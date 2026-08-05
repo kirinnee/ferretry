@@ -8,11 +8,12 @@
  * shipped daemon configuration surface.
  */
 
-import { Check, ShieldCheck } from 'lucide-react';
+import { Check, KeyRound, ShieldCheck } from 'lucide-react';
 import { type ComponentType, useMemo, useState } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
 import { FleetEnvironmentSettings } from './fleet-environment-settings.tsx';
@@ -89,6 +90,8 @@ export interface DaemonSettingsFrameProps {
   readonly readWardenStatus?: WardenStatusReader;
   /** Test and harness seam; production uses the daemon-bound default client. */
   readonly createWardenClient?: WardenClientFactory;
+  /** The same seam for the secret store. */
+  readonly createSecretClient?: SecretClientFactory;
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
 }
@@ -104,6 +107,7 @@ export function DaemonSettingsFrame({
   connections = [connection],
   readWardenStatus,
   createWardenClient,
+  createSecretClient,
   additionalTabs = [],
 }: DaemonSettingsFrameProps) {
   const tabs = useMemo<readonly DaemonSettingsTabDefinition[]>(
@@ -121,6 +125,20 @@ export function DaemonSettingsFrame({
         ),
       },
       {
+        id: 'secrets',
+        label: 'Secrets',
+        description: 'Credentials agents can use without ever holding one.',
+        Surface: ({ connection: activeConnection }) => (
+          <SecretsSurface
+            connection={activeConnection}
+            {...(createSecretClient ? { createClient: createSecretClient } : {})}
+          />
+        ),
+      },
+      {
+        // Environment carries VALUES between daemons; Secrets deliberately does not — a secret is
+        // copied explicitly and per-secret or not at all, never as a side effect of copying
+        // configuration. See `docs/secrets.md`; that copy path is still a declared GAP.
         id: 'environment',
         label: 'Environment',
         description: 'Copy safe fleet profile environment between daemons.',
@@ -130,7 +148,7 @@ export function DaemonSettingsFrame({
       },
       ...additionalTabs,
     ],
-    [additionalTabs, connections, createWardenClient, readWardenStatus],
+    [additionalTabs, connections, createSecretClient, createWardenClient, readWardenStatus],
   );
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? 'warden');
 
@@ -176,6 +194,7 @@ export function DaemonSettingsFrame({
               )}
             >
               {tab.id === 'warden' ? <ShieldCheck size={16} aria-hidden="true" /> : null}
+              {tab.id === 'secrets' ? <KeyRound size={16} aria-hidden="true" /> : null}
               <span className="min-w-0">
                 <span className="block text-ui font-semibold">{tab.label}</span>
                 <span className="block truncate text-meta leading-tight text-faint">{tab.description}</span>

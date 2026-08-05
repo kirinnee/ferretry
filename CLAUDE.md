@@ -86,6 +86,13 @@ renderer and one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and
 extend the grammar there rather than adding a second one.
 
+`packages/daemon` owns a secret store whose contract is **use, never read**: an agent names a secret
+and Ferretry runs a command with the value in _that child's_ environment, so the agent never holds a
+credential. **No route, command or API returns a secret value** — that is enforced by the types, and
+adding a getter would delete the feature. The threat model, the `${secret:NAME}` grammar and the
+declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
+against, because the useful property is narrower than people assume.
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

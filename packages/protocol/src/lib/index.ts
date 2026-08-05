@@ -11,6 +11,7 @@ export * from './learning.ts';
 export * from './pairing.ts';
 export * from './pins.ts';
 export * from './push.ts';
+export * from './secrets.ts';
 export * from './service.ts';
 export * from './session.ts';
 export * from './socket-ticket.ts';
