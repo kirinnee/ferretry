@@ -276,7 +276,7 @@ describe('the structured answer coordinator', () => {
     should(subject.quarantined).deepEqual([]);
   });
 
-  it('quarantines an unsettled receipt nothing can prove, and never sends its keys again', async () => {
+  it('keeps an unsettled receipt accepted when neither answer nor release can be proved', async () => {
     // Arrange
     const stranded: AnswerOperationRecord = {
       requestId: 'request-1',
@@ -290,8 +290,9 @@ describe('the structured answer coordinator', () => {
     // Act + Assert
     await should(answer(subject.subject)).be.rejectedWith(AnswerUnconfirmed);
     should(subject.performer.calls).deepEqual([]);
-    should(subject.quarantined).match([[ID, { ...stranded, outcome: 'quarantined', reason: /could not prove/u }]]);
-    should(subject.ledger.appended.map(([, record]) => record.outcome)).deepEqual(['quarantined']);
+    should(subject.quarantined).deepEqual([]);
+    should(subject.ledger.appended).deepEqual([]);
+    should((await subject.ledger.read(ID, 'request-1'))?.outcome).equal('accepted');
   });
 
   it('tombstones a refusal raised before any key, so the same id may honestly start over', async () => {
@@ -351,7 +352,7 @@ describe('the structured answer coordinator', () => {
     should(retry.performer.calls).deepEqual([]);
   });
 
-  it('keeps an unreleased recovery failure accepted and quarantines it after restart', async () => {
+  it('keeps an unreleased recovery failure accepted across restart', async () => {
     const ledger = new MemoryLedger();
     const failure = new StructuredQuestionAttemptFailed(
       'the form could not be released',
@@ -364,8 +365,9 @@ describe('the structured answer coordinator', () => {
     const retry = harness({ ledger, state: {} as SessionState });
     await should(answer(retry.subject)).be.rejectedWith(AnswerUnconfirmed);
 
-    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual(['accepted', 'quarantined']);
-    should(retry.quarantined).have.length(1);
+    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual(['accepted', 'accepted']);
+    should(ledger.appended.at(-1)?.[1]).match({ outcome: 'accepted', reason: /could not be released/u });
+    should(retry.quarantined).deepEqual([]);
     should(retry.performer.calls).deepEqual([]);
   });
 

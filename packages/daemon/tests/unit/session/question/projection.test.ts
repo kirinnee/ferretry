@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { AnswerOperationRecord } from '../../../../src/lib/session/question/answer-ledger.ts';
+import {
+  type AnswerOperationRecord,
+  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+} from '../../../../src/lib/session/question/answer-ledger.ts';
 import {
   projectStructuredQuestion,
   structuredQuestionStatePatch,
@@ -74,6 +78,25 @@ describe('structured question projection', () => {
     });
   });
 
+  it('preserves a non-question status when confirmed evidence repairs the state', () => {
+    const patch = structuredQuestionStatePatch(
+      {
+        id: 's1',
+        status: 'awaiting_user',
+        turn: 1,
+        pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
+      },
+      projectStructuredQuestion([question]),
+      [answer('confirmed')],
+    );
+
+    should(patch).match({
+      status: 'awaiting_user',
+      pendingQuestion: undefined,
+      lastAnsweredQuestionToolUseId: 'tool-1',
+    });
+  });
+
   it('treats an accepted receipt as confirmed only when the authoritative state stamp proves it', () => {
     const patch = structuredQuestionStatePatch(
       {
@@ -91,7 +114,7 @@ describe('structured question projection', () => {
     should(patch).not.have.property('needsHumanKind');
   });
 
-  it('hard-quarantines unresolved accepted evidence and never leaves its form answerable', () => {
+  it('keeps unresolved accepted evidence bound and input-blocking', () => {
     const patch = structuredQuestionStatePatch(
       {
         id: 's1',
@@ -104,9 +127,9 @@ describe('structured question projection', () => {
     );
 
     should(patch).match({
-      status: 'awaiting_user',
-      pendingQuestion: undefined,
-      needsHumanKind: 'structured-answer-unconfirmed',
+      status: 'awaiting_question',
+      pendingQuestion: { toolUseId: 'tool-1' },
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
       reason: 'daemon restarted during the drive',
     });
   });
@@ -118,7 +141,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 1,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
         needsHuman: 'inspect tool-1 before continuing',
       },
       projectStructuredQuestion([question]),
@@ -140,7 +163,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
       needsHuman: /tool-1/u,
     });
   });
@@ -161,7 +184,7 @@ describe('structured question projection', () => {
         id: 's1',
         status: 'awaiting_user',
         turn: 1,
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
         needsHuman: 'inspect tool-1 before continuing',
       },
       { kind: 'resolved', toolUseId: 'tool-1' },
@@ -178,7 +201,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 1,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
         needsHuman: 'inspect tool-1 before continuing',
       },
       projectStructuredQuestion([question]),
@@ -188,7 +211,7 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_user',
       pendingQuestion: undefined,
-      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
       needsHuman: /tool-1/u,
       reason: 'inspect the terminal',
     });
@@ -204,7 +227,7 @@ describe('structured question projection', () => {
     should(patch).match({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-1' } });
   });
 
-  it('preserves a newer question while settling stale attention for an older accepted operation', () => {
+  it('preserves a newer question while retaining an older accepted operation as blocking', () => {
     const newer = {
       ...question,
       call: {
@@ -218,16 +241,46 @@ describe('structured question projection', () => {
         id: 's1',
         status: 'awaiting_user',
         turn: 1,
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
         needsHuman: 'inspect tool-1 before continuing',
       },
       projectStructuredQuestion([newer]),
       [answer('accepted')],
     );
 
-    should(patch).match({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-2' } });
-    should(patch).have.property('needsHumanKind', undefined);
-    should(patch).have.property('needsHuman', undefined);
+    should(patch).match({
+      status: 'awaiting_question',
+      pendingQuestion: { toolUseId: 'tool-2' },
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHuman: /tool-1/u,
+    });
+  });
+
+  it('retains the exact bound form when unconfirmed evidence meets a newer projected question', () => {
+    const newer = {
+      ...question,
+      call: {
+        ...question.call,
+        id: 'tool-2',
+        questions: [{ question: 'Deploy?', options: [{ label: 'Now' }], multiple: false }],
+      },
+    } satisfies TranscriptEvent;
+    const patch = structuredQuestionStatePatch(
+      {
+        id: 's1',
+        status: 'awaiting_question',
+        turn: 1,
+        pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
+      },
+      projectStructuredQuestion([newer]),
+      [answer('accepted')],
+    );
+
+    should(patch).match({
+      status: 'awaiting_question',
+      pendingQuestion: { toolUseId: 'tool-1' },
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+    });
   });
 
   it('preserves both a newer question and the unresolved attention for an older quarantine', () => {
@@ -243,7 +296,7 @@ describe('structured question projection', () => {
       id: 's1',
       status: 'awaiting_user' as const,
       turn: 1,
-      needsHumanKind: 'structured-answer-unconfirmed' as const,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
       needsHuman: 'inspect tool-1 before continuing',
     };
     const patch = structuredQuestionStatePatch(current, projectStructuredQuestion([newer]), [answer('quarantined')]);
@@ -252,7 +305,7 @@ describe('structured question projection', () => {
     should(patch).not.have.property('needsHumanKind');
     should(patch).not.have.property('needsHuman');
     should({ ...current, ...patch }).match({
-      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
       needsHuman: /tool-1/u,
     });
   });
@@ -275,10 +328,83 @@ describe('structured question projection', () => {
     should(patch).match({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-2' },
-      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
       needsHuman: /tool-1/u,
       reason: 'the earlier form advanced without a state stamp',
     });
+  });
+
+  it('blocks prose for a raw accepted orphan when no question is projected', () => {
+    const patch = structuredQuestionStatePatch({ id: 's1', status: 'running', turn: 1 }, { kind: 'none' }, [
+      answer('accepted', { reason: 'the daemon restarted before release was confirmed' }),
+    ]);
+
+    should(patch).match({
+      status: 'awaiting_user',
+      pendingQuestion: undefined,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHuman: /tool-1/u,
+      reason: 'the daemon restarted before release was confirmed',
+    });
+  });
+
+  it('clears the released advisory when the authoritative answer stamp later proves it', () => {
+    const patch = structuredQuestionStatePatch(
+      {
+        id: 's1',
+        status: 'running',
+        turn: 2,
+        lastAnsweredQuestionToolUseId: 'tool-1',
+        needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+        needsHuman: 'inspect tool-1 before relying on its answer',
+      },
+      { kind: 'resolved', toolUseId: 'tool-1' },
+      [answer('quarantined')],
+    );
+
+    should(patch).have.property('needsHumanKind', undefined);
+    should(patch).have.property('needsHuman', undefined);
+    should(patch).have.property('lastAnsweredQuestionToolUseId', 'tool-1');
+  });
+
+  it('clears a blocking answer attention from a tool-level acknowledgement without confirming it', () => {
+    const patch = structuredQuestionStatePatch(
+      {
+        id: 's1',
+        status: 'awaiting_question',
+        turn: 2,
+        pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+        needsHuman: 'inspect tool-1 before continuing',
+      },
+      projectStructuredQuestion([question]),
+      [answer('accepted'), answer('acknowledged', { requestId: 'human-clear' })],
+    );
+
+    should(patch).match({ status: 'awaiting_user', pendingQuestion: undefined });
+    should(patch).have.property('needsHumanKind', undefined);
+    should(patch).have.property('needsHuman', undefined);
+    should(patch).not.have.property('lastAnsweredQuestionToolUseId');
+  });
+
+  it('clears an orphan released advisory from acknowledgement and then remains idempotent', () => {
+    const current = {
+      id: 's1',
+      status: 'awaiting_user' as const,
+      turn: 2,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHuman: 'inspect tool-1 before relying on its answer',
+    };
+    const records = [answer('quarantined'), answer('acknowledged', { requestId: 'human-clear' })];
+
+    const clearing = structuredQuestionStatePatch(current, { kind: 'none' }, records);
+    should(clearing).have.property('needsHumanKind', undefined);
+    should(clearing).have.property('needsHuman', undefined);
+    should(clearing).not.have.property('lastAnsweredQuestionToolUseId');
+
+    const cleared = { ...current, ...clearing, needsHumanKind: undefined, needsHuman: undefined };
+    should(structuredQuestionStatePatch(cleared, { kind: 'none' }, records)).deepEqual({});
+    should(structuredQuestionStatePatch(cleared, { kind: 'resolved', toolUseId: 'tool-1' }, records)).deepEqual({});
   });
 
   it('clears only when transcript evidence resolves the exact pending form', () => {
@@ -305,7 +431,7 @@ describe('structured question projection', () => {
         status: 'awaiting_question',
         turn: 1,
         pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
         needsHuman: 'inspect tool-2 before continuing',
       },
       projectStructuredQuestion([question]),

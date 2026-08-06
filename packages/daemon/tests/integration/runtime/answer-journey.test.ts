@@ -74,6 +74,11 @@ while IFS= read -r -s -n 1 key; do
   fi
   if [[ -z "$key" ]]; then printf 'enter\\n' >> "$log"; fi
 done
+if IFS= read -r prose; then
+  printf 'prose:%s\\n' "$prose" >> "$log"
+  printf '\\033[2J\\033[H'
+  printf 'Continuing from the prose fallback.\\n'
+fi
 sleep 300
 `;
 
@@ -301,6 +306,13 @@ const answerRequest = (port: number, daemon: Daemon, requestId: string, labels: 
     }),
   });
 
+const sendRequest = (port: number, daemon: Daemon, requestId: string, message: string) =>
+  fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/send`, {
+    method: 'POST',
+    headers: { ...daemon.headers, 'x-fy-request-id': requestId },
+    body: JSON.stringify({ message }),
+  });
+
 /** A busy answer/monitor key makes a read return its current view rather than wait; the next poll projects it. */
 async function waitForPendingQuestion(port: number, daemon: Daemon) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -383,7 +395,7 @@ describe('the structured answer journey', () => {
     await shutdown(restarted);
   }, 120_000);
 
-  it('snapshots a real failed drive, cancels once, releases state, and replays the release after restart', async () => {
+  it('releases an ambiguous drive to prose while retaining its advisory across send, reads, and restart', async () => {
     const home = await tempDirectory('fyd-answer-failure-home');
     const scratch = await tempDirectory('fyd-answer-failure-scratch');
     const transcript = join(scratch, 'session.jsonl');
@@ -411,7 +423,7 @@ describe('the structured answer journey', () => {
     should(released.state).match({
       status: 'awaiting_user',
       promptReady: true,
-      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHumanKind: 'structured-answer-released-unconfirmed',
       needsHuman: new RegExp(TOOL_USE_ID, 'u'),
     });
     should(released.state.pendingQuestion ?? undefined).be.undefined();
@@ -422,6 +434,26 @@ describe('the structured answer journey', () => {
       .map(line => JSON.parse(line) as { readonly outcome: string; readonly resolution?: string });
     should(receipts).match([{ outcome: 'accepted' }, { outcome: 'accepted', resolution: 'quarantined' }]);
 
+    // A positively released native form permits ordinary prose. The real send route types it into
+    // the real pane, but that progress is deliberately NOT evidence that the original structured
+    // selection landed and therefore must not clear its advisory.
+    const prose = await sendRequest(port, daemon, `${REQUEST_ID}:prose`, 'continue in prose');
+    await statusOf(prose, 200);
+    for (let attempt = 0; attempt < 100 && !(await submits(log)).includes('prose:continue in prose'); attempt += 1)
+      await Bun.sleep(25);
+    should(await submits(log)).deepEqual(['enter', 'escape', 'prose:continue in prose']);
+    for (let read = 0; read < 2; read += 1) {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+        headers: daemon.headers,
+      });
+      const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
+      should(view.state).match({
+        needsHumanKind: 'structured-answer-released-unconfirmed',
+        needsHuman: new RegExp(TOOL_USE_ID, 'u'),
+      });
+      should(view.state.lastAnsweredQuestionToolUseId ?? undefined).be.undefined();
+    }
+
     await shutdown(daemon);
     const restarted = await boot(home, port);
     const replay = await answerRequest(port, restarted, `${REQUEST_ID}:failure`, ['Yes']);
@@ -429,7 +461,7 @@ describe('the structured answer journey', () => {
     const freshId = await answerRequest(port, restarted, `${REQUEST_ID}:fresh`, ['Yes']);
 
     should((JSON.parse(await statusOf(freshId, 409)) as { readonly code: string }).code).equal('answer_refused');
-    should(await submits(log)).deepEqual(['enter', 'escape']);
+    should(await submits(log)).deepEqual(['enter', 'escape', 'prose:continue in prose']);
     // Repeated production projections must not make an ambiguous answer's attention transient.
     for (let read = 0; read < 2; read += 1) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
@@ -437,15 +469,16 @@ describe('the structured answer journey', () => {
       });
       const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
       should(view.state).match({
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: 'structured-answer-released-unconfirmed',
         needsHuman: new RegExp(TOOL_USE_ID, 'u'),
       });
+      should(view.state.lastAnsweredQuestionToolUseId ?? undefined).be.undefined();
     }
 
     await shutdown(restarted);
   }, 120_000);
 
-  it('releases durable question state fail-closed when the real pane has terminated', async () => {
+  it('retains the exact question and refuses prose when a dead pane cannot prove release', async () => {
     const home = await tempDirectory('fyd-answer-dead-home');
     const scratch = await tempDirectory('fyd-answer-dead-scratch');
     const transcript = join(scratch, 'session.jsonl');
@@ -461,24 +494,36 @@ describe('the structured answer journey', () => {
     const failed = await answerRequest(port, daemon, `${REQUEST_ID}:dead`, ['Yes']);
     const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
 
-    should(failureBody.code).equal('answer_released');
+    should(failureBody.code).equal('answer_unconfirmed');
     should(failureBody.error).match(/Automatic native cancellation was not confirmed/u);
-    should(failureBody.error).match(/Inspect the terminal before replying in prose/u);
+    should(failureBody.error).match(/structured form remains bound/u);
+    should(failureBody.error).match(new RegExp(QUESTION.replace('?', '\\?'), 'u'));
     const stateResponse = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
       headers: daemon.headers,
     });
-    const released = SessionViewSchema.parse(JSON.parse(await statusOf(stateResponse, 200)));
-    should(released.state).match({
-      status: 'awaiting_user',
-      promptReady: false,
-      reason: /automatic native cancellation was not confirmed/u,
+    const retained = SessionViewSchema.parse(JSON.parse(await statusOf(stateResponse, 200)));
+    should(retained.state).match({
+      status: 'awaiting_question',
+      pendingQuestion: { toolUseId: TOOL_USE_ID },
+      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHuman: new RegExp(TOOL_USE_ID, 'u'),
     });
-    should(released.state.pendingQuestion ?? undefined).be.undefined();
+    const refusedProse = await sendRequest(port, daemon, `${REQUEST_ID}:dead-prose`, 'do not type this');
+    should((JSON.parse(await statusOf(refusedProse, 409)) as { readonly code: string }).code).equal('send_refused');
 
     await shutdown(daemon);
     const restarted = await boot(home, port);
     const replay = await answerRequest(port, restarted, `${REQUEST_ID}:dead`, ['Yes']);
-    should((JSON.parse(await statusOf(replay, 409)) as { readonly code: string }).code).equal('answer_released');
+    should((JSON.parse(await statusOf(replay, 409)) as { readonly code: string }).code).equal('answer_unconfirmed');
+    const afterRestart = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+      headers: restarted.headers,
+    });
+    should(SessionViewSchema.parse(JSON.parse(await statusOf(afterRestart, 200))).state).match({
+      pendingQuestion: { toolUseId: TOOL_USE_ID },
+      needsHumanKind: 'structured-answer-unconfirmed',
+    });
+    const refusedAgain = await sendRequest(port, restarted, `${REQUEST_ID}:dead-prose-retry`, 'still do not type');
+    should((JSON.parse(await statusOf(refusedAgain, 409)) as { readonly code: string }).code).equal('send_refused');
 
     await shutdown(restarted);
   }, 120_000);
@@ -505,7 +550,26 @@ describe('the structured answer journey', () => {
     const daemon = await boot(home, port);
 
     // The production projector, not a coordinator retry, observes that the exact form advanced.
-    // Repeated reads prove its quarantine banner is durable rather than one poll of transient state.
+    // Boot's first monitor reconciliation may still hold the answer key when health begins serving,
+    // so poll for the first derived advisory and then prove two further reads keep it durable.
+    let projected: ReturnType<typeof SessionViewSchema.parse> | undefined;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+        headers: daemon.headers,
+      });
+      const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
+      if (view.state.needsHumanKind === 'structured-answer-released-unconfirmed') {
+        projected = view;
+        break;
+      }
+      await Bun.sleep(25);
+    }
+    should(projected?.state).match({
+      status: 'awaiting_user',
+      needsHumanKind: 'structured-answer-released-unconfirmed',
+      needsHuman: new RegExp(TOOL_USE_ID, 'u'),
+    });
+    should(projected?.state.pendingQuestion ?? undefined).be.undefined();
     for (let read = 0; read < 2; read += 1) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
         headers: daemon.headers,
@@ -513,7 +577,7 @@ describe('the structured answer journey', () => {
       const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
       should(view.state).match({
         status: 'awaiting_user',
-        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHumanKind: 'structured-answer-released-unconfirmed',
         needsHuman: new RegExp(TOOL_USE_ID, 'u'),
       });
       should(view.state.pendingQuestion ?? undefined).be.undefined();

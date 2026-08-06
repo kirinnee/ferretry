@@ -43,7 +43,7 @@ export class FileAnswerLedger implements AnswerLedger {
     // as no receipt and re-driving its keys. Current code restores the richer outcome from
     // `resolution` on read.
     const durable =
-      record.outcome === 'failed' || record.outcome === 'quarantined'
+      record.outcome === 'failed' || record.outcome === 'quarantined' || record.outcome === 'acknowledged'
         ? { ...record, outcome: 'accepted', resolution: record.outcome }
         : record;
     await appendFile(file, `${JSON.stringify({ ...durable, at: this.clock.now() })}\n`, { mode: 0o600 });
@@ -95,7 +95,8 @@ function parseRecord(line: string): AnswerOperationRecord | undefined {
     ? record.outcome
     : undefined;
   const resolution =
-    record.outcome === 'accepted' && (record.resolution === 'failed' || record.resolution === 'quarantined')
+    record.outcome === 'accepted' &&
+    (record.resolution === 'failed' || record.resolution === 'quarantined' || record.resolution === 'acknowledged')
       ? record.resolution
       : undefined;
   const outcome: AnswerOperationRecord['outcome'] = resolution ?? knownOutcome ?? 'accepted';
@@ -121,6 +122,7 @@ function isAnswerOutcome(value: string): value is AnswerOperationRecord['outcome
     value === 'confirmed' ||
     value === 'withdrawn' ||
     value === 'failed' ||
-    value === 'quarantined'
+    value === 'quarantined' ||
+    value === 'acknowledged'
   );
 }

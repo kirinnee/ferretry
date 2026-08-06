@@ -265,6 +265,14 @@ describe('resume plan', () => {
     should(actual.kind).equal('relaunch');
   });
 
+  it('should send through a positively released answer advisory without replacing the live pane', () => {
+    const released = target({ needsHumanKind: 'structured-answer-released-unconfirmed' });
+
+    const actual = planResume(released, LIVE, 'reply in prose', EXPLICIT, SETTINGS);
+
+    should(actual).deepEqual({ kind: 'send', message: 'reply in prose' });
+  });
+
   it('should clean a dead pane quietly, with no composer to preserve', () => {
     // Act
     const actual = planResume(target({ status: 'failed' }), DEAD_PANE, 'again', EXPLICIT, SETTINGS);

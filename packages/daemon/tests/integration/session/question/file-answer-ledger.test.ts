@@ -192,13 +192,16 @@ describe('the durable answer ledger', () => {
     should([...actual.keys()].sort()).deepEqual(['request-1', 'request-2']);
   });
 
-  it.each([['failed'], ['quarantined']] as const)('round-trips the recovery outcome %s', async outcome => {
-    const { ledger } = await subject();
+  it.each([['failed'], ['quarantined'], ['acknowledged']] as const)(
+    'round-trips the recovery outcome %s',
+    async outcome => {
+      const { ledger } = await subject();
 
-    await ledger.append(ID, record({ outcome }));
+      await ledger.append(ID, record({ outcome }));
 
-    should(await ledger.read(ID, 'request-1')).match({ outcome });
-  });
+      should(await ledger.read(ID, 'request-1')).match({ outcome });
+    },
+  );
 
   it('fails closed when the ledger exists but cannot be read as a file', async () => {
     const { ledger } = await subject();

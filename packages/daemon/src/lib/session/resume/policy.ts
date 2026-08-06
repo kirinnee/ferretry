@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
   ResumeCancelled,
@@ -135,7 +136,8 @@ export function planResume(
   const usable = pane.alive && !pane.dead;
   // A quarantined session may be sitting in an unknown native modal, so its pane cannot be trusted
   // to receive input even while it looks alive.
-  const quarantined = target.needsHumanKind !== undefined;
+  const quarantined =
+    target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND;
   if (usable && !isTerminalForResume(target) && !quarantined && policy.replaceLiveTerminal !== true) {
     if (!trimmed) throw new ResumeRefused(`session ${target.id} is already running`);
     return { kind: 'send', message: trimmed };

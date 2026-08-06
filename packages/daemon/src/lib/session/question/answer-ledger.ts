@@ -57,7 +57,15 @@ export type AnswerOutcome =
   /** No answer key landed, and failure recovery deliberately released this form to prose. */
   | 'failed'
   /** Answer keys may have landed, so recovery released the form but this operation stays closed. */
-  | 'quarantined';
+  | 'quarantined'
+  /** A person explicitly cleared the retained warning. Never evidence that the answer landed. */
+  | 'acknowledged';
+
+/** A possibly live form. Send/resume must continue treating this as an unknown native modal. */
+export const STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND = 'structured-answer-unconfirmed';
+
+/** A form positively released from the pane. This warning is advisory, not an input modal. */
+export const STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND = 'structured-answer-released-unconfirmed';
 
 /** One answer operation, durably, from the instant it was admitted. */
 export interface AnswerOperationRecord {
@@ -126,9 +134,19 @@ export class AnswerReleased extends Error {
   constructor(readonly record: AnswerOperationRecord) {
     super(
       record.reason ??
-        `answer request ${JSON.stringify(record.requestId)} released ${JSON.stringify(record.toolUseId)} after an unconfirmed attempt; inspect the terminal before replying in prose`,
+        `answer request ${JSON.stringify(record.requestId)} released ${JSON.stringify(record.toolUseId)} after an unconfirmed attempt; prose may continue, but the original structured answer remains unconfirmed`,
     );
     this.name = 'AnswerReleased';
+  }
+}
+
+/** A person closed the ambiguity without confirming its answer; this tool must still never re-drive. */
+export class AnswerAcknowledged extends Error {
+  constructor(readonly record: AnswerOperationRecord) {
+    super(
+      `answer request ${JSON.stringify(record.requestId)} for ${JSON.stringify(record.toolUseId)} was explicitly acknowledged and will not be driven again; that acknowledgement does not confirm the original structured answer`,
+    );
+    this.name = 'AnswerAcknowledged';
   }
 }
 
@@ -184,7 +202,9 @@ export type AnswerAdmission =
   /** This id failed without answering and its form was released; repeat the terminal failure. */
   | { readonly kind: 'failed'; readonly record: AnswerOperationRecord }
   /** This id may have answered and was released safely; never drive it again. */
-  | { readonly kind: 'quarantined'; readonly record: AnswerOperationRecord };
+  | { readonly kind: 'quarantined'; readonly record: AnswerOperationRecord }
+  /** A person cleared the ambiguity without confirming an answer; never drive it again. */
+  | { readonly kind: 'acknowledged'; readonly record: AnswerOperationRecord };
 
 /**
  * Whether this request may be performed, replayed, or refused.
@@ -207,12 +227,14 @@ export function decideAnswerAdmission(input: {
   if (existing.outcome === 'withdrawn') return { kind: 'admit' };
   if (existing.outcome === 'failed') return { kind: 'failed', record: existing };
   if (existing.outcome === 'quarantined') return { kind: 'quarantined', record: existing };
+  if (existing.outcome === 'acknowledged') return { kind: 'acknowledged', record: existing };
   return { kind: 'reconcile', record: existing };
 }
 
 /** What the answer ledger already knows about one transcript-projected form. */
 export type AnswerQuestionEvidence =
   | { readonly kind: 'none' }
+  | { readonly kind: 'acknowledged'; readonly record: AnswerOperationRecord }
   | { readonly kind: 'confirmed'; readonly record: AnswerOperationRecord }
   | { readonly kind: 'quarantined'; readonly record: AnswerOperationRecord }
   | { readonly kind: 'released'; readonly record: AnswerOperationRecord }
@@ -221,16 +243,23 @@ export type AnswerQuestionEvidence =
 /**
  * Reconcile one TOOL identity across every request identity that ever named it.
  *
- * An unresolved accepted operation wins over every apparently settled row: two request ids may have
- * raced on an older daemon, and one tool-level state stamp cannot prove which one typed. A quarantine
- * that still requires human attention comes next, then a confirmed answer, then a proven non-answer release. Withdrawn rows
- * carry no terminal evidence and deliberately do not hide a still-open question.
+ * An explicit human acknowledgement wins first because it closes every older ambiguity for this
+ * tool without claiming an answer landed. Otherwise an unresolved accepted operation wins over
+ * every apparently settled row: two request ids may have raced on an older daemon, and one
+ * tool-level state stamp cannot prove which one typed. A released quarantine comes next, then a
+ * confirmed answer, then a proven non-answer release. Withdrawn rows carry no terminal evidence and
+ * deliberately do not hide a still-open question.
  */
 export function answerEvidenceForQuestion(
   records: Iterable<AnswerOperationRecord>,
   toolUseId: string,
 ): AnswerQuestionEvidence {
   const matching = [...records].filter(record => record.toolUseId === toolUseId);
+  // Human acknowledgement closes every older ambiguity for the same rendered tool, including an
+  // accepted row written under another request id. It never confirms an answer; it only prevents
+  // an append-only predecessor from re-minting attention after the explicit clear.
+  const acknowledged = matching.find(record => record.outcome === 'acknowledged');
+  if (acknowledged !== undefined) return { kind: 'acknowledged', record: acknowledged };
   const accepted = matching.find(record => record.outcome === 'accepted');
   if (accepted !== undefined) return { kind: 'unconfirmed', record: accepted };
   const quarantined = matching.find(record => record.outcome === 'quarantined');
@@ -246,8 +275,9 @@ export function answerEvidenceForQuestion(
  *
  * The monitor may observe this crash boundary before any caller retries the request. Returning the
  * promoted rows lets its adapter append them durably. Transcript evidence may prove that a modal
- * advanced, but never which answer landed; those accepted rows become explicit quarantines while
- * an unchanged active form stays accepted and therefore remains a hard quarantine.
+ * advanced, but never which answer landed; those accepted rows become released quarantines while
+ * an unchanged or unobserved form stays accepted, retains its exact binding when available, and
+ * remains input-blocking.
  */
 export function reconcileAnswerEvidence(
   records: ReadonlyMap<string, AnswerOperationRecord>,
@@ -291,10 +321,11 @@ export function reconcileAnswerEvidence(
  * might be open because no key landed, or because the keys landed on a form that re-rendered, and a
  * terminal cannot be asked which.
  *
- * SO THE AMBIGUOUS CASE ASKS A PERSON. Quarantine costs one human glance at a session; the
- * alternative — re-sending arrow and `Enter` into a selector whose cursor has already moved — costs
- * an answer nobody chose, silently, on the caller's behalf. A refusal that destroys nothing is
- * always the recoverable error.
+ * SO THE AMBIGUOUS CASE STAYS UNRESOLVED. Until positive release evidence exists, the exact binding
+ * and its input block remain; after positive release evidence, a durable advisory asks a person to
+ * inspect what may have landed while permitting prose. The alternative — re-sending arrow and
+ * `Enter` into a selector whose cursor has already moved — costs an answer nobody chose, silently,
+ * on the caller's behalf. A refusal that destroys nothing is always the recoverable error.
  */
 export function reconcileUnconfirmedAnswer(input: {
   readonly record: AnswerOperationRecord;

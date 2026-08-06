@@ -219,6 +219,7 @@ import {
   type AnalyticsPricingRate,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
+  AnswerAcknowledged,
   AnswerReleased,
   AnswerRequestConflict,
   AnswerTerminalFailure,
@@ -414,6 +415,8 @@ import {
   SignalRefused,
   type SocketTicketBroker,
   SocketTicketRegistry,
+  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
   StructuredQuestionRefused,
@@ -1623,6 +1626,8 @@ function createSessionResumeSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   service: SessionResumeService,
+  answerLedger: FileAnswerLedger,
+  answerSerial: KeyedSerialExecutor,
 ): SessionResumeSubsystem {
   return {
     resume: async (reference, actor, message) => {
@@ -1630,9 +1635,62 @@ function createSessionResumeSubsystem(
       if (id === undefined)
         throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
       if (storage.findSession(id) === undefined) throw new SessionResumeError('not_found', `no session ${reference}`);
-      await service
+      const before = SessionStateSchema.safeParse(await storage.readState(id));
+      const outcome = await service
         .resume({ id, actor, ...(message === undefined ? {} : { message }) })
         .catch((error: unknown) => resumeRefusal(error));
+      // A prose delivery through the live-pane shortcut is progress, not acknowledgement. Only an
+      // explicit HUMAN relaunch that actually cleared needsHuman may close the append-only answer
+      // ambiguity. Append the acknowledgement before re-clearing state: a crash between those two
+      // operations then leaves projection able to finish the clear, never able to resurrect it.
+      if (
+        before.success &&
+        (actor === 'admin-cli' || actor === 'admin-ui') &&
+        (outcome.disposition === 'revived' || outcome.disposition === 'preserved') &&
+        (before.data.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND ||
+          before.data.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND)
+      ) {
+        await answerSerial.run(id, async () => {
+          const records = await answerLedger.all(id);
+          const named = [...records.values()].filter(
+            record =>
+              record.outcome !== 'confirmed' &&
+              record.outcome !== 'withdrawn' &&
+              (before.data.pendingQuestion?.toolUseId === record.toolUseId ||
+                before.data.needsHuman?.includes(record.toolUseId) === true),
+          );
+          for (const record of named) {
+            await answerLedger.append(id, {
+              ...record,
+              outcome: 'acknowledged',
+              reason:
+                'an explicit human relaunch cleared the structured-answer attention without confirming its answer',
+            });
+            await storage
+              .append(id, 'interaction.answer_acknowledged', {
+                toolUseId: record.toolUseId,
+                requestId: record.requestId,
+                actor,
+                resolution: 'explicit-human-relaunch',
+              })
+              .catch(() => undefined);
+          }
+          if (named.length === 0) return;
+          await storage.updateState(id, current => {
+            const parsed = SessionStateSchema.safeParse(current);
+            if (!parsed.success) return current;
+            if (
+              parsed.data.needsHumanKind !== STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND &&
+              parsed.data.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND
+            )
+              return current;
+            const next = { ...(current as Record<string, unknown>) };
+            delete next.needsHuman;
+            delete next.needsHumanKind;
+            return next as typeof current;
+          });
+        });
+      }
       // Read back through the SAME reader the list and the single read serve, so a revive answers with
       // the view those surfaces will show rather than a projection of the resume outcome.
       const view = await sessions.get(id).catch(() => undefined);
@@ -1778,8 +1836,43 @@ function createSessionAnswerSubsystem(
           })
           .catch(() => undefined);
       },
+      retained: async (id, question, answers, context) => {
+        const questionText = question.questions.map(item => item.question).join('\n\n');
+        const pane = context.snapshot;
+        await storage
+          .append(id, 'interaction.question_failed', {
+            action: 'answer',
+            disposition: 'retained',
+            toolUseId: question.toolUseId,
+            error: context.failure.message,
+            acceptance: context.failure.acceptance,
+            matcher: context.failure.diagnostics,
+            answerCount: answers.length,
+            questionText,
+            questions: question.questions.map(item => item.question),
+            pendingQuestion: question,
+            ...(context.snapshot === undefined ? {} : { snapshot: 'last-snapshot.txt' }),
+            ...(context.snapshotError === undefined ? {} : { snapshotError: context.snapshotError }),
+            ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
+            ...(pane === undefined
+              ? {}
+              : {
+                  pane: {
+                    alive: pane.alive,
+                    dead: pane.dead,
+                    promptReady: pane.promptReady,
+                    activeWork: pane.alive && !pane.dead && paneShowsActiveWork(pane.visible),
+                    excerpt: pane.visible.split('\n').slice(-40).join('\n').slice(-6_000),
+                  },
+                }),
+          })
+          .catch(() => undefined);
+      },
       failed: async (id, question, answers, context) => {
         const questionText = question.questions.map(item => item.question).join('\n\n');
+        // The service calls this boundary only after the exact form's cancellation was positively
+        // observed. An unconfirmed Escape never reaches this writer and therefore cannot erase the
+        // pending binding merely because prose would be more convenient.
         const pane = context.cancellation?.pane ?? context.snapshot;
         const active = pane?.alive === true && !pane.dead && paneShowsActiveWork(pane.visible);
         const cancelledPane = context.cancellation?.pane;
@@ -1789,10 +1882,7 @@ function createSessionAnswerSubsystem(
           !cancelledPane.promptReady &&
           paneShowsActiveWork(cancelledPane.visible);
         const promptReady = cancelledPane?.alive === true && !cancelledPane.dead && cancelledPane.promptReady;
-        const reason =
-          context.cancellation === undefined
-            ? `structured answer failed; automatic native cancellation was not confirmed${context.cancellationError === undefined ? '' : `: ${context.cancellationError}`}; inspect the terminal before replying in prose to: ${questionText.replaceAll('\n', ' / ')}`
-            : `structured answer failed; structured form released; reply in prose to: ${questionText.replaceAll('\n', ' / ')}`;
+        const reason = `structured answer failed; structured form released; reply in prose to: ${questionText.replaceAll('\n', ' / ')}`;
         await storage.updateState(id, current => {
           const parsed = SessionStateSchema.safeParse(current);
           if (!parsed.success)
@@ -1816,7 +1906,8 @@ function createSessionAnswerSubsystem(
             delete next.pendingQuestion;
           }
           if (
-            parsed.data.needsHumanKind === 'structured-answer-unconfirmed' &&
+            (parsed.data.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND ||
+              parsed.data.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND) &&
             parsed.data.needsHuman?.includes(question.toolUseId) === true
           ) {
             delete next.needsHuman;
@@ -1856,7 +1947,7 @@ function createSessionAnswerSubsystem(
           .append(id, 'interaction.question_cancelled', {
             toolUseId: question.toolUseId,
             reason: 'answer failed; structured form released for prose reply',
-            confirmedBy: context.cancellation?.confirmedBy ?? 'state-release',
+            confirmedBy: context.cancellation?.confirmedBy ?? context.releaseConfirmedBy ?? 'state-release',
             ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
             questionText,
             pendingQuestion: null,
@@ -1883,7 +1974,7 @@ function createSessionAnswerSubsystem(
     serial,
     clock,
     // Reconciliation reads the state document and nothing else, so an unreadable one is missing
-    // evidence rather than evidence of absence: it quarantines instead of re-driving.
+    // evidence rather than evidence of absence: it keeps the receipt accepted and never re-drives.
     state: async id => {
       const parsed = SessionStateSchema.safeParse(await storage.readState(id).catch(() => undefined));
       return parsed.success ? parsed.data : undefined;
@@ -1899,8 +1990,10 @@ function createSessionAnswerSubsystem(
         );
       return view;
     },
-    // The existing human-attention mechanism rather than a second one: the same two state fields
-    // every other quarantine writes, plus a journal line naming the request nothing could resolve.
+    // This is an advisory only after the service positively released the exact native form. It
+    // remains durable across reads and prose sends, but send/resume policy does not mistake it for
+    // an unknown modal. The original answer remains unconfirmed until the authoritative answer
+    // stamp can prove it; prose is progress, not retroactive confirmation.
     quarantine: async (id, record) => {
       await storage
         .updateState(id, current => {
@@ -1912,8 +2005,8 @@ function createSessionAnswerSubsystem(
               parsed.data.status === 'completed' || parsed.data.status === 'stopped' || parsed.data.status === 'failed'
                 ? parsed.data.status
                 : 'awaiting_user',
-            needsHumanKind: 'structured-answer-unconfirmed',
-            needsHuman: `an answer to ${record.toolUseId} may have reached the form and was never confirmed; inspect the session before continuing`,
+            needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+            needsHuman: `an answer to ${record.toolUseId} may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed`,
           };
           if (parsed.data.pendingQuestion?.toolUseId === record.toolUseId) delete next.pendingQuestion;
           return next as typeof current;
@@ -1951,7 +2044,11 @@ function createSessionAnswerSubsystem(
           if (error instanceof AnswerRequestConflict) throw new SessionAnswerError('conflict', error.message);
           if (error instanceof AnswerToolAlreadyHandled) throw new SessionAnswerError('refused', error.message);
           if (error instanceof AnswerUnconfirmed) throw new SessionAnswerError('unconfirmed', error.message);
-          if (error instanceof AnswerReleased || error instanceof AnswerTerminalFailure)
+          if (
+            error instanceof AnswerAcknowledged ||
+            error instanceof AnswerReleased ||
+            error instanceof AnswerTerminalFailure
+          )
             throw new SessionAnswerError('released', error.message);
           if (error instanceof StructuredQuestionAttemptFailed) {
             if (error.receipt === 'accepted') throw new SessionAnswerError('unconfirmed', error.message);
@@ -4299,7 +4396,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessions,
         catalogs,
         sessionControl,
-        sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
+        sessionResume: createSessionResumeSubsystem(storage, sessions, resume, answerLedger, answerSerial),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
         sessionAnswer: createSessionAnswerSubsystem(
           storage,

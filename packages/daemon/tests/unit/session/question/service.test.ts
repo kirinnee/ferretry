@@ -39,6 +39,9 @@ class Answers implements StructuredQuestionRepository {
   readonly failures: Array<
     readonly [string, PendingQuestion, readonly StructuredQuestionAnswer[], StructuredQuestionFailureContext]
   > = [];
+  readonly retentions: Array<
+    readonly [string, PendingQuestion, readonly StructuredQuestionAnswer[], StructuredQuestionFailureContext]
+  > = [];
   pendingError: unknown;
   answeredError: unknown;
   failureError: unknown;
@@ -68,6 +71,15 @@ class Answers implements StructuredQuestionRepository {
   ): Promise<void> {
     this.failures.push([id, question, answers, context]);
     if (this.failureError !== undefined) throw this.failureError;
+  }
+
+  async retained(
+    id: string,
+    question: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    context: StructuredQuestionFailureContext,
+  ): Promise<void> {
+    this.retentions.push([id, question, answers, context]);
   }
 }
 
@@ -200,7 +212,7 @@ describe('structured question service', () => {
     should(recovery.cancellations).have.length(1);
   });
 
-  it('releases durable state even when snapshot and cancellation both fail', async () => {
+  it('keeps the exact question bound when snapshot and cancellation both fail', async () => {
     const { service, repository, recovery } = subject(
       pending,
       new Driver(Promise.reject(new StructuredQuestionDriveFailure('input may have landed', 'ambiguous'))),
@@ -220,14 +232,16 @@ describe('structured question service', () => {
       })
       .catch((error: unknown) => error);
 
-    should(failure).match({ receipt: 'quarantined' });
-    should(repository.failures[0]?.[3]).match({
+    should(failure).match({ receipt: 'accepted' });
+    should(repository.failures).deepEqual([]);
+    should(repository.retentions[0]?.[3]).match({
       snapshotError: 'capture failed',
       cancellationError: 'Escape could not be confirmed',
     });
     should(recovery.cancellations).have.length(1);
     should((failure as Error).message).match(/Automatic native cancellation was not confirmed/u);
-    should((failure as Error).message).match(/Inspect the terminal before replying in prose/u);
+    should((failure as Error).message).match(/structured form remains bound/u);
+    should((failure as Error).message).match(/Pending question:\nDeploy\?/u);
   });
 
   it('leaves the accepted receipt unresolved when the durable release itself fails', async () => {
@@ -264,7 +278,7 @@ describe('structured question service', () => {
     should(harness.repository.failures).deepEqual([]);
   });
 
-  it('leaves an atomic-confirmation failure unconfirmed after the pane visibly advanced, without Escape', async () => {
+  it('releases an atomic-confirmation failure after the pane visibly advanced, without Escape', async () => {
     const harness = subject();
     harness.repository.answeredError = new Error('state write failed');
 
@@ -281,12 +295,34 @@ describe('structured question service', () => {
       .catch((error: unknown) => error);
 
     should(failure).match({
-      receipt: 'accepted',
+      receipt: 'quarantined',
       failure: { diagnostics: { phase: 'state-confirm', confirmedBy: 'prompt-ready' } },
     });
-    should((failure as Error).message).match(/not driven or cancelled again/u);
-    should(harness.repository.failures).deepEqual([]);
+    should((failure as Error).message).match(/visibly advanced form was released/u);
+    should(harness.repository.failures[0]?.[3]).match({ releaseConfirmedBy: 'prompt-ready' });
     should(harness.recovery.snapshots).deepEqual([ID]);
+    should(harness.recovery.cancellations).deepEqual([]);
+  });
+
+  it('keeps an atomic-confirmation failure accepted when its durable release also fails', async () => {
+    const harness = subject();
+    harness.repository.answeredError = new Error('answer state write failed');
+    harness.repository.failureError = new Error('release state write failed');
+
+    const failure = await harness.service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).match({ receipt: 'accepted' });
+    should((failure as Error).message).match(/failed to release/u);
     should(harness.recovery.cancellations).deepEqual([]);
   });
 

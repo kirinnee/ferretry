@@ -2,6 +2,7 @@ import type { SessionState, SessionView, StructuredQuestionAnswer } from '@ferre
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
+  AnswerAcknowledged,
   type AnswerLedger,
   type AnswerOperationRecord,
   AnswerReleased,
@@ -161,6 +162,7 @@ export class StructuredAnswerCoordinator {
       if (admission.kind === 'replay') return;
       if (admission.kind === 'failed') throw new AnswerTerminalFailure(admission.record);
       if (admission.kind === 'quarantined') throw new AnswerReleased(admission.record);
+      if (admission.kind === 'acknowledged') throw new AnswerAcknowledged(admission.record);
       if (admission.kind === 'reconcile') {
         await this.#reconcile(id, requestId, admission.record);
         return;
@@ -190,14 +192,16 @@ export class StructuredAnswerCoordinator {
   async #reconcile(id: SessionId, requestId: string, record: AnswerOperationRecord): Promise<void> {
     const verdict = reconcileUnconfirmedAnswer({ record, state: await this.ports.state(id) });
     if (verdict === 'quarantine') {
-      const quarantined: AnswerOperationRecord = {
-        ...record,
-        outcome: 'quarantined',
-        reason: record.reason ?? 'the durable session state could not prove whether the accepted answer landed',
-      };
-      await this.ports.quarantine(id, quarantined);
-      await this.ports.ledger.append(id, quarantined);
-      throw new AnswerUnconfirmed(requestId, record.toolUseId, quarantined.reason);
+      // Absence of the answer stamp says only that the accepted operation is unresolved. It does
+      // NOT prove the native form was released: an unconfirmed Escape may have left the exact form
+      // on screen, and replacing `accepted` with `quarantined` here would let prose reach it. Only
+      // the monitor's positive transcript-advance evidence or a confirmed cancellation may make
+      // that transition. Keep the receipt open and let projection retain the exact binding.
+      throw new AnswerUnconfirmed(
+        requestId,
+        record.toolUseId,
+        record.reason ?? 'the durable session state could not prove either an answer or a release',
+      );
     }
     await this.ports.ledger.append(id, {
       ...record,
@@ -234,12 +238,15 @@ export class StructuredAnswerCoordinator {
           outcome: 'withdrawn',
           reason: `refused before any key was sent: ${error.message}`,
         });
-      if (error instanceof StructuredQuestionAttemptFailed && error.receipt !== 'accepted') {
+      if (error instanceof StructuredQuestionAttemptFailed) {
         const settlement: AnswerOperationRecord = {
           ...accepted,
           outcome: error.receipt,
           reason: error.message,
         };
+        // `accepted` remains deliberately unresolved, but append its diagnostic reason so a daemon
+        // restart does not erase why release could not be proved. It still authorizes no second
+        // drive; only the authoritative stamp or positive monitor evidence may settle it.
         if (settlement.outcome === 'quarantined') await this.ports.quarantine(id, settlement);
         await this.ports.ledger.append(id, settlement);
       }

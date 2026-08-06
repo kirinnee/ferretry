@@ -1,6 +1,11 @@
 import type { PendingQuestion, SessionState } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptQuestion } from '../../transcript/types.ts';
-import { type AnswerOperationRecord, answerEvidenceForQuestion } from './answer-ledger.ts';
+import {
+  type AnswerOperationRecord,
+  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+  answerEvidenceForQuestion,
+} from './answer-ledger.ts';
 
 export type StructuredQuestionProjection =
   | { readonly kind: 'none' }
@@ -8,10 +13,17 @@ export type StructuredQuestionProjection =
   | { readonly kind: 'resolved'; readonly toolUseId: string }
   | { readonly kind: 'needs-human'; readonly reason: string };
 
-const answerAttentionFor = (state: SessionState, toolUseId: string | undefined): boolean =>
-  toolUseId !== undefined &&
-  state.needsHumanKind === 'structured-answer-unconfirmed' &&
-  state.needsHuman?.includes(toolUseId) === true;
+const answerAttentionFor = (state: SessionState, kind: string, toolUseId: string | undefined): boolean =>
+  toolUseId !== undefined && state.needsHumanKind === kind && state.needsHuman?.includes(toolUseId) === true;
+
+const unresolvedAnswerAttentionFor = (state: SessionState, toolUseId: string | undefined): boolean =>
+  answerAttentionFor(state, STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND, toolUseId);
+
+const releasedAnswerAttentionFor = (state: SessionState, toolUseId: string | undefined): boolean =>
+  answerAttentionFor(state, STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND, toolUseId);
+
+const ownedAnswerAttentionFor = (state: SessionState, toolUseId: string | undefined): boolean =>
+  unresolvedAnswerAttentionFor(state, toolUseId) || releasedAnswerAttentionFor(state, toolUseId);
 
 const clearAnswerAttention = { needsHuman: undefined, needsHumanKind: undefined } as const;
 
@@ -90,12 +102,13 @@ export function structuredQuestionStatePatch(
     projection.kind === 'pending' && projection.question.toolUseId !== toolUseId ? projection.question : undefined;
   if (
     evidence.kind === 'confirmed' ||
-    (evidence.kind === 'unconfirmed' && current.lastAnsweredQuestionToolUseId === toolUseId)
+    ((evidence.kind === 'unconfirmed' || evidence.kind === 'quarantined') &&
+      current.lastAnsweredQuestionToolUseId === toolUseId)
   ) {
     if (
       current.lastAnsweredQuestionToolUseId === toolUseId &&
       current.pendingQuestion === undefined &&
-      !answerAttentionFor(current, toolUseId)
+      !ownedAnswerAttentionFor(current, toolUseId)
     )
       return {};
     return {
@@ -108,26 +121,26 @@ export function structuredQuestionStatePatch(
             ? 'running'
             : current.status
           : 'awaiting_question',
-      ...(answerAttentionFor(current, toolUseId) ? clearAnswerAttention : {}),
+      ...(ownedAnswerAttentionFor(current, toolUseId) ? clearAnswerAttention : {}),
     };
   }
   if (evidence.kind === 'quarantined') {
     if (
       newerQuestion === undefined &&
       current.pendingQuestion === undefined &&
-      answerAttentionFor(current, evidence.record.toolUseId)
+      releasedAnswerAttentionFor(current, evidence.record.toolUseId)
     )
       return {};
     return {
       pendingQuestion: newerQuestion,
       status: terminal ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
-      needsHumanKind: 'structured-answer-unconfirmed',
-      needsHuman: `answer request ${evidence.record.requestId} for ${evidence.record.toolUseId} may have reached the form; inspect the session before continuing`,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHuman: `answer request ${evidence.record.requestId} for ${evidence.record.toolUseId} may have reached the form; the form was released, so prose may continue, but the original answer remains unconfirmed`,
       ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
     };
   }
-  if (evidence.kind === 'released') {
-    const clearOwnedAttention = answerAttentionFor(current, toolUseId);
+  if (evidence.kind === 'released' || evidence.kind === 'acknowledged') {
+    const clearOwnedAttention = ownedAnswerAttentionFor(current, toolUseId);
     if (
       newerQuestion === undefined &&
       current.pendingQuestion === undefined &&
@@ -138,24 +151,57 @@ export function structuredQuestionStatePatch(
     return {
       pendingQuestion: newerQuestion,
       status: terminal ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
-      ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
+      ...(evidence.kind === 'released' && evidence.record.reason !== undefined
+        ? { reason: evidence.record.reason }
+        : {}),
       ...(clearOwnedAttention ? clearAnswerAttention : {}),
     };
   }
   if (evidence.kind === 'unconfirmed') {
-    if (newerQuestion !== undefined)
-      return {
-        pendingQuestion: newerQuestion,
-        status: terminal ? current.status : 'awaiting_question',
-        ...(answerAttentionFor(current, toolUseId) ? clearAnswerAttention : {}),
-      };
-    if (current.pendingQuestion === undefined && current.needsHumanKind === 'structured-answer-unconfirmed') return {};
+    // An accepted receipt without an answer stamp is not release evidence. In particular, an
+    // Escape whose effect was not observed must leave the exact durable binding in place even if a
+    // newer transcript tail is visible; monitor reconciliation promotes the receipt first whenever
+    // that newer tail positively proves an advance.
+    const boundQuestion =
+      current.pendingQuestion?.toolUseId === evidence.record.toolUseId
+        ? current.pendingQuestion
+        : projection.kind === 'pending' && projection.question.toolUseId === evidence.record.toolUseId
+          ? projection.question
+          : undefined;
+    if (
+      current.pendingQuestion?.toolUseId === boundQuestion?.toolUseId &&
+      unresolvedAnswerAttentionFor(current, evidence.record.toolUseId)
+    )
+      return {};
     return {
-      pendingQuestion: undefined,
-      status: terminal ? current.status : 'awaiting_user',
-      needsHumanKind: 'structured-answer-unconfirmed',
-      needsHuman: `answer request ${evidence.record.requestId} for ${evidence.record.toolUseId} may have reached the form; it was not sent again`,
+      pendingQuestion: boundQuestion,
+      status: terminal ? current.status : boundQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHuman: `answer request ${evidence.record.requestId} for ${evidence.record.toolUseId} may have reached the form, and release was not confirmed; the bound question remains blocked and was not sent again`,
       ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
+    };
+  }
+
+  // An explicit human relaunch acknowledges the append-only predecessors for this tool. When its
+  // transcript identity has already slid out of the tail, clear the answer attention by the ledger
+  // fact rather than re-minting it from the older quarantine on the next read.
+  const orphanAcknowledgement = records.find(
+    record => record.outcome === 'acknowledged' && current.lastAnsweredQuestionToolUseId !== record.toolUseId,
+  );
+  if (orphanAcknowledgement !== undefined) {
+    const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
+    const clearOwnedAttention = ownedAnswerAttentionFor(current, orphanAcknowledgement.toolUseId);
+    if (pendingQuestion === undefined && current.pendingQuestion === undefined && !clearOwnedAttention) return {};
+    return {
+      pendingQuestion,
+      status: terminal
+        ? current.status
+        : pendingQuestion === undefined
+          ? current.status === 'awaiting_question'
+            ? 'awaiting_user'
+            : current.status
+          : 'awaiting_question',
+      ...(clearOwnedAttention ? clearAnswerAttention : {}),
     };
   }
 
@@ -170,7 +216,7 @@ export function structuredQuestionStatePatch(
       : undefined;
   if (orphanQuarantine !== undefined) {
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
-    const attentionStanding = answerAttentionFor(current, orphanQuarantine.toolUseId);
+    const attentionStanding = releasedAnswerAttentionFor(current, orphanQuarantine.toolUseId);
     if (pendingQuestion === undefined && current.pendingQuestion === undefined && attentionStanding) return {};
     return {
       pendingQuestion,
@@ -178,8 +224,8 @@ export function structuredQuestionStatePatch(
       ...(attentionStanding
         ? {}
         : {
-            needsHumanKind: 'structured-answer-unconfirmed' as const,
-            needsHuman: `answer request ${orphanQuarantine.requestId} for ${orphanQuarantine.toolUseId} may have reached the form; inspect the session before continuing`,
+            needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+            needsHuman: `answer request ${orphanQuarantine.requestId} for ${orphanQuarantine.toolUseId} may have reached the form; the form was released, so prose may continue, but the original answer remains unconfirmed`,
           }),
       ...(orphanQuarantine.reason === undefined ? {} : { reason: orphanQuarantine.reason }),
     };
@@ -190,20 +236,21 @@ export function structuredQuestionStatePatch(
   const orphan = records.find(
     record => record.outcome === 'accepted' && current.lastAnsweredQuestionToolUseId !== record.toolUseId,
   );
-  if (orphan !== undefined)
-    return projection.kind === 'pending'
-      ? {
-          pendingQuestion: projection.question,
-          status: terminal ? current.status : 'awaiting_question',
-          ...(answerAttentionFor(current, orphan.toolUseId) ? clearAnswerAttention : {}),
-        }
-      : {
-          pendingQuestion: undefined,
-          status: terminal ? current.status : 'awaiting_user',
-          needsHumanKind: 'structured-answer-unconfirmed',
-          needsHuman: `answer request ${orphan.requestId} for ${orphan.toolUseId} may have reached the form; inspect the session before continuing`,
-          ...(orphan.reason === undefined ? {} : { reason: orphan.reason }),
-        };
+  if (orphan !== undefined) {
+    const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
+    if (
+      current.pendingQuestion?.toolUseId === pendingQuestion?.toolUseId &&
+      unresolvedAnswerAttentionFor(current, orphan.toolUseId)
+    )
+      return {};
+    return {
+      pendingQuestion,
+      status: terminal ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHuman: `answer request ${orphan.requestId} for ${orphan.toolUseId} may have reached the form, and release was not confirmed; inspect the session before continuing`,
+      ...(orphan.reason === undefined ? {} : { reason: orphan.reason }),
+    };
+  }
 
   if (projection.kind === 'pending' && current.lastAnsweredQuestionToolUseId === projection.question.toolUseId)
     return {};
@@ -213,7 +260,7 @@ export function structuredQuestionStatePatch(
         record.toolUseId !== projection.question.toolUseId &&
         record.outcome !== 'withdrawn' &&
         record.outcome !== 'quarantined' &&
-        answerAttentionFor(current, record.toolUseId),
+        ownedAnswerAttentionFor(current, record.toolUseId),
     );
     return {
       pendingQuestion: projection.question,
