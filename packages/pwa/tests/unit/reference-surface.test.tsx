@@ -1,5 +1,5 @@
-import type { AttentionId, SessionView } from '@ferretry/protocol';
 import { beforeEach, describe, test } from 'bun:test';
+import type { AttentionId, SessionView } from '@ferretry/protocol';
 import should from 'should';
 import {
   ReferenceSurfaceProvider,
@@ -107,7 +107,7 @@ describe('sessionReferenceSurface', () => {
       scope,
       tasks: [{ id: 'F12' }],
       attentionIds: ['A3' as AttentionId],
-      skills: ['Summary'],
+      skills: ['summary'],
     });
 
     // Assert
@@ -117,6 +117,22 @@ describe('sessionReferenceSurface', () => {
     should(surface.attentionReferenceResolver?.('A4' as AttentionId)).be.false();
     should(surface.skillReferenceResolver?.('summary')).be.true();
     should(surface.skillReferenceResolver?.('missing')).be.false();
+  });
+
+  test('should not turn a catalog name the grammar refuses into a different name it accepts', () => {
+    // Arrange — the catalog accepts any nonempty trimmed name; the reference
+    // grammar accepts lowercase ones only. `Floop` therefore has NO valid
+    // reference at all, and `/floop` is a different identity that this session
+    // may well not have.
+    const surface = sessionReferenceSurface({ connection, scope, skills: ['Floop', 'run'] });
+
+    // Assert — case-folding the proof set used to make `/floop` live off the
+    // back of `Floop`, while Add to chat kept refusing `/Floop`: the transcript
+    // and the action disagreed about what this session can address.
+    should(surface.skillReferenceResolver?.('floop')).be.false();
+    // The exact, valid entry still proves, so this is a narrowing and not a
+    // silencing.
+    should(surface.skillReferenceResolver?.('run')).be.true();
   });
 
   test('should ask the session filesystem for nothing when there is no candidate', async () => {

@@ -109,7 +109,15 @@ const fileSelection = (line?: number, endLine?: number): SidePaneFileSelection |
 export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions): ReferenceSurface {
   const { connection, scope, cwd, sessions, tasks, attentionIds, skills, terminals, onNavigate } = options;
   const attention = attentionIds === undefined ? undefined : new Set<string>(attentionIds);
-  const skillNames = skills === undefined ? undefined : new Set(skills.map(name => name.toLowerCase()));
+  // EXACT names, never case-folded. The catalog accepts any nonempty trimmed
+  // name, while the reference grammar accepts lowercase ones only — so folding a
+  // catalog entry `Floop` into `floop` would prove `/floop`, a DIFFERENT and
+  // valid identity, from a catalog entry that has no valid reference at all.
+  // Add to chat already refuses `/Floop`, so the folded set made the transcript
+  // and the action disagree about what this session can address. The candidate
+  // arriving here was parsed by that grammar and is therefore already lowercase,
+  // which is what makes exact membership the correct and complete test.
+  const skillNames = skills === undefined ? undefined : new Set(skills);
   return {
     ...(sessions === undefined
       ? {}
