@@ -525,13 +525,61 @@ describe('a stream opened through the carrier router', () => {
     should(second?.streaming()).be.false();
   });
 
-  it('should reuse the live session for a stream already open at the same path', async () => {
-    const { router, daemon, auto } = await routed();
+  /*
+   * TWO SUBSCRIBERS OF ONE ROUTE GET TWO SESSIONS, and this case exists because the version that
+   * shared one passed a test that could not see the defect: both callers passed
+   * `onData: () => undefined` and it asserted only that a second socket was NOT opened. That proved
+   * reuse happened and nothing about whether reuse was correct.
+   *
+   * Sharing is wrong on §14's own terms — "a stream session carries exactly ONE of them: the socket
+   * is the session" — and it fails silently in three directions, all three asserted here: the second
+   * caller's `onData` is never wired, so it receives nothing; `onStreamClosed` ASSIGNS, so the first
+   * subscriber is never told the stream ended; and either caller's close concludes the session for
+   * both.
+   */
+  it('should give two subscribers of one route their own sessions rather than cross-wiring them', async () => {
+    const { router, daemon, auto } = await routed({ streamFrames: [{ t: 'data', text: 'one' }] });
     const opened = auto.sockets.length;
-    await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
-    await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
+    const first: RelayStreamFrame[] = [];
+    const second: RelayStreamFrame[] = [];
+
+    const a = await router.openStream(daemon, { path: '/v1/events', onData: frame => first.push(frame) });
+    const b = await router.openStream(daemon, { path: '/v1/events', onData: frame => second.push(frame) });
     await settle();
-    should(auto.sockets.length).equal(opened + 1);
+
+    // Two sessions, not one shared between them.
+    should(auto.sockets.length).equal(opened + 2);
+    should(a).not.equal(b);
+    // BOTH consumers received the frame. Shared, the second one's `onData` was wired to nothing.
+    should(first).eql([{ kind: 'text', text: 'one' }]);
+    should(second).eql([{ kind: 'text', text: 'one' }]);
+
+    // Each is told about its OWN close, and one leaving does not end the other.
+    const closes: string[] = [];
+    a?.onStreamClosed(() => closes.push('a'));
+    b?.onStreamClosed(() => closes.push('b'));
+    a?.closeStream(1000, 'the viewer left this stream');
+    await settle();
+    should(closes).eql(['a']);
+    should(b?.streaming()).be.true();
+  });
+
+  /*
+   * A concluded session is evicted when it concludes. With a per-call key nothing ever asks for the
+   * same key again, so without this the map would gain one dead entry for every terminal ever
+   * attached over the life of a pairing.
+   */
+  it('should forget a stream session once it has concluded', async () => {
+    const { router, daemon } = await routed();
+    const stream = await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
+    await settle();
+    stream?.closeStream(1000, 'done');
+    await settle();
+
+    // Nothing observable holds it: a fresh open is a fresh session, and the router kept no entry for
+    // the one that ended.
+    const next = await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
+    should(next).not.equal(stream);
   });
 
   it('should surface the daemon refusal with its status rather than a bare failure', async () => {
@@ -721,5 +769,376 @@ describe('the two sequence counters one channel holds', () => {
     // And the receive counter tracked too: a rewind there refuses the next arrival with `4420`,
     // which six rounds would have hit.
     should(session.live()).be.true();
+  });
+});
+
+describe('the pieces the composition root supplies by default', () => {
+  /*
+   * `activeMethod` is what the event transport and the session route both read to decide which kind
+   * of stream to open, and `undefined` covers two facts on purpose: no walk has finished, and the
+   * last walk found nothing. A caller choosing a transport has no use for a carrier that carried
+   * nothing, so they are deliberately one answer.
+   */
+  it('should answer with the measured carrier, and with nothing before a walk decides', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { body: '{}' });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new Error('direct is not reachable in this case');
+      },
+    });
+    const daemon = daemonConnection({
+      daemonId: id.daemonId,
+      baseUrl: 'https://studio.example',
+      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://studio.example' },
+        { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
+      ],
+    });
+
+    should(router.activeMethod(daemon.daemonId)).be.undefined();
+    await router.send(daemon, 'https://studio.example/v1/health');
+    should(router.activeMethod(daemon.daemonId)).match({ kind: 'relay', relayUrl: 'wss://relay.example' });
+  });
+
+  /*
+   * The heartbeat a redemption uses when the caller injects none. It is a real `setInterval`, so the
+   * assertion is that the cancel it returns actually stops it — an interval left armed behind a
+   * finished pairing keeps a timer alive for a conversation that is over.
+   */
+  it('should arm a real interval for a redemption that injects none, and cancel it', async () => {
+    const id = await newDaemonIdentity();
+    const response = {
+      deviceToken: `fy_device_${'m'.repeat(43)}`,
+      daemonId: id.daemonId,
+      daemonName: 'Studio',
+      capabilities: [],
+      carriers: [],
+    };
+    const auto = autoDial(id, { paired: response });
+
+    // No `heartbeat` override: this drives the module's own default all the way through.
+    const paired = await redeemPairingOverRelay({
+      crypto: relayCrypto,
+      seed: seedFor(id.daemonId),
+      deviceName: 'Ferretry PWA',
+      rendezvous: { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
+      dial: auto.dial,
+    });
+
+    should(paired.deviceToken).equal(response.deviceToken);
+    // A timer still armed here would keep this process alive past the suite; that it exits proves it.
+    should(auto.sockets[0]?.closed?.code).equal(1000);
+  });
+});
+
+describe('leaving a stream, on either carrier', () => {
+  const daemon = daemonConnection({
+    daemonId: 'fy_daemon_x',
+    baseUrl: 'https://studio.example',
+    deviceToken: `fy_device_${'x'.repeat(43)}`,
+  });
+  const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
+
+  /*
+   * §14 makes a viewer's leave an explicit sealed record "so that the taxonomy survives in both
+   * directions and a deliberate leave is never spelled the same as a network failure". An aborted
+   * event subscription must therefore SAY it left, and resolve rather than reject: the viewer chose
+   * to go, which is not a failure to report.
+   */
+  it('should seal a stream-close when a relayed event subscription is aborted', async () => {
+    const { session, socket, daemon: scripted } = await keyed(streamMode);
+    const ready = session.ready();
+    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await ready;
+
+    const abort = new AbortController();
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => {
+        throw new Error('a relayed stream mints no ticket');
+      },
+      () => {
+        throw new Error('a relayed stream opens no socket');
+      },
+      () => ({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' }),
+      (async () => session) as never,
+    );
+    const streaming = transport.stream({
+      url: 'wss://studio.example/v1/events',
+      token: 'x',
+      signal: abort.signal,
+      onMessage: () => undefined,
+    });
+
+    const before = socket.sent.length;
+    abort.abort();
+    await streaming;
+    await settle();
+
+    // One more record went out — the sealed leave — and the stream is over on this side.
+    should(socket.sent.length).equal(before + 1);
+    should(session.streaming()).be.false();
+  });
+
+  /** A subscription aborted before it starts never opens anything at all. */
+  it('should open nothing for a subscription that is already aborted', async () => {
+    const abort = new AbortController();
+    abort.abort();
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => {
+        throw new Error('no ticket');
+      },
+      () => {
+        throw new Error('no socket');
+      },
+      () => ({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' }),
+      async () => {
+        throw new Error('no stream session');
+      },
+    );
+    await transport.stream({
+      url: 'wss://studio.example/v1/events',
+      token: 'x',
+      signal: abort.signal,
+      onMessage: () => undefined,
+    });
+  });
+
+  /*
+   * The DIRECT adapter of the same port: a real socket, driven through open, output, and close. It
+   * is the carrier a browser on the daemon's own network gets, and the port is what stops the deck
+   * knowing which one it has.
+   */
+  it('should drive a direct terminal socket through open, output and a deliberate leave', async () => {
+    const listeners = new Map<string, (event: unknown) => void>();
+    let sent: unknown[] = [];
+    let closed: { code: number; reason: string } | undefined;
+    class FakeSocket {
+      /** The real constructor carries this, and `directTerminalStream` compares against it. */
+      static readonly OPEN = 1;
+      binaryType = '';
+      readyState = 1;
+      addEventListener(type: string, listener: (event: unknown) => void): void {
+        listeners.set(type, listener);
+      }
+      send(payload: unknown): void {
+        sent.push(payload);
+      }
+      close(code: number, reason: string): void {
+        closed = { code, reason };
+      }
+    }
+    const previousSocket = globalThis.WebSocket;
+    globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
+    try {
+      const opens: number[] = [];
+      const bytes: Uint8Array[] = [];
+      const closes: { code: number; reason: string }[] = [];
+      const attach = browserTerminalStreamAttach(
+        async () => null,
+        async () =>
+          Response.json({ ticket: `fy_ticket_${'a'.repeat(43)}`, ttlSeconds: 30, expiresAt: '2026-08-01T10:06:00Z' }),
+        () => ({ kind: 'direct', daemonUrl: 'https://studio.example' }),
+      );
+      const stream = await attach(daemon, scope, 'a1b2c3d4e5f6', {
+        onOpen: () => opens.push(1),
+        onBytes: value => bytes.push(value),
+        onClosed: (code, reason) => closes.push({ code, reason }),
+        onRefused: () => undefined,
+      });
+
+      listeners.get('open')?.({});
+      listeners.get('message')?.({ data: utf8Bytes('built ok').buffer });
+      // `error` has no port equivalent: the close that follows owns the taxonomy.
+      listeners.get('error')?.({});
+      sent = [];
+      stream.write(utf8Bytes('ls\n'));
+      stream.control('{"type":"resize"}');
+      stream.close(1000, 'terminal tab detached');
+      listeners.get('close')?.({ code: 1000, reason: 'terminal tab detached' });
+
+      should(opens).eql([1]);
+      should(new TextDecoder().decode(bytes[0] as Uint8Array)).equal('built ok');
+      should(sent).have.length(2);
+      should(closed).eql({ code: 1000, reason: 'terminal tab detached' });
+      should(closes).eql([{ code: 1000, reason: 'terminal tab detached' }]);
+    } finally {
+      globalThis.WebSocket = previousSocket;
+    }
+  });
+});
+
+describe('the failure shapes the adversarial review named', () => {
+  const daemon = daemonConnection({
+    daemonId: 'fy_daemon_x',
+    baseUrl: 'https://studio.example',
+    deviceToken: `fy_device_${'x'.repeat(43)}`,
+  });
+  const scope = { daemonId: 'fy_daemon_x' as never, sessionId: 'shared' } as never;
+
+  /*
+   * P1: a consumer that THROWS used to escape into `void session.receiveBinary(bytes)` and become an
+   * unhandled rejection, leaving the session in `streaming` with no sealed close and no `4440` — so
+   * the stream's promise never settled and the rendezvous session kept holding a device grant with
+   * nobody watching. The real consumer is the typed client parsing each event against a STRICT
+   * schema, which throws on a frame kind an older bundle does not know.
+   */
+  it('should end the session when a stream consumer throws, rather than leaking an unhandled rejection', async () => {
+    const {
+      session,
+      socket,
+      daemon: scripted,
+    } = await keyed(streamMode, () => {
+      throw new Error('this bundle does not know that frame kind');
+    });
+    const ready = session.ready();
+    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await ready;
+    const closes: number[] = [];
+    session.onStreamClosed(closed => closes.push(closed.code));
+
+    // Delivered exactly as the adapter does it — the throw has nowhere else to go.
+    await session.receiveBinary(await scripted.record({ t: 'data', text: '{"kind":"unknown"}' }));
+
+    should(session.streaming()).be.false();
+    // The consumer is told its stream ended rather than left waiting on one that is over…
+    should(closes).eql([1006]);
+    // …and the socket is closed rather than left holding a grant.
+    should(socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
+  });
+
+  /*
+   * P2: a client-detected violation used to end the session locally and go quiet. §14 says a message
+   * a party could not read "ends the session with 4400" — a statement about the WIRE. Left open, the
+   * socket keeps one of the two pre-credential slots §14 bounds a link to, so the NEXT candidate in a
+   * pairing walk can be refused 4429 by a slot the failed attempt is still holding.
+   */
+  it('should close the socket when it refuses a record, not only mark itself ended', async () => {
+    const { session, socket, daemon: scripted } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const ready = session.ready();
+    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+
+    should(await failure(ready)).be.instanceof(RelaySessionError);
+    should(socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
+  });
+
+  /*
+   * The deliberate exception: the rendezvous is already closing this socket, so closing from here
+   * would race its own close frame.
+   */
+  it('should stay quiet when the rendezvous is the one closing', async () => {
+    const { session, socket } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const ready = session.ready();
+    session.carrierClosed(RELAY_CLOSE_CODES.daemonAbsent, 'no daemon holds this rendezvous');
+    await failure(ready);
+    should(socket.closed).be.null();
+  });
+
+  /*
+   * P3: the loop that splits an oversized write runs no iterations for an empty one, so a zero-length
+   * write was dropped with nothing said — in a class whose doctrine is that damaged state is never
+   * empty state.
+   */
+  it('should send a zero-length write rather than dropping it silently', async () => {
+    const { session, socket, daemon: scripted } = await keyed(streamMode);
+    const ready = session.ready();
+    await session.receiveBinary(await scripted.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+    await ready;
+
+    const before = socket.sent.length;
+    session.sendStream({ kind: 'bytes', bytes: new Uint8Array(0) });
+    await settle();
+    should(socket.sent.length).equal(before + 1);
+  });
+
+  /*
+   * P3: the violation sentence used to be reached only for an EMPTY reason, so a `4440` carrying any
+   * string — which a conforming rendezvous forwards from the daemon — was reported in the carrier's
+   * words instead of as the violation it is.
+   */
+  it('should name the violation even when the close carries a reason', async () => {
+    const { session } = await keyed(pairMode);
+    const outcome = session.paired();
+    session.carrierClosed(RELAY_SESSION_CONCLUDED_CLOSE_CODE, 'the pairing exchange is complete');
+    should((await failure(outcome)).message).match(/without stating an outcome/u);
+  });
+
+  /*
+   * P3: `openStream` registers its own eviction listener while the caller registers one for
+   * notification. A single-holder `onStreamClosed` made those two fight — whichever subscribed second
+   * won — so either the consumer was never told or the router never evicted. Both are asserted here
+   * in ONE case, because the defect is precisely that only one of them used to happen.
+   */
+  it('should tell the caller AND evict the session on the same close', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { body: '{}' });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new Error('direct is not reachable in this case');
+      },
+    });
+    const paired = daemonConnection({
+      daemonId: id.daemonId,
+      baseUrl: 'https://studio.example',
+      deviceToken: `fy_device_${'x'.repeat(43)}`,
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://studio.example' },
+        { kind: 'relay', relayUrl: 'wss://relay.example', operator: 'hosted' },
+      ],
+    });
+    await router.send(paired, 'https://studio.example/v1/health');
+
+    const stream = await router.openStream(paired, { path: '/v1/events', onData: () => undefined });
+    const told: number[] = [];
+    stream?.onStreamClosed(closed => told.push(closed.code));
+    stream?.closeStream(1000, 'the viewer left this stream');
+    await settle();
+
+    // The caller was told…
+    should(told).eql([1000]);
+    // …and the router evicted it, which a fresh open proves by being a different session.
+    const next = await router.openStream(paired, { path: '/v1/events', onData: () => undefined });
+    should(next).not.equal(stream);
+  });
+
+  /*
+   * P3: `openStream` answers `null` both for "the winner is direct" and for "no walk has finished".
+   * Reading the second as direct buys a single-use ticket and opens a socket at the daemon's own
+   * address — the one a relayed browser cannot reach — burning a credential on a socket that can only
+   * fail. The live event feed already had this gate; the terminal did not.
+   */
+  it('should refuse to attach a terminal before any carrier has been measured', async () => {
+    let tickets = 0;
+    const attach = browserTerminalStreamAttach(
+      async () => null,
+      async () => {
+        tickets += 1;
+        return Response.json({
+          ticket: `fy_ticket_${'a'.repeat(43)}`,
+          ttlSeconds: 30,
+          expiresAt: '2026-08-01T10:06:00Z',
+        });
+      },
+      () => undefined,
+    );
+    const reason = await failure(
+      attach(daemon, scope, 'a1b2c3d4e5f6', {
+        onOpen: () => undefined,
+        onBytes: () => undefined,
+        onClosed: () => undefined,
+        onRefused: () => undefined,
+      }),
+    );
+    should(reason.message).match(/no carrier has been measured/u);
+    should(tickets).equal(0);
   });
 });

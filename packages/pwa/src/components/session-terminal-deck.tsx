@@ -77,6 +77,7 @@ import {
   type TerminalStreamOpener,
   TerminalStreamRefused,
 } from '../lib/web-terminals.ts';
+import type { ConnectionMethod } from '@ferretry/relay';
 import { browserFetch, type DaemonFetch } from '../lib/runtime-models.ts';
 import { Button } from '../shell/primitives.tsx';
 
@@ -131,12 +132,14 @@ export interface TerminalDeckDependencies {
 export const browserTerminalDeckDependencies = (
   fetcher: DaemonFetch = browserFetch,
   openStream: TerminalStreamOpener = async () => null,
+  /** Which carrier a request has MEASURED. `undefined` means no walk has decided yet. */
+  carrier: () => ConnectionMethod | undefined = () => undefined,
 ): TerminalDeckDependencies => ({
   list: (daemon, scope) => listSessionTerminals(daemon, scope, fetcher),
   create: (daemon, scope) => createSessionTerminal(daemon, scope, {}, fetcher),
   rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
   close: (daemon, scope, id) => closeSessionTerminal(daemon, scope, id, fetcher),
-  attach: browserTerminalStreamAttach(openStream, fetcher),
+  attach: browserTerminalStreamAttach(openStream, fetcher, carrier),
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };

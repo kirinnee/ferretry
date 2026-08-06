@@ -286,3 +286,57 @@ describe('paired daemon connection', () => {
     should(actual.carriers).deepEqual([{ kind: 'direct', daemonUrl: 'http://127.0.0.1:7431' }]);
   });
 });
+
+describe('a pairing that crossed a rendezvous', () => {
+  const seed = pairingSeedFromUrl(
+    'https://app.example.test/pair#v2;url=http%3A%2F%2F127.0.0.1%3A7431;code=7F3K-Q2ND;fp=fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB;relay=wss%3A%2F%2Frelay.example',
+  );
+  const crossed = { kind: 'relay' as const, relayUrl: 'wss://relay.example' };
+  const response = (carriers: readonly { kind: 'direct' | 'relay'; url: string }[]) => ({
+    daemonId: 'fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    deviceToken: 'device-token',
+    carriers,
+  });
+
+  /*
+   * §14: "The client refuses a relayed pairing whose published set does not name the rendezvous the
+   * exchange itself crossed." Without it this function faces a choice with no good answer — write
+   * down an address the daemon did not publish, or discard the only address known to work — and the
+   * protocol removes the choice by making the disagreement fatal. The cost is stated: the daemon has
+   * already minted the grant, so the operator sees a device the device itself discarded.
+   */
+  it('should refuse when the published set does not name the rendezvous it crossed', () => {
+    const mismatch = (): unknown =>
+      pairedDaemonConnection(seed, response([{ kind: 'relay', url: 'wss://somewhere.else' }]), undefined, crossed);
+    const empty = (): unknown => pairedDaemonConnection(seed, response([]), undefined, crossed);
+
+    should(mismatch).throw(/paired over a rendezvous it does not publish/u);
+    // An empty set cannot name it either — and on a relayed pairing the direct fallback would be the
+    // one address this browser has just proved it cannot reach.
+    should(empty).throw(/paired over a rendezvous it does not publish/u);
+  });
+
+  /*
+   * Compared by ADDRESS alone, deliberately. A candidate is built from a fragment or from the
+   * discovery advertisement before the daemon has said anything, so its `operator` is absent or this
+   * browser's own guess, while `publishedConnectionMethods` always stamps `'hosted'` or `'self'`.
+   * A whole-carrier comparison would refuse every relayed pairing that ever succeeded, over a label.
+   */
+  it('should accept a published set that names the rendezvous under a different operator label', () => {
+    const connection = pairedDaemonConnection(
+      seed,
+      response([{ kind: 'relay', url: 'wss://relay.example' }]),
+      // No hosted address discovered, so the daemon's own relay is labelled `self` while the
+      // candidate carried no label at all.
+      undefined,
+      crossed,
+    );
+    should(connection.carriers).containEql({ kind: 'relay', relayUrl: 'wss://relay.example', operator: 'self' });
+  });
+
+  /** The direct path is unaffected: it never crossed a rendezvous, so there is nothing to check. */
+  it('should leave a direct pairing alone', () => {
+    const connection = pairedDaemonConnection(seed, response([]));
+    should(connection.carriers).eql([{ kind: 'direct', daemonUrl: 'http://127.0.0.1:7431' }]);
+  });
+});

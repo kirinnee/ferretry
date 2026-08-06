@@ -131,7 +131,10 @@ describe('browserTerminalDeckDependencies', () => {
     stub('fetch', daemonFetch(calls) as unknown as typeof fetch);
     stub('WebSocket', FakeSocket as unknown as typeof WebSocket);
 
-    await browserTerminalDeckDependencies().attach(alpha, scope, TERMINAL, noHandlers());
+    await browserTerminalDeckDependencies(undefined, undefined, () => ({
+      kind: 'direct',
+      daemonUrl: 'https://alpha.example.test',
+    })).attach(alpha, scope, TERMINAL, noHandlers());
 
     expect(calls.at(0)).toEqual({
       url: `https://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL}/stream/ticket`,

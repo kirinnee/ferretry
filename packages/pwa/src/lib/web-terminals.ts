@@ -15,6 +15,7 @@ import {
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
+import type { ConnectionMethod } from '@ferretry/relay';
 import type { RelayStreamRequest } from './relay-carrier.ts';
 import { type RelayClientSession, type RelayStreamFrame, RelayStreamRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
@@ -302,16 +303,36 @@ const relayTerminalStream = (session: RelayClientSession, handlers: TerminalStre
  * anything that is not a live rendezvous. This is reading a decision, not making one.
  */
 export const browserTerminalStreamAttach =
-  (openStream: TerminalStreamOpener, fetcher: DaemonFetch = browserFetch): TerminalStreamAttach =>
+  (
+    openStream: TerminalStreamOpener,
+    fetcher: DaemonFetch = browserFetch,
+    carrier: () => ConnectionMethod | undefined = () => undefined,
+  ): TerminalStreamAttach =>
   async (daemon, scope, terminalId, handlers) => {
     const path = terminalStreamPath(daemon, scope, terminalId);
     const session = await openStream(daemon, { path, onData: frame => onStreamFrame(frame, handlers) }).catch(
       relayAttachFailure(handlers),
     );
     if (session !== null && session !== undefined) return relayTerminalStream(session, handlers);
+    // NOT UNTIL A CARRIER HAS BEEN MEASURED, the same gate the live event feed already has. A carrier
+    // is decided by the first request that walks, and `openStream` answers `null` both for "the
+    // winner is direct" and for "no walk has finished". Treating the second as direct buys a
+    // single-use ticket and opens a `wss://` at the daemon's own address — the one a relayed browser
+    // cannot reach — burning a credential on a socket that can only fail, and recovering through the
+    // deck's backoff rather than through anything this function knew.
+    if (carrier() === undefined) throw new Error(TERMINAL_STREAM_NO_CARRIER);
     const ticket = await daemonTerminalTicket(daemon, scope, terminalId, fetcher);
     return directTerminalStream(new WebSocket(terminalStreamUrl(daemon, scope, terminalId, ticket)), handlers);
   };
+
+/**
+ * Said when a terminal is asked for before any request has measured a carrier.
+ *
+ * It is a RETRYABLE failure rather than a refusal: the deck's ordinary backoff is exactly right here,
+ * because the next request to walk decides the carrier and the attach after it will succeed.
+ */
+export const TERMINAL_STREAM_NO_CARRIER =
+  'no carrier has been measured for this daemon yet, so there is nothing to attach a terminal over';
 
 /**
  * A terminal's frames, as the two shapes §14 gives them.
@@ -328,16 +349,19 @@ const onStreamFrame = (frame: RelayStreamFrame, handlers: TerminalStreamHandlers
 /**
  * A relayed attach that did not open, told apart into the two answers a viewer acts on differently.
  *
- * A `stream-refused` is the DAEMON's verdict and is final for this attempt, so it reaches
- * `onRefused` and the deck stops asking. Anything else is a carrier that did not work, which is
- * rethrown so the deck's own retry — the one that already exists for a refused ticket — takes it.
+ * A `stream-refused` is the DAEMON's verdict and is final for this attempt, so the viewer is told
+ * through `onRefused` and then this throws `TerminalStreamRefused` — which the deck recognises and
+ * does NOT retry. Anything else is a carrier that did not work, and is rethrown unchanged so the
+ * deck's ordinary retry takes it.
+ *
+ * EVERY PATH THROWS, which is why the return type says so. There is no session to hand back either
+ * way: a refusal never opened one, and a transport failure never reached one.
  */
 const relayAttachFailure =
   (handlers: TerminalStreamHandlers) =>
-  (reason: unknown): null => {
+  (reason: unknown): never => {
     if (!(reason instanceof RelayStreamRefusedError)) throw reason;
     handlers.onRefused(reason.status, reason.body);
-    // Answered rather than thrown: the viewer has been told, and there is no socket to hand back.
     throw new TerminalStreamRefused(reason.status, reason.body);
   };
 

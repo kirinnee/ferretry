@@ -487,11 +487,21 @@ export interface RelayStreamRequest {
 }
 
 /** The request session's key. One per rendezvous, because §14 gives a request session no identity. */
-const requestSessionKey = (relayUrl: string): string => `request ${relayUrl}`;
+const requestSessionKey = (relayUrl: string): string => `request ${relayUrl}`;
 
-/** A stream session's key: one per rendezvous per stream, because each stream IS its own session. */
-const streamSessionKey = (relayUrl: string, path: string, query: readonly (readonly [string, string])[]): string =>
-  `stream ${relayUrl} ${path} ${query.map(([name, value]) => `${name}=${value}`).join('&')}`;
+/**
+ * A stream session's key: one per CALL, because §14 gives each stream its own session.
+ *
+ * The ordinal is what stops two callers of the same route sharing one session — `openStream` names
+ * the three silent failures sharing produces. The address, path and query stay in the key so a
+ * reader of this map can still see what a session is for.
+ */
+const streamSessionKey = (
+  relayUrl: string,
+  path: string,
+  query: readonly (readonly [string, string])[],
+  ordinal: number,
+): string => `stream ${String(ordinal)} ${relayUrl} ${path} ${query.map(pair => pair.join('=')).join('&')}`;
 
 /**
  * Same daemon, same address, same grant — only the published carrier set moved.
@@ -585,6 +595,8 @@ export class DaemonCarrierRouter {
   readonly #crypto: RelayClientSessionDependencies['crypto'];
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
   readonly #hostedRelay: () => Promise<string | undefined>;
+  /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
+  #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
 
   /**
@@ -675,6 +687,20 @@ export class DaemonCarrierRouter {
    * refusal in particular to be "rendered with its reason … rather than surfacing as a stream that
    * never opens, because a person with three tabs open did nothing wrong and can act on the
    * sentence", so it is thrown with its close code intact for the caller to say out loud.
+   *
+   * A STREAM SESSION IS NEVER SHARED BETWEEN TWO CALLERS, and that is the protocol's rule rather than
+   * a convenience. §14: "A stream session carries exactly ONE of them: the socket is the session."
+   * Handing one session to two subscribers breaks it on its own terms, and the failure is silent in
+   * all three directions a client would care about. `RelayClientSession` takes ONE `onData` at
+   * construction, so a second caller receives no frames at all. `onStreamClosed` ASSIGNS rather than
+   * appends, so a second subscriber overwrites the first and the first is never told the stream
+   * ended — a terminal pane whose `onClosed` never fires sits on `connecting` forever, and an event
+   * subscription whose promise never settles holds a rendezvous session, and a device grant, open
+   * with nobody watching. And either caller's `closeStream` concludes the session for BOTH.
+   *
+   * So every call opens its own session and the key carries a per-call ordinal to say so. The REQUEST
+   * session is still shared, because it genuinely has no per-caller state: its answers are routed by
+   * the `id` the caller minted, so two callers on one request session cannot receive each other's.
    */
   async openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession | null> {
     const entry = this.#entry(daemon);
@@ -682,7 +708,9 @@ export class DaemonCarrierRouter {
     if (chosen?.ok !== true || chosen.method.kind !== 'relay') return null;
     const method = chosen.method;
     const query = request.query ?? [];
-    return await this.#hold(entry, streamSessionKey(method.relayUrl, request.path, query), method.relayUrl, () =>
+    this.#streams += 1;
+    const key = streamSessionKey(method.relayUrl, request.path, query, this.#streams);
+    const session = await this.#hold(entry, key, method.relayUrl, () =>
       openRelaySession({
         crypto: this.#crypto,
         dial: this.#dial,
@@ -698,6 +726,12 @@ export class DaemonCarrierRouter {
         onData: request.onData,
       }),
     );
+    // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
+    // a per-call key nothing ever does, so without this the map would gain one dead entry for every
+    // terminal ever attached over the life of a pairing. The entry holds no live socket, so this is
+    // unbounded growth rather than a leak of anything that matters; it is still unbounded.
+    session.onStreamClosed(() => entry.sessions.delete(key));
+    return session;
   }
 
   /** Unpair and re-pair invalidation: a carrier is live state, never durable. */

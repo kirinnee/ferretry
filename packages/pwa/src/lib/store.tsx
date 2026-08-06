@@ -174,6 +174,16 @@ const pairingFailure = async (response: Response): Promise<string> => {
 /** How this browser names itself to a daemon it is asking to trust it. */
 const PAIRING_DEVICE_NAME = 'Ferretry PWA';
 
+/**
+ * How long the DIRECT half of a redemption may spend before the walk moves on.
+ *
+ * Short on purpose. It is not a budget for a slow daemon — a daemon that is reachable answers a
+ * `POST /v1/pair` in milliseconds on a LAN — it is the point at which "this address is not answering"
+ * becomes the more useful conclusion. The code it is spending has a two-minute life, and the
+ * rendezvous attempt behind this one needs a socket, a handshake and a sealed exchange of its own.
+ */
+export const DIRECT_PAIRING_TIMEOUT_MS = 4_000;
+
 export interface ExchangePairingOptions {
   readonly fetcher?: DaemonFetch;
   readonly hostedRelayUrl?: string;
@@ -181,6 +191,8 @@ export interface ExchangePairingOptions {
   readonly relayCrypto?: RelayCrypto;
   /** The browser WebSocket by default. Injected so no suite opens one. */
   readonly relayDial?: RelayDial;
+  /** `DIRECT_PAIRING_TIMEOUT_MS` by default. A parameter so a suite can prove the deadline in ms. */
+  readonly directTimeoutMs?: number;
 }
 
 /**
@@ -203,7 +215,11 @@ type DirectRedemption =
  * exchange has not issued yet, so this request cannot go through the carrier router — and routing a
  * RE-pair through an existing session would exchange a fresh code under the credential it replaces.
  */
-async function exchangePairingDirect(seed: PairingSeed, fetcher: DaemonFetch): Promise<DirectRedemption> {
+async function exchangePairingDirect(
+  seed: PairingSeed,
+  fetcher: DaemonFetch,
+  timeoutMs: number,
+): Promise<DirectRedemption> {
   const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
   let response: Response;
   try {
@@ -214,8 +230,20 @@ async function exchangePairingDirect(seed: PairingSeed, fetcher: DaemonFetch): P
       cache: 'no-store',
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
+      // A BLACKHOLED ADDRESS IS THE FEATURE'S HEADLINE CASE, AND IT DOES NOT REJECT ON ITS OWN.
+      // §14 exists so a phone off the LAN can pair, and a daemon's advertised address is typically a
+      // private one — from cellular those packets are DROPPED rather than refused, so a browser sits
+      // in SYN retransmit for tens of seconds to minutes before this fetch rejects. Until it does the
+      // walk has not reached a rendezvous at all and the screen says only "pairing". Meanwhile the
+      // code's own life is two minutes, so an unbounded direct attempt can outlive the credential the
+      // walk was going to redeem. Every other leg of this feature has a deadline — `driveRelaySession`
+      // arms one before a session opens, and calls a carrier that neither answers nor closes "a
+      // refusal, not a wait" — and this was the one place that rule was not applied.
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (reason) {
+    // An abort is a transport failure like any other: nothing reached the daemon, so the walk may go
+    // on to a rendezvous. It is deliberately NOT `answered` — the daemon has judged nothing.
     return { kind: 'unreachable', error: reason instanceof Error ? reason : new Error(String(reason)) };
   }
   if (!response.ok) return { kind: 'answered', error: new Error(await pairingFailure(response)) };
@@ -257,7 +285,7 @@ export async function exchangePairing(
       : fetcherOrOptions;
   const fetcher = options.fetcher ?? browserFetch;
   const hostedRelayUrl = options.hostedRelayUrl;
-  const direct = await exchangePairingDirect(seed, fetcher);
+  const direct = await exchangePairingDirect(seed, fetcher, options.directTimeoutMs ?? DIRECT_PAIRING_TIMEOUT_MS);
   if (direct.kind === 'paired') return pairedDaemonConnection(seed, direct.response, hostedRelayUrl);
   if (direct.kind === 'answered') throw direct.error;
 

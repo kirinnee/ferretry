@@ -385,6 +385,10 @@ interface PendingRequest {
   readonly reject: (reason: Error) => void;
 }
 
+/** What a thrown value says about itself, without pretending an unknown one is an `Error`. */
+const failureReason = (reason: unknown): string =>
+  `this session's consumer refused a record: ${reason instanceof Error ? reason.message : String(reason)}`;
+
 /** The record at sequence 1, which is this session's mode expressed on the wire. */
 const credentialRecord = (mode: RelaySessionMode): RelayTunnelClientMessage => {
   if (mode.kind === 'auth') return { t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: mode.deviceToken };
@@ -461,7 +465,7 @@ export class RelayClientSession {
    * result" shape this package keeps paying for.
    */
   #streamClosed: RelayStreamClosed | undefined;
-  #onStreamClosed: ((closed: RelayStreamClosed) => void) | undefined;
+  readonly #streamListeners = new Set<(closed: RelayStreamClosed) => void>();
   /**
    * Receives in flight, and the close that is waiting for them to finish.
    *
@@ -537,6 +541,13 @@ export class RelayClientSession {
    *
    * Answers immediately when it has already ended, because a caller arriving late must not be left
    * waiting on something that is over.
+   *
+   * EVERY LISTENER IS KEPT, and this used to ASSIGN. One session legitimately has two watchers with
+   * different jobs — the consumer that wants to know its stream ended, and the router that evicts the
+   * session from the structure an unpair walks — and a single holder makes those two silently fight:
+   * whichever subscribed second won, so either the consumer was never told the stream closed (a
+   * terminal pane stuck on `connecting` forever, an event promise that never settles) or the router
+   * never evicted. Two facts, two listeners, no ordering to get wrong.
    */
   onStreamClosed(listener: (closed: RelayStreamClosed) => void): void {
     const already = this.#streamClosed;
@@ -544,7 +555,13 @@ export class RelayClientSession {
       listener(already);
       return;
     }
-    this.#onStreamClosed = listener;
+    this.#streamListeners.add(listener);
+  }
+
+  /** Tell every watcher once, and never twice: `#streamClosed` is latched before this runs. */
+  #announceStreamClosed(closed: RelayStreamClosed): void {
+    for (const listener of this.#streamListeners) listener(closed);
+    this.#streamListeners.clear();
   }
 
   /** The heartbeat this side owes: text, so the edge answers it without waking anything. */
@@ -568,6 +585,13 @@ export class RelayClientSession {
     }
     if (frame.kind === 'text') {
       this.#sendRecord({ t: 'data', text: frame.text });
+      return;
+    }
+    // A ZERO-LENGTH WRITE IS STILL A WRITE, and the loop below runs no iterations for one — so it was
+    // dropped with nothing said, in a class whose stated doctrine is that damaged state is never
+    // empty state. Harmless for a terminal today; the silent drop is the shape, not the size.
+    if (frame.bytes.byteLength === 0) {
+      this.#sendRecord({ t: 'data', bytes: '' });
       return;
     }
     for (let offset = 0; offset < frame.bytes.byteLength; offset += RELAY_DATA_BYTE_BUDGET) {
@@ -651,7 +675,8 @@ export class RelayClientSession {
       this.#deferredClose ??= { code, reason };
       return;
     }
-    this.#fail(code, reason === '' ? this.#closedWithoutOutcome(code) : reason);
+    // Quietly: the carrier has already taken this socket away, so there is nothing left to close.
+    this.#quietly(code, this.#closedWithoutOutcome(code, reason));
   }
 
   /** Nothing more will happen to this session, by either route out of it. */
@@ -666,10 +691,16 @@ export class RelayClientSession {
    * the resulting error: a session that never got as far as its credential simply lost its carrier,
    * while one that sent a credential and got a bare close was told nothing by a daemon that owed it
    * an answer. §14 requires the second to be reported as a violation.
+   *
+   * THE VIOLATION SENTENCE DOES NOT DEPEND ON THE CARRIER SAYING NOTHING. It used to be reached only
+   * for an EMPTY reason, so a `4440` that arrived carrying any string at all — which a conforming
+   * rendezvous forwards from the daemon — was reported in the carrier's words instead of as the
+   * violation it is. The phase is what decides this, because the phase is what knows an outcome was
+   * owed; the carrier's own words are kept for the cases where nothing was.
    */
-  #closedWithoutOutcome(code: number): string {
+  #closedWithoutOutcome(code: number, reason: string): string {
     if (this.#phase !== 'awaiting-credential' && this.#phase !== 'streaming') {
-      return 'the carrier closed this session';
+      return reason === '' ? 'the carrier closed this session' : reason;
     }
     return code === RELAY_SESSION_CONCLUDED_CLOSE_CODE
       ? 'the daemon ended this session as concluded without stating an outcome inside the channel, which this protocol does not allow'
@@ -689,7 +720,7 @@ export class RelayClientSession {
       return;
     }
     if (text === HEARTBEAT_RESPONSE) return;
-    this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'the carrier sent an unknown text message');
+    this.#fail(RELAY_CLOSE_CODES.protocolError, 'the carrier sent an unknown text message');
   }
 
   /**
@@ -716,6 +747,17 @@ export class RelayClientSession {
     try {
       await this.#handle(bytes);
       await this.#outbox;
+    } catch (reason) {
+      // A CONSUMER THAT THREW HAS LEFT THIS SESSION IN A STATE NOBODY CAN DESCRIBE, and the only
+      // thing worse than ending it is not ending it. `onData` runs a caller's code — the typed
+      // client parses each event against a strict schema and throws on a frame kind this bundle does
+      // not know, which is exactly what an older browser meets against a newer daemon. Without this
+      // the throw escapes into `void session.receiveBinary(bytes)`, becomes an unhandled rejection,
+      // and leaves the session in `streaming` with no sealed close and no `4440`: the stream's own
+      // promise never settles, the abort listener stays registered, and the rendezvous session keeps
+      // holding a device grant with nobody watching it. The daemon's own adapter closes the link in
+      // this case for the same stated reason; this side was the only one of the four that did not.
+      this.#fail(RELAY_CLOSE_CODES.protocolError, failureReason(reason));
     } finally {
       release();
       this.#receiving -= 1;
@@ -731,7 +773,7 @@ export class RelayClientSession {
     if (this.#done()) return;
     const decoded = decodeFrame(bytes);
     if (!decoded.ok) {
-      this.#refuseSocket(decoded.code, decoded.reason);
+      this.#fail(decoded.code, decoded.reason);
       return;
     }
     const frame = decoded.frame;
@@ -741,7 +783,7 @@ export class RelayClientSession {
     }
     const sessionId = this.#sessionId;
     if (sessionId === undefined || frame.sessionId.text !== sessionId.text) {
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a frame named a session this browser does not hold');
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'a frame named a session this browser does not hold');
       return;
     }
     if (frame.kind === FRAME_KINDS.credit) {
@@ -760,7 +802,7 @@ export class RelayClientSession {
   async #onControl(frame: RelayFrame): Promise<void> {
     const message = decodeControlMessage(frame.payload);
     if (message === null) {
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'unparseable rendezvous control');
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'unparseable rendezvous control');
       return;
     }
     switch (message.t) {
@@ -768,17 +810,17 @@ export class RelayClientSession {
         await this.#onReady(frame.sessionId);
         return;
       case 'closed':
-        this.#fail(message.code, `the rendezvous ended this session: ${message.code} ${message.reason}`);
+        this.#quietly(message.code, `the rendezvous ended this session: ${message.code} ${message.reason}`);
         return;
       case 'error':
         // The rendezvous closes the socket immediately after this, so closing from
         // here as well would race its own close frame. The reason is what matters.
-        this.#fail(message.code, `the rendezvous refused this browser: ${message.code} ${message.reason}`);
+        this.#quietly(message.code, `the rendezvous refused this browser: ${message.code} ${message.reason}`);
         return;
       default:
         // `challenge`, `claim`, `claimed` and `open` belong to the daemon role.
         // Receiving one means this is not the conversation the browser is in.
-        this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, `unexpected rendezvous control: ${message.t}`);
+        this.#fail(RELAY_CLOSE_CODES.protocolError, `unexpected rendezvous control: ${message.t}`);
     }
   }
 
@@ -791,7 +833,7 @@ export class RelayClientSession {
    */
   async #onReady(sessionId: SessionId): Promise<void> {
     if (this.#phase !== 'awaiting-ready') {
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a second ready arrived for this socket');
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'a second ready arrived for this socket');
       return;
     }
     const pending = await startClientHandshake(this.deps.crypto, sessionId, this.deps.daemonId);
@@ -1005,7 +1047,7 @@ export class RelayClientSession {
     if (this.#streamClosed !== undefined) return;
     this.#streamClosed = closed;
     this.#conclude();
-    this.#onStreamClosed?.(closed);
+    this.#announceStreamClosed(closed);
   }
 
   // ─── sending ────────────────────────────────────────────────────────────────
@@ -1075,13 +1117,26 @@ export class RelayClientSession {
   }
 
   /**
-   * End this session and refuse everything waiting on it.
+   * End this session, refuse everything waiting on it, and SAY SO ON THE WIRE.
    *
    * The first refusal is the one that is kept: a later close code caused by the
    * first would otherwise overwrite the reason somebody can act on.
+   *
+   * THE SOCKET IS CLOSED HERE, and it did not used to be. §14 says a message a party could not read
+   * "ends the session with `4400`" — which is a statement about the wire, not about a flag. This side
+   * used to mark itself ended and go quiet, and nothing closed the socket afterwards either:
+   * `driveRelaySession`'s catch cancels timers and rethrows, and `redeemPairingOverRelay` closes only
+   * on its success path. A pairing walk that hit a fingerprint mismatch on its first candidate
+   * therefore left that socket open with its heartbeat already cancelled, and §14 bounds a link to
+   * TWO sessions awaiting a credential — so the second candidate could be refused `4429` by a slot
+   * the first attempt was still holding, and the walk would read that as another dead carrier.
+   *
+   * `#onControl`'s `closed`/`error` branches are the deliberate exception and call `#quietly`: the
+   * rendezvous is already closing, and closing from here would race its own close frame.
    */
-  #fail(code: number, reason: string): void {
+  #fail(code: number, reason: string, close = true): void {
     if (this.#done()) return;
+    if (close) this.deps.socket.close(code, reason);
     const streaming = this.#phase === 'streaming';
     this.#phase = 'ended';
     const failure = new RelaySessionError(reason, code);
@@ -1098,12 +1153,12 @@ export class RelayClientSession {
     // no close frame", which is exactly what this is.
     if (streaming) {
       this.#streamClosed = { code: 1006, reason };
-      this.#onStreamClosed?.(this.#streamClosed);
+      this.#announceStreamClosed(this.#streamClosed);
     }
   }
 
-  #refuseSocket(code: number, reason: string): void {
-    this.#fail(code, reason);
-    this.deps.socket.close(code, reason);
+  /** End without closing: for the two cases where the far end is already closing this socket. */
+  #quietly(code: number, reason: string): void {
+    this.#fail(code, reason, false);
   }
 }
