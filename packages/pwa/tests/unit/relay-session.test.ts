@@ -76,6 +76,21 @@ const serving = async (overrides: Partial<RelayClientSessionDependencies> = {}):
   return harness;
 };
 
+/** A keyed stream the daemon has accepted: ready to carry frames and conclude. */
+const streaming = async (overrides: Partial<RelayClientSessionDependencies> = {}): Promise<Harness> => {
+  const harness = await opened({
+    mode: { kind: 'stream', deviceToken: DEVICE_TOKEN, path: '/v1/events' },
+    ...overrides,
+  });
+  const hello = harness.socket.sent[0];
+  if (hello === undefined) throw new Error('the session sent no hello');
+  await harness.session.receiveBinary(await harness.daemon.answer(hello));
+  const ready = harness.session.ready();
+  await harness.session.receiveBinary(await harness.daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+  await ready;
+  return harness;
+};
+
 const failure = async (promise: Promise<unknown>): Promise<RelaySessionError> => {
   const reason = await promise.then(
     () => undefined,
@@ -285,6 +300,39 @@ describe('a relay session completing its handshake', () => {
     await wrongShape.session.receiveBinary(await wrongShape.daemon.answer(helloB));
     await wrongShape.session.receiveBinary(await wrongShape.daemon.record({ t: 'res', id: 1, status: 200 }));
     should((await failure(wrongShape.session.ready())).message).match(/did not accept this device/u);
+  });
+});
+
+describe('a streaming relay session', () => {
+  it('should contain a throwing close listener and still notify following and late listeners once', async () => {
+    const failures: unknown[] = [];
+    const reportingFault = new Error('the reporting port failed');
+    const { session, daemon } = await streaming({
+      onStreamListenerFailure: reason => {
+        failures.push(reason);
+        throw reportingFault;
+      },
+    });
+    const listenerFault = new Error('the first close observer failed');
+    const observed: { source: string; code: number; reason: string }[] = [];
+    session.onStreamClosed(() => {
+      throw listenerFault;
+    });
+    session.onStreamClosed(closed => observed.push({ source: 'following', ...closed }));
+
+    await session.receiveBinary(
+      await daemon.record({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
+    );
+    session.onStreamClosed(closed => observed.push({ source: 'late', ...closed }));
+
+    // Neither another local close nor the carrier's teardown may announce the latched outcome again.
+    session.closeStream(1000, 'again');
+    session.carrierClosed(4440, 'the stream is complete');
+    should(observed).eql([
+      { source: 'following', code: 1013, reason: 'fell behind' },
+      { source: 'late', code: 1013, reason: 'fell behind' },
+    ]);
+    should(failures).eql([listenerFault]);
   });
 });
 

@@ -565,21 +565,40 @@ describe('a stream opened through the carrier router', () => {
   });
 
   /*
-   * A concluded session is evicted when it concludes. With a per-call key nothing ever asks for the
-   * same key again, so without this the map would gain one dead entry for every terminal ever
-   * attached over the life of a pairing.
+   * A carrier-only refresh installs a new entry while retaining this relay and its live sessions.
+   * The stream's close must evict from THAT authoritative entry: deleting only from the entry the
+   * open captured leaves a never-reused ordinal key behind, so every later teardown revisits a dead
+   * stream and the map grows once per attachment.
    */
-  it('should forget a stream session once it has concluded', async () => {
-    const { router, daemon } = await routed();
+  it('should evict a concluded stream from the current entry after a same-relay refresh', async () => {
+    const { router, daemon, auto } = await routed();
     const stream = await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
     await settle();
-    stream?.closeStream(1000, 'done');
+    if (stream === null) throw new Error('the measured relay did not open the stream');
+
+    const refreshed = daemonConnection({
+      daemonId: daemon.daemonId,
+      baseUrl: daemon.baseUrl,
+      deviceToken: daemon.deviceToken,
+      carriers: [RELAY],
+    });
+    await router.send(refreshed, 'https://studio.example/v1/health');
+    // The real request path refreshed the entry and retained both sessions on the same relay.
+    should(auto.sockets).have.length(2);
+
+    const retired: string[] = [];
+    const close = stream.close.bind(stream);
+    stream.close = reason => {
+      retired.push(reason ?? '');
+      close(reason);
+    };
+    stream.closeStream(1000, 'done');
     await settle();
 
-    // Nothing observable holds it: a fresh open is a fresh session, and the router kept no entry for
-    // the one that ended.
-    const next = await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
-    should(next).not.equal(stream);
+    // `clearDaemon` walks the current entry. A concluded stream must already be absent from it.
+    router.clearDaemon(refreshed.daemonId);
+    await settle();
+    should(retired).be.empty();
   });
 
   it('should surface the daemon refusal with its status rather than a bare failure', async () => {

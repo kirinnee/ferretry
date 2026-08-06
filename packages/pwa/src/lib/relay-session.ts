@@ -303,6 +303,8 @@ export interface RelayClientSessionDependencies {
   readonly maxRequestId?: number;
   /** One arrived stream frame. Only a stream session ever calls it. */
   readonly onData?: (frame: RelayStreamFrame) => void;
+  /** Observe a faulty close listener without coupling this pure domain module to browser IO. */
+  readonly onStreamListenerFailure?: (reason: unknown) => void;
 }
 
 /** One frame of a live stream, in the two shapes §14 gives it. */
@@ -552,16 +554,32 @@ export class RelayClientSession {
   onStreamClosed(listener: (closed: RelayStreamClosed) => void): void {
     const already = this.#streamClosed;
     if (already !== undefined) {
-      listener(already);
+      this.#notifyStreamClosed(listener, already);
       return;
     }
     this.#streamListeners.add(listener);
   }
 
+  /** One observer is not part of the protocol state and cannot fail or re-enter its teardown. */
+  #notifyStreamClosed(listener: (closed: RelayStreamClosed) => void, closed: RelayStreamClosed): void {
+    try {
+      listener(closed);
+    } catch (reason) {
+      try {
+        this.deps.onStreamListenerFailure?.(reason);
+      } catch {
+        // Teardown and the remaining listeners cannot depend on an injected reporting port.
+      }
+    }
+  }
+
   /** Tell every watcher once, and never twice: `#streamClosed` is latched before this runs. */
   #announceStreamClosed(closed: RelayStreamClosed): void {
-    for (const listener of this.#streamListeners) listener(closed);
+    // Snapshot and clear FIRST. A watcher may subscribe re-entrantly (and is then answered from the
+    // latched result), while a throwing watcher must neither retain every closure nor skip the rest.
+    const listeners = [...this.#streamListeners];
     this.#streamListeners.clear();
+    for (const listener of listeners) this.#notifyStreamClosed(listener, closed);
   }
 
   /** The heartbeat this side owes: text, so the edge answers it without waking anything. */

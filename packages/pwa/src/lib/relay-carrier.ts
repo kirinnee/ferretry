@@ -728,9 +728,14 @@ export class DaemonCarrierRouter {
     );
     // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
     // a per-call key nothing ever does, so without this the map would gain one dead entry for every
-    // terminal ever attached over the life of a pairing. The entry holds no live socket, so this is
-    // unbounded growth rather than a leak of anything that matters; it is still unbounded.
-    session.onStreamClosed(() => entry.sessions.delete(key));
+    // terminal ever attached over the life of a pairing. A carrier-only refresh replaces `entry`
+    // while carrying this exact held value into the new map, so eviction resolves the authoritative
+    // entry at close time. Identity is the fence: an old close can never delete a newer occupant.
+    const held = entry.sessions.get(key);
+    session.onStreamClosed(() => {
+      const sessions = this.#entries.get(entry.connection.daemonId)?.sessions;
+      if (held !== undefined && sessions?.get(key) === held) sessions.delete(key);
+    });
     return session;
   }
 
