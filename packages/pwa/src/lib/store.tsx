@@ -1,5 +1,7 @@
+import { DaemonCarriersViewSchema, PairingResponseSchema } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { RelayCrypto } from '@ferretry/relay';
+import { publishedConnectionMethods } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import {
   createContext,
@@ -25,11 +27,12 @@ import {
   type DaemonConnectionsSnapshot,
 } from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
-import { type DaemonConnection, type DaemonId, type RelayCarrier, sameDaemonConnection } from './daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
+import { daemonRequest } from './daemon-transport.ts';
 import { documentDraftStore } from './drafts.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
-import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './pairing.ts';
+import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
@@ -167,6 +170,7 @@ const pairingFailure = async (response: Response): Promise<string> => {
 export async function exchangePairing(
   seed: PairingSeed,
   fetcher: DaemonFetch = browserFetch,
+  hostedRelayUrl?: string,
 ): Promise<DaemonConnection> {
   const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
   const response = await fetcher(endpoint, {
@@ -178,11 +182,9 @@ export async function exchangePairing(
     referrerPolicy: 'no-referrer',
   });
   if (!response.ok) throw new Error(await pairingFailure(response));
-  const value = (await response.json()) as Partial<PairingResult>;
-  if (typeof value.daemonId !== 'string' || typeof value.deviceToken !== 'string') {
-    throw new Error('the daemon returned an invalid pairing response');
-  }
-  return pairedDaemonConnection(seed, { daemonId: value.daemonId, deviceToken: value.deviceToken });
+  const value = PairingResponseSchema.safeParse(await response.json().catch(() => undefined));
+  if (!value.success) throw new Error('the daemon returned an invalid pairing response');
+  return pairedDaemonConnection(seed, value.data, hostedRelayUrl);
 }
 
 export interface AppStore {
@@ -334,30 +336,29 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher });
 
   /**
-   * ASK THE LIVE ADVERTISEMENT, THEN GIVE EVERY DAEMON THE ANSWER.
+   * Discovery now labels a published relay; it never invents one for a daemon.
    *
-   * Read once per document load, never from storage: `relayUrl: null` is a kill
-   * switch its operator can throw without an app release, so a browser that carried
-   * a remembered hosted address would be the switch not working (§13). A discovery
-   * failure and a `null` are the SAME answer here — no hosted carrier — because
-   * neither is permission to guess an address.
-   *
-   * An owner-supplied relay is left alone. That address has no runtime source, so
-   * overwriting it with a hosted one would take away the only carrier its owner
-   * configured.
+   * The address set is daemon-authored on pairing and `/v1/carriers`. The runtime
+   * advertisement remains useful only for disclosure — whether one published URL
+   * is Ferretry's hosted service — and a failed read therefore changes no route.
    */
-  let hosted: RelayCarrier | undefined;
-  const applyHostedRelay = (): void => {
-    for (const record of connections.list()) {
-      if (record.relay?.operator === 'self') continue;
-      connections.attachRelay(record.daemonId, hosted);
-    }
-  };
-  connections.subscribe(applyHostedRelay);
-  void readDefaultRelay().then(fallback => {
-    hosted =
-      fallback.kind === 'available' ? { kind: 'relay', relayUrl: fallback.relayUrl, operator: 'hosted' } : undefined;
-    applyHostedRelay();
+  const hostedRelayUrl = readDefaultRelay().then(fallback =>
+    fallback.kind === 'available' ? fallback.relayUrl : undefined,
+  );
+
+  /** The daemon is authoritative; after a carrier first answers, replace the cache. */
+  carrier.onConnected(daemon => {
+    void (async () => {
+      const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
+      const response = await carrier.fetch(request.url, request.init);
+      if (!response.ok) return;
+      const view = DaemonCarriersViewSchema.safeParse(await response.json().catch(() => undefined));
+      if (!view.success) return;
+      connections.replaceCarriers(
+        daemon.daemonId,
+        publishedConnectionMethods(view.data.carriers, await hostedRelayUrl),
+      );
+    })().catch(() => undefined);
   });
 
   return {
@@ -375,7 +376,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushService,
     readDefaultRelay,
     pair: async seed => {
-      const connection = await exchangePairing(seed, fetcher);
+      const connection = await exchangePairing(seed, fetcher, await hostedRelayUrl);
       connections.add(connection);
       return connection;
     },

@@ -84,18 +84,33 @@ describe('DaemonApiPool', () => {
 
 describe('exchangePairing', () => {
   it('posts the single-use code only to the reader-supplied daemon and validates its identity', async () => {
+    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
+    const deviceToken = `fy_device_${'t'.repeat(43)}`;
     const requests: { readonly url: string; readonly init?: RequestInit }[] = [];
     const connection = await exchangePairing(
-      { daemonUrl: 'https://daemon.example.test', daemonId: 'fingerprint', code: 'one-time-code' },
+      { daemonUrl: 'https://daemon.example.test', daemonId, code: 'one-time-code' },
       async (input, init) => {
         requests.push({ url: String(input), init });
-        return Response.json({ daemonId: 'fingerprint', deviceToken: 'device-token' });
+        return Response.json({
+          daemonId,
+          deviceToken,
+          daemonName: 'workstation',
+          capabilities: [],
+          carriers: [
+            { kind: 'relay', url: 'https://relay.example.test' },
+            { kind: 'direct', url: 'https://daemon.example.test' },
+          ],
+        });
       },
     );
 
-    expect(String(connection.daemonId)).toBe('fingerprint');
+    expect(String(connection.daemonId)).toBe(daemonId);
     expect(connection.baseUrl).toBe('https://daemon.example.test');
-    expect(connection.deviceToken).toBe('device-token');
+    expect(connection.deviceToken).toBe(deviceToken);
+    expect(connection.carriers).toEqual([
+      { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+      { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'self' },
+    ]);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe('https://daemon.example.test/v1/pair');
     expect(requests[0]?.init?.credentials).toBe('omit');
@@ -107,7 +122,8 @@ describe('exchangePairing', () => {
   });
 
   it('fails closed on a daemon error, malformed response, or fingerprint mismatch', async () => {
-    const seed = { daemonUrl: 'https://daemon.example.test', daemonId: 'fingerprint', code: 'code' };
+    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
+    const seed = { daemonUrl: 'https://daemon.example.test', daemonId, code: 'code' };
 
     await expect(
       exchangePairing(seed, async () => Response.json({ error: 'expired' }, { status: 410 })),
@@ -116,7 +132,15 @@ describe('exchangePairing', () => {
       'invalid pairing response',
     );
     await expect(
-      exchangePairing(seed, async () => Response.json({ daemonId: 'other', deviceToken: 'token' })),
+      exchangePairing(seed, async () =>
+        Response.json({
+          daemonId: `fy_daemon_${'o'.repeat(43)}`,
+          deviceToken: `fy_device_${'t'.repeat(43)}`,
+          daemonName: 'other',
+          capabilities: [],
+          carriers: [],
+        }),
+      ),
     ).rejects.toThrow('does not match its fingerprint');
   });
 });
@@ -372,17 +396,66 @@ describe('StoreProvider', () => {
       repository: new MemoryRepository(),
       fetcher: async input => {
         requests.push(String(input));
-        return Response.json([]);
+        return String(input).endsWith('/v1/carriers')
+          ? Response.json({ carriers: [{ kind: 'direct', url: 'https://alpha.example.test' }] })
+          : Response.json([]);
       },
     });
     store.connections.add(alpha);
 
     await (await store.clients.client(alpha)).list();
 
-    expect(requests).toEqual(['https://alpha.example.test/v1/sessions']);
+    expect(requests).toEqual(['https://alpha.example.test/v1/sessions', 'https://alpha.example.test/v1/carriers']);
     // And the router recorded it as a measurement, which is the whole point: the
     // probe and the Carrier panel are now reading one answer.
     expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(true);
+  });
+
+  it('replaces the cached carrier set from the authenticated daemon view after connecting', async () => {
+    const daemon = daemonConnection({
+      daemonId: `fy_daemon_${'d'.repeat(43)}`,
+      baseUrl: 'https://daemon.example.test',
+      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+        { kind: 'relay', relayUrl: 'https://stale.example.test' },
+      ],
+    });
+    const requests: Array<{ readonly url: string; readonly authorization: string | null }> = [];
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      fetcher: async (input, init) => {
+        requests.push({
+          url: String(input),
+          authorization: new Headers(init?.headers).get('authorization'),
+        });
+        if (String(input).endsWith('/v1/carriers')) {
+          return Response.json({
+            carriers: [
+              { kind: 'direct', url: 'https://daemon.example.test' },
+              { kind: 'relay', url: 'https://relay-one.example.test' },
+              { kind: 'relay', url: 'https://relay-two.example.test' },
+            ],
+          });
+        }
+        return Response.json({ ok: true });
+      },
+    });
+    store.connections.add(daemon);
+
+    await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(requests.map(request => request.url)).toEqual([
+      'https://daemon.example.test/v1/projects',
+      'https://daemon.example.test/v1/carriers',
+    ]);
+    expect(requests[1]?.authorization).toBe(`Bearer ${daemon.deviceToken}`);
+    expect(store.connections.get(daemon.daemonId)?.carriers).toEqual([
+      { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+      { kind: 'relay', relayUrl: 'https://relay-one.example.test', operator: 'self' },
+      { kind: 'relay', relayUrl: 'https://relay-two.example.test', operator: 'self' },
+    ]);
   });
 
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {

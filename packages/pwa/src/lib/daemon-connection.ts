@@ -2,13 +2,12 @@
  * A paired daemon is an explicit runtime value.  The static PWA bundle must
  * never provide a default daemon, URL, or credential.
  *
- * A CONNECTION IS NOW TWO ADDRESSES, NOT ONE, and neither is compiled in.
- * `baseUrl` is the daemon's own address, which pairing handed over; `relay` is a
- * rendezvous that can carry the same session when that address is not reachable
- * from wherever this browser is. `docs/relay-protocol.md` §1 is the contract:
- * direct is attempted first because it has fewer hops and fewer observers, the
- * relay is the automatic fallback, and neither is a question a conforming product
- * asks its user.
+ * A CONNECTION IS AN ORDERED CARRIER SET, and none of it is compiled in.
+ * `baseUrl` is the direct address the pairing link arrived on; `carriers` is the
+ * daemon-published cache that may contain that direct address, another direct
+ * address, and up to four rendezvous links. `docs/relay-protocol.md` §13 is the
+ * contract: every direct carrier is attempted first, then every relay, preserving
+ * the daemon's order within each kind.
  *
  * There is deliberately no "which carrier" preference stored anywhere. The order
  * is a property of the protocol (`connectionPreferenceOrder`), so a stored
@@ -30,7 +29,7 @@ export interface DaemonConnectionInput {
   daemonId: string;
   baseUrl: string;
   deviceToken: string;
-  relay?: RelayCarrier | undefined;
+  carriers?: readonly ConnectionMethod[] | undefined;
 }
 
 export interface DaemonConnection {
@@ -38,14 +37,13 @@ export interface DaemonConnection {
   readonly baseUrl: string;
   readonly deviceToken: string;
   /**
-   * The rendezvous this daemon may be reached through, when one is known.
+   * The daemon's published carrier set, cached in the order the protocol tries it.
    *
-   * ABSENT MEANS DIRECT-ONLY, and it is the honest default: a hosted relay's
-   * address is a runtime advertisement whose operator can withdraw it, and
-   * `relayUrl: null` or a discovery failure means no hosted carrier rather than
-   * permission to guess (§13). Nothing here invents an address.
+   * The daemon is authoritative. Pairing seeds the cache and a successful live
+   * connection replaces it from `GET /v1/carriers`; no client-side merge or
+   * discovery branch is allowed to keep a relay the daemon has withdrawn.
    */
-  readonly relay?: RelayCarrier;
+  readonly carriers: readonly ConnectionMethod[];
 }
 
 const requireNonEmpty = (value: string, name: string): string => {
@@ -93,13 +91,36 @@ export const daemonRelayCarrier = (value: RelayCarrier): RelayCarrier => {
   return parsed.data;
 };
 
-/** Constructs an immutable connection from runtime pairing output. */
-export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection => ({
-  daemonId: daemonId(input.daemonId),
-  baseUrl: daemonBaseUrl(input.baseUrl),
-  deviceToken: requireNonEmpty(input.deviceToken, 'deviceToken'),
-  ...(input.relay === undefined ? {} : { relay: daemonRelayCarrier(input.relay) }),
-});
+/** Validates one cached carrier without changing the daemon's preference within its kind. */
+const daemonCarrier = (value: ConnectionMethod): ConnectionMethod => {
+  if (value.kind === 'direct') return { kind: 'direct', daemonUrl: daemonBaseUrl(value.daemonUrl) };
+  return daemonRelayCarrier(value);
+};
+
+/**
+ * Constructs an immutable connection from runtime pairing output.
+ *
+ * A PAIRED DAEMON IS NEVER CARRIER-LESS. An absent carrier set and an empty one
+ * are the same fact — nothing said where this daemon is — and the pairing already
+ * answered it: `baseUrl` is the address the exchange succeeded over, so it is the
+ * one carrier this browser can name without inventing a rendezvous.
+ *
+ * Left empty it would be a record with a valid credential and nowhere to send it,
+ * which is a paired daemon presented as permanently unreachable. That is exactly
+ * what a persisted set of carriers this build refuses to dial decays into, and
+ * recovering to the known direct address is the only answer that can ever heal.
+ */
+export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection => {
+  const baseUrl = daemonBaseUrl(input.baseUrl);
+  const direct: ConnectionMethod = { kind: 'direct', daemonUrl: baseUrl };
+  const carriers = connectionPreferenceOrder((input.carriers ?? [direct]).map(daemonCarrier));
+  return {
+    daemonId: daemonId(input.daemonId),
+    baseUrl,
+    deviceToken: requireNonEmpty(input.deviceToken, 'deviceToken'),
+    carriers: carriers.length === 0 ? [direct] : carriers,
+  };
+};
 
 /**
  * The carriers this connection may be tried on, in the order the protocol says.
@@ -116,10 +137,21 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
  * fingerprint is exactly what a hostile carrier would like this browser to open.
  */
 export const daemonCarriers = (daemon: DaemonConnection): readonly ConnectionMethod[] => {
-  const direct: ConnectionMethod = { kind: 'direct', daemonUrl: daemon.baseUrl };
-  const relay = parseDaemonId(daemon.daemonId) === null ? undefined : daemon.relay;
-  return connectionPreferenceOrder(relay === undefined ? [direct] : [direct, relay]);
+  if (parseDaemonId(daemon.daemonId) !== null) return daemon.carriers;
+  return daemon.carriers.filter(carrier => carrier.kind === 'direct');
 };
+
+/** Is this the same published address, dialled the same way? */
+export const sameDaemonCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean =>
+  left.kind === right.kind &&
+  (left.kind === 'direct'
+    ? right.kind === 'direct' && left.daemonUrl === right.daemonUrl
+    : right.kind === 'relay' && left.relayUrl === right.relayUrl && left.operator === right.operator);
+
+/** Equality for the daemon-authored cache, including published order. */
+export const sameDaemonCarriers = (left: readonly ConnectionMethod[], right: readonly ConnectionMethod[]): boolean =>
+  left.length === right.length &&
+  left.every((carrier, index) => sameDaemonCarrier(carrier, right[index] as ConnectionMethod));
 
 /**
  * Is this the same LIVE connection? The liveness boundary for anything holding
@@ -152,5 +184,4 @@ export const sameDaemonConnection = (left: DaemonConnection, right: DaemonConnec
   left.daemonId === right.daemonId &&
   left.baseUrl === right.baseUrl &&
   left.deviceToken === right.deviceToken &&
-  left.relay?.relayUrl === right.relay?.relayUrl &&
-  left.relay?.operator === right.relay?.operator;
+  sameDaemonCarriers(left.carriers, right.carriers);

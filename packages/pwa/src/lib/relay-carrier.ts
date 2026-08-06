@@ -20,7 +20,12 @@
  * Re-probing direct on every request would cost a failed connection attempt per
  * call on exactly the network where the relay is needed; persisting the answer
  * would outlive the network that produced it. `sameDaemonConnection` is the fence:
- * a re-pair, a moved daemon address or a changed relay address starts over.
+ * a re-pair or a moved daemon address starts over, and so does a winner the daemon
+ * has since stopped publishing. THE DAEMON REPUBLISHING ITS ADDRESS SET IS NOT ONE
+ * OF THOSE — a refresh that still names the winning carrier keeps it, and keeps the
+ * session already open on it, because nothing about that path changed. A remembered
+ * winner is also forgotten the moment it stops carrying, and the failure is reported
+ * rather than replayed at the next address.
  *
  * FAIL CLOSED, IN THREE PLACES THAT HAVE EACH BEEN A BUG IN THIS REPOSITORY:
  *
@@ -37,13 +42,20 @@ import {
   type ConnectionChoice,
   type ConnectionMethod,
   type ConnectionProbe,
+  carrierProbe,
   chooseConnection,
   connectionSocketUrl,
   HEARTBEAT_GRACE_SECONDS,
   HEARTBEAT_SECONDS,
   RELAY_CLOSE_CODES,
 } from '@ferretry/relay';
-import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './daemon-connection.ts';
+import {
+  type DaemonConnection,
+  type DaemonId,
+  daemonCarriers,
+  sameDaemonCarrier,
+  sameDaemonConnection,
+} from './daemon-connection.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import {
   type RelayClientSessionDependencies,
@@ -374,8 +386,19 @@ export interface DaemonCarrierRouterOptions {
 interface CarrierEntry {
   readonly connection: DaemonConnection;
   choice: ConnectionChoice | undefined;
-  session: Promise<RelayClientSession> | undefined;
+  readonly sessions: Map<string, Promise<RelayClientSession>>;
 }
+
+/**
+ * Same daemon, same address, same grant — only the published carrier set moved.
+ *
+ * Deliberately NOT `sameDaemonConnection` with the carriers excused: that function is
+ * the liveness fence and stays whole. This is the narrower question asked only after
+ * it has already said no, and it separates the one difference a live session can
+ * survive from every difference it may not.
+ */
+const carrierRefreshOnly = (left: DaemonConnection, right: DaemonConnection): boolean =>
+  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
 
 const transportFailure = (reason: unknown): string => {
   if (reason instanceof RelaySessionError) return `${reason.message} (${reason.code})`;
@@ -400,6 +423,7 @@ const transportFailure = (reason: unknown): string => {
 export class DaemonCarrierRouter {
   readonly #entries = new Map<DaemonId, CarrierEntry>();
   readonly #listeners = new Set<() => void>();
+  readonly #connectedListeners = new Set<(daemon: DaemonConnection) => void>();
   readonly #network: DaemonFetch;
   readonly #dial: RelayDial;
   readonly #crypto: RelayClientSessionDependencies['crypto'];
@@ -449,6 +473,12 @@ export class DaemonCarrierRouter {
     return () => this.#listeners.delete(listener);
   }
 
+  /** Called once when a fresh carrier walk first receives any answer, including a 503. */
+  onConnected(listener: (daemon: DaemonConnection) => void): () => void {
+    this.#connectedListeners.add(listener);
+    return () => this.#connectedListeners.delete(listener);
+  }
+
   /** What carried this daemon's traffic, and why the alternatives did not. */
   choice(daemonId: DaemonId): ConnectionChoice | undefined {
     return this.#entries.get(daemonId)?.choice;
@@ -459,10 +489,12 @@ export class DaemonCarrierRouter {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
     this.#entries.delete(daemonId);
-    void entry.session?.then(
-      session => session.close('this daemon was re-paired or unpaired'),
-      () => undefined,
-    );
+    for (const session of entry.sessions.values()) {
+      void session.then(
+        connected => connected.close('this daemon was re-paired or unpaired'),
+        () => undefined,
+      );
+    }
     this.#announce();
   }
 
@@ -489,6 +521,17 @@ export class DaemonCarrierRouter {
    * is what stops a browser on the network the relay exists for paying a failed
    * direct connection on every single call.
    *
+   * A REMEMBERED WINNER THAT STOPS CARRYING IS FORGOTTEN AND THE FAILURE IS REPORTED
+   * — this request is not replayed over another carrier inside the same call. The
+   * walk cannot know whether the daemon received the attempt that just died: §9 says
+   * frames in flight are gone, and a transport failure on a direct carrier says
+   * nothing at all about whether the daemon applied the request. Re-sending it at the
+   * next address would turn one `POST /v1/sessions` into two sessions on a daemon
+   * that took the first. So the remembered choice is dropped and the caller is told;
+   * the NEXT request begins the deterministic direct-then-relay walk with nothing
+   * remembered, which is the recovery. Retrying is the caller's decision, exactly as
+   * it already is for a relayed request whose session went away mid-flight.
+   *
    * A ROUND OF FAILURES IS NOT REMEMBERED, and this used to be two bugs at once. The
    * refused carriers were accumulated on the shared entry rather than kept to the
    * request that tried them, so:
@@ -511,17 +554,34 @@ export class DaemonCarrierRouter {
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
     const entry = this.#entry(daemon);
     const chosen = entry.choice;
-    if (chosen?.ok === true) return await this.#over(entry, chosen.method, url, init);
+    if (chosen?.ok === true) {
+      try {
+        return await this.#over(entry, chosen.method, url, init);
+      } catch (reason) {
+        if (reason instanceof RelayAnswerError) throw reason.cause;
+        // The remembered carrier stopped carrying. Forget it — the next request walks
+        // the set again — and report this failure rather than re-sending a request
+        // whose fate on the daemon is unknown.
+        entry.choice = undefined;
+        this.#announce();
+        throw reason;
+      }
+    }
 
     const probes: ConnectionProbe[] = [];
     for (const method of daemonCarriers(daemon)) {
       try {
         const response = await this.#over(entry, method, url, init);
-        this.#decide(entry, [...probes, { method, reachable: true }]);
+        // WHETHER AN ATTEMPT ADVANCES THE WALK IS THE PROTOCOL'S RULE, not this
+        // class's: `carrierProbe` reads an ANSWER — any status, `503` included — as
+        // this carrier working, and only a transport failure as a reason to try the
+        // next address. Spelling that out a second time here is how a client and its
+        // own protocol come to disagree about what "reachable" means.
+        this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: response.status })]);
         return response;
       } catch (reason) {
         if (reason instanceof RelayAnswerError) throw reason.cause;
-        probes.push({ method, reachable: false, detail: transportFailure(reason) });
+        probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
       }
     }
     this.#decide(entry, probes);
@@ -531,19 +591,74 @@ export class DaemonCarrierRouter {
   #entry(daemon: DaemonConnection): CarrierEntry {
     const current = this.#entries.get(daemon.daemonId);
     if (current !== undefined && sameDaemonConnection(current.connection, daemon)) return current;
+    if (current !== undefined && carrierRefreshOnly(current.connection, daemon))
+      return this.#refreshed(current, daemon);
     if (current !== undefined) this.clearDaemon(daemon.daemonId);
-    const entry: CarrierEntry = { connection: daemon, choice: undefined, session: undefined };
+    const entry: CarrierEntry = { connection: daemon, choice: undefined, sessions: new Map() };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
   }
 
+  /**
+   * The daemon republished its addresses. That is not a re-pair.
+   *
+   * A successful connection replaces the cached carrier set from `/v1/carriers`, so
+   * the FIRST answer a daemon gives is routinely followed by a new connection object
+   * for the same daemon, the same address and the same grant. Treated as a re-pair it
+   * tore down the rendezvous session that had just carried that very read and closed
+   * it saying the daemon "was re-paired or unpaired", which is a sentence about
+   * something that did not happen — and on the network the relay exists for, the
+   * replacement session costs a second handshake to arrive back where it started.
+   *
+   * WHAT IS KEPT IS ONLY WHAT THE NEW SET STILL NAMES. A session survives when its
+   * rendezvous is still published, because nothing about that path changed: same
+   * daemon, same device token, same relay URL, so an answer arriving on it is an
+   * answer from the connection that asked. A rendezvous the daemon WITHDREW is closed
+   * — saying so — and a winner no longer in the set is forgotten, which puts the next
+   * request back at the top of the deterministic walk.
+   *
+   * The identity fence is untouched: a changed `daemonId`, `baseUrl` or device token
+   * is not a refresh and never reaches here.
+   */
+  #refreshed(current: CarrierEntry, daemon: DaemonConnection): CarrierEntry {
+    const carriers = daemonCarriers(daemon);
+    const published = new Set(carriers.flatMap(method => (method.kind === 'relay' ? [method.relayUrl] : [])));
+    const sessions = new Map<string, Promise<RelayClientSession>>();
+    for (const [relayUrl, session] of current.sessions) {
+      if (published.has(relayUrl)) {
+        sessions.set(relayUrl, session);
+        continue;
+      }
+      void session.then(
+        connected => connected.close('this daemon withdrew this rendezvous from its published carriers'),
+        () => undefined,
+      );
+    }
+    const chosen = current.choice;
+    const kept =
+      chosen?.ok === true && carriers.some(method => sameDaemonCarrier(method, chosen.method)) ? chosen : undefined;
+    const entry: CarrierEntry = { connection: daemon, choice: kept, sessions };
+    this.#entries.set(daemon.daemonId, entry);
+    this.#announce();
+    return entry;
+  }
+
   #decide(entry: CarrierEntry, probes: readonly ConnectionProbe[]): void {
+    const alreadyConnected = entry.choice?.ok === true;
     entry.choice = chooseConnection(probes);
     this.#announce();
+    if (alreadyConnected || !entry.choice.ok) return;
+    for (const listener of this.#connectedListeners) {
+      try {
+        listener(entry.connection);
+      } catch {
+        // Refresh and disclosure observers cannot turn a served request into a failure.
+      }
+    }
   }
 
   async #over(entry: CarrierEntry, method: ConnectionMethod, url: string, init: RequestInit): Promise<Response> {
-    if (method.kind === 'direct') return await this.#network(url, init);
+    if (method.kind === 'direct') return await this.#network(directCarrierUrl(method, url), init);
     const session = await this.#session(entry, method);
     try {
       return relayResponse(await session.request(relayTunnelRequest(url, init)));
@@ -570,11 +685,11 @@ export class DaemonCarrierRouter {
     entry: CarrierEntry,
     method: Extract<ConnectionMethod, { kind: 'relay' }>,
   ): Promise<RelayClientSession> {
-    const existing = entry.session;
+    const existing = entry.sessions.get(method.relayUrl);
     if (existing !== undefined) {
       const current = await existing.catch(() => undefined);
       if (current?.live() === true) return current;
-      entry.session = undefined;
+      entry.sessions.delete(method.relayUrl);
     }
     const opening = openRelaySession({
       crypto: this.#crypto,
@@ -583,11 +698,11 @@ export class DaemonCarrierRouter {
       method,
       ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
     });
-    entry.session = opening;
+    entry.sessions.set(method.relayUrl, opening);
     try {
       return await opening;
     } catch (reason) {
-      entry.session = undefined;
+      if (entry.sessions.get(method.relayUrl) === opening) entry.sessions.delete(method.relayUrl);
       throw reason;
     }
   }
@@ -596,6 +711,12 @@ export class DaemonCarrierRouter {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/** Re-targets one daemon-shaped request to a published direct carrier without changing the request path. */
+export const directCarrierUrl = (method: Extract<ConnectionMethod, { kind: 'direct' }>, requestUrl: string): string => {
+  const request = new URL(requestUrl);
+  return new URL(`${request.pathname}${request.search}`, `${method.daemonUrl}/`).toString();
+};
 
 /** Marks a refusal that came from the DAEMON, so no other carrier is tried after it. */
 class RelayAnswerError extends Error {

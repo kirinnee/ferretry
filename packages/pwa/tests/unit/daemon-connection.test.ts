@@ -12,7 +12,12 @@ describe('daemon connection', () => {
     });
 
     // Assert
-    should(actual).deepEqual({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'device-a' });
+    should(actual).deepEqual({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'device-a',
+      carriers: [{ kind: 'direct', daemonUrl: 'https://a.example.test' }],
+    });
   });
 
   it('should reject empty daemon identities and device tokens', () => {
@@ -71,6 +76,15 @@ describe('daemon connection', () => {
       baseUrl: 'https://a.example.test',
       deviceToken: 'grant-1',
     });
+    const movedCarrier = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'grant-1',
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://a.example.test' },
+        { kind: 'relay', relayUrl: 'https://relay.example' },
+      ],
+    });
 
     // Assert
     should(sameDaemonConnection(paired, paired)).be.true();
@@ -82,6 +96,7 @@ describe('daemon connection', () => {
     should(sameDaemonConnection(paired, rotatedToken)).be.false();
     should(sameDaemonConnection(paired, movedUrl)).be.false();
     should(sameDaemonConnection(paired, otherDaemon)).be.false();
+    should(sameDaemonConnection(paired, movedCarrier)).be.false();
     // Symmetric, so no caller has to remember which side is the incumbent.
     should(sameDaemonConnection(rotatedToken, paired)).be.false();
   });
