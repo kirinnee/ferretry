@@ -365,6 +365,18 @@ const catalogResult = (
         contextLabel: `$ skills · ${skillHarnessLabel(catalog.harness)}`,
       };
 
+/** What a host-owned catalog nobody could read looks like: an offer that is
+ *  missing, said out loud, rather than an empty catalog presented as fact. */
+const unprovedSkillsResult = (
+  sigil: ComposerSkillSigil,
+  scope: DaemonSessionScope,
+  harness?: ComposerHarness,
+): ComposerProviderResult => {
+  const notice =
+    'Installed skills have not been read for this session yet. Skills can still be typed, and /name still works.';
+  return sigil === '/' ? commandsResult(scope, harness, notice) : { candidates: [], contextLabel: '$ skills', notice };
+};
+
 const skillsProviderFor = (
   sigil: ComposerSkillSigil,
   {
@@ -405,6 +417,15 @@ const skillsProviderFor = (
         if (signal.aborted) throw abortReason(signal);
         const supplied = getSkills?.(scope);
         if (supplied) return catalogResult(sigil, scope, supplied);
+        // A HOST THAT SUPPLIES A GETTER OWNS THIS FACT, so an empty answer from
+        // it ends the question. Falling through to our own request here was a
+        // race a reader met on the first message of every session: the page's
+        // one read is still in flight, this menu opens, and the daemon is asked
+        // for the same catalog twice — two answers that can disagree, and the
+        // second one arriving is what decides which the reader sees. An unread
+        // or failed host catalog is UNPROVED, and unproved is a menu that says
+        // so, never a menu that invents an empty catalog or re-asks.
+        if (getSkills !== undefined) return unprovedSkillsResult(sigil, scope, harness);
         const cached = catalog.get(cacheKey) ?? (await loadSkillsCatalog(daemon, scope, signal, fetcher));
         if (signal.aborted) throw abortReason(signal);
         catalog.set(cacheKey, cached);
