@@ -78,6 +78,30 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A closed list copied between independently compiled packages can gain a member on one side
+    # while every typecheck stays green. This is temporary detection: despite §4.6's preferred
+    # no-gate design, the explicit Wave A brief requires it until Wave 2a replaces each registered
+    # duplication with derivation or a compiler-exhaustive key map.
+    a-closed-set-agreement = {
+      enable = true;
+      name = "Cross-package closed-set agreement";
+      entry = validator "scripts/validate/closed-set-agreement.sh";
+      files = "^(packages/[^/]+/src/.*\\.tsx?|scripts/validate/closed-set-agreement\\.(sh|ts))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # The all-loop, contract tables, hook inventory and hook/CI wiring are independently edited
+    # registries. Compare them before another contract runs but disappears from its documentation.
+    a-contract-registry = {
+      enable = true;
+      name = "Contract registry agreement";
+      entry = validator "scripts/validate/contract-registry.sh";
+      files = "^(docs/standards/(contracts/README|linting/index)\\.md|nix/pre-commit\\.nix|scripts/ci/test\\.sh|scripts/validate/.*\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-composition-reachability = {
       enable = true;
       name = "Composition-root reachability";
@@ -107,6 +131,19 @@ pre-commit-lib.run {
       # are on it: the gate now also pins the discovery path both halves read and the release chain
       # that gives the daemon a directory to ask at all.
       files = "^(packages/relay/wrangler\\.(hosted\\.json|jsonc)|packages/relay/src/adapters/(worker|hosted-control)\\.ts|packages/daemon/src/lib/relay/discovery\\.ts|packages/daemon/src/adapters/system/runtime-environment\\.ts|packages/pwa/src/features/onboarding/hosted-relay\\.ts|scripts/release/compile\\.sh|\\.github/workflows/(relay-hosted|cd)\\.yaml|scripts/validate/relay-config\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # Compare each production client path observation at a served prefix with every daemon route in
+    # both path directions, and declare route-method debt when a dial's verb cannot be read. The exact
+    # main baseline is explicit and stale exemptions fail, so it can shrink but a new disagreement
+    # inside that observation set cannot be absorbed silently.
+    a-route-agreement = {
+      enable = true;
+      name = "Client and daemon route agreement";
+      entry = validator "scripts/validate/route-agreement.sh";
+      files = "^(packages/[^/]+/(package\\.json|(src|bin)/.*\\.tsx?)|scripts/validate/route-agreement\\.(sh|ts)|scripts/validate/route-agreement-allowlist\\.txt)$";
       pass_filenames = false;
       language = "system";
     };
@@ -151,7 +188,8 @@ pre-commit-lib.run {
     # Runs on EVERY file rather than a subset, and scans the whole tree rather than the staged paths:
     # a marker reaches `main` through the file somebody was not looking at. `docs/grants.md` shipped
     # with three of them behind eleven green checks, one of which treefmt had rewritten into valid
-    # Markdown — see the script for why the laundered shape has to be in the pattern list.
+    # Markdown. Teaching documents that must quote a shape declare an exact path and reason in the
+    # gate's allowlist; everything else is damage — see the script for both populations.
     a-conflict-markers = {
       enable = true;
       name = "No conflict markers";

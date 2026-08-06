@@ -33,8 +33,16 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs
 | `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                     |
 | `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment               |
 | `a-cli-contracts`            | the release/architecture invariants in [Contracts](../contracts/README.md) |
+| `a-closed-set-agreement`     | registered cross-package closed enumerations have the same members         |
+| `a-composition-invocation`   | constructed composition-root fields have a caller                          |
 | `a-composition-reachability` | production modules are used by their package's composition root            |
+| `a-conflict-markers`         | marker shapes appear only in declared teaching documents                   |
+| `a-contract-registry`        | executable, documented and wired contract inventories agree                |
+| `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon               |
+| `a-fetch-binding`            | the PWA never stores an unbound browser `fetch` builtin                    |
 | `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers             |
+| `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree         |
+| `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt  |
 | `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                           |
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and

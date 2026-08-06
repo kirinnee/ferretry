@@ -1,0 +1,46 @@
+# Files that legitimately CONTAIN a merge-conflict marker shape.
+#
+# Enforced by scripts/validate/conflict-markers.sh. A file belongs here because it TEACHES a shape
+# the gate refuses, not because it is damaged. Every other file in the tree that carries one is
+# carrying an unresolved conflict, which is the entire point of the gate.
+#
+# ## A DECLARATION, NEVER A REWORDING
+#
+# There are two ways to keep a marker shape out of this gate's way and only one of them is allowed.
+#
+#   DECLARE IT   One line here naming the exact path and why that file has to spell the shape out.
+#                The document goes on saying the true thing, and the exemption is a reviewable line
+#                in the diff instead of a silence.
+#
+#   REWORD IT    Break the run with a zero-width space, write six characters instead of seven,
+#                describe the shape in words rather than showing it. FORBIDDEN. A document that
+#                teaches a shape while spelling it wrong teaches the WRONG shape, and the reader who
+#                copies it into their own search gets a check that matches nothing. docs/grants.md
+#                shipped past eleven green checks because one pattern was a rewrite away from the
+#                artefact; a deliberately misspelled marker is that same failure on purpose.
+#
+# ## RULES THE GATE ENFORCES ON THIS FILE
+#
+#   * one exact repo-relative path per line — no globs, no wildcards, no directories, so exempting a
+#     NEW file always costs a visible line in the diff;
+#   * every entry carries a trailing '# <reason>' specific to that file: name what it quotes and why
+#     it must. "documentation" is not a reason, and an empty one is refused;
+#   * a duplicate path is refused — two reasons for one file means one of them is already stale;
+#   * every one of those is exit 2, not exit 1. A broken exemption list is a broken gate, and a
+#     broken gate must never be reported as a clean tree.
+#
+# ## WHAT IS REPORTED RATHER THAN REFUSED, AND WHY
+#
+# An entry that describes nothing today is PRINTED, never failed. There are two ways that happens and
+# neither is a defect: the path has not landed yet (a seed for an open PR), or the document was
+# rewritten and no longer shows the shape. The sibling lists in scripts/validate/ make a spent entry
+# a hard failure because each of their entries is a work item owing a fix. This list is not a work
+# schedule — its members are documents doing their job — so failing here would turn "somebody
+# improved the prose" into a red build. The report keeps the line visible; delete it when you see it.
+
+scripts/validate/conflict-markers.sh # The gate itself. It cannot search for a shape it is forbidden to write: the pattern list spells all six, and the docblock spells the raw and laundered pair side by side to show that treefmt turns one into the other. Excluding it by path used to be hardcoded in the script; this line is that exclusion, declared.
+
+# NOT SEEDED, AND MEASURED RATHER THAN ASSUMED: docs/standards/fact-ownership/index.md exists on
+# current main and quotes no marker shape, so an entry for it would describe nothing. Add one only in
+# a future change that makes the article show a marker instead of describing one.
+docs/design/one-fact-one-owner.md # Open PR #303 on docs/unified-config-model. Its §4.3 quotes the raw closing marker inline while specifying this very gate, and §8 records the docs/grants.md resolution that motivated it. Measured against the PR head: one line, one shape, no laundered form. Absent from this branch until #303 merges, so this is a seed and the gate will report it as describing nothing until then.

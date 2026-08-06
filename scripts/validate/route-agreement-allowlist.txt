@@ -1,0 +1,153 @@
+# Route-agreement exemptions — one exact "<direction> <VERB> <path> # <reason>" per line.
+#
+# SEEDED FROM `main` AT 00b733d0, DELIBERATELY. Every line below is drift that already existed when
+# the gate landed, recorded so it is VISIBLE rather than absorbed. The list may only shrink: a stale
+# entry — one that no longer describes anything — is a hard failure, so closing a gap costs the line
+# in the same change.
+#
+# Most of these are not "correct". They are the state of the repository on the day the gate was
+# written, and the reason column says which is which: a line that says WHY the disagreement is right
+# stays, and a line that names a defect leaves with the fix.
+#
+#   unserved       a client dials a path the daemon does not serve — a shipped 404
+#   unreached      the daemon serves a path nothing outside it dials — dead, or a surface with no client
+#   verb-unproven  the daemon serves it and a client reaches it, but no dial names a verb, so the ADDRESS
+#                  is proved and the METHOD is not. The target is the SERVED verb and path, so changing
+#                  the method makes the line stale AND leaves a new undeclared target: the verb is held
+#                  without this pass ever guessing at the expression that made it unreadable. Pay one off
+#                  by making the verb readable at the dial, never by editing the line.
+#
+# 32 LINES AT SEEDING, 52 NOW. Every added line is an address the old list could not hold anybody to, and
+# the arithmetic is here so the growth cannot be quoted as a relaxation:
+#
+#   -1  +2  `unserved * /v1/sessions/*/*` stood for every session action `FyApiClient.#post` composes.
+#       Its nine action literals are read now: seven agree with a served route, and the two that do not
+#       are named here — POST …/rename and POST …/runtime, both real 404s, both dialled by a shipped
+#       client, both invisible while one wildcard answered for all nine.
+#   -1  +3  `unserved * /v1/task-boards*` stood for all twelve arms of `FyTaskBoardGateway`'s switch.
+#       All twelve are read now: nine agree, and the three that do not are named here.
+#       Fifteen routes used to be proved "reached" by nothing but a lenient match against one of those
+#       two wildcards, so any of them could be RENAMED with the gate green. All fifteen are reached by
+#       name now, which is why closing that hole cost three lines rather than fifteen.
+#   +1  `unreached PUT /v1/fleet/environment`, found by reading the verb of the call a `new URL(…)` is
+#       handed to. Nothing anywhere writes the fleet environment; one read-only dial had been answering
+#       for both routes on that path.
+#   +16 The `verb-unproven` block at the bottom. These are not new drift — they are routes whose METHOD
+#       this gate was silently not proving, printed as a number before and DECLARED now, so a server-side
+#       verb change on any of them fails instead of passing. Sixteen, not twenty: the bounded readers
+#       (`const init: RequestInit = { method }`, the call a `new URL()` feeds, a spread of
+#       `jsonRequest('POST', …)`) reclaimed four before any of this was written down.
+#
+# The rule is unchanged: a new mismatch fails, a stale line fails, and the list may only shrink.
+#
+# The gate proves the two ENDS of a call agree. It cannot prove a client is CAPABLE of making it:
+# `packages/pwa` still has no service worker, so the push lines below would stay undialable even
+# after the routes exist. See docs/standards/contracts/README.md#route-agreement.
+
+# ── unserved: the client dials, nothing answers ───────────────────────────────────────────────
+
+# Finding #4 of docs/design/one-fact-one-owner.md, and the case that motivated this gate. The PWA has
+# enrolled against these three since the surface landed and the daemon has never served a push route.
+# #302 mounts them; it is halted, not abandoned.
+unserved * /v1/push/vapid # DEFECT: no daemon push route exists (#302, halted)
+unserved * /v1/push/subscriptions # DEFECT: no daemon push route exists (#302, halted)
+unserved POST /v1/push/subscriptions # DEFECT: no daemon push route exists (#302, halted)
+unserved DELETE /v1/push/subscriptions/* # DEFECT: no daemon push route exists (#302, halted)
+
+# Whole surfaces the client half of which shipped without the daemon half.
+unserved GET /v1/worktrees # DEFECT: packages/daemon serves no worktree route at all
+unserved POST /v1/worktrees/remove # DEFECT: packages/daemon serves no worktree route at all
+unserved GET /v1/worktrees/removal # DEFECT: packages/daemon serves no worktree route at all
+unserved GET /v1/cgroups/config # DEFECT: IFyApiClient.cgroupConfig() dials a route nothing serves
+unserved PATCH /v1/cgroups/config # DEFECT: IFyApiClient.updateCgroupConfig() dials a route nothing serves
+unserved GET /v1/pwa/config # DEFECT: IFyApiClient.pwaConfig() dials a route nothing serves
+unserved PATCH /v1/pwa/config # DEFECT: IFyApiClient.updatePwaConfig() dials a route nothing serves
+unserved POST /v1/sessions/*/notify # DEFECT: mounts/attention.ts says this route is deliberately not there; the CLI gateway dials it anyway
+unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session; mounts/sessions.ts serves only GET on that path
+unserved * /v1/sessions/*/browser/stream # DEFECT: the PWA viewer builds this socket URL; mounts/browser-login.ts serves /browser with no /stream
+unserved GET /v1/sessions/*/runtime-models # DEFECT: the PWA fetches a runtime-model catalog but the daemon serves no such route
+
+# Verb disagreements — finding #5's shape, where the path exists and the method does not.
+unserved POST /v1/learning/proposals/*/patch # DEFECT: the PWA POSTs; mounts/learning.ts serves GET
+unserved PATCH /v1/sessions/*/terminals/* # DEFECT: the PWA renames a terminal with PATCH; mounts/terminals.ts serves GET, POST and DELETE
+
+# `FyTaskBoardGateway` dials `${TASK_BOARD_ROUTE_PREFIX}${path}` where `path` is destructured out of a
+# twelve-arm switch whose arms return `{ path: '/create', … }`. All twelve arms are READ, so these are
+# the three exact suffixes nothing serves — not one aggregate `/v1/task-boards*` line standing in for
+# twelve addresses. That aggregate also absorbed the nine arms that DO have a route, so any of them could
+# be renamed with this gate green, and a thirteenth arm would have been absorbed on the day it landed.
+unserved * /v1/task-boards/mark-done # DEFECT: the CLI dials it; packages/daemon serves no such route
+unserved * /v1/task-boards/coordinator/replace # DEFECT: the CLI dials it; packages/daemon serves no such route
+unserved * /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages/daemon serves no such route
+
+# `FyApiClient.#post` builds `/v1/sessions/${id}/${action}` and nine sites in its own file pass `action`
+# as a string literal. Those nine addresses are now READ, so this list names the two that nothing
+# serves instead of one wildcard that hid them. The wildcard line that used to sit here claimed the
+# concrete call sites were checked separately; they were not, and it is the sentence that kept
+# `POST …/rename` invisible while the PWA shipped a rename sheet against it.
+unserved POST /v1/sessions/*/rename # DEFECT: IFyApiClient.rename() POSTs it; no daemon route has `rename` in its path
+unserved POST /v1/sessions/*/runtime # DEFECT: IFyApiClient.runtime() POSTs it; no daemon route has `runtime` in its path
+
+# Correct as written: not the daemon.
+unserved GET /v1/default-relay # CORRECT: dialled against the relay DISCOVERY ORIGIN, a Ferretry service, never a daemon
+
+# ── unreached: the daemon serves, nothing in this repository dials ────────────────────────────
+
+# Machine feeds. Their callers are an orchestrator, a scraper and a human, none of which live here.
+unreached GET /healthz # CORRECT: liveness probe for whatever supervises the process
+unreached GET /usage # CORRECT: public usage feed for external readers
+unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
+
+# Surfaces with no shipped client yet. Each is a route somebody built and nobody wired.
+unreached POST /v1/projects # no client registers a project; only the GET is read
+unreached GET /v1/fleet/plan # no client dials it; `fy fleet plan` computes locally
+unreached GET /v1/fleet/usage # no client dials it
+# Found by reading the verb of the call a `new URL(…)` is handed to. The PWA's environment settings
+# surface GETs this address and nothing anywhere WRITES it; while the verb was unreadable, that one
+# read-only dial answered for both routes and the write side looked reached.
+unreached PUT /v1/fleet/environment # DEFECT: the PWA only reads it; no client writes the fleet environment
+unreached POST /v1/fleet/apply # no client dials it; `fy fleet apply` writes locally
+unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks for attachment metadata alone; list and content paths are the shipped surface
+unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes TerminalView rows from the list/create responses; no client asks for detail alone
+unreached POST /v1/sessions/:sessionId/terminals/:terminalId # DEFECT: the daemon serves rename as POST while the only client uses PATCH
+unreached POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
+unreached DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
+
+# ── verb-unproven: the address agrees, the method is not proved ────────────────────────────────
+
+# Sixteen routes, five causes, and each cause names the expression this pass will not guess at. The
+# BOUNDED readers landed first and took the residual from twenty to sixteen: a `const init: RequestInit =
+# { method: 'POST' }`, the verb of the call a `new URL(…)` is handed to, and a spread of
+# `jsonRequest('POST', …)` are all stated facts and are read. What is left needs data flow.
+
+# A ternary init whose two arms state DIFFERENT verbs: `body === undefined ? { headers } : { method:
+# 'POST', … }`. Which arm applies depends on which switch arm of `route(command)` set `body`, so proving
+# the verb means evaluating a condition per arm. That is symbolic execution, not lexing, and a pass that
+# guessed here would be confidently wrong rather than quiet.
+verb-unproven GET /v1/task-boards/membership # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, GET arm
+verb-unproven POST /v1/task-boards/create # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/child-grants/approve # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/invitations/request # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/invitations/approve # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/invitations/accept # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/invitations/verify # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/membership/relinquish # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+
+# The path is wrapped in a path-COMPOSING helper — `withPath(filesystemPath(id), path)` — so the init
+# sits on the outer `client.request(…)` call, one level further out than the expression being read.
+verb-unproven GET /v1/sessions/:sessionId/fs # ANALYSIS: cli filesystem/gateway.ts:31 init is on the outer call, past withPath()
+verb-unproven GET /v1/sessions/:sessionId/fs/file # ANALYSIS: cli filesystem/gateway.ts:36 init is on the outer call, past withPath()
+verb-unproven GET /v1/sessions/:sessionId/fs/diff # ANALYSIS: cli filesystem/gateway.ts:45 init is on the outer call, past withPath()
+
+# A trailing argument this pass cannot tell from an init: a transport (`fetcher: DaemonFetch`) or a
+# timeout constant. Excluding them would mean trusting a parameter's name or its type NAME, which is the
+# guessing this gate refuses — `/schema/i` is already one such concession and it does not want a second.
+verb-unproven GET /v1/learning/proposals # ANALYSIS: pwa learning-api.ts:54 trailing `fetcher` argument is indistinguishable from an init
+verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
+verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
+
+# `const url = new URL(path, base)` — the composed URL is not an argument to anything, so there is no
+# outer call whose init could be read. The stream route is a WebSocket upgrade: its dial site has no HTTP
+# verb at all, and the daemon declares GET only because that is what an upgrade is.
+verb-unproven POST /v1/pair # ANALYSIS: pwa store.tsx:170 const-bound `new URL()`, dialled a statement later
+verb-unproven GET /v1/sessions/:sessionId/terminals/:terminalId/stream # ANALYSIS: pwa web-terminals.ts:168 const-bound `new URL()` for a WebSocket upgrade
