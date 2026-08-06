@@ -314,6 +314,7 @@ import {
   parseWardenConfigPatch,
   planInitialAttachments,
   portCandidates,
+  publishableDirectCarrier,
   publishedDaemonCarriers,
   projectStructuredQuestion,
   type QuotaFailoverLoop,
@@ -3028,6 +3029,29 @@ function browserOrigins(config: DaemonConfig): readonly string[] {
   return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin, new URL(config.bindUrl).origin])];
 }
 
+/** The direct carrier this invocation may publish, or the one complete notice explaining why it cannot. */
+function directCarrierPublication(
+  config: DaemonConfig,
+): { readonly kind: 'published'; readonly url: string } | { readonly kind: 'omitted'; readonly notice: string } {
+  // The advertisement decision owns wildcard-derived omission. In particular, an operator-written
+  // wildcard publicUrl is an address here and must not be reinterpreted from its hostname spelling.
+  if (config.advertisement.kind === 'none') {
+    return {
+      kind: 'omitted',
+      notice: `direct carrier omitted — ${config.bindUrl} is a wildcard bind, not an address a device can dial; set publicUrl to publish one`,
+    };
+  }
+  const candidate = publishableDirectCarrier(config.publicUrl);
+  if (candidate.kind === 'ok') return { kind: 'published', url: candidate.url };
+  return {
+    kind: 'omitted',
+    notice:
+      `direct carrier omitted — ${config.publicUrl} cannot be published: ${candidate.reason}; ` +
+      'no direct entry is published, so devices can reach this daemon only over its relays; ' +
+      'set "publicUrl" to an http or https origin without credentials, a path, a query, or a fragment to publish one',
+  };
+}
+
 /**
  * Resolve every relay entry from one runtime advertisement read, only when an enabled discovery
  * entry actually needs that fact. Boot and `--check` each call this once for their own invocation;
@@ -4273,13 +4297,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // ONE VALUE, in wire order: the externally declared direct origin first, then every enabled relay
   // in document order. The advertisement decision owns whether this boot has a publishable direct
   // origin; pairing and refresh receive this exact frozen array reference below.
-  const directCarrier = config.advertisement.kind === 'none' ? undefined : config.publicUrl;
-  if (directCarrier === undefined) {
-    world.notices.state(
-      `direct carrier omitted — ${config.bindUrl} is a wildcard bind, not an address a device can dial; set publicUrl to publish one`,
-    );
-  }
-  const carriers = Object.freeze(publishedDaemonCarriers(directCarrier, relaySources));
+  const directCarrier = directCarrierPublication(config);
+  if (directCarrier.kind === 'omitted') world.notices.state(directCarrier.notice);
+  const carriers = Object.freeze(
+    publishedDaemonCarriers(directCarrier.kind === 'published' ? directCarrier.url : undefined, relaySources),
+  );
   /**
    * Whether this host can launch an agent at all.
    *
@@ -4752,6 +4774,8 @@ export async function checkConfiguration(
    * An ordinary direct-only or disabled posture does not change the exit code because that daemon
    * starts perfectly. A duplicate discovered rendezvous is a refused configuration and does.
    */
+  const directCarrier = directCarrierPublication(config);
+  if (directCarrier.kind === 'omitted') say(directCarrier.notice);
   const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
   let carrierForGrants: RelayCarrierSource | undefined;
   let carrierExitCode = 0;

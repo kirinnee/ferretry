@@ -30,7 +30,7 @@
  * knows it is unreachable and prints a bare reason is the complaint this product has earned.
  */
 
-import { isLoopbackHost, PublishedCarriersSchema, WILDCARD_BIND_HOST } from '@ferretry/protocol';
+import { DaemonOriginSchema, isLoopbackHost, PublishedCarriersSchema, WILDCARD_BIND_HOST } from '@ferretry/protocol';
 import { HostedRelayAdvertisementSchema, SocketEndpointSchema } from '@ferretry/relay';
 import { type DaemonRelayConfig, DaemonRelayConfigSchema } from '../runtime/config.ts';
 import { type DaemonRelayCarrierEntry, relayCarrierIsConfigured } from '../runtime/carriers.ts';
@@ -256,6 +256,25 @@ function resolveEachRelayCarrier(
       },
     };
   });
+}
+
+/**
+ * Whether an operator's wider `publicUrl` can cross the device wire as a direct carrier.
+ *
+ * Configuration deliberately accepts more URL shapes than a device can use as a daemon origin: a
+ * reverse-proxy path may be meaningful to another surface, and an operator's spelling remains their
+ * fact. This seam applies the wire owner's narrower rule without turning that configuration into a
+ * boot refusal, and carries the schema's own reason so every caller explains the same decision.
+ */
+export function publishableDirectCarrier(
+  url: string,
+): { readonly kind: 'ok'; readonly url: string } | { readonly kind: 'refused'; readonly reason: string } {
+  const parsed = DaemonOriginSchema.safeParse(url);
+  if (parsed.success) return { kind: 'ok', url: parsed.data };
+  return {
+    kind: 'refused',
+    reason: parsed.error.issues.map(issue => issue.message).join('; ') || 'daemon address is not a publishable origin',
+  };
 }
 
 /** The publishable direct address, when there is one, and every relay this boot will actually dial. */

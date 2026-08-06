@@ -3872,6 +3872,104 @@ describe('daemon boot lifecycle', () => {
       should(said.stated.filter(message => message.includes('superseded'))).be.empty();
     });
 
+    it('should omit a reverse-proxy path from the carrier wire while boot and --check stay healthy', async () => {
+      const home = await tempDirectory('fyd-carrier-proxy-path');
+      const port = await freeLoopbackPort();
+      const relayPort = await freeLoopbackPort();
+      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      const publicUrl = 'https://box.example/ferretry';
+      await seedHome(home, port);
+      await seedFleet(home);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          publicUrl,
+          carriers: [{ kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 }],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+      const booting = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      await waitUntil(() => said.steps.some(step => step.startsWith('ready')), 'the proxy-path daemon to become ready');
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const response = await fetch(`${base}/v1/carriers`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const view = DaemonCarriersViewSchema.parse(await response.json());
+      release();
+      const bootCode = await booting;
+      await runCleanups(cleanups);
+      const bootNotice = said.stated.find(message => message.startsWith('direct carrier omitted'));
+      if (bootNotice === undefined) throw new Error('the boot did not explain why its direct carrier was omitted');
+
+      const checkLines: string[] = [];
+      const checkCode = await checkConfiguration(buildWorld(), line => checkLines.push(line));
+
+      should(bootCode).equal(0);
+      should(response.status).equal(200);
+      should(view.carriers).deepEqual([{ kind: 'relay', url: relayUrl }]);
+      should(bootNotice).containEql(publicUrl);
+      should(bootNotice).match(/origin without a path/u);
+      should(bootNotice).match(/no direct entry is published.*only over its relays/u);
+      should(bootNotice).match(/set "publicUrl" to an http or https origin/u);
+      should(checkCode).equal(0);
+      should(checkLines.filter(line => line.startsWith('direct carrier omitted'))).deepEqual([bootNotice]);
+    });
+
+    it('should publish an operator-written wildcard publicUrl without reinterpreting its hostname', async () => {
+      const home = await tempDirectory('fyd-carrier-operator-wildcard');
+      const port = await freeLoopbackPort();
+      const publicUrl = `http://0.0.0.0:${String(port)}`;
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          publicUrl,
+          carriers: [{ kind: 'relay', source: 'discovery', enabled: false }],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+      const booting = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      await waitUntil(
+        () => said.steps.some(step => step.startsWith('ready')),
+        'the operator-wildcard daemon to become ready',
+      );
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const response = await fetch(`${base}/v1/carriers`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const view = DaemonCarriersViewSchema.parse(await response.json());
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      should(response.status).equal(200);
+      should(view.carriers).deepEqual([{ kind: 'direct', url: publicUrl }]);
+      should(said.stated.filter(message => message.startsWith('direct carrier omitted'))).be.empty();
+    });
+
     it('should report only superseded legacy keys the raw document actually contains', async () => {
       const home = await tempDirectory('fyd-carrier-superseded');
       const port = await freeLoopbackPort();

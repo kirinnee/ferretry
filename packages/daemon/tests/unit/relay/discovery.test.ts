@@ -20,6 +20,7 @@ import {
   NO_RELAY_DIRECTORY,
   PAIRING_IS_ALWAYS_DIRECT,
   parseRelayAdvertisement,
+  publishableDirectCarrier,
   publishedDaemonCarriers,
   RELAY_ADVERTISEMENT_PATH,
   RELAY_DIRECTORY_NOT_ASKED,
@@ -175,6 +176,21 @@ describe('choosing the carrier', () => {
     };
 
     should(publishedDaemonCarriers(undefined, [source])).deepEqual([{ kind: 'relay', url: 'https://relay.example' }]);
+  });
+
+  it('should accept a daemon origin and explain every wider URL shape the carrier wire refuses', () => {
+    should(publishableDirectCarrier('https://box.example')).deepEqual({
+      kind: 'ok',
+      url: 'https://box.example',
+    });
+    for (const [url, reason] of [
+      ['https://box.example/ferretry', /origin without a path/u],
+      ['ftp://box.example', /must use http or https/u],
+      ['https://user:password@box.example', /may not carry credentials/u],
+      ['https://box.example?token=one', /may not carry a query or a fragment/u],
+    ] as const) {
+      should(publishableDirectCarrier(url)).match({ kind: 'refused', reason });
+    }
   });
 
   it('should refuse the boot when a written-down relay and the advertised one are the same rendezvous', () => {
