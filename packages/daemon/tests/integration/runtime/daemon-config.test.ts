@@ -83,6 +83,34 @@ describe('FileDaemonConfig', () => {
     should(written).not.have.property('publicUrl');
   });
 
+  it('should record a settled port into the bind carrier rather than the key it supersedes', async () => {
+    // Arrange: an operator who has moved their bind into `carriers` and left the old key in place.
+    const documents = documentStore(
+      JSON.stringify({
+        port: 7_431,
+        carriers: [
+          { kind: 'bind', host: 'box.lan' },
+          { kind: 'relay', source: 'discovery' },
+        ],
+      }),
+    );
+
+    // Act
+    await documents.store.record(7_432);
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    const reloaded = await documents.store.load();
+
+    // Assert — writing `port` here would write a key with no effect on where this daemon listens,
+    // which is the defect the carrier list exists to remove rather than reproduce.
+    should(written).have.property('carriers', [
+      { kind: 'bind', host: 'box.lan', port: 7_432 },
+      { kind: 'relay', source: 'discovery', enabled: true, reconnectSeconds: 5 },
+    ]);
+    should(written).have.property('port', 7_431);
+    should(reloaded.bindUrl).equal('http://box.lan:7432');
+    should(reloaded.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 7_432 });
+  });
+
   it('should answer what is on disk without writing anything', async () => {
     // Arrange
     const fresh = documentStore();

@@ -38,6 +38,26 @@ describe('ExplicitDaemonConfig', () => {
     await should(stat(path)).be.rejected();
   });
 
+  it('should record a settled port into the bind carrier rather than the key it supersedes', async () => {
+    // Arrange: the same document an operator mid-migration hands to `--config`.
+    const directory = await tempDirectory('fyd-explicit-carriers');
+    const path = join(directory, 'daemon.json');
+    await writeFile(path, JSON.stringify({ port: 7_431, carriers: [{ kind: 'bind', host: 'box.lan' }] }));
+    const store = new ExplicitDaemonConfig(path);
+
+    // Act
+    await store.record(9_800);
+    const recorded = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    const reloaded = await store.load();
+
+    // Assert — both adapters answer this the same way, because an operator moving between the state
+    // home and their own file must not find the port landing in a different key.
+    should(recorded).have.property('carriers', [{ kind: 'bind', host: 'box.lan', port: 9_800 }]);
+    should(recorded).have.property('port', 7_431);
+    should(reloaded.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 9_800 });
+    should(reloaded.bindUrl).equal('http://box.lan:9800');
+  });
+
   it('should seed and record privately, and never persist a derived address', async () => {
     // Arrange
     const directory = await tempDirectory('fyd-explicit-write');

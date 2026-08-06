@@ -1,13 +1,16 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import { DISCOVERED_RELAY_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
   configuredAt,
+  DaemonConfigDocumentSchema,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
   overriddenBy,
   parseDaemonConfig,
+  recordedPortDocument,
 } from '../../../src/lib/runtime/config.ts';
 
 const pricingRate = (patch: Record<string, unknown> = {}) => ({
@@ -274,6 +277,164 @@ describe('daemon configuration', () => {
         ],
       }),
     ).throw();
+  });
+});
+
+describe('the carriers a document declares', () => {
+  it('should read the legacy keys as the one bind and one relay they always were', () => {
+    // Act
+    const legacy = parseDaemonConfig({ host: 'box.lan', port: 9_100, relay: { url: 'wss://relay.example' } });
+
+    // Assert — the legacy spelling is not a second mechanism, it is this list written the old way.
+    should(legacy.carrierSet).deepEqual({
+      bind: { kind: 'bind', host: 'box.lan', port: 9_100 },
+      relays: [{ kind: 'relay', url: 'wss://relay.example', enabled: true, reconnectSeconds: 5 }],
+    });
+    should(legacy.bindUrl).equal('http://box.lan:9100');
+    // A document that names no rendezvous at all still asks the directory, because a daemon that
+    // dialled nowhere would be reachable from nothing but its own host.
+    should(defaultDaemonConfig().carrierSet).deepEqual({
+      bind: { kind: 'bind', host: '127.0.0.1', port: FY_DEFAULT_DAEMON_PORT },
+      relays: [DISCOVERED_RELAY_CARRIER],
+    });
+    should(defaultDaemonConfig().portIsRecorded).be.false();
+  });
+
+  it('should let an explicit bind carrier decide where this daemon listens', () => {
+    // Arrange + Act: both spellings present, so the new one has to be the one that lands.
+    const config = parseDaemonConfig({
+      host: '127.0.0.1',
+      port: 7_431,
+      carriers: [{ kind: 'bind', host: '192.168.1.10', port: 9_200 }],
+    });
+
+    // Assert — a superseded key that still moved the socket would be the defect, not the feature.
+    should(config.host).equal('192.168.1.10');
+    should(config.port).equal(9_200);
+    should(config.bindUrl).equal('http://192.168.1.10:9200');
+    should(config.publicUrl).equal('http://192.168.1.10:9200');
+    should(config.advertisement).deepEqual({
+      kind: 'address',
+      url: 'http://192.168.1.10:9200',
+      origin: 'derived',
+    });
+    should(config.portIsRecorded).be.true();
+    should(config.carrierSet.bind).deepEqual({ kind: 'bind', host: '192.168.1.10', port: 9_200 });
+  });
+
+  it('should treat a bind carrier with no port as the preference an absent legacy port is', () => {
+    // A bind that names no port means the same thing the legacy key's absence means: this daemon may
+    // choose, once, and write the answer down — so the superseded `port` must not leak back in.
+    const config = parseDaemonConfig({ port: 9_300, carriers: [{ kind: 'bind', host: 'box.lan' }] });
+
+    // Assert
+    should(config.port).equal(FY_DEFAULT_DAEMON_PORT);
+    should(config.portIsRecorded).be.false();
+    should(config.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: FY_DEFAULT_DAEMON_PORT });
+  });
+
+  it('should supersede a legacy key per kind rather than wholesale', () => {
+    // Somebody midway through the migration — relays moved over, `host` and `port` still at the top —
+    // gets both read, which is the only reading that does not silently move where their daemon listens.
+    const config = parseDaemonConfig({
+      host: 'box.lan',
+      port: 9_100,
+      relay: { url: 'wss://legacy.example' },
+      carriers: [
+        { kind: 'relay', url: 'wss://new.example' },
+        { kind: 'relay', source: 'discovery' },
+      ],
+    });
+
+    // Assert
+    should(config.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 9_100 });
+    should(config.carrierSet.relays).deepEqual([
+      { kind: 'relay', url: 'wss://new.example', enabled: true, reconnectSeconds: 5 },
+      DISCOVERED_RELAY_CARRIER,
+    ]);
+    // The legacy block stays readable as itself; it is superseded, not deleted out from under anyone.
+    should(config.relay).deepEqual({ url: 'wss://legacy.example', enabled: true, reconnectSeconds: 5 });
+  });
+
+  it('should hold a hand-edited list to the same bounds a command is', () => {
+    // A daemon has one listening socket, and an operator who declared five rendezvous meant something
+    // by the fifth — quietly serving four of them is a daemon lying about its own reach.
+    should(() =>
+      parseDaemonConfig({
+        carriers: [
+          { kind: 'bind', host: '127.0.0.1' },
+          { kind: 'bind', host: 'box.lan' },
+        ],
+      }),
+    ).throw();
+    should(() =>
+      parseDaemonConfig({
+        carriers: Array.from({ length: 5 }, (_, index) => ({
+          kind: 'relay',
+          url: `https://relay-${String(index)}.example`,
+        })),
+      }),
+    ).throw();
+    should(() => parseDaemonConfig({ carriers: [{ kind: 'bind' }] })).throw();
+    should(() => parseDaemonConfig({ carriers: [{ kind: 'relay', url: 'http://relay.example' }] })).throw();
+  });
+
+  it('should keep the effective bind coherent when a port settles or a run overrides it', () => {
+    // Arrange
+    const declared = parseDaemonConfig({
+      carriers: [
+        { kind: 'bind', host: 'box.lan' },
+        { kind: 'relay', url: 'wss://relay.example' },
+      ],
+    });
+
+    // Act
+    const settled = configuredAt(declared, 9_400);
+    const overridden = overriddenBy(declared, { host: '0.0.0.0', port: 9_500 });
+
+    // Assert — the resolved set is what every later stage reads, so an address that moved and a set
+    // that did not would put the two back into the disagreement this whole shape removes.
+    should(settled.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 9_400 });
+    should(settled.bindUrl).equal('http://box.lan:9400');
+    should(settled.carrierSet.relays).deepEqual(declared.carrierSet.relays);
+    should(overridden.carrierSet.bind).deepEqual({ kind: 'bind', host: '0.0.0.0', port: 9_500 });
+    should(overridden.bindUrl).equal('http://0.0.0.0:9500');
+    should(overridden.carrierSet.relays).deepEqual(declared.carrierSet.relays);
+    // Settling on the port already in hand records the claim and leaves the set exactly as it was.
+    should(configuredAt(declared, declared.port).carrierSet).deepEqual(declared.carrierSet);
+  });
+});
+
+describe('the document a settled port is written into', () => {
+  it('should write the port into the bind carrier that supersedes the legacy key', () => {
+    // Arrange
+    const document = DaemonConfigDocumentSchema.parse({
+      port: 7_431,
+      carriers: [
+        { kind: 'bind', host: 'box.lan' },
+        { kind: 'relay', source: 'discovery' },
+      ],
+    });
+
+    // Act
+    const recorded = recordedPortDocument(document, 9_600);
+
+    // Assert — recording into the superseded key is the exact defect this module exists to prevent:
+    // a field an operator can watch change with no error, no message and no change in behaviour.
+    should(recorded.carriers).deepEqual([{ kind: 'bind', host: 'box.lan', port: 9_600 }, DISCOVERED_RELAY_CARRIER]);
+    should(recorded.port).equal(7_431);
+  });
+
+  it('should record the legacy key when no bind carrier was declared', () => {
+    // Arrange
+    const document = DaemonConfigDocumentSchema.parse({ host: 'box.lan' });
+
+    // Act
+    const recorded = recordedPortDocument(document, 9_700);
+
+    // Assert — the legacy spelling is still a bind, so it is still where a settled port belongs.
+    should(recorded.port).equal(9_700);
+    should(recorded.carriers).deepEqual([]);
   });
 });
 

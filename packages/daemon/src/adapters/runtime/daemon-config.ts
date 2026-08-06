@@ -6,6 +6,7 @@ import {
   type FileSystemPort,
   type FoundationPaths,
   parseDaemonConfig,
+  recordedPortDocument,
 } from '../../lib/index.ts';
 
 /**
@@ -92,11 +93,14 @@ export class FileDaemonConfig {
    * form carries derived addresses and persisting one of those is the defect this whole file was
    * corrected for. Re-reading also means an operator's own fields survive untouched — this writes
    * exactly one key.
+   *
+   * WHICH key is `recordedPortDocument`'s decision, not this adapter's: a document with an explicit
+   * bind carrier reads its address from that entry, and the top-level `port` is superseded there.
    */
   async record(port: number): Promise<void> {
     const text = await this.files.readText(this.paths.daemonConfig);
-    const document = this.document(text);
-    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, port }, null, 2)}\n`);
+    const document = recordedPortDocument(this.document(text), port);
+    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify(document, null, 2)}\n`);
   }
 
   /**

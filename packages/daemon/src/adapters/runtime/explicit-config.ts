@@ -5,6 +5,7 @@ import {
   type DaemonConfigStore,
   defaultDaemonConfigDocument,
   parseDaemonConfig,
+  recordedPortDocument,
 } from '../../lib/index.ts';
 
 /**
@@ -40,10 +41,16 @@ export class ExplicitDaemonConfig implements DaemonConfigStore {
     return parseDaemonConfig(JSON.parse(text));
   }
 
+  /**
+   * Writes down the address this daemon took, into the key that decides it.
+   *
+   * The same `recordedPortDocument` the state-home adapter records through, so a document that moves
+   * between `--config` and the state home cannot have its port land in a different key on the way.
+   */
   async record(port: number): Promise<void> {
     const text = await this.read();
     const document = DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text));
-    await this.write({ ...document, port });
+    await this.write(recordedPortDocument(document, port));
   }
 
   /** A document that is not there is not an error: the operator names where it SHOULD live. */
