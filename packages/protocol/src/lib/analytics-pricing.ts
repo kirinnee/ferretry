@@ -56,7 +56,14 @@ export const AnalyticsPricingRatesSchema = z.strictObject({
   tool: UsdMicrosSchema.nullable(),
 });
 export type AnalyticsPricingRates = z.infer<typeof AnalyticsPricingRatesSchema>;
-export type AnalyticsPricingRateSlot = keyof AnalyticsPricingRates;
+
+/**
+ * Every rate slot as a single parseable value, read straight off the rates schema — never a second
+ * hand-typed list a new slot could fall out of. A slot added to the rates schema reaches this enum,
+ * the slot list and the records below without anything to keep in step.
+ */
+export const AnalyticsPricingRateSlotSchema = z.keyof(AnalyticsPricingRatesSchema);
+export type AnalyticsPricingRateSlot = z.infer<typeof AnalyticsPricingRateSlotSchema>;
 
 /**
  * What each slot's amount is denominated in — one owner, and a compile error when a slot has none.
@@ -79,10 +86,8 @@ export const ANALYTICS_PRICING_RATE_UNITS = {
   tool: 'tool_call',
 } as const satisfies { readonly [K in AnalyticsPricingRateSlot]: AnalyticsPricingRateUnit };
 
-/** Every priced slot, derived from the unit table so a walk over the rates cannot miss a new one. */
-export const ANALYTICS_PRICING_RATE_SLOTS = Object.keys(
-  ANALYTICS_PRICING_RATE_UNITS,
-) as readonly AnalyticsPricingRateSlot[];
+/** Every priced slot, read from the key schema so a walk over the rates cannot miss a new one. */
+export const ANALYTICS_PRICING_RATE_SLOTS: readonly AnalyticsPricingRateSlot[] = AnalyticsPricingRateSlotSchema.options;
 
 /** The denomination a slot's amount is expressed in. Ask this rather than assuming per-million tokens. */
 export function analyticsPricingRateUnit(slot: AnalyticsPricingRateSlot): AnalyticsPricingRateUnit {
@@ -93,6 +98,59 @@ export function analyticsPricingRateUnit(slot: AnalyticsPricingRateSlot): Analyt
 export const ANALYTICS_PRICING_TOKEN_SLOTS = ANALYTICS_PRICING_RATE_SLOTS.filter(
   slot => ANALYTICS_PRICING_RATE_UNITS[slot] === 'million_tokens',
 );
+
+/**
+ * Whether a slot's stored price is one the analytics pipeline can charge a session for, or one the
+ * catalog keeps priced but the pipeline cannot yet evidence. Exactly two values: a third state would
+ * be a half-truth an operator could not act on, and an open string would let one in unnoticed.
+ */
+export const AnalyticsPricingRateApplicabilitySchema = z.enum(['applied_when_evidenced', 'stored_not_applied']);
+export type AnalyticsPricingRateApplicability = z.infer<typeof AnalyticsPricingRateApplicabilitySchema>;
+
+/**
+ * Which slots a billable event can actually evidence, and which the catalog keeps priced but the
+ * analytics pipeline cannot yet charge for — one owner, and a compile error when a slot has none.
+ *
+ * STORED, NOT APPLIED. The catalog prices `image` and `tool` because an operator wants to record what
+ * a model charges for them, but the analytics pipeline has no reliable per-image or per-tool evidence
+ * to multiply that price by, so applying them now would invent a cost. The token slots are applied
+ * when their evidence arrives. An applicability is a property of the contract, so it is declared once
+ * here and read by both ends; the mapped type below makes a new slot without an applicability a
+ * compile error at this declaration rather than a billing surprise later.
+ */
+export const ANALYTICS_PRICING_RATE_APPLICABILITY = {
+  input: 'applied_when_evidenced',
+  output: 'applied_when_evidenced',
+  cachedInput: 'applied_when_evidenced',
+  cacheWrite: 'applied_when_evidenced',
+  cacheWrite5m: 'applied_when_evidenced',
+  cacheWrite1h: 'applied_when_evidenced',
+  reasoning: 'applied_when_evidenced',
+  image: 'stored_not_applied',
+  tool: 'stored_not_applied',
+} as const satisfies { readonly [K in AnalyticsPricingRateSlot]: AnalyticsPricingRateApplicability };
+
+/** Whether a slot's price is applied when the analytics pipeline has evidence for it. */
+export function analyticsPricingRateApplicability(slot: AnalyticsPricingRateSlot): AnalyticsPricingRateApplicability {
+  return ANALYTICS_PRICING_RATE_APPLICABILITY[slot];
+}
+
+/**
+ * One applicability for every slot, as a single document a person reads — and that a slot left unsaid
+ * fails parsing out of.
+ *
+ * TOTAL ON PURPOSE. The same reason a rate is never optional applies to its applicability: a slot the
+ * record simply omitted would read as "not applied", and "the operator did not say" is not the same
+ * fact as "this build does not apply it". The shape is built from the slot key schema's own options,
+ * so a new slot is required here the moment it is added to the rates schema, and the exhaustive
+ * declaration above is what makes a valid one possible to produce.
+ */
+const rateApplicabilityShape = Object.fromEntries(
+  AnalyticsPricingRateSlotSchema.options.map(slot => [slot, AnalyticsPricingRateApplicabilitySchema]),
+) as { readonly [K in AnalyticsPricingRateSlot]: typeof AnalyticsPricingRateApplicabilitySchema };
+
+export const AnalyticsPricingRateApplicabilityRecordSchema = z.strictObject(rateApplicabilityShape);
+export type AnalyticsPricingRateApplicabilityRecord = z.infer<typeof AnalyticsPricingRateApplicabilityRecordSchema>;
 
 /**
  * A bounded address a price may be fetched from — never a place to smuggle a credential.

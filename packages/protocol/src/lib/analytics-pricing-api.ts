@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   AnalyticsPricingCatalogSchema,
   AnalyticsPricingProviderSchema,
+  AnalyticsPricingRateApplicabilityRecordSchema,
   AnalyticsPricingRateSchema,
   AnalyticsPricingSourceUrlSchema,
   ConfiguredAnalyticsPricingSourcesSchema,
@@ -33,6 +34,11 @@ export const AnalyticsPricingViewSchema = z.strictObject({
   catalogFingerprint: AnalyticsPricingFingerprintSchema,
   sources: ConfiguredAnalyticsPricingSourcesSchema,
   sourcesFingerprint: AnalyticsPricingFingerprintSchema,
+  /**
+   * Which slots this build applies when it has evidence, and which it stores priced but does not — so
+   * an operator seeing a total also sees, in the same document, what it does not yet honour.
+   */
+  rateApplicability: AnalyticsPricingRateApplicabilityRecordSchema,
 });
 export type AnalyticsPricingView = z.infer<typeof AnalyticsPricingViewSchema>;
 

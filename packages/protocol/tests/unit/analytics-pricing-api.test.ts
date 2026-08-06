@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import * as pricingApi from '../../src/lib/analytics-pricing-api.ts';
 import {
+  ANALYTICS_PRICING_RATE_APPLICABILITY,
   AnalyticsPricingFingerprintSchema,
   AnalyticsPricingPatchOperationSchema,
   AnalyticsPricingPatchSchema,
@@ -62,6 +63,7 @@ const view = {
   catalogFingerprint: BASE,
   sources: [{ id: 'openai-public', provider: 'openai', url: FEED_URL, enabled: true }],
   sourcesFingerprint: 'sources-fingerprint',
+  rateApplicability: ANALYTICS_PRICING_RATE_APPLICABILITY,
 } as const;
 
 const patch = {

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import * as pricing from '../../src/lib/analytics-pricing.ts';
 import {
+  ANALYTICS_PRICING_RATE_APPLICABILITY,
   ANALYTICS_PRICING_RATE_SLOTS,
   ANALYTICS_PRICING_RATE_UNITS,
   ANALYTICS_PRICING_TOKEN_SLOTS,
@@ -10,11 +11,15 @@ import {
   AnalyticsPricingFeedEntrySchema,
   AnalyticsPricingFeedSchema,
   AnalyticsPricingProviderSchema,
+  AnalyticsPricingRateApplicabilityRecordSchema,
+  AnalyticsPricingRateApplicabilitySchema,
   AnalyticsPricingRateSchema,
-  AnalyticsPricingRatesSchema,
+  AnalyticsPricingRateSlotSchema,
   AnalyticsPricingRateUnitSchema,
+  AnalyticsPricingRatesSchema,
   AnalyticsPricingSourceSchema,
   AnalyticsPricingSourceUrlSchema,
+  analyticsPricingRateApplicability,
   analyticsPricingRateUnit,
   ConfiguredAnalyticsPricingSourceSchema,
   ConfiguredAnalyticsPricingSourcesSchema,
@@ -93,6 +98,13 @@ const cases: readonly SchemaCase[] = [
   { name: 'provider', schema: AnalyticsPricingProviderSchema, value: 'anthropic' },
   { name: 'currency', schema: AnalyticsPricingCurrencySchema, value: 'USD' },
   { name: 'rate unit', schema: AnalyticsPricingRateUnitSchema, value: 'tool_call' },
+  { name: 'rate slot', schema: AnalyticsPricingRateSlotSchema, value: 'image' },
+  { name: 'rate applicability', schema: AnalyticsPricingRateApplicabilitySchema, value: 'stored_not_applied' },
+  {
+    name: 'rate applicability record',
+    schema: AnalyticsPricingRateApplicabilityRecordSchema,
+    value: ANALYTICS_PRICING_RATE_APPLICABILITY,
+  },
   { name: 'rates', schema: AnalyticsPricingRatesSchema, value: rates },
   { name: 'source url', schema: AnalyticsPricingSourceUrlSchema, value: FEED_URL },
   { name: 'manual source', schema: AnalyticsPricingSourceSchema, value: { kind: 'manual' } },
@@ -133,6 +145,52 @@ describe('analytics pricing contract', () => {
       'reasoning',
     ]);
     should(ANALYTICS_PRICING_RATE_UNITS.image).equal('image');
+  });
+
+  it('should apply the token slots when evidenced and never the image or tool slots', () => {
+    // Arrange: every slot is priced in the catalog, but only the token slots have per-event evidence
+    // the analytics pipeline can multiply a price by. image and tool are kept priced and stated as not
+    // applied, so an operator reading a total also reads what this build does not yet charge for.
+    const expectedApplied = [
+      'cacheWrite',
+      'cacheWrite1h',
+      'cacheWrite5m',
+      'cachedInput',
+      'input',
+      'output',
+      'reasoning',
+    ];
+
+    // Act
+    const applied = ANALYTICS_PRICING_RATE_SLOTS.filter(
+      slot => analyticsPricingRateApplicability(slot) === 'applied_when_evidenced',
+    );
+    const stored = ANALYTICS_PRICING_RATE_SLOTS.filter(
+      slot => analyticsPricingRateApplicability(slot) === 'stored_not_applied',
+    );
+
+    // Assert
+    should(applied.sort()).deepEqual(expectedApplied);
+    should(stored.sort()).deepEqual(['image', 'tool']);
+  });
+
+  it('should keep the applicability record total so a slot left unsaid is refused, not read as not applied', () => {
+    // Act
+    const complete = AnalyticsPricingRateApplicabilityRecordSchema.safeParse(ANALYTICS_PRICING_RATE_APPLICABILITY);
+    const missingSlot = AnalyticsPricingRateApplicabilityRecordSchema.safeParse({
+      ...ANALYTICS_PRICING_RATE_APPLICABILITY,
+      image: undefined,
+    });
+    const extraSlot = AnalyticsPricingRateApplicabilityRecordSchema.safeParse({
+      ...ANALYTICS_PRICING_RATE_APPLICABILITY,
+      bonus: 'stored_not_applied',
+    });
+
+    // Assert: the exhaustive declaration round-trips, and a slot that simply went unsaid is refused
+    // rather than read as "not applied" — the same total-record property a rate has.
+    should(complete.success).be.true();
+    should(missingSlot.success).be.false();
+    should(extraSlot.success).be.false();
   });
 
   it('should keep an unsupplied price visible as a null instead of a zero', () => {
