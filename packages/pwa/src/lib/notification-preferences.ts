@@ -20,12 +20,22 @@ import type { PushNotificationKind, PushPreferences } from '@ferretry/protocol';
 
 import { type DaemonId, daemonId } from './daemon-connection.ts';
 
-export const NOTIFICATION_KINDS = [
-  'attention',
-  'question',
-  'failed',
-  'completed',
-] as const satisfies readonly PushNotificationKind[];
+/**
+ * The PWA needs this literal key map for its presentation order. The mapped type is deliberately
+ * exhaustive: `satisfies readonly PushNotificationKind[]` would reject an invented kind but let a
+ * new protocol kind disappear from the UI.
+ */
+const NOTIFICATION_KIND_FIELDS = {
+  attention: true,
+  question: true,
+  failed: true,
+  completed: true,
+} as const satisfies { readonly [K in PushNotificationKind]: true };
+
+/** Every protocol notification kind, in the PWA's declared presentation order. */
+export const NOTIFICATION_KINDS: readonly PushNotificationKind[] = Object.keys(
+  NOTIFICATION_KIND_FIELDS,
+) as PushNotificationKind[];
 
 export interface NotificationPreferences extends PushPreferences {
   /** Quiet until the reader explicitly enables delivery for this daemon. */
