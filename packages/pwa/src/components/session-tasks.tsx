@@ -9,9 +9,9 @@
  */
 
 import type { TaskBoardLane, TaskSummary } from '@ferretry/protocol';
-import type { DaemonId } from '../lib/daemon-connection.ts';
-import { TASK_BOARD_LANE_META, taskBoardLane, type TaskFileConflict } from '../features/tasks/task-board-model.ts';
+import { TASK_BOARD_LANE_META, type TaskFileConflict, taskBoardLane } from '../features/tasks/task-board-model.ts';
 import { TaskRow } from '../features/tasks/task-row.tsx';
+import type { DaemonId } from '../lib/daemon-connection.ts';
 
 type SessionTaskConflicts = ReadonlyMap<string, readonly TaskFileConflict[]>;
 
@@ -43,6 +43,7 @@ export interface SessionTaskListProps {
   readonly conflicts?: SessionTaskConflicts;
   readonly onOpen: (taskId: string) => void;
   readonly onMarkDone?: (task: TaskSummary) => void;
+  readonly onAddToChat?: (task: TaskSummary) => void;
   readonly markingDoneId?: string | null;
 }
 
@@ -52,6 +53,7 @@ export function SessionTaskList({
   conflicts = EMPTY_CONFLICTS,
   onOpen,
   onMarkDone,
+  onAddToChat,
   markingDoneId = null,
 }: SessionTaskListProps) {
   const visibleTasks = sortSessionTasks(tasks);
@@ -68,6 +70,7 @@ export function SessionTaskList({
           task={task}
           conflicts={conflicts.get(task.id)}
           markingDone={markingDoneId === task.id}
+          onAddToChat={onAddToChat}
           onMarkDone={onMarkDone}
           onOpen={onOpen}
         />
@@ -91,6 +94,7 @@ export function SessionTaskKanban({
   onOpen,
   compact = false,
   onMarkDone,
+  onAddToChat,
   markingDoneId = null,
 }: SessionTaskKanbanProps) {
   return (
@@ -127,6 +131,7 @@ export function SessionTaskKanban({
                   conflicts={conflicts.get(task.id)}
                   impliedLane={lane}
                   markingDone={markingDoneId === task.id}
+                  onAddToChat={onAddToChat}
                   onMarkDone={onMarkDone}
                   onOpen={onOpen}
                 />

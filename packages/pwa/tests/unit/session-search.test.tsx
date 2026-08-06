@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ScopedTaskView } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER, type ScopedTaskView } from '@ferretry/protocol';
 import { useEffect } from 'react';
 import {
   filterSessionSearchResults,
@@ -9,7 +9,8 @@ import {
   useSessionSearch,
 } from '../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { registerComposerQuoteTarget } from '../../src/lib/quote.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { taskSummary } from '../support/tasks.ts';
 
@@ -20,6 +21,7 @@ const daemon = daemonConnection({
 });
 const scope = daemonSessionScope(daemon, 'session-a');
 const originalFetch = globalThis.fetch;
+const composers: Array<() => void> = [];
 
 const settle = async (): Promise<void> => {
   await runAsync(async () => {
@@ -76,8 +78,24 @@ beforeEach(() => {
   }) as typeof fetch;
 });
 
+/** A composer registered under one exact scope, so a delivery can be observed. */
+const composerAt = (target: DaemonSessionScope, draft = ''): { draft: string } => {
+  const state = { draft };
+  composers.push(
+    registerComposerQuoteTarget({
+      ...target,
+      draft: () => state.draft,
+      replaceDraft: next => {
+        state.draft = next;
+      },
+    }),
+  );
+  return state;
+};
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  while (composers.length > 0) composers.pop()?.();
 });
 
 describe('current-session search model', () => {
@@ -229,6 +247,140 @@ describe('current-session search model', () => {
 
       expect(JSON.stringify(surface.toJSON())).toContain('The daemon refused to mark this task done (HTTP 403).');
       expect(surface.root.findByProps({ 'aria-label': 'Mark &F6 done' })).toBeDefined();
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+
+  test('carries one request id per logical Mark Done, and a fresh one for a fresh click', async () => {
+    const live = task({ phase: 'live', status: 'live' });
+    const requestIds: string[] = [];
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === 'POST') {
+        requestIds.push(String(new Headers(init.headers).get(FY_REQUEST_ID_HEADER)));
+        return Promise.resolve(new Response('forbidden', { status: 403 }));
+      }
+      if (url.pathname.endsWith('/tasks/F6'))
+        return Promise.resolve(Response.json({ activity: [], sessionId: 'session-a', task: live }));
+      if (url.pathname.endsWith('/tasks')) return Promise.resolve(Response.json({ tasks: [live] }));
+      if (url.pathname.endsWith('/fs')) return Promise.resolve(Response.json({ entries: [] }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      for (let click = 0; click < 2; click += 1) {
+        const done = surface.root.findByProps({ 'aria-label': 'Mark &F6 done' });
+        await runAsync(async () => {
+          done.props.onClick();
+          await settle();
+        });
+      }
+
+      expect(requestIds).toHaveLength(2);
+      // A uuid per click, not per render and not one shared by both: the daemon
+      // deduplicates on this header, so a second deliberate attempt that reused
+      // the first id would be answered with the first refusal.
+      for (const id of requestIds)
+        expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u);
+      expect(new Set(requestIds).size).toBe(2);
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+});
+
+describe('Add to chat from the aggregate task board', () => {
+  test('delivers the reference into the composer of exactly this daemon session', async () => {
+    const mine = composerAt(scope, 'look at');
+    // Same session id, different daemon — the one delivery that must never
+    // happen, because a task id is session-local and would name other work.
+    const stranger = composerAt(
+      daemonSessionScope(
+        daemonConnection({ daemonId: 'other-daemon', baseUrl: 'https://other.example.test', deviceToken: 'other' }),
+        'session-a',
+      ),
+      '',
+    );
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const add = surface.root.findByProps({ 'aria-label': 'Add &F6 to chat' });
+      run(() => {
+        add.props.onClick();
+      });
+
+      expect(mine.draft).toBe('look at &F6 ');
+      expect(stranger.draft).toBe('');
+      expect(JSON.stringify(surface.toJSON())).toContain("Added &F6 to this session's message.");
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+
+  test('says so rather than repeating a reference the draft already carries', async () => {
+    const mine = composerAt(scope, '&F6 ');
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      run(() => {
+        surface.root.findByProps({ 'aria-label': 'Add &F6 to chat' }).props.onClick();
+      });
+
+      expect(mine.draft).toBe('&F6 ');
+      expect(JSON.stringify(surface.toJSON())).toContain('&F6 is already in this message.');
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+
+  test('reports an absent composer instead of silently dropping the reference', async () => {
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      run(() => {
+        surface.root.findByProps({ 'aria-label': 'Add &F6 to chat' }).props.onClick();
+      });
+
+      expect(JSON.stringify(surface.toJSON())).toContain('No message box is open for this session');
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+
+  test('offers the action on Kanban as well as List, on the same exact scope', async () => {
+    const mine = composerAt(scope);
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const kanban = surface.root.findAllByType('button').find(button => button.children.join('') === 'Kanban');
+      run(() => kanban?.props.onClick());
+      run(() => {
+        surface.root.findByProps({ 'aria-label': 'Add &F6 to chat' }).props.onClick();
+      });
+
+      expect(mine.draft).toBe('&F6 ');
     } finally {
       run(() => surface.unmount());
     }

@@ -24,18 +24,20 @@
  *     that label, and the chip keeps it on hover as a `title`.
  */
 
+import { Eye, Loader2, MessageSquarePlus, RefreshCw, Search, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
-import { Loader2, RefreshCw, Search, Sparkles } from 'lucide-react';
 
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../../lib/daemon-scope.ts';
+import { Button } from '../../shell/primitives.tsx';
 import type { SkillsCatalogLoader } from './skills-api.ts';
 import {
   groupSkills,
   insertSkillIntoDraft,
+  type SkillsCatalog,
   skillBadgeLabel,
   skillHarnessLabel,
   skillInsertText,
-  type SkillsCatalog,
+  skillScopeLabel,
   skillsEmptyCopy,
   visibleSkillCount,
 } from './skills-catalog.ts';
@@ -53,6 +55,8 @@ export interface SkillsCatalogListProps {
 
 /** The grouped rows, hostless so the harness and tests render exactly this. */
 export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogListProps) {
+  const detailsPrefix = useId();
+  const [expanded, setExpanded] = useState<string | null>(null);
   const groups = groupSkills(catalog.skills, query);
   const skillCount = groups.reduce((count, group) => count + group.skills.length, 0);
   if (skillCount === 0) {
@@ -82,14 +86,12 @@ export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogLis
               {group.skills.map(skill => {
                 const invocation = skillInsertText(catalog.harness, skill.name);
                 const origin = skillBadgeLabel(skill.origin);
+                const key = `${group.scope}:${skill.name}`;
+                const detailId = `${detailsPrefix}-${group.scope}-${skill.name}`;
+                const detailOpen = expanded === key;
                 return (
                   <li key={skill.name}>
-                    <button
-                      type="button"
-                      className="flex min-h-[64px] w-full flex-col items-stretch gap-1 px-3 py-2 text-left hover:bg-surface-2"
-                      onClick={() => insertSkillIntoDraft(onInsert, catalog.harness, skill.name)}
-                      aria-label={`Insert ${invocation} into composer draft. ${skill.description} ${origin}.`}
-                    >
+                    <article className="flex min-w-0 flex-col gap-2 px-3 py-2" data-skill={skill.name}>
                       <span className="flex min-w-0 items-center justify-between gap-2">
                         <code className="min-w-0 truncate font-mono text-cell font-semibold text-accent">
                           {invocation}
@@ -101,11 +103,60 @@ export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogLis
                           >
                             {skill.origin}
                           </span>
-                          <span>Insert into draft</span>
                         </span>
                       </span>
                       <span className="text-cell leading-base text-muted">{skill.description}</span>
-                    </button>
+                      {/* TWO ACTIONS, ONE OF THEM PRIMARY. Using a skill is what
+                          a reader came here to do, so it is the filled control;
+                          reading its detail is the cautious second look and
+                          keeps the resting outline. Both are the shared `Button`
+                          so they inherit this build's control height — floored
+                          to the touch target on a phone — and its always-on
+                          focus outline. */}
+                      <span className="flex flex-wrap items-center gap-2">
+                        <Button
+                          aria-label={`Use ${invocation} in chat`}
+                          onClick={() => insertSkillIntoDraft(onInsert, catalog.harness, skill.name)}
+                          size="sm"
+                          type="button"
+                          variant="primary"
+                        >
+                          <MessageSquarePlus size={14} aria-hidden="true" />
+                          Use in chat
+                        </Button>
+                        <Button
+                          aria-controls={detailId}
+                          aria-expanded={detailOpen}
+                          aria-label={`${detailOpen ? 'Hide' : 'View'} full detail for ${invocation}`}
+                          onClick={() => setExpanded(current => (current === key ? null : key))}
+                          size="sm"
+                          type="button"
+                        >
+                          <Eye size={14} aria-hidden="true" />
+                          {detailOpen ? 'Hide detail' : 'View full detail'}
+                        </Button>
+                      </span>
+                      {detailOpen ? (
+                        <section
+                          aria-label={`Full detail for ${invocation}`}
+                          className="rounded-control border border-border-soft bg-surface-2 p-3 text-ui"
+                          data-skill-detail={skill.name}
+                          id={detailId}
+                        >
+                          <p className="m-0 whitespace-pre-wrap leading-base text-fg">{skill.description}</p>
+                          <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta">
+                            <dt className="font-semibold text-muted">Invocation</dt>
+                            <dd className="m-0 min-w-0">
+                              <code className="font-mono text-accent">{invocation}</code>
+                            </dd>
+                            <dt className="font-semibold text-muted">Scope</dt>
+                            <dd className="m-0 text-fg">{skillScopeLabel(skill.scope)}</dd>
+                            <dt className="font-semibold text-muted">Available to</dt>
+                            <dd className="m-0 text-fg">{origin}</dd>
+                          </dl>
+                        </section>
+                      ) : null}
+                    </article>
                   </li>
                 );
               })}
@@ -119,8 +170,22 @@ export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogLis
 export interface SkillsSurfaceProps {
   /** Required daemon/session identity. There is intentionally no session-only overload. */
   readonly scope: DaemonSessionScope;
-  /** Draft-only boundary. There is intentionally no submit callback. */
-  readonly onInsert: (invocation: string) => void;
+  /**
+   * Draft-only boundary. There is intentionally no submit callback.
+   *
+   * A host that actually delivers the invocation may return its own sentence —
+   * "already in this message", "no message box is open" — because only the host
+   * knows whether the draft took it. A host that returns nothing gets the plain
+   * inserted announcement.
+   *
+   * `| void` rather than `| undefined` is deliberate and is the only shape that
+   * accepts both: `undefined` would reject an ordinary `() => {}` host, since a
+   * void-returning function is not assignable to one that returns a value. The
+   * insert path reads the result as `unknown` and treats only a string as a
+   * sentence, which is what makes the looseness safe.
+   */
+  // biome-ignore lint/suspicious/noConfusingVoidType: a host that returns nothing must still satisfy this prop
+  readonly onInsert: (invocation: string) => string | void;
   readonly loadCatalog: SkillsCatalogLoader;
 }
 
@@ -134,7 +199,7 @@ function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSu
   const [catalog, setCatalog] = useState<SkillsCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  const [inserted, setInserted] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<string | null>(null);
   // The identity is read as two primitives so the effect re-runs on a real
   // daemon or session change and not merely because the parent re-rendered
   // with a fresh scope object.
@@ -163,8 +228,16 @@ function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSu
   const visible = catalog === null ? 0 : visibleSkillCount(catalog, query);
   const insert = useCallback(
     (invocation: string) => {
-      onInsert(invocation);
-      setInserted(invocation);
+      // Only a STRING is treated as the host's sentence. TypeScript lets a
+      // `void`-returning callback return anything at all, so an arrow body like
+      // `value => log.push(value)` hands back a number — and announcing it would
+      // read a push count out loud to a screen reader.
+      const hostMessage: unknown = onInsert(invocation);
+      setAnnouncement(
+        typeof hostMessage === 'string'
+          ? hostMessage
+          : `Inserted ${invocation} into the composer draft. Review it before sending.`,
+      );
     },
     [onInsert],
   );
@@ -241,7 +314,7 @@ function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSu
       </div>
 
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {inserted === null ? '' : `Inserted ${inserted} into the composer draft. Review it before sending.`}
+        {announcement ?? ''}
       </div>
     </div>
   );

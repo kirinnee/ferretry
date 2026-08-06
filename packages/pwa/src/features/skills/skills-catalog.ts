@@ -59,6 +59,17 @@ export const filterSkills = (skills: readonly AvailableSkill[], query: string): 
   return skills.filter(skill => `${skill.name}\n${skill.description}`.toLocaleLowerCase().includes(needle));
 };
 
+/**
+ * The one reader-facing name for a scope.
+ *
+ * A group heading and a skill's own detail are the same fact stated twice, so
+ * they are stated once here. The alternative — a heading built from this map and
+ * a detail line CSS-capitalising the raw wire value — reads identically until a
+ * scope arrives whose display name is not its identifier capitalised.
+ */
+export const skillScopeLabel = (scope: AvailableSkill['scope']): 'Global' | 'Project' =>
+  scope === 'global' ? 'Global' : 'Project';
+
 export interface SkillGroup {
   readonly scope: AvailableSkill['scope'];
   readonly label: 'Global' | 'Project';
@@ -73,7 +84,7 @@ export const groupSkills = (skills: readonly AvailableSkill[], query: string): S
   const matching = filterSkills(skills, query);
   return (['global', 'project'] as const).map(scope => ({
     scope,
-    label: scope === 'global' ? ('Global' as const) : ('Project' as const),
+    label: skillScopeLabel(scope),
     skills: matching.filter(skill => skill.scope === scope),
   }));
 };
