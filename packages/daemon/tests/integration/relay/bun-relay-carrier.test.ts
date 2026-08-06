@@ -354,6 +354,56 @@ describe('what a socket does that a protocol does not', () => {
     should(carrier.status().phase).equal('stopped');
   });
 
+  it('should not let an in-flight frame resurrect a carrier after shutdown', async () => {
+    // Arrange — capture the close callback because a real socket may already have queued it when
+    // stop detaches the handlers. The claimed control is deliberately handed over immediately
+    // before stop, leaving its ordered inbox continuation pending across the shutdown boundary.
+    const fake = fakeSockets();
+    const carrier = new BunRelayCarrier({
+      config: config({ url: 'https://relay.example', reconnectSeconds: 1 }),
+      crypto: relayCrypto,
+      identity,
+      devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
+      dispatch: async () => ok({}),
+      socketFactory: fake.factory,
+    });
+    carrier.start();
+    const socket = fake.sockets[0];
+    if (socket === undefined) throw new Error('no socket');
+    socket.onopen?.(undefined);
+    const closing = socket.onclose;
+
+    try {
+      // Act — the inbox used to complete after stop, rewrite `stopped` to `carrying`, and make this
+      // already-queued close schedule a redial that kept the daemon process alive after shutdown.
+      socket.onmessage?.({
+        data: controlFrame({
+          t: 'claimed',
+          protocol: RELAY_PROTOCOL_ID,
+          limits: { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 },
+        }),
+      });
+      carrier.stop();
+      await Bun.sleep(0);
+      closing?.(undefined);
+
+      // Assert — stopped is monotonic, every handler is detached, and no queued callback can turn
+      // shutdown into a new dial.
+      should(carrier.status().phase).equal('stopped');
+      should(socket.onopen).be.null();
+      should(socket.onmessage).be.null();
+      should(socket.onclose).be.null();
+      should(socket.onerror).be.null();
+      should(fake.sockets).have.length(1);
+    } finally {
+      // Also clears a redial timer on the unfixed source, so the deliberately red regression cannot
+      // itself leave the focused test process alive.
+      carrier.stop();
+    }
+  });
+
   it('should drop a socket that stopped answering rather than believe it still holds the slot', async () => {
     // Arrange — a clock the test moves past the grace window.
     const fake = fakeSockets();
