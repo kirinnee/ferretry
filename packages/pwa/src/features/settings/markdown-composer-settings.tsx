@@ -22,7 +22,7 @@ export const MARKDOWN_COMPOSER_EXPLANATION =
   'Markdown markers stay visible in the native textarea. A separate bounded preview renders headings, lists, emphasis, code, links, and proven in-app references while you type.';
 
 export const VIM_COMPOSER_EXPLANATION =
-  'Modal Vim keys — normal, insert and visual — inside the same message textarea. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard.';
+  'Modal Vim keys — normal and insert — inside the same message textarea. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard.';
 
 function ComposerSwitch({
   checked,
