@@ -76,6 +76,16 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     }),
   },
   pairing: pairingSubsystem(),
+  push: {
+    publicKey: async () => 'the-application-server-key',
+    list: async () => [],
+    register: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    revoke: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   fleet: {
     accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),
     config: async () => {
@@ -268,7 +278,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 5, operator: 102, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 5, operator: 106, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -292,6 +302,13 @@ describe('the mounted daemon surface', () => {
       // that returns a device token or its digest — the list is a projection with no field for one.
       'GET /v1/pair/devices',
       'DELETE /v1/pair/devices/:deviceId',
+      // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
+      // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
+      // list is a projection with no field for one.
+      'GET /v1/push/vapid',
+      'GET /v1/push/subscriptions',
+      'POST /v1/push/subscriptions',
+      'DELETE /v1/push/subscriptions/:pushId',
       // The grant surface. NOTE WHAT IS ABSENT: no route returns the operator password, its hash or
       // its length — `GET /v1/grants` answers with booleans and reasons, and this list is the proof.
       'GET /v1/grants',

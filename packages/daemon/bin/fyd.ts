@@ -89,12 +89,15 @@ import {
   StateHomeLayout,
   StateHomeLockedError,
   StatePairingRepository,
+  StatePushRepository,
+  StateVapidKeys,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoRelayIdentityKeys,
+  WebPushFetchTransport,
   WebCryptoSecretCipher,
   type WorkerClientOptions,
   XvfbDisplay,
@@ -297,9 +300,12 @@ import {
   type OpenedAnalyticsIndexStore,
   OperatorReadService,
   overriddenBy,
+  PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
   PinService,
+  PushService,
+  type PushSubscriptionSubsystem,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   packageRole,
@@ -660,13 +666,21 @@ export interface DaemonWorld {
    *  period is the fleet's declared `usage.interval`, so it is built once both
    *  documents have been read — which is why it resolves rather than returns. */
   readonly createUsageFeed: (config: DaemonConfig) => Promise<UsageFeedPort>;
-  /** Opens this daemon's durable identity and device grants before any remote route is served. */
+  /**
+   * Opens this daemon's durable identity and device grants before any remote route is served.
+   *
+   * IT OPENS PUSH ENROLMENT WITH THEM, in one call, because the two share a lifetime rather than merely
+   * a state home: an enrolment is filed against a device grant and is purged when that grant is
+   * revoked, so the pairing service has to be constructed already holding the thing it purges. Building
+   * push later and attaching it afterwards would make the purge a wire somebody can forget to connect.
+   */
   readonly createPairing: (
     config: DaemonConfig,
     clock: MillisecondClockPort,
   ) => Promise<{
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
+    readonly push: PushSubscriptionSubsystem;
   }>;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
@@ -805,6 +819,8 @@ export interface DaemonWorld {
     analyticsStore: OpenedAnalyticsIndexStore,
     /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
     pairing: PairingService,
+    /** Opened WITH pairing, because an enrolment's lifetime is a device grant's — see `createPairing`. */
+    push: PushSubscriptionSubsystem,
     socketTickets: SocketTicketBroker,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
@@ -3566,8 +3582,24 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
       const credentials = new PairingDeviceRegistry(state.daemonId, cryptography, state.devices);
+      // The application-server key pair, minted into the state home on first use and never returned by
+      // anything: the transport below is the only holder of the signing half, and the domain above sees
+      // the public point alone. See `src/adapters/push/webcrypto-vapid-keys.ts`.
+      const vapidKeys = new StateVapidKeys(paths, stateFiles);
+      const push = new PushService({
+        store: new StatePushRepository(paths, stateFiles),
+        keys: vapidKeys,
+        transport: new WebPushFetchTransport(vapidKeys),
+        // The grant store itself, so "is this device still paired" is answered by the document that
+        // decides it rather than by a second list that could disagree with it.
+        devices: new PairedPushDevices(repository),
+        clock,
+        // A push enrolment id is a protocol UUID under a fixed prefix, minted the way a pin id is.
+        ids: { next: () => crypto.randomUUID() },
+      });
       return {
         credentials,
+        push,
         subsystem: new PairingService({
           daemonId: state.daemonId,
           daemonName: state.daemonName,
@@ -3579,6 +3611,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           cryptography,
           devices: repository,
           credentials,
+          // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
+          // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
+          deviceState: [push],
         }),
       };
     },
@@ -3657,6 +3692,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       pricingCatalog,
       analyticsStore,
       pairing,
+      push,
       socketTickets,
     ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
@@ -3908,6 +3944,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           },
         },
         pairing,
+        push,
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
         fleet,
@@ -4263,6 +4300,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     config.analyticsPricing,
     analyticsStore,
     pairing.subsystem,
+    pairing.push,
     world.createSocketTickets(),
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can

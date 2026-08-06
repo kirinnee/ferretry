@@ -40,19 +40,7 @@
 #
 # The rule is unchanged: a new mismatch fails, a stale line fails, and the list may only shrink.
 #
-# The gate proves the two ENDS of a call agree. It cannot prove a client is CAPABLE of making it:
-# `packages/pwa` still has no service worker, so the push lines below would stay undialable even
-# after the routes exist. See docs/standards/contracts/README.md#route-agreement.
-
 # ── unserved: the client dials, nothing answers ───────────────────────────────────────────────
-
-# Finding #4 of docs/design/one-fact-one-owner.md, and the case that motivated this gate. The PWA has
-# enrolled against these three since the surface landed and the daemon has never served a push route.
-# #302 mounts them; it is halted, not abandoned.
-unserved * /v1/push/vapid # DEFECT: no daemon push route exists (#302, halted)
-unserved * /v1/push/subscriptions # DEFECT: no daemon push route exists (#302, halted)
-unserved POST /v1/push/subscriptions # DEFECT: no daemon push route exists (#302, halted)
-unserved DELETE /v1/push/subscriptions/* # DEFECT: no daemon push route exists (#302, halted)
 
 # Whole surfaces the client half of which shipped without the daemon half.
 unserved GET /v1/worktrees # DEFECT: packages/daemon serves no worktree route at all

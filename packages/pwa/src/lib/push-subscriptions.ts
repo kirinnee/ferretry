@@ -103,14 +103,15 @@ export const fetchDaemonVapidKey = async (
   daemon: DaemonConnection,
   fetcher: DaemonFetch = browserFetch,
 ): Promise<string> =>
-  VapidPublicKeyResponseSchema.parse(await pushJson(daemon, '/v1/push/vapid', {}, fetcher)).publicKey;
+  VapidPublicKeyResponseSchema.parse(await pushJson(daemon, '/v1/push/vapid', { method: 'GET' }, fetcher)).publicKey;
 
 /** Lists the devices enrolled with this daemon, and no other. */
 export const listDaemonPushDevices = async (
   daemon: DaemonConnection,
   fetcher: DaemonFetch = browserFetch,
 ): Promise<readonly PushDeviceView[]> =>
-  PushDeviceListResponseSchema.parse(await pushJson(daemon, '/v1/push/subscriptions', {}, fetcher)).devices;
+  PushDeviceListResponseSchema.parse(await pushJson(daemon, '/v1/push/subscriptions', { method: 'GET' }, fetcher))
+    .devices;
 
 /** Enrols this browser with one daemon under a reader-chosen device name. */
 export const registerDaemonPushDevice = async (
