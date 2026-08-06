@@ -1,4 +1,5 @@
 {
+  gitHooks,
   packages,
   formatter,
   pkgs,
@@ -29,6 +30,13 @@ let
   validator =
     command:
     ''${packages.bash}/bin/bash -c 'export PATH=${validator-runtime}/bin; exec ${packages.bash}/bin/bash ${command} "$@"' --'';
+  # The one gate that proves the devshell's own hook installation rather than a repository fact, so
+  # it lives beside the installer under `nix/` instead of in `scripts/validate/`. It brings its own
+  # PATH for the same reason the validator wrapper does, plus `cmp`, which compares an installed
+  # launcher with the generated one.
+  hook-proof =
+    arguments:
+    "${packages.bash}/bin/bash -c 'export PATH=${gitHooks.runtime}/bin:$PATH; exec ${packages.bash}/bin/bash nix/git-hooks/worktree-proof.sh ${arguments}' --";
   bun-tool = name: "${packages.bash}/bin/bash -c 'exec ./node_modules/.bin/${name} \"$@\"' --";
   # Like bun-tool, a repo script that drives a node_modules binary keeps the ambient
   # devshell PATH: the validator runtime deliberately has no node for tsc's shebang.
@@ -214,6 +222,15 @@ pre-commit-lib.run {
       entry = validator "scripts/validate/commit-msg.sh";
       stages = [ "commit-msg" ];
       pass_filenames = true;
+      language = "system";
+    };
+
+    a-git-hooks-worktree = {
+      enable = true;
+      name = "Worktree commit linting";
+      entry = hook-proof "${gitHooks.launchers} ${packages.pre-commit}";
+      files = "^(flake\\.nix|nix/git-hooks\\.nix|nix/git-hooks/.*)$";
+      pass_filenames = false;
       language = "system";
     };
 

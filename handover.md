@@ -215,9 +215,33 @@ Prevent repeated breakage in everyday development.
 
 |  ID | Todo | Feature                             | Definition of done                                                                              | 🔒 Hard | ↔ Soft  |
 | --: | :--: | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ------- | ------- |
-|   3 |  ☐   | **Fix gitlint in worktrees**        | Make commit linting work reliably inside mandatory Git worktrees.                               | —       | #4, #31 |
+|   3 |  ☑   | **Fix gitlint in worktrees**        | Make commit linting work reliably inside mandatory Git worktrees.                               | —       | #4, #31 |
 |   4 |  ☑   | **Stop hiding untracked files**     | Always show untracked files so new callees cannot disappear from reviews or commits.            | —       | #3, #31 |
 |   5 |  ☐   | **Land Tasks pane performance fix** | Make Tasks load quickly by eliminating sequential task-file reads; record before/after timings. | —       | #35     |
+
+**#3 is complete (2026-08-06).** PR #283 had diagnosed the mechanism correctly and then broken
+commit linting repo-wide: its `shellHook` block ran `pre-commit install` without `-f` on every
+`direnv exec`, so migration mode promoted pre-commit's own launcher to `<hook>.legacy`, which then
+called itself. Measured on the live repository from a linked worktree, both a **valid** and an
+**invalid** subject exited `1` — the valid one after the gate had printed `Passed`. Installation now
+belongs to `nix/git-hooks.nix`, and `checks.pre-commit-check.shellHook` is no longer sourced into the
+devshell (the check itself is unchanged). The launcher carries no worktree and no `/nix/store` path,
+so it is byte-identical on every revision and each checkout still lints at its own generated config;
+installation compares before it writes, serialises real repairs on a lock in the common directory,
+and renames launchers into place. After the change, the same two probes gave exit `0` and exit `1`
+with the conventional-commit diagnostic.
+
+Sharing one hooks directory with worktrees that still run the old `shellHook` was tried first and
+**measured**: twenty takeovers a minute, the shared launcher owned by a stale worktree in 96 of 120
+samples, and every commit refused while it was. Each worktree therefore also gets a private
+`ferretry-hooks` directory selected by a worktree-scoped `core.hooksPath`, which is why
+`extensions.worktreeConfig` is the one repository-level setting the installer writes — skipped, with
+the reason printed, where `core.bare` or `core.worktree` would change meaning. The shared install
+stays as the baseline for the worktrees `packages/daemon` creates without ever entering a devshell.
+The regression check is the `a-git-hooks-worktree` gate (`nix/git-hooks/worktree-proof.sh`), which
+builds a scratch repository with three linked worktrees and proves valid/invalid behaviour from the
+**second** one across repeated, concurrent, never-entered and stale-worktree installs. Full design in
+[Linting](docs/standards/linting/index.md#hook-installation-across-worktrees).
 
 **#4 is complete.** This ports kteam's `src/git.ts` `gitChanges` behaviour into Ferretry's shared
 Git runner: `packages/daemon/src/adapters/git/runner.ts` pins
