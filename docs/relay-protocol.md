@@ -1102,8 +1102,8 @@ means per-stream windows, a stream-id space, fair-scheduling rules and close-rac
 of invented machinery, where §5 through §9 already are that machinery. One session per job reuses
 the session layer whole — its window is the stream's window, its teardown is the stream's teardown,
 its close is the stream's cancellation — and the relay carries **more sessions** instead of new
-frame kinds, which is one of the reasons `packages/relay` does not change for anything in this
-section. What the extra sessions cost is stated under "What a stream session costs", because the
+frame kinds, which is one of the reasons nothing in this section changes the rendezvous state
+machine. What the extra sessions cost is stated under "What a stream session costs", because the
 ceilings are real.
 
 Two bounds apply to every session between its handshake and its credential record, because that
@@ -1534,4 +1534,12 @@ first pairing each have a session mode above; what stands between this section a
 is implementation state, and §13 names each remaining piece exactly. None of it changes the
 rendezvous: every message this section added is sealed record plaintext the relay cannot read, and
 the one novelty visible outside the channel — the `4440` close — is an ordinary code inside the
-range §5's `closed` message already carries.
+range §5's `closed` message already carries, which a deployed rendezvous forwards today without
+modification. Where that code LIVES is decided here rather than improvised at a compile error: it is
+an **additive member of the shared close-code constants** (§9's table is the wire vocabulary, and
+the reference tree keeps that vocabulary in one module whose stated job is to be the single source
+of wire constants). A daemon-local literal or a widened type at one endpoint would fork the
+vocabulary three ways across the daemon link, the browser session and the rendezvous — the invisible
+kind of difference §1 calls the expensive kind. So the one change this section makes to
+`packages/relay` is that constant, and it changes no behaviour: nothing dispatches on it, nothing
+iterates the code table exhaustively, and a rendezvous built before it existed carries it unchanged.
