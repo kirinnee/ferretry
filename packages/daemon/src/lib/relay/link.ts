@@ -305,7 +305,7 @@ interface LinkSession {
   sealing: PendingRecord | undefined;
   /** The one live stream this session carries, once it carries one. */
   stream: SocketHandler | undefined;
-  /** Armed when the channel is keyed, cancelled by the credential record that beats it. */
+  /** Armed when the session opens, cancelled by the credential record that beats it. */
   credentialDeadline: RelayLinkTimer | undefined;
   /**
    * That this session is ending, held until the sealed outcome has ACTUALLY crossed.
