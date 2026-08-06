@@ -833,6 +833,238 @@ describe('the carrier router', () => {
     should(socket?.closed).be.ok();
   });
 
+  /**
+   * A DAEMON THAT PUBLISHES NO RENDEZVOUS IS NOT A DAEMON THAT IS DIRECT-ONLY.
+   *
+   * A pairing stored before the carrier set existed names one address: the direct one it arrived
+   * over. The relay it was actually reached over, away from that network, came from the hosted
+   * advertisement and was never written down — so a browser that offered such a record only its
+   * direct address would take that path away, and the refresh that would teach it back needs a
+   * connection it can no longer make. The address is therefore tried at DIAL time, last, and never
+   * enters the cache: withdraw it and the next load offers nothing.
+   */
+  it('should dial the current hosted address for a daemon that published no rendezvous', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const auto = autoDial(identity);
+    let asked = 0;
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+      hostedRelay: async () => {
+        asked += 1;
+        return RELAY.relayUrl;
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+
+    should(asked).equal(1);
+    should(auto.sockets).have.length(1);
+    const choice = router.choice(daemon.daemonId);
+    if (choice?.ok !== true) throw new Error('the fallback did not carry the request');
+    should(choice.method).eql(RELAY);
+    // Dialled, not adopted: the connection this router was handed still names one carrier, so
+    // nothing a reload could inherit was written and the kill switch stays immediate.
+    should(daemon.carriers).eql([{ kind: 'direct', daemonUrl: DAEMON_URL }]);
+    await settle(5);
+  });
+
+  it('should dial nothing for that daemon once the directory has no address to give', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const auto = autoDial(identity);
+    let asked = 0;
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+      // `relayUrl: null`, an unreachable directory and a build carrying none arrive as one answer.
+      hostedRelay: async () => {
+        asked += 1;
+        return undefined;
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(/No configured connection worked/u);
+
+    // Asked and answered "nothing", which is the boundary being enforced rather than skipped.
+    should(asked).equal(1);
+    should(auto.sockets).have.length(0);
+    should(router.choice(daemon.daemonId)?.ok).be.false();
+  });
+
+  it('should never ask the directory for a daemon that authored its own rendezvous', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const auto = autoDial(identity);
+    let asked = 0;
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+      hostedRelay: async () => {
+        asked += 1;
+        return RELAY.relayUrl;
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+
+    // The daemon SAID where it can be reached, so its answer is the whole answer — and a walk that
+    // waited on the directory anyway would put a network read in front of every failed direct
+    // attempt for a daemon that never needed one.
+    should(asked).equal(0);
+    should(auto.sockets).have.length(1);
+    await settle(5);
+  });
+
+  /**
+   * THE TWO OMISSIONS ARE NOT THE SAME FACT, which is why only one of them is retained.
+   *
+   * A daemon publishes no direct entry when it cannot EXPRESS one — a wildcard bind names no
+   * address, a `publicUrl` with a proxy path is not an origin a device may store — and it is still
+   * answering on the address this browser is talking to. Dropping that would put a reachable daemon
+   * behind a rendezvous, and a rendezvous that later goes away would strand a device that could
+   * have reached it all along. It is live state only: nothing is written, and it survives exactly
+   * as long as it keeps carrying.
+   */
+  it('should keep carrying over a direct winner the daemon can no longer name, and hand back to its set when that stops', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceToken: DEVICE_TOKEN });
+    const auto = autoDial(identity);
+    let directWorks = true;
+    let directCalls = 0;
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        directCalls += 1;
+        if (!directWorks) throw new TypeError('Failed to fetch');
+        return new Response('direct');
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    should(await (await router.send(daemon, `${DAEMON_URL}/v1/projects`)).text()).equal('direct');
+
+    // The refresh names only the rendezvous this daemon dials, over the very address it omits.
+    const relayOnly = daemonConnection({ ...daemon, carriers: [RELAY] });
+    should(await (await router.send(relayOnly, `${DAEMON_URL}/v1/usage`)).text()).equal('direct');
+    should(auto.sockets).have.length(0);
+
+    // And the moment it stops carrying it is forgotten like any other winner: the next walk is the
+    // daemon's own set and nothing re-offers the address it did not publish.
+    directWorks = false;
+    await should(router.send(relayOnly, `${DAEMON_URL}/v1/usage`)).be.rejected();
+    should((await router.send(relayOnly, `${DAEMON_URL}/v1/usage`)).status).equal(200);
+    const choice = router.choice(daemon.daemonId);
+    if (choice?.ok !== true) throw new Error('the published rendezvous did not take over');
+    should(choice.method).eql(RELAY);
+    const settled = directCalls;
+    should((await router.send(relayOnly, `${DAEMON_URL}/v1/projects`)).status).equal(200);
+    should(directCalls).equal(settled);
+    await settle(5);
+  });
+
+  /**
+   * A DIAL OUTLIVES THE ENTRY IT WAS STARTED FOR, and the socket must not.
+   *
+   * A handshake takes time, and an unpair or a refresh installs a different entry while it runs.
+   * `clearDaemon` and the refresh both walk the CURRENT entry's sessions, so a session recorded
+   * only in the abandoned one would be a live rendezvous holding this device's grant that no
+   * unpair could ever close.
+   */
+  it('should close a rendezvous session that finished opening after an unpair', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const auto = autoDial(identity);
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    const inflight = router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    // Synchronous, so the entry is already gone before the direct attempt has even failed.
+    router.clearDaemon(daemon.daemonId);
+
+    await should(inflight).be.rejected();
+    await settle(5);
+    should(auto.sockets).have.length(1);
+    should(auto.sockets[0]?.closed).be.ok();
+    should(router.choice(daemon.daemonId)).be.undefined();
+  });
+
+  it('should close a rendezvous session that finished opening after a carrier refresh replaced its entry', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const republished = daemonConnection({
+      ...daemon,
+      carriers: [
+        { kind: 'direct', daemonUrl: DAEMON_URL },
+        RELAY,
+        { kind: 'relay', relayUrl: 'https://relay-two.example', operator: 'self' },
+      ],
+    });
+    const auto = autoDial(identity);
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    const stale = router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    // The refresh installs a new entry before the first walk has dialled anything, so its session
+    // cannot have been carried across.
+    const current = router.send(republished, `${DAEMON_URL}/v1/usage`);
+
+    await should(stale).be.rejected();
+    should((await current).status).equal(200);
+    await settle(5);
+
+    // Two sockets, exactly one of them closed: the abandoned dial ended and the tracked one lives.
+    should(auto.sockets).have.length(2);
+    should(auto.sockets.filter(socket => socket.closed !== null)).have.length(1);
+    should(router.choice(daemon.daemonId)?.ok).be.true();
+  });
+
   it('should re-dial rather than reuse a session the carrier has dropped', async () => {
     const { router, daemon, auto } = await routerFor({
       relay: RELAY,

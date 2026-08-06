@@ -255,10 +255,33 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // with the device grant pairing has not issued yet, so it cannot be relayed, and
   // routing a RE-pair through an existing session would exchange a fresh code under
   // the credential it is replacing.
+  const readDefaultRelay = async (): Promise<HostedRelayFallback> =>
+    // The directory origin is the build constant and nothing else: no literal, no
+    // relative path, no guess. Unset ships no directory and answers without
+    // dialling, which is what a local build or a fork honestly is.
+    await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher });
+
+  /**
+   * Discovery labels a published relay, and is the last resort for a daemon that publishes none.
+   *
+   * The address set is daemon-authored on pairing and `/v1/carriers`, and this read is never written
+   * into it. It has two uses, both of them read-only: saying whether a published URL is Ferretry's
+   * hosted service, and standing in as a dial-time fallback for a daemon too old to publish a set at
+   * all — which would otherwise lose the hosted path it has always been reached over, with no
+   * connection left that could teach it back. Read ONCE per document, so `relayUrl: null` withdraws
+   * it on the next load rather than being remembered.
+   */
+  const hostedRelayUrl = readDefaultRelay().then(fallback =>
+    fallback.kind === 'available' ? fallback.relayUrl : undefined,
+  );
+
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
     crypto: options.relayCrypto ?? new WebCryptoRelayCrypto(),
     ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+    // The same one-per-load promise both other readers await; the router waits on it only after a
+    // daemon's own carriers have all failed, so nothing on the ordinary path pays for the read.
+    hostedRelay: async () => await hostedRelayUrl,
   });
   const carried = carrier.fetch;
   /**
@@ -328,23 +351,6 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // The document-lifetime store owns this document-lifetime convenience. Every
   // add, eviction, and explicit unpair now keeps the marker honest.
   connections.subscribe(syncLandingPage);
-
-  const readDefaultRelay = async (): Promise<HostedRelayFallback> =>
-    // The directory origin is the build constant and nothing else: no literal, no
-    // relative path, no guess. Unset ships no directory and answers without
-    // dialling, which is what a local build or a fork honestly is.
-    await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher });
-
-  /**
-   * Discovery now labels a published relay; it never invents one for a daemon.
-   *
-   * The address set is daemon-authored on pairing and `/v1/carriers`. The runtime
-   * advertisement remains useful only for disclosure — whether one published URL
-   * is Ferretry's hosted service — and a failed read therefore changes no route.
-   */
-  const hostedRelayUrl = readDefaultRelay().then(fallback =>
-    fallback.kind === 'available' ? fallback.relayUrl : undefined,
-  );
 
   /** The daemon is authoritative; after a carrier first answers, replace the cache. */
   carrier.onConnected(daemon => {

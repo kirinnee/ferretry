@@ -20,7 +20,12 @@ import {
   DaemonConnectionStore,
   parseDaemonConnections,
 } from '../../src/lib/connections.ts';
-import { daemonCarriers, daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
+import {
+  daemonCarriers,
+  daemonConnection,
+  hostedRelayFallbackCarrier,
+  type RelayCarrier,
+} from '../../src/lib/daemon-connection.ts';
 import { DaemonEventTransport, daemonEventTicket, RELAY_STREAM_UNSUPPORTED } from '../../src/lib/event-transport.ts';
 
 const FINGERPRINT = `fy_daemon_${'A'.repeat(43)}`;
@@ -98,6 +103,46 @@ describe('a stored pairing registry', () => {
     should(
       parseDaemonConnections(stored({ kind: 'relay', relayUrl: 'https://relay.mine' })).connections[0]?.carriers,
     ).eql([{ kind: 'direct', daemonUrl: DAEMON_URL }, SELF_RELAY]);
+  });
+
+  /**
+   * The other half of the rule above, and the reason it is safe.
+   *
+   * A daemon too old to publish a set cannot say where it can be reached, and the stored record from
+   * the previous model names only the direct address the pairing arrived on. Refusing that daemon the
+   * hosted address as well would take away the path a phone off its network has always used, with no
+   * connection left that could ever teach it back — the refresh needs one and pairing is direct-only.
+   * So the address is offered per DIAL and never written down: nothing here returns a value a reload
+   * could inherit, which is what keeps `relayUrl: null` an immediate kill switch.
+   */
+  it('should offer the current hosted address to a daemon that has authored no rendezvous', () => {
+    should(hostedRelayFallbackCarrier(connection(FINGERPRINT), HOSTED_RELAY.relayUrl)).eql(HOSTED_RELAY);
+  });
+
+  it('should offer nothing when the daemon authored a rendezvous of its own', () => {
+    // The daemon SAID where it can be reached, and its answer is the whole answer: adding an address
+    // it did not name would be this browser second-guessing the authority it just read.
+    should(hostedRelayFallbackCarrier(connection(FINGERPRINT, [SELF_RELAY]), HOSTED_RELAY.relayUrl)).be.undefined();
+    should(hostedRelayFallbackCarrier(connection(FINGERPRINT, [HOSTED_RELAY]), HOSTED_RELAY.relayUrl)).be.undefined();
+  });
+
+  it('should offer nothing once the directory withdraws the address, and nothing to dial without one', () => {
+    // `relayUrl: null`, a directory this page could not reach, and a build carrying no directory at
+    // all arrive here identically: as no address. None of the three is permission to guess.
+    should(hostedRelayFallbackCarrier(connection(FINGERPRINT), undefined)).be.undefined();
+  });
+
+  it('should offer nothing to a fingerprint no rendezvous can address, whoever runs it', () => {
+    // Same rule `daemonCarriers` draws for a published relay, and for the same reason: a session
+    // keyed against an unverifiable fingerprint is the attack, not a fallback that failed politely.
+    should(hostedRelayFallbackCarrier(connection('sha256:legacy-spelling'), HOSTED_RELAY.relayUrl)).be.undefined();
+  });
+
+  it('should refuse an advertised address this browser may not dial', () => {
+    // Parsed rather than trusted, by the protocol's own endpoint rule — plaintext to a stranger's
+    // service is not a carrier this browser will open whatever the directory says.
+    should(hostedRelayFallbackCarrier(connection(FINGERPRINT), 'http://plaintext.example')).be.undefined();
+    should(hostedRelayFallbackCarrier(connection(FINGERPRINT), 'not a url')).be.undefined();
   });
 
   it('should not promote the old client-discovered hosted relay into the daemon-authored cache', () => {

@@ -141,6 +141,38 @@ export const daemonCarriers = (daemon: DaemonConnection): readonly ConnectionMet
   return daemon.carriers.filter(carrier => carrier.kind === 'direct');
 };
 
+/**
+ * The rendezvous a router may try when this daemon has authored NONE — dialled, never stored.
+ *
+ * WHY A DAEMON THAT PUBLISHES NOTHING IS NOT A DAEMON THAT IS DIRECT-ONLY. Until the carrier set
+ * existed, each end read the hosted advertisement for itself and the two met by coincidence of
+ * picking the same service; a phone away from its daemon's network reached it that way and nothing
+ * was ever written down. A daemon too old to answer `GET /v1/carriers` still cannot say where it can
+ * be reached, so a browser that offered it only the direct address it cannot get to would take that
+ * working path away and have no way to learn it back: the refresh that would teach it needs a
+ * connection it can no longer make, and pairing again is direct-only by construction.
+ *
+ * IT IS NOT PROMOTED INTO THE CACHE AND MUST NEVER BE. The stored set is what the DAEMON said, and a
+ * guess written into it would outlive the advertisement that produced it — which is the kill switch
+ * not working (§13). So this is computed per dial from the one advertisement read this document
+ * performed: withdraw the address and the next load offers nothing, and the first set a daemon does
+ * publish replaces this wholesale because it was never in the cache to survive.
+ *
+ * THE FINGERPRINT RULE IS `daemonCarriers`', unchanged: a rendezvous is addressed by a fingerprint
+ * this protocol can verify against, so a pairing without one is offered no relay of any provenance.
+ * The address is parsed rather than trusted for the same reason every other carrier is.
+ */
+export const hostedRelayFallbackCarrier = (
+  daemon: DaemonConnection,
+  hostedRelayUrl: string | undefined,
+): RelayCarrier | undefined => {
+  if (hostedRelayUrl === undefined) return undefined;
+  if (parseDaemonId(daemon.daemonId) === null) return undefined;
+  if (daemonCarriers(daemon).some(carrier => carrier.kind === 'relay')) return undefined;
+  const parsed = ConnectionMethodSchema.safeParse({ kind: 'relay', relayUrl: hostedRelayUrl, operator: 'hosted' });
+  return parsed.success && parsed.data.kind === 'relay' ? parsed.data : undefined;
+};
+
 /** Is this the same published address, dialled the same way? */
 export const sameDaemonCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean =>
   left.kind === right.kind &&

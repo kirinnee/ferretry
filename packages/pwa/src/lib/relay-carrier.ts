@@ -53,6 +53,7 @@ import {
   type DaemonConnection,
   type DaemonId,
   daemonCarriers,
+  hostedRelayFallbackCarrier,
   sameDaemonCarrier,
   sameDaemonConnection,
 } from './daemon-connection.ts';
@@ -381,6 +382,18 @@ export interface DaemonCarrierRouterOptions {
   readonly crypto: RelayClientSessionDependencies['crypto'];
   readonly dial?: RelayDial;
   readonly heartbeat?: RelayHeartbeatSchedule;
+  /**
+   * THE ONE ADVERTISEMENT READ THIS DOCUMENT PERFORMED, as a last-resort address and nothing else.
+   *
+   * A FUNCTION RATHER THAN A VALUE because the answer arrives after this router does, and a promise
+   * rather than a string because it must not be re-read: `relayUrl: null` is a kill switch, and a
+   * router that asked again per request would both hammer the directory and hold two answers.
+   *
+   * It is awaited ONLY when a daemon has authored no rendezvous and every address it did author has
+   * already failed — so a daemon with its own relay, and every direct-first attempt, never waits on
+   * the directory at all. What comes back is dialled, never stored: see `hostedRelayFallbackCarrier`.
+   */
+  readonly hostedRelay?: () => Promise<string | undefined>;
 }
 
 interface CarrierEntry {
@@ -399,6 +412,15 @@ interface CarrierEntry {
  */
 const carrierRefreshOnly = (left: DaemonConnection, right: DaemonConnection): boolean =>
   left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
+
+/**
+ * Said to a session that finished opening after the entry it was dialled for was replaced.
+ *
+ * It names all three causes because the dial cannot tell them apart from where it stands, and a
+ * sentence that guessed one would be wrong two thirds of the time.
+ */
+const STALE_SESSION_REASON =
+  'this daemon was re-paired, unpaired or republished while this rendezvous session was opening';
 
 const transportFailure = (reason: unknown): string => {
   if (reason instanceof RelaySessionError) return `${reason.message} (${reason.code})`;
@@ -441,6 +463,7 @@ export class DaemonCarrierRouter {
   readonly #dial: RelayDial;
   readonly #crypto: RelayClientSessionDependencies['crypto'];
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
+  readonly #hostedRelay: () => Promise<string | undefined>;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
 
   /**
@@ -468,6 +491,8 @@ export class DaemonCarrierRouter {
     this.#dial = options.dial ?? browserRelayDial;
     this.#crypto = options.crypto;
     this.#heartbeat = options.heartbeat;
+    // No provider is direct-only, which is what a build with no relay directory honestly is.
+    this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
   }
 
   /**
@@ -582,7 +607,7 @@ export class DaemonCarrierRouter {
     }
 
     const probes: ConnectionProbe[] = [];
-    for (const method of daemonCarriers(daemon)) {
+    for await (const method of this.#candidates(daemon)) {
       try {
         const response = await this.#over(entry, method, url, init);
         // WHETHER AN ATTEMPT ADVANCES THE WALK IS THE PROTOCOL'S RULE, not this
@@ -606,6 +631,23 @@ export class DaemonCarrierRouter {
     }
     this.#decide(entry, probes);
     throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
+  }
+
+  /**
+   * Every address this walk may try, in order: the daemon's own set, then the fallback.
+   *
+   * THE FALLBACK IS LAST AND IS REACHED ONLY BY EXHAUSTION. A daemon that authored a rendezvous is
+   * answered entirely from its own set — the generator returns before the advertisement is even
+   * awaited — so the directory cannot delay a direct-first attempt on the ordinary path. It is
+   * dialled and never written down; `hostedRelayFallbackCarrier` owns why, and owns the fingerprint
+   * and address rules it is held to.
+   */
+  async *#candidates(daemon: DaemonConnection): AsyncGenerator<ConnectionMethod> {
+    const authored = daemonCarriers(daemon);
+    yield* authored;
+    if (authored.some(method => method.kind === 'relay')) return;
+    const hosted = hostedRelayFallbackCarrier(daemon, await this.#hostedRelay());
+    if (hosted !== undefined) yield hosted;
   }
 
   #entry(daemon: DaemonConnection): CarrierEntry {
@@ -634,8 +676,22 @@ export class DaemonCarrierRouter {
    * rendezvous is still published, because nothing about that path changed: same
    * daemon, same device token, same relay URL, so an answer arriving on it is an
    * answer from the connection that asked. A rendezvous the daemon WITHDREW is closed
-   * — saying so — and a winner no longer in the set is forgotten, which puts the next
-   * request back at the top of the deterministic walk.
+   * — saying so — and a relay winner no longer in the set is forgotten, which puts the
+   * next request back at the top of the deterministic walk.
+   *
+   * ONE EXCEPTION, AND ONLY FOR A DIRECT WINNER: an address that is CARRYING THIS
+   * CONNECTION's traffic is kept even when the replacement omits it. The two omissions
+   * are not the same fact. A withdrawn relay is a decision — the daemon stopped dialling
+   * that room and nothing is there — while a daemon publishes no direct entry when it
+   * cannot EXPRESS one on the wire: a wildcard bind names no address, and a `publicUrl`
+   * with a proxy path is not an origin a device may store. The daemon is still answering
+   * on it, and this browser has the only proof of that there is. Dropping it would put a
+   * reachable daemon behind a rendezvous, and a rendezvous that later goes away would
+   * strand a device that could have talked to it all along.
+   *
+   * IT IS LIVE STATE AND NOTHING ELSE. Nothing is written to the cache, which stays
+   * exactly what the daemon said; the moment this winner stops carrying, `send` forgets
+   * it like any other, and the next walk sees only the daemon-authored set.
    *
    * The identity fence is untouched: a changed `daemonId`, `baseUrl` or device token
    * is not a refresh and never reaches here.
@@ -650,13 +706,18 @@ export class DaemonCarrierRouter {
         continue;
       }
       void session.then(
-        connected => connected.close('this daemon withdrew this rendezvous from its published carriers'),
+        // True of a rendezvous the daemon withdrew AND of a fallback it never published, which is
+        // every session this branch can be holding.
+        connected => connected.close('this rendezvous is not named in the carriers this daemon publishes'),
         () => undefined,
       );
     }
     const chosen = current.choice;
     const kept =
-      chosen?.ok === true && carriers.some(method => sameDaemonCarrier(method, chosen.method)) ? chosen : undefined;
+      chosen?.ok === true &&
+      (carriers.some(method => sameDaemonCarrier(method, chosen.method)) || chosen.method.kind === 'direct')
+        ? chosen
+        : undefined;
     const entry: CarrierEntry = { connection: daemon, choice: kept, sessions };
     this.#entries.set(daemon.daemonId, entry);
     this.#announce();
@@ -704,6 +765,15 @@ export class DaemonCarrierRouter {
    * sockets, and when one drops the session is over. So a dead session is replaced
    * rather than revived, and the replacement has new keys and a new identifier.
    * Reusing a dead one would be a request that can never be answered.
+   *
+   * A SESSION THAT FINISHES OPENING INTO AN ENTRY NOBODY HOLDS IS CLOSED, NOT RETURNED.
+   * A dial takes a handshake, and the entry it was started against can be replaced while
+   * it runs — by a re-pair, an unpair, or a carrier refresh, all of which install a
+   * different object. The socket would then be reachable from nothing: `clearDaemon` and
+   * `#refreshed` walk the CURRENT entry's map, so a session recorded only in the
+   * abandoned one is a live rendezvous holding this device's grant that no unpair can
+   * ever close. A refresh that carried this exact opening promise across is the one case
+   * where the entry moved and the session did not, and that session is tracked and fine.
    */
   async #session(
     entry: CarrierEntry,
@@ -723,12 +793,21 @@ export class DaemonCarrierRouter {
       ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
     });
     entry.sessions.set(method.relayUrl, opening);
+    let session: RelayClientSession;
     try {
-      return await opening;
+      session = await opening;
     } catch (reason) {
       if (entry.sessions.get(method.relayUrl) === opening) entry.sessions.delete(method.relayUrl);
       throw reason;
     }
+    const held = this.#entries.get(entry.connection.daemonId);
+    if (held === entry || held?.sessions.get(method.relayUrl) === opening) return session;
+    entry.sessions.delete(method.relayUrl);
+    // `close` is idempotent, so a re-pair that already closed this promise's session and this
+    // sentence do not fight; either way it ends, and the caller is told rather than handed a
+    // session no unpair could reach.
+    session.close(STALE_SESSION_REASON);
+    throw new Error(STALE_SESSION_REASON);
   }
 
   #announce(): void {
