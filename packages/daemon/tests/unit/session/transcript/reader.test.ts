@@ -161,11 +161,11 @@ describe('SessionTranscriptReader', () => {
     );
 
     // Act
-    const actual = await subject.digest({ sessionId: 'session-1', harness: 'claude' }, { byteOffset: 12 });
+    const actual = await subject.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 12 });
 
     // Assert
     should(proofs).eql(['session-1']);
-    should(actual.messages).eql([{ point: { byteOffset: 12 }, role: 'user', text: 'restart from here' }]);
+    should(actual.messages).eql([{ point: { v: 1, byteOffset: 12 }, role: 'user', text: 'restart from here' }]);
   });
 
   it('should refuse a digest when no daemon journal proof or transcript can be read', async () => {
@@ -181,9 +181,11 @@ describe('SessionTranscriptReader', () => {
     );
 
     // Act / Assert
-    await should(withoutJournal.digest({ sessionId: 'session-1', harness: 'claude' }, { byteOffset: 0 })).be.rejected();
     await should(
-      withoutTranscript.digest({ sessionId: 'session-1', harness: 'claude' }, { byteOffset: 0 }),
+      withoutJournal.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0 }),
+    ).be.rejected();
+    await should(
+      withoutTranscript.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0 }),
     ).be.rejected();
   });
 });

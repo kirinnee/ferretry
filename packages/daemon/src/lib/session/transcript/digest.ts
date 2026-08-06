@@ -1,12 +1,5 @@
+import type { ConversationMessagePoint } from '@ferretry/protocol';
 import type { TranscriptBatch, TranscriptEvent, TranscriptIssue, TranscriptRole } from '../../transcript/types.ts';
-
-/** A stable, harness-neutral coordinate for one durable transcript message. */
-export interface ConversationMessagePoint {
-  /** The zero-based byte offset of the source record. */
-  readonly byteOffset: number;
-  /** A harness record may normalize into more than one message. */
-  readonly blockIndex?: number;
-}
 
 /** The roles a replacement harness can receive as ordinary conversation context. */
 export type ConversationMessageRole = Extract<TranscriptRole, 'user' | 'assistant' | 'developer' | 'system'>;
@@ -55,6 +48,7 @@ export class ConversationDigestError extends Error {
 function pointOf(event: TranscriptEvent): ConversationMessagePoint | undefined {
   if (event.byteOffset === undefined) return undefined;
   return {
+    v: 1,
     byteOffset: event.byteOffset,
     ...(event.blockIndex === undefined ? {} : { blockIndex: event.blockIndex }),
   };
