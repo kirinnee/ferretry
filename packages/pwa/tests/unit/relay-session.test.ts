@@ -314,9 +314,14 @@ describe('a serving relay session', () => {
     );
 
     const unasked = await serving();
-    const outstanding = unasked.session.request({ method: 'GET', path: '/x' });
+    // THE HANDLER IS ATTACHED BEFORE THE REJECTION CAN FIRE, and that is not a style choice. The
+    // record below rejects this request from inside `receiveBinary`; a promise that rejects while
+    // nothing is watching it is an unhandled rejection, which Bun fails the file for — intermittently,
+    // because whether the test's own `await` has attached a handler by then is a matter of microtask
+    // timing. Wrapping first makes the case deterministic against what it is actually asserting.
+    const outstanding = failure(unasked.session.request({ method: 'GET', path: '/x' }));
     await unasked.session.receiveBinary(await unasked.daemon.record({ t: 'res', id: 99, status: 200 }));
-    should((await failure(outstanding)).message).match(/did not send/u);
+    should((await outstanding).message).match(/did not send/u);
   });
 
   it('should return credit once it owes half a window, and never before', async () => {

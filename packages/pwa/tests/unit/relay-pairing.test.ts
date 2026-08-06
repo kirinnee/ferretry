@@ -10,7 +10,15 @@
  */
 
 import { RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
-import { fromBase64Url, RELAY_CLOSE_CODES, RELAY_PROTOCOL_ID, toBase64Url, utf8Bytes } from '@ferretry/relay';
+import {
+  decodeFrame,
+  FRAME_KINDS,
+  fromBase64Url,
+  RELAY_CLOSE_CODES,
+  RELAY_PROTOCOL_ID,
+  toBase64Url,
+  utf8Bytes,
+} from '@ferretry/relay';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { RelayCarrier } from '../../src/lib/daemon-connection.ts';
@@ -668,5 +676,50 @@ describe('a terminal and an event feed on a relayed carrier', () => {
         )
       ).message,
     ).match(/no longer reachable over a rendezvous/u);
+  });
+});
+
+describe('the two sequence counters one channel holds', () => {
+  /**
+   * A DETERMINISTIC REGRESSION FOR COUNTER OWNERSHIP, not a stress test.
+   *
+   * `ChannelState` carries `sendSequence` AND `receiveSequence`, and this session opens records on
+   * the inbox while sealing them on the outbox — both asynchronous, both writing the channel back.
+   * Writing the WHOLE captured state back means whichever finishes last rewinds the other's counter
+   * with a copy taken before its own await.
+   *
+   * The interleave is forced rather than hoped for: `request` is deliberately not awaited, so its
+   * seal is in flight on the outbox at the moment `receiveBinary` starts an open. A rewound
+   * `receiveSequence` shows up as `4420` on the next arriving record; a rewound `sendSequence` is
+   * worse and quieter — a record's sequence IS its AEAD nonce, so the next seal reuses one under the
+   * same key, which is the arithmetic mistake AES-GCM does not survive.
+   *
+   * The nonce claim is read OFF THE WIRE rather than out of a private field: every record this side
+   * sealed is on the socket, and its frame sequence IS the nonce it was sealed under. Two frames
+   * carrying one sequence is the defect, stated in the only terms an attacker would also see.
+   */
+  it('should never reuse a record sequence when a seal and an open overlap', async () => {
+    const { session, socket, daemon } = await keyed({ kind: 'auth', deviceToken: 'fy_device_x' });
+    const ready = session.ready();
+    await session.receiveBinary(await daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+    await ready;
+
+    for (let round = 1; round <= 6; round += 1) {
+      // NOT awaited: the seal this starts must still be in flight when the open below begins.
+      const answer = session.request({ method: 'GET', path: '/v1/sessions' });
+      await session.receiveBinary(await daemon.record({ t: 'res', id: round, status: 200 }));
+      should(await answer).match({ kind: 'response', status: 200 });
+    }
+
+    // Every RECORD this side sealed, by the sequence it was sealed under.
+    const sealed = socket.sent
+      .map(bytes => decodeFrame(bytes))
+      .flatMap(decoded => (decoded.ok && decoded.frame.kind === FRAME_KINDS.data ? [decoded.frame.sequence] : []));
+    should(sealed.length).be.aboveOrEqual(7);
+    should(new Set(sealed).size).equal(sealed.length);
+    should(sealed).eql([...sealed].sort((left, right) => left - right));
+    // And the receive counter tracked too: a rewind there refuses the next arrival with `4420`,
+    // which six rounds would have hit.
+    should(session.live()).be.true();
   });
 });

@@ -868,7 +868,13 @@ export class RelayClientSession {
       this.#fail(opened.code, opened.reason);
       return;
     }
-    this.#channel = opened.state;
+    // ONLY THE RECEIVE COUNTER, and writing the whole state back was a real defect rather than a
+    // tidier line. `ChannelState` carries BOTH sequences, and sealing runs concurrently on the
+    // outbox: a send that completed while this open was awaiting would have its `sendSequence`
+    // overwritten by the stale copy captured before the await. A record's sequence IS its AEAD
+    // nonce, so the rewound counter reuses one under the same key — the single arithmetic mistake
+    // AES-GCM does not survive — and the peer refuses the session with `4420` if it is lucky.
+    this.#channel = { ...(this.#channel ?? channel), receiveSequence: opened.state.receiveSequence };
     this.#consume();
     const message = decodeTunnelDaemonMessage(opened.plaintext);
     if (message === null) {
@@ -1058,7 +1064,10 @@ export class RelayClientSession {
           return;
         }
         this.#waiting.shift();
-        this.#channel = sealed.state;
+        // The mirror of the rule in `#onRecord`: this side owns the SEND counter and nothing else.
+        // An arriving record may have advanced `receiveSequence` while this seal was awaiting, and
+        // writing the whole captured state back would rewind it.
+        this.#channel = { ...(this.#channel ?? channel), sendSequence: sealed.state.sendSequence };
         this.#send = recordSent(this.#send);
         this.deps.socket.send(encodeFrame(sealed.frame));
       }
