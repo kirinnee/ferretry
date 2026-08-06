@@ -291,6 +291,14 @@ describe('compiled daemon conversation fork', () => {
         await startCompiledDaemon(environment, executable);
         daemonRunning = true;
         client = await connect(environment);
+        const sourceMessages = await client.messages(SOURCE_ID, undefined, 1);
+        should(sourceMessages.messages).have.length(1);
+        should(sourceMessages.sessionId).equal(SOURCE_ID);
+        const sourceMessage = sourceMessages.messages[0];
+        if (sourceMessage === undefined) throw new Error('source session did not return its one forkable message');
+        should(sourceMessage.point).deepEqual(THROUGH);
+        should(sourceMessage.text).equal(SOURCE_MESSAGE);
+
         const sourceAttachment = await client.upload(
           SOURCE_ID,
           new Blob([ATTACHMENT_BODY], { type: 'text/plain' }),
@@ -298,6 +306,7 @@ describe('compiled daemon conversation fork', () => {
         );
         const request: ForkSessionRequest = {
           through: THROUGH,
+          selectionBinding: sourceMessage.selectionBinding,
           agent: TARGET_AGENT,
           model: TARGET_MODEL,
           effort: 'high',

@@ -21,12 +21,6 @@ import {
   SystemClock,
 } from '../../src/adapters/index.ts';
 
-/**
- * The pinned key basename the marker-absent recovery admits, and the root of its scratch name —
- * IMPORTED from the owner rather than restated, so a test cannot keep passing against a name
- * production no longer writes.
- */
-const TOKEN_KEY_BASENAME = SESSION_MESSAGE_TOKEN_KEY_BASENAME;
 import {
   createFoundationPaths,
   type FileSystemFactory,
@@ -34,6 +28,13 @@ import {
   resolveStateHome,
   StateHomeLayoutError,
 } from '../../src/lib/index.ts';
+
+/**
+ * The pinned key basename the marker-absent recovery admits, and the root of its scratch name —
+ * IMPORTED from the owner rather than restated, so a test cannot keep passing against a name
+ * production no longer writes.
+ */
+const TOKEN_KEY_BASENAME = SESSION_MESSAGE_TOKEN_KEY_BASENAME;
 
 const homes = new Set<string>();
 const stores = new Set<DaemonStorage>();
