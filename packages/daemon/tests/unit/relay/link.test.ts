@@ -1549,6 +1549,66 @@ async function until(ready: () => boolean): Promise<void> {
   throw new Error('timed out waiting for the link');
 }
 
+interface HeldStream {
+  readonly crypto: RelayCrypto & { hold(): void; release(): void };
+  readonly link: RelayLink;
+  readonly sent: Wire;
+  readonly stream: FakeStream;
+  readonly downstream: SocketDownstream;
+  /** The CLIENT's channel, positioned after the credential record it just sent. */
+  readonly channel: ChannelState;
+}
+
+/**
+ * A claimed link carrying one live stream, on crypto a test can suspend.
+ *
+ * Every interleave below needs exactly this and needs it built with the gate already installed —
+ * `heldCrypto` wraps the instance, so it has to be the crypto the link was constructed with rather
+ * than something swapped in later. Nothing is held yet: setup runs at full speed and the test calls
+ * `hold()` at the moment it wants to freeze.
+ */
+async function heldStreamingLink(which: 'open' | 'seal'): Promise<HeldStream> {
+  const crypto = heldCrypto(which);
+  const stream = fakeStream();
+  const sent = wire();
+  const link = new RelayLink({
+    crypto,
+    identity,
+    relayHost: HOST,
+    socket: sent.socket,
+    dispatch: async () => json(200, {}),
+    sockets: accepts(stream),
+    devices: {
+      identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
+    },
+    pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
+    scheduler: { after: () => ({ cancel: () => undefined }) },
+  });
+  await link.receiveBinary(challenge());
+  await link.receiveBinary(claimed());
+  const opened = await openSession(link, sent, sessionOne());
+  const channel = await clientSend(link, opened.channel, {
+    t: 'stream',
+    protocol: RELAY_PROTOCOL_ID,
+    deviceToken: DEVICE_TOKEN,
+    path: '/v1/events',
+  });
+  const downstream = stream.downstream;
+  if (downstream === undefined) throw new Error('the stream was never attached');
+  return { crypto, link, sent, stream, downstream, channel };
+}
+
+/** Where the `4440` that ends a session with its outcome already stated sits on the wire, or `-1`. */
+const concludedAt = (sent: Wire): number =>
+  sent.frames.findIndex(frame => {
+    const message = frame.kind === FRAME_KINDS.control ? decodeControlMessage(frame.payload) : null;
+    return message?.t === 'closed' && message.code === RELAY_SESSION_CONCLUDED_CLOSE_CODE;
+  });
+
+/** Where the last record sits on the wire, or `-1`. */
+const lastRecordAt = (sent: Wire): number =>
+  sent.frames.reduce((last, frame, index) => (frame.kind === FRAME_KINDS.data ? index : last), -1);
+
 describe('two directions sharing one channel value', () => {
   it('should never let a receive rewind the send counter, because a sequence IS a nonce', async () => {
     // THE DEFECT THIS PINS, and it is the worst one available in this module. `ChannelState` carries
@@ -1560,33 +1620,7 @@ describe('two directions sharing one channel value', () => {
     //
     // Timing normally decides which lands last, which is why this is unprovable by repetition. The
     // held crypto makes the order a fact of the test.
-    const crypto = heldCrypto();
-    const stream = fakeStream();
-    const sent = wire();
-    const link = new RelayLink({
-      crypto,
-      identity,
-      relayHost: HOST,
-      socket: sent.socket,
-      dispatch: async () => json(200, {}),
-      sockets: accepts(stream),
-      devices: {
-        identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
-      },
-      pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
-      scheduler: { after: () => ({ cancel: () => undefined }) },
-    });
-    await link.receiveBinary(challenge());
-    await link.receiveBinary(claimed());
-    const opened = await openSession(link, sent, sessionOne());
-    const streaming = await clientSend(link, opened.channel, {
-      t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
-      deviceToken: DEVICE_TOKEN,
-      path: '/v1/events',
-    });
-    const downstream = stream.downstream;
-    if (downstream === undefined) throw new Error('the stream was never attached');
+    const { crypto, link, sent, stream, downstream, channel: streaming } = await heldStreamingLink('open');
 
     // Arrange — one client record whose decryption is held mid-flight. It has already captured the
     // channel; it has not yet written its counter back.
@@ -1621,33 +1655,9 @@ describe('two directions sharing one channel value', () => {
     // a channel that has forgotten it already read one, and the session dies blaming the carrier for
     // frames it delivered perfectly. Both orders are fixed by the same rule, and both are pinned
     // because only one of them announces itself.
-    const crypto = heldCrypto('seal');
-    const stream = fakeStream();
-    const sent = wire();
-    const link = new RelayLink({
-      crypto,
-      identity,
-      relayHost: HOST,
-      socket: sent.socket,
-      dispatch: async () => json(200, {}),
-      sockets: accepts(stream),
-      devices: {
-        identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
-      },
-      pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
-      scheduler: { after: () => ({ cancel: () => undefined }) },
-    });
-    await link.receiveBinary(challenge());
-    await link.receiveBinary(claimed());
-    const opened = await openSession(link, sent, sessionOne());
-    let channel = await clientSend(link, opened.channel, {
-      t: 'stream',
-      protocol: RELAY_PROTOCOL_ID,
-      deviceToken: DEVICE_TOKEN,
-      path: '/v1/events',
-    });
-    const downstream = stream.downstream;
-    if (downstream === undefined) throw new Error('the stream was never attached');
+    const held = await heldStreamingLink('seal');
+    const { crypto, link, stream, downstream } = held;
+    let channel = held.channel;
 
     // Arrange — a seal suspended mid-flight, having already captured the channel.
     crypto.hold();
@@ -1674,5 +1684,130 @@ describe('two directions sharing one channel value', () => {
     // Assert — both keystrokes reached the pane and the session is still alive.
     should(stream.fromClientFrames).deepEqual(['first', 'second']);
     should(link.report().sessions).equal(1);
+  });
+});
+
+describe('a send queue spliced while one of its records is being sealed', () => {
+  it('should keep the sealed stream-close on the wire behind the record it was sealing, and conclude only after it', async () => {
+    // THE DEFECT THIS PINS, and it is the `ChannelState` race one array over. `#discardStreamPayload`
+    // runs on the INBOUND path and splices the send queue — index `0` included — while a seal on the
+    // outbox is suspended holding the record that WAS at index `0`. The `shift()` after that await
+    // therefore removed whatever had taken the head, and on this exact path that is the sealed
+    // `stream-close` the discard had just queued: the close was deleted, the superseded payload went
+    // out in its place, and the `4440` behind it became a conclusion with no outcome stated inside the
+    // channel. §14 makes that a protocol violation, so the browser reported an ordinary pane exit as a
+    // broken daemon and lost the `1000`/`1009`/`1013` taxonomy the close exists to carry.
+    //
+    // Timing decides this in the wild. The held seal makes it a fact of the test.
+    const { crypto, link, sent, stream, downstream, channel } = await heldStreamingLink('seal');
+
+    // Arrange — one payload frame, captured by a seal that cannot finish yet.
+    crypto.hold();
+    downstream.send('{"kind":"event","n":1}');
+    await new Promise(resolve => setTimeout(resolve, 1));
+
+    // Act — the pane closes WHILE that seal is suspended, so the discard runs against a queue whose
+    // head is the record being sealed, and queues the close behind it. Then the seal may finish.
+    downstream.close(1013, 'fell behind');
+    crypto.release();
+    await settle(link);
+
+    // Assert — read exactly as the client reads. The acceptance, then the frame that was already
+    // sealed when the close was decided, then the close itself. A `stream-close` present at all is
+    // what proves the seal did not delete it.
+    //
+    // THE PINNED FRAME IS SENT RATHER THAN DROPPED, and that is the invariant this shape buys: one
+    // seal, one nonce, one frame on the wire. Dropping an already-produced ciphertext and sealing
+    // the close under the same sequence number would put two AEAD invocations under one nonce, which
+    // is not an exposure while only one can reach a socket but is a rule that stops being auditable
+    // by reading. The discard loses nothing for it — this record already held its credit.
+    //
+    // `clientReadAll` also proves the sequence space: it opens every record in order against the
+    // client's own channel, so a sequence that skipped or repeated throws here instead of asserting.
+    const read = await clientReadAll(sent, channel);
+    should(read.messages).deepEqual([
+      { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID },
+      { t: 'data', text: '{"kind":"event","n":1}' },
+      { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' },
+    ]);
+
+    // Assert — and §14's order holds around it: the sealed outcome crossed BEFORE the `4440` that
+    // says the session ended with its outcome already stated.
+    should(concludedAt(sent)).be.above(lastRecordAt(sent));
+    should(stream.closed).have.length(1);
+    should(link.report().sessions).equal(0);
+  });
+
+  it('should still discard the payload the close supersedes, keeping only the record under the seal', async () => {
+    // The pin is an exemption for ONE record, not a retreat from the policy. A backlog behind an
+    // exhausted window is still dropped, because the close is what makes that loss explicit and
+    // holding those frames would make it wait for credit a departed viewer will never return.
+    const { crypto, link, sent, stream, downstream, channel } = await heldStreamingLink('seal');
+
+    // Arrange — one frame under the seal and two more queued behind it, none of them sent yet.
+    crypto.hold();
+    downstream.send('{"kind":"event","n":1}');
+    await new Promise(resolve => setTimeout(resolve, 1));
+    downstream.send('{"kind":"event","n":2}');
+    downstream.send('{"kind":"event","n":3}');
+
+    // Act
+    downstream.close(1013, 'fell behind');
+    crypto.release();
+    await settle(link);
+
+    // Assert — the pinned frame survives because it was already sealed; the two behind it do not.
+    const read = await clientReadAll(sent, channel);
+    should(read.messages).deepEqual([
+      { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID },
+      { t: 'data', text: '{"kind":"event","n":1}' },
+      { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' },
+    ]);
+    should(concludedAt(sent)).be.above(lastRecordAt(sent));
+    should(stream.closed).have.length(1);
+  });
+});
+
+describe('a record delivered twice', () => {
+  it('should refuse the repeat as a broken sequence and never answer it a second time', async () => {
+    // A carrier that duplicates a frame — by accident, or because it would like the request run
+    // again — must not be able to replay one. The receive counter is the whole defence: the repeat
+    // names a sequence this channel has already consumed, which earns the same `4420` a gap earns,
+    // because "already read" and "never arrived" are both a stream this daemon refuses to repair.
+    //
+    // The counter only defends it while records are opened ONE AT A TIME, which is the contract
+    // `receiveBinary` states and the carrier adapter's own promise chain keeps. Two opens in flight
+    // would both read the same counter and both accept — so this case is also what that contract is
+    // worth if anything ever hands frames over without awaiting.
+    const { link, wire: sent, requests } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const opened = await openSession(link, sent, sessionOne());
+    const authenticated = await clientSend(link, opened.channel, {
+      t: 'auth',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const request = await sealRecord(
+      crypto_,
+      authenticated,
+      utf8Bytes(JSON.stringify({ t: 'req', id: 1, method: 'GET', path: '/v1/fleet' })),
+    );
+    if (!request.ok) throw new Error(request.reason);
+    const frame = encodeFrame(request.frame);
+
+    // Act — the same bytes twice. The copy is a copy on purpose: nothing here may depend on the
+    // daemon recognising the same object, only on the sequence number the header carries.
+    await link.receiveBinary(frame);
+    should(requests).have.length(1);
+    await link.receiveBinary(new Uint8Array(frame));
+
+    // Assert — refused, the session is gone, and the dispatcher ran that request exactly once.
+    should(controlOf(sent.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.sequenceBroken,
+    });
+    should(requests).have.length(1);
+    should(link.report().sessions).equal(0);
   });
 });

@@ -250,6 +250,16 @@ interface LinkSession {
   readonly answered: Set<number>;
   /** Answers waiting for the peer to return credit. Bounded by the peer's own send window. */
   readonly waiting: PendingRecord[];
+  /**
+   * The record a seal on the outbox has already captured, while it is still sealing it.
+   *
+   * It stays in {@link waiting} — `#buffered` must keep counting it and `#flush` still removes it
+   * from the front — and it is the one record `#discardStreamPayload` may not take away, because
+   * removing it would leave a produced ciphertext with nothing to remove and a sealed sequence
+   * number with nothing on the wire. `#flush` owns both writes and clears it in the same breath as
+   * the await it spans.
+   */
+  sealing: PendingRecord | undefined;
   /** The one live stream this session carries, once it carries one. */
   stream: SocketHandler | undefined;
   /** Armed when the channel is keyed, cancelled by the credential record that beats it. */
@@ -441,6 +451,7 @@ export class RelayLink {
       receive: newReceiveWindow(),
       answered: new Set(),
       waiting: [],
+      sealing: undefined,
       stream: undefined,
       credentialDeadline: undefined,
       conclusion: undefined,
@@ -909,10 +920,17 @@ export class RelayLink {
    * dropping the close, arrived at politely. The close itself, an acceptance and an answer are never
    * dropped here: a session that ended saying something other than what happened is the failure this
    * whole module is written against.
+   *
+   * IT RUNS ON THE INBOUND PATH AND SPLICES A QUEUE A SEAL MAY BE HALFWAY THROUGH, so the one record
+   * it may not touch is the one already captured by that seal — see `sealing` in {@link RelayLink.flush},
+   * which is what makes the removal there true. Exempting it costs this policy nothing: the exemption
+   * exists so a close does not wait for credit to drain frames nobody will read, and a record that is
+   * already sealed already holds its credit.
    */
   #discardStreamPayload(session: LinkSession): void {
     for (let index = session.waiting.length - 1; index >= 0; index -= 1) {
-      if (session.waiting[index]?.payload === true) session.waiting.splice(index, 1);
+      const record = session.waiting[index];
+      if (record?.payload === true && record !== session.sealing) session.waiting.splice(index, 1);
     }
   }
 
@@ -929,8 +947,29 @@ export class RelayLink {
         const channel = session.channel;
         const pending = session.waiting[0];
         if (channel === undefined || pending === undefined) return;
+        // CAPTURING A RECORD PINS IT, and the `shift()` below is only true because of this line.
+        // `#discardStreamPayload` splices this queue from the INBOUND path while the await here is
+        // suspended, index `0` included, so without the pin the head can change identity mid-seal.
+        // The interleave that bit: a pane's payload frame is being sealed, its handler closes, the
+        // discard drops that payload and queues the sealed `stream-close` in its place — and the
+        // `shift()` then deleted the CLOSE and put the superseded payload on the wire instead.
+        // `#settle` sent `4440` behind it with no outcome stated inside the channel, which §14 makes
+        // a protocol violation, so an ordinary pane exit reached the viewer as a broken daemon with
+        // the `1000`/`1009`/`1013` taxonomy the close carries lost.
+        //
+        // PINNING RATHER THAN DROPPING THE CIPHERTEXT, deliberately. Honouring the discard for a
+        // record already sealed would mean throwing that ciphertext away and sealing the next one
+        // under the same sequence number — two AEAD invocations under one key and one nonce. Only
+        // one of them could ever reach a socket, so it is not an exposure; it is still an invariant
+        // worth keeping literal rather than conditional, because "one nonce, one seal" is auditable
+        // by reading and "one nonce, one ciphertext anybody kept" is not. Below this line every
+        // seal produces exactly one frame that is sent, and the sequence advances exactly once.
+        session.sealing = pending;
         const sealed = await sealRecord(this.deps.crypto, channel, pending.plaintext);
+        session.sealing = undefined;
         if (!sealed.ok) {
+          // No ciphertext was produced: both refusals are checked ahead of the AEAD, and the session
+          // is over, so this sequence number is never spent and never reused.
           this.#endSession(session.sessionId, sealed.code, sealed.reason);
           return;
         }
