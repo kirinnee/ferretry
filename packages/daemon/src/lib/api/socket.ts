@@ -19,7 +19,7 @@ import { authorizeRequest } from './dispatcher.ts';
 import { ApiError } from './error.ts';
 import type { ApiRequest, ApiResponse } from './http.ts';
 import { errorResponse } from './responses.ts';
-import type { RouteContext, ScopedRoute } from './route.ts';
+import type { RouteContext, ScopedRoute, WardenRemedyAuthorizer } from './route.ts';
 import type { ApiRouter } from './router.ts';
 import type { SocketTicketRedeemer } from './socket-ticket.ts';
 
@@ -143,6 +143,18 @@ export class ApiSocketDispatcher {
      * terminal an operator had denied and then happily hand a browser the socket that drives one.
      */
     private readonly guard: CapabilityGuard,
+    /**
+     * The administrator's per-remedy decision, forwarded so the shared boundary really does enforce
+     * warden scope the same way on both tables.
+     *
+     * NOTHING HERE IS EXPECTED TO DECLARE A REMEDY — a remedy is a destructive action on a session
+     * and a protocol switch is not one. It is wired anyway because the alternative is a refusal that
+     * names a fix nobody can perform: a socket route that declared one would be told the boundary
+     * serving it must be wired with an authorizer, against a constructor that had nowhere to put
+     * one. An unsatisfiable instruction is a worse state than either a served route or a declared
+     * prohibition.
+     */
+    private readonly remedies?: WardenRemedyAuthorizer,
   ) {}
 
   /**
@@ -158,7 +170,14 @@ export class ApiSocketDispatcher {
   }
 
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, this.tickets, this.guard);
+    const authorized = authorizeRequest(
+      this.router,
+      this.credentials,
+      request,
+      this.tickets,
+      this.guard,
+      this.remedies,
+    );
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {
