@@ -633,3 +633,50 @@ describe('anomaly fingerprints', () => {
     should(fingerprintAnomalies([anomaly])).eql('provider_unavailable:provider:acme');
   });
 });
+
+/**
+ * The detector's inputs, pinned.
+ *
+ * "The suspicion scan does not read Attention" was true by accident: nothing
+ * passed a board in, and nothing would have failed if a later edit started to.
+ * These assertions make the absence a property the compiler enforces, because a
+ * session's own Attention becoming an input is the exact defect row 14 names —
+ * a node would then be flagged for having asked a question, and the question
+ * would be evidence of the fault it reported.
+ */
+type AttentionShaped<T> = Extract<keyof T, `attention${string}` | `board${string}` | `needsHuman${string}`>;
+
+describe('what the detector is allowed to see', () => {
+  it('should declare no attention member anywhere in a session view', () => {
+    // Arrange — a compile-time claim, asserted at runtime so it is a visible test.
+    const free: [
+      AttentionShaped<WardenSessionView>,
+      AttentionShaped<WardenSessionConfig>,
+      AttentionShaped<WardenSessionState>,
+    ] extends [never, never, never]
+      ? true
+      : false = true;
+
+    // Act / Assert
+    should(free).be.true();
+  });
+
+  it('should reach the same verdict whether or not a board is smuggled in beside the view', () => {
+    // Arrange — the type forbids it, so the smuggled board is planted past the type. If any code
+    // path ever reads one, the two results diverge and this fails.
+    const bare = view('s1', { status: 'awaiting_user', lastActivityAt: ago(600) });
+    const smuggled = {
+      ...bare,
+      attention: { count: 3, items: [{ id: 'A1', subject: 'May I push?' }] },
+      board: ['A1', 'A2'],
+    } as WardenSessionView;
+
+    // Act
+    const without = detectAnomalies([bare], NOW, options);
+    const with_ = detectAnomalies([smuggled], NOW, options);
+
+    // Assert
+    should(with_).eql(without);
+    should(kinds(with_.anomalies)).eql(['unattended_question']);
+  });
+});

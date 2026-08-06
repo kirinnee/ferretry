@@ -65,5 +65,4 @@ invalidate DaemonAttachmentBlobCache # a per-mount useRef in attachment-gallery.
 # GAPS. Each of these is a daemon-scoped store that NOTHING under packages/pwa/src constructs — the
 # surface is not mounted, so there is no instance to register. Delete the line in the PR that mounts
 # it, and add the store to the `caches:` array in lib/store.tsx in the same change.
-invalidate DaemonAttentionClient # unmounted: no construction site in packages/pwa/src. The attention surface is reached only from tests and the harness.
 invalidate DaemonRuntimeModelCatalogStore # unmounted: no construction site in packages/pwa/src. runtime-controls.tsx names the type as the port it wants; nothing supplies one.

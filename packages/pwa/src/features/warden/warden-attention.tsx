@@ -331,12 +331,21 @@ function AttentionRow({
   readonly now: number;
   readonly pending: boolean;
 }) {
-  const judgement = item.judgement ?? { state: 'none' as const };
-  const chip = judgementMeta[judgement.state];
-  const recommendation = item.recommendation ?? {
-    action: 'nudge' as const,
-    reason: 'Ask the session to restate its blocker or continue.',
-  };
+  // ABSENT IS NOT `none`, AND IT IS NEVER `nudge`.
+  //
+  // A judgement the warden actually made — including its explicit "no matching
+  // judgement" — is warden output and is shown. An item the warden never judged
+  // carries NEITHER field, and the row must then say nothing on the warden's
+  // behalf. Defaulting the pair here is how a human's own permission request
+  // came back out of this surface wearing a warden chip and a warden-shaped
+  // *Recommended action: nudge* it never earned; the daemon now omits both, so
+  // synthesising them is the one thing this renderer must not do.
+  const judgement = item.judgement;
+  const chip = judgement === undefined ? undefined : judgementMeta[judgement.state];
+  const recommendation = item.recommendation;
+  // Read once: an optional chain inside the JSX below does not narrow for the
+  // click handler that closes over it.
+  const reportPath = judgement?.reportPath;
   const callsign = displayCallsign(item.teammate) || item.sessionId;
   return (
     <li
@@ -352,15 +361,17 @@ function AttentionRow({
       >
         <span className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs">
           <span className="min-w-0 truncate text-cell font-semibold text-fg">{callsign}</span>
-          <span
-            className={cn(
-              'inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider',
-              chip.cls,
-            )}
-          >
-            <chip.Icon size={11} aria-hidden="true" />
-            {chip.label}
-          </span>
+          {chip && (
+            <span
+              className={cn(
+                'inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider',
+                chip.cls,
+              )}
+            >
+              <chip.Icon size={11} aria-hidden="true" />
+              {chip.label}
+            </span>
+          )}
           {item.sessionStatus && (
             <span className="kt-label shrink-0 text-faint">{item.sessionStatus.replaceAll('_', ' ')}</span>
           )}
@@ -384,35 +395,39 @@ function AttentionRow({
             </p>
           </div>
         )}
-        <Recommendation
-          connection={connection}
-          item={item}
-          recommendation={recommendation}
-          pending={pending}
-          onRunAction={onRunAction}
-        />
-        <span className="text-meta leading-base text-muted">{judgementSummary(judgement)}</span>
+        {recommendation && (
+          <Recommendation
+            connection={connection}
+            item={item}
+            recommendation={recommendation}
+            pending={pending}
+            onRunAction={onRunAction}
+          />
+        )}
+        {judgement && <span className="text-meta leading-base text-muted">{judgementSummary(judgement)}</span>}
         <span className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs text-meta text-faint">
-          <span className="inline-flex items-center gap-xs">
-            <UserRound size={11} aria-hidden="true" />
-            {judgement.judgedBy?.wrapper
-              ? `Judged by ${judgement.judgedBy.wrapper}${judgement.judgedBy.model ? ` (${judgement.judgedBy.model})` : ''}`
-              : 'Judge unknown'}
-          </span>
+          {judgement && (
+            <span className="inline-flex items-center gap-xs">
+              <UserRound size={11} aria-hidden="true" />
+              {judgement.judgedBy?.wrapper
+                ? `Judged by ${judgement.judgedBy.wrapper}${judgement.judgedBy.model ? ` (${judgement.judgedBy.model})` : ''}`
+                : 'Judge unknown'}
+            </span>
+          )}
           <span className="inline-flex items-center gap-xs">
             <Clock3 size={11} aria-hidden="true" />
             waiting {relativeTime(item.waitingSince, now)}
           </span>
         </span>
       </div>
-      {judgement.reportPath && onOpenReport && (
+      {reportPath !== undefined && onOpenReport && (
         <div className="border-t border-border-soft">
           <button
             type="button"
             onClick={() =>
               onOpenReport({
                 connection,
-                reportPath: judgement.reportPath as string,
+                reportPath,
                 sessionId: item.sessionId,
                 attentionId: item.id,
               })

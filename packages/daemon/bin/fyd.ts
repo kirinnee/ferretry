@@ -226,6 +226,7 @@ import {
   type ApiServerPort,
   type ArgumentAnswer,
   type AssigneeObservation,
+  type AttentionActor,
   AttentionService,
   accountLaunchability,
   advertisesForeignAddress,
@@ -1888,10 +1889,30 @@ interface WardenSupervisionState {
   lastSweepAt: string | undefined;
 }
 
+/**
+ * Provenance for every attention item the warden writes.
+ *
+ * `warden-escalation` is a DISTINCT daemon cause from ordinary source
+ * reconciliation, and the state machine reads it: an agent can never dismiss a
+ * daemon-raised item, and a reader can tell a warden's interruption apart from a
+ * session's own request without parsing its prose.
+ */
+const WARDEN_ESCALATION_ACTOR: AttentionActor = { kind: 'daemon', cause: 'warden-escalation' };
+
 /** The collaborators a warden subsystem needs from the rest of the root. */
 interface WardenParts {
   readonly sessions: SessionDirectorySubsystem;
   readonly control: SessionControlSubsystem;
+  /**
+   * The ONE attention service every other caller uses, not a second one.
+   *
+   * A warden escalation lands on the flagged session's own board, through the
+   * same state machine, the same locking and the same durable document a person
+   * answers it on. A private store here would be a second account of what a
+   * session is waiting for, and the two would disagree the first time anybody
+   * resolved anything.
+   */
+  readonly attention: AttentionService;
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort;
   readonly files: NodeWardenReportFileSystem;
@@ -1973,6 +1994,47 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             ...account,
             ...(typeof retryAt === 'number' ? { retryAt } : {}),
           })),
+      },
+      // The SAME reader the verdict route serves from, so "what the report says" has one answer.
+      // An unreadable directory answers `undefined` rather than a short list: a missing NEEDS_HUMAN
+      // marker and a marker nobody could read must not both look like "nothing to escalate".
+      verdicts: { recent: async () => await parts.reportsReader.readVerdicts().catch(() => undefined) },
+      attention: {
+        board: async sessionId => {
+          const listed = await parts.attention.list(sessionId).catch(() => undefined);
+          return listed?.ok === true
+            ? { sessionId, items: listed.value.items, resolved: listed.value.resolved }
+            : undefined;
+        },
+        raise: async (sessionId, request) => {
+          const mutation = await parts.attention
+            .raise(
+              sessionId,
+              {
+                source: request.source,
+                sourceRef: request.sourceRef,
+                subject: request.subject,
+                why: request.why,
+                context: request.context,
+                waitingSince: request.waitingSince,
+                howToResolve: request.howToResolve,
+                // NO STRUCTURED ASK. This is an instruction, not a question: the daemon has nothing
+                // to do with an answer, and a bare `resolve` is what a person needs to be able to
+                // reach for once they have acted.
+              },
+              WARDEN_ESCALATION_ACTOR,
+            )
+            .catch(() => undefined);
+          if (mutation === undefined || !mutation.ok) return 'rejected';
+          return mutation.change === 'created' || mutation.change === 'refreshed' ? mutation.change : 'unchanged';
+        },
+        resolveSource: async (sessionId, source, sourceRef, note) => {
+          const mutation = await parts.attention
+            .resolveSource(sessionId, source, sourceRef, WARDEN_ESCALATION_ACTOR, note)
+            .catch(() => undefined);
+          if (mutation === undefined || !mutation.ok) return false;
+          return mutation.changed;
+        },
       },
       // The journal is the daemon's own log for now: the fleet event tier these belong on is
       // `emitTransient`, which section I of the survey records as absent. A supervision decision an
@@ -2060,6 +2122,10 @@ async function wardenFleetSession(parts: WardenParts, view: SessionView): Promis
       ...(view.config.parent === undefined ? {} : { parent: view.config.parent }),
       agent: view.config.agent,
       ...(view.config.model === undefined ? {} : { model: view.config.model }),
+      // The start's own resolution, carried beside the configured value rather than folded into it —
+      // an escalation naming this node's model wants what actually ran, and a session whose account
+      // pinned nothing has it only here.
+      ...(view.config.modelHint === undefined ? {} : { modelHint: view.config.modelHint }),
       intervalSeconds: view.config.intervalSeconds,
     },
     state: view.state,
@@ -4014,6 +4080,22 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         clock,
       );
       const wardenPaths = createWardenPaths(paths.home);
+      // ONE attention service for this opened store, shared by the route a person answers on and by
+      // the warden sweep that raises and clears its own escalations. Two would each hold their own
+      // idea of what a session is waiting for.
+      const attention = new AttentionService(
+        // The ledger repository is handed raw ids from the transport, so the id is parsed here
+        // rather than asserted: an id the layout would not accept must never become a directory
+        // path.
+        new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        clock,
+        {
+          // A missing attention.json is an empty board only for a session the
+          // registry can prove exists. Session document damage propagates
+          // rather than being flattened into "no attention".
+          has: async id => (await sessions.get(id)) !== undefined,
+        },
+      );
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
@@ -4117,19 +4199,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // usage feed already own those. One service per opened state home serializes only this
         // daemon's timer ticks, so a slow probe in another daemon can neither join nor delay it.
         fleetRefresh: new FleetRefreshService({ usage, fleet }),
-        attention: new AttentionService(
-          // The ledger repository is handed raw ids from the transport, so the id is parsed here
-          // rather than asserted: an id the layout would not accept must never become a directory
-          // path.
-          new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
-          clock,
-          {
-            // A missing attention.json is an empty board only for a session the
-            // registry can prove exists. Session document damage propagates
-            // rather than being flattened into "no attention".
-            has: async id => (await sessions.get(id)) !== undefined,
-          },
-        ),
+        attention,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
@@ -4187,6 +4257,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         warden: createWardenSubsystem({
           sessions,
           control: sessionControl,
+          attention,
           usage,
           accounts,
           files: wardenFiles,

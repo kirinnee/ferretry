@@ -10,12 +10,21 @@
  * never invents a resolution workflow — acting on a row happens on the
  * per-session surface reachable through its session id.
  *
+ * ═══ ORDINARY ATTENTION IS SHOWN, NEVER JUDGED ═══
+ *
+ * A blocked task, a permission ask a person raised, any free-form row: these
+ * have no warden selector, so no verdict can be matched to them and none is
+ * invented. Such a row is listed with its own words and NOTHING ELSE — no
+ * judgement, no recommendation. The join is legitimate; restating a human's own
+ * request as a warden-shaped "Recommended action: nudge" is not, and that is
+ * ordinary session Attention becoming warden output.
+ *
  * Pure: the clock arrives as `now`; everything else arrives as arguments.
  */
 
-import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
+import { wardenAnomalySubject, type WardenAnomaly, type WardenAnomalyKind } from './detect.ts';
 import { instantMs, isoFromMs } from './time.ts';
-import type { WardenSessionStatus } from './types.ts';
+import { WARDEN_TERMINAL_STATUSES, type WardenSessionStatus } from './types.ts';
 import {
   parseWardenAnomalyKind,
   parseWardenVerdictSourceRef,
@@ -90,11 +99,24 @@ export interface FleetAttentionItem {
   /** Oldest waiting first across the whole fleet. */
   readonly waitingSince: string;
   readonly howToResolve: string;
-  /** One named, executable next step. */
-  readonly recommendation: WardenRecommendation;
+  /**
+   * One named, executable next step — ABSENT on a row the warden has no
+   * identity for.
+   *
+   * A task row, a permission ask a person raised, or any other ordinary session
+   * Attention carries no warden selector, so there is no verdict to report and
+   * nothing to derive a next step from. Synthesising one turned a human's own
+   * request into a warden-shaped "Recommended action: nudge", which is exactly
+   * the ordinary Attention becoming warden output that this projection must not
+   * produce. Absent is the honest answer, and the reader renders the row without
+   * a warden opinion.
+   */
+  readonly recommendation?: WardenRecommendation;
   readonly raisedBy?: AttentionRaisedBy;
   readonly raisedByName?: string;
-  readonly judgement: WardenJudgement;
+  /** Absent for the same reason `recommendation` is: no warden identity, no
+   *  warden judgement. */
+  readonly judgement?: WardenJudgement;
   /** True for a synthesised anomaly row with no board record. */
   readonly fromAnomaly?: boolean;
   /** Set for a provider-wide anomaly expanded to each affected session. */
@@ -191,31 +213,14 @@ const PROVIDER_SOURCE_PREFIX = 'provider-unavailable:';
 
 /** A board row for a session in one of these states is finished history: the
  *  daemon already killed its pane. A durable board must never resurrect a dead
- *  session into the human's live action list. */
-const TERMINAL_ATTENTION_STATUSES: ReadonlySet<string> = new Set([
-  'completed',
-  'failed',
-  'stalled',
-  'stopped',
-  'kill_failed',
-]);
+ *  session into the human's live action list. DERIVED from the one owner of
+ *  "which statuses a session never leaves"; a second spelling here would drift
+ *  the moment a status is added. */
+const TERMINAL_ATTENTION_STATUSES: ReadonlySet<string> = new Set<string>(WARDEN_TERMINAL_STATUSES);
 
 function isTerminalAttentionStatus(status: string | undefined): boolean {
   return status !== undefined && TERMINAL_ATTENTION_STATUSES.has(status);
 }
-
-/** Outcome-first, short subject per anomaly kind. */
-const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
-  dead_monitor: 'Session lost its monitor',
-  unattended_question: 'A question is waiting',
-  abandoned_wreckage: 'A finished session looks abandoned',
-  quota_reset_passed: 'Quota reset — session can resume',
-  declared_wait_overdue: 'A declared wait is overdue',
-  peer_wait_unanswerable: 'A peer wait cannot be answered',
-  sus_thinking: 'Session may be stuck thinking',
-  sus_subprocess: 'Session stuck in a subprocess',
-  provider_unavailable: 'Provider is unavailable',
-};
 
 /** Composite map keys. JSON-encoding the parts makes the key unambiguous by
  *  construction: a report path may contain any character a filesystem allows,
@@ -367,11 +372,7 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
 
   const { exhaustedSince } = wardenState;
 
-  const matchingVerdict = (
-    sessionId: string,
-    match: WardenVerdictSourceIdentity | undefined,
-  ): WardenVerdict | undefined => {
-    if (match === undefined) return undefined;
+  const matchingVerdict = (sessionId: string, match: WardenVerdictSourceIdentity): WardenVerdict | undefined => {
     if (match.reportPath !== undefined && match.anomalyKind !== undefined)
       return byReportBlock.get(reportBlockKey(sessionId, match.reportPath, match.anomalyKind));
     if (match.anomalyKind !== undefined) return byAnomaly.get(anomalyKey(sessionId, match.anomalyKind));
@@ -388,7 +389,7 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
 
   const computeJudgement = (
     sessionId: string,
-    match: WardenVerdictSourceIdentity | undefined,
+    match: WardenVerdictSourceIdentity,
     waitingSince?: string,
   ): WardenJudgement => {
     const verdict = matchingVerdict(sessionId, match);
@@ -419,17 +420,12 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
       // silently covers a situation that is happening right now — which is how
       // a wedged agent comes to be reported as an all-clear.
       const stale =
-        match?.anomalyKind !== undefined &&
+        match.anomalyKind !== undefined &&
         match.reportPath === undefined &&
         (waitingSince === undefined || sortableMs(verdict.at) < sortableMs(waitingSince));
       return { ...shared, state: 'judged', verdict: verdict.verdict, ...(stale ? { stale: true } : {}) };
     }
 
-    // An ordinary task or free-form row has no warden identity, so it must not
-    // inherit session-wide pending, queued, exhaustion, or truncation state.
-    if (match === undefined) {
-      return { state: 'none', reason: 'No matching warden judgement applies to this attention item.' };
-    }
     if (isAssigned(sessionId, match)) {
       return { state: 'pending', reason: 'A warden is investigating this anomaly now.' };
     }
@@ -462,12 +458,15 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
 
     for (const item of board.items) {
       const match = verdictMatchForItem(item);
-      const exact = matchingVerdict(board.sessionId, match);
+      const exact = match === undefined ? undefined : matchingVerdict(board.sessionId, match);
       if (match?.anomalyKind !== undefined) coveredAnomalies.add(anomalyKey(board.sessionId, match.anomalyKind));
       if (match?.reportPath !== undefined && match.anomalyKind === undefined && exact?.anomalyKind !== undefined)
         coveredAnomalies.add(anomalyKey(board.sessionId, exact.anomalyKind));
 
-      const judgement = computeJudgement(board.sessionId, match, item.waitingSince);
+      // ORDINARY ATTENTION GETS NO WARDEN OPINION. A row with no warden
+      // selector was never judged and never could be, so it carries neither a
+      // judgement nor a recommendation — see `FleetAttentionItem`.
+      const judgement = match === undefined ? undefined : computeJudgement(board.sessionId, match, item.waitingSince);
       const teammate = session?.config.teammate ?? session?.config.name;
       const provider =
         item.sourceRef?.startsWith(PROVIDER_SOURCE_PREFIX) === true
@@ -488,8 +487,12 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
         howToResolve: item.howToResolve,
         ...(item.raisedBy === undefined ? {} : { raisedBy: item.raisedBy }),
         ...(item.raisedByName === undefined ? {} : { raisedByName: item.raisedByName }),
-        recommendation: fallbackRecommendation(judgement, session?.state.status, match?.anomalyKind),
-        judgement,
+        ...(judgement === undefined
+          ? {}
+          : {
+              recommendation: fallbackRecommendation(judgement, session?.state.status, match?.anomalyKind),
+              judgement,
+            }),
         ...(provider === undefined || provider === '' ? {} : { provider }),
       });
     }
@@ -533,7 +536,7 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
         ...(targetStatus === undefined ? {} : { sessionStatus: targetStatus }),
         id: rowId,
         source: 'warden-anomaly',
-        subject: ANOMALY_SUBJECT[anomaly.kind],
+        subject: wardenAnomalySubject(anomaly.kind),
         why: anomaly.detail,
         waitingSince: anomaly.since ?? wardenState.lastSweepAt ?? isoFromMs(now),
         howToResolve: 'Open the session and decide what to do.',

@@ -92,6 +92,7 @@ import {
   type SessionAnalyticsRequest,
   SessionAnalyticsSurface,
 } from '../src/features/analytics/session-analytics-surface.tsx';
+import { AttentionActionModal, AttentionActionTrigger } from '../src/features/attention/attention-action-modal.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
@@ -2392,6 +2393,56 @@ const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPalet
 /** Attention fixture puts all four response shapes beside their distinct action
  * controls. The permission background stays deliberately long so the phone
  * disclosure is exercised without hiding the required action. */
+/**
+ * The focused action modal, reachable exactly as it is in the shipped session
+ * workspace: a counted trigger that opens a `BottomSheet` over the page.
+ *
+ * It starts CLOSED on purpose. The sheet is a fixed overlay, so an open one
+ * would sit on top of every other gallery capture in the same run;
+ * `harness/screenshot.ts --attention-only` presses the trigger and takes the
+ * whole viewport, which is the frame that actually shows the feature.
+ */
+function AttentionActionHarness() {
+  const [open, setOpen] = useState(false);
+  // The shipped page derives this from its layout mode. Reading the viewport
+  // once is the harness's equivalent, and it keeps the desktop capture from
+  // claiming "on this phone" at 1440px.
+  const phone = useMemo(() => globalThis.innerWidth < 768, []);
+  const client = useMemo(
+    () => ({
+      respond: async () => undefined,
+      resolve: async () => undefined,
+      dismiss: async () => undefined,
+    }),
+    [],
+  );
+  return (
+    <Card className="overflow-hidden" data-harness="attention-modal">
+      <PanelBody>
+        <AttentionActionTrigger
+          id="harness-attention-trigger"
+          controls="harness-attention-sheet"
+          count={ATTENTION.count}
+          expanded={open}
+          onOpen={() => setOpen(true)}
+        />
+      </PanelBody>
+      <AttentionActionModal
+        client={client}
+        connection={daemon}
+        id="harness-attention-sheet"
+        onClose={() => setOpen(false)}
+        open={open}
+        scope={scope}
+        snapshot={ATTENTION}
+        status="ready"
+        swipeEnabled={phone}
+        targetId={null}
+      />
+    </Card>
+  );
+}
+
 const ATTENTION: AttentionSnapshot = {
   v: 1,
   sessionId: 'harness-session',
@@ -4764,6 +4815,10 @@ function Shell() {
           />
         </Card>
       ),
+    },
+    {
+      label: 'Attention action modal',
+      render: () => <AttentionActionHarness />,
     },
     {
       label: 'Pins ledger',

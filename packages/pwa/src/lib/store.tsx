@@ -21,6 +21,7 @@ import {
 import { readAccountPickerCatalog, readAccountPickerHealth } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
+import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
 import {
   type DaemonConnectionRepository,
@@ -412,6 +413,8 @@ export interface AppStore {
   readonly controls: DaemonControlsStore;
   readonly projects: DaemonProjectsStore;
   readonly accountPicker: DaemonAccountPickerStore;
+  /** The one daemon/session-scoped Attention cache and mutation client. */
+  readonly attention: DaemonAttentionClient;
   readonly usage: DaemonUsageStore;
   readonly pins: DaemonPinClient;
   readonly browserLogin: DaemonBrowserLoginStore;
@@ -571,6 +574,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
     health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
   });
+  // Attention is not part of the generated FyApiClient yet, but it still takes
+  // the SAME carrier as every generated call. A direct-only second client would
+  // make the action modal fail on precisely the remote phone it is for.
+  const attention = new DaemonAttentionClient(undefined, carried);
   const usage = new DaemonUsageStore(daemonUsagePort(carried));
   const pins = new DaemonPinClient(undefined, carried);
   const browserLogin = new DaemonBrowserLoginStore(daemon => ({
@@ -596,6 +603,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       controls,
       projects,
       accountPicker,
+      attention,
       usage,
       pins,
       browserLogin,
@@ -636,6 +644,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     controls,
     projects,
     accountPicker,
+    attention,
     usage,
     pins,
     browserLogin,

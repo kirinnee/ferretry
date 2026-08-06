@@ -44,6 +44,7 @@ const PHONE_CONTEXT = {
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
+const ATTENTION_ONLY = process.argv.includes('--attention-only');
 
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
@@ -554,6 +555,22 @@ try {
           await page.goto(server.url.toString());
           if (SEARCH_ONLY) {
             await captureSessionSearchEvidence(page, viewport, server.url.toString());
+            continue;
+          }
+          if (ATTENTION_ONLY) {
+            // The WHOLE viewport, not the card: the action modal is a fixed
+            // overlay, so an element capture would frame the trigger and miss
+            // the entire feature. Pressing the real trigger is also the point —
+            // this proves the journey, not just that the component renders.
+            const trigger = page.locator('#harness-attention-trigger');
+            await trigger.scrollIntoViewIfNeeded();
+            await trigger.click();
+            await page.locator('#harness-attention-sheet').waitFor({ state: 'visible' });
+            const target = join(outDir, `attention-modal-${viewport.name}.png`);
+            await page.screenshot({ path: target, animations: 'disabled' });
+            process.stdout.write(
+              `📸 attention modal ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`,
+            );
             continue;
           }
           if (TASK_BOARD_ONLY) {

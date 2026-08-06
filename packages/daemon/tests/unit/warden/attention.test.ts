@@ -273,7 +273,7 @@ describe('judging a board row', () => {
     });
 
     // Assert
-    should(result.items[0]?.judgement.judgedBy).eql(spawn);
+    should(result.items[0]?.judgement?.judgedBy).eql(spawn);
   });
 
   it('should leave the judge unnamed when the sidecar recorded nothing useful', () => {
@@ -284,7 +284,7 @@ describe('judging a board row', () => {
     });
 
     // Assert
-    should(result.items[0]?.judgement.judgedBy).be.undefined();
+    should(result.items[0]?.judgement?.judgedBy).be.undefined();
   });
 
   it('should report an unclassifiable verdict as a failure rather than a clearance', () => {
@@ -310,7 +310,7 @@ describe('judging a board row', () => {
     });
 
     // Assert
-    should(result.items[0]?.judgement.reason).eql('A warden reached a verdict on this session.');
+    should(result.items[0]?.judgement?.reason).eql('A warden reached a verdict on this session.');
   });
 
   it('should mark a kind-matched verdict that predates the wait as stale', () => {
@@ -324,7 +324,7 @@ describe('judging a board row', () => {
     });
 
     // Assert
-    should(result.items[0]?.judgement.stale).be.true();
+    should(result.items[0]?.judgement?.stale).be.true();
   });
 
   it('should not call a report-matched verdict stale for trailing by milliseconds', () => {
@@ -335,7 +335,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [item])], verdicts: [verdict({ at: at(-5) })] });
 
     // Assert
-    should(result.items[0]?.judgement.stale).be.undefined();
+    should(result.items[0]?.judgement?.stale).be.undefined();
   });
 
   it('should prefer the needs-human block when one report holds several for a session', () => {
@@ -349,7 +349,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [boardItem({ sourceRef: 'warden:/r/a.md' })])], verdicts });
 
     // Assert
-    should(result.items[0]?.judgement.verdict).eql('needs_human');
+    should(result.items[0]?.judgement?.verdict).eql('needs_human');
   });
 
   it('should keep the newest verdict for a repeated anomaly class', () => {
@@ -363,7 +363,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [boardItem({ source: 'question' })])], verdicts });
 
     // Assert
-    should(result.items[0]?.judgement.reason).eql('newer');
+    should(result.items[0]?.judgement?.reason).eql('newer');
   });
 
   it('should ignore a verdict that names no target', () => {
@@ -374,7 +374,7 @@ describe('judging a board row', () => {
     });
 
     // Assert
-    should(result.items[0]?.judgement.state).eql('none');
+    should(result.items[0]?.judgement?.state).eql('none');
   });
 
   it('should say a warden is investigating when the anomaly is assigned', () => {
@@ -403,7 +403,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [item])], wardenState: assigned });
 
     // Assert
-    should(result.items[0]?.judgement.state).eql('none');
+    should(result.items[0]?.judgement?.state).eql('none');
   });
 
   it('should ignore an assignment recording an unknown anomaly kind', () => {
@@ -414,7 +414,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [boardItem({ source: 'question' })])], wardenState });
 
     // Assert
-    should(result.items[0]?.judgement.state).eql('none');
+    should(result.items[0]?.judgement?.state).eql('none');
   });
 
   it('should say an anomaly is queued when it is waiting for a slot', () => {
@@ -436,7 +436,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [boardItem({ source: 'question' })])], wardenState });
 
     // Assert
-    should(result.items[0]?.judgement.state).eql('none');
+    should(result.items[0]?.judgement?.state).eql('none');
   });
 
   it('should report exhaustion as the reason no judgement exists', () => {
@@ -462,7 +462,7 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [boardItem({ source: 'question' })])], verdictCoverage: coverage });
 
     // Assert
-    should(result.items[0]?.judgement.reason).containEql('recent 100-verdict window');
+    should(result.items[0]?.judgement?.reason).containEql('recent 100-verdict window');
   });
 
   it('should never let an ordinary task row inherit fleet-wide warden state', () => {
@@ -473,10 +473,41 @@ describe('judging a board row', () => {
     const result = view({ boards: [board('s1', [boardItem({ source: 'task' })])], wardenState });
 
     // Assert
-    should(result.items[0]?.judgement).eql({
-      state: 'none',
-      reason: 'No matching warden judgement applies to this attention item.',
+    should(result.items[0]?.judgement).be.undefined();
+  });
+
+  it('should give an ordinary task row no warden recommendation to restate it with', () => {
+    // Arrange / Act
+    const result = view({ boards: [board('s1', [boardItem({ source: 'task' })])] });
+
+    // Assert
+    should(result.items).have.length(1);
+    should(result.items[0]?.recommendation).be.undefined();
+  });
+
+  it("should still show a human's own request, with its own words and nothing added", () => {
+    // Arrange
+    const own = boardItem({ source: 'agent-raised', sourceRef: undefined, raisedBy: 'human', subject: 'May I push?' });
+
+    // Act
+    const result = view({ boards: [board('s1', [own])] });
+
+    // Assert
+    should(result.items[0]).match({ subject: 'May I push?', raisedBy: 'human' });
+    should(result.items[0]?.recommendation).be.undefined();
+    should(result.items[0]?.judgement).be.undefined();
+  });
+
+  it('should keep judging a row the warden does have an identity for', () => {
+    // Arrange / Act
+    const result = view({
+      boards: [board('s1', [boardItem({ sourceRef: 'warden:/r/a.md' })])],
+      verdicts: [verdict({})],
     });
+
+    // Assert
+    should(result.items[0]?.judgement?.state).eql('judged');
+    should(result.items[0]?.recommendation).not.be.undefined();
   });
 
   it('should default the coverage window when the caller states none', () => {
@@ -531,7 +562,7 @@ describe('anomalies with no board row', () => {
     // Assert
     should(result.outcome).eql('items');
     should(result.items.map(item => item.sessionId)).eql(['s1']);
-    should(result.items[0]?.judgement.stale).be.true();
+    should(result.items[0]?.judgement?.stale).be.true();
   });
 
   it('should surface an unanchored anomaly rather than let an old clearance cover it', () => {
@@ -546,7 +577,7 @@ describe('anomalies with no board row', () => {
 
     // Assert — "cannot be shown current" resolves to stale, never to fresh.
     should(result.outcome).eql('items');
-    should(result.items[0]?.judgement.stale).be.true();
+    should(result.items[0]?.judgement?.stale).be.true();
   });
 
   it('should still name the session when a stale clearance coincides with exhaustion', () => {
@@ -577,7 +608,7 @@ describe('anomalies with no board row', () => {
 
     // Assert
     should(result.items).have.length(1);
-    should(result.items[0]?.judgement.stale).be.true();
+    should(result.items[0]?.judgement?.stale).be.true();
   });
 
   it('should keep surfacing an anomaly the warden explicitly escalated', () => {
@@ -591,7 +622,7 @@ describe('anomalies with no board row', () => {
 
     // Assert
     should(result.items).have.length(1);
-    should(result.items[0]?.judgement.verdict).eql('needs_human');
+    should(result.items[0]?.judgement?.verdict).eql('needs_human');
   });
 
   it('should not duplicate an anomaly that already has a board row', () => {

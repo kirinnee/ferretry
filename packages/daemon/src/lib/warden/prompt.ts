@@ -68,8 +68,20 @@ export interface WardenMigrateCandidates {
   readonly candidates: readonly string[];
 }
 
+/**
+ * A teammate callsign as the reference grammar writes it.
+ *
+ * ONE OWNER for the `:name` token: the prompt names a session's teammate with
+ * it and the warden escalation puts the same token in an Attention item, where a
+ * reader's client turns a proved callsign into a link. Two spellings would mean
+ * one of them never resolves.
+ */
+export function wardenTeammateToken(teammate: string): string {
+  return `:${teammate}`;
+}
+
 const teammateOf = (config: WardenPromptSession['config']): string =>
-  config.teammate === undefined ? 'unknown' : `:${config.teammate}`;
+  config.teammate === undefined ? 'unknown' : wardenTeammateToken(config.teammate);
 
 /** The report-writing rules both prompts share. */
 function reportWritingRules(reportPath: string): readonly string[] {

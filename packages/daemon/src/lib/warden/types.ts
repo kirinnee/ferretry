@@ -90,6 +90,16 @@ export interface WardenSessionConfig {
   readonly wardenLineage?: boolean;
   readonly agent?: string;
   readonly model?: string;
+  /**
+   * The model a start RESOLVED when the account pinned none.
+   *
+   * Carried beside `model` rather than folded into it because the two answer
+   * different questions: `model` is what an operator configured, and this is what
+   * actually ran. A surface naming the node's model wants the resolved value —
+   * reporting "not recorded" for a session that is demonstrably running one is
+   * the kind of quiet blank a person reads as a broken screen.
+   */
+  readonly modelHint?: string;
   readonly intervalSeconds?: number;
 }
 

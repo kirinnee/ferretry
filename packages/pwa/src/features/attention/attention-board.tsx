@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ArrowRight,
   BadgeCheck,
@@ -28,13 +28,13 @@ import type {
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { cn } from '../../lib/class-names.ts';
-import { Button, Textarea } from '../../shell/primitives.tsx';
-import { actOnAttention, fetchAttention } from './attention-api.ts';
+import { Button } from '../../shell/primitives.tsx';
+import { AttentionAnswerControls } from './attention-answer-controls.tsx';
 
-type AttentionTone = AttentionAsk['kind'] | 'none' | 'unknown';
+export type AttentionTone = AttentionAsk['kind'] | 'none' | 'unknown';
 type Action = (id: string, action: AttentionResponse | null, dismissed?: boolean) => void;
 
-const kindMeta = (
+export const attentionKindMeta = (
   item: Pick<AttentionItem, 'source' | 'ask'>,
 ): { tone: AttentionTone; label: string; icon: typeof CircleAlert; action: string } => {
   if (!item.ask)
@@ -288,7 +288,7 @@ function AttentionRow({
   readonly onBackground: () => void;
   readonly onAction: Action;
 }) {
-  const kind = kindMeta(item);
+  const kind = attentionKindMeta(item);
   const KindIcon = kind.icon;
   return (
     <li
@@ -340,7 +340,7 @@ function AttentionRow({
             Cannot offer a response for this damaged attention item. Repair it before treating it as resolved.
           </p>
         ) : item.ask ? (
-          <AnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
+          <AttentionAnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
         ) : (
           <>
             <div className="flex justify-end">
@@ -399,129 +399,6 @@ function Part({
   );
 }
 
-function AnswerControls({
-  ask,
-  busy,
-  onRespond,
-}: {
-  readonly ask: AttentionAsk;
-  readonly busy: boolean;
-  readonly onRespond: (response: AttentionResponse) => void;
-}) {
-  const [text, setText] = useState('');
-  const [clarifying, setClarifying] = useState(false);
-  if (ask.kind === 'permission')
-    return (
-      <div className="flex flex-col gap-xs sm:flex-row sm:justify-end">
-        <Button
-          size="sm"
-          variant="danger"
-          className="min-h-[44px]"
-          disabled={busy}
-          onClick={() => onRespond({ kind: 'permission', decision: 'reject' })}
-        >
-          <X size={14} />
-          Reject
-        </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          className="min-h-[44px]"
-          disabled={busy}
-          onClick={() => onRespond({ kind: 'permission', decision: 'approve' })}
-        >
-          <Check size={14} />
-          Approve
-        </Button>
-      </div>
-    );
-  if (ask.kind === 'multiple-choice')
-    return (
-      <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0">
-        <legend className="sr-only">Pick an answer</legend>
-        {ask.options.map(option => (
-          <button
-            key={option.label}
-            type="button"
-            className="kt-attn-option"
-            disabled={busy}
-            onClick={() => onRespond({ kind: 'multiple-choice', choice: option.label })}
-          >
-            <span className="kt-attn-option__body">
-              <span className="kt-attn-option__label">{option.label}</span>
-              {option.description && <span className="kt-attn-option__hint">{option.description}</span>}
-            </span>
-          </button>
-        ))}
-      </fieldset>
-    );
-  if (ask.kind === 'answer-review')
-    return clarifying ? (
-      <div className="flex flex-col gap-xs">
-        <Textarea
-          rows={3}
-          value={text}
-          onChange={event => setText(event.target.value)}
-          aria-label="Clarification request"
-          placeholder="What needs clarifying?"
-        />
-        <div className="flex flex-col gap-xs sm:flex-row sm:justify-end">
-          <Button size="sm" variant="ghost" className="min-h-[44px]" onClick={() => setClarifying(false)}>
-            Back
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            className="min-h-[44px]"
-            disabled={busy || !text.trim()}
-            onClick={() => onRespond({ kind: 'answer-review', verdict: 'clarify', clarification: text })}
-          >
-            Ask to clarify
-          </Button>
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col gap-xs sm:flex-row sm:justify-end">
-        <Button size="sm" className="min-h-[44px]" disabled={busy} onClick={() => setClarifying(true)}>
-          <MessageCircleQuestion size={14} />
-          Needs clarification
-        </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          className="min-h-[44px]"
-          disabled={busy}
-          onClick={() => onRespond({ kind: 'answer-review', verdict: 'good' })}
-        >
-          <BadgeCheck size={14} />
-          The answer is good
-        </Button>
-      </div>
-    );
-  return (
-    <div className="flex flex-col gap-xs">
-      <Textarea
-        rows={3}
-        value={text}
-        onChange={event => setText(event.target.value)}
-        aria-label="Your answer"
-        placeholder="Write your answer…"
-      />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          variant="primary"
-          className="min-h-[44px]"
-          disabled={busy || !text.trim()}
-          onClick={() => onRespond({ kind: 'open-question', answer: text })}
-        >
-          Send answer
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function ResolutionAudit({ items }: { readonly items: readonly ResolvedAttentionItem[] }) {
   return (
     <details className="group mt-md border-t border-border-soft pt-row-y">
@@ -570,57 +447,15 @@ function ResolutionAudit({ items }: { readonly items: readonly ResolvedAttention
   );
 }
 
-export interface AttentionPageProps {
-  readonly connection: DaemonConnection;
-  readonly sessionId: string;
-}
-
-/** Live attention page. Connection and session are explicit, so a daemon switch clears rather than reuses another daemon's ledger. */
-export function AttentionPage({ connection, sessionId }: AttentionPageProps) {
-  const [snapshot, setSnapshot] = useState<AttentionSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setSnapshot(await fetchAttention(connection, sessionId));
-      setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Attention is unavailable on this daemon.');
-    } finally {
-      setLoading(false);
-    }
-  }, [connection, sessionId]);
-  useEffect(() => {
-    setSnapshot(null);
-    void load();
-  }, [load]);
-  const onAction = useCallback(
-    async (id: string, response: AttentionResponse | null, dismissed = false) => {
-      setBusyId(id);
-      try {
-        const action = dismissed
-          ? { action: 'dismiss' as const, id }
-          : { action: 'resolve' as const, id, ...(response ? { response } : {}) };
-        setSnapshot(await actOnAttention(connection, sessionId, action));
-        setError(null);
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : 'Could not update attention.');
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [connection, sessionId],
-  );
-  return (
-    <AttentionBoard
-      connection={connection}
-      snapshot={snapshot}
-      loading={loading}
-      error={error}
-      busyId={busyId}
-      onAction={onAction}
-    />
-  );
-}
+/*
+ * THERE IS NO `AttentionPage` HERE ANY MORE, AND THAT IS THE POINT.
+ *
+ * It carried its own fetch, its own parse, its own error type and its own
+ * session-mismatch check — a second definition of "what this session's Attention
+ * is", beside `lib/attention-client.ts`, which additionally fences a re-pair and
+ * feeds the badge from the same store. Two definitions of one fact is the defect
+ * `docs/standards/fact-ownership/index.md` exists to remove, so the wrapper and
+ * its transport are gone rather than kept in sync. The live surface is
+ * `attention-action-modal.tsx` over `DaemonAttentionClient`; this board stays a
+ * pure, render-testable ledger with its data handed to it.
+ */

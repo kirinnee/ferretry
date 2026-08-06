@@ -39,6 +39,49 @@ describe('WardenAttention', () => {
     expect(tree).not.toContain('Nothing is waiting on you right now.');
   });
 
+  it('says nothing on the warden’s behalf about an item the warden never judged', () => {
+    // A human's own permission request is ordinary session Attention. The daemon
+    // now omits `judgement` and `recommendation` for it, and absence must render
+    // as absence: no chip, no judge line, no *Suggested next step*, and above
+    // all no `nudge` — a warden-shaped instruction nobody ever issued.
+    const ordinary = {
+      id: 'A9',
+      sessionId: 'session-a',
+      teammate: 'ms-98',
+      subject: 'Approve the pairing request',
+      why: 'This browser needs a decision before it can continue.',
+      waitingSince: '2026-07-31T11:30:00.000Z',
+    };
+    const renderer = render(
+      <WardenAttention connection={connection} state={{ status: 'ready', view: { items: [ordinary] } }} now={NOW} />,
+    );
+    const tree = JSON.stringify(renderer.toJSON());
+
+    // Its own content is all there…
+    expect(tree).toContain('Approve the pairing request');
+    expect(tree).toContain('This browser needs a decision before it can continue.');
+    // …and none of the warden's.
+    expect(tree).not.toContain('Suggested next step');
+    expect(tree).not.toContain('Nudge session');
+    expect(tree).not.toContain('No matching judgement');
+    expect(tree).not.toContain('No matching warden judgement for this one.');
+    expect(tree).not.toContain('Judge unknown');
+  });
+
+  it('still shows a judgement the warden explicitly made, including “none”', () => {
+    // `none` is warden OUTPUT — "I looked and found no matching verdict" — and
+    // is not the same claim as an absent field. Only the absent one is silent.
+    const judged = { ...item, judgement: { state: 'none' as const }, recommendation: undefined };
+    const renderer = render(
+      <WardenAttention connection={connection} state={{ status: 'ready', view: { items: [judged] } }} now={NOW} />,
+    );
+    const tree = JSON.stringify(renderer.toJSON());
+
+    expect(tree).toContain('No matching judgement');
+    expect(tree).toContain('No matching warden judgement for this one.');
+    expect(tree).not.toContain('Suggested next step');
+  });
+
   it('distinguishes a clean sweep from no sweep or a degraded empty result', () => {
     expect(attentionOutcome({ items: [], lastSweepAt: '2026-07-31T11:59:00.000Z' })).toBe('clean-sweep');
     expect(attentionOutcome({ items: [] })).toBe('no-sweep');

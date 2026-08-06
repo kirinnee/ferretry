@@ -4,12 +4,12 @@ import should from 'should';
 import { registerAttentionCommands } from '../../../src/lib/attention/commands';
 import { AttentionController } from '../../../src/lib/attention/controller';
 import {
-  CapturingOutput,
-  RecordingAttentionGateway,
-  SESSION,
   agentItem,
+  CapturingOutput,
   humanItem,
+  RecordingAttentionGateway,
   resolvedItem,
+  SESSION,
   snapshot,
 } from './fixtures';
 
@@ -249,6 +249,32 @@ describe('attention command surface', () => {
 
     // Assert — the reader of an attention item has not been following the session; the help says so.
     should(help).containEql('The reader has NOT been following this session');
+  });
+
+  it('should teach that an addressed item must be resolved or dismissed immediately, not left open', async () => {
+    // Arrange
+    let help = '';
+    const gateway = new RecordingAttentionGateway(board);
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({
+      writeOut: text => {
+        help += text;
+      },
+      writeErr: () => {},
+    });
+    registerAttentionCommands(program, new AttentionController(gateway, new CapturingOutput(), SESSION));
+
+    // Act
+    await should(program.parseAsync(['node', 'fy', 'attention', '--help'])).be.rejected();
+
+    // Assert — items never time out on their own, but must not outlive their reason. Answering or
+    // dismissing on the board already resolves it; a blocker cleared some other way still needs the
+    // raising agent to close it itself, immediately — there is no wording left that could be read as
+    // "an addressed item may stay open".
+    should(help).containEql('Answering or dismissing on the board already');
+    should(help).containEql('the raising agent must run `done` or `dismiss` itself, immediately');
+    should(help).containEql('whose reason is gone but is still open is a bug');
+    should(help).not.containEql('never auto-clear');
   });
 
   it('should explain the ask kinds in the add help', async () => {
