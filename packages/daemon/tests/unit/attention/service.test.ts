@@ -3,6 +3,7 @@ import type {
   AttentionLedger,
   AttentionLedgerRepository,
   AttentionMutation,
+  AttentionRaisedObserver,
 } from '../../../src/lib/attention/index.ts';
 import { AttentionService, isAttentionSessionId } from '../../../src/lib/attention/service.ts';
 import should from 'should';
@@ -28,13 +29,31 @@ class MemoryRepository implements AttentionLedgerRepository {
   }
 }
 
-function createService(repository = new MemoryRepository()): {
+class Observer implements AttentionRaisedObserver {
+  readonly calls: Array<{ sessionId: string; itemId: string; count: number }> = [];
+
+  async raised(sessionId: string, item: { id: string }, snapshot: { count: number }): Promise<void> {
+    this.calls.push({ sessionId, itemId: item.id, count: snapshot.count });
+  }
+}
+
+function createService(
+  repository = new MemoryRepository(),
+  observer: AttentionRaisedObserver = new Observer(),
+): {
   readonly repository: MemoryRepository;
   readonly service: AttentionService;
+  readonly observer: AttentionRaisedObserver;
 } {
   return {
     repository,
-    service: new AttentionService(repository, { now: () => NOW }, { has: async sessionId => sessionId === SESSION }),
+    observer,
+    service: new AttentionService(
+      repository,
+      { now: () => NOW },
+      { has: async sessionId => sessionId === SESSION },
+      observer,
+    ),
   };
 }
 
@@ -149,6 +168,68 @@ describe('Attention service', () => {
     should(dismissed).containDeep({ ok: true, changed: false, change: 'unchanged' });
     should(resolved).containDeep({ ok: true, changed: false, change: 'unchanged' });
     should(repository.ledgers.get(SESSION)?.entries).have.length(2);
+  });
+
+  it('should observe only a committed creation and never a refresh, answer, or refusal', async () => {
+    // Arrange
+    const observer = new Observer();
+    const { repository, service } = createService(new MemoryRepository(), observer);
+
+    // Act
+    const created = await service.raise(SESSION, request, AGENT);
+    const duplicate = await service.raise(SESSION, request, AGENT);
+    const answered = await service.answer(
+      SESSION,
+      'A1',
+      { kind: 'permission', decision: 'approve' },
+      { kind: 'human' },
+    );
+    const refused = await service.raise(SESSION, request, {
+      kind: 'agent',
+      sessionId: 'another-session',
+      name: 'Mallory',
+    });
+
+    // Assert
+    should(created).containDeep({ ok: true, change: 'created' });
+    should(duplicate).containDeep({ ok: true, change: 'unchanged' });
+    should(answered).containDeep({ ok: true, change: 'answered' });
+    should(refused).containDeep({ ok: false, error: { code: 'forbidden' } });
+    should(observer.calls).deepEqual([{ sessionId: SESSION, itemId: 'A1', count: 1 }]);
+    should(repository.ledgers.get(SESSION)?.entries).have.length(1);
+  });
+
+  it('should not observe a stable-source refresh', async () => {
+    // Arrange
+    const observer = new Observer();
+    const { service } = createService(new MemoryRepository(), observer);
+    const daemon = { kind: 'daemon' as const, cause: 'system' as const };
+    const stable = { ...request, source: 'task' as const, sourceRef: 'F12', ask: undefined };
+
+    // Act
+    const created = await service.raise(SESSION, stable, daemon);
+    const refreshed = await service.raise(SESSION, { ...stable, subject: 'Revised release request' }, daemon);
+
+    // Assert
+    should(created).containDeep({ ok: true, change: 'created' });
+    should(refreshed).containDeep({ ok: true, change: 'refreshed' });
+    should(observer.calls).deepEqual([{ sessionId: SESSION, itemId: 'A1', count: 1 }]);
+  });
+
+  it('should return the committed mutation when an observer throws synchronously', async () => {
+    // Arrange
+    const { repository, service } = createService(new MemoryRepository(), {
+      raised: () => {
+        throw new Error('presenter unavailable');
+      },
+    });
+
+    // Act
+    const actual = await service.raise(SESSION, request, AGENT);
+
+    // Assert
+    should(actual).containDeep({ ok: true, change: 'created', snapshot: { count: 1 } });
+    should(repository.ledgers.get(SESSION)?.entries).have.length(1);
   });
 
   it('should accept only path-safe attention session identifiers', () => {

@@ -41,6 +41,7 @@ describe('FileAttentionLedgerRepository', () => {
       repository,
       { now: () => '2026-07-31T10:00:00Z' },
       { has: async sessionId => sessionId === 'session-1' },
+      { raised: async () => undefined },
     );
 
     // Act
@@ -61,6 +62,7 @@ describe('FileAttentionLedgerRepository', () => {
       repository,
       { now: () => '2026-07-31T10:00:00Z' },
       { has: async sessionId => sessionId === 'session-1' },
+      { raised: async () => undefined },
     );
 
     // Act

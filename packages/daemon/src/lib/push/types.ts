@@ -82,7 +82,8 @@ export interface PushDelivery {
  * `expired` is the load-bearing one: a push service answering 404 or 410 is telling us this endpoint
  * will never work again, which is the only signal that a stored enrolment should be dropped. Every
  * other failure — a timeout, a 5xx, a refused connection — says nothing about the endpoint and must
- * not delete it.
+ * not delete it. `delivered` means endpoint acceptance, never proof that a person observed the
+ * notification.
  */
 export type PushDeliveryOutcome = 'delivered' | 'expired' | 'failed';
 

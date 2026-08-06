@@ -233,7 +233,12 @@ class FakeLedgerRepository implements AttentionLedgerRepository {
 
 /** An attention service over an in-memory ledger, with a fixed instant. */
 export function attentionService(repository: AttentionLedgerRepository = new FakeLedgerRepository()): AttentionService {
-  return new AttentionService(repository, { now: () => AT }, { has: async sessionId => sessionId === 's1' });
+  return new AttentionService(
+    repository,
+    { now: () => AT },
+    { has: async sessionId => sessionId === 's1' },
+    { raised: async () => undefined },
+  );
 }
 
 /**

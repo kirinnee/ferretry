@@ -186,6 +186,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
         : undefined,
   },
   attention: attentionService(),
+  notifications: {
+    notifyDirect: async sessionId => ({ ok: true, value: { sessionId, delivered: 0 } }),
+  },
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
   catalogs: {
@@ -285,7 +288,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 106, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 107, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -379,6 +382,7 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
+      'POST /v1/sessions/:sessionId/notify',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
       'GET /v1/tasks',
