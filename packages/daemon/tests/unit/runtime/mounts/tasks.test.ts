@@ -1,6 +1,11 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse } from '@ferretry/protocol';
+import {
+  MAX_SESSION_SEARCH_QUERY_LENGTH,
+  type ScopedTaskDetailResponse,
+  type ScopedTaskView,
+  type SessionTaskListResponse,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -346,6 +351,158 @@ describe('the task board mount', () => {
       should((jsonBody(missed) as unknown as SessionTaskListResponse).tasks).be.empty();
       // The task declares no repo, so a repo filter cannot match it.
       should((jsonBody(byRepo) as unknown as SessionTaskListResponse).tasks).be.empty();
+    });
+
+    it('should narrow a board by free text, on fields the summary deliberately does not carry', async () => {
+      // Arrange
+      const dispatch = dispatcher();
+      await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks', { ...CREATE, description: 'the relay round trip is the cost that matters' }),
+      );
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, title: 'Compress the browser HUD bar' }));
+      await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks', {
+          ...CREATE,
+          title: 'Keep the original wording',
+          ask: { text: 'the human uniquely requested a provenance check', source: 'human' },
+        }),
+      );
+      const clarified = jsonBody(
+        await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, title: 'Clarified later' })),
+      ) as unknown as ScopedTaskView;
+      await dispatch.dispatch(
+        post(`/v1/sessions/s1/tasks/${clarified.id}`, {
+          action: 'clarify',
+          text: 'reconcile the edge case after midnight',
+          source: 'human-follow-up',
+        }),
+      );
+      const listing = (q: string) =>
+        dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human, query: [['q', q]] }));
+
+      // Act
+      const byDescription = await listing('round trip');
+      const byTitle = await listing('HUD');
+      const byNumber = await listing('f1');
+      const byAsk = await listing('uniquely requested');
+      const byClarification = await listing('after midnight');
+      const missed = await listing('nothing here matches');
+
+      // Assert: the description is not on a summary row at all, so this match could only have been
+      // made where the prose already is.
+      should((jsonBody(byDescription) as unknown as SessionTaskListResponse).tasks).have.length(1);
+      should((jsonBody(byTitle) as unknown as SessionTaskListResponse).tasks).have.length(1);
+      should((jsonBody(byNumber) as unknown as SessionTaskListResponse).tasks).have.length(1);
+      should((jsonBody(byAsk) as unknown as SessionTaskListResponse).tasks).have.length(1);
+      should((jsonBody(byClarification) as unknown as SessionTaskListResponse).tasks).have.length(1);
+      should((jsonBody(missed) as unknown as SessionTaskListResponse).tasks).be.empty();
+    });
+
+    it('should answer a description-only search in ONE request where the client needed one per task', async () => {
+      // This is the N+1 the row is about, measured. The list route drops description, ask and
+      // clarifications, so a client matching on them had to re-read every row — and one unreadable
+      // row then rejected the whole result set.
+      // Arrange
+      const dispatch = dispatcher();
+      const titles = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
+      for (const [position, title] of titles.entries()) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks', {
+            ...CREATE,
+            title,
+            description: position === 3 ? 'the needle lives only in prose' : 'nothing to find',
+          }),
+        );
+      }
+
+      // Act: what a client without `?q=` had to do.
+      let routeRequests = 0;
+      const counted = async (routeRequest: ReturnType<typeof request>) => {
+        routeRequests += 1;
+        return await dispatch.dispatch(routeRequest);
+      };
+      const list = await counted(request({ path: '/v1/sessions/s1/tasks', headers: human }));
+      const rows = (jsonBody(list) as unknown as SessionTaskListResponse).tasks;
+      const details = await Promise.all(
+        rows.map(async row => {
+          return await counted(request({ path: `/v1/sessions/s1/tasks/${row.id}`, headers: human }));
+        }),
+      );
+      const before = routeRequests;
+      const crawled = details
+        .map(response => jsonBody(response) as unknown as ScopedTaskDetailResponse)
+        .filter(detail => detail.task.description.includes('needle'));
+
+      // Act: what one request now answers.
+      routeRequests = 0;
+      const searched = await counted(
+        request({ path: '/v1/sessions/s1/tasks', headers: human, query: [['q', 'needle']] }),
+      );
+      const after = routeRequests;
+
+      // Assert
+      should(before).eql(titles.length + 1);
+      should(after).eql(1);
+      should(crawled).have.length(1);
+      should((jsonBody(searched) as unknown as SessionTaskListResponse).tasks.map(row => row.title)).eql(['delta']);
+    });
+
+    it('should compose a free-text search with the exact-match filters rather than replacing them', async () => {
+      // Arrange
+      const dispatch = dispatcher();
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, title: 'searchable feature' }));
+      const listing = (query: readonly (readonly [string, string])[]) =>
+        dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human, query }));
+
+      // Act
+      const both = await listing([
+        ['q', 'searchable'],
+        ['kind', 'feature'],
+      ]);
+      const filterMisses = await listing([
+        ['q', 'searchable'],
+        ['kind', 'bug'],
+      ]);
+
+      // Assert
+      should((jsonBody(both) as unknown as SessionTaskListResponse).tasks).have.length(1);
+      should((jsonBody(filterMisses) as unknown as SessionTaskListResponse).tasks).be.empty();
+    });
+
+    it('should reject current-session free text on the fleet route', async () => {
+      // Arrange
+      const dispatch = dispatcher({ sessionIds: ['s1', 's2'] });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, title: 'findable' }));
+      await dispatch.dispatch(post('/v1/sessions/s2/tasks', { ...CREATE, title: 'unrelated' }));
+
+      // Act
+      const response = await dispatch.dispatch(
+        request({ path: '/v1/tasks', headers: human, query: [['q', 'findable']] }),
+      );
+
+      // Assert
+      should(response.status).equal(400);
+      should(jsonBody(response)).have.property('code', 'invalid_query_scope');
+    });
+
+    it('should refuse a search term that is blank or longer than a person types', async () => {
+      // A blank box is a question nobody asked; answering it with the whole board is the one result a
+      // reader cannot act on.
+      // Arrange
+      const dispatch = dispatcher();
+      const listing = (q: string) =>
+        dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human, query: [['q', q]] }));
+
+      // Act
+      const blank = await listing('   ');
+      const control = await listing('two\nlines');
+      const overLong = await listing('x'.repeat(MAX_SESSION_SEARCH_QUERY_LENGTH + 1));
+
+      // Assert
+      should(blank.status).equal(400);
+      should(jsonBody(blank)).have.property('code', 'invalid_query');
+      should(control.status).equal(400);
+      should(overLong.status).equal(400);
     });
 
     it('should refuse a filter it does not implement rather than answering with the whole board', async () => {

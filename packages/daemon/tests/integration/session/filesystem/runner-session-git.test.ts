@@ -5,6 +5,7 @@ import should from 'should';
 import { BunGitRunner, GitCommandError } from '../../../../src/adapters/git/index.ts';
 import { RunnerSessionGit } from '../../../../src/adapters/session/filesystem/index.ts';
 import { MAX_DIFF_SIDE_BYTES } from '../../../../src/lib/session/filesystem/index.ts';
+import type { GitInvocation, GitRunner } from '../../../../src/lib/worktrees/ports.ts';
 import {
   cleanupTempDirectories,
   setupGit,
@@ -692,5 +693,153 @@ describe('the hardened runner as this viewer needs it', () => {
     should(tracked).be.true();
     should(new TextDecoder().decode(entry?.bytes)).eql('body\n');
     should(name.includes(NUL)).be.false();
+  });
+});
+
+describe('RunnerSessionGit.listFiles', () => {
+  it('should list tracked and untracked files while Git itself removes the ignored ones', async () => {
+    // The gitignore rule is applied by the tool that defines it. Reimplementing that matching to build
+    // a search index is how a build directory full of credentials ends up in one.
+    // Arrange
+    const { root } = await tempRepository('list-files');
+    await writeFile(path.join(root, '.gitignore'), 'dist/\n*.log\n');
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    await mkdir(path.join(root, 'dist'), { recursive: true });
+    await writeFile(path.join(root, 'src', 'app.ts'), 'export const x = 1;\n');
+    await writeFile(path.join(root, 'src', 'untracked.ts'), 'export const y = 2;\n');
+    await writeFile(path.join(root, 'dist', 'bundle.js'), 'built\n');
+    await writeFile(path.join(root, 'debug.log'), 'noisy\n');
+    await setupGit(root, 'add', 'src/app.ts');
+
+    // Act
+    const listed = await git.listFiles(root, MAX_DIFF_SIDE_BYTES);
+
+    // Assert
+    should([...listed.paths].sort()).eql(['.gitignore', 'README.md', 'src/app.ts', 'src/untracked.ts']);
+    should(listed.truncated).be.false();
+  });
+
+  it('should never name a path inside .git or an ignored node_modules', async () => {
+    // The two directories the whole crawl used to die on.
+    // Arrange
+    const { root } = await tempRepository('list-files-denied');
+    await writeFile(path.join(root, '.gitignore'), 'node_modules/\n');
+    await mkdir(path.join(root, 'node_modules', 'left-pad'), { recursive: true });
+    await writeFile(path.join(root, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
+
+    // Act
+    const listed = await git.listFiles(root, MAX_DIFF_SIDE_BYTES);
+
+    // Assert
+    should(listed.paths.some(entry => entry.startsWith('.git/'))).be.false();
+    should(listed.paths.some(entry => entry.startsWith('node_modules/'))).be.false();
+    should(listed.paths).containEql('README.md');
+  });
+
+  it('should still name an UNIGNORED node_modules, so the daemon denylist is what refuses it', async () => {
+    // Git has no opinion about `node_modules`; the unconditional denylist does. Proving Git reports it
+    // is what proves the two gates are separate, rather than one accidentally covering for the other.
+    // Arrange
+    const { root } = await tempRepository('list-files-unignored');
+    await mkdir(path.join(root, 'node_modules'), { recursive: true });
+    await writeFile(path.join(root, 'node_modules', 'thing.js'), 'x\n');
+
+    // Act
+    const listed = await git.listFiles(root, MAX_DIFF_SIDE_BYTES);
+
+    // Assert
+    should(listed.paths).containEql('node_modules/thing.js');
+  });
+
+  it('should bound itself to a session started in a SUBDIRECTORY, never listing its siblings', async () => {
+    // Arrange
+    const { root } = await tempRepository('list-files-sub');
+    await mkdir(path.join(root, 'packages', 'cli'), { recursive: true });
+    await mkdir(path.join(root, 'packages', 'daemon'), { recursive: true });
+    await writeFile(path.join(root, 'packages', 'cli', 'mine.ts'), 'x\n');
+    await writeFile(path.join(root, 'packages', 'daemon', 'theirs.ts'), 'y\n');
+
+    // Act
+    const listed = await git.listFiles(path.join(root, 'packages', 'cli'), MAX_DIFF_SIDE_BYTES);
+
+    // Assert
+    should(listed.paths).eql(['mine.ts']);
+  });
+
+  it('should report a path holding a newline as one path rather than as two', async () => {
+    // Arrange
+    const { root } = await tempRepository('list-files-newline');
+    await writeFile(path.join(root, 'we\nird.ts'), 'x\n');
+
+    // Act
+    const listed = await git.listFiles(root, MAX_DIFF_SIDE_BYTES);
+
+    // Assert
+    should(listed.paths).containEql('we\nird.ts');
+    should(listed.paths).have.length(2);
+  });
+
+  it('should say when its own output was capped rather than presenting a short list as whole', async () => {
+    // Arrange
+    const { root } = await tempRepository('list-files-capped');
+    for (let index = 0; index < 40; index += 1) {
+      await writeFile(path.join(root, `file-${index}-with-a-long-enough-name.ts`), 'x\n');
+    }
+
+    // Act
+    const listed = await git.listFiles(root, 64);
+
+    // Assert
+    should(listed.truncated).be.true();
+    should(listed.paths.length).be.below(41);
+  });
+
+  it('should refuse rather than answer when Git could not be run at all', async () => {
+    // The domain turns this throw into an index that reports itself incomplete; answering "no files"
+    // here would make a broken interrogation indistinguishable from an empty tree.
+    // Arrange
+    const broken = await gitOnPath('#!/bin/sh\nexit 3\n');
+    const plain = await tempDirectory('list-files-broken');
+
+    // Act
+    const failure = await broken.listFiles(plain, MAX_DIFF_SIDE_BYTES).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceof(GitCommandError);
+  });
+
+  it('should turn a runner timeout into an explicit failure even when the child reported exit zero', async () => {
+    // The domain catches this named failure and reports a partial/unreadable index. Treating exit zero as
+    // success would turn a killed process's short output into a confidently complete search result.
+    // Arrange
+    const invocations: GitInvocation[] = [];
+    const runner: GitRunner = {
+      run: invocation => {
+        invocations.push(invocation);
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: encode('partial.ts\0'),
+          stderr: '',
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          timedOut: true,
+        });
+      },
+    };
+    const subject = new RunnerSessionGit(runner);
+
+    // Act
+    const failure = await subject.listFiles('/pinned/session', 128).catch((error: unknown) => error);
+
+    // Assert
+    should(failure).be.instanceof(GitCommandError);
+    should((failure as GitCommandError).execution.timedOut).be.true();
+    should((failure as Error).message).match(/timed out/u);
+    should(invocations).have.length(1);
+    should(invocations[0]?.args).eql(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+    should(invocations[0]?.maxStdoutBytes).eql(128);
   });
 });

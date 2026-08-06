@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { SessionFileIndexResponseSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { sessionFilesystemRoutes } from '../../../../src/lib/runtime/index.ts';
@@ -391,5 +392,156 @@ describe('the diff route', () => {
     // Assert
     should(response.status).eql(403);
     should(jsonBody(response)).have.property('code', 'escapes_root');
+  });
+});
+
+/**
+ * The whole-session file index.
+ *
+ * The first case is the before/after in one place: a client that walked the tree through the listing
+ * route is refused at the FIRST directory of any Git checkout, and the same fixture answers 200 through
+ * the index route with the files and a count of what it withheld. That difference is the row's file half.
+ */
+describe('the working-tree index route', () => {
+  /** The checkout every real session looks like: a `.git`, a `node_modules`, and some source. */
+  const checkout = () =>
+    treeOf(
+      [
+        '',
+        directory([
+          { name: '.git', type: 'dir' },
+          { name: 'node_modules', type: 'dir' },
+          { name: 'src', type: 'dir' },
+          { name: 'README.md', type: 'file' },
+        ]),
+      ],
+      ['.git', directory([{ name: 'config', type: 'file' }])],
+      ['node_modules', directory([{ name: 'left-pad', type: 'dir' }])],
+      ['src', directory([{ name: 'app.ts', type: 'file' }])],
+      ['src/app.ts', textFile('x')],
+    );
+
+  const notARepo: SessionGitScript = { repoInfo: () => ({ repo: false, prefix: '', hasHead: false }) };
+
+  it('should answer a checkout the per-directory crawl could never get past', async () => {
+    // Arrange: one fixture, both readings.
+    const dispatch = fixture({ tree: checkout() }, notARepo);
+
+    // Act: what a recursive client crawl did — root plus one request per directory, never per file.
+    let crawlRequests = 0;
+    const crawl = async (path: string | undefined) => {
+      crawlRequests += 1;
+      return await dispatch({
+        path: '/v1/sessions/s1/fs',
+        ...(path === undefined ? {} : { query: [['path', path]] as const }),
+        headers: human,
+      });
+    };
+    const root = jsonBody(await crawl(undefined)) as { entries: { name: string; type: string }[] };
+    const queue = root.entries.filter(entry => entry.type === 'dir').map(entry => entry.name);
+    const crawled = [];
+    while (queue.length > 0) {
+      const path = queue.shift();
+      if (path === undefined) break;
+      const response = await crawl(path);
+      crawled.push(response);
+      if (response.status !== 200) continue;
+      const body = jsonBody(response) as { entries: { name: string; type: string }[] };
+      queue.push(...body.entries.filter(entry => entry.type === 'dir').map(entry => `${path}/${entry.name}`));
+    }
+    let indexRequests = 0;
+    indexRequests += 1;
+    const indexed = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+
+    // Assert: the crawl meets a 403 it cannot tell from a failure, and it takes one request per
+    // directory to get there. The index is ONE request and returns the files with the refusal counted.
+    should(crawled.filter(response => response.status === 403)).have.length(2);
+    should(crawlRequests).eql(4);
+    should(indexRequests).eql(1);
+    should(indexed.status).eql(200);
+    should(jsonBody(indexed)).match({
+      v: 1,
+      sessionId: 's1',
+      files: [
+        { path: 'README.md', name: 'README.md' },
+        { path: 'src/app.ts', name: 'app.ts' },
+      ],
+      coverage: 'complete',
+      skipped: [{ reason: 'excluded', count: 2 }],
+    });
+  });
+
+  it('should produce a document its own protocol schema accepts', async () => {
+    // Arrange
+    const dispatch = fixture({ tree: checkout() }, notARepo);
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+
+    // Assert
+    should(SessionFileIndexResponseSchema.safeParse(jsonBody(response)).success).be.true();
+  });
+
+  it('should take the root from the session document and never cache the answer', async () => {
+    // Arrange
+    const pinner = new FakeRootPinner({ tree: checkout() });
+    const routes = sessionFilesystemRoutes(
+      new SessionFilesystem(pinner, new FakeSessionGit(notARepo)),
+      sessionDirectory([sessionView('s1')]),
+    );
+    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
+
+    // Act
+    const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/fs/index', headers: human }));
+
+    // Assert
+    should(pinner.pinnedCwds).eql([SESSION_CWD]);
+    should(response.headers.get('cache-control')).eql('no-store');
+  });
+
+  it('should be reachable behind the one-segment fs pattern rather than shadowed by it', async () => {
+    // Arrange
+    const dispatch = fixture({ tree: checkout() }, notARepo);
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+
+    // Assert: a shadowed route would have been served by `list`, whose body has `entries`.
+    should(jsonBody(response)).have.property('files');
+    should(jsonBody(response)).not.have.property('entries');
+  });
+
+  it('should refuse a session the daemon does not hold', async () => {
+    // Arrange
+    const dispatch = fixture({ tree: checkout() }, notARepo);
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/absent/fs/index', headers: human });
+
+    // Assert
+    should(response.status).eql(404);
+  });
+
+  it('should keep the warden away from a map of the human’s working tree', async () => {
+    // Arrange
+    const dispatch = fixture({ tree: checkout() }, notARepo);
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: wardenToken });
+
+    // Assert
+    should(response.status).be.aboveOrEqual(400);
+  });
+
+  it('should restate a domain refusal as the status a client can act on', async () => {
+    // Arrange
+    const dispatch = fixture({ pinError: new FsError('unsupported', 'no pinning here') }, notARepo);
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+
+    // Assert
+    should(response.status).eql(501);
+    should(jsonBody(response)).have.property('code', 'unsupported');
   });
 });

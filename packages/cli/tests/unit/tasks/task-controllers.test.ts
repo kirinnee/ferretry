@@ -249,6 +249,23 @@ describe('listing tasks', () => {
     should(gateway.calls[0]?.arguments[0]).eql({ sessionId: null });
   });
 
+  it('should refuse a current-session query on the fleet scope before contacting the daemon', async () => {
+    // Arrange
+    const gateway = new FakeGateway({ ...sessionBoard(), sessionId: null });
+
+    // Act
+    const failure = new TaskListController(gateway, new CapturedOutput()).run({
+      scope: { sessionId: null },
+      options: { query: 'needle' },
+      markdown: false,
+      json: false,
+    });
+
+    // Assert
+    await should(failure).be.rejectedWith(/cannot be combined with --all/u);
+    should(gateway.calls).be.empty();
+  });
+
   it('should refuse an unknown view before contacting the daemon', async () => {
     // Arrange
     const gateway = new FakeGateway(sessionBoard());

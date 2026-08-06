@@ -11,6 +11,7 @@ import {
   type PinnedTarget,
   type RenderedDiff,
   type SessionChangesView,
+  type SessionFileList,
   type SessionGit,
   type SessionRepoInfo,
   type SessionRootPinner,
@@ -44,7 +45,7 @@ export interface FakeNode {
   readonly entries?: readonly PinnedDirectoryEntry[];
   readonly truncated?: boolean;
   /** Raised instead of opening, so a test can stage any refusal the real walk can produce. */
-  readonly error?: FsError;
+  readonly error?: Error;
 }
 
 export type FakeTree = Map<string, FakeNode>;
@@ -62,6 +63,7 @@ function identitiesFor(rel: string): readonly ComponentIdentity[] {
 
 class FakePinnedTarget implements PinnedTarget {
   closed = false;
+  readonly readCalls: number[] = [];
 
   constructor(
     readonly metadata: PinnedTarget['metadata'],
@@ -72,6 +74,7 @@ class FakePinnedTarget implements PinnedTarget {
   ) {}
 
   async read(maxBytes: number): Promise<Uint8Array | undefined> {
+    this.readCalls.push(maxBytes);
     return this.metadata.size > maxBytes ? undefined : this.bytes;
   }
 
@@ -175,6 +178,8 @@ export class FakeRootPinner implements SessionRootPinner {
 
 export interface SessionGitScript {
   readonly repoInfo?: (cwd: string) => SessionRepoInfo;
+  /** May throw, which is how a repository Git cannot answer for is staged. */
+  readonly listFiles?: (cwd: string, maxBytes: number) => SessionFileList;
   /** `call` counts from one, so a test can make a path become ignored between two verdicts. */
   readonly ignoredPaths?: (cwd: string, rels: readonly string[], call: number) => ReadonlySet<string>;
   readonly isTracked?: (cwd: string, rel: string) => boolean | Promise<boolean>;
@@ -193,6 +198,7 @@ export class FakeSessionGit implements SessionGit {
     readonly oldSide: DiffSide | undefined;
     readonly newSide: DiffSide | undefined;
   }> = [];
+  readonly listCalls: Array<{ readonly cwd: string; readonly maxBytes: number }> = [];
   readonly cwds: string[] = [];
 
   constructor(private readonly script: SessionGitScript = {}) {}
@@ -200,6 +206,11 @@ export class FakeSessionGit implements SessionGit {
   async repoInfo(cwd: string): Promise<SessionRepoInfo> {
     this.cwds.push(cwd);
     return this.script.repoInfo?.(cwd) ?? IN_REPO;
+  }
+
+  async listFiles(cwd: string, maxBytes: number): Promise<SessionFileList> {
+    this.listCalls.push({ cwd, maxBytes });
+    return this.script.listFiles?.(cwd, maxBytes) ?? { paths: [], truncated: false };
   }
 
   async ignoredPaths(cwd: string, rels: readonly string[]): Promise<ReadonlySet<string>> {
