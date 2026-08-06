@@ -235,6 +235,24 @@ export async function waitForDaemonFingerprint(
   throw new Error(`no daemon dialled the rendezvous within ${String(timeoutMs)}ms`);
 }
 
+/** Wait until at least `wanted` client sessions have arrived for this daemon; answer how many did. */
+export async function waitForClientArrivals(
+  rendezvous: RendezvousProcess,
+  daemonId: string,
+  wanted: number,
+  timeoutMs = 30_000,
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = 0;
+  while (Date.now() < deadline) {
+    const arrivals = await rendezvous.arrivals().catch(() => []);
+    seen = arrivals.filter(entry => entry.role === 'client' && entry.daemonId === daemonId).length;
+    if (seen >= wanted) return seen;
+    await Bun.sleep(150);
+  }
+  return seen;
+}
+
 export async function waitForDaemonAtRendezvous(rendezvous: RendezvousProcess, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let seen = 'nothing';
@@ -593,21 +611,68 @@ export function stepLedger(steps: readonly LedgerStep[]): StepLedger {
  * {@link plaintextLeaks} reports the LABEL of a matched secret and never the secret, which is what
  * makes holding it briefly acceptable rather than merely convenient.
  */
-export async function deviceTokenForLeakSearchOnly(page: BrowserPage): Promise<string> {
-  return page.evaluate<string>(`(async () => {
-    const database = await new Promise((settle, fail) => {
-      const request = indexedDB.open('ferretry-pwa');
+export interface StoredDeviceToken {
+  /** The credential, for {@link plaintextLeaks} and nothing else. Empty when none was found. */
+  readonly token: string;
+  /**
+   * Where the reader looked and what it found there, as NAMES ONLY.
+   *
+   * A failure to find a credential has to be diagnosable without printing one, so this reports
+   * database names, store names, record keys and JSON key paths — never a value. It is the whole
+   * difference between "no device token is stored" (which is either a product defect or a reader
+   * that is looking in the wrong place, and does not say which) and an answer.
+   */
+  readonly shape: string;
+}
+
+export async function deviceTokenForLeakSearchOnly(page: BrowserPage): Promise<StoredDeviceToken> {
+  return page.evaluate<StoredDeviceToken>(`(async () => {
+    const open = name => new Promise((settle, fail) => {
+      const request = indexedDB.open(name);
       request.onsuccess = () => settle(request.result);
       request.onerror = () => fail(request.error);
     });
-    if (!database.objectStoreNames.contains('connections')) return '';
-    const value = await new Promise((settle, fail) => {
-      const request = database.transaction('connections').objectStore('connections').get('fy-connections-v1');
-      request.onsuccess = () => settle(request.result);
-      request.onerror = () => fail(request.error);
-    });
-    const found = JSON.stringify(value ?? null).match(/"deviceToken"\\s*:\\s*"([^"]+)"/);
-    return found === null ? '' : found[1];
+    const all = typeof indexedDB.databases === 'function' ? await indexedDB.databases() : [{ name: 'ferretry-pwa' }];
+    const notes = [];
+    let token = '';
+    for (const entry of all) {
+      if (typeof entry.name !== 'string') continue;
+      const database = await open(entry.name);
+      for (const store of [...database.objectStoreNames]) {
+        const records = await new Promise((settle, fail) => {
+          const request = database.transaction(store).objectStore(store).getAll();
+          request.onsuccess = () => settle(request.result ?? []);
+          request.onerror = () => fail(request.error);
+        });
+        const keys = new Set();
+        const walk = (node, path) => {
+          if (node === null || node === undefined) return;
+          // The record is a SERIALISED document, not an object graph: the connections store holds
+          // one JSON string. Walking it as an object found nothing and reported "no device token is
+          // stored", which reads as a product defect and was a reader looking at the wrong shape.
+          // (No backticks in this comment: it lives inside a template literal, and one would end it.)
+          if (typeof node === 'string') {
+            if (!node.trimStart().startsWith('{') && !node.trimStart().startsWith('[')) return;
+            try {
+              walk(JSON.parse(node), path);
+            } catch {
+              keys.add(path + '<unparseable string>');
+            }
+            return;
+          }
+          if (typeof node !== 'object') return;
+          for (const [name, child] of Object.entries(node)) {
+            keys.add(path + name);
+            if (typeof child === 'string' && /token/i.test(name) && child !== '' && token === '') token = child;
+            walk(child, path + name + '.');
+          }
+        };
+        for (const record of records) walk(record, '');
+        notes.push(entry.name + '/' + store + ' (' + records.length + ' record(s)): ' + [...keys].sort().join(', '));
+      }
+    }
+    const local = Object.keys(localStorage).sort().join(', ');
+    return { token, shape: notes.join(' | ') + ' || localStorage keys: ' + local };
   })()`);
 }
 

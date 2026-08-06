@@ -52,6 +52,7 @@ import { join, resolve } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type E2eEnvironment, withE2eEnvironment } from './fixture.ts';
+import { seedRunningSession } from './support/seeded-session.ts';
 import {
   attributeNow,
   buildPwaBundle,
@@ -70,6 +71,7 @@ import {
   startRendezvous,
   stepLedger,
   type StepLedger,
+  waitForClientArrivals,
   waitForDaemonAtRendezvous,
   waitForDaemonFingerprint,
 } from './support/relay-harness.ts';
@@ -141,11 +143,11 @@ const PAIRING_LINK = /https?:\/\/\S*#v\d;\S+/u;
  * screen offers is worth more than a click that lands somewhere.
  */
 const CONFIRM_CONTROLS: readonly string[] = [
+  // `data-pair-confirm` is on the "Pair this device" button as of `051e5c04`. The
+  // `button[data-variant="primary"]` fallback that carried this before is deliberately gone: a
+  // design-system attribute is not a contract, and keeping it would let a rename of the real one
+  // pass silently by falling through to a button that merely looks important.
   '[data-pair-confirm]',
-  // "Pair this device" — `pairing-screen.tsx`'s confirm action, which carries the design system's
-  // `primary` variant and no test attribute of its own yet.
-  '[data-pairing-stage="confirm"] button[data-variant="primary"]',
-  '[data-pairing-stage="confirm"] button[type="submit"]',
 ];
 
 /**
@@ -180,23 +182,29 @@ const PAIRED_DEVICE_NAME = 'Ferretry PWA';
 const PAIRED_DEVICES_PATH = '/v1/pair/devices';
 
 /**
- * The daemon-side command that must produce a live event.
+ * Park or resume a session, which is what appends a durable journal event.
  *
- * Overridable because nobody in this unit owns the answer yet: the event feed is fed from session
- * journal events, and starting a session needs a published fleet account this isolated home does
- * not have. `attention raise` is the cheapest candidate that carries a payload the leak search can
- * look for; `FY_E2E_EVENT_TRIGGER` (space-separated `fy` arguments, `{marker}` interpolated) is how
- * you swap it without editing this file when the real answer is known.
+ * The signal route is the cheapest thing in the product that produces a live event: it transitions
+ * state, appends, and does nothing else — no terminal port, no artifacts, no harness turn. Fired
+ * over loopback with the host token, because what this journey is proving is that the EVENT reaches
+ * the browser over the relay, not that the trigger did.
+ *
+ * `waiting` carries the run marker so the leak search has a value it can look for that nothing else
+ * on this host could have produced.
  */
-function eventTrigger(marker: string): readonly string[] {
-  const configured = process.env.FY_E2E_EVENT_TRIGGER;
-  if (configured !== undefined && configured.trim() !== '') {
-    return configured
-      .trim()
-      .split(/\s+/u)
-      .map(argument => argument.replaceAll('{marker}', marker));
-  }
-  return ['attention', 'raise', marker];
+async function signalSession(
+  environment: E2eEnvironment,
+  sessionId: string,
+  kind: 'waiting' | 'working',
+  marker: string,
+): Promise<number> {
+  const token = (await readFile(join(environment.paths.fyHome, 'api-token'), 'utf8')).trim();
+  const response = await fetch(environment.httpUrl(`/v1/sessions/${sessionId}/signal`), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(kind === 'waiting' ? { kind, message: marker } : { kind }),
+  });
+  return response.status;
 }
 
 /** Everything the journey claims, in the order it can be claimed. */
@@ -221,9 +229,18 @@ const STEPS: readonly LedgerStep[] = [
     id: 'pairing-persisted',
     claim: 'both ends recorded the pairing, and the daemon names the device, without reading a credential',
   },
-  { id: 'authenticated-relay-session', claim: 'the session that followed pairing won on the relay carrier' },
-  { id: 'live-stream-rendered', claim: 'a real daemon event reached Chrome and changed the product' },
-  { id: 'relay-read-nothing', claim: 'no code, token, device name or payload appears in any relay-observable frame' },
+  {
+    id: 'authenticated-relay-session',
+    claim: 'a second, authenticated session followed the pairing across the same rendezvous',
+  },
+  {
+    id: 'relay-read-nothing',
+    claim: 'no pairing code, device token or device name appears in any relay-observable frame',
+  },
+  {
+    id: 'live-stream-rendered',
+    claim: 'a real daemon event reached Chrome, and its payload appears in no relay-observable frame',
+  },
 ];
 
 async function reportAndRethrow(error: unknown, report: string): Promise<never> {
@@ -392,6 +409,10 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           'utf8',
         );
 
+        // Seeded BEFORE the daemon opens the home, which is the ordering the whole thing rests on:
+        // the compiled daemon then reads these documents back through the same schemas that wrote
+        // them. See `support/seeded-session.ts` for what this substitutes and what it does not.
+        const session = await seedRunningSession(environment.paths.fyHome);
         const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous).catch((error: unknown) =>
           ledger.fail('daemon-fingerprint', String(error)),
         );
@@ -603,64 +624,146 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           `localStorage fy-has-pairings-v1 === "1" and the daemon recorded a device named ${PAIRED_DEVICE_NAME}, with no credential read on either side`,
         );
 
+        /**
+         * A SECOND session, opened with the grant the first one issued.
+         *
+         * The proof is the rendezvous' own arrival record rather than anything the app says about
+         * itself, and that is the stronger direction: a §14 pairing session is one attempt and the
+         * daemon closes it immediately, so a later client arrival cannot be the pairing exchange —
+         * it is the ordinary authenticated path. Direct is a sinkhole, so there is no other route it
+         * could have taken. The browser's own `data-carrier-kind` is corroboration when it exists;
+         * an attribute that is absent is not the same as one that disagrees, so an absent one is
+         * recorded rather than treated as a contradiction, and a PRESENT one that says anything but
+         * `relay` fails this step.
+         */
+        const pairingArrivals = clientArrivals.length;
         await browser.page.goto(`${origin.origin}/app/#/settings/daemons`, {
           waitUntil: 'networkidle',
           timeout: 30_000,
         });
-        const carrier = await browser.page
-          .waitForSelector('[data-carrier-kind="relay"]', { timeout: 30_000 })
-          .then(() => 'relay')
-          .catch(async () => String(await attributeNow(browser.page, '[data-carrier-kind]', 'data-carrier-kind')));
-        if (carrier !== 'relay') {
+        const authArrivals = await waitForClientArrivals(rendezvous, fingerprint, pairingArrivals + 1).catch(
+          () => pairingArrivals,
+        );
+        if (authArrivals <= pairingArrivals) {
           ledger.fail(
             'authenticated-relay-session',
-            `the live carrier reads ${carrier}, so the authenticated session did not cross the relay`,
+            `the rendezvous saw ${String(authArrivals)} client session(s) for ${fingerprint} — no second session followed the pairing, so nothing authenticated crossed the relay`,
           );
         }
-        ledger.prove('authenticated-relay-session', 'data-carrier-kind="relay" on the measured active carrier');
-
-        const before = String(await attributeNow(browser.page, '[data-live-events]', 'data-live-events'));
-        const trigger = await environment.runFy(eventTrigger(eventMarker), { FY_URL: environment.httpUrl() });
-        const advanced = await browser.page
-          .waitForSelector(`[data-live-events]:not([data-live-events="${before}"])`, { timeout: 30_000 })
-          .then(() => true)
-          .catch(() => false);
-        if (!advanced) {
+        // `none` is "no walk has measured a carrier yet", deliberately not `direct` — so it is a
+        // state to wait out, never an answer to assert against.
+        const carrier = await browser.page
+          .waitForSelector('[data-carrier-kind]:not([data-carrier-kind="none"])', { timeout: 30_000 })
+          .then(async () => attributeNow(browser.page, '[data-carrier-kind]', 'data-carrier-kind'))
+          .catch(async () => attributeNow(browser.page, '[data-carrier-kind]', 'data-carrier-kind'));
+        if (carrier !== null && carrier !== 'relay') {
           ledger.fail(
-            'live-stream-rendered',
-            `no live event reached the browser after \`fy ${eventTrigger(eventMarker).join(' ')}\` ` +
-              `(exit ${String(trigger.code)}${trigger.err === '' ? '' : `: ${trigger.err.trim()}`}); ` +
-              `data-live-events did not advance from ${before}`,
+            'authenticated-relay-session',
+            `the browser's measured active carrier reads ${carrier}, contradicting the relay's own record of ${String(authArrivals)} client session(s)`,
           );
         }
         ledger.prove(
-          'live-stream-rendered',
-          `data-live-events advanced in Chrome after a real daemon event carrying ${eventMarker}`,
+          'authenticated-relay-session',
+          `the rendezvous carried ${String(authArrivals)} client session(s) for this daemon — a second one after the pairing closed` +
+            (carrier === null
+              ? '; the browser has no data-carrier-kind attribute yet, so this rests on the relay record alone'
+              : '; the browser agrees with data-carrier-kind="relay"'),
         );
 
         /**
-         * All four secrets, searched across every frame the rendezvous handled.
+         * The three credentials that HAVE crossed, searched across every frame the rendezvous saw.
+         *
+         * Run here rather than at the end, deliberately. Every value in this search has already
+         * gone over the wire, so the privacy claim about the pairing exchange is provable now
+         * instead of waiting behind an unbuilt stream — and a claim deferred is a claim nobody has
+         * checked. The event payload gets the identical treatment inside the stream step below,
+         * where the value it names actually exists; asserting the absence of a marker no event ever
+         * carried would be a check that passes because it tests nothing.
          *
          * The token is read out of the browser for this comparison and for nothing else, and
-         * `plaintextLeaks` reports only which label matched — never the value. The device name is
-         * searchable because the harness made it unique through the user agent the app derives it
-         * from, and the event payload is searchable for the same reason: a marker nobody else on
-         * this host could have produced.
+         * `plaintextLeaks` reports only which LABEL matched — never the value.
          */
-        const deviceToken = await deviceTokenForLeakSearchOnly(browser.page);
-        if (deviceToken === '') {
-          ledger.fail('relay-read-nothing', 'no device token is stored, so the token leak search would assert nothing');
+        const stored = await deviceTokenForLeakSearchOnly(browser.page);
+        if (stored.token === '') {
+          ledger.fail(
+            'relay-read-nothing',
+            `no device token is stored, so the token leak search would assert nothing. The browser holds: ${stored.shape}`,
+          );
         }
         const leaks = plaintextLeaks(await rendezvous.observations(), {
           'the pairing code': code,
-          'the minted device token': deviceToken,
+          'the minted device token': stored.token,
           'the device name the browser sent': PAIRED_DEVICE_NAME,
-          'the live event payload marker': eventMarker,
         });
         if (leaks.length !== 0) ledger.fail('relay-read-nothing', leaks.join('; '));
         ledger.prove(
           'relay-read-nothing',
-          'the pairing code, the minted device token, the device name and the live event payload are all absent from every relay-observable frame',
+          `the pairing code, the minted device token and the device name ${PAIRED_DEVICE_NAME} are absent from all ` +
+            `${String((await rendezvous.observations()).length)} frames the rendezvous handled`,
+        );
+
+        /**
+         * A live event, and the browser watching for it over the relay.
+         *
+         * The cursor starts at `0` and only ever climbs, so "an event arrived" is `> 0` rather than
+         * "different from before" — a value that changed could be a remount, and a value that grew
+         * cannot be. The trigger is the waiting-then-working signal pair, which appends exactly two
+         * durable journal events and leaves the session where it started; ORDER IS LOAD-BEARING,
+         * because `working` on a session that is not parked appends nothing at all.
+         */
+        await browser.page.goto(`${origin.origin}/d/${fingerprint}/session/${session.sessionId}`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
+        const mounted = await browser.page
+          .waitForSelector('[data-live-events]', { timeout: 30_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!mounted) {
+          ledger.fail(
+            'live-stream-rendered',
+            `the session route rendered no data-live-events for ${session.sessionId}. ` +
+              `The page renders: ${await renderedDataAttributes(browser.page)}. ` +
+              `Page errors: ${browser.pageErrors.join(' | ') || 'none'}`,
+          );
+        }
+        const before = Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events'));
+        const parked = await signalSession(environment, session.sessionId, 'waiting', eventMarker);
+        const resumed = await signalSession(environment, session.sessionId, 'working', eventMarker);
+        const advanced = await browser.page
+          .waitForSelector(`[data-live-events]:not([data-live-events="${String(before)}"])`, { timeout: 30_000 })
+          .then(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')))
+          .catch(() => before);
+        if (advanced <= before) {
+          /**
+           * The discriminator: did the browser OPEN a stream session at all?
+           *
+           * §14 gives every live stream its own authenticated session, so a subscription shows up
+           * at the rendezvous as another client arrival. More arrivals than the pairing plus the
+           * request session means the browser dialled and the frames did not come; the same count
+           * means it never subscribed. Those are different defects in different packages, and
+           * without this number the report cannot tell them apart.
+           */
+          const streams = (await rendezvous.arrivals()).filter(
+            entry => entry.role === 'client' && entry.daemonId === fingerprint,
+          ).length;
+          ledger.fail(
+            'live-stream-rendered',
+            `no live event reached the browser: data-live-events stayed at ${String(before)}. ` +
+              `The signal pair answered ${String(parked)} then ${String(resumed)}, so the daemon appended two durable events. ` +
+              `The rendezvous saw ${String(streams)} client session(s) in total (${String(pairingArrivals)} for pairing, ` +
+              `${String(authArrivals - pairingArrivals)} for the authenticated request session) — ` +
+              `${streams > authArrivals ? 'a stream session WAS opened and carried no frames' : 'NO stream session was ever opened'}. ` +
+              `Console: ${browser.console.slice(-6).join(' | ') || 'silent'}`,
+          );
+        }
+        const payloadLeaks = plaintextLeaks(await rendezvous.observations(), {
+          'the live event payload marker': eventMarker,
+        });
+        if (payloadLeaks.length !== 0) ledger.fail('live-stream-rendered', payloadLeaks.join('; '));
+        ledger.prove(
+          'live-stream-rendered',
+          `data-live-events advanced in Chrome after a real daemon event carrying ${eventMarker}, and that marker appears in no relay-observable frame`,
         );
 
         // A noted step does not abort, so the journey can reach here with one still unproven. It is
