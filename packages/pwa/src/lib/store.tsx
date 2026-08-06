@@ -182,7 +182,7 @@ const PAIRING_DEVICE_NAME = 'Ferretry PWA';
  * becomes the more useful conclusion. The code it is spending has a two-minute life, and the
  * rendezvous attempt behind this one needs a socket, a handshake and a sealed exchange of its own.
  */
-export const DIRECT_PAIRING_TIMEOUT_MS = 4_000;
+const DIRECT_PAIRING_TIMEOUT_MS = 4_000;
 
 export interface ExchangePairingOptions {
   readonly fetcher?: DaemonFetch;
