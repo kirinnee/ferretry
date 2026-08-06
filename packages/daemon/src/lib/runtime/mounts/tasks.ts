@@ -552,6 +552,16 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
       const grant = await subsystem.boardActions
         .authorize({ targetSessionId: sessionId, capability, action: 'mark_done' })
         .catch(reraiseTaskBoardError);
+      // The session header says WHO the caller claims to be, while the capability resolves the
+      // peer the board actually authorized. They must agree: otherwise a holder of one peer's
+      // capability could complete work under a different peer's journal identity, leaving the
+      // durable actor and the authorization evidence contradicting each other.
+      if (grant.sessionId !== actor.sessionId)
+        throw new ApiError(
+          403,
+          'the task-board capability belongs to a different peer than the completion actor',
+          'forbidden',
+        );
       actor = {
         ...actor,
         boardAuthorizedForSession: sessionId,

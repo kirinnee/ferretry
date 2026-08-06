@@ -865,6 +865,41 @@ describe('the task board mount', () => {
       ]);
     });
 
+    it('should refuse a grant whose peer disagrees with the completion actor without changing the task', async () => {
+      // The session header is only attribution; the capability is the board's identity proof.
+      // Letting them name different peers would journal a completion under an actor the board did
+      // not authorize, which is false provenance even though the capability itself is valid.
+      // Arrange
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async () => ({ ...RESOLVED_GRANT, sessionId: 's2' }),
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const refused = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 's2-capability', 'x-fy-request-id': 'click-2' },
+        ),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(refused.status).equal(403);
+      should(jsonBody(refused)).have.property('code', 'forbidden');
+      const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
+      should(body.task.phase).equal('live');
+      should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
+    });
+
     it('should keep a shared live completion unavailable when the board authorizer cannot mount', async () => {
       // Arrange — no fallback to the task route is allowed when the permission
       // source is unavailable: that would turn damaged board state into a grant.

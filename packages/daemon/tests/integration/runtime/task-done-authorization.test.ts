@@ -241,6 +241,13 @@ describe('completing shared live work', () => {
     // Act — the same peer, four credentials.
     const withoutCapability = await markDone(peer);
     const withWrongGrant = await markDone({ ...peer, 'x-fy-board-capability': coordinatorCapability });
+    // The capability is a proof for ROOT, not a license to claim any other peer as the actor.
+    // A disagreement must fail before task state or provenance moves.
+    const withMismatchedPeer = await markDone({
+      'x-ferretry-session-id': coordinator.config.id,
+      'x-fy-board-capability': rootCapability,
+      'x-fy-request-id': 'mark-done-mismatched-peer',
+    });
     const withoutRequestId = await markDone({ ...peer, 'x-fy-board-capability': rootCapability });
     const withGrant = await markDone({
       ...peer,
@@ -266,6 +273,7 @@ describe('completing shared live work', () => {
     // A capability is required, and the coordinator's real membership is not this grant.
     should(withoutCapability.status).equal(401);
     should(withWrongGrant.status).equal(403);
+    should(withMismatchedPeer.status).equal(403);
     // Authorized, and still refused: the record this completion writes is keyed by the caller's own
     // id for it, and the daemon will not invent one.
     should(withoutRequestId.status).equal(400);
