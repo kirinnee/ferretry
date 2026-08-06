@@ -1,4 +1,4 @@
-import { FY_DEFAULT_DAEMON_URL, recordedDaemonAddress } from '@ferretry/protocol';
+import { FY_DEFAULT_DAEMON_URL, recordedBindAddress } from '@ferretry/protocol';
 
 /**
  * Every host name that names THIS machine.
@@ -43,6 +43,12 @@ export function isLocalDaemonUrl(url: string): boolean {
  * daemon unreachable, which is the failure this resolution exists to prevent. The default is the
  * last resort, for a machine where no daemon has ever written a document.
  *
+ * IT ASKS FOR THE BIND, NOT THE ADVERTISEMENT. `publicUrl` says where somebody ELSE reaches this
+ * machine, and a client that followed it dialled a routed address for a daemon sitting on the same
+ * desk — which `isLocalDaemonUrl` then correctly refused to spend a local credential on, so the one
+ * command that mints a pairing code stopped working the moment its operator took the advice printed
+ * beside it. The two questions have two functions in the protocol now, and this one asks the local one.
+ *
  * `documentText` is passed IN rather than read here so the decision is a pure function of what the
  * file said, including the case where there is no file at all.
  */
@@ -51,11 +57,11 @@ export function resolveDaemonUrl(explicitUrl: string, documentText: string | und
   return recordedAddress(documentText) ?? FY_DEFAULT_DAEMON_URL;
 }
 
-/** The address the daemon wrote down, or `undefined` when the document is absent or unusable. */
+/** The address the daemon bound, or `undefined` when the document is absent or unusable. */
 function recordedAddress(documentText: string | undefined): string | undefined {
   if (documentText === undefined) return undefined;
   try {
-    return recordedDaemonAddress(JSON.parse(documentText));
+    return recordedBindAddress(JSON.parse(documentText));
   } catch {
     // A document this client cannot read leaves it looking at the well-known default, which fails
     // visibly as "the daemon is not answering". The daemon parses the same file strictly and refuses

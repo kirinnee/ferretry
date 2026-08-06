@@ -48,7 +48,7 @@
  * grows another copy.
  */
 
-import { daemonAddress, FY_DEFAULT_DAEMON_PORT, isLoopbackHost, isWildcardHost } from './address.ts';
+import { daemonAddress, isLoopbackHost, isWildcardHost, WILDCARD_BIND_HOST } from './address.ts';
 
 /**
  * Why there is no address to hand out at all.
@@ -109,17 +109,71 @@ export function decideAdvertisement(input: {
 export interface AdvertisementNotice {
   /** Who can redeem the link, said plainly. */
   readonly audience: string;
-  /** The single change that makes it redeemable from another device. */
+  /**
+   * What actually makes it redeemable from another device — which is not one change for every
+   * reason, and saying it was is how a remedy came to be printed where it could not work.
+   */
   readonly remedy: string;
 }
 
 /**
- * The one remedy both surfaces render, using the documented default as a concrete example.
+ * ONE REMEDY PER REASON, because one remedy for all of them was false for two of them.
+ *
+ * The single sentence this replaced told everybody to set `publicUrl`. For a wildcard bind that is
+ * the whole fix. For a LOOPBACK bind it is half of one: `publicUrl` is what a daemon HANDS OUT and
+ * changes nothing about the interface it listens on, so an operator who followed it turned an honest
+ * "only this machine can redeem it" into a QR a phone scans and then cannot connect to — a worse
+ * failure than the one being remedied, because the screen now claims it works. And for a missing
+ * port `publicUrl` is not involved at all: there is no address because nothing has bound one yet.
+ *
+ * A REMEDY THAT CANNOT BE FOLLOWED IS A DEAD END WITH EXTRA STEPS, so each one names the fields, the
+ * document, and the restart that makes it take effect.
  */
-function advertisementRemedy(): string {
+
+/** The document an operator edits, spelled the way every other user-facing sentence spells it. */
+const CONFIG_DOCUMENT = '<FY_HOME>/config/daemon.json';
+
+/** A private address: obviously an example, unmistakably a LAN. */
+const EXAMPLE_LAN_HOST = '192.168.1.10';
+
+/**
+ * The example address a remedy tells somebody to write, carrying THIS daemon's port.
+ *
+ * ADVICE WITH THE WRONG PORT IN IT IS ADVICE TO TYPE THE WRONG NUMBER. The port comes from the
+ * address the reader was just shown rather than from the compiled-in default, because a daemon whose
+ * preferred port was taken binds the next free one — the ordinary outcome of a first boot — and an
+ * example carrying the default would point at whatever else holds that number.
+ *
+ * An address this cannot parse still yields an example, because a malformed advertisement is exactly
+ * the state somebody most needs a remedy from.
+ */
+function exampleReachableAddress(daemonUrl: string): string {
+  try {
+    const url = new URL(daemonUrl);
+    url.hostname = EXAMPLE_LAN_HOST;
+    return url.origin;
+  } catch {
+    return `http://${EXAMPLE_LAN_HOST}`;
+  }
+}
+
+/** The advertise half, shared by the reasons that genuinely need an address written down. */
+function advertiseRemedy(example: string): string {
+  return `set "publicUrl" in ${CONFIG_DOCUMENT} to the address other devices reach this machine at, e.g. ${example}, then restart the daemon`;
+}
+
+/**
+ * The two-step remedy for a daemon nothing off this machine can reach: BIND FIRST, then advertise.
+ *
+ * THE WILDCARD IS WHAT KEEPS THE FIX FROM TAKING THE DAEMON AWAY FROM THE PERSON APPLYING IT.
+ * Binding a single routed interface would also let the phone in, and would simultaneously move the
+ * daemon off loopback — where this machine's own commands look for it, and the only address an
+ * owner-only credential may travel to. Every interface includes loopback, so nothing local changes.
+ */
+function bindAndAdvertiseRemedy(example: string): string {
   return (
-    `set publicUrl to the address other devices reach this machine at, ` +
-    `e.g. http://192.168.1.10:${String(FY_DEFAULT_DAEMON_PORT)}`
+    `bind every interface with "host": "${WILDCARD_BIND_HOST}" and ${advertiseRemedy(example)}. ` +
+    `Commands on this machine keep reaching it on loopback`
   );
 }
 
@@ -127,7 +181,7 @@ function advertisementRemedy(): string {
 export function localOnlyNotice(daemonUrl: string): AdvertisementNotice {
   return {
     audience: `Only a browser on this machine can redeem this link at ${daemonUrl}; no QR is drawn because another device cannot dial it.`,
-    remedy: advertisementRemedy(),
+    remedy: bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl)),
   };
 }
 
@@ -137,7 +191,29 @@ const REFUSAL_AUDIENCES: Readonly<Record<AdvertisementRefusal, string>> = {
   'no-port': 'This daemon has no port recorded yet, so there is no address to hand out.',
 };
 
+/**
+ * WHAT TO DO ABOUT IT, per reason, and no two of these are the same instruction.
+ *
+ * A wildcard bind is already listening everywhere and needs only somewhere to point a device at — so
+ * it takes the advertise half alone, and the notice that used to fire afterwards for "binds one
+ * address, advertises another" no longer fires at a wildcard, because that pairing is now the
+ * documented answer rather than a suspicious one.
+ *
+ * A missing port has nothing bound and no advertisement to fix; sending that operator to edit
+ * `publicUrl` is sending them to a field that cannot help. `loopback-bind` is never emitted by the
+ * decision above and is kept for readers that still speak it: it takes the same two-step answer as a
+ * local-only address, with no port known to put in the example.
+ *
+ * A REFUSAL HAS NO ADDRESS, so no example here can carry a real port. The wildcard case names the
+ * gap rather than guessing at it — a number in that slot would be a number to copy.
+ */
+const REFUSAL_REMEDIES: Readonly<Record<AdvertisementRefusal, string>> = {
+  'loopback-bind': bindAndAdvertiseRemedy(`http://${EXAMPLE_LAN_HOST}`),
+  'wildcard-bind': advertiseRemedy(`http://${EXAMPLE_LAN_HOST}:<the port this daemon bound>`),
+  'no-port': `start the daemon once so it records the port it takes, or write "port" into ${CONFIG_DOCUMENT} yourself; "publicUrl" cannot supply an address nothing has bound`,
+};
+
 /** What to say when there is no address to hand out at all, per reason. */
 export function refusalNotice(refusal: AdvertisementRefusal): AdvertisementNotice {
-  return { audience: REFUSAL_AUDIENCES[refusal], remedy: advertisementRemedy() };
+  return { audience: REFUSAL_AUDIENCES[refusal], remedy: REFUSAL_REMEDIES[refusal] };
 }

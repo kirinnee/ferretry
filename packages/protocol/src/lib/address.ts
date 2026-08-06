@@ -14,8 +14,6 @@
  * literal cannot reappear elsewhere, the same way the two-name model is pinned.
  */
 
-import { decideAdvertisement } from './advertisement.ts';
-
 /** Loopback, never a routable interface: a daemon binds the machine it runs on and nothing else. */
 export const LOOPBACK = '127.0.0.1';
 
@@ -55,13 +53,22 @@ export function isLoopbackPeer(address: string): boolean {
 }
 
 /**
+ * The wildcard an operator is TOLD TO WRITE when a daemon must accept more than loopback.
+ *
+ * Single-sourced beside the loopback spelling and for the same reason: the advertisement's remedy
+ * names this value in a sentence somebody will copy into a configuration document, and a remedy that
+ * spells a host the predicate below does not recognise is advice that quietly does nothing.
+ */
+export const WILDCARD_BIND_HOST = '0.0.0.0';
+
+/**
  * A bind that names EVERY interface, so no single address can be derived from it.
  *
  * A daemon serves perfectly on one of these. What is undefined is only which address to hand out:
- * `http://0.0.0.0:…` is a bind instruction, not somewhere a device can dial, and handing it to a
+ * a wildcard authority is a bind instruction, not somewhere a device can dial, and handing it to a
  * phone is a link that fails with nothing to explain it.
  */
-const WILDCARD_HOSTS: ReadonlySet<string> = new Set(['0.0.0.0', '::', '[::]']);
+const WILDCARD_HOSTS: ReadonlySet<string> = new Set([WILDCARD_BIND_HOST, '::', '[::]']);
 
 /** A bind that names every interface, so no advertisement can be derived from it. */
 export function isWildcardHost(host: string): boolean {
@@ -98,31 +105,37 @@ export function daemonAddress(host: string, port: number): string {
 }
 
 /**
- * The address recorded in a daemon's configuration document, or `undefined` when it records none.
+ * WHERE A CLIENT ON THIS MACHINE DIALS THE DAEMON, read from what the daemon wrote down.
  *
  * WHY A CLIENT READS THIS AT ALL: the daemon may choose its own port. A first boot whose preferred
  * port is taken binds the next free one and writes the choice down, so a client that assumed the
  * default would be looking at an address its daemon deliberately moved off. The recorded value is
  * the daemon's answer to "where am I", and following it is what makes the fallback safe.
  *
- * IT READS THE SAME DECISION THE DAEMON DOES. This is a SEPARATE derivation site in a separate
- * package with its own coverage ledger, so a daemon-side fix does not reach it — and disagreement is
- * a client dialling an address its daemon does not consider its own. `local-only` is still returned:
- * this reader runs ON the host, which is exactly the caller such an address is right for.
+ * IT READS THE BIND AND NEVER THE ADVERTISEMENT, which is the whole reason it is a separate function
+ * from `decideAdvertisement`. `publicUrl` answers a DIFFERENT question — where somebody ELSE reaches
+ * this machine — and welding the two is the defect `advertisement.ts` was written to remove, applied
+ * to the inbound direction: an operator who followed the advice to advertise a routed address made
+ * their own command line classify the daemon on their desk as remote, and the local command that
+ * mints a pairing code refused to run at all. So `publicUrl` is not read here, and an operator
+ * describing a reverse proxy or a tunnel does not move the socket their own client dials.
+ *
+ * A WILDCARD BIND ANSWERS LOOPBACK. A daemon told to accept every interface is listening on loopback
+ * too, and loopback is the one spelling that keeps an owner-only credential on the machine that
+ * issued it. Answering with the wildcard authority itself — a bind instruction, not a destination —
+ * is how this used to report a healthy daemon unreachable while it served one interface away.
  *
  * TOLERANT BY DESIGN, and that is not the usual rule here. A document this cannot read leaves a
  * client using the well-known default — the same place it looked before any of this existed — which
  * fails by reporting the daemon unreachable. The DAEMON parses the same document strictly and
  * refuses to boot on damage, which is where a damaged document must be caught.
  */
-export function recordedDaemonAddress(document: unknown): string | undefined {
+export function recordedBindAddress(document: unknown): string | undefined {
   if (typeof document !== 'object' || document === null) return undefined;
-  const recorded = document as { readonly host?: unknown; readonly port?: unknown; readonly publicUrl?: unknown };
-  const publicUrl = typeof recorded.publicUrl === 'string' ? recorded.publicUrl.trim() : '';
-  const advertisement = decideAdvertisement({
-    ...(publicUrl === '' ? {} : { operatorPublicUrl: publicUrl }),
-    host: typeof recorded.host === 'string' && recorded.host.trim() !== '' ? recorded.host : LOOPBACK,
-    ...(typeof recorded.port === 'number' && Number.isInteger(recorded.port) ? { port: recorded.port } : {}),
-  });
-  return advertisement.kind === 'none' ? undefined : advertisement.url;
+  const recorded = document as { readonly host?: unknown; readonly port?: unknown };
+  // The port is the one field with no safe assumption: a recorded document that names none has not
+  // said where its daemon went, and guessing would send a client to somebody else's socket.
+  if (typeof recorded.port !== 'number' || !Number.isInteger(recorded.port)) return undefined;
+  const host = typeof recorded.host === 'string' && recorded.host.trim() !== '' ? recorded.host.trim() : LOOPBACK;
+  return daemonAddress(isWildcardHost(host) ? LOOPBACK : host, recorded.port);
 }

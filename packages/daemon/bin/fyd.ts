@@ -4,10 +4,13 @@ import { accessSync, constants as fsConstants, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import {
+  type Advertisement,
   FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
+  localOnlyNotice,
   type MigrateSessionRequest,
   type RegisterProjectRequest,
+  refusalNotice,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -4540,6 +4543,31 @@ export async function printConfiguration(world: DaemonWorld): Promise<number> {
 }
 
 /**
+ * WHO COULD REDEEM A CODE THIS DAEMON MINTS, on the command somebody runs when pairing will not work.
+ *
+ * IT IS THE QUESTION `--check` WAS MISSING. The carrier posture beside it answers "can anything off
+ * this machine reach me", and pairing is the one exchange a relay can never carry — so a daemon can
+ * report a healthy carrier, a free address and a ready harness while the only thing the owner is
+ * trying to do cannot work, for a reason the binary already holds. An advertisement that cannot be
+ * handed to another device says so here, hours before a phone is pointed at it.
+ *
+ * THE SENTENCES COME FROM THE PROTOCOL, not from this file. `fy pair`, the browser's Add-a-device
+ * panel and this command are three renderings of one fact, and a fourth wording invented here is how
+ * three surfaces come to disagree about what an operator should do next.
+ *
+ * IT REPORTS, IT DOES NOT JUDGE — no exit code moves, exactly as the harness and grant postures do
+ * not move it. A daemon nothing can pair with still starts perfectly.
+ */
+export function describePairingAdvertisement(advertisement: Advertisement): readonly string[] {
+  const label = 'pairing     ';
+  if (advertisement.kind === 'address')
+    return [`${label} any device that can reach ${advertisement.url} may redeem a code (${advertisement.origin})`];
+  const notice =
+    advertisement.kind === 'local-only' ? localOnlyNotice(advertisement.url) : refusalNotice(advertisement.refusal);
+  return [`${label} ${notice.audience}`, `             ! ${notice.remedy}`];
+}
+
+/**
  * `--check`: whether this daemon would start, and what it would do, without doing any of it.
  *
  * NO DIRECTORY, NO LOCK, NO BIND. The address is probed — a request to an address is not a change to
@@ -4614,6 +4642,9 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
   if (carrier.kind === 'direct-only' || !carrier.config.enabled) {
     for (const line of relayCarrierRemedy(carrier, world.config.path, config.host)) say(`             ! ${line}`);
   }
+  // Directly beneath the carrier, because the line above has just said pairing cannot use one: this
+  // is the address that has to work on its own, and whether anybody but this machine can dial it.
+  for (const line of describePairingAdvertisement(config.advertisement)) say(line);
   for (const line of describeGrantPosture({
     config,
     passwordSet: await world.operatorPassword.isSet().catch(() => false),

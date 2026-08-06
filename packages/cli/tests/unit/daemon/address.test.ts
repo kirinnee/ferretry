@@ -13,6 +13,28 @@ describe('where the client looks for the daemon', () => {
     should(resolveDaemonUrl('', recorded)).equal('http://127.0.0.1:7432');
   });
 
+  it('should follow the bind and never the advertisement, so the remedy stays followable', () => {
+    // THE BLOCKER THIS FIXES. The pairing screen tells an operator to advertise the address other
+    // devices reach this machine at. Reading that value here made the next `pair` dial a routed
+    // address for a daemon on the same desk, which `isLocalDaemonUrl` then refused to send the
+    // owner-only token to — so taking the advice broke the command that gave it.
+    const advertised = JSON.stringify({ host: '127.0.0.1', port: 7_432, publicUrl: 'http://192.168.1.10:7432' });
+
+    // Act + Assert
+    should(resolveDaemonUrl('', advertised)).equal('http://127.0.0.1:7432');
+    should(isLocalDaemonUrl(resolveDaemonUrl('', advertised))).be.true();
+  });
+
+  it('should dial loopback at the recorded port when the daemon binds every interface', () => {
+    // Arrange — the deployment the remedy now asks for: bound everywhere, advertised once.
+    const wildcard = JSON.stringify({ host: '0.0.0.0', port: 9_000, publicUrl: 'http://192.168.1.10:9000' });
+
+    // Act + Assert — the port is the part that must survive. Falling back to the well-known default
+    // here reports a healthy daemon down while it serves the port it wrote in that document.
+    should(resolveDaemonUrl('', wildcard)).equal('http://127.0.0.1:9000');
+    should(isLocalDaemonUrl(resolveDaemonUrl('', wildcard))).be.true();
+  });
+
   it('should let an operator who pinned an address keep it', () => {
     // Arrange
     const recorded = JSON.stringify({ host: '127.0.0.1', port: 7_432 });
