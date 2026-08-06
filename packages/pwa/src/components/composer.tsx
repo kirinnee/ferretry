@@ -10,7 +10,7 @@ import {
 } from '../lib/composer-keybinding.ts';
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionScope } from '../lib/daemon-scope.ts';
+import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
@@ -300,13 +300,10 @@ export function Composer({
    * unrepresentable — a mismatched tag reads this scope's own stored draft —
    * and the effect below then settles the state for every render after it.
    */
-  const scopeKey = `${scope.daemonId} ${scope.sessionId}`;
+  const scopeKey = daemonSessionKey(scope);
   const [draftState, setDraftState] = useState(() => ({ key: scopeKey, text: draftStore.load(scope) }));
   const draft = draftState.key === scopeKey ? draftState.text : draftStore.load(scope);
-  const setDraft = useCallback(
-    (text: string) => setDraftState({ key: `${scope.daemonId} ${scope.sessionId}`, text }),
-    [scope.daemonId, scope.sessionId],
-  );
+  const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
@@ -594,7 +591,7 @@ export function Composer({
     setDraft(outcome.value);
   };
 
-  const previewText = useDeferredDraft(draft, PREVIEW_DEBOUNCE_MS, `${scope.daemonId} ${scope.sessionId}`);
+  const previewText = useDeferredDraft(draft, PREVIEW_DEBOUNCE_MS, scopeKey);
   const previewMaxPx = !compact
     ? PREVIEW_MAX_PX
     : keyboardOpen
