@@ -28,6 +28,7 @@ import {
   TaskStateUnavailableError,
   taskBlockedBy,
 } from '../../tasks/index.ts';
+import { readTaskBoardFleet } from '../../task-boards/fleet-read.ts';
 import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError, type TaskBoardTaskActionAuthorizer } from './task-boards.ts';
 
 /**
@@ -345,30 +346,6 @@ function scopedSummary(
  */
 const NO_DISCARDED_RECORDS = 0;
 
-/**
- * Enough simultaneous board reads to collapse a fleet walk into a handful of event-loop turns,
- * while keeping a daemon with thousands of boards below its file-descriptor limit.
- *
- * Ported from kteam `src/tasks.ts`'s `FLEET_READ_CONCURRENCY` / `mapPooled` pair.
- */
-const FLEET_READ_CONCURRENCY = 64;
-
-/** Order-preserving bounded fan-out for independent board reads. */
-async function mapPooled<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, async () => {
-      while (true) {
-        const index = next++;
-        if (index >= items.length) return;
-        results[index] = await fn(items[index] as T);
-      }
-    }),
-  );
-  return results;
-}
-
 /** One session's board, filtered and summarised. */
 async function listSession(subsystem: TaskSubsystem, sessionId: string, context: RouteContext): Promise<ApiResponse> {
   const filters = taskFilters(context.request);
@@ -421,10 +398,10 @@ async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promi
   const filters = taskFilters(context.request);
   // Gathered before any assignee is resolved, so ONE batch answers for the whole fleet: resolving
   // inside the loop would fan out over every session once per session's board.
-  // Each board is an atomic, daemon-scoped snapshot. The reads are independent, so the kteam
-  // bounded parallel walk is safe here; a refusal still rejects the entire fleet answer rather
-  // than dropping that session's rows.
-  const boards = await mapPooled(await subsystem.sessionIds(), FLEET_READ_CONCURRENCY, async sessionId => {
+  // Each board is an atomic, daemon-scoped snapshot. The reads are independent, so the bounded
+  // fleet walk the board domain owns is safe here; a refusal still rejects the entire fleet answer
+  // rather than dropping that session's rows, and the row order is still the index's.
+  const boards = await readTaskBoardFleet(await subsystem.sessionIds(), async sessionId => {
     // Acquisition is inside the guard for the same reason the read is: an id the index holds but the
     // layout refuses is a damaged session, and a fleet answer that skipped it would be short.
     const read = await Promise.resolve()

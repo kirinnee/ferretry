@@ -217,7 +217,7 @@ Prevent repeated breakage in everyday development.
 | --: | :--: | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ------- | ------- |
 |   3 |  ☑   | **Fix gitlint in worktrees**        | Make commit linting work reliably inside mandatory Git worktrees.                               | —       | #4, #31 |
 |   4 |  ☑   | **Stop hiding untracked files**     | Always show untracked files so new callees cannot disappear from reviews or commits.            | —       | #3, #31 |
-|   5 |  ☐   | **Land Tasks pane performance fix** | Make Tasks load quickly by eliminating sequential task-file reads; record before/after timings. | —       | #35     |
+|   5 |  ☑   | **Land Tasks pane performance fix** | Make Tasks load quickly by eliminating sequential task-file reads; record before/after timings. | —       | #35     |
 
 **#3 is complete (2026-08-06).** PR #283 had diagnosed the mechanism correctly and then broken
 commit linting repo-wide: its `shellHook` block ran `pre-commit install` without `-f` on every
@@ -252,9 +252,36 @@ status reader independently passes `--untracked-files=all` in
 `packages/daemon/src/adapters/worktrees/git-gateway.ts`, and the daemon-scoped PWA changes request
 in `packages/pwa/src/components/files-api.ts` uses the shared `browserFetch` transport without
 filtering `??` rows; `packages/pwa/tests/unit/files-api.test.ts` keeps that final path covered.
-**#5 measurement (2026-08-05).** The aggregate Tasks route ran through the real dispatcher/router
-over 96 independent daemon-scoped board reads, each delayed by 12 ms; three sequential samples gave
-a 1,183.1 ms median before the change (1,182.4–1,184.8 ms) and a 26.1 ms median after it
-(25.2–29.3 ms): a 45.3× reduction. The old access pattern was one `await
-board(sessionId).list()` per session in `GET /v1/tasks`; a damaged board still makes the whole
-aggregate unavailable rather than looking like an empty or shortened fleet.
+**#5 is complete.** The sequential walk landed as `37af20d4`
+(`fix(tasks): parallelize fleet board reads (#282)`), which replaced one awaited
+`board(sessionId).list()` per session in `GET /v1/tasks` with a bounded 64-wide fan-out ported from
+kteam's `FLEET_READ_CONCURRENCY` / `mapPooled` pair.
+
+**Which surface got faster, stated plainly.** The optimized route is the AGGREGATE one —
+`GET /v1/tasks`, the capability behind `fy task list` when no session is named. The PWA's
+current-session Tasks pane calls `/v1/sessions/:sessionId/tasks`, which reads exactly one board and
+never contained the fleet walk, so it was neither the cause nor the beneficiary. Each board is a
+single snapshot file (`packages/daemon/src/adapters/tasks/file-task-store.ts`), so N sessions was
+N serialised file reads and nothing below the route can batch further.
+
+**The measurement is a script, not a number.** `scripts/local/bench-fleet-task-reads.ts` runs both
+access patterns against the same fixture in one interpreter — the pre-`37af20d4` sequential loop,
+reimplemented because the change deleted it, and the shipped route through the real
+`ApiRouter`/`ApiDispatcher`. Probe: 96 sessions, one `FakeTaskBoard` each
+(`packages/daemon/tests/unit/runtime/mounts/support.ts`), 12 ms injected per board read, 3 samples
+per arm, fixture rebuilt between samples, unit wall-clock milliseconds by `performance.now()`,
+median reported. It is offline and touches no state home; `bun scripts/local/bench-fleet-task-reads.ts`
+reproduces it and `--boards/--latency/--samples` vary it. Each run prints the commit it measured and
+says so when the tree is dirty, so a citation of a specific tree comes from running the script and
+never from this paragraph. A representative clean-tree run on this branch: **1,167.5 ms** before
+(1,166.3–1,170.8) against **28.7 ms** after (26.8–29.6), a **40.7×** reduction. The ratio is a
+floor — only the AFTER arm pays routing, authorization and serialization.
+
+**The bound now has one owner.** `readTaskBoardFleet`
+(`packages/daemon/src/lib/task-boards/fleet-read.ts`) is the only way the board domain walks every
+session, and the limit is private to it. It closed a second, contradicting answer next door:
+`StorageTaskBoardSessionDirectory.snapshot()` was reading two documents per session for every
+session at once with no bound at all, so a daemon with thousands of boards exhausted descriptors
+through the directory while the route beside it stayed under 64. Ordering is the session index's,
+not completion order; a damaged board still makes the whole aggregate unavailable rather than
+looking like an empty or shortened fleet.

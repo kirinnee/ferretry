@@ -1,5 +1,6 @@
 import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import { z } from 'zod';
+import { readTaskBoardFleet } from '../../lib/task-boards/fleet-read.ts';
 import type { TaskBoardSession, TaskBoardSessionDirectory } from '../../lib/task-boards/types.ts';
 import { isTerminalStatus, type WardenSessionStatus } from '../../lib/warden/types.ts';
 
@@ -52,8 +53,16 @@ export interface TaskBoardSessionSource {
 export class StorageTaskBoardSessionDirectory implements TaskBoardSessionDirectory {
   constructor(private readonly source: TaskBoardSessionSource) {}
 
+  /**
+   * WHY THIS WALK IS BOUNDED RATHER THAN A PLAIN `Promise.all`. Every session here costs TWO reads,
+   * and the fleet is however many sessions the daemon holds — so the unbounded form opened two
+   * descriptors per session simultaneously, on a long-lived daemon, while the aggregate task route
+   * next door was carefully staying under a 64-wide limit for reads of the same fleet. One fact,
+   * two answers. {@link readTaskBoardFleet} is now the only answer, and it also keeps this list in
+   * the index's order rather than in whichever order the filesystem replied.
+   */
   async snapshot(): Promise<readonly TaskBoardSession[]> {
-    const sessions = await Promise.all(this.source.sessionIds().map(async id => await this.session(id)));
+    const sessions = await readTaskBoardFleet(this.source.sessionIds(), async id => await this.session(id));
     return sessions.filter((session): session is TaskBoardSession => session !== undefined);
   }
 

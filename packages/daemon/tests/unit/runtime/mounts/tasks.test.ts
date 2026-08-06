@@ -401,8 +401,10 @@ describe('the task board mount', () => {
   describe('listing the whole fleet', () => {
     it('should read independent fleet boards in bounded parallel batches', async () => {
       // The old route awaited each board in this loop. Each board is an independent atomic
-      // snapshot, so the kteam port may overlap them, but must not open one descriptor per board
-      // without a bound on a long-lived daemon.
+      // snapshot, so the walk may overlap them, but must not open one descriptor per board without
+      // a bound on a long-lived daemon. `readTaskBoardFleet` owns that rule and its own tests prove
+      // it in isolation; what this case proves is that the ROUTE still asks it rather than
+      // reintroducing a loop of its own.
       const sessionIds = Array.from({ length: 96 }, (_unused, index) => `s${index}`);
       let inFlight = 0;
       let peakInFlight = 0;
@@ -432,6 +434,36 @@ describe('the task board mount', () => {
       // descriptor fan-out beyond the source implementation's 64-board safety ceiling.
       should(response.status).equal(200);
       should(peakInFlight).equal(64);
+    });
+
+    it('should order fleet rows by the session index even when a later board answers first', async () => {
+      // Overlapping the reads is only safe if the answer is still deterministic. Here the LAST
+      // session's board is the fastest and the first is the slowest, so a route that gathered rows
+      // as they arrived would hand an operator the fleet reversed — and reversed differently on the
+      // next request, for no reason visible to them.
+      const sessionIds = ['s0', 's1', 's2', 's3'];
+      const delays: Record<string, number> = { s0: 40, s1: 30, s2: 20, s3: 10 };
+      const boards = Object.fromEntries(
+        sessionIds.map(sessionId => {
+          const board = new FakeTaskBoard(sessionId);
+          const list = board.list.bind(board);
+          board.list = async () => {
+            await Bun.sleep(delays[sessionId] as number);
+            return await list();
+          };
+          return [sessionId, board];
+        }),
+      );
+      const dispatch = dispatcher({ boards, sessionIds });
+      for (const sessionId of sessionIds) await dispatch.dispatch(post(`/v1/sessions/${sessionId}/tasks`, CREATE));
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+      const body = jsonBody(response) as unknown as { tasks: { sessionId: string }[] };
+
+      // Assert
+      should(response.status).equal(200);
+      should(body.tasks.map(task => task.sessionId)).deepEqual(sessionIds);
     });
 
     it('should read every session board and keep each row scoped to its own session', async () => {

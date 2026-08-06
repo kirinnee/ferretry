@@ -180,4 +180,62 @@ describe('StorageTaskBoardSessionDirectory', () => {
     // Act & Assert
     should(await directory({}).snapshot()).be.empty();
   });
+
+  it('should read a large fleet under the same descriptor bound the aggregate task route uses', async () => {
+    // This walk costs TWO document reads per session and used to run every session at once, so a
+    // daemon holding thousands of boards opened thousands of descriptors here while the aggregate
+    // task route next door stayed under 64 for reads of the same fleet. Both now go through
+    // `readTaskBoardFleet`, so there is one bound rather than two answers — and this case measures
+    // it against real reads rather than trusting the call site to look right.
+    // Arrange
+    const ids = Array.from({ length: 300 }, (_unused, index) => `s${index}`);
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const meter = async <T>(answer: T): Promise<T> => {
+      inFlight += 1;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      try {
+        await Bun.sleep(1);
+        return answer;
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    const source = new StorageTaskBoardSessionDirectory({
+      sessionIds: () => ids,
+      readConfig: async id => await meter(configDocument(id)),
+      readState: async id => await meter({ id, status: 'running', turn: 1, lastActivityAt: AT }),
+    });
+
+    // Act
+    const sessions = await source.snapshot();
+
+    // Assert — every session is answered, in the index's order, and never more than the bound's
+    // worth of sessions is in flight. Each session issues its config and state reads together, so
+    // the ceiling here is two documents per in-flight session.
+    should(sessions.map(session => session.id)).eql(ids);
+    should(peakInFlight).be.above(1);
+    should(peakInFlight).be.belowOrEqual(64 * 2);
+  });
+
+  it('should raise rather than answer short when one session document cannot be read at all', async () => {
+    // Arrange — a rejected read is not the same as an unparseable document: the cases above omit a
+    // session the schema refuses, but a filesystem that cannot answer at all is damaged state, and
+    // the bounded walk hands that failure straight back to the caller.
+    const failure = new Error('EIO: the session directory is unreadable');
+    const source = new StorageTaskBoardSessionDirectory({
+      sessionIds: () => ['ok', 'broken'],
+      readConfig: async id => {
+        if (id === 'broken') throw failure;
+        return configDocument(id);
+      },
+      readState: async id => ({ id, status: 'running', turn: 1 }),
+    });
+
+    // Act
+    const raised = await source.snapshot().catch((error: unknown) => error);
+
+    // Assert
+    should(raised).equal(failure);
+  });
 });
