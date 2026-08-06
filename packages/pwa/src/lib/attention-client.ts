@@ -122,15 +122,26 @@ export class DaemonAttentionClient {
   ) {}
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+    return this.#load(daemon, scope, false);
+  }
+
+  /** Refreshes a complete board even when this session is already hydrated. */
+  revalidate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+    return this.#load(daemon, scope, true);
+  }
+
+  #load(daemon: DaemonConnection, scope: DaemonSessionScope, revalidate: boolean): Promise<void> {
     assertScopeDaemon(daemon, scope);
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
-    if (this.store.status(scope) === 'ready') return Promise.resolve();
     const existing = this.#fullInFlight.get(key);
     if (existing?.generation === generation) return existing.promise;
+    if (!revalidate && this.store.status(scope) === 'ready') return Promise.resolve();
 
     const revision = this.#advanceBoardRevision(key);
-    this.store.beginLoad(scope);
+    // A live refresh must not replace an already usable board with a loading
+    // state. Initial hydration and retries still expose that they are loading.
+    if (this.store.status(scope) !== 'ready') this.store.beginLoad(scope);
     const promise = fetchAttentionSnapshot(daemon, scope, this.fetcher)
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {

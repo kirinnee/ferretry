@@ -124,6 +124,30 @@ describe('DaemonAttentionClient', () => {
     should(client.store.attention(scopeB)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
   });
 
+  it('revalidates a ready board while coalescing every overlapping full-board read', async () => {
+    const refreshed = deferred<Response>();
+    let calls = 0;
+    const client = new DaemonAttentionClient(undefined, async () => {
+      calls += 1;
+      return calls === 1 ? response(snapshot('same/session')) : refreshed.promise;
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const first = client.revalidate(daemonA, scopeA);
+    const same = client.revalidate(daemonA, scopeA);
+    const hydration = client.hydrate(daemonA, scopeA);
+
+    should(first).equal(same);
+    should(first).equal(hydration);
+    should(calls).equal(2);
+    should(client.store.status(scopeA)).equal('ready');
+
+    refreshed.resolve(response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 1)));
+    await first;
+    should(client.store.count(scopeA)).equal(1);
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T01:00:00.000Z');
+  });
+
   it('keeps badge hydration distinct from full readiness and leaves failures unknown', async () => {
     const responses = [
       response(snapshot('same/session', '2026-07-31T00:30:00.000Z', 4)),
@@ -192,6 +216,28 @@ describe('DaemonAttentionClient', () => {
     await loading;
 
     should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
+    should(client.store.count(scopeA)).equal(2);
+  });
+
+  it('does not let an in-flight revalidation overwrite a later mutation', async () => {
+    const refresh = deferred<Response>();
+    const mutation = deferred<Response>();
+    let calls = 0;
+    const client = new DaemonAttentionClient(undefined, async (_input, init) => {
+      calls += 1;
+      if (calls === 1) return response(snapshot('same/session'));
+      return init?.method === 'POST' ? mutation.promise : refresh.promise;
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const refreshing = client.revalidate(daemonA, scopeA);
+    const dismissing = client.dismiss(daemonA, scopeA, 'A1');
+    mutation.resolve(response(snapshot('same/session', '2026-07-31T03:00:00.000Z', 2)));
+    await dismissing;
+    refresh.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z', 1)));
+    await refreshing;
+
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T03:00:00.000Z');
     should(client.store.count(scopeA)).equal(2);
   });
 
