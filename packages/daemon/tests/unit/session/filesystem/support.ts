@@ -15,6 +15,8 @@ import {
   type SessionGit,
   type SessionRepoInfo,
   type SessionRootPinner,
+  type SpawnBudget,
+  type WorkBudget,
 } from '../../../../src/lib/session/filesystem/index.ts';
 
 /**
@@ -78,8 +80,19 @@ class FakePinnedTarget implements PinnedTarget {
     return this.metadata.size > maxBytes ? undefined : this.bytes;
   }
 
-  async list(maxEntries: number): Promise<PinnedListing> {
-    return { entries: this.listing.entries.slice(0, maxEntries), truncated: this.listing.truncated };
+  /**
+   * The real enumeration stops where a spent budget finds it and says `truncated`; so does this one.
+   *
+   * Checked per entry rather than once, because the property under test is that a directory of many
+   * children is abandoned from the INSIDE rather than after every one of them has been classified.
+   */
+  async list(maxEntries: number, budget?: WorkBudget): Promise<PinnedListing> {
+    const entries: PinnedDirectoryEntry[] = [];
+    for (const entry of this.listing.entries.slice(0, maxEntries)) {
+      if (budget?.expired() === true) return { entries, truncated: true };
+      entries.push(entry);
+    }
+    return { entries, truncated: this.listing.truncated };
   }
 
   async close(): Promise<void> {
@@ -198,18 +211,23 @@ export class FakeSessionGit implements SessionGit {
     readonly oldSide: DiffSide | undefined;
     readonly newSide: DiffSide | undefined;
   }> = [];
-  readonly listCalls: Array<{ readonly cwd: string; readonly maxBytes: number }> = [];
+  readonly listCalls: Array<{ readonly cwd: string; readonly maxBytes: number; readonly remainingMs?: number }> = [];
+  readonly repoInfoCalls: Array<{ readonly cwd: string; readonly remainingMs?: number }> = [];
   readonly cwds: string[] = [];
 
   constructor(private readonly script: SessionGitScript = {}) {}
 
-  async repoInfo(cwd: string): Promise<SessionRepoInfo> {
+  async repoInfo(cwd: string, budget?: SpawnBudget): Promise<SessionRepoInfo> {
     this.cwds.push(cwd);
-    return this.script.repoInfo?.(cwd) ?? IN_REPO;
+    const info = this.script.repoInfo?.(cwd) ?? IN_REPO;
+    // Read AFTER the script, mirroring the real adapter: what is left is consulted when it is about to
+    // start its SECOND command, by which time a caller may already have hung up.
+    this.repoInfoCalls.push({ cwd, ...(budget === undefined ? {} : { remainingMs: budget.remainingMs() }) });
+    return info;
   }
 
-  async listFiles(cwd: string, maxBytes: number): Promise<SessionFileList> {
-    this.listCalls.push({ cwd, maxBytes });
+  async listFiles(cwd: string, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList> {
+    this.listCalls.push({ cwd, maxBytes, ...(budget === undefined ? {} : { remainingMs: budget.remainingMs() }) });
     return this.script.listFiles?.(cwd, maxBytes) ?? { paths: [], truncated: false };
   }
 

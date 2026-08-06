@@ -843,3 +843,117 @@ describe('RunnerSessionGit.listFiles', () => {
     should(invocations[0]?.maxStdoutBytes).eql(128);
   });
 });
+
+/**
+ * Two Git commands under ONE budget.
+ *
+ * A budget spent on the first command must not buy the second, and a caller who hung up while the first
+ * was running must not be the reason a new child is spawned. Neither property is observable through a
+ * real repository — both are about what is NOT run — so both are proven against a runner that counts.
+ */
+describe('RunnerSessionGit.repoInfo under a budget', () => {
+  const INSIDE = 'true\n/pinned/root\n\n';
+
+  /** A runner that answers every command identically and records what it was asked to start. */
+  const counting = (invocations: GitInvocation[]): GitRunner => ({
+    run: invocation => {
+      invocations.push(invocation);
+      return Promise.resolve({
+        exitCode: 0,
+        stdout: encode(INSIDE),
+        stderr: '',
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        timedOut: false,
+      });
+    },
+  });
+
+  it('should start no second command once the budget is spent by the first', async () => {
+    // Arrange: the budget turns expired exactly when the first command has run.
+    const invocations: GitInvocation[] = [];
+    let started = 0;
+    const runner = counting(invocations);
+    const budget = {
+      expired: () => started >= 1,
+      remainingMs: () => (started >= 1 ? 0 : 5_000),
+    };
+    const counted: GitRunner = {
+      run: async invocation => {
+        started += 1;
+        return await runner.run(invocation);
+      },
+    };
+
+    // Act
+    const info = await new RunnerSessionGit(counted).repoInfo('/pinned/session', budget);
+
+    // Assert: the shape the first command established, and nothing spawned to complete it.
+    should(invocations).have.length(1);
+    should(invocations[0]?.args).eql(['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix']);
+    should(info.repo).be.true();
+    should(info.root).eql('/pinned/root');
+    should(info.hasHead).be.false();
+  });
+
+  it('should start no second command for a caller who hung up during the first', async () => {
+    // Arrange: an abort mid-command is invisible to the child, which is exactly why it is asked after.
+    const invocations: GitInvocation[] = [];
+    const controller = new AbortController();
+    const runner = counting(invocations);
+    const aborting: GitRunner = {
+      run: async invocation => {
+        controller.abort();
+        return await runner.run(invocation);
+      },
+    };
+    // Modelling the port's own invariant: a hung-up caller has zero left, never a positive remainder.
+    const budget = {
+      expired: () => controller.signal.aborted,
+      remainingMs: () => (controller.signal.aborted ? 0 : 5_000),
+    };
+
+    // Act
+    const info = await new RunnerSessionGit(aborting).repoInfo('/pinned/session', budget);
+
+    // Assert
+    should(invocations).have.length(1);
+    should(info.repo).be.true();
+    should(info.hasHead).be.false();
+  });
+
+  it('should give the second command only what the first one left', async () => {
+    // Arrange: a budget that visibly drains, so the two timeouts cannot both be the whole of it.
+    const invocations: GitInvocation[] = [];
+    const runner = counting(invocations);
+    let remaining = 5_000;
+    const draining: GitRunner = {
+      run: async invocation => {
+        remaining -= 2_000;
+        return await runner.run(invocation);
+      },
+    };
+    const budget = { expired: () => remaining <= 0, remainingMs: () => Math.max(0, remaining) };
+
+    // Act
+    await new RunnerSessionGit(draining).repoInfo('/pinned/session', budget);
+
+    // Assert
+    should(invocations).have.length(2);
+    should(invocations[0]?.timeoutMs).eql(5_000);
+    should(invocations[1]?.timeoutMs).eql(3_000);
+    should(invocations[1]?.args).eql(['rev-parse', '--verify', '--quiet', 'HEAD']);
+  });
+
+  it('should apply the runner default when no budget is supplied at all', async () => {
+    // Arrange
+    const invocations: GitInvocation[] = [];
+
+    // Act
+    await new RunnerSessionGit(counting(invocations)).repoInfo('/pinned/session');
+
+    // Assert
+    should(invocations).have.length(2);
+    should(invocations.every(invocation => invocation.timeoutMs === undefined)).be.true();
+  });
+});

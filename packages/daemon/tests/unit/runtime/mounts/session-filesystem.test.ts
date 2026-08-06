@@ -544,4 +544,31 @@ describe('the working-tree index route', () => {
     should(response.status).eql(501);
     should(jsonBody(response)).have.property('code', 'unsupported');
   });
+
+  it('should carry a hung-up caller through to the walk instead of finishing for nobody', async () => {
+    // The route contributes exactly one thing the domain cannot know: that the caller stopped waiting.
+    // Arrange
+    const controller = new AbortController();
+    controller.abort();
+    const pinner = new FakeRootPinner({ tree: checkout() });
+    const routes = sessionFilesystemRoutes(
+      new SessionFilesystem(pinner, new FakeSessionGit(notARepo)),
+      sessionDirectory([sessionView('s1')]),
+    );
+    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
+
+    // Act
+    const response = await dispatch.dispatch(
+      request({ path: '/v1/sessions/s1/fs/index', headers: human, signal: controller.signal }),
+    );
+
+    // Assert: a partial answer the schema accepts, and not one directory opened to produce it.
+    should(response.status).eql(200);
+    const body = jsonBody(response) as unknown as { coverage: string; files: unknown[] };
+    should(SessionFileIndexResponseSchema.safeParse(body).success).be.true();
+    should(body.coverage).eql('partial');
+    should(body.files).be.empty();
+    should(pinner.lastRoot.opens).be.empty();
+    should(pinner.lastRoot.closed).be.true();
+  });
 });

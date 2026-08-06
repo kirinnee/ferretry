@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FsError, SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
+import { FsError, MAX_INDEX_WALL_MS, SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import {
   directory,
   FAKE_POLICY_CWD,
@@ -25,10 +25,26 @@ import {
 
 const CWD = '/home/kirin/session';
 
-const viewer = (root: FakeRootOptions = {}, git: SessionGitScript = {}) => {
+const viewer = (root: FakeRootOptions = {}, git: SessionGitScript = {}, nowMs?: () => number) => {
   const pinner = new FakeRootPinner(root);
   const sessionGit = new FakeSessionGit(git);
-  return { filesystem: new SessionFilesystem(pinner, sessionGit), pinner, git: sessionGit };
+  return { filesystem: new SessionFilesystem(pinner, sessionGit, nowMs), pinner, git: sessionGit };
+};
+
+/**
+ * A clock that stays still for `reads` observations and then jumps past any budget.
+ *
+ * A deadline proven by sleeping is a deadline proven by luck on a loaded machine. Counting reads instead
+ * makes "the budget ran out HERE" an exact statement: the budget's constructor takes the first reading
+ * and every `expired()` takes one more, so a test can place expiry at a named step and assert what the
+ * step before it had already finished.
+ */
+const clockExpiringAfter = (reads: number) => {
+  let seen = 0;
+  return () => {
+    seen += 1;
+    return seen <= reads ? 0 : 1_000_000;
+  };
 };
 
 const NOT_A_REPO = { repo: false as const, prefix: '', hasHead: false };
@@ -557,5 +573,280 @@ describe('the session file index outside a Git worktree', () => {
     should(index.files.map(file => file.path)).eql(['kept.ts']);
     should(index.skipped).eql([{ reason: 'excluded', count: EXPECTED_INDEX_EXCLUSIONS.length }]);
     should(pinner.lastRoot.opens).eql(['']);
+  });
+});
+
+/**
+ * The wall-clock budget and the caller's cancellation.
+ *
+ * The counts elsewhere in this file bound how much is LOOKED AT. Neither bounds how long looking takes,
+ * and on a large monorepo proving each Git candidate is a current regular file is what makes those two
+ * different numbers — long enough that the server closes the connection first and turns a partial answer
+ * this schema has exact words for into a dropped socket. So every case here asserts the same three
+ * things: work stopped, the stopping was SAID in the document, and nothing was left open.
+ */
+describe('the session file index under a budget', () => {
+  const walked = (root: FakeRootOptions, nowMs?: () => number) => viewer(root, { repoInfo: () => NOT_A_REPO }, nowMs);
+
+  it('should hand EVERY Git question what is left of the budget rather than a timeout of its own', async () => {
+    // A child allowed to outlive the answer it belongs to would spend the budget the walk after it
+    // still has to fit inside — and a bound that covered only the reads after Git would be a bound on
+    // the cheaper half of the call.
+    // Arrange
+    const { filesystem, git } = viewer(
+      { tree: gitTree('a.ts') },
+      { listFiles: () => ({ paths: ['a.ts'], truncated: false }) },
+    );
+
+    // Act
+    await filesystem.index(CWD, { budgetMs: 5_000 });
+
+    // Assert
+    should(git.repoInfoCalls).have.length(1);
+    should(git.repoInfoCalls[0]?.remainingMs).be.aboveOrEqual(1);
+    should(git.repoInfoCalls[0]?.remainingMs).be.belowOrEqual(5_000);
+    should(git.listCalls).have.length(1);
+    should(git.listCalls[0]?.remainingMs).be.aboveOrEqual(1);
+    should(git.listCalls[0]?.remainingMs).be.belowOrEqual(5_000);
+  });
+
+  it('should not start a second Git child for a caller who hung up during the first', async () => {
+    // Nothing can reach into a spawn already running, so the guarantee that IS available is this one:
+    // after cancellation no new child begins.
+    // Arrange
+    const controller = new AbortController();
+    const { filesystem, pinner, git } = viewer(
+      { tree: gitTree('a.ts', 'b.ts') },
+      {
+        repoInfo: () => {
+          controller.abort();
+          return { repo: true, root: FAKE_ROOT, prefix: '', hasHead: true };
+        },
+        listFiles: () => ({ paths: ['a.ts', 'b.ts'], truncated: false }),
+      },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD, { signal: controller.signal });
+
+    // Assert: a hung-up caller has no time left, not merely a deadline that has not arrived — so an
+    // implementation that bounded a spawn by the remainder alone would still start nothing.
+    should(git.repoInfoCalls).have.length(1);
+    should(git.repoInfoCalls[0]?.remainingMs).eql(0);
+    should(git.listCalls).be.empty();
+    should(index.files).be.empty();
+    should(index.coverage).eql('partial');
+    should(index.skipped).eql([{ reason: 'truncated', count: 1 }]);
+    should(pinner.lastRoot.opens).be.empty();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should do no candidate work at all for a caller who has already hung up', async () => {
+    // The pin is still taken: `root` is a fact only the pin can state, and it is one open and close
+    // rather than a tree walk. Nothing beneath it is asked anything — not even Git.
+    // Arrange
+    const controller = new AbortController();
+    controller.abort();
+    const { filesystem, pinner, git } = viewer(
+      { tree: gitTree('a.ts', 'b.ts') },
+      { listFiles: () => ({ paths: ['a.ts', 'b.ts'], truncated: false }) },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD, { signal: controller.signal });
+
+    // Assert
+    should(index.files).be.empty();
+    should(index.coverage).eql('partial');
+    should(index.skipped).eql([{ reason: 'truncated', count: 1 }]);
+    should(index.root).eql(FAKE_ROOT);
+    should(git.listCalls).be.empty();
+    should(git.cwds).be.empty();
+    should(pinner.lastRoot.opens).be.empty();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should keep the rows it proved when a tracked caller hangs up mid-validation', async () => {
+    // Arrange: the abort lands while `b.ts` is being opened, so `a.ts` is already accepted and
+    // `c.ts` and `d.ts` are never looked at.
+    const controller = new AbortController();
+    const { filesystem, pinner } = viewer(
+      {
+        tree: gitTree('a.ts', 'b.ts', 'c.ts', 'd.ts'),
+        onOpen: rel => {
+          if (rel === 'b.ts') controller.abort();
+        },
+      },
+      { listFiles: () => ({ paths: ['d.ts', 'c.ts', 'b.ts', 'a.ts'], truncated: false }) },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD, { signal: controller.signal });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts', 'b.ts']);
+    should(index.coverage).eql('partial');
+    should(index.skipped).eql([{ reason: 'truncated', count: 2 }]);
+    should(pinner.lastRoot.opens).eql(['a.ts', 'b.ts']);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should stop tracked validation on a spent deadline and count what it never opened', async () => {
+    // Arrange: reads are the budget's constructor, the entry check, the remainder handed to `repoInfo`,
+    // the check after it, the remainder handed to `listFiles`, then one per candidate. Expiring after
+    // the seventh leaves `a.ts` and `b.ts` proven and `c.ts` and `d.ts` untouched.
+    const { filesystem, pinner } = viewer(
+      { tree: gitTree('a.ts', 'b.ts', 'c.ts', 'd.ts') },
+      { listFiles: () => ({ paths: ['a.ts', 'b.ts', 'c.ts', 'd.ts'], truncated: false }) },
+      clockExpiringAfter(7),
+    );
+
+    // Act
+    const index = await filesystem.index(CWD, { budgetMs: 1_000 });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts', 'b.ts']);
+    should(index.coverage).eql('partial');
+    should(index.skipped).eql([{ reason: 'truncated', count: 2 }]);
+    should(pinner.lastRoot.opens).eql(['a.ts', 'b.ts']);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should stop opening tracked candidates once the response bound is already satisfied', async () => {
+    // The candidates are in the comparator's own order, so once `maxFiles` rows are accepted every
+    // remaining one sorts after all of them and would be sliced off — opening it proves nothing and
+    // was half the cost of a large repository's index.
+    // Arrange
+    const { filesystem, pinner } = viewer(
+      { tree: gitTree('a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts') },
+      { listFiles: () => ({ paths: ['e.ts', 'd.ts', 'c.ts', 'b.ts', 'a.ts'], truncated: false }) },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD, { maxFiles: 2 });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts', 'b.ts']);
+    should(index.coverage).eql('partial');
+    should(countFor(index.skipped, 'truncated')).eql(3);
+    should(pinner.lastRoot.opens).eql(['a.ts', 'b.ts']);
+    should(pinner.lastRoot.targets).have.length(2);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+  });
+
+  it('should stop the walk between directories and count everything still queued', async () => {
+    // Arrange: the abort lands as `alpha` is opened, so the queue still holds `beta`.
+    const controller = new AbortController();
+    const { filesystem, pinner } = walked({
+      tree: treeOf(
+        [
+          '',
+          directory([
+            { name: 'alpha', type: 'dir' },
+            { name: 'beta', type: 'dir' },
+          ]),
+        ],
+        ['alpha', directory([{ name: 'deep.ts', type: 'file' }])],
+        ['alpha/deep.ts', textFile('x')],
+        ['beta', directory([{ name: 'other.ts', type: 'file' }])],
+        ['beta/other.ts', textFile('y')],
+      ),
+      onOpen: rel => {
+        if (rel === 'alpha') controller.abort();
+      },
+    });
+
+    // Act
+    const index = await filesystem.index(CWD, { signal: controller.signal });
+
+    // Assert: `alpha` was opened but its enumeration stopped, and `beta` was never opened at all.
+    should(index.files).be.empty();
+    should(index.coverage).eql('partial');
+    should(pinner.lastRoot.opens).eql(['', 'alpha']);
+    should(countFor(index.skipped, 'truncated')).be.aboveOrEqual(1);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should abandon one directory from inside rather than after classifying all of it', async () => {
+    // A spent budget must not buy one more classification per remaining child of a directory holding
+    // thousands, so the enumeration itself takes the budget and reports what it stopped short of.
+    // Arrange
+    const controller = new AbortController();
+    const { filesystem, pinner } = walked({
+      tree: treeOf([
+        '',
+        directory([
+          { name: 'one.ts', type: 'file' },
+          { name: 'two.ts', type: 'file' },
+          { name: 'three.ts', type: 'file' },
+        ]),
+      ]),
+      onOpen: () => controller.abort(),
+    });
+
+    // Act
+    const index = await filesystem.index(CWD, { signal: controller.signal });
+
+    // Assert
+    should(index.files).be.empty();
+    should(index.coverage).eql('partial');
+    should(countFor(index.skipped, 'truncated')).be.aboveOrEqual(1);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should keep the children it inspected before the budget ran out mid-directory', async () => {
+    // Arrange: reads are the constructor, the entry check, the pair around `repoInfo`, the dequeue
+    // check, one per entry the enumeration classifies, then one per child inspected. Expiring after
+    // the ninth keeps the first child and stops at the second.
+    const { filesystem, pinner } = walked(
+      {
+        tree: treeOf(
+          [
+            '',
+            directory([
+              { name: 'one.ts', type: 'file' },
+              { name: 'two.ts', type: 'file' },
+              { name: 'three.ts', type: 'file' },
+            ]),
+          ],
+          ['one.ts', textFile('1')],
+          ['two.ts', textFile('2')],
+          ['three.ts', textFile('3')],
+        ),
+      },
+      clockExpiringAfter(9),
+    );
+
+    // Act
+    const index = await filesystem.index(CWD, { budgetMs: 1_000 });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['one.ts']);
+    should(index.coverage).eql('partial');
+    should(countFor(index.skipped, 'truncated')).be.aboveOrEqual(1);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+    should(pinner.lastRoot.closed).be.true();
+  });
+
+  it('should refuse a budget that is not a real bound before pinning or asking Git', async () => {
+    // Arrange
+    const { filesystem, pinner, git } = viewer({ tree: treeOf() });
+
+    // Act
+    const failures = await Promise.all([
+      filesystem.index(CWD, { budgetMs: -1 }).catch((error: unknown) => error),
+      filesystem.index(CWD, { budgetMs: 1.5 }).catch((error: unknown) => error),
+      filesystem.index(CWD, { budgetMs: Number.NaN }).catch((error: unknown) => error),
+      filesystem.index(CWD, { budgetMs: MAX_INDEX_WALL_MS + 1 }).catch((error: unknown) => error),
+    ]);
+
+    // Assert
+    should(failures.every(error => error instanceof RangeError)).be.true();
+    should(pinner.roots).eql([]);
+    should(git.cwds).eql([]);
   });
 });
