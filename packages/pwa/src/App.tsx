@@ -243,6 +243,12 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: 'New' }];
     case 'projects':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Projects' }];
+    case 'project-detail':
+      return [
+        { href: sessions, label: 'Sessions' },
+        { href: `${sessions}/projects`, label: 'Projects' },
+        { label: 'Project' },
+      ];
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'settings':

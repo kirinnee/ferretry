@@ -102,6 +102,8 @@ export * from '../features/onboarding/setup-handoff.ts';
 export * from '../features/onboarding/setup-handoff-panel.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
+export * from '../features/projects/project-detail-model.ts';
+export * from '../features/projects/project-launch-model.ts';
 export * from '../features/projects/project-registration-model.ts';
 export * from '../features/projects/projects-api.ts';
 export * from '../features/secrets/secrets-api.ts';

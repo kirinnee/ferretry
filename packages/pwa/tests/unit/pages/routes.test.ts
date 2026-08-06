@@ -7,6 +7,7 @@ import {
   daemonImportedHistoryPath,
   daemonLearningPath,
   daemonNewSessionPath,
+  daemonProjectPath,
   daemonProjectsPath,
   daemonSessionPath,
   daemonSessionsPath,
@@ -30,6 +31,7 @@ describe('route path builders', () => {
       daemonSessionsPath(daemonA),
       daemonNewSessionPath(daemonA),
       daemonProjectsPath(daemonA),
+      daemonProjectPath(daemonA, '11111111-1111-4111-8111-111111111111'),
       daemonSessionPath(daemonA, 'session / one'),
       daemonSettingsPath(daemonA),
       daemonWardenPath(daemonA),
@@ -44,6 +46,7 @@ describe('route path builders', () => {
       '/d/daemon%2Fa',
       '/d/daemon%2Fa/new',
       '/d/daemon%2Fa/projects',
+      '/d/daemon%2Fa/projects/11111111-1111-4111-8111-111111111111',
       '/d/daemon%2Fa/session/session%20%2F%20one',
       '/d/daemon%2Fa/settings',
       '/d/daemon%2Fa/warden',
@@ -60,6 +63,10 @@ describe('route path builders', () => {
     // Assert
     should(actual).throw('sessionId must not be empty');
   });
+
+  it('should reject a blank project ID instead of treating a path as identity', () => {
+    should(() => daemonProjectPath(daemonA, ' ')).throw('projectId must not be empty');
+  });
 });
 
 describe('route parsing', () => {
@@ -69,6 +76,7 @@ describe('route parsing', () => {
       parseRoute('/d/daemon%2Fa'),
       parseRoute('/d/daemon%2Fa/new'),
       parseRoute('/d/daemon%2Fa/projects'),
+      parseRoute('/d/daemon%2Fa/projects/11111111-1111-4111-8111-111111111111'),
       parseRoute('/d/daemon%2Fa/session/session%20%2F%20one'),
       parseRoute('/d/daemon%2Fa/settings'),
       parseRoute('/d/daemon%2Fa/warden'),
@@ -82,6 +90,7 @@ describe('route parsing', () => {
       { kind: 'sessions', daemonId: daemonA },
       { kind: 'new-session', daemonId: daemonA },
       { kind: 'projects', daemonId: daemonA },
+      { kind: 'project-detail', daemonId: daemonA, projectId: '11111111-1111-4111-8111-111111111111' },
       { kind: 'session', daemonId: daemonA, sessionId: 'session / one' },
       { kind: 'settings', daemonId: daemonA },
       { kind: 'warden', daemonId: daemonA },
@@ -170,6 +179,7 @@ describe('route identity', () => {
       parseRoute('/setup'),
       parseRoute('/d/daemon-b'),
       parseRoute('/d/daemon-b/new'),
+      parseRoute('/d/daemon-b/projects/project%20id'),
       daemonBSession,
       daemonASession,
       parseRoute('/d/daemon-b/settings'),
@@ -188,6 +198,7 @@ describe('route identity', () => {
       ['/setup', 'setup'],
       ['/d/daemon-b', 'sessions:"daemon-b"'],
       ['/d/daemon-b/new', 'new-session:"daemon-b"'],
+      ['/d/daemon-b/projects/project%20id', 'project-detail:["daemon-b","project id"]'],
       ['/d/daemon-b/session/same', 'session:["daemon-b","same"]'],
       ['/d/daemon%2Fa/session/same', 'session:["daemon/a","same"]'],
       ['/d/daemon-b/settings', 'settings:"daemon-b"'],

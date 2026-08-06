@@ -25,6 +25,7 @@
  * refusal, and that is the whole protocol between this component and its caller.
  */
 
+import type { RegisterProjectRequest } from '@ferretry/protocol';
 import { FolderOpen, Plus, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { RecentProjectOption } from '../../components/daemon-picker-model.ts';
@@ -38,7 +39,6 @@ import {
   type ProjectRegistrationDraft,
   type ProjectRegistrationStatus,
 } from './project-registration-model.ts';
-import type { RegisterProjectRequest } from '@ferretry/protocol';
 
 interface ProjectsHubProps {
   readonly slice: DaemonProjectsSlice;
@@ -54,6 +54,8 @@ interface ProjectsHubProps {
   readonly onRegister: (request: RegisterProjectRequest) => Promise<boolean>;
   /** Clears a settled status, so a notice cannot outlive the thing it describes. */
   readonly onDismiss: () => void;
+  /** The daemon-scoped UUID route for a registered project. */
+  readonly projectHref?: (projectId: string) => string;
   readonly now: number;
 }
 
@@ -99,6 +101,7 @@ export function ProjectsHub({
   status,
   onRegister,
   onDismiss,
+  projectHref,
   now,
 }: ProjectsHubProps) {
   const [draft, setDraft] = useState<ProjectRegistrationDraft>(emptyProjectRegistrationDraft);
@@ -198,7 +201,18 @@ export function ProjectsHub({
                   data-registered-project={project.path}
                   key={project.id ?? project.path}
                 >
-                  <h3 className="m-0 text-ui font-semibold text-fg">{project.name}</h3>
+                  {project.id === undefined || projectHref === undefined ? (
+                    <h3 className="m-0 text-ui font-semibold text-fg">{project.name}</h3>
+                  ) : (
+                    <h3 className="m-0">
+                      <a
+                        href={projectHref(project.id)}
+                        className="inline-flex min-h-control items-center text-left text-ui font-semibold text-fg underline-offset-4 hover:text-accent hover:underline"
+                      >
+                        {project.name}
+                      </a>
+                    </h3>
+                  )}
                   <ProjectProvenance project={project} />
                 </li>
               ))}

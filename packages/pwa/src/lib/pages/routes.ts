@@ -33,6 +33,13 @@ export interface DaemonProjectsRoute {
   readonly daemonId: DaemonId;
 }
 
+/** One durable registered Project, addressed by its protocol UUID rather than its path. */
+export interface DaemonProjectDetailRoute {
+  readonly kind: 'project-detail';
+  readonly daemonId: DaemonId;
+  readonly projectId: string;
+}
+
 export interface DaemonSessionRoute {
   readonly kind: 'session';
   readonly daemonId: DaemonId;
@@ -68,6 +75,7 @@ export type DaemonPageRoute =
   | DaemonSessionsRoute
   | DaemonNewSessionRoute
   | DaemonProjectsRoute
+  | DaemonProjectDetailRoute
   | DaemonSessionRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
@@ -128,6 +136,13 @@ export const daemonNewSessionPath = (id: DaemonId): string => `${daemonSessionsP
 /** Builds the canonical durable-project hub pathname for one daemon. */
 export const daemonProjectsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/projects`;
 
+/** Builds the canonical UUID-addressed project detail pathname for one daemon. */
+export const daemonProjectPath = (id: DaemonId, projectId: string): string => {
+  const value = projectId.trim();
+  if (value === '') throw new Error('projectId must not be empty');
+  return `${daemonProjectsPath(id)}/${encodeURIComponent(value)}`;
+};
+
 /** Builds the canonical session pathname for one daemon and session. */
 export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   const scope = daemonSessionScope({ daemonId: id }, sessionId);
@@ -169,6 +184,11 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
   }
 
+  if (destination === 'projects' && remainder.length === 0) {
+    const projectId = parsedSessionId(sessionSegment);
+    if (projectId !== undefined) return { kind: 'project-detail', daemonId: id, projectId };
+  }
+
   if (remainder.length === 0) {
     const sessionId = destination === 'session' ? parsedSessionId(sessionSegment) : undefined;
     if (sessionId !== undefined) return { kind: 'session', daemonId: id, sessionId };
@@ -190,6 +210,8 @@ export const routePath = (route: Route): string => {
       return daemonNewSessionPath(route.daemonId);
     case 'projects':
       return daemonProjectsPath(route.daemonId);
+    case 'project-detail':
+      return daemonProjectPath(route.daemonId, route.projectId);
     case 'session':
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'settings':
@@ -215,5 +237,6 @@ export const routePageKey = (route: Route): string => {
   if (route.kind === 'legacy-tasks-redirect') return routePageKey(route.to);
   if (route.kind === 'connection-picker' || route.kind === 'setup') return route.kind;
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;
+  if (route.kind === 'project-detail') return `project-detail:${JSON.stringify([route.daemonId, route.projectId])}`;
   return `${route.kind}:${JSON.stringify(route.daemonId)}`;
 };

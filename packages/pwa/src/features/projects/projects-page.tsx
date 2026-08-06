@@ -27,10 +27,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { projectPickerOptions } from '../../components/daemon-picker-model.ts';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { daemonProjectPath } from '../../lib/pages/routes.ts';
 import { useAppStore } from '../../lib/store.tsx';
-import { ProjectsHub } from './projects-hub.tsx';
-import { alreadyRegistered, registerProject } from './projects-api.ts';
 import type { ProjectRegistrationStatus } from './project-registration-model.ts';
+import { alreadyRegistered, registerProject } from './projects-api.ts';
+import { ProjectsHub } from './projects-hub.tsx';
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
@@ -143,6 +144,7 @@ export function ProjectsPage({ connection }: { readonly connection: DaemonConnec
       status={status}
       onRegister={register}
       onDismiss={() => setStatus(null)}
+      projectHref={projectId => daemonProjectPath(connection.daemonId, projectId)}
       now={Date.now()}
     />
   );

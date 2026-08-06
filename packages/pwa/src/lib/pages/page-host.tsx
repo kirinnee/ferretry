@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-
+import { ProjectDetailPage } from '../../features/projects/project-detail.tsx';
 import type { DaemonConnection, DaemonId } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import type { PageRoute } from './routes.ts';
@@ -60,6 +60,8 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'projects':
       if (slots.Projects === undefined) throw new Error('the projects route is not mounted');
       return <slots.Projects connection={matchedConnection} />;
+    case 'project-detail':
+      return <ProjectDetailPage connection={matchedConnection} projectId={route.projectId} />;
     case 'session':
       return (
         <slots.SessionChat
