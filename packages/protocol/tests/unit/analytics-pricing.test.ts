@@ -375,6 +375,27 @@ describe('analytics pricing contract', () => {
     should(punctuated.success).be.false();
   });
 
+  it('should record when a configured source was last applied, and stay strict about the instant', () => {
+    // The configured-source last-sync is operational metadata the daemon stamps from a preview's
+    // `fetchedAt` only on a successful apply: a preview never writes it, and a source that has never
+    // been applied reads as `null`. It is the shared strict instant, so a date-only value — which the
+    // on-disk catalog canonicalizes — is refused here, where nothing ever came from that legacy document.
+    // Act
+    const omitted = ConfiguredAnalyticsPricingSourceSchema.parse(configuredSource);
+    const applied = ConfiguredAnalyticsPricingSourceSchema.parse({ ...configuredSource, lastSyncedAt: LATER });
+    const malformed = ConfiguredAnalyticsPricingSourceSchema.safeParse({
+      ...configuredSource,
+      lastSyncedAt: '2026-08-30',
+    });
+
+    // Assert: a source with no recorded sync canonicalizes to `null`, a valid instant round-trips, and
+    // a value the strict instant refuses is named by path so this proves that rule fired.
+    should(omitted.lastSyncedAt).be.null();
+    should(applied.lastSyncedAt).equal(LATER);
+    should(malformed.success).be.false();
+    should(malformed.error?.issues.map(issue => issue.path)).containDeep([['lastSyncedAt']]);
+  });
+
   it('should refuse a feed that describes its own provenance', () => {
     // A feed states prices; the daemon stamps where they came from and when it fetched them.
     // Act + Assert

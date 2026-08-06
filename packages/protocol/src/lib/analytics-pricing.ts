@@ -401,6 +401,12 @@ export const ConfiguredAnalyticsPricingSourceSchema = z.strictObject({
   url: AnalyticsPricingSourceUrlSchema,
   /** A configured feed the operator has switched off stays readable rather than having to be retyped. */
   enabled: z.boolean().default(true),
+  /**
+   * When this source was last successfully applied — the daemon-stamped `fetchedAt` of the latest sync
+   * that took. Operational metadata, not fetch authority: a preview never writes it, a failed or stale
+   * apply never moves it, and a source that has never been applied canonicalizes to `null`.
+   */
+  lastSyncedAt: InstantSchema.nullable().default(null),
 });
 export type ConfiguredAnalyticsPricingSource = z.infer<typeof ConfiguredAnalyticsPricingSourceSchema>;
 
