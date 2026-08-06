@@ -407,6 +407,34 @@ describe('structured question projection', () => {
     should(structuredQuestionStatePatch(cleared, { kind: 'resolved', toolUseId: 'tool-1' }, records)).deepEqual({});
   });
 
+  it('re-mints a later accepted operation despite an older tool’s acknowledgement', () => {
+    const patch = structuredQuestionStatePatch({ id: 's1', status: 'running', turn: 1 }, { kind: 'none' }, [
+      answer('acknowledged', { requestId: 'human-clear' }),
+      answer('accepted', { requestId: 'request-2', toolUseId: 'tool-2', fingerprint: 'fingerprint-2' }),
+    ]);
+
+    should(patch).match({
+      status: 'awaiting_user',
+      pendingQuestion: undefined,
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+      needsHuman: /request-2 for tool-2/u,
+    });
+  });
+
+  it('re-mints a later quarantine despite an older tool’s acknowledgement', () => {
+    const patch = structuredQuestionStatePatch({ id: 's1', status: 'running', turn: 1 }, { kind: 'none' }, [
+      answer('acknowledged', { requestId: 'human-clear' }),
+      answer('quarantined', { requestId: 'request-2', toolUseId: 'tool-2', fingerprint: 'fingerprint-2' }),
+    ]);
+
+    should(patch).match({
+      status: 'awaiting_user',
+      pendingQuestion: undefined,
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+      needsHuman: /request-2 for tool-2/u,
+    });
+  });
+
   it('clears only when transcript evidence resolves the exact pending form', () => {
     const result: TranscriptEvent = {
       kind: 'tool-result',
@@ -414,14 +442,56 @@ describe('structured question projection', () => {
       role: 'tool',
       result: { callId: 'tool-1', content: null, isError: false },
     };
-    const terminal: TranscriptEvent = { kind: 'turn', harness: 'claude', role: 'assistant', state: 'completed' };
     should(projectStructuredQuestion([question, result])).deepEqual({ kind: 'resolved', toolUseId: 'tool-1' });
-    should(projectStructuredQuestion([question, terminal])).deepEqual({ kind: 'resolved', toolUseId: 'tool-1' });
     should(
       projectStructuredQuestion([question, { ...result, result: { ...result.result, callId: 'another-tool' } }]),
     ).match({
       kind: 'pending',
     });
+  });
+
+  it('never releases an open form on a terminal turn alone', () => {
+    const completed: TranscriptEvent = { kind: 'turn', harness: 'claude', role: 'assistant', state: 'completed' };
+    const aborted: TranscriptEvent = { ...completed, state: 'aborted' } satisfies TranscriptEvent;
+
+    should(projectStructuredQuestion([question, completed])).match({
+      kind: 'pending',
+      question: { toolUseId: 'tool-1' },
+    });
+    should(projectStructuredQuestion([question, aborted])).match({
+      kind: 'pending',
+      question: { toolUseId: 'tool-1' },
+    });
+    // A terminal turn AFTER a real tool result still resolves: the result, not the turn, released it.
+    should(
+      projectStructuredQuestion([
+        question,
+        {
+          kind: 'tool-result',
+          harness: 'claude',
+          role: 'tool',
+          result: { callId: 'tool-1', content: null, isError: false },
+        },
+        aborted,
+      ]),
+    ).deepEqual({ kind: 'resolved', toolUseId: 'tool-1' });
+  });
+
+  it('keeps an unconfirmed answer blocking and never prose-permitting after a terminal turn', () => {
+    for (const state of ['completed', 'aborted'] as const) {
+      const patch = structuredQuestionStatePatch(
+        { id: 's1', status: 'running', turn: 1 },
+        projectStructuredQuestion([question, { kind: 'turn', harness: 'claude', role: 'assistant', state }]),
+        [answer('accepted', { reason: 'the drive was interrupted before release was confirmed' })],
+      );
+
+      should(patch).match({
+        status: 'awaiting_question',
+        pendingQuestion: { toolUseId: 'tool-1' },
+        needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+        reason: 'the drive was interrupted before release was confirmed',
+      });
+    }
   });
 
   it('never clears another tool’s answer quarantine', () => {

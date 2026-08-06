@@ -66,14 +66,12 @@ export function projectStructuredQuestion(events: readonly TranscriptEvent[]): S
       };
       continue;
     }
+    // A TOOL RESULT IS THE ONLY RELEASE EVIDENCE A TAIL CARRIES. A terminal `turn` event is
+    // deliberately not one: an aborted or completed turn says nothing about the pane, so it cannot
+    // prove the selector stopped being drawn. Reconciliation would convert that identity into the
+    // prose-permitting released advisory, which is exactly how prose could reach a live form, so an
+    // unresolved question stays pending until a result or a positive pane observation releases it.
     if (event.kind === 'tool-result' && pending?.toolUseId === event.result.callId) {
-      resolvedToolUseId = pending.toolUseId;
-      pending = undefined;
-    }
-    if (event.kind === 'turn' && (event.state === 'completed' || event.state === 'aborted') && pending !== undefined) {
-      // A terminal turn does NOT prove an answer landed; it proves only that this modal can no
-      // longer be the active form. Reconciliation uses this identity to quarantine an accepted
-      // receipt (never confirm it or re-drive it) and to stop projecting stale question state.
       resolvedToolUseId = pending.toolUseId;
       pending = undefined;
     }
@@ -182,16 +180,22 @@ export function structuredQuestionStatePatch(
     };
   }
 
-  // An explicit human relaunch acknowledges the append-only predecessors for this tool. When its
-  // transcript identity has already slid out of the tail, clear the answer attention by the ledger
-  // fact rather than re-minting it from the older quarantine on the next read.
+  const acknowledgedTool = (toolUseId: string): boolean =>
+    records.some(record => record.outcome === 'acknowledged' && record.toolUseId === toolUseId);
+
+  // An explicit human relaunch acknowledges the append-only predecessors OF ITS OWN TOOL. When that
+  // tool's transcript identity has already slid out of the tail, retire the attention by the ledger
+  // fact rather than re-minting it from the older quarantine on the next read. It may retire only
+  // the attention it actually owns: an acknowledgement of one tool is silence about a later one, so
+  // with nothing of its own standing this falls through and lets a later record mint its own.
   const orphanAcknowledgement = records.find(
-    record => record.outcome === 'acknowledged' && current.lastAnsweredQuestionToolUseId !== record.toolUseId,
+    record =>
+      record.outcome === 'acknowledged' &&
+      current.lastAnsweredQuestionToolUseId !== record.toolUseId &&
+      ownedAnswerAttentionFor(current, record.toolUseId),
   );
   if (orphanAcknowledgement !== undefined) {
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
-    const clearOwnedAttention = ownedAnswerAttentionFor(current, orphanAcknowledgement.toolUseId);
-    if (pendingQuestion === undefined && current.pendingQuestion === undefined && !clearOwnedAttention) return {};
     return {
       pendingQuestion,
       status: terminal
@@ -201,17 +205,21 @@ export function structuredQuestionStatePatch(
             ? 'awaiting_user'
             : current.status
           : 'awaiting_question',
-      ...(clearOwnedAttention ? clearAnswerAttention : {}),
+      ...clearAnswerAttention,
     };
   }
 
   // Monitor reconciliation normally turns an accepted predecessor into a quarantine before this
   // patch runs. If the durable state no longer names that predecessor, still restore its operator
-  // attention while allowing a genuinely newer question to remain answerable.
+  // attention while allowing a genuinely newer question to remain answerable — unless a human
+  // already acknowledged that same tool, which is the one fact that closes it for good.
   const orphanQuarantine =
     evidence.kind === 'none'
       ? records.find(
-          record => record.outcome === 'quarantined' && current.lastAnsweredQuestionToolUseId !== record.toolUseId,
+          record =>
+            record.outcome === 'quarantined' &&
+            current.lastAnsweredQuestionToolUseId !== record.toolUseId &&
+            !acknowledgedTool(record.toolUseId),
         )
       : undefined;
   if (orphanQuarantine !== undefined) {
@@ -234,7 +242,10 @@ export function structuredQuestionStatePatch(
   // An accepted operation whose old form is no longer the projected/current one is still unresolved.
   // A newer question is not permission to forget that keys may have landed on its predecessor.
   const orphan = records.find(
-    record => record.outcome === 'accepted' && current.lastAnsweredQuestionToolUseId !== record.toolUseId,
+    record =>
+      record.outcome === 'accepted' &&
+      current.lastAnsweredQuestionToolUseId !== record.toolUseId &&
+      !acknowledgedTool(record.toolUseId),
   );
   if (orphan !== undefined) {
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
