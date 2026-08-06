@@ -97,7 +97,6 @@ export function sessionAttachmentRoutes(subsystem: SessionAttachmentSubsystem): 
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attachments',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await upload(subsystem, context),
@@ -105,7 +104,6 @@ export function sessionAttachmentRoutes(subsystem: SessionAttachmentSubsystem): 
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/attachments/:attachmentId',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await download(subsystem, context),
@@ -113,7 +111,6 @@ export function sessionAttachmentRoutes(subsystem: SessionAttachmentSubsystem): 
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attachments/:attachmentId/unlock',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await unlock(subsystem, context),
@@ -121,7 +118,6 @@ export function sessionAttachmentRoutes(subsystem: SessionAttachmentSubsystem): 
     {
       method: 'DELETE',
       path: '/v1/sessions/:sessionId/attachments/:attachmentId/unlock',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await lock(subsystem, context),

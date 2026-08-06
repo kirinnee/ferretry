@@ -151,7 +151,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/warden/status',
-      scope: 'warden',
       minimum: 'authenticated',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
@@ -160,7 +159,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/warden/verdicts',
-      scope: 'warden',
       minimum: 'authenticated',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
@@ -169,7 +167,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/warden/report',
-      scope: 'warden',
       minimum: 'authenticated',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
@@ -178,7 +175,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     {
       method: 'POST',
       path: '/v1/warden/run',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
@@ -187,7 +183,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/warden/config',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
@@ -196,7 +191,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
     {
       method: 'PATCH',
       path: '/v1/warden/config',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'warden', axis: 'configure' },
       noStore: true,

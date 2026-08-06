@@ -17,30 +17,8 @@ import type { AuthenticatedCredential } from './socket-ticket.ts';
  * - `admin` — a host admin or paired device acting as the operator.
  * - `host` — the host's admin token only; never a remote device or warden.
  */
-export type RouteScope = 'public' | 'warden' | 'admin' | 'host';
-
 /** The least credential class that may use a route. */
 export type CredentialMinimum = 'none' | 'authenticated' | 'operator' | 'admin-token';
-
-/** Compatibility mapping while route tables carry both declarations. */
-export function minimumForScope(scope: RouteScope): CredentialMinimum {
-  switch (scope) {
-    case 'public':
-      return 'none';
-    case 'warden':
-      return 'authenticated';
-    case 'admin':
-      return 'operator';
-    case 'host':
-      return 'admin-token';
-  }
-}
-
-/** Compatibility mapping while route tables carry both declarations. */
-export function privilegedOnlyForScope(scope: RouteScope): true | undefined {
-  void scope;
-  return undefined;
-}
 
 /** Everything a handler is allowed to know about the caller. */
 export interface RouteContext {
@@ -77,13 +55,9 @@ export interface RoutePattern {
 /** A route whose reachability is decided by the token class that authenticated the request. Shared
  *  by both tables, so one authorization boundary serves both and neither can drift. */
 export interface ScopedRoute extends RoutePattern {
-  readonly scope: RouteScope;
-  /**
-   * The credential part of {@link scope}, made explicit while the legacy total order is retired.
-   * The surface inventory proves this is derived exactly for every route before dispatch reads it.
-   */
+  /** The least credential class that may reach this route. */
   readonly minimum: CredentialMinimum;
-  /** An independent arrival requirement, unused by legacy scopes. */
+  /** Whether the request must have arrived through a privileged carrier. */
   readonly privilegedOnly?: true;
   /**
    * What the OPERATOR must additionally have agreed to, when this route is one of the five things

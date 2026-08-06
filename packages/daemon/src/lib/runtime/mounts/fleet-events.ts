@@ -56,7 +56,6 @@ export function fleetEventSocketRoutes(
     {
       method: 'GET',
       path: '/v1/events',
-      scope: 'admin',
       minimum: 'operator',
       accept: async context => {
         const requested = await scope(context, sessions);

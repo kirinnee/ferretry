@@ -800,7 +800,7 @@ describe('the task board mount', () => {
         'GET /v1/sessions/:sessionId/tasks/:taskId',
         'POST /v1/sessions/:sessionId/tasks/:taskId',
       ]);
-      should(routes.every(route => route.scope === 'admin')).be.true();
+      should(routes.every(route => route.minimum === 'operator')).be.true();
       should(routes.every(route => route.noStore === true)).be.true();
     });
 

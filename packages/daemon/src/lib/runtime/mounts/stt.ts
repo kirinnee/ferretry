@@ -82,7 +82,6 @@ export function sttEnhancementRoutes(subsystem: SttEnhancementSubsystem): readon
     {
       method: 'POST',
       path: '/v1/stt/enhance',
-      scope: 'admin',
       minimum: 'operator',
       handle: async context => await enhance(subsystem, context),
     },

@@ -231,6 +231,6 @@ describe('the session signal mount', () => {
     // Assert
     should(routes).have.length(1);
     should(routes[0]?.noStore).be.true();
-    should(routes[0]?.scope).equal('admin');
+    should(routes[0]?.minimum).equal('operator');
   });
 });

@@ -47,7 +47,7 @@ describe('the secret routes', () => {
     const routes = secretRoutes(secretSubsystem());
 
     // Assert — a warden supervises sessions; it has no business spending the operator's credentials.
-    should(routes.every(route => route.scope === 'admin')).be.true();
+    should(routes.every(route => route.minimum === 'operator')).be.true();
     should(routes.every(route => route.noStore === true)).be.true();
   });
 

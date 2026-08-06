@@ -69,7 +69,6 @@ export function sessionAttachRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/attach',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await attachTarget(attach, sessions, context),

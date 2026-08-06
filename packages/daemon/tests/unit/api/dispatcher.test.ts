@@ -7,10 +7,8 @@ import {
   ApiRouter,
   type CapabilityGuard,
   CLIENT_HEADER,
+  type CredentialMinimum,
   jsonResponse,
-  minimumForScope,
-  privilegedOnlyForScope,
-  type RouteScope,
   SESSION_ID_HEADER,
 } from '../../../src/lib/api/index.ts';
 import { jsonBody, request } from './support.ts';
@@ -22,12 +20,11 @@ const credentials = {
 };
 
 /** Echoes back what the dispatcher decided, so a test asserts the decision rather than a mock call. */
-const echo = (path: string, scope: RouteScope, method = 'GET'): ApiRoute => ({
+const echo = (path: string, minimum: CredentialMinimum, method = 'GET', privilegedOnly?: true): ApiRoute => ({
   method,
   path,
-  scope,
-  minimum: minimumForScope(scope),
-  ...(privilegedOnlyForScope(scope) === true ? { privilegedOnly: true } : {}),
+  minimum,
+  ...(privilegedOnly === true ? { privilegedOnly: true } : {}),
   handle: async context => jsonResponse({ actor: context.actor ?? null, params: [...context.params] }),
 });
 
@@ -36,7 +33,7 @@ const dispatcherFor = (...routes: readonly ApiRoute[]) => new ApiDispatcher(new 
 describe('ApiDispatcher authorization', () => {
   it('should serve a public route with no token at all', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/healthz', 'public'));
+    const dispatcher = dispatcherFor(echo('/healthz', 'none'));
 
     // Act
     const response = await dispatcher.dispatch(request({ path: '/healthz' }));
@@ -48,7 +45,7 @@ describe('ApiDispatcher authorization', () => {
 
   it('should refuse an unauthenticated request to a token route', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(request({ path: '/v1/sessions' }));
@@ -62,7 +59,7 @@ describe('ApiDispatcher authorization', () => {
     // 404 versus 405 is a map of the private surface; both must be 401 until a token proves the
     // caller is entitled to know.
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const unknown = await dispatcher.dispatch(request({ path: '/v1/secret-thing' }));
@@ -75,7 +72,7 @@ describe('ApiDispatcher authorization', () => {
 
   it('should answer unknown_route once the caller is authenticated', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -89,7 +86,7 @@ describe('ApiDispatcher authorization', () => {
 
   it('should answer 405 for a known path under the wrong verb', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -103,7 +100,7 @@ describe('ApiDispatcher authorization', () => {
 
   it('should refuse an admin-scoped route to the warden token', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -117,7 +114,7 @@ describe('ApiDispatcher authorization', () => {
 
   it('should allow a warden-scoped route to both tokens', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/usage', 'warden'));
+    const dispatcher = dispatcherFor(echo('/v1/usage', 'authenticated'));
 
     // Act
     const asWarden = await dispatcher.dispatch(
@@ -133,7 +130,7 @@ describe('ApiDispatcher authorization', () => {
   });
 
   it('should let a paired device use operator routes but never host-only routes', async () => {
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'), echo('/v1/pair/code', 'host', 'POST'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'), echo('/v1/pair/code', 'admin-token', 'POST'));
 
     const operator = await dispatcher.dispatch(
       request({ path: '/v1/sessions', headers: { authorization: 'Bearer device-secret' } }),
@@ -159,7 +156,7 @@ describe('ApiDispatcher authorization', () => {
   it('should honour a query token only for a loopback peer', async () => {
     // A token in a URL is logged by every proxy on the path.
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/events', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/events', 'operator'));
 
     // Act
     const local = await dispatcher.dispatch(
@@ -178,7 +175,7 @@ describe('ApiDispatcher authorization', () => {
 describe('ApiDispatcher attribution', () => {
   it('should attribute the admin token with no headers to the UI', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -191,7 +188,7 @@ describe('ApiDispatcher attribution', () => {
 
   it('should attribute a self-identified CLI caller to admin-cli', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -207,7 +204,7 @@ describe('ApiDispatcher attribution', () => {
 
   it('should attribute an in-pane admin caller to its own session', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -223,7 +220,7 @@ describe('ApiDispatcher attribution', () => {
 
   it('should attribute the warden token to the warden', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/usage', 'warden'));
+    const dispatcher = dispatcherFor(echo('/v1/usage', 'authenticated'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -238,7 +235,7 @@ describe('ApiDispatcher attribution', () => {
   });
 
   it('should ignore spoofed actor headers on a device credential', async () => {
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     const response = await dispatcher.dispatch(
       request({
@@ -258,7 +255,7 @@ describe('ApiDispatcher attribution', () => {
     // The source flipped the token class whenever this header was merely present, so an admin CLI
     // passing one had its own actions journalled as the warden's.
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -278,7 +275,7 @@ describe('ApiDispatcher attribution', () => {
 
   it('should pass captured path parameters to the handler', async () => {
     // Arrange
-    const dispatcher = dispatcherFor(echo('/v1/sessions/:id', 'admin'));
+    const dispatcher = dispatcherFor(echo('/v1/sessions/:id', 'operator'));
 
     // Act
     const response = await dispatcher.dispatch(
@@ -291,12 +288,10 @@ describe('ApiDispatcher attribution', () => {
 });
 
 describe('ApiDispatcher error handling', () => {
-  const failing = (error: unknown, scope: RouteScope = 'public'): ApiRoute => ({
+  const failing = (error: unknown, minimum: CredentialMinimum = 'none'): ApiRoute => ({
     method: 'GET',
     path: '/boom',
-    scope,
-    minimum: minimumForScope(scope),
-    ...(privilegedOnlyForScope(scope) === true ? { privilegedOnly: true } : {}),
+    minimum,
     handle: async () => {
       throw error;
     },
@@ -352,7 +347,7 @@ describe('ApiDispatcher error handling', () => {
 
   it('should mark an authenticated no-store route uncacheable', async () => {
     // Arrange
-    const dispatcher = dispatcherFor({ ...echo('/v1/usage', 'warden'), noStore: true });
+    const dispatcher = dispatcherFor({ ...echo('/v1/usage', 'authenticated'), noStore: true });
 
     // Act
     const response = await dispatcher.dispatch(
@@ -369,7 +364,6 @@ describe('the operator grant layer', () => {
   const governed = (): ApiRoute => ({
     method: 'GET',
     path: '/v1/fleet/plan',
-    scope: 'admin',
     minimum: 'operator',
     capability: { capability: 'fleet', axis: 'use' },
     handle: async () => jsonResponse({ plan: [] }),
@@ -445,7 +439,6 @@ describe('the operator grant layer', () => {
     const ungoverned: ApiRoute = {
       method: 'GET',
       path: '/v1/sessions',
-      scope: 'admin',
       minimum: 'operator',
       handle: async () => jsonResponse([]),
     };

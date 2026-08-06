@@ -13,7 +13,7 @@ import {
   type SocketRoute,
 } from '../../../src/lib/api/socket.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { minimumForScope, privilegedOnlyForScope } from '../../../src/lib/api/route.ts';
+import type { CredentialMinimum } from '../../../src/lib/api/route.ts';
 import {
   TERMINAL_MAX_CONTROL_FRAME_BYTES,
   TERMINAL_MAX_INPUT_FRAME_BYTES,
@@ -34,13 +34,11 @@ const inertHandler: SocketHandler = {
 };
 
 /** A socket route that accepts, unless told to refuse with the given error. */
-function streamRoute(refusal?: unknown, scope: SocketRoute['scope'] = 'admin'): SocketRoute {
+function streamRoute(refusal?: unknown, minimum: CredentialMinimum = 'operator'): SocketRoute {
   return {
     method: 'GET',
     path: '/v1/sessions/:sessionId/stream',
-    scope,
-    minimum: minimumForScope(scope),
-    ...(privilegedOnlyForScope(scope) === true ? { privilegedOnly: true } : {}),
+    minimum,
     accept: async context => {
       if (refusal !== undefined) throw refusal;
       const attachment: SocketAttachment = async (downstream: SocketDownstream) => {
@@ -234,7 +232,7 @@ describe('ApiSocketDispatcher', () => {
     // Scope travels with the route here exactly as it does for an `ApiRoute`, so the two tables
     // cannot disagree about what `public` means.
     // Arrange
-    const dispatcher = dispatcherFor(streamRoute(undefined, 'public'));
+    const dispatcher = dispatcherFor(streamRoute(undefined, 'none'));
 
     // Act
     const decision = await dispatcher.upgrade(request({ path: '/v1/sessions/s1/stream' }));

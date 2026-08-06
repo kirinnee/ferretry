@@ -583,7 +583,6 @@ export function taskRoutes(subsystem: TaskSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/tasks',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await listFleet(subsystem, context),
@@ -591,7 +590,6 @@ export function taskRoutes(subsystem: TaskSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/tasks',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await listSession(subsystem, pathSessionId(context), context),
@@ -599,7 +597,6 @@ export function taskRoutes(subsystem: TaskSubsystem): readonly ApiRoute[] {
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/tasks',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await create(subsystem, context),
@@ -607,7 +604,6 @@ export function taskRoutes(subsystem: TaskSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/tasks/:taskId',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await detail(subsystem, context),
@@ -615,7 +611,6 @@ export function taskRoutes(subsystem: TaskSubsystem): readonly ApiRoute[] {
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/tasks/:taskId',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await act(subsystem, context),

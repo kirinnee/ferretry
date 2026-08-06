@@ -19,7 +19,6 @@ export function foreignHistoryRoutes(subsystem: ForeignHistorySubsystem): readon
     {
       method: 'GET',
       path: '/v1/imports/history',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async () => {
@@ -45,7 +44,6 @@ export function foreignHistoryRoutes(subsystem: ForeignHistorySubsystem): readon
     {
       method: 'GET',
       path: '/v1/imports/history/:importId',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => {

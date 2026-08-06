@@ -166,7 +166,6 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/file',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
@@ -175,7 +174,6 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/changes',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
@@ -184,7 +182,6 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/diff',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
@@ -193,7 +190,6 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,

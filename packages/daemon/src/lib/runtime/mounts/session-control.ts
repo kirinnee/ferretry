@@ -312,7 +312,6 @@ export function sessionControlRoutes(subsystem: SessionControlSubsystem): readon
     {
       method: 'POST',
       path: '/v1/sessions',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await start(subsystem, context),
@@ -320,7 +319,6 @@ export function sessionControlRoutes(subsystem: SessionControlSubsystem): readon
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/stop',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await stop(subsystem, context),
@@ -330,7 +328,6 @@ export function sessionControlRoutes(subsystem: SessionControlSubsystem): readon
     {
       method: 'GET',
       path: '/v1/sessions/by-request/:requestId',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await recover(subsystem, context),

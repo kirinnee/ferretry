@@ -140,7 +140,6 @@ export function recommendRoutes(subsystem: RecommendSubsystem): readonly ApiRout
     {
       method: 'POST',
       path: '/v1/recommend',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await recommend(subsystem, context),

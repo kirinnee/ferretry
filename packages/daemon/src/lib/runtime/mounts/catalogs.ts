@@ -60,7 +60,6 @@ export function catalogRoutes(catalogs: CatalogSubsystem, sessions: SessionDirec
     {
       method: 'GET',
       path: '/v1/projects',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async () => jsonResponse(await catalogs.projects()),
@@ -68,7 +67,6 @@ export function catalogRoutes(catalogs: CatalogSubsystem, sessions: SessionDirec
     {
       method: 'POST',
       path: '/v1/projects',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await registerProject(catalogs, context),
@@ -76,7 +74,6 @@ export function catalogRoutes(catalogs: CatalogSubsystem, sessions: SessionDirec
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/skills',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await skills(catalogs, sessions, context),

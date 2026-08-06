@@ -48,7 +48,6 @@ export function scratchGcRoutes(subsystem: ScratchGcSubsystem): readonly ApiRout
     {
       method: 'GET',
       path: '/v1/gc',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await plan(subsystem, context.request),
@@ -56,7 +55,6 @@ export function scratchGcRoutes(subsystem: ScratchGcSubsystem): readonly ApiRout
     {
       method: 'POST',
       path: '/v1/gc',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await sweep(subsystem, context.request),

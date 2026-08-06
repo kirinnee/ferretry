@@ -197,7 +197,6 @@ export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly Api
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/send',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await send(subsystem, context),
@@ -205,7 +204,6 @@ export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly Api
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/interrupt',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await interrupt(subsystem, context),

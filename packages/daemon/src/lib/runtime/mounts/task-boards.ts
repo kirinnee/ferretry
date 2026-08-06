@@ -704,7 +704,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'GET',
       path: '/v1/task-boards/membership',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await membership(subsystem, context),
@@ -712,7 +711,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/create',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await create(subsystem, context),
@@ -720,7 +718,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/child-grants/request',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await requestChildGrant(subsystem, context),
@@ -728,7 +725,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/child-grants/approve',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await approveChildGrant(subsystem, context),
@@ -736,7 +732,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/invitations/request',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await requestInvitation(subsystem, context),
@@ -744,7 +739,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/invitations/approve',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await approveInvitation(subsystem, context),
@@ -752,7 +746,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/invitations/accept',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await acceptInvitation(subsystem, context),
@@ -760,7 +753,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/invitations/verify',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await verifyInvitation(subsystem, context),
@@ -768,7 +760,6 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/task-boards/membership/relinquish',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await relinquish(subsystem, context),

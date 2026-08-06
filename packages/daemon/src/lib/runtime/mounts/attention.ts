@@ -120,7 +120,6 @@ export function attentionRoutes(attention: AttentionService): readonly ApiRoute[
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/attention',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await list(attention, context),
@@ -128,7 +127,6 @@ export function attentionRoutes(attention: AttentionService): readonly ApiRoute[
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attention',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await apply(attention, context),

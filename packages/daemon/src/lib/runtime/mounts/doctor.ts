@@ -12,7 +12,6 @@ export function doctorRoutes(subsystem: DoctorSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/doctor',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async () => jsonResponse(DoctorReportSchema.parse(await subsystem.report())),

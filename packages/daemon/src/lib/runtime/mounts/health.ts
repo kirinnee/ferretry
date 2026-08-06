@@ -117,7 +117,6 @@ export function daemonHealthRoutes(subsystem: DaemonHealthSubsystem): readonly A
     {
       method: 'GET',
       path: '/v1/health',
-      scope: 'public',
       minimum: 'none',
       noStore: true,
       handle: async () => await health(subsystem),

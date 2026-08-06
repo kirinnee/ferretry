@@ -59,7 +59,6 @@ async function serve(...routes: readonly ApiRoute[]): Promise<ApiServerHandle> {
 const mirror: ApiRoute = {
   method: 'GET',
   path: '/mirror/:id',
-  scope: 'public',
   minimum: 'none',
   handle: async context =>
     jsonResponse({
@@ -147,7 +146,6 @@ describe('BunApiServer', () => {
     const handle = await serve({
       method: 'GET',
       path: '/teapot',
-      scope: 'public',
       minimum: 'none',
       noStore: true,
       handle: async () => textResponse('short and stout', 418, 'text/plain; charset=utf-8'),
@@ -167,7 +165,6 @@ describe('BunApiServer', () => {
     const handle = await serve({
       method: 'POST',
       path: '/echo',
-      scope: 'public',
       minimum: 'none',
       handle: async context => jsonResponse({ received: await context.request.text() }),
     });
@@ -184,7 +181,6 @@ describe('BunApiServer', () => {
     const handle = await serve({
       method: 'GET',
       path: '/v1/private',
-      scope: 'admin',
       minimum: 'operator',
       handle: async () => jsonResponse({ ok: true }),
     });
@@ -205,7 +201,6 @@ describe('BunApiServer', () => {
     const handle = await serve({
       method: 'POST',
       path: '/same-origin',
-      scope: 'public',
       minimum: 'none',
       handle: async () => {
         calls += 1;
@@ -227,7 +222,6 @@ describe('BunApiServer', () => {
     const handle = await serve({
       method: 'POST',
       path: '/v1/private',
-      scope: 'admin',
       minimum: 'operator',
       handle: async () => jsonResponse({ ok: true }),
     });
@@ -265,7 +259,6 @@ describe('BunApiServer', () => {
     const handle = await serve({
       method: 'POST',
       path: '/effect',
-      scope: 'public',
       minimum: 'none',
       handle: async () => {
         calls += 1;
@@ -391,7 +384,6 @@ function recordingSocket(
   return {
     method: 'GET',
     path: '/v1/stream',
-    scope: 'admin',
     minimum: 'operator',
     accept: async () => {
       if (options.refuse !== undefined) throw options.refuse;
@@ -740,7 +732,6 @@ describe('BunApiServer request-body bounds', () => {
   const bounded: ApiRoute = {
     method: 'POST',
     path: '/bounded',
-    scope: 'public',
     minimum: 'none',
     handle: async context => jsonResponse(await parseBody(context.request, AnySchema, { maxBytes: 64 })),
   };
@@ -775,7 +766,6 @@ describe('BunApiServer request-body bounds', () => {
         {
           method: 'POST',
           path: '/echo',
-          scope: 'public',
           minimum: 'none',
           handle: async context => {
             calls += 1;

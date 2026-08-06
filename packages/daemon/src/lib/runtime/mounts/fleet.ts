@@ -1015,7 +1015,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/accounts',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1027,7 +1026,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/config',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1036,7 +1034,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/environment',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1045,7 +1042,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'PUT',
       path: '/v1/fleet/environment',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
@@ -1060,7 +1056,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/plan',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1069,7 +1064,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/usage',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1078,7 +1072,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/health',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1087,7 +1080,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'POST',
       path: '/v1/fleet/apply',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
@@ -1101,7 +1093,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/permissions',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1111,7 +1102,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/assets',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1120,7 +1110,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/assets/:assetPath',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1140,7 +1129,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
        */
       method: 'POST',
       path: '/v1/fleet/proposals',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1156,7 +1144,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/fleet/proposals/:proposalId',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -1178,7 +1165,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
        */
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/authorize',
-      scope: 'host',
       minimum: 'admin-token',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
@@ -1196,7 +1182,6 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
        */
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/apply',
-      scope: 'admin',
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,

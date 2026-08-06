@@ -71,11 +71,10 @@ export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): r
   const publicUsage = async () => jsonResponse(document(await currentSnapshot(feed)));
   const versionedUsage = async () => jsonResponse(versionedDocument(await currentSnapshot(feed)));
   return [
-    { method: 'GET', path: '/usage', scope: 'public', minimum: 'none', noStore: true, handle: publicUsage },
+    { method: 'GET', path: '/usage', minimum: 'none', noStore: true, handle: publicUsage },
     {
       method: 'GET',
       path: '/v1/usage',
-      scope: 'warden',
       minimum: 'authenticated',
       noStore: true,
       handle: versionedUsage,
@@ -83,7 +82,6 @@ export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): r
     {
       method: 'GET',
       path: '/metrics',
-      scope: 'public',
       minimum: 'none',
       noStore: true,
       handle: async () =>

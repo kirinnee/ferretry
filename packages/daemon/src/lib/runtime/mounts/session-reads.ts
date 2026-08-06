@@ -159,7 +159,6 @@ export function sessionReadRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/events',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await events(reads, sessions, context),
@@ -167,7 +166,6 @@ export function sessionReadRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/snapshot',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await snapshot(reads, sessions, context),
@@ -175,7 +173,6 @@ export function sessionReadRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/logs',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await logs(reads, sessions, context),

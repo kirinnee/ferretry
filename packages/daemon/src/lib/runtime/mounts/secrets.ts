@@ -140,7 +140,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/secrets',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async () => await list(subsystem.directory, subsystem.references),
@@ -148,7 +147,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
     {
       method: 'POST',
       path: '/v1/secrets/use',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await use(subsystem.uses, context),
@@ -156,7 +154,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
     {
       method: 'POST',
       path: '/v1/secrets',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await put(subsystem.directory, context),
@@ -164,7 +161,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
     {
       method: 'DELETE',
       path: '/v1/secrets/:name',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await remove(subsystem.directory, context),

@@ -1,4 +1,4 @@
-import { resolveApiActor } from './actor.ts';
+import { resolveApiActor, type TokenClass } from './actor.ts';
 import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
 import { type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
@@ -54,7 +54,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   guard?: CapabilityGuard,
 ): RouteAuthorization<TRoute> {
   const lookup = router.lookup(request.method, request.path);
-  if (lookup.kind === 'matched' && lookup.route.scope === 'public')
+  if (lookup.kind === 'matched' && lookup.route.minimum === 'none')
     return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params } };
 
   const presented = authenticate(credentials, {
@@ -81,10 +81,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
     };
 
-  if (
-    (lookup.route.scope === 'host' && authentication.tokenClass !== 'admin') ||
-    (lookup.route.scope === 'admin' && authentication.tokenClass === 'warden')
-  )
+  if (!meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
+      (lookup.route.privilegedOnly === true && !request.loopback))
     return {
       kind: 'refused',
       response: errorResponse(
@@ -143,6 +141,18 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     route: lookup.route,
     context: { request, params: lookup.params, actor, credential: authentication },
   };
+}
+
+function meetsMinimum(tokenClass: TokenClass, minimum: ScopedRoute['minimum']): boolean {
+  switch (minimum) {
+    case 'none':
+    case 'authenticated':
+      return true;
+    case 'operator':
+      return tokenClass !== 'warden';
+    case 'admin-token':
+      return tokenClass === 'admin';
+  }
 }
 
 /** Turns a request into a response, over the shared authorization boundary above. */

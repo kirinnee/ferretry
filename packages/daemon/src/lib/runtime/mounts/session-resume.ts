@@ -136,7 +136,6 @@ export function sessionResumeRoutes(subsystem: SessionResumeSubsystem): readonly
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/resume',
-      scope: 'admin',
       minimum: 'operator',
       noStore: true,
       handle: async context => await resume(subsystem, context),
