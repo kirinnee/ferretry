@@ -358,6 +358,76 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('hands the composer the reader’s suggestion switches and Vim preference, mapped once above it', () => {
+    const suggestions = { mentionSuggestions: false, directReferenceSuggestions: true, skillSuggestions: false };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        composerSuggestions={suggestions}
+        composerVimMode
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      // Passed through by identity: a page that rebuilt this object would make
+      // the composer re-issue an open list's request on every render.
+      expect(page.root.findByType(Composer).props.suggestions).toBe(suggestions);
+      expect(page.root.findByType(Composer).props.vimMode).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('gives the runtime sheets a Terminal opener that actually navigates', () => {
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        canControl
+        client={
+          { ...client([], sessionView('shared')), runtime: async () => sessionView('shared') } as SessionChatClient
+        }
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared', { config: { harness: 'codex' } })}
+      />,
+    );
+    try {
+      // Codex's native picker lives in the Terminal view, so the sheet can only
+      // offer it if the host answers `true` — and the host can only answer that
+      // from INSIDE the pane context, which is why this is asserted through the
+      // rendered page rather than through the controls in isolation.
+      const lifecycle = {
+        open: true,
+        onClose: () => undefined,
+        onClaudeEffortSent: () => undefined,
+        onSwitchFailed: () => undefined,
+        onSwitchSubmitted: () => undefined,
+      };
+      const runtime = page.root.findByType(ComposerRuntime);
+      const model = runtime.props.renderModelControls(lifecycle) as ReactElement<
+        ComponentProps<typeof RuntimeModelControls>
+      >;
+      const effort = runtime.props.renderEffortControls(lifecycle) as ReactElement<
+        ComponentProps<typeof RuntimeModelControls>
+      >;
+
+      // `true` is the claim that the host SHOWED it, which is why the sheet is
+      // allowed to close on it; the composer runtime keeps its own explanation
+      // visible whenever this answers `false`.
+      expect(model.props.onOpenTerminal?.()).toBe(true);
+      expect(effort.props.onOpenTerminal?.()).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('runs lifecycle actions through the visible daemon and confirms stop before mutating', async () => {
     const calls: string[] = [];
     const published: SessionView[] = [];

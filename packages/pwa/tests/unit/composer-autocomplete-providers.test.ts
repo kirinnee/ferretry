@@ -521,17 +521,44 @@ describe('composer $ skills sigil', () => {
     expect(warmed).toBe(1);
   });
 
-  it('falls back to its own request when the host has not read a catalog yet', async () => {
+  it('never re-asks the daemon for a catalog the host owns, however that read went', async () => {
+    let requests = 0;
     const provider = createSkillSigilProvider({
       daemon: daemonA,
       scope: scopeA,
-      fetcher: async () => json(catalogResponse),
-      // `undefined` is "not read yet", never "there are no skills".
+      fetcher: async () => {
+        requests += 1;
+        return json(catalogResponse);
+      },
+      // `undefined` is "not read yet", never "there are no skills" — and a host
+      // that supplies this getter has claimed the fact, so the answer to "not
+      // read yet" is to say so, not to open a second read of the same route.
       getSkills: () => undefined,
     });
 
+    const result = await provider.candidates(context('$', 'sum'));
     expect(provider.snapshotKey).toBeUndefined();
+    expect(requests).toBe(0);
+    expect(result.candidates).toEqual([]);
+    expect(result.notice).toContain('have not been read for this session yet');
+    expect(result.notice).toContain('/name still works');
+  });
+
+  it('still reads for itself when no host claims the catalog at all', async () => {
+    let requests = 0;
+    const provider = createSkillSigilProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => {
+        requests += 1;
+        return json(catalogResponse);
+      },
+    });
+
+    // A standalone composer with no page around it is the case this fallback
+    // exists for, and it is the only one.
     expect((await provider.candidates(context('$', 'sum'))).candidates[0]?.label).toBe('summary');
+    expect(requests).toBe(1);
   });
 
   it('says the catalog is unavailable rather than pretending there are no skills', async () => {

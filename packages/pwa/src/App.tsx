@@ -530,6 +530,18 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribe, snapshot);
   const controls = useSyncExternalStore(store.controls.subscribe, () => store.controls.controls(daemonId));
+  // THE mapping from the persisted device preference to the composer's rule,
+  // written once. It is memoised on the three booleans rather than rebuilt on
+  // every render because the composer rebuilds its providers from it, and a
+  // fresh object each render would abort an open list on every keystroke.
+  const composerSuggestions = useMemo(
+    () => ({
+      mentionSuggestions: controls.mentionSuggestions,
+      directReferenceSuggestions: controls.directReferenceSuggestions,
+      skillSuggestions: controls.skillSuggestions,
+    }),
+    [controls.mentionSuggestions, controls.directReferenceSuggestions, controls.skillSuggestions],
+  );
   const fleetSlice = fleet.daemons.get(scope.daemonId);
   const session = fleetSlice?.byId.get(scope.sessionId);
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
@@ -606,6 +618,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           browserLogin={store.browserLogin}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
+          composerSuggestions={composerSuggestions}
+          composerVimMode={controls.composerVimMode}
           dictationSettings={dictation.settings}
           client={client}
           connection={connection}

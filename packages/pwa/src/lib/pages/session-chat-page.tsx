@@ -1,7 +1,7 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-
 import { Composer } from '../../components/composer.tsx';
+import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
@@ -42,6 +42,7 @@ import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
+import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
@@ -54,7 +55,7 @@ import type { DaemonUsageStore } from '../usage-store.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
-  Partial<Pick<IFyApiClient, 'history' | 'runtime'>>;
+  Partial<Pick<IFyApiClient, 'history' | 'request' | 'runtime'>>;
 
 /** One scoped cache is safe because every key carries its daemon id. Keeping it
  * outside the page also avoids re-reading a live account catalog whenever the
@@ -88,6 +89,15 @@ export interface SessionChatPageProps {
   readonly composerEnterKey?: ComposerEnterKeyPreference | null;
   /** Browser-local dictation settings; supplied by the application store. */
   readonly dictationSettings?: SttSettings;
+  /**
+   * Which composer suggestion families this reader still wants offered, mapped
+   * from `DeviceControls` exactly once, by `App.tsx`. Absent means all of them.
+   * A suppressed family changes menus only: every reference in this transcript
+   * and in the draft still parses, proves and links.
+   */
+  readonly composerSuggestions?: ComposerSuggestionSwitches;
+  /** Browser-local modal-editing preference for the composer textarea. */
+  readonly composerVimMode?: boolean;
   readonly onBack: (daemonId: string) => void;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
@@ -139,6 +149,24 @@ function PaneLaunchers() {
       </span>
     </fieldset>
   );
+}
+
+/**
+ * Codex's native model picker lives in the Terminal view, and the runtime sheet
+ * can only offer it if something actually navigates there.
+ *
+ * This is a child component rather than a hook call in the page BECAUSE the page
+ * renders `SidePaneWorkspace` — it is the context's parent, so its own body can
+ * never read it. A `false` answer is honest: with no pane host mounted the sheet
+ * keeps its own explanation on screen instead of closing over nothing.
+ */
+function SidePaneCapture({ onHost }: { readonly onHost: (host: ReturnType<typeof useSidePane>) => void }) {
+  const pane = useSidePane();
+  useEffect(() => {
+    onHost(pane);
+    return () => onHost(null);
+  }, [onHost, pane]);
+  return null;
 }
 
 /** Gives the app-bar search real current-workspace destinations without ever
@@ -305,6 +333,8 @@ export function SessionChatPage({
   refreshError = null,
   chatWidth = 'full',
   composerEnterKey,
+  composerSuggestions,
+  composerVimMode = false,
   dictationSettings,
   onBack,
   onSessionChange,
@@ -326,6 +356,26 @@ export function SessionChatPage({
   // would be two owners that disagree after a refresh. `names` is undefined
   // until a catalog has actually been read — unread, never "no skills".
   const skills = useSessionSkills(connection, scope);
+  const composerCatalogs = useComposerReferenceCatalogs(client, session.config.id);
+  /**
+   * Codex's native model picker lives in the Terminal view, and the runtime
+   * sheet can only offer it if something actually navigates there.
+   *
+   * The host is captured from a CHILD because this component renders
+   * `SidePaneWorkspace` — it is the context's parent and can never read it
+   * itself. A `false` answer is honest: with no pane mounted the sheet keeps its
+   * own explanation on screen instead of closing over a navigation that did not
+   * happen.
+   */
+  const paneHost = useRef<ReturnType<typeof useSidePane>>(null);
+  const captureSidePane = useCallback((host: ReturnType<typeof useSidePane>) => {
+    paneHost.current = host;
+  }, []);
+  const openTerminalPane = useCallback(() => {
+    if (paneHost.current === null) return false;
+    paneHost.current.open('terminals');
+    return true;
+  }, []);
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
   // churn cannot rebuild the surface and re-parse every rendered Markdown block
@@ -342,9 +392,21 @@ export function SessionChatPage({
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
         ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
         ...(skills.names === undefined ? {} : { skills: skills.names }),
+        ...(composerCatalogs.attention === undefined
+          ? {}
+          : { attentionIds: composerCatalogs.attention.map(item => item.id) }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
       }),
-    [connection, scope, session.config.cwd, fleetIdentity, referenceTasks, skills.names, onNavigate],
+    [
+      connection,
+      scope,
+      session.config.cwd,
+      fleetIdentity,
+      referenceTasks,
+      composerCatalogs.attention,
+      skills.names,
+      onNavigate,
+    ],
   );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -536,6 +598,7 @@ export function SessionChatPage({
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-soft px-2 py-1">
             {compact ? null : lifecycleActions}
             <PaneLaunchers />
+            <SidePaneCapture onHost={captureSidePane} />
           </div>
           {/* NOT a live region. App.tsx owns the single announcement for a refresh
             failure and hands down a finished sentence; a second `role=status`
@@ -594,6 +657,7 @@ export function SessionChatPage({
                           canControl={canControl}
                           catalogs={runtimeModelCatalogs}
                           daemon={connection}
+                          onOpenTerminal={openTerminalPane}
                           view={session}
                           {...lifecycle}
                         />
@@ -604,6 +668,7 @@ export function SessionChatPage({
                           canControl={canControl}
                           catalogs={runtimeModelCatalogs}
                           daemon={connection}
+                          onOpenTerminal={openTerminalPane}
                           view={session}
                           {...lifecycle}
                           open={lifecycle.open}
@@ -614,8 +679,21 @@ export function SessionChatPage({
                   )}
                   <Composer
                     api={client}
+                    {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
+                    {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
+                    {...(composerCatalogs.attention === undefined
+                      ? {}
+                      : { autocompleteAttention: composerCatalogs.attention })}
+                    {...(composerCatalogs.skills?.skills === undefined
+                      ? {}
+                      : { autocompleteSkills: composerCatalogs.skills })}
+                    // The one in-flight read: a menu opened before it settles waits for it
+                    // instead of inventing an empty family or fetching the catalog twice.
+                    autocompleteReady={composerCatalogs.settled}
                     busy={busy}
                     compact={compact}
+                    {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
+                    vimMode={composerVimMode}
                     {...(dictationSettings === undefined ? {} : { dictationSettings })}
                     enterKeyPreference={composerEnterKey}
                     daemon={connection}
