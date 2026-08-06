@@ -1,27 +1,28 @@
 /**
- * One session-scoped read feeding both composer autocomplete and Markdown proof.
+ * One session-scoped catalog feeding both composer autocomplete and Markdown proof.
  *
- * Tasks, Attention and skills are each daemon facts. Reading them independently
- * in the preview and in autocomplete creates two freshness stories and doubles
- * the transport work, so the session host hydrates this bundle once and passes
- * the same arrays to both consumers. A failed family stays `undefined`: that is
- * "not proved", never an empty daemon fact.
+ * Tasks, Attention and skills are each daemon facts. A standalone reader can
+ * hydrate all three once; the session page instead supplies tasks and skills
+ * from their existing workspace owners and this module reads only Attention.
+ * Either way, preview and autocomplete receive the same arrays. A failed family
+ * stays `undefined`: that is "not proved", never an empty daemon fact.
  */
 import {
   type AttentionItem,
   AttentionSnapshotSchema,
   type IFyApiClient,
-  type ScopedTaskSummary,
   type SessionSkills,
   SessionSkillsSchema,
   SessionTaskListResponseSchema,
+  type TaskSummary,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export type ComposerReferenceCatalogFamily = 'tasks' | 'attention' | 'skills';
+type ComposerReferenceTask = Pick<TaskSummary, 'id' | 'title' | 'status'>;
 
 export interface ComposerReferenceCatalogs {
-  readonly tasks?: readonly ScopedTaskSummary[];
+  readonly tasks?: readonly ComposerReferenceTask[];
   readonly attention?: readonly AttentionItem[];
   readonly skills?: SessionSkills;
   readonly failures: Readonly<Partial<Record<ComposerReferenceCatalogFamily, string>>>;
@@ -32,6 +33,16 @@ type ComposerReferenceCatalogPatch = Partial<Pick<ComposerReferenceCatalogs, 'ta
 };
 
 export type ComposerReferenceCatalogReader = Pick<IFyApiClient, 'request'>;
+
+/** Existing workspace owners a session page shares with the composer bundle. */
+export interface ComposerReferenceCatalogSources {
+  readonly tasks: readonly ComposerReferenceTask[] | undefined;
+  readonly skills: SessionSkills | undefined;
+  readonly taskFailure?: string;
+  readonly skillFailure?: string;
+  readonly waitForTasks: () => Promise<void> | undefined;
+  readonly waitForSkills: () => Promise<void> | undefined;
+}
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
@@ -120,6 +131,28 @@ async function readComposerReferenceCatalogsIncrementally(
   };
 }
 
+/** Attention is the only family the session page has no existing owner for. */
+async function readComposerAttentionIncrementally(
+  client: ComposerReferenceCatalogReader,
+  sessionId: string,
+  signal: AbortSignal,
+  publish: (patch: ComposerReferenceCatalogPatch) => void,
+): Promise<void> {
+  const attention = client
+    .request(sessionAttentionPath(sessionId), AttentionSnapshotSchema, { signal })
+    .then(value => sameSession(sessionId, value));
+  await attention.then(
+    value => {
+      if (!signal.aborted) publish({ attention: value.items, failures: {} });
+    },
+    reason => {
+      if (!signal.aborted) publish({ failures: { attention: failureMessage(reason) } });
+      throw reason;
+    },
+  );
+  if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
 /** Read all independently: one refused family must not erase two valid ones. */
 export async function readComposerReferenceCatalogs(
   client: ComposerReferenceCatalogReader,
@@ -149,15 +182,16 @@ const mergeCatalogPatch = (
 export function useComposerReferenceCatalogs(
   client: Partial<ComposerReferenceCatalogReader>,
   sessionId: string,
+  sources?: ComposerReferenceCatalogSources,
 ): ComposerReferenceCatalogs & {
   /**
-   * The one in-flight read for THIS session, or nothing once it has settled.
+   * All in-flight owner reads for THIS session, or nothing once they settle.
    *
    * It exists for the race a reader hits on the first message of every session:
    * a menu opened while the page is still reading would otherwise offer an
    * invented empty list, or — for skills — make the composer issue its own
-   * second request for exactly what is already being fetched. Awaiting this is
-   * what makes "one read per session" true rather than merely intended.
+   * second request for exactly what is already being fetched. Awaiting their
+   * aggregate is what makes "one read per fact" true rather than intended.
    */
   readonly settled: () => Promise<void> | undefined;
 } {
@@ -166,7 +200,19 @@ export function useComposerReferenceCatalogs(
     readonly catalogs: ComposerReferenceCatalogs;
   } | null>(null);
   const pending = useRef<Promise<void> | null>(null);
-  const settled = useCallback(() => pending.current ?? undefined, []);
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
+  const settled = useCallback((): Promise<void> | undefined => {
+    const waits: Promise<void>[] = [];
+    if (pending.current !== null) waits.push(pending.current);
+    const current = sourcesRef.current;
+    const tasks = current?.waitForTasks();
+    const skills = current?.waitForSkills();
+    if (tasks !== undefined) waits.push(tasks);
+    if (skills !== undefined) waits.push(skills);
+    return waits.length === 0 ? undefined : Promise.allSettled(waits).then(() => undefined);
+  }, []);
+  const usesSharedSources = sources !== undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -175,17 +221,26 @@ export function useComposerReferenceCatalogs(
       pending.current = null;
       return () => controller.abort();
     }
-    const read = readComposerReferenceCatalogsIncrementally(
-      client as ComposerReferenceCatalogReader,
-      sessionId,
-      controller.signal,
-      patch => {
-        setSnapshot(current => ({
+    const publish = (patch: ComposerReferenceCatalogPatch): void => {
+      setSnapshot(current => ({
+        sessionId,
+        catalogs: mergeCatalogPatch(current?.sessionId === sessionId ? current.catalogs : EMPTY_CATALOGS, patch),
+      }));
+    };
+    const operation = usesSharedSources
+      ? readComposerAttentionIncrementally(
+          client as ComposerReferenceCatalogReader,
           sessionId,
-          catalogs: mergeCatalogPatch(current?.sessionId === sessionId ? current.catalogs : EMPTY_CATALOGS, patch),
-        }));
-      },
-    )
+          controller.signal,
+          publish,
+        )
+      : readComposerReferenceCatalogsIncrementally(
+          client as ComposerReferenceCatalogReader,
+          sessionId,
+          controller.signal,
+          publish,
+        );
+    const read = operation
       .then(() => undefined)
       .catch(() => {
         // Abort is expected on navigation. All non-abort family failures are
@@ -199,8 +254,21 @@ export function useComposerReferenceCatalogs(
       controller.abort();
       pending.current = null;
     };
-  }, [client, sessionId]);
+  }, [client, sessionId, usesSharedSources]);
 
-  const catalogs = snapshot?.sessionId === sessionId ? snapshot.catalogs : EMPTY_CATALOGS;
+  const owned = snapshot?.sessionId === sessionId ? snapshot.catalogs : EMPTY_CATALOGS;
+  const catalogs = useMemo<ComposerReferenceCatalogs>(() => {
+    if (sources === undefined) return owned;
+    return {
+      ...(sources.tasks === undefined ? {} : { tasks: sources.tasks }),
+      ...(owned.attention === undefined ? {} : { attention: owned.attention }),
+      ...(sources.skills === undefined ? {} : { skills: sources.skills }),
+      failures: {
+        ...(owned.failures.attention === undefined ? {} : { attention: owned.failures.attention }),
+        ...(sources.taskFailure === undefined ? {} : { tasks: sources.taskFailure }),
+        ...(sources.skillFailure === undefined ? {} : { skills: sources.skillFailure }),
+      },
+    };
+  }, [owned, sources]);
   return useMemo(() => ({ ...catalogs, settled }), [catalogs, settled]);
 }

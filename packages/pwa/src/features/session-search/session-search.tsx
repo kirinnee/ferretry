@@ -298,6 +298,8 @@ interface SessionSearchContextValue extends SearchSnapshot {
    */
   readonly presenting: string | null;
   readonly activeIndex: number;
+  /** The task read already in flight for `scope`, or nothing once it settled. */
+  readonly waitForTasks: () => Promise<void> | undefined;
   readonly setQuery: (query: string) => void;
   readonly setActiveIndex: (index: number) => void;
   readonly present: (instanceId: string) => void;
@@ -335,6 +337,13 @@ export function SessionSearchProvider({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const openers = useRef<SessionSearchOpeners | null>(null);
   const key = snapshotKey(scope);
+  const currentKey = useRef(key);
+  const taskPending = useRef<{ readonly key: string; readonly promise: Promise<void> } | null>(null);
+  currentKey.current = key;
+  const waitForTasks = useCallback((): Promise<void> | undefined => {
+    const held = taskPending.current;
+    return held?.key === currentKey.current ? held.promise : undefined;
+  }, []);
   // DERIVED, not cleared. Evidence filed under another session is not this
   // session's evidence, and this is the line that says so during the very render
   // that publishes the new scope.
@@ -372,7 +381,7 @@ export function SessionSearchProvider({
     // provider has not read yet is already what `snapshot` derives above, and
     // writing it would be a second, later answer to the same question.
     const forKey = daemonSessionKey(scope);
-    void readTasks(connection, scope, controller.signal).then(
+    const taskRead = readTasks(connection, scope, controller.signal).then(
       tasks => {
         if (!controller.signal.aborted)
           publish(forKey, current => ({ ...current, taskState: 'ready', taskError: null, tasks }));
@@ -387,6 +396,11 @@ export function SessionSearchProvider({
           }));
       },
     );
+    const pending = { key: forKey, promise: taskRead };
+    taskPending.current = pending;
+    void taskRead.finally(() => {
+      if (taskPending.current === pending) taskPending.current = null;
+    });
     void readFiles(connection, scope, controller.signal).then(
       files => {
         if (!controller.signal.aborted)
@@ -402,7 +416,10 @@ export function SessionSearchProvider({
           }));
       },
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (taskPending.current === pending) taskPending.current = null;
+    };
   }, [connection, publish, scope]);
 
   const setOpeners = useCallback((next: SessionSearchOpeners | null) => {
@@ -442,6 +459,7 @@ export function SessionSearchProvider({
       presenting,
       activeIndex,
       focusSignal,
+      waitForTasks,
       setQuery,
       setActiveIndex,
       present,
@@ -465,6 +483,7 @@ export function SessionSearchProvider({
       setOpeners,
       setQuery,
       snapshot,
+      waitForTasks,
     ],
   );
   return <SessionSearchContext.Provider value={value}>{children}</SessionSearchContext.Provider>;

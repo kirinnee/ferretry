@@ -3,6 +3,7 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 import type { z } from 'zod';
 import {
   type ComposerReferenceCatalogReader,
+  type ComposerReferenceCatalogSources,
   readComposerReferenceCatalogs,
   useComposerReferenceCatalogs,
 } from '../../src/lib/composer-reference-catalogs.ts';
@@ -118,11 +119,16 @@ describe('readComposerReferenceCatalogs', () => {
 function CatalogProbe({
   client,
   sessionId,
+  sources,
+  onCatalogs,
 }: {
   readonly client: Partial<ComposerReferenceCatalogReader>;
   readonly sessionId: string;
+  readonly sources?: ComposerReferenceCatalogSources;
+  readonly onCatalogs?: (catalogs: ReturnType<typeof useComposerReferenceCatalogs>) => void;
 }) {
-  const catalogs = useComposerReferenceCatalogs(client, sessionId);
+  const catalogs = useComposerReferenceCatalogs(client, sessionId, sources);
+  onCatalogs?.(catalogs);
   return (
     <output>{`${catalogs.tasks?.length ?? '-'}:${catalogs.attention?.length ?? '-'}:${catalogs.skills?.skills.length ?? '-'}`}</output>
   );
@@ -181,6 +187,63 @@ describe('useComposerReferenceCatalogs', () => {
     await flushCatalogs();
     expect(output(view)).toBe('1:1:1');
     expect(calls).toHaveLength(3);
+    run(() => view.unmount());
+  });
+
+  test('joins shared task and skill owners while reading only Attention itself', async () => {
+    const calls: string[] = [];
+    let resolveAttention: ((value: unknown) => void) | undefined;
+    let resolveTasks: (() => void) | undefined;
+    let resolveSkills: (() => void) | undefined;
+    const tasksSettled = new Promise<void>(resolve => {
+      resolveTasks = resolve;
+    });
+    const skillsSettled = new Promise<void>(resolve => {
+      resolveSkills = resolve;
+    });
+    const client = reader(
+      () =>
+        new Promise(resolve => {
+          resolveAttention = resolve;
+        }),
+      calls,
+    );
+    const sources: ComposerReferenceCatalogSources = {
+      tasks: taskListing().tasks,
+      skills: skillsListing,
+      waitForTasks: () => tasksSettled,
+      waitForSkills: () => skillsSettled,
+    };
+    let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
+    const view = render(
+      <CatalogProbe
+        client={client}
+        onCatalogs={catalogs => {
+          latest = catalogs;
+        }}
+        sessionId="session-a"
+        sources={sources}
+      />,
+    );
+
+    expect(calls).toEqual(['/v1/sessions/session-a/attention']);
+    const allSettled = latest?.settled();
+    let finished = false;
+    void allSettled?.then(() => {
+      finished = true;
+    });
+    if (resolveAttention === undefined || resolveTasks === undefined || resolveSkills === undefined)
+      throw new Error('shared catalog reads did not start');
+    resolveAttention(attentionListing());
+    await flushCatalogs();
+    expect(output(view)).toBe('1:1:1');
+    expect(finished).toBe(false);
+
+    resolveTasks();
+    resolveSkills();
+    await allSettled;
+    expect(finished).toBe(true);
+    expect(calls).toHaveLength(1);
     run(() => view.unmount());
   });
 

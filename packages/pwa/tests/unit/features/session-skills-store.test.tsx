@@ -65,6 +65,8 @@ describe('useSessionSkills', () => {
       await settle();
       const first = latest as SessionSkillsRead | null;
       expect(first?.names).toEqual(['floop', 'run']);
+      expect(first?.catalog?.skills.map(skill => skill.name)).toEqual(['floop', 'run']);
+      await first?.settled();
 
       // The pane mounts and asks. It must JOIN, not start a second read.
       const joined = await first?.load(scopeA, new AbortController().signal);
