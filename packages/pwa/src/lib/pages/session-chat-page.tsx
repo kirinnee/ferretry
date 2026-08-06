@@ -529,8 +529,30 @@ export function SessionChatPage({
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
   const compact = presentation === 'sheet';
+  /**
+   * BOUND, BECAUSE THE SHIPPED CLIENT IS AN OBJECT AND NOT A BAG OF FUNCTIONS.
+   *
+   * The feature check has to read `client.runtime` — the route is optional and a
+   * daemon that lacks it must render no controls at all. Reading it into a local
+   * and calling THAT is what broke: `DaemonApiClient.runtime` is a prototype
+   * method over private fields, so an unbound call has no receiver and dies on
+   * the first field it touches. In a minified build that surfaced as
+   * `Cannot read properties of undefined (reading 'e')` — a handler that ran,
+   * showed a stack, and sent no request. `bind` keeps the check and restores the
+   * receiver in one step.
+   *
+   * NO TEST COULD HAVE SEEN IT FROM A MOCK. An arrow function ignores its
+   * receiver entirely, so every unit client here kept working while the real one
+   * threw; the regression beside this one uses a class with private state for
+   * exactly that reason.
+   *
+   * The dependency is the CLIENT, not `client.runtime`. A prototype method is
+   * the same reference on every instance of that class, so keying on the method
+   * would hold a binding to the first client forever and quietly send this
+   * session's commands through a replaced one.
+   */
   const runtimeApi = useMemo<RuntimeControlApi | null>(() => {
-    const runtime = client.runtime;
+    const runtime = client.runtime?.bind(client);
     if (runtime === undefined) return null;
     return {
       runtime: async (daemon, sessionId, command, requestId) => {
@@ -543,7 +565,7 @@ export function SessionChatPage({
         publish(next);
       },
     };
-  }, [client.runtime, publish]);
+  }, [client, publish]);
 
   // `<fieldset>`, not `role="toolbar"`: these are plain wrapping buttons with no
   // roving tabindex and no arrow handling, and a toolbar role promises both.
