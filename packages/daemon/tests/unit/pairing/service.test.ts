@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type Advertisement,
+  type DaemonCarrier,
   type DaemonId,
   decideAdvertisement,
   type DeviceToken,
@@ -26,6 +27,19 @@ const CODE = '7F3K-Q2ND' as PairingCode;
 const SECOND_CODE = '6E2J-P3MC' as PairingCode;
 const FIRST_DEVICE_ID = `fy_device_id_${'1'.padStart(22, 'a')}`;
 const SECOND_DEVICE_ID = `fy_device_id_${'2'.padStart(22, 'a')}`;
+
+/**
+ * A REAL published set, and non-empty on purpose.
+ *
+ * `PairingResponse.carriers` defaults to `[]`, so a fixture that handed the service an empty set would
+ * assert nothing: "the daemon's carriers reached the device" and "the field was dropped and the schema
+ * re-defaulted it" produce byte-identical responses. Two entries of both kinds is the smallest set that
+ * cannot be produced by accident.
+ */
+const CARRIERS: readonly DaemonCarrier[] = [
+  { kind: 'direct', url: 'https://workstation.example.test' },
+  { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
+];
 
 class FakeClock {
   nowMs = Date.parse('2026-08-03T12:00:00.000Z');
@@ -115,6 +129,8 @@ function fixture(
     /** The decision this daemon was built with. Dialable unless a case is about the other two. */
     readonly advertisement?: Advertisement;
     readonly deviceState?: readonly RecordingDeviceState[];
+    /** What this daemon resolved at boot, for a case about what a redemption hands out. */
+    readonly carriers?: readonly DaemonCarrier[];
   } = {},
 ) {
   const clock = new FakeClock();
@@ -129,6 +145,7 @@ function fixture(
       url: 'https://workstation.example.test',
       origin: 'operator',
     },
+    carriers: options.carriers ?? CARRIERS,
     clock,
     cryptography,
     devices,
@@ -251,6 +268,11 @@ describe('PairingService redemption', () => {
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       capabilities: ['daemon-api'],
+      // EVERY WAY TO REACH THIS DAEMON, not just the one this device happened to pair over. A phone
+      // that learned only the direct address has nothing to fall back to when it leaves the house, and
+      // it cannot discover the rendezvous by itself — each end used to read its own build-time
+      // directory and the two met by coincidence.
+      carriers: CARRIERS,
     });
     should(devices.records).deepEqual([
       {
@@ -272,6 +294,27 @@ describe('PairingService redemption', () => {
       redeemedAt: '2026-08-03T12:00:00.000Z',
       deviceName: 'Ernest phone',
     });
+  });
+
+  it('should publish the carrier set it was given rather than deriving one from its advertisement', async () => {
+    // THE SHORTCUT THIS FORBIDS. The service already holds a dialable address, so "publish a direct
+    // carrier for it" looks free — and it is wrong twice over: the advertisement is one address while
+    // the carrier set is every address, and the rendezvous half cannot be derived from an
+    // advertisement at all. The set is resolved once, at boot, by the owner of that question; this
+    // service is a courier. So the two facts are deliberately in disagreement here, and the response
+    // must carry the set.
+    // Arrange
+    const resolved: readonly DaemonCarrier[] = [{ kind: 'relay', url: 'wss://elsewhere.example.test/fy' }];
+    const { service } = fixture({ carriers: resolved });
+    service.mint();
+
+    // Act
+    const result = await service.redeem({ code: CODE, deviceName: 'phone' }, '198.51.100.9');
+
+    // Assert
+    if (result.kind !== 'paired') throw new Error('expected successful pairing');
+    should(result.response.carriers).deepEqual(resolved);
+    should(JSON.stringify(result.response.carriers)).not.containEql('workstation.example.test');
   });
 
   it('should give wrong, malformed, expired, and already-consumed codes the same refusal', async () => {
@@ -339,6 +382,7 @@ describe('PairingService redemption', () => {
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+      carriers: CARRIERS,
       clock: base.clock,
       cryptography: base.cryptography,
       devices,

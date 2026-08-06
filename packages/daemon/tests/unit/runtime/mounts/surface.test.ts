@@ -86,6 +86,13 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  // A VALUE, not a subsystem, and the only field here that is one: the set is resolved once at boot and
+  // the pairing service is handed the very same array. Non-empty on purpose — an empty one would let
+  // `PairingResponseSchema`'s default stand in for a carried-through set.
+  carriers: [
+    { kind: 'direct', url: 'https://workstation.example.test' },
+    { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
+  ],
   fleet: {
     accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),
     config: async () => {
@@ -278,7 +285,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 5, operator: 106, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 106, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -316,6 +323,10 @@ describe('the mounted daemon surface', () => {
       'POST /v1/grants/unlock',
       'PATCH /v1/grants',
       'PUT /v1/grants/password',
+      // The carrier refresh, beside the pairing exchange whose second half it is. NOTE WHAT IS ABSENT:
+      // there is no POST, PUT or DELETE here — a device may read where this daemon can be reached and
+      // can never re-point it, because that is a change to the operator's own document.
+      'GET /v1/carriers',
       'GET /v1/health',
       'GET /v1/doctor',
       'GET /v1/fleet/accounts',

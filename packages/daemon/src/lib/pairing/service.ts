@@ -1,6 +1,7 @@
 import {
   type Advertisement,
   type AdvertisementRefusal,
+  type DaemonCarrier,
   type DaemonId,
   DaemonIdSchema,
   DaemonNameSchema,
@@ -191,6 +192,24 @@ interface PairingServiceOptions {
    * has nothing to derive and no way to derive it differently.
    */
   readonly advertisement: Advertisement;
+  /**
+   * EVERY WAY THIS DAEMON CAN BE REACHED, handed to the device that just earned the right to reach it.
+   *
+   * A redemption is the one moment a device is guaranteed to be listening, so it is where the set
+   * belongs — a phone that learned only the direct address it paired over has no way to find the
+   * rendezvous that would still work when it leaves the house.
+   *
+   * IT IS THE VALUE, NOT A WAY TO ASK FOR ONE. The composition root resolves the set once, before this
+   * service exists, and gives the SAME ARRAY to `GET /v1/carriers`. A getter would have been the
+   * flexible choice and it would also have been the bug: two calls may answer differently, so the set
+   * a device is handed at pairing could stop matching the set it refreshes, which is precisely the
+   * disagreement the published set was introduced to end.
+   *
+   * THIS SERVICE DECIDES NOTHING ABOUT IT. Nothing here filters, re-orders or adds to it, and it is
+   * never held as anything but `readonly`. `PairingResponseSchema` parses it on the way out, so a
+   * carrier this daemon's own device would refuse cannot leave through here.
+   */
+  readonly carriers: readonly DaemonCarrier[];
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -430,6 +449,9 @@ export class PairingService {
         daemonId: this.daemonId,
         daemonName: this.daemonName,
         capabilities: this.capabilities,
+        // The one set this daemon resolved at boot, projected for the wire. The refresh route answers
+        // with the same array, so a device's first answer and its next one cannot disagree.
+        carriers: this.options.carriers,
       }),
     };
   }
