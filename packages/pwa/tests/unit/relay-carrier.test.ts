@@ -574,6 +574,68 @@ describe('the carrier router', () => {
     should(choice?.passedOver.map(skip => skip.method.kind)).eql(['direct', 'relay']);
   });
 
+  it('should keep the first successful direct winner when a concurrent walk later reaches a relay', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    let releaseFirstDirect = (): void => {};
+    const firstDirect = new Promise<void>(resolve => {
+      releaseFirstDirect = resolve;
+    });
+    let releaseSecondDirect = (): void => {};
+    const secondDirect = new Promise<void>(resolve => {
+      releaseSecondDirect = resolve;
+    });
+    let secondStarted = (): void => {};
+    const secondAttemptStarted = new Promise<void>(resolve => {
+      secondStarted = resolve;
+    });
+    let directAttempts = 0;
+    let dials = 0;
+    const auto = autoDial(identity);
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        directAttempts += 1;
+        if (directAttempts === 1) {
+          await firstDirect;
+          return new Response('direct first');
+        }
+        if (directAttempts === 2) {
+          secondStarted();
+          await secondDirect;
+          throw new TypeError('the second direct request lost its transport');
+        }
+        return new Response('direct later');
+      },
+      dial: () => {
+        dials += 1;
+        return auto.dial();
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    const first = router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    const second = router.send(daemon, `${DAEMON_URL}/v1/usage`);
+    await secondAttemptStarted;
+
+    releaseFirstDirect();
+    should(await (await first).text()).equal('direct first');
+    releaseSecondDirect();
+    should((await second).status).equal(200);
+
+    const choice = router.choice(daemon.daemonId);
+    if (choice?.ok !== true) throw new Error('the first direct answer was not retained as the winner');
+    should(choice.method).eql({ kind: 'direct', daemonUrl: DAEMON_URL });
+    should(await (await router.send(daemon, `${DAEMON_URL}/v1/sessions`)).text()).equal('direct later');
+    should(dials).equal(1);
+  });
+
   /**
    * A round in which nothing worked used to poison the entry for the life of the
    * pairing: every later request found both carriers already on the refused list,

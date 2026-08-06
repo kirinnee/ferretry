@@ -664,10 +664,14 @@ export class DaemonCarrierRouter {
   }
 
   #decide(entry: CarrierEntry, probes: readonly ConnectionProbe[]): void {
-    const alreadyConnected = entry.choice?.ok === true;
+    // Initial requests may walk concurrently. Once one has an answer, that winner
+    // is the connection's fact: a later walk that happened to lose direct and
+    // reach a relay must still return its own response, but may not turn timing
+    // into a relay preference for every request that follows.
+    if (entry.choice?.ok === true) return;
     entry.choice = chooseConnection(probes);
     this.#announce();
-    if (alreadyConnected || !entry.choice.ok) return;
+    if (!entry.choice.ok) return;
     for (const listener of this.#connectedListeners) {
       try {
         listener(entry.connection);
