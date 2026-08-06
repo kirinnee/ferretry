@@ -1,4 +1,4 @@
-import type { PairingInvitationLink } from '@ferretry/protocol';
+import { type PairingInvitationLink, pairingLinkUrl } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { checkedPairUrl, pairingDaemonHost } from '../../../src/lib/pair/link';
@@ -57,14 +57,24 @@ describe('pairing link check', () => {
     should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7431', reach: 'local-only' }))).equal(PAIR_URL);
   });
 
-  it('should accept every fragment version the daemon can mint, not just the first one', () => {
-    // THE REGRESSION THIS PINS. This reader hard-coded `#v1;`, the daemon learned to mint `#v2;`
-    // whenever it publishes a rendezvous, and `fy pair` then refused the daemon's own link — no code,
-    // no QR, no link, on the one screen that exists to hand a person all three. The fragment has two
-    // readers, the host's own screen is one of them, and only the other one was taught the second
-    // version. It now asks the package that owns the fragment instead of keeping its own list.
-    const v2 = `https://ferretry.pages.dev/pair#v2;url=${encodeURIComponent(DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)};relay=wss%3A%2F%2Frendezvous.example`;
-    should(checkedPairUrl(bent({ pairUrl: v2 }))).equal(v2);
+  it('should accept the fragment version the daemon mints, through the owner rather than its own list', () => {
+    // THE REGRESSION THIS PINS. This reader hard-coded `#v1;`, the daemon briefly learned to mint
+    // `#v2;` whenever it published a rendezvous, and `fy pair` then refused the daemon's own link — no
+    // code, no QR, no link, on the one screen that exists to hand a person all three. The fragment has
+    // two readers, the host's own screen is one of them, and only the other one was taught the second
+    // version.
+    //
+    // THE `v2` FORM IS WITHDRAWN AND THIS TEST STILL HAS WORK TO DO, which is why it is re-keyed
+    // rather than deleted: what it now proves is that whatever the WRITER emits is accepted here. It
+    // fails if this reader ever spells a version of its own again — the shape of the original defect —
+    // because the link is built by the codec that owns the version rather than by this file.
+    const minted = pairingLinkUrl('https://ferretry.pages.dev/pair', {
+      daemonUrl: DAEMON_URL,
+      code: CODE,
+      daemonId: DAEMON_ID,
+    });
+    should(checkedPairUrl(bent({ pairUrl: minted }))).equal(minted);
+    should(minted).not.containEql('relay');
   });
 
   it('should refuse a pairing URL that is not a pairing claim at all', () => {

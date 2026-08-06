@@ -50,9 +50,9 @@ describe('pairing seed', () => {
 
   /*
    * A repeat and an unknown name are opposite facts and now get opposite answers.
-   * `docs/relay-protocol.md` §14 requires exactly this pair: "a v2 reader keeps rejecting a
-   * duplicated field name while ignoring an unrecognised one — a duplicate is a real ambiguity, an
-   * unknown name is the next version arriving".
+   * `docs/relay-protocol.md` §14 requires exactly this pair: a reader keeps rejecting a duplicated
+   * field name while ignoring an unrecognised one — a duplicate is a real ambiguity, an unknown name
+   * is the next version arriving.
    */
   it('should ignore an unrecognised field rather than failing the whole link', () => {
     // Act
@@ -68,65 +68,29 @@ describe('pairing seed', () => {
     });
   });
 
-  it('should read a v2 rendezvous candidate out of the fragment', () => {
-    // Act
-    const actual = pairingSeedFromUrl(
-      'https://app.example.test/pair#v2;url=https%3A%2F%2Fa.test;code=7F3K-Q2ND;fp=fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;relay=wss%3A%2F%2Frelay.example.test',
-    );
-
-    // Assert
-    should(actual).deepEqual({
-      daemonUrl: 'https://a.test',
-      daemonId: 'fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-      code: '7F3K-Q2ND',
-      relay: { kind: 'relay', relayUrl: 'wss://relay.example.test' },
-    });
-  });
-
   /*
-   * A v1 link predates the field, so honouring `relay=` there would let anything that could edit a
-   * link add a carrier the daemon never authored. It is an unknown name under v1, and unknown names
-   * are ignored.
+   * THE LOAD-BEARING TOLERANCE CASE, and it outlived the version it was written beside. A `v2` form
+   * briefly gave `relay=` a meaning; it is withdrawn, so the name has none at any version and this
+   * reader must never dial one. Honouring it would let anything that can edit a URL choose which
+   * rendezvous this browser opens a pre-auth socket to — the rendezvous it does dial is the one its
+   * own build discovered.
    */
-  it('should ignore a relay candidate on a v1 link', () => {
-    // Act
-    const actual = pairingSeedFromUrl(
-      'https://app.example.test/pair#v1;url=https%3A%2F%2Fa.test;code=7F3K-Q2ND;fp=fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;relay=wss%3A%2F%2Frelay.example.test',
-    );
-
-    // Assert
-    should(actual).deepEqual({
+  it('should ignore a relay field on a link rather than ever dialling one', () => {
+    const seed = {
       daemonUrl: 'https://a.test',
       daemonId: 'fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       code: '7F3K-Q2ND',
-    });
-  });
+    };
 
-  /*
-   * §14: "a candidate that fails the rule is dropped rather than dialled". The direct address, the
-   * code and the fingerprint beside it are still good, so failing the LINK would take a working
-   * direct pairing away from somebody standing next to their own machine.
-   */
-  it('should drop an insecure or unreadable relay candidate and keep the rest of the link', () => {
-    // Act
-    const insecure = pairingSeedFromUrl(
-      'https://app.example.test/pair#v2;url=https%3A%2F%2Fa.test;code=7F3K-Q2ND;fp=fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;relay=ws%3A%2F%2Frelay.example.test',
-    );
-    const unreadable = pairingSeedFromUrl(
-      'https://app.example.test/pair#v2;url=https%3A%2F%2Fa.test;code=7F3K-Q2ND;fp=fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;relay=not-a-url',
-    );
+    // Act — a plausible address, an insecure one, and an unreadable one all reach the same answer.
+    for (const relay of ['wss%3A%2F%2Frelay.example.test', 'ws%3A%2F%2Frelay.example.test', 'not-a-url']) {
+      const actual = pairingSeedFromUrl(
+        `https://app.example.test/pair#v1;url=https%3A%2F%2Fa.test;code=7F3K-Q2ND;fp=fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;relay=${relay}`,
+      );
 
-    // Assert
-    should(insecure).deepEqual({
-      daemonUrl: 'https://a.test',
-      daemonId: 'fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-      code: '7F3K-Q2ND',
-    });
-    should(unreadable).deepEqual({
-      daemonUrl: 'https://a.test',
-      daemonId: 'fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-      code: '7F3K-Q2ND',
-    });
+      // Assert
+      should(actual).deepEqual(seed);
+    }
   });
 });
 
@@ -170,29 +134,24 @@ describe('pairing arrival', () => {
   });
 
   /*
-   * The regex gating this function and the parser's version list must agree, and the failure when
-   * they do not is SILENT: a version the regex rejects never reaches the parser, so the screen shows
-   * the ordinary cold "Connect a daemon" state and a reader who just scanned a QR is told nothing at
-   * all. That is strictly worse than the parser's throw. This is the test that keeps the two in step.
+   * The regex gating this function and the parser's version must agree, and the failure when they do
+   * not is SILENT: a version the regex rejects never reaches the parser, so the screen shows the
+   * ordinary cold "Connect a daemon" state and a reader who just scanned a QR is told nothing at all.
+   * That is strictly worse than the parser's throw. This is the test that keeps the two in step — and
+   * it is why `v2` belongs on the COLD side now rather than being quietly deleted: the pattern and the
+   * parser were narrowed together, so an unshipped-version link is a cold open rather than a lie about
+   * a rendezvous.
    */
-  it('should read a v2 link as an arrival rather than as a cold open', () => {
+  it('should agree with the parser about which versions exist, in both directions', () => {
     // Act
-    const actual = pairingArrival(
+    const withdrawnVersion = pairingArrival(
       'https://app.example.test/pair#v2;url=https%3A%2F%2Fd.test;code=7F3K-Q2ND;fp=fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA;relay=wss%3A%2F%2Fr.test',
     );
-    const damagedV2 = pairingArrival('https://app.example.test/pair#v2;url=https%3A%2F%2Fd.test');
+    const damaged = pairingArrival('https://app.example.test/pair#v1;url=https%3A%2F%2Fd.test');
 
-    // Assert
-    should(actual).deepEqual({
-      kind: 'seed',
-      seed: {
-        daemonUrl: 'https://d.test',
-        daemonId: 'fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-        code: '7F3K-Q2ND',
-        relay: { kind: 'relay', relayUrl: 'wss://r.test' },
-      },
-    });
-    should(damagedV2.kind).equal('unreadable');
+    // Assert — the gate refuses the version the parser refuses, so no half-read link exists.
+    should(withdrawnVersion).deepEqual({ kind: 'none' });
+    should(damaged.kind).equal('unreadable');
   });
 
   it('should name the daemon by the host a reader can recognise', () => {
@@ -288,8 +247,11 @@ describe('paired daemon connection', () => {
 });
 
 describe('a pairing that crossed a rendezvous', () => {
+  // AN ORDINARY LINK, AND THE CROSSING IS NOT IN IT. The seed names only the daemon's loopback
+  // address; the rendezvous below is the one this build discovered and dialled after that address
+  // failed, which is exactly what §14's published-set rule has to hold the daemon to.
   const seed = pairingSeedFromUrl(
-    'https://app.example.test/pair#v2;url=http%3A%2F%2F127.0.0.1%3A7431;code=7F3K-Q2ND;fp=fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB;relay=wss%3A%2F%2Frelay.example',
+    'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=7F3K-Q2ND;fp=fy_daemon_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
   );
   const crossed = { kind: 'relay' as const, relayUrl: 'wss://relay.example' };
   const response = (carriers: readonly { kind: 'direct' | 'relay'; url: string }[]) => ({

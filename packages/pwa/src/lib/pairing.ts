@@ -4,29 +4,25 @@ import {
   daemonBaseUrl,
   daemonConnection,
   daemonId,
-  daemonRelayCarrier,
   type DaemonConnection,
   type RelayCarrier,
 } from './daemon-connection.ts';
 
+/**
+ * The three facts a pairing link carries, and deliberately no fourth.
+ *
+ * IT NAMES NO RENDEZVOUS. A link briefly could — a `v2` fragment with `relay=` — for a real reason:
+ * `docs/relay-protocol.md` §14 notes that a device which cannot reach the daemon's own address needs
+ * a rendezvous to dial and cannot ask the daemon it cannot reach. That circularity is broken on THIS
+ * side instead: the build carries a hosted directory origin, `StoreProvider` reads the advertisement
+ * once per document, and `relayPairingCandidates` offers that rendezvous — the same one the daemon
+ * discovered. So nothing has to arrive in the fragment, and a stray `relay=` field is ignored by the
+ * protocol's reader like any other unrecognised name.
+ */
 export interface PairingSeed {
   readonly daemonUrl: string;
   readonly daemonId: string;
   readonly code: string;
-  /**
-   * The rendezvous this link offers for THIS redemption, and nothing beyond it.
-   *
-   * `docs/relay-protocol.md` §14: a device that cannot reach the daemon's own address needs a
-   * rendezvous to dial and cannot ask the daemon it cannot reach, so a v2 link may name one. It is
-   * daemon-authored and travels out of band with the same trust as `fp`.
-   *
-   * IT IS NEVER STORED. What a device navigates by afterwards is `paired.response.carriers` — the
-   * daemon's own published set — and the pairing is refused outright if that set does not name the
-   * rendezvous the exchange crossed. So this value exists for the length of one attempt and is
-   * deliberately absent from `DaemonConnection`, where a written-down guess would outlive the
-   * advertisement that produced it.
-   */
-  readonly relay?: RelayCarrier;
 }
 
 export interface PairingResult {
@@ -40,21 +36,17 @@ export interface PairingResult {
  * HTTP requests, keeping the single-use pairing code out of logs.
  *
  * THE GRAMMAR IS THE PROTOCOL PACKAGE'S AND IS NOT RESTATED HERE. `parsePairingFragment` is the one
- * implementation of the tolerance rules — both versions read, a duplicated field name refused, an
- * unrecognised one ignored, a `relay` candidate honoured only under `v2` and dropped rather than
- * dialled when it fails the socket-endpoint rule — and the daemon that WRITES a link uses the writer
- * beside it. Two readers of one string is how a daemon and a browser come to hold different opinions
- * about the same QR, which is the failure this whole seam exists to make impossible.
+ * implementation of the tolerance rules — the version required, a duplicated field name refused, an
+ * unrecognised one ignored — and the daemon that WRITES a link uses the writer beside it. Two readers
+ * of one string is how a daemon and a browser come to hold different opinions about the same QR,
+ * which is the failure this whole seam exists to make impossible. A `relay=` field is an unrecognised
+ * name and is therefore IGNORED, never dialled: no writer emits one, and honouring one would let
+ * whoever composed a URL choose which rendezvous this browser opens a socket to.
  *
  * WHAT THIS FUNCTION STILL OWNS is the browser's own narrowing on top of that grammar: the daemon
  * address is held to `daemonBaseUrl`'s origin rule — no path, no query, no credentials — because
  * every HTTP and WebSocket adapter in this package resolves `/v1` against it, and the protocol's
  * reader deliberately returns it verbatim so each consumer applies its own.
- *
- * BOTH VERSIONS ARE READ, AND THAT ORDERING IS NORMATIVE. §14: "the current reader rejects any
- * fragment that is not exactly the three-field v1 form, so a v2 link shown to an older app fails
- * pairing outright — direct included. The reader that accepts both v1 and v2 therefore ships before
- * any daemon emits v2." This is that reader; nothing in this package mints a link at all.
  */
 export const pairingSeedFromUrl = (value: string): PairingSeed => {
   let url: URL;
@@ -64,17 +56,7 @@ export const pairingSeedFromUrl = (value: string): PairingSeed => {
     throw new Error('pairing URL must be absolute');
   }
   const seed = parsePairingFragment(url.hash);
-  return {
-    daemonUrl: daemonBaseUrl(seed.daemonUrl),
-    daemonId: daemonId(seed.daemonId),
-    code: seed.code,
-    // Already normalised by the socket-endpoint rule, which IS the rule `daemonRelayCarrier` applies
-    // — so this cannot refuse a candidate the parser accepted, and a defensive catch here would be a
-    // branch nothing can reach.
-    ...(seed.relayCandidate === undefined
-      ? {}
-      : { relay: daemonRelayCarrier({ kind: 'relay', relayUrl: seed.relayCandidate }) }),
-  };
+  return { daemonUrl: daemonBaseUrl(seed.daemonUrl), daemonId: daemonId(seed.daemonId), code: seed.code };
 };
 
 /**
@@ -96,7 +78,7 @@ export type PairingArrival =
  * A fragment that CLAIMS to be a pairing link; any other hash belongs to something else.
  *
  * THE PATTERN COMES FROM THE PROTOCOL PACKAGE, beside the parser it gates, and that is not tidiness.
- * When a gate and its parser disagree about which versions exist the failure is SILENT rather than
+ * When a gate and its parser disagree about which version exists the failure is SILENT rather than
  * loud: a version the gate rejects never reaches the parser, so `pairingArrival` answers `none`, the
  * screen renders the ordinary cold "Connect a daemon" state, and a reader who just scanned a QR is
  * told nothing whatsoever — strictly worse than the parser's throw, which at least reaches

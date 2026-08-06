@@ -28,9 +28,12 @@
  * - **It will not treat a refusal as a reason to try elsewhere.** A sealed `pair-refused` means the
  *   exchange HAPPENED and the answer is final for that attempt; carrying the same code to the next
  *   rendezvous would spend another attempt from the relay budget to be told the same thing.
- * - **It will not remember the rendezvous it used.** The candidate is for one redemption. What the
+ * - **It will not remember the rendezvous it used.** The address is for one redemption. What the
  *   device navigates by afterwards is the daemon's own published set, and `pairedDaemonConnection`
  *   refuses the pairing outright if that set does not name the rendezvous this exchange crossed.
+ * - **It will not dial an address that arrived in the link.** The fragment carries no rendezvous, and
+ *   the one this browser dials is the one its own build discovered — so a composed URL cannot choose
+ *   where a pre-auth socket opens.
  */
 
 import type { PairingResponse } from '@ferretry/protocol';
@@ -41,21 +44,26 @@ import { browserRelayDial, driveRelaySession, type RelayDial, type RelayHeartbea
 import { RelayClientSession, type RelayClientSessionDependencies, RelaySessionError } from './relay-session.ts';
 
 /**
- * Every rendezvous this redemption may try, in the order §14 gives — and never the direct address.
+ * Every rendezvous this redemption may try — and never the direct address.
  *
  * §1's rule does not bend for pairing: direct is attempted first and is attempted by the caller,
  * over ordinary HTTP, because a browser that can reach the daemon has no reason to involve a third
- * party. This list is what comes AFTER that, and its order is the protocol's:
+ * party. What comes AFTER that is exactly one address: **the discovery advertisement's hosted
+ * rendezvous**, the one this build can find for itself.
  *
- * 1. **the link's own candidate**, daemon-authored and carried out of band with the same trust as
- *    the fingerprint beside it — so a daemon published only on a self-hosted rendezvous is pairable
- *    off-LAN, which is the entire reason the v2 fragment exists;
- * 2. **the discovery advertisement's hosted rendezvous**, which is what a v1 link leaves as the only
- *    relayed path.
+ * A SECOND CANDIDATE WAS BUILT HERE AND IS WITHDRAWN, ahead of the link field it read. It came first
+ * in the order and was the link's own `relay=` — daemon-authored and carried out of band with the
+ * same trust as the fingerprint beside it, so a daemon published only on a self-hosted rendezvous
+ * would have been pairable off-LAN. That is a real capability and it is DEFERRED, not refuted: which
+ * addresses a QR may send a fresh device to is a larger question than the hosted default needed, and
+ * shipping a fragment format that neither works for self-hosting nor stays simple would have been
+ * worse than declaring the gap. So this list is one entry long, a self-hosted-only daemon is pairable
+ * only from a device that can already reach its direct address, and §13 records that consequence.
  *
- * DEDUPLICATED BY ADDRESS, because a daemon whose first published relay IS the hosted one would
- * otherwise be dialled twice — two sockets, two handshakes, and two attempts spent from a five-guess
- * budget to ask one question.
+ * IT RETURNS A LIST RATHER THAN AN OPTION, deliberately: the caller's walk, its per-attempt relay
+ * budget and its "a sealed refusal ends everything" rule are all written against a sequence, and
+ * collapsing them to a single value would have to be un-collapsed the day a second address is
+ * admissible again.
  *
  * A FINGERPRINT THIS PROTOCOL CANNOT ADDRESS GETS NO CANDIDATES AT ALL. `connectionSocketUrl` would
  * refuse the address and `completeClientHandshake` would have nothing to check the daemon against, so
@@ -67,16 +75,8 @@ export const relayPairingCandidates = (
   hostedRelayUrl: string | undefined,
 ): readonly RelayCarrier[] => {
   if (parseDaemonId(seed.daemonId) === null) return [];
-  const candidates: RelayCarrier[] = [];
-  const seen = new Set<string>();
-  const offer = (carrier: RelayCarrier | undefined): void => {
-    if (carrier === undefined || seen.has(carrier.relayUrl)) return;
-    seen.add(carrier.relayUrl);
-    candidates.push(carrier);
-  };
-  offer(seed.relay);
-  offer(discoveredRendezvous(hostedRelayUrl));
-  return candidates;
+  const discovered = discoveredRendezvous(hostedRelayUrl);
+  return discovered === undefined ? [] : [discovered];
 };
 
 /**

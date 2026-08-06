@@ -55,7 +55,7 @@ import {
   type SetupTargetId,
 } from './onboarding-model.ts';
 
-/** The fragment key. Distinct from the `#v1;`/`#v2;` a pairing link uses — these are not the same claim. */
+/** The fragment key. Distinct from the `#v1;` a pairing link uses — these are not the same claim. */
 export const SETUP_HANDOFF_KEY = 'fy-setup';
 
 /**

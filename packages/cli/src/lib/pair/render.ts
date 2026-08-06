@@ -85,17 +85,18 @@ export function renderRemaining(milliseconds: number): string {
  * case that has one, and the two cases that do not carry the sentence saying who can redeem what is
  * left — which is the whole rule: never offer a link without saying who can redeem it.
  *
- * `qr`'s `notice` IS OPTIONAL, NOT A SEPARATE KIND, because a relay candidate does not change what is
- * drawn — a QR is still a QR — it only adds a disclosure the operator did not need when the direct
- * address alone was redeemable. `reach: 'local-only'` describes the DIRECT address only; a
- * `relayCandidate` beside it means ANOTHER device can still redeem this link, through the rendezvous,
- * so the `local-only` kind below — which never draws a QR — must not be reached for that case, or the
- * screen would say "no QR is drawn" while one sits right below it.
+ * `qr`'s `notice` IS OPTIONAL, NOT A SEPARATE KIND, because a discoverable rendezvous does not change
+ * what is drawn — a QR is still a QR, and the link inside it is the same three-field fragment either
+ * way — it only adds a disclosure the operator did not need when the direct address alone was
+ * redeemable. `reach: 'local-only'` describes the DIRECT address only; a `discoveredRelayUrl` beside it
+ * means ANOTHER device can still redeem this link, through the rendezvous it finds for itself, so the
+ * `local-only` kind below — which never draws a QR — must not be reached for that case, or the screen
+ * would say "no QR is drawn" while one sits right below it.
  */
 export type PairingOffer =
   /**
-   * An address any device can dial, or a local-only one a relay candidate also makes redeemable
-   * elsewhere. The QR is already drawn in block characters; `notice` carries the rendezvous
+   * An address any device can dial, or a local-only one a discoverable rendezvous also makes
+   * redeemable elsewhere. The QR is already drawn in block characters; `notice` carries the rendezvous
    * disclosure when a relay is what makes this reachable, and is absent otherwise.
    */
   | { readonly kind: 'qr'; readonly link: string; readonly qr: string; readonly notice?: AdvertisementNotice }

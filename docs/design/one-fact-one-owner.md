@@ -360,16 +360,19 @@ NOT move is the point this section exists for: a rendezvous still does not make 
 **direct address** dialable, so `reachableOffHost` and `decideAdvertisement` still answer
 **different questions** and must stay separate:
 
-| question                                                     | who asks                    | does a relay count?                                                                   |
-| ------------------------------------------------------------ | --------------------------- | ------------------------------------------------------------------------------------- |
-| can anything off this host reach me at all?                  | `fyd --check` grant posture | **yes** — the daemon dials out                                                        |
-| can a device dial me directly, right now, for first contact? | the pairing mint            | **no** — a rendezvous is not a direct address; its answer travels as `relayCandidate` |
+| question                                                     | who asks                    | does a relay count?                                                                    |
+| ------------------------------------------------------------ | --------------------------- | -------------------------------------------------------------------------------------- |
+| can anything off this host reach me at all?                  | `fyd --check` grant posture | **yes** — the daemon dials out                                                         |
+| can a device dial me directly, right now, for first contact? | the pairing mint            | **no** — a rendezvous is not a direct address; it is disclosed as `discoveredRelayUrl` |
 
 temperance offered to join them and I am declining the join. This is §4.5's rule in action: **two facts
 sharing one sub-fact**. Single-source the sub-fact (`isLoopbackHost`), keep the two questions distinct.
 Merging them would have the pairing mint call a relay-reachable daemon directly dialable — and the
 supersession vindicates the split rather than weakening it: the relay answer joined the mint as its
-own field beside `reach`, not as a widening of it.
+own field beside `reach`, not as a widening of it. That field is `discoveredRelayUrl`, and it is
+host-facing — it says whether a rendezvous a fresh device could **discover for itself** exists, so the
+host's screens know to draw a QR and what to disclose. It never enters the link, which keeps the two
+questions separate on the wire as well as in the code: the fragment answers only the direct one.
 
 ---
 

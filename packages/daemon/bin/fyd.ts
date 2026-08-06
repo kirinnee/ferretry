@@ -685,6 +685,15 @@ export interface DaemonWorld {
     config: DaemonConfig,
     clock: MillisecondClockPort,
     carriers: readonly DaemonCarrier[],
+    /**
+     * The rendezvous a fresh device can discover for itself — see {@link discoverableRelayUrl}.
+     *
+     * REQUIRED RATHER THAN OPTIONAL, because the interesting value is `undefined` and an omitted
+     * argument and a deliberate "there is none" would be the same call. A boot that forgot to derive
+     * it would silently stop drawing the default install's QR, which is the regression this whole
+     * field exists to prevent.
+     */
+    discoveredRelayUrl: string | undefined,
   ) => Promise<{
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
@@ -3633,7 +3642,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         },
       );
     },
-    createPairing: async (config, pairingClock, carriers) => {
+    createPairing: async (config, pairingClock, carriers, discoveredRelayUrl) => {
       const cryptography = new NodePairingCryptography();
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
@@ -3665,6 +3674,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           // reading its QR names the phone.
           advertisement: config.advertisement,
           carriers,
+          // Provenance, not the first entry of `carriers`. The service cannot tell a discovered
+          // rendezvous from an operator's own one, and only the first is something the phone reading
+          // the QR can find for itself.
+          ...(discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl }),
           clock: pairingClock,
           cryptography,
           devices: repository,
@@ -4332,7 +4345,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
 
   const usage = await world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
-  const pairing = await world.createPairing(config, world.clock, carriers);
+  const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
   const base = {
     credentials: { ...(await world.credentials.load()), devices: pairing.credentials },
@@ -4717,15 +4730,20 @@ export async function printConfiguration(world: DaemonWorld): Promise<number> {
  * trying to do cannot work, for a reason the binary already holds. An advertisement that cannot be
  * handed to another device says so here, hours before a phone is pointed at it.
  *
- * THIS LINE NAMES NO RENDEZVOUS, AND THAT IS A DECLARED GAP RATHER THAN THE OLD CLAIM. It used to be
- * justified by "pairing is the one exchange a relay can never carry", which `docs/relay-protocol.md`
- * §14 retired: a redemption may cross a rendezvous as a sealed one-attempt exchange. `localOnlyNotice`
- * already takes an optional candidate for exactly that reason and `fy pair` passes one. This command
- * deliberately does not, because a fresh device cannot DISCOVER a rendezvous the daemon holds — the
- * fallback a browser can find on its own is Ferretry's hosted one — so the consequence is stated
- * rather than dressed up: for a daemon whose only carrier is a rendezvous of its own, this line
- * UNDER-reports, and it says "no QR is drawn" about a link the hosted path could still carry. Closing
- * it is deferred with the naming it depends on; §13 records the gap.
+ * IT NAMES THE RENDEZVOUS A FRESH DEVICE COULD FIND, AND ONLY THAT ONE. Two claims are retired here
+ * rather than deleted, because both were written down as justifications and both were wrong in turn.
+ * The first was "pairing is the one exchange a relay can never carry", which `docs/relay-protocol.md`
+ * §14 retired: a redemption may cross a rendezvous as a sealed one-attempt exchange. The second was
+ * this command passing NO carrier and calling the shortfall a uniform under-report — but a default
+ * install binds loopback and dials the DISCOVERED hosted rendezvous, so that reading printed "no QR is
+ * drawn" about a daemon a phone can in fact pair with. It now takes {@link discoverableRelayUrl}'s
+ * answer, the same value the boot hands the pairing service.
+ *
+ * WHAT REMAINS IS THE DECLARED GAP, AND IT IS NARROWER THAN THE OLD SENTENCE: a rendezvous an operator
+ * RUNS is not one a fresh device can discover, so a daemon published only on a self-hosted rendezvous
+ * still reads as local-only with no QR. That is the correct answer for it — nothing off its LAN could
+ * find that address — and closing it needs a link that names a rendezvous, which is deferred. §13
+ * records it.
  *
  * THE SENTENCES COME FROM THE PROTOCOL, not from this file. `fy pair`, the browser's Add-a-device
  * panel and this command are three renderings of one fact, and a fourth wording invented here is how
@@ -4734,13 +4752,47 @@ export async function printConfiguration(world: DaemonWorld): Promise<number> {
  * IT REPORTS, IT DOES NOT JUDGE — no exit code moves, exactly as the harness and grant postures do
  * not move it. A daemon nothing can pair with still starts perfectly.
  */
-export function describePairingAdvertisement(advertisement: Advertisement): readonly string[] {
+export function describePairingAdvertisement(
+  advertisement: Advertisement,
+  discoveredRelayUrl?: string,
+): readonly string[] {
   const label = 'pairing     ';
   if (advertisement.kind === 'address')
     return [`${label} any device that can reach ${advertisement.url} may redeem a code (${advertisement.origin})`];
   const notice =
-    advertisement.kind === 'local-only' ? localOnlyNotice(advertisement.url) : refusalNotice(advertisement.refusal);
+    advertisement.kind === 'local-only'
+      ? localOnlyNotice(advertisement.url, discoveredRelayUrl)
+      : refusalNotice(advertisement.refusal);
   return [`${label} ${notice.audience}`, `             ! ${notice.remedy}`];
+}
+
+/**
+ * The rendezvous a device that has never met this daemon can find FOR ITSELF, or nothing.
+ *
+ * ONE DERIVATION, READ BY BOTH THE BOOT AND `--check`, so the QR `fy pair` draws and the sentence
+ * `fyd --check` prints cannot disagree about the same daemon. That disagreement is not hypothetical:
+ * this fact was briefly derived in the pairing service as "the first published relay of any kind",
+ * and `--check` passed nothing at all — two answers for one question, one of them wrong.
+ *
+ * `kind === 'discovered'` IS THE WHOLE PREDICATE, and it is exact rather than approximate.
+ * `chooseRelayCarrierSource` answers `configured` for an explicit `relay` block — which wins
+ * unconditionally — and `discovered` only for an address read out of the hosted directory
+ * advertisement. That is the same advertisement the scanning device's own build reads, so a
+ * `discovered` source is true when and only when a fresh phone will find the same address. A
+ * self-hosted deployment therefore discloses nothing and draws no QR for a loopback bind: the
+ * declared GAP in `docs/relay-protocol.md` §13, failing closed by construction rather than by a
+ * check somebody has to remember.
+ *
+ * `dialledRelayUrl` is what makes "enabled" part of the answer: a discovered entry the operator
+ * switched off is not a carrier, and disclosing it would promise a path nothing is dialling.
+ */
+export function discoverableRelayUrl(sources: readonly RelayCarrierSource[]): string | undefined {
+  for (const source of sources) {
+    if (source.kind !== 'discovered') continue;
+    const url = dialledRelayUrl(source);
+    if (url !== undefined) return url;
+  }
+  return undefined;
 }
 
 /**
@@ -4820,6 +4872,9 @@ export async function checkConfiguration(
   const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
   let carrierForGrants: RelayCarrierSource | undefined;
   let carrierExitCode = 0;
+  // Absent for a refused set, because a refusal names no carrier this daemon would dial and claiming
+  // a redeemable link off one would be the same wrong answer the grant posture refuses to invent.
+  let discoveredRelay: string | undefined;
   if (resolvedRelays.kind === 'refused') {
     say(`carrier      refused — ${resolvedRelays.reason}`);
     carrierExitCode = 1;
@@ -4829,6 +4884,7 @@ export async function checkConfiguration(
     }
     const dialled = resolvedRelays.sources.find(carrier => dialledRelayUrl(carrier) !== undefined);
     carrierForGrants = dialled ?? resolvedRelays.sources[0];
+    discoveredRelay = discoverableRelayUrl(resolvedRelays.sources);
     // The remedy is GLOBAL: it says this daemon dials no relay. An inactive entry beside an active
     // sibling gets its own posture line above, never a false claim that nothing off-host can connect.
     if (dialled === undefined && carrierForGrants !== undefined) {
@@ -4838,11 +4894,13 @@ export async function checkConfiguration(
     }
   }
   // Directly beneath the carrier, because this is the address that has to work on its own and whether
-  // anybody but this machine can dial it. It does NOT read the carrier above it, and the comment here
-  // used to explain that by saying pairing cannot use one — which §14 retired. The honest version is
-  // the declared gap on `describePairingAdvertisement`: a fresh device cannot discover a rendezvous
-  // this daemon holds, so this line stays the address's own answer and can under-report.
-  for (const line of describePairingAdvertisement(config.advertisement)) say(line);
+  // anybody but this machine can dial it. It DOES read the carrier above it now, through the one
+  // derivation the boot uses, so this line and the QR `fy pair` draws for the same daemon agree. Two
+  // earlier comments here are retired: "pairing cannot use a carrier" (§14 retired it) and "this line
+  // passes no candidate, so it under-reports" (it passes one for the case a device can discover). What
+  // survives is narrower and is the declared GAP: a SELF-HOSTED rendezvous is not discoverable, so a
+  // daemon on one still reads as local-only here — correctly, since no fresh device could find it.
+  for (const line of describePairingAdvertisement(config.advertisement, discoveredRelay)) say(line);
   /**
    * A REFUSED CARRIER SET HAS NO GRANT POSTURE, AND SAYING SO IS THE WHOLE POINT.
    *

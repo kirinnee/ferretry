@@ -27,11 +27,15 @@
  */
 
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer, type Server, type Socket } from 'node:net';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Readable } from 'node:stream';
+// The path the DAEMON's own reader asks for, from the module that owns it — a literal here would be a
+// second spelling, and the failure it produces is a 404 that reads as "discovery is switched off".
+import { RELAY_ADVERTISEMENT_PATH } from '../../../packages/daemon/src/lib/relay/discovery.ts';
 import { assertNoLiveStatePath } from '../fixture.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
@@ -306,6 +310,87 @@ export async function startDirectSinkhole(teardown: HarnessTeardown): Promise<Di
   return { origin: `http://127.0.0.1:${String(address.port)}`, port: address.port, attempts: () => attempts, stop };
 }
 
+// ─── the relay directory advertisement, which is how BOTH ends find one rendezvous ────────────
+
+export interface RelayDirectory {
+  /** The origin compiled into the bundle and handed to the daemon as `FY_RELAY_DIRECTORY_ORIGIN`. */
+  readonly origin: string;
+  /** How many times `/v1/default-relay` has been answered, so "the browser discovered it" is a claim. */
+  reads(): number;
+  /** Every path asked for, so a 404 caused by a path change cannot read as "nobody looked". */
+  requests(): readonly string[];
+  /** What the advertisement names. `null` is the switched-off answer, which fails closed to direct. */
+  publish(relayUrl: string | null): void;
+}
+
+/**
+ * The stub hosted directory, and it is the piece that makes this journey the SHIPPED path.
+ *
+ * The default install has no rendezvous in its QR. Both ends find one by reading the same no-store
+ * advertisement — the daemon at boot, the browser once per document — so a journey that hands the
+ * daemon an explicit `relay` block and the browser a `relay=` fragment field proves a spelling nobody
+ * ships. This serves that advertisement from loopback instead, on an origin nothing outside this
+ * process knows.
+ *
+ * ORIGIN AT BUILD TIME, ADDRESS AFTERWARDS. Only the ORIGIN has to exist before `vite build`, because
+ * that is what becomes `__FY_RELAY_DIRECTORY__`. The `relayUrl` is published once the rendezvous has a
+ * port, which is what removes the ordering problem a build-time address would create.
+ *
+ * ONE PER PROCESS, AND DELIBERATELY NOT ON A JOURNEY'S TEARDOWN. The bundle memo below is keyed on
+ * this origin, so a per-journey directory would mean a second full `vite build` for the second
+ * journey — and closing it on the first journey's teardown would leave the second serving nothing,
+ * which is the same trap the bundle's own comment records. `unref()` is what makes that safe without a
+ * suite-level teardown: the listener stops holding the event loop open, so the process exits normally
+ * and the socket goes with it.
+ *
+ * It counts reads because "the browser discovered the rendezvous" must be ASSERTED. Without the count
+ * a journey that crossed the relay for some other reason would look identical to one that read this.
+ */
+let directoryPromise: Promise<RelayDirectory> | undefined;
+
+export async function startRelayDirectory(): Promise<RelayDirectory> {
+  directoryPromise ??= (async () => {
+    let reads = 0;
+    const paths: string[] = [];
+    // `null` until a rendezvous exists: an advertisement that named a dead address would make the
+    // browser's first relayed attempt fail for a harness reason.
+    let relayUrl: string | null = null;
+    const server = createHttpServer((request, response) => {
+      const path = (request.url ?? '/').split('?')[0] ?? '/';
+      paths.push(path);
+      if (path !== RELAY_ADVERTISEMENT_PATH) {
+        response.writeHead(404).end();
+        return;
+      }
+      reads += 1;
+      // The real control plane's own headers: no-store, and permissive CORS because the browser
+      // reading this is on the PWA origin, not on this one.
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'cache-control': 'no-store',
+        'access-control-allow-origin': '*',
+      });
+      response.end(JSON.stringify({ version: 1, relayUrl }));
+    });
+    await new Promise<void>((settle, fail) => {
+      server.once('error', fail);
+      server.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => settle());
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('the relay directory took no IPv4 port');
+    server.unref();
+    return {
+      origin: `http://127.0.0.1:${String(address.port)}`,
+      reads: () => reads,
+      requests: () => [...paths],
+      publish: (next: string | null) => {
+        relayUrl = next;
+      },
+    };
+  })();
+  return directoryPromise;
+}
+
 // ─── the real bundle, on a real origin ────────────────────────────────────────────────────────
 
 /**
@@ -315,9 +400,13 @@ export async function startDirectSinkhole(teardown: HarnessTeardown): Promise<Di
  * markup into a static page, which cannot pair with anything because the app is never running. What
  * makes this journey different is that the JavaScript that ships is the JavaScript that dials.
  *
- * Built with NO `FY_RELAY_DIRECTORY_ORIGIN`, deliberately — the fail-closed case. Discovery is
- * skipped entirely, there is no hosted fallback, and the rendezvous this journey crosses can only
- * have come from the pairing fragment and the daemon's published carrier set.
+ * BUILT AGAINST THE STUB DIRECTORY, and the previous arrangement was a false comment as well as a
+ * weaker proof. It read "built with NO `FY_RELAY_DIRECTORY_ORIGIN`, deliberately — discovery is
+ * skipped entirely", and passed `FY_RELAY_DIRECTORY_ORIGIN: ''`. That variable was INERT:
+ * `packages/pwa/vite.config.ts` read no environment at all, so the bundle carried the PRODUCTION
+ * directory origin and every page load dialled a real Cloudflare Worker. The config now honours the
+ * variable — the daemon always did — and this passes the loopback stub, so nothing reaches a real
+ * service and discovery is exercised rather than skipped.
  */
 let bundlePromise: Promise<string> | undefined;
 
@@ -330,14 +419,25 @@ let bundlePromise: Promise<string> | undefined;
  * hour-long misdiagnosis this comment exists to prevent. `run-e2e.sh` removes the suite root once,
  * after every journey has finished.
  */
-export async function buildPwaBundle(): Promise<string> {
+let bundleDirectoryOrigin: string | undefined;
+
+export async function buildPwaBundle(directoryOrigin: string): Promise<string> {
+  // The memo answers the FIRST origin forever, so a second one is a silent wrong bundle: the app would
+  // discover a directory this journey is not serving and its relayed leg would fail for a harness
+  // reason. Refuse loudly instead — one directory per process is the arrangement.
+  if (bundleDirectoryOrigin !== undefined && bundleDirectoryOrigin !== directoryOrigin) {
+    throw new Error(
+      `the PWA bundle is already built against ${bundleDirectoryOrigin}; it cannot also serve ${directoryOrigin}`,
+    );
+  }
+  bundleDirectoryOrigin = directoryOrigin;
   bundlePromise ??= (async () => {
     const suiteRoot = process.env.FY_E2E_RUN_ROOT ?? tmpdir();
     const outDir = await assertNoLiveStatePath(join(suiteRoot, 'fy-e2e-pwa-dist'), 'PWA bundle output');
     await mkdir(outDir, { recursive: true });
     const build = Bun.spawn(['bun', 'run', 'build', '--outDir', outDir, '--emptyOutDir'], {
       cwd: join(REPOSITORY_ROOT, 'packages', 'pwa'),
-      env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: '', NO_COLOR: '1' },
+      env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin, NO_COLOR: '1' },
       stdout: 'pipe',
       stderr: 'pipe',
     });

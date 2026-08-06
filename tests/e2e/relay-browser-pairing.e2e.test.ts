@@ -21,6 +21,8 @@
  *   REAL PWA bundle from `vite build`, served over HTTP under the published site's own CSP
  *   REAL Google Chrome, driven by `playwright-core`
  *   REAL failure of the direct address, arranged rather than assumed
+ *   REAL directory advertisement on loopback, which is how BOTH ends learn one rendezvous — nothing
+ *        here is told an address, so this is the shipped default rather than a spelling of it
  *
  * ── THE STEP LEDGER, AND WHY IT IS SHAPED LIKE THIS ────────────────────────────────────────────
  *
@@ -29,9 +31,10 @@
  * reached, which sends the reader to the wrong package.
  *
  * That shape earned itself several times over while this was being built. It located a
- * release-blocking CLI regression (`fy pair` refusing the daemon's own `v2` link, so the operator
- * got no code by any route), and a §14 stream session that opened over the rendezvous and carried
- * no frames — both in builds where every in-process tier was green. The failure messages carry the
+ * release-blocking CLI regression (`fy pair` refusing the daemon's own link when the fragment briefly
+ * gained a second version, so the operator got no code by any route), and a §14 stream session that
+ * opened over the rendezvous and carried no frames — both in builds where every in-process tier was
+ * green. The failure messages carry the
  * discriminator rather than the symptom: "a stream session WAS opened and carried no frames" and
  * "NO stream session was ever opened" are defects in different packages.
  *
@@ -70,6 +73,7 @@ import {
   renderedDataAttributes,
   startDirectSinkhole,
   startPwaOrigin,
+  startRelayDirectory,
   type RendezvousProcess,
   startRendezvous,
   stepLedger,
@@ -103,10 +107,20 @@ interface DaemonDocument {
   readonly bindPort: number;
   /** The address the daemon ADVERTISES — the sinkhole, which no browser can use. */
   readonly publicUrl: string;
-  readonly relayUrl: string;
   readonly appOrigin: string;
 }
 
+/**
+ * The document a DEFAULT INSTALL has, which is the whole point of its shape.
+ *
+ * IT DECLARES NO RENDEZVOUS. It used to carry `{ kind: 'relay', url: … }` plus an explicit
+ * `{ source: 'discovery', enabled: false }`, and that arrangement proved a spelling nobody ships: the
+ * daemon was TOLD its rendezvous and the browser read it out of a `v2` fragment field. Omitting both
+ * lines leaves the discovery default, so this daemon reads the stub directory advertisement at boot —
+ * the same advertisement the compiled bundle reads — and the two ends arrive at ONE rendezvous with
+ * nothing passing between them but a fingerprint. `FY_RELAY_DIRECTORY_ORIGIN` points that read at
+ * loopback, so nothing here reaches a real service, which is what the `enabled: false` line was for.
+ */
 function daemonDocument(input: DaemonDocument): string {
   return `${JSON.stringify(
     {
@@ -115,13 +129,7 @@ function daemonDocument(input: DaemonDocument): string {
       // fails at TRANSPORT against the sinkhole instead of being refused earlier by CORS — which
       // would prove a different thing, and a weaker one.
       corsOrigins: [input.appOrigin],
-      carriers: [
-        { kind: 'bind', host: '127.0.0.1', port: input.bindPort },
-        { kind: 'relay', url: input.relayUrl },
-        // "No, and I mean it." An omitted discovery entry is read as the hosted default; this is
-        // the explicit spelling, so nothing in this journey can reach a real service.
-        { kind: 'relay', source: 'discovery', enabled: false },
-      ],
+      carriers: [{ kind: 'bind', host: '127.0.0.1', port: input.bindPort }],
     },
     null,
     2,
@@ -272,7 +280,14 @@ const STEPS: readonly LedgerStep[] = [
   },
   { id: 'pairing-link-minted', claim: 'the compiled CLI printed a pairing link the host can hand out' },
   { id: 'browser-loads-app', claim: 'real Chrome loaded the real bundle at /pair and reached the confirm stage' },
-  { id: 'pairing-link-names-relay', claim: 'the minted link is v2 and its relay= is this run’s rendezvous' },
+  {
+    id: 'pairing-link-carries-no-relay',
+    claim: 'the minted link is v1, advertises the sinkhole, and names no rendezvous at all',
+  },
+  {
+    id: 'browser-discovered-the-rendezvous',
+    claim: 'the browser read the directory advertisement, which is the only place it could learn a relay',
+  },
   { id: 'browser-tried-direct', claim: 'the browser attempted the advertised direct address and it failed' },
   {
     id: 'browser-paired-over-relay',
@@ -331,12 +346,16 @@ async function bootAndLearnFingerprint(
   environment: E2eEnvironment,
   configPath: string,
   rendezvous: RendezvousProcess,
+  directoryOrigin: string,
 ): Promise<string> {
   const before = await rendezvous.dialled();
   await environment.startDaemon({
     command: [compiledDaemon(), '--config', configPath],
     readyUrl: environment.httpUrl('/v1/health'),
     timeoutMs: 30_000,
+    // The daemon's own escape hatch, pointed at the stub. Its default would be the production origin,
+    // which this journey must never dial.
+    env: { FY_RELAY_DIRECTORY_ORIGIN: directoryOrigin },
   });
   // Wait for the DIAL, not for the listener. `/v1/health` answering means the HTTP surface is up;
   // the relay identity is announced afterwards, so stopping at readiness raced the announcement and
@@ -354,10 +373,13 @@ describe('a real browser, a compiled daemon and a real relay', () => {
     try {
       await withE2eEnvironment(async environment => {
         const rendezvous = await startRendezvous(environment.paths.root, teardown);
+        const directory = await startRelayDirectory();
+        directory.publish(rendezvous.relayUrl);
         const sinkhole = await startDirectSinkhole(teardown);
         const configPath = join(environment.paths.root, 'daemon.json');
 
-        // Act — the rendezvous, the compiled daemon, the sinkhole, the bundle and Chrome, in turn.
+        // Act — the rendezvous, the directory, the compiled daemon, the sinkhole, the bundle and
+        // Chrome, in turn.
         const stranger = await fetch(`${rendezvous.httpOrigin}/v1/rendezvous/fy_daemon_${'A'.repeat(43)}/daemon`, {
           headers: { Upgrade: 'websocket' },
         });
@@ -367,43 +389,68 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           daemonDocument({
             bindPort: environment.ports.api,
             publicUrl: sinkhole.origin,
-            relayUrl: rendezvous.relayUrl,
             appOrigin: 'http://127.0.0.1:1',
           }),
           'utf8',
         );
-        const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous);
+        const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous, directory.origin);
         await rendezvous.allow(fingerprint);
         await environment.startDaemon({
           command: [compiledDaemon(), '--config', configPath],
           readyUrl: environment.httpUrl('/v1/health'),
           timeoutMs: 30_000,
+          env: { FY_RELAY_DIRECTORY_ORIGIN: directory.origin },
         });
         await waitForDaemonAtRendezvous(rendezvous);
+        const directoryReadsByDaemon = directory.reads();
 
         const directFailure = await fetch(`${sinkhole.origin}/v1/health`).then(
           () => undefined,
           (error: unknown) => error,
         );
 
-        const distDir = await buildPwaBundle();
+        const distDir = await buildPwaBundle(directory.origin);
         const origin = await startPwaOrigin(distDir, teardown);
         const browser = await launchChrome(teardown);
         await browser.page.goto(`${origin.origin}/pair`, { waitUntil: 'networkidle', timeout: 30_000 });
         const title = await browser.page.evaluate<string>('document.title');
-        const rendered = await browser.page.evaluate<number>('document.body.innerText.trim().length');
+        /**
+         * `textContent`, NOT `innerText`, and the difference is the whole assertion.
+         *
+         * This read `document.body.innerText`, which is LAYOUT-dependent: it reports the text a reader
+         * would see, so an element of zero measured height contributes nothing to it. The app shell is
+         * fixed-height and `#root` measures 0 in this headless context even though React has rendered —
+         * `body` is 900px, `--app-h` is 900px, `#root` is 0 — so this step asserted "the browser laid
+         * the app out the way a phone would" while claiming to assert "the app rendered". It failed on
+         * a bundle with none of this branch's changes in it, which is how the substitution was found.
+         * `textContent` is what "React mounted and produced content" means and cannot be moved by a
+         * viewport.
+         */
+        const bodyText = await browser.page.evaluate<string>('document.body.textContent.trim().slice(0, 400)');
+        const rendered = bodyText.length;
 
         // Assert
         should(stranger.status).equal(404);
         should(fingerprint).match(FINGERPRINT);
         should((await rendezvous.sockets()).some(row => row.roles.includes('daemon'))).be.true();
+        // The daemon reached the rendezvous WITHOUT being told its address, so the stub directory is
+        // wired: an unread advertisement would leave a direct-only daemon and no socket above. The
+        // paths asked for are in the message because a wrong PATH and a wrong ORIGIN are different
+        // harness defects and the count alone cannot tell them apart.
+        should(directoryReadsByDaemon).be.greaterThan(
+          0,
+          `the daemon read no advertisement at ${directory.origin}; it asked for ${directory.requests().join(', ') || 'nothing'}`,
+        );
         should(directFailure).be.an.Error();
         should(sinkhole.attempts()).be.greaterThan(0);
         should(chromeExecutable()).not.be.empty();
         should(title).not.be.empty();
-        should(rendered).be.greaterThan(0);
-        should(origin.missingAssets()).be.empty();
+        // A page error and a missing asset BEFORE the rendered-length check, deliberately: both explain
+        // an empty body, and asserting the symptom first reports "0 is not above 0" about a page whose
+        // real failure is one line further down.
         should(browser.pageErrors).be.empty();
+        should(origin.missingAssets()).be.empty();
+        should(rendered).be.greaterThan(0, `the cold /pair document rendered no content: ${JSON.stringify(bodyText)}`);
         should((await rendezvous.observations()).length).be.greaterThan(0);
       });
     } finally {
@@ -447,8 +494,19 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         }
         ledger.prove('rendezvous-refuses-strangers', `unlisted fingerprint → 404 at ${rendezvous.httpOrigin}`);
 
+        /**
+         * ONE ADVERTISEMENT, READ BY BOTH ENDS — which is the shipped default path, spelled here.
+         *
+         * Nothing tells the daemon its rendezvous and nothing tells the browser: the compiled bundle
+         * carries this origin as its directory constant and the compiled daemon is pointed at the same
+         * origin, so each finds the address for itself. Published now, before either end boots, because
+         * the daemon reads it once at startup.
+         */
+        const directory = await startRelayDirectory();
+        directory.publish(rendezvous.relayUrl);
+
         const sinkhole = await startDirectSinkhole(teardown);
-        const distDir = await buildPwaBundle();
+        const distDir = await buildPwaBundle(directory.origin);
         const origin = await startPwaOrigin(distDir, teardown);
         const configPath = join(environment.paths.root, 'daemon.json');
         await writeFile(
@@ -456,7 +514,6 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           daemonDocument({
             bindPort: environment.ports.api,
             publicUrl: sinkhole.origin,
-            relayUrl: rendezvous.relayUrl,
             appOrigin: origin.origin,
           }),
           'utf8',
@@ -466,8 +523,8 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         // the compiled daemon then reads these documents back through the same schemas that wrote
         // them. See `support/seeded-session.ts` for what this substitutes and what it does not.
         const session = await seedRunningSession(environment.paths.fyHome);
-        const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous).catch((error: unknown) =>
-          ledger.fail('daemon-fingerprint', String(error)),
+        const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous, directory.origin).catch(
+          (error: unknown) => ledger.fail('daemon-fingerprint', String(error)),
         );
         ledger.prove('daemon-fingerprint', `the compiled daemon minted ${fingerprint}`);
 
@@ -476,11 +533,17 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           command: [daemonBin, '--config', configPath],
           readyUrl: environment.httpUrl('/v1/health'),
           timeoutMs: 30_000,
+          env: { FY_RELAY_DIRECTORY_ORIGIN: directory.origin },
         });
         await waitForDaemonAtRendezvous(rendezvous).catch((error: unknown) =>
           ledger.fail('daemon-claims-rendezvous', String(error)),
         );
-        ledger.prove('daemon-claims-rendezvous', `the rendezvous holds a daemon socket for ${fingerprint}`);
+        ledger.prove(
+          'daemon-claims-rendezvous',
+          `the rendezvous holds a daemon socket for ${fingerprint}, discovered from the advertisement rather than declared`,
+        );
+        // Read BEFORE the browser loads, so the browser's own reads can be told apart from the daemon's.
+        const directoryReadsBeforeBrowser = directory.reads();
 
         const directProbe = await fetch(`${sinkhole.origin}/v1/health`).then(
           () => 'answered',
@@ -504,8 +567,8 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * is deliberately not re-minted through the daemon's HTTP pairing-code route: a second mint
          * is a second code, and the journey would then prove that *a* credential can be redeemed
          * rather than that the one an operator was actually shown is the one that works. It also
-         * keeps the host-rendered screen on the critical path — which is where a v1-only fragment
-         * reader was caught, in a build where every other half was already correct.
+         * keeps the host-rendered screen on the critical path — which is where a fragment reader that
+         * spelled its own version was caught, in a build where every other half was already correct.
          */
         const minted = await environment.runFy(['pair', '--no-wait'], { FY_URL: environment.httpUrl() });
         const link = PAIRING_LINK.exec(`${minted.out}\n${minted.err}`)?.[0];
@@ -522,12 +585,11 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const relayField = fragmentField(fragment, 'relay');
 
         /**
-         * The browser reads the link BEFORE the link is asserted to be v2, deliberately.
+         * The browser reads the link BEFORE the fragment's shape is asserted, deliberately.
          *
-         * A v1 fragment is a perfectly good arrival for the confirm stage — the reader is being
-         * asked which machine they are pairing with, and that question does not depend on which
-         * carrier the answer will take. Checking the app first means a screen defect and a mint
-         * defect cannot hide behind one another, and each unit sees its own gap named.
+         * The confirm stage does not depend on which carrier the answer will take — the reader is being
+         * asked which machine they are pairing with. Checking the app first means a screen defect and a
+         * mint defect cannot hide behind one another, and each unit sees its own gap named.
          */
         const browser = await launchChrome(teardown);
         await browser.page.goto(pairUrl, { waitUntil: 'networkidle', timeout: 30_000 });
@@ -553,28 +615,64 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         }
         ledger.prove('browser-loads-app', `Chrome reached data-pairing-stage="confirm" at ${pairUrl}`);
 
-        if (!fragment.startsWith('v2;')) {
+        /**
+         * THE LINK CARRIES NO RENDEZVOUS, and this step is the inverse of what it used to assert.
+         *
+         * It demanded a `v2` fragment whose `relay=` was this run's rendezvous. That form is withdrawn:
+         * a QR that named an arbitrary carrier address is the deferred general case, and relayed first
+         * pairing ships on the ordinary link because the scanning device discovers the rendezvous
+         * itself. So the assertion inverts — one version, no `relay=` — and the step below proves the
+         * device really did find the address by the only route left to it.
+         */
+        if (!fragment.startsWith('v1;')) {
           ledger.fail(
-            'pairing-link-names-relay',
-            `the daemon minted a ${fragment.split(';')[0] ?? '?'} link. §14 relayed pairing needs a v2 fragment carrying relay=; ` +
-              'until the daemon emits one, a browser that cannot reach the direct address has no rendezvous to dial.',
+            'pairing-link-carries-no-relay',
+            `the daemon minted a ${fragment.split(';')[0] ?? '?'} link. The shipped fragment is the one v1 form; ` +
+              'a second version would be a reader nobody has shipped.',
           );
         }
-        if (relayField !== rendezvous.relayUrl) {
+        if (relayField !== undefined) {
           ledger.fail(
-            'pairing-link-names-relay',
-            `the v2 fragment names relay=${String(relayField)}, not this run's rendezvous ${rendezvous.relayUrl}`,
+            'pairing-link-carries-no-relay',
+            `the fragment carries relay=${relayField}. A rendezvous must never enter the QR — the device ` +
+              'discovers one from its own build, and a named address would be the deferred general case.',
           );
         }
         if (!advertised.startsWith(sinkhole.origin)) {
           ledger.fail(
-            'pairing-link-names-relay',
+            'pairing-link-carries-no-relay',
             `the fragment advertises ${advertised}, not the unreachable ${sinkhole.origin}`,
           );
         }
         ledger.prove(
-          'pairing-link-names-relay',
-          `v2 fragment advertising ${advertised} and naming ${String(relayField)}`,
+          'pairing-link-carries-no-relay',
+          `v1 fragment advertising the unreachable ${advertised} and naming no rendezvous`,
+        );
+
+        /**
+         * THE DEVICE FOUND THE RENDEZVOUS ITSELF, and there is nowhere else it could have found it.
+         *
+         * The fragment names none (proved above), the direct address is a sinkhole, and the bundle
+         * holds no relay address of its own — only this run's directory ORIGIN, compiled in. So a read
+         * of `/v1/default-relay` from the browser is the whole of how it learned where to dial, and
+         * counting reads is what turns "it crossed the relay" into "it crossed the relay by the shipped
+         * route". Measured against the count taken before Chrome launched, so the daemon's own boot read
+         * cannot be mistaken for the browser's.
+         */
+        const browserDirectoryReads = directory.reads() - directoryReadsBeforeBrowser;
+        if (browserDirectoryReads <= 0) {
+          ledger.fail(
+            'browser-discovered-the-rendezvous',
+            `Chrome never read ${directory.origin}${'/v1/default-relay'} (${String(directory.reads())} total reads, ` +
+              `${String(directoryReadsBeforeBrowser)} of them the daemon's). The bundle's directory constant is ` +
+              `either unset or pointing elsewhere, so the app has no rendezvous it could dial. It asked for: ` +
+              `${directory.requests().join(', ') || 'nothing'}`,
+          );
+        }
+        ledger.prove(
+          'browser-discovered-the-rendezvous',
+          `Chrome read the advertisement at ${directory.origin} ${String(browserDirectoryReads)} time(s), which is the ` +
+            `only place a v1 link and a sinkhole direct address leave it to learn ${rendezvous.relayUrl}`,
         );
 
         const directBefore = sinkhole.attempts();

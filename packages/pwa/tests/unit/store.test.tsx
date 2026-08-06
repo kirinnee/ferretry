@@ -234,13 +234,11 @@ describe('exchangePairing', () => {
     let abortedAt: number | undefined;
     try {
       const connection = await exchangePairing(
+        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
         {
-          daemonUrl: 'https://studio.example',
-          daemonId: identity.daemonId,
-          code: '7F3K-Q2ND',
-          relay: { kind: 'relay', relayUrl: RELAY },
-        },
-        {
+          // The rendezvous the walk falls back to comes from the DISCOVERED advertisement, not from
+          // the link — the seed above is the ordinary three-field one a v1 fragment produces.
+          hostedRelayUrl: RELAY,
           fetcher: async (_input, init) =>
             await new Promise<Response>((_resolve, reject) => {
               init?.signal?.addEventListener(

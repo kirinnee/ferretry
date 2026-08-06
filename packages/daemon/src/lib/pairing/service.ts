@@ -237,6 +237,23 @@ interface PairingServiceOptions {
    * halfway through a redemption either.
    */
   readonly carriers: readonly DaemonCarrier[];
+  /**
+   * The rendezvous a device that has never met this daemon can find FOR ITSELF, or nothing.
+   *
+   * IT IS PROVENANCE, NOT AN ADDRESS FROM THE LIST ABOVE, and that distinction is the whole value of
+   * the field. This used to be derived here as "the first published relay of any kind", which was
+   * wrong in exactly the case it mattered: an operator's own rendezvous is published and is NOT
+   * something a fresh phone can discover, so disclosing it beside a QR promised a first pairing that
+   * cannot happen. The composition root supplies this only for a DISCOVERED source — one this daemon
+   * read from the hosted directory advertisement, which is the same advertisement the scanning
+   * device's own build reads — so the claim is true by construction and a self-hosted deployment
+   * fails closed to nothing. That closed door is the declared GAP in `docs/relay-protocol.md` §13.
+   *
+   * IT NEVER REACHES THE LINK. The fragment is `v1;url=…;code=…;fp=…` and carries no rendezvous;
+   * this value exists so the HOST's own screens know a loopback-bound daemon is redeemable anyway and
+   * can draw the QR plus the metadata disclosure.
+   */
+  readonly discoveredRelayUrl?: string;
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -337,34 +354,30 @@ export class PairingService {
         readonly daemonUrl: string;
         readonly pairUrl: string;
         readonly reach: PairingReach;
-        readonly relayCandidate?: string;
+        readonly discoveredRelayUrl?: string;
       }
     | { readonly refusal: AdvertisementRefusal } {
     if (this.advertisement.kind === 'none') return { refusal: this.advertisement.refusal };
     const daemonUrl = this.advertisement.url;
-    // A DEVICE THAT CANNOT REACH THE ADDRESS ABOVE CANNOT ASK THIS DAEMON WHERE ELSE TO LOOK — that
-    // is the whole circularity, and the link is the only thing that travels out of band with it. So
-    // the link may name one rendezvous, and it is taken from the SAME frozen published array a
-    // redemption answers with, never re-resolved: the candidate a device dials and the carrier set it
-    // stores afterwards are then the same fact, which is what lets a client refuse a relayed pairing
-    // whose published set does not name the rendezvous the exchange actually crossed.
-    const relayCandidate = this.options.carriers.find(carrier => carrier.kind === 'relay')?.url;
-    const seed = {
-      daemonUrl,
-      code,
-      daemonId: this.daemonId,
-      ...(relayCandidate === undefined ? {} : { relayCandidate }),
-    };
     return {
       daemonUrl,
-      // Composed by the protocol's own writer rather than spelled here. The fragment is a wire format
-      // with two versions now, the mint schema verifies this URL against these very fields, and a
-      // second speller would be the invisible difference that breaks a reader nobody tested.
-      pairUrl: pairingLinkUrl(this.pairingAppUrl, seed),
+      // Composed by the protocol's own writer rather than spelled here. The mint schema verifies this
+      // URL against these very fields, and a second speller would be the invisible difference that
+      // breaks a reader nobody tested.
+      //
+      // THE SEED IS THE THREE FIELDS AND NOTHING ELSE. It briefly carried a rendezvous, so a device
+      // that could not reach `daemonUrl` had somewhere to dial — the circularity is real, and it is
+      // now resolved on the OTHER side: the scanning device reads the hosted directory advertisement
+      // its own build carries and finds the same rendezvous this daemon dialled, so the link does not
+      // have to tell it. A QR that named an arbitrary address is the larger, deferred question.
+      pairUrl: pairingLinkUrl(this.pairingAppUrl, { daemonUrl, code, daemonId: this.daemonId }),
       // The decision's vocabulary translated into the wire's, in the one place that crosses between
       // them: an address a different device can dial is an address any device can redeem.
       reach: this.advertisement.kind === 'address' ? 'any-device' : 'local-only',
-      ...(relayCandidate === undefined ? {} : { relayCandidate }),
+      // Passed through from the composition root, never derived from `options.carriers`: only a
+      // DISCOVERED rendezvous is something a fresh device can find, and this list cannot say which
+      // entry that is. See the option's own comment for why the difference is not cosmetic.
+      ...(this.options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: this.options.discoveredRelayUrl }),
     };
   }
 

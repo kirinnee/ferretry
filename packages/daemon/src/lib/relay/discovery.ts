@@ -325,8 +325,11 @@ export function describeRelayCarrierPosture(source: RelayCarrierSource, configFi
  * once", on the reasoning that a relayed session is opened with a device grant the pairing exchange
  * has not issued yet. `docs/relay-protocol.md` §14 answered that: the QR is the out-of-band enrolment
  * path, the daemon is proved against the pinned fingerprint before any plaintext leaves the device,
- * and a one-attempt sealed `pair` record redeems the code through the rendezvous. A daemon that dials
- * one mints a `#v2` link naming it, so a device that can never reach this address pairs anyway.
+ * and a one-attempt sealed `pair` record redeems the code through the rendezvous. So a device that can
+ * never reach this address pairs anyway — over the ordinary `#v1` link, because it finds the rendezvous
+ * in its OWN build's hosted directory advertisement rather than being told one in the QR. (An earlier
+ * draft of this comment said the daemon mints a `#v2` link naming the relay; no such link ships, and
+ * the paragraph below is why the distinction matters here rather than being a detail of the codec.)
  *
  * WHAT IS LEFT IS A CONDITION, NOT A RULE, and it is the one an owner acts on: direct is still tried
  * first and is still the better path, and a daemon that dials NO rendezvous has to be reachable on its

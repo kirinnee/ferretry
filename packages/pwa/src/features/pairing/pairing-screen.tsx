@@ -8,9 +8,9 @@
  *
  * WHAT ARRIVES HERE, IN ORDER OF HOW OFTEN IT HAPPENS. The design's pairing
  * flow (`docs/design/split-proposal.md` §5) puts the daemon's QR in the
- * terminal and on a loopback page, and the QR encodes a link to `/pair#v…;…` —
- * `v1` for a daemon reachable at its own address, `v2` when the link also names a
- * rendezvous another device can redeem through.
+ * terminal and on a loopback page, and the QR encodes a link to `/pair#v1;…` —
+ * one form, whether the device will reach the daemon at that address or fall back
+ * to the rendezvous this build discovers for itself (`docs/relay-protocol.md` §14).
  * So the common arrival is a phone's ORDINARY camera app opening this page
  * already carrying the code, and this screen's job there is a confirmation, not
  * a form. A cold open gets the camera button. Paste is the last-resort path and

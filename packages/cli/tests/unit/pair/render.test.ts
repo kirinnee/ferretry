@@ -76,10 +76,10 @@ describe('pairing screen', () => {
     should(actual).containEql('\n\nExpires in');
   });
 
-  it('should draw the QR for a local-only address a relay candidate also makes redeemable elsewhere', () => {
+  it('should draw the QR for a local-only address a discoverable rendezvous makes redeemable elsewhere', () => {
     // THE NARROWING THIS TASK ADDS. `reach: 'local-only'` still describes the direct address alone,
-    // but a relay candidate beside it means another device CAN redeem this link — through the
-    // rendezvous — so the QR belongs on screen, next to the disclosure the old no-QR notice never
+    // but a rendezvous the scanning device can discover for itself means another device CAN redeem
+    // this link, so the QR belongs on screen, next to the disclosure the old no-QR notice never
     // needed to make.
     const actual = invitation({
       offer: {
@@ -107,7 +107,7 @@ describe('pairing screen', () => {
   });
 
   it('should draw no QR and no disclosure for a plain any-device offer', () => {
-    // The ordinary case must stay ordinary: no relay was ever named, so nothing about one appears.
+    // The ordinary case must stay ordinary: nothing discovered a rendezvous, so nothing about one appears.
     const actual = invitation();
 
     should(actual).not.containEql('rendezvous');

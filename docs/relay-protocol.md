@@ -1026,13 +1026,18 @@ outstanding:
    - **A fresh device cannot DISCOVER a rendezvous an operator runs, and naming one to it is
      deferred.** What a device that has never paired can find for itself is exactly one address: the
      hosted advertisement above. So the relayed first contact this branch ships is direct-first plus
-     the hosted fallback, and a daemon whose only carrier is a rendezvous of its own is pairable
-     off-LAN only by a link that names it. Two surfaces state the consequence rather than paper over
-     it: `PAIRING_REACH_NOTICE` names the hosted relay instead of "the relay this daemon dials", and
-     `fyd --check`'s `pairing` line reads the advertised address alone — it passes no candidate to
-     `localOnlyNotice`, so for a self-hosted-only daemon it UNDER-reports and still says "no QR is
-     drawn" about a link the hosted path could carry. Closing that is one change, held back with the
-     naming it depends on rather than shipped half-generalised.
+     the hosted fallback, and **a daemon whose only carrier is a rendezvous of its own is pairable only
+     from a device that can already reach its direct address** — no link names one, so there is no
+     off-LAN path to it at all. Three surfaces state that consequence rather than paper over it:
+     `PAIRING_REACH_NOTICE` names the hosted relay instead of "the relay this daemon dials", and both
+     `fy pair` and `fyd --check` draw no QR and print the plain local-only sentence for such a daemon.
+     That is the CORRECT answer for it, not an under-report: nothing off its network could reach the
+     address either. What was an under-report — and is fixed — is the **hosted default**: a
+     loopback-bound daemon dialling the discovered hosted relay is redeemable from a phone, and
+     `fyd --check` used to pass no address to `localOnlyNotice` and say "no QR is drawn" about it. Both
+     surfaces now read one derivation (`discoverableRelayUrl`) keyed on relay **provenance**, so they
+     cannot disagree about the same daemon. Closing the self-hosted half needs a link that can name a
+     rendezvous, which is deferred rather than shipped half-generalised.
    - **The session-ceiling refusal is not rendered, and one stream does not even retry it.** §14
      requires a `4429` to be told to the reader in words — "this daemon already has as many relayed
      sessions as the rendezvous carries" — because somebody with three tabs open did nothing wrong.
@@ -1057,14 +1062,24 @@ outstanding:
      What was actually missing was a session mode, not a proof. A phone that cannot reach a daemon's
      address now pairs with it: the sealed pre-auth exchange mints the grant, the session closes,
      and the browser reconnects as an ordinary authenticated request session.
-   - **The v2 pairing link — built.** A daemon that publishes a rendezvous mints the `#v2` fragment
-     naming the first relay in the same frozen published array a redemption answers with, composed
-     through the protocol's one fragment writer. Readers accept v1 and v2 from that same codec, and
-     `scripts/validate/cli-contracts.sh` pins the version set to the WRITER so a third reader cannot
-     silently fall behind again — a gate that exists because exactly that happened, and for one
-     commit `fy pair` refused the daemon's own link. **The release ordering still holds and is
-     not optional**: a daemon build that emits v2 must not ship ahead of a browser build that reads
-     it, or a v2 link reads as no link at all. Within this branch the readers land together.
+   - **The v2 pairing link — built and WITHDRAWN, with no version spent.** A `#v2` fragment naming the
+     first published relay was built here, and the reasoning is recorded rather than deleted because
+     the conclusion moved while the problem did not. The problem is real: a device that cannot reach
+     the daemon's address cannot ask that daemon where else to look. What changed is where it is
+     solved — the scanning device reads the **same hosted directory advertisement the daemon read**, so
+     it finds the rendezvous itself and the QR does not have to carry one. Naming an ARBITRARY
+     rendezvous in a link is a strictly larger question (which addresses may a QR send a fresh device
+     to?) and is deferred with the self-hosted gap above; shipping a fragment format that neither
+     works for self-hosting nor stays simple would have been worse than declaring it. So the fragment
+     is `#v1;url=…;code=…;fp=…` again, byte-identical to every shipped link, **no reader was ever asked
+     to learn a second form, and the version escape hatch is unspent** — a future `v2` may land its
+     pattern and its parser together. What survives is the discipline: readers ask the protocol which
+     version exists instead of spelling one, and `scripts/validate/cli-contracts.sh` still pins that
+     agreement to the WRITER plus the new negative — the writer's output contains no `relay=`. That
+     gate exists because a reader did spell a version, and for one commit `fy pair` refused the
+     daemon's own link; a shape defect outlives the version that exposed it. The rendezvous a fresh
+     device can find is instead disclosed on the mint as `discoveredRelayUrl`, read only by the HOST's
+     own screens, and it reaches no fragment.
    - **The relayed rate-limit identity — fixed.** A relayed request used to reach the daemon's route
      table with no client address, so every fixed-window limiter keying by peer collapsed every
      relayed caller on earth into one shared anonymous bucket. A relayed caller is now keyed by its
@@ -1516,21 +1531,27 @@ device that paired reconnects as an ordinary request session with the token it w
    suspension point, so two concurrent redemptions cannot both win, and the minted token crosses
    once, sealed, in a record no relay can read.
 
-**Where the device learns the rendezvous.** A pairing link names the daemon's direct address and
-fingerprint; a device that cannot reach that address needs a rendezvous to dial, and it cannot ask
-the daemon it cannot reach. So the link may name one: a **v2 pairing fragment** carries an optional
-`relay=<percent-encoded wss URL>` alongside `url`, `code` and `fp` — the first rendezvous in the
-daemon's published order, chosen by the daemon at mint. It is daemon-authored and travels out of
-band with the same trust as `fp`. It obeys the same URL rule as a published relay address —
-`wss:`/`https:` anywhere, plaintext only against loopback — and a candidate that fails the rule is
-dropped rather than dialled, because the fingerprint pin protects the content of a session and never
-its timing and shape. The walk for a redemption is the ordinary one, and §1's rule does not bend for
-pairing: **direct first, always**; then the link's relay candidate; then the discovery
-advertisement's hosted rendezvous. A link with no candidate leaves the hosted rendezvous as the only
-relayed path, so a daemon published only on a self-hosted rendezvous is pairable off-LAN only
-through a v2 link.
+**Where the device learns the rendezvous.** A pairing link names the daemon's direct address,
+fingerprint and code, and **nothing else**. A device that cannot reach that address still needs a
+rendezvous to dial and still cannot ask the daemon it cannot reach — the circularity is real — and it
+is broken on the DEVICE's side rather than in the link: the app's build carries
+`HOSTED_RELAY_DIRECTORY_ORIGIN`, reads that no-store advertisement once per document, and dials the
+address it names. That is the **same advertisement the daemon read** when it chose its own fallback
+carrier, so both ends arrive at one rendezvous without anything travelling out of band beyond the
+fingerprint. The address obeys the ordinary published-relay URL rule — `wss:`/`https:` anywhere,
+plaintext only against loopback — and an advertisement that fails it yields no candidate at all. The
+walk for a redemption is the ordinary one, and §1's rule does not bend for pairing: **direct first,
+always**; then that one discovered rendezvous.
 
-The candidate is for **this one redemption** and is never stored: what a device navigates by
+A **v2 fragment carrying `relay=<percent-encoded wss URL>`** was specified and built here, so a daemon
+published only on a self-hosted rendezvous would have been pairable off-LAN. It is withdrawn: which
+addresses a QR may send a fresh device to is a larger question than the hosted default needs, and §13
+declares the consequence — such a daemon is pairable only from a device that can already reach its
+direct address. Readers keep ignoring an unrecognised field name, so a stray `relay=` on a link is
+dropped rather than honoured; a reader that dialled one would let whoever composed a URL choose where a
+pre-auth socket opens.
+
+The rendezvous is for **this one redemption** and is never stored: what a device navigates by
 afterwards is `paired.response.carriers`, the daemon's own published set. **The client refuses a
 relayed pairing whose published set does not name the rendezvous the exchange itself crossed** — the
 set always names it or the pairing fails, so the client never has to choose between keeping an
@@ -1540,14 +1561,20 @@ minted the grant, so the operator sees a device the device itself discarded, rev
 other. Reaching that state takes the operator changing the carrier configuration inside the code's
 own two minutes.
 
-Compatibility is normative, not advice: the current reader rejects any fragment that is not exactly
-the three-field v1 form, so a v2 link shown to an older app fails pairing outright — direct
-included. **The reader that accepts both v1 and v2 therefore ships before any daemon emits v2**, v1
-stays the form of every link that names no relay candidate, and a v2 reader keeps rejecting a
-duplicated field name while ignoring an unrecognised one — a duplicate is a real ambiguity, an
-unknown name is the next version arriving. The hosted app's entry page is served no-store, so the
-exposure of the ordering is a stale open tab rather than an installed bundle; it is still an
-ordering, and releases state it.
+Compatibility is normative, not advice, and this narrowing is what makes it easy: **the fragment stays
+the three-field `v1` form, so no reader anywhere is asked to learn anything.** A reader older than this
+change accepts exactly what a daemon after it emits, in both directions, which is why the narrowing was
+safe to land late. A reader keeps rejecting a duplicated field name while ignoring an unrecognised one
+— a duplicate is a real ambiguity, an unknown name is the next version arriving — and the recogniser
+`PAIRING_FRAGMENT_PATTERN` admits exactly the version the parser understands, because a gate that
+admitted more would turn a loud `unreadable` into a silent cold screen for somebody who just scanned a
+QR.
+
+The one ordering obligation left is the ordinary `strictObject` rule in `version-skew.ts`, and it is
+about the MINT rather than the link: `discoveredRelayUrl` is a new key on `PairingCodeMintResponse`,
+whose readers are `fy pair` (released with `fyd`) and the hosted Add-a-device panel (deployed ahead of
+the binary). Both directions are satisfied by the same release discipline `PairingResponse.carriers`
+already used.
 
 **Two attempt budgets, because two carriers.** The direct path's budget is unchanged: five attempts
 per code, and exhausting them expires the code. A relayed attempt spends a **separate relay budget**

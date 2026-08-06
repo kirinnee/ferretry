@@ -5,8 +5,10 @@ import {
   type DaemonId,
   decideAdvertisement,
   type DeviceToken,
+  invitationRedeemableByAnotherDevice,
   type PairingCode,
   type PairingId,
+  pairingMintOutcome,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -131,6 +133,8 @@ function fixture(
     readonly deviceState?: readonly RecordingDeviceState[];
     /** What this daemon resolved at boot, for a case about what a redemption hands out. */
     readonly carriers?: readonly DaemonCarrier[];
+    /** The rendezvous the composition root proved a fresh device could discover, if any. */
+    readonly discoveredRelayUrl?: string;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -146,6 +150,7 @@ function fixture(
       origin: 'operator',
     },
     carriers: options.carriers ?? CARRIERS,
+    ...(options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: options.discoveredRelayUrl }),
     clock,
     cryptography,
     devices,
@@ -171,15 +176,14 @@ describe('PairingService minting and status', () => {
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       daemonUrl: 'https://workstation.example.test/',
-      // A v2 fragment, because this daemon publishes a rendezvous. The candidate is what a device
-      // that CANNOT reach the address beside it has to dial, and it can only travel out of band —
-      // a device that cannot reach the daemon cannot ask the daemon where else to look.
+      // The ONE fragment form, and it names no rendezvous even though this daemon publishes one. A
+      // device that cannot reach the address beside it still has somewhere to dial — the rendezvous
+      // its own build discovers from the hosted directory — so the link does not have to carry one.
       pairUrl:
-        'https://ferretry.pages.dev/pair#v2;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;relay=wss%3A%2F%2Frendezvous.example.test%2Ffy',
+        'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       // Who can redeem it travels WITH it. A link and no audience is the shape that put a QR of a
       // loopback address in front of a phone, and the protocol has no value for it any more.
       reach: 'any-device',
-      relayCandidate: 'wss://rendezvous.example.test/fy',
     });
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
@@ -188,37 +192,62 @@ describe('PairingService minting and status', () => {
     });
   });
 
-  it('should mint the v1 fragment unchanged when this daemon publishes no rendezvous', () => {
-    // A daemon reachable only at its own address has no candidate to name, and the link it mints is
-    // BYTE-IDENTICAL to the one it minted before any of this existed — which is what lets a reader
-    // that predates the second version keep working against a daemon that does not need it.
-    const { service } = fixture({ carriers: [{ kind: 'direct', url: 'https://workstation.example.test' }] });
-
-    const minted = service.mint();
-
-    should(minted.pairUrl).equal(
-      'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    );
-    should(minted.relayCandidate).be.undefined();
-  });
-
-  it('should name the FIRST published rendezvous, from the same array a redemption answers with', async () => {
-    // The candidate and the carrier set a device stores afterwards must be the same fact, or a client
-    // is asked to choose between keeping an address the daemon did not publish and discarding the only
-    // one that works. Taking both from one frozen array is what makes that impossible.
+  it('should disclose the discovered rendezvous and never a published one, whatever it publishes', async () => {
+    // THE GAP, PINNED AS BEHAVIOUR. This used to read the FIRST published relay of any provenance,
+    // which is wrong in exactly the case that matters: an operator's own rendezvous is published and
+    // is NOT something a fresh phone can find, so disclosing it promised a first pairing that cannot
+    // happen. Only the composition root knows which entry — if any — came from the hosted directory
+    // advertisement, so only it may answer, and the published set stays untouched.
     const carriers: readonly DaemonCarrier[] = [
       { kind: 'direct', url: 'https://workstation.example.test' },
-      { kind: 'relay', url: 'wss://first.example.test' },
+      { kind: 'relay', url: 'wss://self-hosted.example.test' },
       { kind: 'relay', url: 'wss://second.example.test' },
     ];
-    const { service } = fixture({ carriers });
+    const selfHosted = fixture({ carriers });
 
-    const minted = service.mint();
-    const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+    const mintedWithoutDiscovery = selfHosted.service.mint();
+    const redemption = await selfHosted.service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
 
-    should(minted.relayCandidate).equal('wss://first.example.test');
+    should(mintedWithoutDiscovery.discoveredRelayUrl).be.undefined();
     if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    // The set a device navigates by is unchanged — this narrowing touches disclosure, not publication.
     should(redemption.response.carriers).deepEqual(carriers);
+
+    const discovered = fixture({ carriers, discoveredRelayUrl: 'wss://hosted.example.test/fy' });
+    should(discovered.service.mint().discoveredRelayUrl).equal('wss://hosted.example.test/fy');
+  });
+
+  it('should mint the same fragment whether or not a rendezvous is discoverable', () => {
+    // BYTE-IDENTICAL, AND THAT IS THE POINT OF THE NARROWING. The disclosure is host-facing; the link
+    // is the one every daemon has ever written, so no reader anywhere is asked to learn a new form.
+    const expected =
+      'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const direct = fixture({ carriers: [{ kind: 'direct', url: 'https://workstation.example.test' }] });
+    const relayed = fixture({ discoveredRelayUrl: 'wss://hosted.example.test/fy' });
+
+    const withoutRelay = direct.service.mint();
+    const withRelay = relayed.service.mint();
+
+    should(withoutRelay.pairUrl).equal(expected);
+    should(withoutRelay.discoveredRelayUrl).be.undefined();
+    should(withRelay.pairUrl).equal(expected);
+    should(withRelay.pairUrl).not.containEql('relay');
+  });
+
+  it('should draw no QR for a loopback bind whose only rendezvous is self-hosted, and one when it is discovered', () => {
+    // The user-visible half of the same gap, read through the protocol's single narrowing so this
+    // agrees with `fy pair` and the Add-a-device panel rather than re-deciding.
+    const local: Advertisement = { kind: 'local-only', url: 'http://127.0.0.1:7431' };
+    const selfHosted = fixture({ advertisement: local });
+    const discovered = fixture({ advertisement: local, discoveredRelayUrl: 'wss://hosted.example.test/fy' });
+
+    const withoutDiscovery = pairingMintOutcome(selfHosted.service.mint());
+    const withDiscovery = pairingMintOutcome(discovered.service.mint());
+
+    if (withoutDiscovery.kind !== 'invitation' || withDiscovery.kind !== 'invitation')
+      throw new Error('expected two invitations');
+    should(invitationRedeemableByAnotherDevice(withoutDiscovery)).be.false();
+    should(invitationRedeemableByAnotherDevice(withDiscovery)).be.true();
   });
 
   it('should mint a link for a loopback advertisement and say only this machine can redeem it', () => {

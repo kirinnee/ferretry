@@ -131,46 +131,53 @@ and the mint response carries that answer rather than making each renderer infer
 - `reach: "any-device"` accompanies an address another device can dial. The command line and browser
   panel show the link and draw its QR.
 - `reach: "local-only"` accompanies a loopback address, and describes the **direct** address alone.
-  Alone, it means no QR: on a phone, loopback names the phone. Beside a `relayCandidate` it no longer
-  means unredeemable — the QR is drawn, because another device can redeem the link through the named
-  rendezvous — and the notice says what that rendezvous can observe. `localOnlyNotice` owns both
-  sentences; no surface re-derives the answer, and
+  Alone, it means no QR: on a phone, loopback names the phone. Beside a `discoveredRelayUrl` it no
+  longer means unredeemable — the QR is drawn, because another device can redeem the link through a
+  rendezvous **it discovers for itself** — and the notice says what that rendezvous can observe.
+  `localOnlyNotice` owns both sentences; no surface re-derives the answer, and
   `invitationRedeemableByAnotherDevice` in `@ferretry/protocol` is the one narrowing that decides
   whether a QR is drawn at all.
 - `refusal` replaces `daemonUrl`, `pairUrl`, and `reach` when a wildcard bind or missing port leaves no
   address to hand out. The daemon still mints the short-lived code; the surfaces show no link and name
-  the fix for **that** reason. A refusal never carries a `relayCandidate` — the supported invariant,
-  enforced by the schema, is that **a relay candidate only ever rides beside a link**: the redeeming
-  device's connection model has no shape for a daemon with no address at all, and the `v2` fragment
-  requires one.
+  the fix for **that** reason. A refusal never carries a `discoveredRelayUrl` — the supported
+  invariant, enforced by the schema, is that **a disclosed rendezvous only ever rides beside a link**:
+  there is no address to disclose one beside, and no link to draw.
 
-### The link names its relay candidate, in a versioned fragment
+### The link names no rendezvous; the device finds one itself
 
-A mint whose daemon publishes at least one rendezvous carries `relayCandidate` — the **first relay in
-the daemon's published order** — and its link uses the **v2** fragment form,
-`#v2;url=…;code=…;fp=…;relay=…`; a mint with no rendezvous keeps the v1 form unchanged. One codec in
-`@ferretry/protocol` (`formatPairingFragment` / `parsePairingFragment`) writes and reads both forms,
-so the daemon and the browser cannot hold different opinions about the same string: readers accept
-both versions, require `url`/`code`/`fp`, ignore an unrecognised field name, refuse a duplicated one,
-honour `relay` only under v2, and **drop** a candidate that fails the published-relay URL rule rather
-than failing a link whose direct half still works. The candidate serves **one redemption** and is
-never stored — what a device navigates by afterwards is the redemption response's `carriers`, and the
-browser refuses a relayed pairing whose published set does not name the rendezvous the exchange
-crossed ([relay-protocol.md](relay-protocol.md) §14).
+The fragment is one form, `#v1;url=…;code=…;fp=…`, byte-identical to every link a daemon has ever
+written. One codec in `@ferretry/protocol` (`formatPairingFragment` / `parsePairingFragment`) writes
+and reads it, so the daemon and the browser cannot hold different opinions about the same string:
+readers require `url`/`code`/`fp`, ignore an unrecognised field name — a stray `relay=` included, which
+is therefore never honoured — and refuse a duplicated one.
 
-**Rollout is ordered:** a reader older than v2 fails a v2 link outright, direct pairing included, so
-the reader that accepts both forms deploys — as the hosted app, which ships ahead of the daemon
-binary — **before** any daemon emits v2. The ordering is contract; release notes state it.
+**A relayed first pairing needs nothing in the link, because both ends discover the same rendezvous.**
+The scanning device's build carries `HOSTED_RELAY_DIRECTORY_ORIGIN`, reads that no-store advertisement
+once per document, and dials the address it names when the daemon's own address fails
+([relay-protocol.md](relay-protocol.md) §14). The daemon reads the same advertisement, which is why it
+can say on its own mint whether a fresh device will find a way in. That address serves **one
+redemption** and is never stored — what a device navigates by afterwards is the redemption response's
+`carriers`, and the browser refuses a relayed pairing whose published set does not name the rendezvous
+the exchange crossed.
+
+`discoveredRelayUrl` on the mint response is **host-facing only**. It exists so `fy pair`, the
+Add-a-device panel and `fyd --check` know a loopback-bound daemon is redeemable anyway, and so they can
+disclose which rendezvous will see the exchange's metadata. It is derived from relay **provenance** at
+the composition root — only an address read from the hosted directory, never an operator's own
+configured block, and never merely the first published relay — so it is true exactly when a fresh
+device will find the same address. **No version escape hatch was spent:** a relay-bearing `v2` form was
+built and withdrawn before any release, so a future second version may still land its pattern and its
+parser together.
 
 **A remedy that cannot be followed is a dead end with extra steps**, so there is one per reason rather
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
 sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own.
 
 Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
-`local-only` daemon that also publishes a rendezvous is already redeemable from another device, so
-its remedy is the upgrade to a connection with no third party on the path rather than the unlock it
-reads as here — `localOnlyNotice` says so itself when a candidate is present, and this table is the
-no-rendezvous wording:
+`local-only` daemon that also dials a discoverable rendezvous is already redeemable from another
+device, so its remedy is the upgrade to a connection with no third party on the path rather than the
+unlock it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
+this table is the no-rendezvous wording:
 
 | reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -280,9 +287,15 @@ row states what its revoke will do before the press.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).
-- **A v2 daemon must not ship ahead of a v2 reader.** A daemon mints the `#v2` fragment the moment it
-  publishes a rendezvous, and a browser or CLI that only reads `#v1` treats such a link as no link at
-  all — no QR, no code, direct pairing included. The readers land with the writer in this branch, and
-  `scripts/validate/cli-contracts.sh` pins the version set to the writer so a third reader cannot fall
-  behind silently; the release ordering itself is still a release-notes fact rather than something a
-  gate can enforce.
+- **A fresh device cannot discover a self-hosted rendezvous.** A pairing fragment carries only the
+  daemon's direct address, code and fingerprint, so the sole relayed first-pairing path a scanning
+  device can find is the hosted rendezvous its own build discovers from
+  `HOSTED_RELAY_DIRECTORY_ORIGIN`; a daemon published only on a self-hosted relay is therefore pairable
+  only from a device that can already reach its direct address, and naming a rendezvous in the link is
+  deferred. `fy pair`, the Add-a-device panel and `fyd --check` all fail closed for that daemon — they
+  draw no QR and print the plain local-only sentence — which is the correct answer for it rather than an
+  under-report, because nothing off its network could reach the address either.
+- **A private directory origin moves the discovered address for one end only.** An operator who points
+  `FY_RELAY_DIRECTORY_ORIGIN` at their own directory makes the daemon's "discovered" rendezvous one the
+  phone's build does not ask for. It is the same failure mode as the gap above and reported the same
+  way: the device finds no route and says so.

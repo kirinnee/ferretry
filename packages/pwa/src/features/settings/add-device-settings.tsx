@@ -106,10 +106,10 @@ function InviteSymbol({ pairUrl }: { readonly pairUrl: string }) {
  * Which of the three offers this outcome is, for the copy that must vary with it.
  *
  * `local-only` NO LONGER MEANS UNREDEEMABLE, and that is the entire user-visible point of relayed
- * pairing. A daemon that binds loopback but dials a rendezvous hands out a link another device CAN
- * redeem — through the relay — so drawing no QR for it would tell an owner to go and fix a bind that
- * has stopped being the obstacle, which is the "dead end with extra steps" `docs/pairing.md`
- * legislates against.
+ * pairing. A daemon that binds loopback but dials a rendezvous a fresh device can DISCOVER hands out a
+ * link another device CAN redeem — the phone reads the same hosted advertisement and dials the relay
+ * itself — so drawing no QR for it would tell an owner to go and fix a bind that has stopped being the
+ * obstacle, which is the "dead end with extra steps" `docs/pairing.md` legislates against.
  *
  * THE NARROWING IS THE PROTOCOL'S, not this panel's: `invitationRedeemableByAnotherDevice` is the one
  * place that decides it, so `fy pair`'s terminal QR and this panel cannot come to different
@@ -151,17 +151,19 @@ const EXPIRED_HEADLINE = 'This code has run out';
  *
  * THE QR IS DRAWN WHENEVER ANOTHER DEVICE COULD REDEEM THE LINK, BY ANY CARRIER. A daemon that
  * advertises a routed address qualifies as it always did; so, now, does one that advertises only
- * loopback but dials a rendezvous, because a phone reaches that daemon through the relay
- * (`docs/relay-protocol.md` §14). What is left in the `local-only` branch is the case that really is
- * local: a link perfectly good for the browser reading this panel and dead on a phone, because the
- * address means THAT PHONE once it is scanned and no rendezvous carries it. A daemon with no address
- * at all has no link, and the code below it is still live for a browser somebody points at the
- * machine themselves.
+ * loopback but dials a DISCOVERABLE rendezvous, because a phone finds that rendezvous in its own
+ * build's advertisement and reaches the daemon through it (`docs/relay-protocol.md` §14). What is left
+ * in the `local-only` branch is the case that really is local: a link perfectly good for the browser
+ * reading this panel and dead on a phone, because the address means THAT PHONE once it is scanned and
+ * no rendezvous a fresh device could find carries it — a self-hosted-only daemon included, which is
+ * §13's declared gap. A daemon with no address at all has no link, and the code below it is still live
+ * for a browser somebody points at the machine themselves.
  *
- * NOTHING HERE JUDGES REACHABILITY. Both halves of the answer — `reach` and the relay candidate —
+ * NOTHING HERE JUDGES REACHABILITY. Both halves of the answer — `reach` and `discoveredRelayUrl` —
  * arrive on the wire, decided by the daemon's own configuration, because the device that will redeem
  * the code is not the one rendering this panel. The narrowing and the sentences come from the
- * protocol too, so this panel and `fy pair` say the same thing about the same mint.
+ * protocol too, so this panel and `fy pair` say the same thing about the same mint. Neither half
+ * reaches the QR itself: the link it encodes is the daemon's ordinary `v1` fragment.
  */
 function InviteOffer({ outcome }: { readonly outcome: PairingMintOutcome }) {
   if (outcome.kind === 'refusal') {
@@ -194,7 +196,7 @@ function InviteOffer({ outcome }: { readonly outcome: PairingMintOutcome }) {
    * whenever the ADDRESS is local-only (`reach`), and a relayed loopback mint gets both.
    */
   const redeemable = invitationRedeemableByAnotherDevice(outcome);
-  const local = outcome.reach === 'local-only' ? localOnlyNotice(outcome.daemonUrl, outcome.relayCandidate) : null;
+  const local = outcome.reach === 'local-only' ? localOnlyNotice(outcome.daemonUrl, outcome.discoveredRelayUrl) : null;
   return (
     <div className="flex min-w-0 flex-col gap-2" data-pair-offer={outcome.reach}>
       {redeemable && (

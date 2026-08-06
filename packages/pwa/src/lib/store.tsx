@@ -285,11 +285,12 @@ async function exchangePairingDirect(
 /**
  * Exchanges one reader-supplied, single-use fragment code — over whichever carrier reaches its daemon.
  *
- * THE WALK IS §1'S, AND PAIRING IS NO LONGER ITS EXCEPTION: direct first, always; then the link's own
- * rendezvous candidate; then the discovery advertisement's hosted one. Only a TRANSPORT failure
- * advances it. A daemon that answered — `409`, `429`, a schema refusal — is reachable and saying so,
- * and carrying the same single-use code to a rendezvous after that would spend a second attempt from
- * a five-guess budget to be told the same thing.
+ * THE WALK IS §1'S, AND PAIRING IS NO LONGER ITS EXCEPTION: direct first, always; then the one
+ * rendezvous this build discovered for itself from the hosted directory advertisement. The link names
+ * none — see `relayPairingCandidates` for the candidate that was built there and deferred. Only a
+ * TRANSPORT failure advances the walk. A daemon that answered — `409`, `429`, a schema refusal — is
+ * reachable and saying so, and carrying the same single-use code to a rendezvous after that would
+ * spend a second attempt from a five-guess budget to be told the same thing.
  *
  * A SEALED REFUSAL ENDS THE WALK TOO, for the same reason and one layer in. §14: "A sealed
  * `pair-refused` is the opposite: the exchange happened, the answer is final for that attempt." It

@@ -41,15 +41,17 @@ function assertPairableDaemonUrl(value: string): void {
  *
  * THE VERSION PREFIX IS CHECKED THROUGH THE PROTOCOL'S OWN PATTERN, and that is the whole lesson of
  * the defect this line used to be. It read `#v1;` literally, because when it was written there was
- * one version and this file could not be wrong about it. Then the daemon learned to mint a `v2`
- * fragment whenever it publishes a rendezvous — and `fy pair` refused the daemon's own link outright:
- * no code, no QR, no link, on the one screen that exists to hand a person all three.
+ * one version and this file could not be wrong about it. Then the daemon briefly learned to mint a
+ * `v2` fragment naming a rendezvous — and `fy pair` refused the daemon's own link outright: no code,
+ * no QR, no link, on the one screen that exists to hand a person all three.
  *
- * The rule that was supposed to prevent it — ship the tolerant reader before the emitter — was applied
- * to the PWA and missed here, because nobody had noticed that the fragment has TWO readers and that
- * the host's own screen is one of them. So this no longer keeps its own list of versions: it asks the
- * package that owns the fragment. A version this reader has never heard of is now the protocol's fact
- * to add, in one place, rather than a string three packages each have to remember to change.
+ * THE LESSON OUTLIVED THE VERSION THAT TAUGHT IT. That `v2` form is withdrawn and the writer emits
+ * `v1` again, so a literal check would pass today — which is exactly why it is not restored. The rule
+ * that was supposed to prevent the original defect — ship the tolerant reader before the emitter — was
+ * applied to the PWA and missed here, because nobody had noticed that the fragment has TWO readers and
+ * that the host's own screen is one of them. So this keeps no list of versions: it asks the package
+ * that owns the fragment. A version this reader has never heard of is the protocol's fact to add, in
+ * one place, rather than a string three packages each have to remember to change.
  *
  * What it is still asking is unchanged: is this a pairing claim at all? Without a version prefix the
  * PWA treats the fragment as somebody else's and shows the cold screen, so a scan looks like nothing

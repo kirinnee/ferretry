@@ -1026,7 +1026,7 @@ export function AppShell() {
    * Two ways in. Nothing paired: the store is already hydrated on this first
    * render (`StoreProvider` holds the tree back until IndexedDB opens), so zero
    * connections is a true "nothing here" and not a not-loaded-yet flash. Or a
-   * pairing code in the address — a phone's camera app opening `/pair#v1;…` or `/pair#v2;…` —
+   * pairing code in the address — a phone's camera app opening `/pair#v1;…` —
    * which is the setup journey arriving at its third stage, whether or not this
    * browser already has daemons.
    *

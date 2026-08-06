@@ -187,18 +187,24 @@ function bindAndAdvertiseRemedy(example: string): string {
 /**
  * What to say beside a link whose DIRECT address only this machine's own browser can redeem.
  *
- * THE RELAY CANDIDATE CHANGES THE AUDIENCE SENTENCE, NOT THE REACH. A daemon that publishes a
- * rendezvous mints a link another device CAN redeem — the QR is drawn, the phone dials the
- * rendezvous when the loopback address fails, and pairing completes inside the sealed channel
- * (`docs/relay-protocol.md` §14). Saying "no QR is drawn" beside that link would be the original
- * defect inverted: an honest address description turned into a false claim about the journey. The
- * sentence also names what the rendezvous operator can observe, because the metadata disclosure
- * belongs beside the offer rather than in a document nobody reads mid-pairing. The remedy keeps
- * offering the direct bind — a connection with no third party on the path is still the better one —
- * but as the upgrade it now is, not the unlock it used to be.
+ * A DISCOVERABLE RENDEZVOUS CHANGES THE AUDIENCE SENTENCE, NOT THE REACH. A daemon that dials a
+ * rendezvous a fresh device can discover for itself mints a link another device CAN redeem — the QR
+ * is drawn, the phone dials that rendezvous when the loopback address fails, and pairing completes
+ * inside the sealed channel (`docs/relay-protocol.md` §14). Saying "no QR is drawn" beside that link
+ * would be the original defect inverted: an honest address description turned into a false claim
+ * about the journey. The sentence also names what the rendezvous operator can observe, because the
+ * metadata disclosure belongs beside the offer rather than in a document nobody reads mid-pairing.
+ * The remedy keeps offering the direct bind — a connection with no third party on the path is still
+ * the better one — but as the upgrade it now is, not the unlock it used to be.
+ *
+ * THE ADDRESS IS THE DAEMON'S OWN DISCOVERED RENDEZVOUS, NOT A FIELD FROM THE LINK. This parameter
+ * once carried an address the mint had copied into the fragment; the fragment carries none now, so what
+ * makes this sentence true is that the phone reads the same hosted advertisement the daemon did. A
+ * caller whose rendezvous is self-hosted passes nothing and gets the plain sentence — the declared GAP,
+ * failing closed.
  */
-export function localOnlyNotice(daemonUrl: string, relayCandidate?: string): AdvertisementNotice {
-  if (relayCandidate === undefined) {
+export function localOnlyNotice(daemonUrl: string, discoveredRelayUrl?: string): AdvertisementNotice {
+  if (discoveredRelayUrl === undefined) {
     return {
       audience: `Only a browser on this machine can redeem this link at ${daemonUrl}; no QR is drawn because another device cannot dial it.`,
       remedy: bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl)),
@@ -207,7 +213,7 @@ export function localOnlyNotice(daemonUrl: string, relayCandidate?: string): Adv
   return {
     audience:
       `A browser on this machine redeems this link at ${daemonUrl}; another device can redeem it through ` +
-      `the rendezvous at ${relayCandidate}, which observes connection metadata such as timing and sizes ` +
+      `the rendezvous at ${discoveredRelayUrl}, which observes connection metadata such as timing and sizes ` +
       `but can never read the code or the exchange.`,
     remedy: `for a direct connection that no rendezvous carries, ${bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl))}`,
   };

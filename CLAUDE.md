@@ -89,11 +89,16 @@ is no longer direct-only.** A relay session commits to one of three modes with i
 record (protocol §14): a request session, one live event or terminal stream, or a one-attempt
 `pair` — sent only after the daemon is proved against the QR-pinned fingerprint, never as an
 anonymous routed request, with its own relay guess budget so an internet stranger cannot expire a
-code a LAN device could still redeem. A daemon that publishes a rendezvous names it in a `#v2`
-pairing fragment, so **a device that can never reach the daemon's address pairs anyway** and then
-reconnects as an ordinary authenticated session. All three modes are built on both ends; read §14
-for the state machine and §13 for what is still outstanding around it rather than restating either
-here.
+code a LAN device could still redeem. **The QR stays the ordinary one-version `v1` fragment** — daemon
+address, code, fingerprint, no rendezvous — because the scanning device reads the SAME hosted
+directory advertisement the daemon read and finds the fallback itself, so **a device that can never
+reach the daemon's address pairs anyway** and then reconnects as an ordinary authenticated session.
+The mint's `discoveredRelayUrl` is host-facing only: it exists so `fy pair`, Add Device and
+`fyd --check` know a loopback daemon is redeemable and what to disclose, and it is derived from relay
+provenance so a self-hosted rendezvous yields nothing. That is a **declared GAP** — a fresh device
+cannot discover a self-hosted rendezvous, and naming one in the link is deferred, not promised. All
+three modes are built on both ends; read §14 for the state machine and §13 for what is still
+outstanding around it rather than restating either here.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one

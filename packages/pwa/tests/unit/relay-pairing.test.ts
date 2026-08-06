@@ -53,13 +53,13 @@ const sessionId = testSessionId();
 const CODE = '7F3K-Q2ND';
 const FINGERPRINT = `fy_daemon_${'A'.repeat(43)}`;
 const HOSTED = 'wss://relay.ferretry.test';
-const LINK_RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'wss://relay.mine.test' };
+/** A rendezvous an operator runs, used only where a test needs one that is not the hosted address. */
+const SELF_HOSTED_RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'wss://relay.mine.test' };
 
-const seedFor = (daemonId: string, relay?: RelayCarrier): PairingSeed => ({
+const seedFor = (daemonId: string): PairingSeed => ({
   daemonUrl: 'https://studio.example',
   daemonId,
   code: CODE,
-  ...(relay === undefined ? {} : { relay }),
 });
 
 const PAIRED_RESPONSE = {
@@ -113,23 +113,13 @@ const failure = async (promise: Promise<unknown>): Promise<Error> => {
 };
 
 describe('the rendezvous candidates one redemption may try', () => {
-  it('should offer the link candidate first and the advertisement second', () => {
-    should(relayPairingCandidates(seedFor(FINGERPRINT, LINK_RELAY), HOSTED)).eql([
-      LINK_RELAY,
-      { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
-    ]);
-  });
-
   /*
-   * A daemon whose first published relay IS the hosted one would otherwise be dialled twice: two
-   * sockets, two handshakes, and two attempts spent from a five-guess budget to ask one question.
+   * ONE ADDRESS, THE ONE THIS BUILD DISCOVERED. A second candidate came first here — the link's own
+   * `relay=` — so a daemon published only on a self-hosted rendezvous was pairable off-LAN. That is
+   * deferred rather than refuted: which addresses a QR may send a fresh device to is a larger question
+   * than the hosted default needed. §13 declares the consequence.
    */
-  it('should dial one address once even when the link and the advertisement agree', () => {
-    const same: RelayCarrier = { kind: 'relay', relayUrl: HOSTED };
-    should(relayPairingCandidates(seedFor(FINGERPRINT, same), HOSTED)).have.length(1);
-  });
-
-  it('should leave a v1 link with only the advertisement, and a directory-less build with nothing', () => {
+  it('should offer only the advertisement, and nothing to a directory-less build', () => {
     should(relayPairingCandidates(seedFor(FINGERPRINT), HOSTED)).eql([
       { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
     ]);
@@ -142,7 +132,7 @@ describe('the rendezvous candidates one redemption may try', () => {
    * unverifiable fingerprint is exactly the one a hostile carrier would like this browser to open.
    */
   it('should offer nothing at all to a fingerprint no rendezvous can address', () => {
-    should(relayPairingCandidates(seedFor('sha256:legacy', LINK_RELAY), HOSTED)).eql([]);
+    should(relayPairingCandidates(seedFor('sha256:legacy'), HOSTED)).eql([]);
   });
 
   it('should refuse an advertised address this browser may not dial', () => {
@@ -251,7 +241,7 @@ describe('redeeming over one rendezvous', () => {
         crypto: relayCrypto,
         seed: seedFor('sha256:legacy'),
         deviceName: 'Ferretry PWA',
-        rendezvous: LINK_RELAY,
+        rendezvous: SELF_HOSTED_RELAY,
         dial: () => {
           throw new Error('nothing may be dialled for an unverifiable fingerprint');
         },

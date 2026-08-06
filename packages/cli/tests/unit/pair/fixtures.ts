@@ -58,33 +58,35 @@ export const LOCAL_ONLY_MINT: PairingCodeMintResponse = PairingCodeMintResponseS
   reach: 'local-only',
 });
 
-/** The one rendezvous a local-only daemon named, so another device has somewhere to dial. */
-export const RELAY_CANDIDATE = 'wss://relay.example';
+/** The rendezvous a local-only daemon discovered, and which a scanning device can discover too. */
+export const DISCOVERED_RELAY_URL = 'wss://relay.example';
 
 /**
- * Built through `pairingLinkUrl` rather than by hand: the schema requires the fragment to be exactly
- * what the codec would write for this daemon, code, fingerprint and candidate, and a hand-rolled `v2`
- * string is exactly the second opinion that codec exists to make unnecessary.
+ * The SAME link the plain local-only mint carries, and that is the fixture's whole point.
+ *
+ * Built through `pairingLinkUrl` rather than by hand, because the schema requires the fragment to be
+ * exactly what the codec would write for this daemon, code and fingerprint — a hand-rolled string is
+ * the second opinion that codec exists to make unnecessary. The rendezvous is deliberately absent
+ * from it: it is disclosed beside the link, never inside it.
  */
 export const RELAY_PAIR_URL = pairingLinkUrl('https://ferretry.pages.dev/pair', {
   daemonUrl: LOCAL_DAEMON_URL,
   code: CODE,
   daemonId: DAEMON_ID,
-  relayCandidate: RELAY_CANDIDATE,
 });
 
 /**
  * A daemon whose direct address is loopback — right for a browser on its own machine, dead on any
- * other — but which also named a rendezvous, so a DIFFERENT device can still redeem this link through
- * it. `reach: 'local-only'` still describes the direct address alone; `invitationRedeemableByAnotherDevice`
- * is what turns the candidate into a QR.
+ * other — but which dials a rendezvous a fresh device can DISCOVER, so a DIFFERENT device can still
+ * redeem this link. `reach: 'local-only'` still describes the direct address alone;
+ * `invitationRedeemableByAnotherDevice` is what turns the disclosure into a QR.
  */
 export const RELAY_LOCAL_ONLY_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({
   ...minted,
   daemonUrl: LOCAL_DAEMON_URL,
   pairUrl: RELAY_PAIR_URL,
   reach: 'local-only',
-  relayCandidate: RELAY_CANDIDATE,
+  discoveredRelayUrl: DISCOVERED_RELAY_URL,
 });
 
 /** A daemon with no address to hand out at all. The code is still live; there is nowhere to point it. */
