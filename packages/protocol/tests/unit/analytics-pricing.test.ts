@@ -157,6 +157,7 @@ describe('analytics pricing contract', () => {
   it('should keep manual and provider-synced provenance mechanically apart', () => {
     // Act
     const synced = AnalyticsPricingRateSchema.parse(syncedRate);
+    const manual = AnalyticsPricingRateSchema.parse(manualRate);
     const mismatched = AnalyticsPricingRateSchema.safeParse({
       ...syncedRate,
       source: { kind: 'provider_sync', provider: 'anthropic', sourceUrl: FEED_URL },
@@ -165,8 +166,26 @@ describe('analytics pricing contract', () => {
 
     // Assert
     should(synced.source.kind).equal('provider_sync');
+    should(synced.lastSyncedAt).equal(LATER);
+    should(manual.lastSyncedAt).be.null();
     should(mismatched.success).be.false();
     should(manualButSynced.success).be.false();
+  });
+
+  it('should refuse a synced rate that will not say when it was synced', () => {
+    // Checking only that a manual rate has no sync instant leaves the useful half of the claim
+    // optional: `provider_sync` with a null `lastSyncedAt` reads as freshly fetched and carries no
+    // evidence anybody can check it against.
+    // Act
+    const undated = AnalyticsPricingRateSchema.safeParse({ ...syncedRate, lastSyncedAt: null });
+    const looselyDated = AnalyticsPricingRateSchema.safeParse({ ...syncedRate, lastSyncedAt: '2026-08-30' });
+
+    // Assert: named by path, so this proves the new rule fired rather than some other refusal.
+    should(undated.success).be.false();
+    should(undated.error?.issues.map(issue => issue.path)).containDeep([['lastSyncedAt']]);
+    // And it is the shared strict instant, not the legacy input domain: only the on-disk catalog
+    // spelling canonicalizes a date-only value, and a synced rate never came from that document.
+    should(looselyDated.success).be.false();
   });
 
   it('should refuse an effective window that ends before it begins', () => {

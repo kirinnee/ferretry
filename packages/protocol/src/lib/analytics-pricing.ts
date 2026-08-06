@@ -247,11 +247,21 @@ export const AnalyticsPricingRateSchema = z
         message: `must match the rate provider ${JSON.stringify(rate.provider)}`,
       });
     }
+    // PROVENANCE AND ITS EVIDENCE AGREE, BOTH WAYS. One direction alone leaves the useful half of
+    // the claim optional: a row saying it came from a provider feed, with no instant naming when it
+    // did, is exactly the row an operator would read as freshly synced and cannot check.
     if (rate.source.kind === 'manual' && rate.lastSyncedAt !== null) {
       context.addIssue({
         code: 'custom',
         path: ['lastSyncedAt'],
         message: 'a manually entered rate was never synced from a provider',
+      });
+    }
+    if (rate.source.kind === 'provider_sync' && rate.lastSyncedAt === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['lastSyncedAt'],
+        message: 'a provider-synced rate must record when it was synced',
       });
     }
     // One cache write, one price. An entry carrying the undifferentiated rate AND a per-duration
