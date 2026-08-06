@@ -10,6 +10,7 @@ import {
   taskReference,
   taskReferenceFor,
 } from '../../../src/features/tasks/task-board-model.ts';
+import { findReferences } from '../../../src/lib/references.ts';
 import { taskSummary } from '../../support/tasks.ts';
 
 describe('taskBoardLane', () => {
@@ -63,6 +64,13 @@ describe('taskReference', () => {
     expect(taskReference('&Z9')).toBe('Z9');
   });
 
+  it('removes every task sigil from rejected local labels', () => {
+    const labels = [taskReference('&&F12'), taskReference('#&F12'), taskReference('bad &F12')];
+
+    expect(labels).toEqual(['F12', 'F12', 'bad F12']);
+    for (const label of labels) expect(findReferences(label)).toEqual([]);
+  });
+
   it('formats a current row bare and a foreign row with its exact owner', () => {
     const viewer = { sessionId: 'session-1' };
 
@@ -73,6 +81,9 @@ describe('taskReference', () => {
   it('never degrades an unsafe foreign owner into a bare reference', () => {
     expect(taskReferenceFor({ sessionId: 'session-1' }, '..', 'F12')).toBe('F12');
     expect(taskReferenceFor({ sessionId: 'session-1' }, 'session-2', 'bad-id')).toBe('bad-id');
+    const label = taskReferenceFor({ sessionId: 'viewer' }, '..', '&&F12');
+    expect(label).toBe('F12');
+    expect(findReferences(label)).toEqual([]);
   });
 });
 

@@ -108,8 +108,8 @@ never rewritten.
 | --------------------------- | ------------------------------------------------------------------------ |
 | `:agent`                    | That agent's session, **on the daemon the reference was proved against** |
 | `@file`                     | A file tab in the side pane, scrolled to the referenced line or range    |
-| bare `&task`                | The Tasks pane at that exact task in this session                        |
-| qualified `&task@{session}` | The existing Tasks pane at that exact Shared board row                   |
+| bare `&task`                | The Tasks pane for this session                                          |
+| qualified `&task@{session}` | Not wired yet — the later Shared-board surface will select the exact row |
 | `!attention`                | The Attention pane for this session                                      |
 | `/skill`                    | The Skills pane for this session                                         |
 | `%terminal:`                | That exact terminal instance's tab                                       |
@@ -144,9 +144,9 @@ The picker inserts what the harness invokes, which is why `$` can insert `/name`
 harness ignores is a broken offer. That is not the same as rewriting an authored reference, which
 never happens.
 
-The `&` and `@@@` pickers remain local by default and insert bare tokens. A Shared board action that
-generates a reference for a foreign row inserts the qualified spelling through `formatReference`;
-it still delivers into the current/viewer's composer, never the owner's composer.
+The `&` and `@@@` pickers remain local by default and insert bare tokens. When the later Shared-board
+surface supplies an action for a foreign row, it will generate the qualified spelling through
+`formatReference` and deliver it into the current/viewer's composer, never the owner's composer.
 
 There is deliberately no fifth `@@@@@` tier: Pins are a top link strip, not a reference tier
 (handover #63), and they are readable composer text rather than a second reference grammar. Template

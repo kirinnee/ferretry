@@ -67,7 +67,10 @@ export interface TaskReferenceResolverInputs {
   readonly boardTasks?: readonly BoardAggregateTaskReferenceRow[];
 }
 
-/** Route each authored lookup to exactly one evidence domain. */
+/**
+ * Route each authored lookup to exactly one evidence domain.
+ * Explicitly-current lookups stay local even when only aggregate evidence exists.
+ */
 export const composeTaskReferenceResolvers =
   (
     scope: Pick<DaemonSessionScope, 'sessionId'>,

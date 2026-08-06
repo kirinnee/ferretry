@@ -111,6 +111,20 @@ describe('task reference context', () => {
     expect(resolve({ form: 'qualified', id: 'F12', sessionId: 'session-2' })).toBeNull();
   });
 
+  it('never lets aggregate-only evidence backfill local or explicitly-current proof', () => {
+    const resolve = createTaskReferenceResolver({
+      scope: scope(),
+      boardTasks: [
+        { sessionId: 'session-1', id: 'F12' },
+        { sessionId: 'session-2', id: 'F12' },
+      ],
+    });
+
+    expect(resolve({ form: 'local', id: 'F12' })).toBeNull();
+    expect(resolve({ form: 'qualified', id: 'F12', sessionId: 'session-1' })).toBeNull();
+    expect(resolve({ form: 'qualified', id: 'F12', sessionId: 'session-2' })?.sessionId).toBe('session-2');
+  });
+
   it('stamps identical session/task pairs with the daemon that supplied the evidence', () => {
     const a = createTaskReferenceResolver({ scope: scope(daemonA), localTasks: [{ id: 'F12' }] });
     const b = createTaskReferenceResolver({ scope: scope(daemonB), localTasks: [{ id: 'F12' }] });

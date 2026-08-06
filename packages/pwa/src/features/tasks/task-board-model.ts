@@ -36,6 +36,7 @@ export const taskBoardLane = (phase: TaskPhase): TaskBoardLane =>
   phase === 'research' || phase === 'design' || phase === 'build' ? 'in_progress' : phase;
 
 const unprefixedTaskId = (id: string): string => id.replace(/^[#&]/u, '');
+const inertTaskLabel = (value: string): string => value.replaceAll('&', '');
 
 /** All local human-facing task references use the canonical formatter. */
 export const taskReference = (id: string): string => {
@@ -45,7 +46,7 @@ export const taskReference = (id: string): string => {
   } catch {
     // Activity history can retain an id from damaged/older data. Keep the label
     // renderable but inert: inventing a sigil token would address another task.
-    return taskId;
+    return inertTaskLabel(taskId);
   }
 };
 
@@ -68,7 +69,7 @@ export const taskReferenceFor = (
   } catch {
     // Never fall back to a bare token for a foreign/unsafe owner: that would
     // silently point at the viewer's task. Unqualified text is the fail-closed UI.
-    return taskId;
+    return inertTaskLabel(taskId);
   }
 };
 
