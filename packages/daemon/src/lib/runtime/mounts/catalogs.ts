@@ -68,6 +68,7 @@ export function catalogRoutes(catalogs: CatalogSubsystem, sessions: SessionDirec
       method: 'POST',
       path: '/v1/projects',
       minimum: 'operator',
+      capability: { capability: 'filesystem', axis: 'configure' },
       noStore: true,
       handle: async context => await registerProject(catalogs, context),
     },
