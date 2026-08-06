@@ -19,11 +19,12 @@
  * copy, and its object URL is replaced and revoked only when new bytes arrive.
  */
 
-import { Download, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
+import { Download, ExternalLink } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { fsApi } from './files-api.ts';
+import { StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 
 const CSV_PREVIEW_BYTES = 512 * 1024;
@@ -221,22 +222,11 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
       </div>
     );
   }
-  const stale = preview.stale ? (
-    preview.error === null ? (
-      <div className="kt-fs-stale" role="status" key="preview-reloading">
-        <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-        <span>Reloading this preview — showing the copy loaded earlier.</span>
-      </div>
-    ) : (
-      <div className="kt-fs-stale" data-tone="err" role="alert" key="preview-reload-failed">
-        <span>Could not reload this preview: {preview.error}. This is the copy loaded earlier.</span>
-        <button type="button" className="kt-btn kt-btn--sm kt-fs-retry" onClick={preview.reload}>
-          <RefreshCw size={13} aria-hidden="true" />
-          Try again
-        </button>
-      </div>
-    )
-  ) : null;
+  // THE SAME notice the surfaces show, retrying the preview's own byte read.
+  // Not dismissible here: this sits inside a small document rather than above a
+  // scroller, so it costs no reading position, and a dismiss would only be a
+  // second way to lose the only report the preview gets.
+  const stale = <StaleNotice what="this preview" status={preview} onRetry={preview.reload} />;
   if (!preview.data.base64 || bytes === null)
     return (
       <div className="kt-fs-note" data-tone="warn" role="status">

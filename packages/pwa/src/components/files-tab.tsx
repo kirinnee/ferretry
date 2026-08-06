@@ -30,6 +30,7 @@ import { formatCodeReference } from '../lib/references.ts';
 import { FileTree } from './file-tree.tsx';
 import { type FsFile, type FsListing, fsApi, useFsProbe } from './files-api.ts';
 import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
+import { ReloadAction, StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import {
   type CodeReferenceOpenRequest,
@@ -52,8 +53,6 @@ import {
   Loading,
   Note,
   OpenFileTabs,
-  ReloadAction,
-  StaleNotice,
   Unavailable,
 } from './files-views.tsx';
 
@@ -407,7 +406,7 @@ export const FilesTab = ({
 
       {/* Directly above the content it is about, and OUTSIDE the scroller: the
           reading position is part of what a reload preserves. */}
-      <StaleNotice what={shownWhat} status={shown} onRetry={reload} />
+      <StaleNotice dismissible what={shownWhat} status={shown} onRetry={reload} />
 
       <div className="kt-fs-body">
         {treeOpen && (
@@ -431,13 +430,14 @@ export const FilesTab = ({
               bytes and the scroll offset while a reload runs or after it
               fails, exactly as the instance viewer behaves. */}
           {diffActive && active ? (
+            // Two answers, not three: a settled successful diff read is never
+            // null (`fsApi.diff` resolves a string), so there is no fourth state
+            // to describe. Same reasoning as `file-instance-surface.tsx`.
             parsedDiff === null ? (
-              diff.loading ? (
+              diff.error === null ? (
                 <Loading what="the diff" />
-              ) : diff.error ? (
-                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
               ) : (
-                <Note role="status">Nothing to show.</Note>
+                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
               )
             ) : parsedDiff.binary ? (
               <Note tone="warn" role="status">

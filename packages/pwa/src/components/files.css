@@ -133,26 +133,97 @@
 /* ---- the reload's honest state ------------------------------------------
    OUTSIDE the scroller, between the bar and the body: the reading position is
    part of what a reload preserves, and a strip inserted above the content
-   would move it. One row, wrapping rather than clipping, so the sentence is
-   readable at 390px. */
+   would move it.
+
+   BOTH REGIONS ARE ALWAYS IN THE DOM (see `StaleNotice`) — a live region is
+   reliably announced only if it was already there. `:empty` is what keeps that
+   free: no children, no padding, no border, no rule, so an unused region costs
+   zero pixels while remaining in the accessibility tree.
+
+   One row on a phone, not three. The message stays on a single line with its
+   own ellipsis and the full text in `title`; the retry and dismiss controls
+   keep their 44px targets beside it, so a failure costs ~44px of reading area
+   instead of ~150px, and the reader can take even that back. */
 .kt-fs-stale {
   display: flex;
+  min-width: 0;
   flex: 0 0 auto;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-xs);
-  padding: var(--gap-xs) var(--pad-cell-x);
+  padding-inline: var(--pad-cell-x);
   border-bottom: var(--stroke) solid var(--border-soft);
   background: var(--surface-2);
   color: var(--fg-soft);
   font-size: var(--text-2xs);
-  line-height: var(--leading-base);
+  line-height: var(--leading-tight);
+}
+
+.kt-fs-stale:empty {
+  padding: 0;
+  border: 0;
+}
+
+/* TWO lines by default, not one and not three: the row's height is already set
+   by the 44px controls beside it, so a second line of `--text-2xs` is free.
+
+   AND IT IS A BUTTON. A clamp that only a `title` could undo hides the error
+   from every sighted touch reader, who has no hover — so the message itself
+   toggles, the whole line is the target, and the chevron says it is one. */
+.kt-fs-stale-text {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) var(--gap-xs) var(--gap-xs) 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  text-align: start;
+}
+
+.kt-fs-stale-text > span {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.kt-fs-stale-text[data-expanded='true'] > span {
+  display: block;
+  -webkit-line-clamp: initial;
+}
+
+.kt-fs-stale-chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.kt-fs-stale-text[data-expanded='true'] .kt-fs-stale-chevron {
+  transform: rotate(180deg);
+}
+
+/* The controls never shrink: a `kt-btn--sm` that gives way lets the sentence
+   ellipsise INTO it, and the two read as one overlapping smear at 390px. */
+.kt-fs-stale > .kt-fs-retry,
+.kt-fs-stale > .kt-fs-stale-dismiss {
+  flex: 0 0 auto;
 }
 
 .kt-fs-stale[data-tone='err'] {
   border-inline-start: 2px solid var(--err);
   background: var(--err-bg);
   color: var(--err);
+}
+
+/* Inherits the error tone rather than the bar's muted grey: a dismiss control
+   sitting in a red strip that is not red reads as belonging to something else. */
+.kt-fs-stale-dismiss {
+  color: inherit;
 }
 
 /* ---- open files ----------------------------------------------------------

@@ -95,6 +95,23 @@ const byLabel = (container: HTMLElement, label: string): HTMLElement =>
 const click = (container: HTMLElement, label: string): Promise<void> =>
   interact(() => byLabel(container, label).click());
 
+/**
+ * The two reload notices are ALWAYS mounted and start empty — that is what makes
+ * the later announcement reliable — so "no notice" is empty text, never an
+ * absent node. Scoped by parent because the rich preview has its own pair.
+ */
+const surfaceNotice = (container: HTMLElement, tone: 'status' | 'alert'): HTMLElement =>
+  must(container.querySelector<HTMLElement>(`.kt-fs > .kt-fs-stale[role="${tone}"]`), `the ${tone} reload notice`);
+
+const previewNotice = (container: HTMLElement, tone: 'status' | 'alert'): HTMLElement =>
+  must(
+    container.querySelector<HTMLElement>(`.kt-rich-file > .kt-fs-stale[role="${tone}"]`),
+    `the ${tone} preview notice`,
+  );
+
+const noticeText = (container: HTMLElement): string =>
+  [...container.querySelectorAll('.kt-fs-stale')].map(node => node.textContent ?? '').join('');
+
 const fileInstance = (path: string, extra: Partial<SidePaneTabInstance> = {}): SidePaneTabInstance => ({
   id: `file:${path}`,
   kind: 'file',
@@ -246,7 +263,7 @@ describe('a file instance tab body', () => {
       // the failure panel is the whole answer, and it can be retried.
       expect(view.container.textContent).toContain('git is not on this host');
       expect(view.container.textContent).not.toContain('No textual changes in this file.');
-      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+      expect(noticeText(view.container)).toBe('');
 
       fixture.diffs = { 'src/api.ts': '--- a/src/api.ts\n+++ b/src/api.ts\n@@ -1 +1 @@\n-old\n+new\n' };
       await click(view.container, 'Retry loading the diff');
@@ -323,9 +340,10 @@ describe('a file instance tab body', () => {
 
       expect(asked.filter(url => url.includes('/fs/file')).length).toBeGreaterThan(before);
       expect(view.container.textContent).toContain('second read');
-      // A settled reload leaves no stale copy behind it.
-      expect(view.container.textContent).not.toContain('the copy loaded earlier');
-      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+      // A settled reload leaves no stale copy behind it. The regions stay in the
+      // DOM — that is what makes the next announcement reliable — so what has to
+      // be gone is their TEXT.
+      expect(noticeText(view.container)).toBe('');
     } finally {
       await view.unmount();
     }
@@ -350,14 +368,20 @@ describe('a file instance tab body', () => {
       await click(view.container, 'Reload src/api.ts');
       await settle();
 
-      // Mid-reload: the same nodes, the same offset, and one honest notice.
+      // Mid-reload: the same nodes and one honest notice.
+      //
+      // NODE IDENTITY is the real evidence here. happy-dom never lays out and
+      // never scrolls, so `scrollTop` only proves the property did not get
+      // written over; what actually preserves a reading position is that the
+      // scroller and the body it holds are the SAME elements as before, never
+      // unmounted for a spinner and remounted.
       expect(view.container.textContent).toContain('the bytes already on screen');
       expect(pane.firstElementChild).toBe(body);
       expect(view.container.querySelector('.kt-fs-scroll')).toBe(pane);
       expect(pane.scrollTop).toBe(120);
-      const notice = must(view.container.querySelector('.kt-fs-stale'), 'the reload notice');
-      expect(notice.getAttribute('role')).toBe('status');
+      const notice = surfaceNotice(view.container, 'status');
       expect(notice.textContent).toContain('showing the copy loaded earlier');
+      expect(surfaceNotice(view.container, 'alert').textContent).toBe('');
       expect(byLabel(view.container, 'Reload src/api.ts').getAttribute('aria-busy')).toBe('true');
       // Never a spinner INSTEAD of the file — that is what loses the position.
       expect(view.container.textContent).not.toContain('Loading api.ts');
@@ -368,7 +392,7 @@ describe('a file instance tab body', () => {
       await settle();
       expect(view.container.textContent).toContain('the newly fetched bytes');
       expect(view.container.textContent).not.toContain('the bytes already on screen');
-      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+      expect(noticeText(view.container)).toBe('');
       expect(view.container.querySelector('.kt-fs-scroll')).toBe(pane);
     } finally {
       await view.unmount();
@@ -388,16 +412,130 @@ describe('a file instance tab body', () => {
       // A failed reread is NOT a failed file: the bytes stay, the failure is said.
       expect(view.container.textContent).toContain('the copy that survived');
       expect(view.container.querySelector('[aria-label="Retry loading api.ts"]')).toBeNull();
-      const notice = must(view.container.querySelector('.kt-fs-stale'), 'the failed-reload notice');
-      expect(notice.getAttribute('role')).toBe('alert');
+      const notice = surfaceNotice(view.container, 'alert');
       expect(notice.textContent).toContain('the session host went away');
-      expect(notice.textContent).toContain('This is the copy loaded earlier');
+      expect(notice.textContent).toContain('Showing the copy loaded earlier');
+      expect(surfaceNotice(view.container, 'status').textContent).toBe('');
 
-      fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'the retry that worked' } };
-      await interact(() => must(notice.querySelector('button'), 'the try-again control').click());
+      // THE RETRY IS THE NEWER FACT. While it is in flight the settled failure
+      // no longer applies, so the alert must clear and the progress region must
+      // say the read started — a retry that still renders its own failure is
+      // asserting a stale error as current.
+      let release: ((file: FsFile) => void) | null = null;
+      fixture.files = {
+        'src/api.ts': new Promise<FsFile>(resolve => {
+          release = resolve;
+        }),
+      };
+      await interact(() => must(notice.querySelector<HTMLElement>('.kt-fs-retry'), 'the try-again control').click());
+      await settle();
+      expect(view.container.textContent).toContain('the copy that survived');
+      expect(surfaceNotice(view.container, 'alert').textContent).toBe('');
+      expect(surfaceNotice(view.container, 'status').textContent).toContain('Reloading api.ts');
+      expect(view.container.textContent).not.toContain('the session host went away');
+
+      await interact(async () => {
+        must(release, 'the stalled retry')({ path: 'src/api.ts', content: 'the retry that worked' });
+      });
       await settle();
       expect(view.container.textContent).toContain('the retry that worked');
-      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+      expect(noticeText(view.container)).toBe('');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('lets a touch reader open the whole failure by tapping the message itself', async () => {
+    fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'the copy that survived' } };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      const detail = 'the daemon refused this read and here is the long reason it gave for doing so';
+      fixture.files = { 'src/api.ts': new Error(detail) };
+      await click(view.container, 'Reload src/api.ts');
+      await settle();
+
+      // A phone has no hover, so a clamp whose only escape is a `title` hides
+      // the error from a sighted touch reader. The message IS the control.
+      const message = must(
+        surfaceNotice(view.container, 'alert').querySelector<HTMLElement>('.kt-fs-stale-text'),
+        'the expandable failure message',
+      );
+      expect(message.tagName).toBe('BUTTON');
+      expect(message.getAttribute('aria-expanded')).toBe('false');
+      expect(message.hasAttribute('data-expanded')).toBe(false);
+      // The accessible name has to STAY the message: it is what the alert says.
+      expect(message.hasAttribute('aria-label')).toBe(false);
+      expect(message.textContent).toContain(detail);
+
+      await interact(() => message.click());
+      await settle();
+      expect(message.getAttribute('aria-expanded')).toBe('true');
+      expect(message.getAttribute('data-expanded')).toBe('true');
+
+      await interact(() => message.click());
+      await settle();
+      expect(message.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('lets the reader dismiss a failed reload, and says it again on the next attempt', async () => {
+    fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'the copy that survived' } };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      fixture.files = { 'src/api.ts': new Error('the session host went away') };
+      await click(view.container, 'Reload src/api.ts');
+      await settle();
+      expect(surfaceNotice(view.container, 'alert').textContent).toContain('the session host went away');
+
+      // A banner that only a SUCCESSFUL reload can remove costs a fifth of a
+      // phone's reading area for as long as the daemon stays away.
+      await click(view.container, 'Dismiss the failed reload of api.ts');
+      await settle();
+      expect(noticeText(view.container)).toBe('');
+      expect(view.container.textContent).toContain('the copy that survived');
+
+      // The dismissal answered ONE attempt: the next failure is said again.
+      await click(view.container, 'Reload src/api.ts');
+      await settle();
+      expect(surfaceNotice(view.container, 'alert').textContent).toContain('the session host went away');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('keeps the rendered diff and its choice when a diff reload fails', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    fixture.diffs = { 'src/api.ts': '--- a/src/api.ts\n+++ b/src/api.ts\n@@ -1 +1 @@\n-old\n+the diff on screen\n' };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      await click(view.container, 'Show git diff for src/api.ts');
+      await settle();
+      const pane = must(view.container.querySelector<HTMLElement>('.kt-fs-scroll'), 'the scroller');
+      const body = must(pane.firstElementChild, 'the rendered diff');
+      expect(view.container.textContent).toContain('the diff on screen');
+
+      fixture.diffs = { 'src/api.ts': new Error('git went away mid-read') };
+      await click(view.container, 'Reload src/api.ts');
+      await settle();
+
+      // The diff half of the retained-content claim: same parsed diff, same
+      // nodes (the real reading-position evidence), diff still the active
+      // choice, and the notice names the diff rather than the file.
+      expect(view.container.textContent).toContain('the diff on screen');
+      expect(pane.firstElementChild).toBe(body);
+      expect(byLabel(view.container, 'Show src/api.ts normally').getAttribute('aria-pressed')).toBe('true');
+      const notice = surfaceNotice(view.container, 'alert');
+      expect(notice.textContent).toContain('Could not reload the diff');
+      expect(notice.textContent).toContain('git went away mid-read');
+      expect(view.container.textContent).not.toContain('Could not load the diff');
     } finally {
       await view.unmount();
     }
@@ -482,9 +620,8 @@ describe('a file instance tab body showing a rich preview', () => {
           'blob:instance/1',
         );
         expect(urls.revoked).toEqual([]);
-        const running = must(view.container.querySelector('.kt-rich-file .kt-fs-stale'), 'the reloading notice');
-        expect(running.getAttribute('role')).toBe('status');
-        expect(running.textContent).toContain('showing the copy loaded earlier');
+        expect(previewNotice(view.container, 'status').textContent).toContain('showing the copy loaded earlier');
+        expect(previewNotice(view.container, 'alert').textContent).toBe('');
 
         await interact(async () => {
           must(release, 'the stalled preview refetch')({ path: 'report.html', base64: btoa('<h1>two</h1>') });
@@ -524,10 +661,86 @@ describe('a file instance tab body showing a rich preview', () => {
         const frame = must(view.container.querySelector('iframe'), 'the retained preview');
         expect(frame.getAttribute('src')).toBe('blob:instance/1');
         expect(urls.revoked).toEqual([]);
-        const notice = must(view.container.querySelector('.kt-rich-file .kt-fs-stale'), 'the stale preview notice');
-        expect(notice.getAttribute('role')).toBe('alert');
+        const notice = previewNotice(view.container, 'alert');
         expect(notice.textContent).toContain('the preview read failed');
-        expect(notice.textContent).toContain('This is the copy loaded earlier');
+        expect(notice.textContent).toContain('Showing the copy loaded earlier');
+        expect(previewNotice(view.container, 'status').textContent).toBe('');
+
+        // And its retry is honest too: while the second read is in flight the
+        // settled failure no longer applies.
+        let release: ((file: FsFile) => void) | null = null;
+        fixture.previews = {
+          'report.html': new Promise<FsFile>(resolve => {
+            release = resolve;
+          }),
+        };
+        await interact(() =>
+          must(notice.querySelector<HTMLElement>('.kt-fs-retry'), 'the preview try-again control').click(),
+        );
+        await settle();
+        expect(previewNotice(view.container, 'alert').textContent).toBe('');
+        expect(previewNotice(view.container, 'status').textContent).toContain('Reloading this preview');
+        expect(must(view.container.querySelector('iframe'), 'the still-retained preview').getAttribute('src')).toBe(
+          'blob:instance/1',
+        );
+
+        await interact(async () => {
+          must(release, 'the stalled preview retry')({ path: 'report.html', base64: btoa('<h1>two</h1>') });
+        });
+        await settle();
+        expect(must(view.container.querySelector('iframe'), 'the reloaded preview').getAttribute('src')).toBe(
+          'blob:instance/2',
+        );
+        expect(noticeText(view.container)).toBe('');
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      urls.restore();
+    }
+  });
+
+  it('reads its bytes ONCE across a diff toggle, not twice, because a re-armed key is not a reload', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    fixture.files = { 'report.html': { path: 'report.html', content: '<h1>one</h1>' } };
+    fixture.previews = { 'report.html': { path: 'report.html', base64: btoa('<h1>one</h1>') } };
+    fixture.diffs = { 'report.html': '--- a/report.html\n+++ b/report.html\n@@ -1 +1 @@\n-old\n+new\n' };
+    const urls = previewUrls();
+    try {
+      const view = await open(
+        <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('report.html')} />,
+      );
+      try {
+        // One reload first, so the file's revision has genuinely moved: that is
+        // the case where a re-armed key used to bump it again behind the reader.
+        await click(view.container, 'Reload report.html');
+        await settle();
+        const fileReads = () => asked.filter(url => url.includes('/fs/file') && !url.includes('base64')).length;
+        const beforeFile = fileReads();
+        const beforePreview = previewReads();
+
+        await click(view.container, 'Show git diff for report.html');
+        await settle();
+        await click(view.container, 'Show report.html normally');
+        await settle();
+
+        // The file resource already holds this key at this generation, so it is
+        // not asked again.
+        expect(fileReads()).toBe(beforeFile);
+        // The preview pays exactly ONE read: the diff has no file body, so the
+        // component genuinely unmounts and a fresh mount must fetch. What is
+        // gone is the SECOND read — the background re-read of the file used to
+        // move `revision` under a preview that had just fetched, and that
+        // reload cost another bounded byte read of the same bytes.
+        expect(previewReads()).toBe(beforePreview + 1);
+        expect(must(view.container.querySelector('iframe'), 'the preview across the toggle')).toBeDefined();
+        expect(noticeText(view.container)).toBe('');
+
+        // Reload still asks: the generation is what moves, not the key.
+        await click(view.container, 'Reload report.html');
+        await settle();
+        expect(fileReads()).toBe(beforeFile + 1);
+        expect(previewReads()).toBe(beforePreview + 2);
       } finally {
         await view.unmount();
       }

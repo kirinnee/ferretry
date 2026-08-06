@@ -13,6 +13,7 @@
  *
  *   bun harness/screenshot.ts            # writes harness/out/*.png
  *   bun harness/screenshot.ts --serve    # leave it running to look at by hand
+ *   bun harness/screenshot.ts --files-only   # just the Files/reload/preview frames
  *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
  */
 
@@ -43,6 +44,75 @@ const PHONE_CONTEXT = {
 
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
+const FILES_ONLY = process.argv.includes('--files-only');
+
+/**
+ * The Files evidence for handover #37 and #62, at whatever viewport is current.
+ *
+ * Its own function so `--files-only` can take it without walking the whole
+ * gallery: these frames get re-taken every time the reload wording or the
+ * notice layout moves, and a full pass is dozens of unrelated element shots
+ * that each get their own chance to flake on a loaded machine.
+ */
+const captureFiles = async (page: Page, viewportName: string): Promise<void> => {
+  const filesTarget = join(outDir, `files-${viewportName}.png`);
+  await page.locator('#harness-files').scrollIntoViewIfNeeded();
+  await page.getByLabel('Files browser').screenshot({ path: filesTarget });
+  process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
+
+  // The body behind ONE file tab (#35), not the picker: its own path in the
+  // bar, its own raw/diff/Reload controls, its own bytes — plus the rich
+  // preview and the two states a Reload can leave behind (#37/#62).
+  //
+  // The last two are DRIVEN, not drawn: their second read never settles and
+  // fails respectively, so pressing Reload is what puts the surface in the
+  // state being reviewed. Capturing before the press would show two ordinary
+  // files and prove nothing.
+  //
+  // Explicit short timeouts, because the failure they guard is a WAIT. Each
+  // driven path belongs to exactly one body (`main.tsx`); if that ever stops
+  // being true the body never gets its first answer, the Reload control never
+  // appears, and the default timeout would spend half a minute saying so. Five
+  // seconds and a named locator is the difference between a deterministic
+  // failure and a hung capture.
+  await page.locator('#harness-file-instance').scrollIntoViewIfNeeded();
+  for (const [slot, path] of [
+    ['file-instance-reloading', 'RELEASE.md'],
+    ['file-instance-reload-failed', 'DEPLOY.md'],
+  ] as const) {
+    const body = page.locator(`[data-harness="${slot}"]`);
+    await body.scrollIntoViewIfNeeded();
+    await body.getByLabel(`Reload ${path}`).click({ timeout: 5_000 });
+    await body.locator('.kt-fs-stale:not(:empty)').first().waitFor({ state: 'visible', timeout: 5_000 });
+  }
+  // ONE BODY PER FRAME, at the real viewport. Four stacked bodies do not fit a
+  // 390x844 phone, and borrowing a taller viewport to fit them would review a
+  // layout no reader ever sees.
+  for (const [slot, slug] of [
+    ['file-instance-surface', 'file-instance'],
+    ['file-instance-preview', 'file-preview'],
+    ['file-instance-reloading', 'file-reloading'],
+    ['file-instance-reload-failed', 'file-reload-failed'],
+  ] as const) {
+    const body = page.locator(`[data-harness="${slot}"]`);
+    await body.scrollIntoViewIfNeeded();
+    const target = join(outDir, `${slug}-${viewportName}.png`);
+    await body.screenshot({ path: target });
+    process.stdout.write(`📸 File tab body ${slug} -> ${target}\n`);
+  }
+
+  // The failure compactly, then the SAME failure opened. A phone has no hover,
+  // so this second frame is the evidence that a sighted touch reader can still
+  // reach the whole sentence; the compact frame alone would only show a message
+  // that stops mid-way.
+  const failed = page.locator('[data-harness="file-instance-reload-failed"]');
+  await failed.scrollIntoViewIfNeeded();
+  await failed.locator('.kt-fs-stale-text').click({ timeout: 5_000 });
+  await failed.locator('.kt-fs-stale-text[data-expanded="true"]').waitFor({ state: 'visible', timeout: 5_000 });
+  const expandedTarget = join(outDir, `file-reload-expanded-${viewportName}.png`);
+  await failed.screenshot({ path: expandedTarget });
+  process.stdout.write(`📸 File tab body file-reload-expanded -> ${expandedTarget}\n`);
+};
 
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
@@ -342,6 +412,10 @@ try {
         const page = await context.newPage();
         try {
           await page.goto(server.url.toString());
+          if (FILES_ONLY) {
+            await captureFiles(page, viewport.name);
+            continue;
+          }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
             const taskBoard = page.locator('#harness-task-board');
@@ -942,44 +1016,7 @@ try {
           await page.getByLabel('In-app link preview').screenshot({ path: inAppTarget });
           process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
 
-          const filesTarget = join(outDir, `files-${viewport.name}.png`);
-          await page.locator('#harness-files').scrollIntoViewIfNeeded();
-          await page.getByLabel('Files browser').screenshot({ path: filesTarget });
-          process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
-
-          // The body behind ONE file tab (#35), not the picker: its own path in
-          // the bar, its own raw/diff/Reload controls, its own bytes — plus the
-          // rich preview and the two states a Reload can leave behind (#37/#62).
-          //
-          // The last two are DRIVEN, not drawn: their second read never settles
-          // and fails respectively, so pressing Reload is what puts the surface
-          // in the state being reviewed. Capturing before the press would show
-          // two ordinary files and prove nothing.
-          await page.locator('#harness-file-instance').scrollIntoViewIfNeeded();
-          for (const [slot, path] of [
-            ['file-instance-reloading', 'RELEASE.md'],
-            ['file-instance-reload-failed', 'DEPLOY.md'],
-          ] as const) {
-            const body = page.locator(`[data-harness="${slot}"]`);
-            await body.scrollIntoViewIfNeeded();
-            await body.getByLabel(`Reload ${path}`).click();
-            await body.locator('.kt-fs-stale').waitFor({ state: 'visible' });
-          }
-          // ONE BODY PER FRAME, at the real viewport. Four stacked bodies do not
-          // fit a 390x844 phone, and borrowing a taller viewport to fit them
-          // would review a layout no reader ever sees.
-          for (const [slot, slug] of [
-            ['file-instance-surface', 'file-instance'],
-            ['file-instance-preview', 'file-preview'],
-            ['file-instance-reloading', 'file-reloading'],
-            ['file-instance-reload-failed', 'file-reload-failed'],
-          ] as const) {
-            const body = page.locator(`[data-harness="${slot}"]`);
-            await body.scrollIntoViewIfNeeded();
-            const target = join(outDir, `${slug}-${viewport.name}.png`);
-            await body.screenshot({ path: target });
-            process.stdout.write(`📸 File tab body ${slug} -> ${target}\n`);
-          }
+          await captureFiles(page, viewport.name);
 
           const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
           // The thumbnail is `loading="lazy"` and the harness stacks it thousands

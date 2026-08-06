@@ -18,7 +18,18 @@
  *
  * Property 3 is why `revision` counts SUCCESSES rather than attempts: it names
  * the snapshot currently on screen, so a failed reread cannot make a derived
- * renderer believe new bytes landed.
+ * renderer believe new bytes landed. It is also why starting a reread CLEARS the
+ * error it is trying to replace: a settled failure and an unsettled attempt are
+ * different states, and a surface that kept showing the alert while a read was
+ * genuinely in flight would be asserting a stale failure as current.
+ *
+ * ASKING AGAIN IS A DECISION, NOT A SIDE EFFECT. A key that this hook already
+ * answered successfully, at this reload generation, is NOT re-read when it comes
+ * back — flipping to the diff and back re-arms the same key, and the value is
+ * still right there. Re-reading it would spend a second network round trip (and,
+ * downstream, a second bounded byte read in the preview) on bytes the reader is
+ * already looking at, while `refreshing` said nothing was happening. Newer bytes
+ * are what Reload is for, and Reload bumps the generation.
  *
  * Whether a reread actually reaches the disk is NOT decided here. The daemon's
  * fs routes are the owner of that (`noStore` on every response); the
@@ -64,12 +75,22 @@ export const useFsResource = <T>(key: string | null, load: (signal: AbortSignal)
   const [nonce, setNonce] = useState(0);
   const loadRef = useRef(load);
   loadRef.current = load;
+  // Read inside the effect WITHOUT making the effect depend on it: the settled
+  // state is what decides whether a re-armed key still needs asking, and adding
+  // it as a dependency would re-run the read on every answer it receives.
+  const settledRef = useRef(state);
+  settledRef.current = state;
 
   // `nonce` carries no value into the read: bumping it IS the reload, and it is
   // the only way to re-run a read for a key that has not changed. It is stamped
   // onto the settled state so a render can tell "answered" from "still asking".
   useEffect(() => {
     if (key === null) return;
+    const settled = settledRef.current;
+    // Already answered, for this exact key and this exact generation. A failure
+    // is deliberately NOT covered: re-arming a key whose read failed is worth
+    // one more attempt, because the reader has no other way to ask for one.
+    if (settled.key === key && settled.nonce === nonce && settled.data !== null) return;
     const controller = new AbortController();
     let live = true;
     loadRef
@@ -112,6 +133,13 @@ export const useFsResource = <T>(key: string | null, load: (signal: AbortSignal)
     refreshing: pending && data !== null,
     stale: data !== null && (pending || error !== null),
     revision: mine ? state.revision : 0,
-    reload: useCallback(() => setNonce(current => current + 1), []),
+    // The error goes with the attempt that produced it. Dropping it here is what
+    // lets every consumer read "a read is in flight" straight off `refreshing`
+    // and `loading`, instead of each deciding for itself whether a settled
+    // failure still applies while its replacement is being fetched.
+    reload: useCallback(() => {
+      setState(previous => (previous.error === null ? previous : { ...previous, error: null }));
+      setNonce(current => current + 1);
+    }, []),
   };
 };

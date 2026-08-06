@@ -32,19 +32,10 @@ import { formatCodeReference } from '../lib/references.ts';
 import type { SidePaneTabInstance } from '../shell/side-pane-tab-model.ts';
 import { fsApi, useFsProbe, type FsFile } from './files-api.ts';
 import { baseName, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
+import { ReloadAction, StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import { type FileLineSelection, type FileView, scrollFileLineIntoView } from './files-tab-model.ts';
-import {
-  DiffBody,
-  Failed,
-  FileBody,
-  type FilesMarkdownContext,
-  Loading,
-  Note,
-  ReloadAction,
-  StaleNotice,
-  Unavailable,
-} from './files-views.tsx';
+import { DiffBody, Failed, FileBody, type FilesMarkdownContext, Loading, Note, Unavailable } from './files-views.tsx';
 
 export interface FileInstanceSurfaceProps {
   readonly daemon: DaemonConnection;
@@ -173,7 +164,7 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
         </span>
       </div>
 
-      <StaleNotice what={diffActive ? 'the diff' : baseName(path)} status={shown} onRetry={reload} />
+      <StaleNotice dismissible what={diffActive ? 'the diff' : baseName(path)} status={shown} onRetry={reload} />
 
       <div className="kt-fs-body">
         <div ref={paneRef} tabIndex={-1} className="kt-fs-scroll scroll-thin outline-none">
@@ -181,13 +172,15 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
               that failed, still has the bytes the reader was looking at, and
               swapping them for a spinner is what loses the reading position. */}
           {diffActive ? (
+            // No third answer for a diff with nothing retained: `fsApi.diff`
+            // resolves a string (`''` included), so a settled successful read
+            // whose value is null cannot happen, and a branch for it would read
+            // as a state the surface can reach.
             parsedDiff === null ? (
-              diff.loading ? (
+              diff.error === null ? (
                 <Loading what="the diff" />
-              ) : diff.error ? (
-                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
               ) : (
-                <Note role="status">Nothing to show.</Note>
+                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
               )
             ) : parsedDiff.binary ? (
               <Note tone="warn" role="status">
