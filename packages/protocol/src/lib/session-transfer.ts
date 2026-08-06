@@ -197,7 +197,7 @@ const SessionTransferFacetsSchema = z.strictObject({
   lineage: LineageFacetSchema,
 });
 
-/** A complete, serializable decision that can be persisted and replayed without re-reading its source. */
+/** A complete, serializable decision replayed without re-deriving its source decisions. */
 export const SessionTransferPlanSchema = z
   .strictObject({
     v: z.literal(1),
