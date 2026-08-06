@@ -30,9 +30,10 @@
  * knows it is unreachable and prints a bare reason is the complaint this product has earned.
  */
 
-import { isLoopbackHost, WILDCARD_BIND_HOST } from '@ferretry/protocol';
+import { isLoopbackHost, PublishedCarriersSchema, WILDCARD_BIND_HOST } from '@ferretry/protocol';
 import { HostedRelayAdvertisementSchema, SocketEndpointSchema } from '@ferretry/relay';
 import { type DaemonRelayConfig, DaemonRelayConfigSchema } from '../runtime/config.ts';
+import { type DaemonRelayCarrierEntry, relayCarrierIsConfigured } from '../runtime/carriers.ts';
 
 /**
  * The public discovery path, from `docs/relay-protocol.md` §13.
@@ -152,6 +153,123 @@ export function chooseRelayCarrierSource(
     return { kind: 'direct-only', reason: 'the advertised relay address is not one this daemon may dial' };
   }
   return { kind: 'discovered', config: parsed.data };
+}
+
+/** Whether resolving this ordered set requires the runtime relay advertisement. */
+export function relayCarriersNeedDiscovery(relays: readonly DaemonRelayCarrierEntry[]): boolean {
+  return relays.some(relay => !relayCarrierIsConfigured(relay) && relay.enabled);
+}
+
+/**
+ * Every relay this boot resolved, or the refusal that replaces the list entirely.
+ *
+ * IT IS A UNION SO THE REFUSAL CANNOT BE SKIPPED. A separate "and also check for duplicates" helper
+ * would be a rule a caller has to remember, and the whole point of the refusal is that the case it
+ * catches is invisible — both halves look healthy right up until two sockets race for one room.
+ */
+export type ResolvedRelayCarriers =
+  | { readonly kind: 'resolved'; readonly sources: readonly RelayCarrierSource[] }
+  /** Two entries resolved to one rendezvous. `url` is that address, named so a boot can print it. */
+  | { readonly kind: 'refused'; readonly url: string; readonly reason: string };
+
+/**
+ * Resolves every configured relay entry without collapsing the list to one.
+ *
+ * A configured URL is already complete. A discovery entry receives the one
+ * advertisement read performed for this boot, then keeps the entry's own enabled
+ * and reconnect settings. The output order is the operator's order and is also the
+ * order the daemon publishes to devices.
+ *
+ * ## A DUPLICATE IS ONLY VISIBLE ONCE DISCOVERY HAS ANSWERED
+ *
+ * The document schema already refuses a list that names one address twice, but it cannot see the
+ * collision that matters: a rendezvous the operator wrote down AND the discovery entry, where today's
+ * advertisement happens to be that same address. Two entries, both legal, one room. Dialled as-is,
+ * this daemon opens two sockets to one rendezvous — which claims the slot from itself, since a
+ * rendezvous holds the incumbent's place until a dead socket is swept — and publishes the address
+ * twice to every device, so a browser walks the same failure twice before trying anything else.
+ *
+ * THE BOOT REFUSES RATHER THAN DEDUPLICATING. Silently dropping one entry would pick, on the
+ * operator's behalf, between "I want Ferretry's hosted relay" and "I want mine" at a moment when
+ * those two happen to be equal — and the choice would then flip by itself the day the advertisement
+ * changes, with nothing said. The refusal names the address and both ways out.
+ *
+ * ONLY DIALLED ADDRESSES COLLIDE. An entry that is switched off opens no socket and publishes
+ * nothing, so a configured relay kept in the file with `enabled: false` alongside the same discovered
+ * address is not a duplicate — it is somebody who switched one of the two off, which is exactly the
+ * remedy this refusal asks for.
+ */
+export function chooseRelayCarrierSources(
+  relays: readonly DaemonRelayCarrierEntry[],
+  advertised: RelayAdvertisement,
+): ResolvedRelayCarriers {
+  const sources = resolveEachRelayCarrier(relays, advertised);
+  const dialled = new Set<string>();
+  for (const source of sources) {
+    const url = dialledRelayUrl(source);
+    if (url === undefined) continue;
+    if (dialled.has(url)) return { kind: 'refused', url, reason: duplicateRendezvousRefusal(url) };
+    dialled.add(url);
+  }
+  return { kind: 'resolved', sources };
+}
+
+/** The sentence a boot prints when it refuses: the fault, the consequence, and both ways out. */
+function duplicateRendezvousRefusal(url: string): string {
+  return (
+    `two relay carriers resolved to the same rendezvous ${url} — a relay written in this daemon’s ` +
+    'configuration and the one the relay directory advertises are the same address, so this boot would ' +
+    'open two sockets to one room and publish it to devices twice. Remove the configured entry to keep ' +
+    'the hosted one, or switch the { "kind": "relay", "source": "discovery" } entry off to keep your own.'
+  );
+}
+
+/** Each entry on its own terms, before the list is checked for a collision between them. */
+function resolveEachRelayCarrier(
+  relays: readonly DaemonRelayCarrierEntry[],
+  advertised: RelayAdvertisement,
+): readonly RelayCarrierSource[] {
+  return relays.map(relay => {
+    if (relayCarrierIsConfigured(relay)) {
+      return {
+        kind: 'configured' as const,
+        config: DaemonRelayConfigSchema.parse({
+          url: relay.url,
+          enabled: relay.enabled,
+          reconnectSeconds: relay.reconnectSeconds,
+        }),
+      };
+    }
+    if (!relay.enabled) {
+      return {
+        kind: 'direct-only' as const,
+        reason: 'the discovery relay entry is switched off in this daemon’s configuration',
+      };
+    }
+    const source = chooseRelayCarrierSource(undefined, advertised);
+    if (source.kind !== 'discovered') return source;
+    return {
+      kind: 'discovered' as const,
+      config: {
+        ...source.config,
+        reconnectSeconds: relay.reconnectSeconds,
+      },
+    };
+  });
+}
+
+/** The direct address and every relay this boot will actually dial, ready for the device wire. */
+export function publishedDaemonCarriers(
+  directUrl: string,
+  sources: readonly RelayCarrierSource[],
+): ReturnType<typeof PublishedCarriersSchema.parse> {
+  return PublishedCarriersSchema.parse([
+    { kind: 'direct', url: directUrl },
+    ...sources.flatMap(source => {
+      const url = dialledRelayUrl(source);
+      return url === undefined ? [] : [{ kind: 'relay' as const, url }];
+    }),
+  ]);
 }
 
 /** The address this daemon will actually dial, or nothing. A switched-off block dials nothing. */
