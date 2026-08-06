@@ -12,6 +12,7 @@
  * refusal proved against a fake signature is a refusal proved against nothing.
  */
 
+import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
 import {
   answerClientHandshake,
   type ChannelState,
@@ -255,8 +256,19 @@ export const autoDial = (
                 : { t: 'paired', protocol: RELAY_PROTOCOL_ID, response: answer.paired },
             ),
           );
+          // THE CLOSE IS THE PROTOCOL'S, NOT THIS FIXTURE'S. It used to spell `4440` as a literal and
+          // give it the reason `'the pairing exchange is complete'` — a sentence that told an observer
+          // OUTSIDE the channel which of the two outcomes had just happened, and `d599f510` removed the
+          // daemon's ability to send anything of the kind. A scripted daemon that can still produce it
+          // is a fixture the shipped one cannot match: a client proved against it would be proved
+          // against a frame no rendezvous will ever forward, and reading this file would suggest a
+          // per-outcome reason is legal. Both constants come from the one module that owns them.
           socket.onBinary?.(
-            controlFrame(sessionId, { t: 'closed', code: 4440, reason: 'the pairing exchange is complete' }),
+            controlFrame(sessionId, {
+              t: 'closed',
+              code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+              reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+            }),
           );
           return;
         }
