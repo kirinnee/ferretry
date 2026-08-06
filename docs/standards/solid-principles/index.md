@@ -231,6 +231,55 @@ class UserService
     this.logger.log("User logged in")  // request to a collaborator
 ```
 
+### The one exception: a value a framework needs at module load
+
+**Settled: a module-level instance is permitted when a framework needs the value before the
+composition root can run, and only under all four conditions below.** The question is real -- React
+resolves a component's default props at module load, which is strictly earlier than any context
+exists -- so this is the answer rather than a judgement call per pull request.
+
+1. **A framework forces the timing.** The value is needed at module evaluation, before the
+   composition root has run. "It was convenient" and "everything already imports it" are not this
+   condition.
+2. **It stays injectable.** Every consumer can be handed a different instance, and the tests do. This
+   is the property "no singletons" exists to protect, and it must be completely present -- a module
+   default is a default binding, not a hardwiring.
+3. **Whatever owns its lifecycle holds a reference to it.** A module-level instance is invisible to
+   the object graph, so anything that must invalidate, reset, or dispose of it has to be given it
+   explicitly at the composition root.
+4. **The declaration says why.** The docblock names the framework constraint that forced the timing
+   and the defect that produced the current arrangement, so the next reader can retire the exception
+   instead of copying it.
+
+Fail any one of the four and the value moves into the composition root. There is no allowlist and no
+second exception: a new module-level instance is a decision somebody has to argue for on these terms.
+
+**Exactly one value in the repository qualifies today**: `documentDraftStore` in
+`packages/pwa/src/lib/drafts.ts`, which the composer needs as a default prop at module load. It is
+also the reason condition 3 is a condition. That store used to be a module default inside
+`composer.tsx`, which made it the one daemon-scoped store in the bundle the connection registry could
+not reach -- `clearDaemon` existed, was tested, and was called by nothing, so unpairing a daemon left
+its drafts in `localStorage` for the next pairing that minted the same id to read back. Moving it into
+`drafts.ts` and registering it at the composition root fixed that, and left the module-level instance
+behind as the cost.
+
+**How a violation is detected.** Condition 3 is mechanical for daemon-scoped state:
+`scripts/validate/daemon-scope.sh`'s `invalidate` pass fails when a class declares `clearDaemon()` and
+the connection registry never receives it -- it is what found the defect above. The rest is a stated
+sweep rather than a gate:
+
+```bash
+# module-level service instances, tolerating a type annotation, excluding value-object constructors
+git ls-files "packages/*/src/lib/*" | grep '\.ts$' | grep -v tests \
+  | xargs rg -n '^export const [A-Za-z_][A-Za-z0-9_]*(: [^=]+)? = new ' \
+  | grep -vE '= *new (Set|Map|WeakMap|WeakSet|RegExp|Date|URL)\b'
+```
+
+The pattern is written out because a shorter one hides things: `^export const [a-zA-Z]+ = new ` misses
+a `SCREAMING_SNAKE` name and misses any declaration carrying a type annotation, so a genuine stateful
+singleton would be invisible to it. On `00b733d0` the sweep returns one line, and it is the exception
+named above.
+
 ---
 
 ## Temporal Coupling
@@ -301,7 +350,8 @@ class OrderService
 - [ ] **No subclassing:** Is every relationship an `implements` of an interface, with zero
       `extends`?
 - [ ] **No singletons:** Are there zero singletons or static methods with business logic? Is
-      everything injectable?
+      everything injectable? If a module-level instance is unavoidable, does it meet all four
+      conditions of [the one exception](#the-one-exception-a-value-a-framework-needs-at-module-load)?
 - [ ] **Immutable members:** Are all class fields set in the constructor and never mutated? Are
       members only config values or injected services?
 - [ ] **Methods take value types:** Do methods receive data as parameters (not stored in fields) and
