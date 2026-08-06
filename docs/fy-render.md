@@ -82,7 +82,26 @@ numbers.
 | `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element opening tags; more than 32 filter primitives; a declared canvas over 8192 per axis or 16,777,216 pixels; an unterminated comment, CDATA section or tag; a payload that does not begin with `<svg>` |
 | `mermaid` | 20,000 characters                | —                                                                                                                                                                                                                                                                                          |
 | `lottie`  | 1 MiB                            | invalid JSON; a non-object root; any `"x"` expression key at any depth; more than 500 layers; deeper than 64 levels                                                                                                                                                                        |
-| `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a malformed, truncated or trailing-byte container                                                                                   |
+| `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a container that fails the selected admission checks below                                                                          |
+
+**The selected pre-decode admission checks, exactly.** The parser reads a format signature, walks the
+container's records, and reads what those records DECLARE — dimensions, animation markers, and a
+format-specific ordering and terminal shape:
+
+- **PNG** — the signature; a first and only `IHDR` of length 13; exactly one consecutive `IDAT` run;
+  no `acTL`; a zero-length `IEND` at exactly the end of the file.
+- **JPEG** — `SOI`; every segment extent validated before anything inside it is read; at least one
+  `SOFn` before `SOS`, max-bounded across all of them; a terminal `EOI`.
+- **GIF** — the logical screen; each image descriptor fitting inside it; exactly one frame; the
+  trailer as the last byte.
+- **WebP** — a RIFF size matching the file; every chunk length fitting; a recognised dimension record
+  long enough to read, max-bounded across all of them; no `ANIM`/`ANMF`; the walk landing exactly on
+  the end.
+
+**CRCs and compressed image content are NOT validated, and neither is anything the records do not
+declare.** A file can satisfy every check above and still be rubbish inside. That is the browser
+decoder's job and it happens after the gesture, so read "admitted" as "passed these checks", never as
+"valid".
 
 **The element count is a count of element opening tags, and means it.** It uses the full XML 1.0
 `NameStartChar` production, so `<_/>`, `<:a/>` and `<À/>` all count, and it is a small lexical
@@ -270,22 +289,31 @@ half-written payload before it sees the whole one. Four rules follow, and they a
   tells this block that a message has stopped growing, so a reader who presses Render while an `svg`
   is still arriving **will** decode a partial — lexically admitted, within every cap, and their own
   deliberate choice. A partial **raster** cannot mount at all, but for a different reason: the
-  container checks demand a structurally complete file, so an unfinished one does not parse.
-- **A new payload clears an old failure.** The completed SVG arriving a moment after the partial one
-  renders normally, with no Reload press.
+  container's terminal-shape and ordering checks refuse an unfinished file, so a partial raster does
+  not parse at all.
+- **A new payload clears an old failure, and returns to the offer.** The completed SVG arriving a
+  moment after the partial one does _not_ render on its own: withdrawing approval is what clears the
+  failure, so the block goes back to **Render illustration** and waits for a fresh press. There is no
+  Reload to press — that control only exists once something has been rendered.
 - **A stale error cannot fail a live image.** The `<img>` is keyed by source generation, and the
   `error` handler carries the generation it was created for, so an event queued for bytes that have
   already been replaced is ignored rather than applied to their successor.
 - **The source panel remembers who opened it.** A panel a failure opened closes when that failure
   clears; a panel the reader opened stays open. Recovering from a transient decode error must not
   leave an unsolicited wall of markup under a picture that is now fine, and must not close a panel
-  the reader asked for.
+  the reader asked for. A panel is re-derived only when the KIND of block changes — source-only opens,
+  visual closes — because re-deriving on every byte would undo the reader's own decision.
+- **Fullscreen closes with the approval that was holding it open.** An unrendered visual has nothing
+  to enlarge, so its Fullscreen control is hidden; leaving an open overlay behind when new bytes
+  withdraw approval would remove Exit — the only dismiss affordance on touch — out from under a
+  reader standing in it.
 
-The two types stream differently, and the difference is visible: an `svg` payload is admitted by
-prefix, so the block persists and updates as it grows, while a base64 `image` payload is only
-canonical on four-character boundaries — so while a raster streams the surface alternates between an
-ordinary escaped fence and the block, and each change discards panel and fullscreen state. In neither
-case does anything decode without a press.
+The two types stream differently, and the difference is visible. An `svg` payload is admitted by
+prefix, so the block persists and updates as it grows. A raster is not: the selected container checks
+require a terminal shape and valid record ordering, so a partially-received one fails them, does not
+parse, and the fence stays an ordinary escaped code fence until the last byte arrives — the block
+appears once, rather than being
+repeatedly mounted and discarded. In neither case does a browser image decoder run without a press.
 
 ---
 
@@ -300,8 +328,10 @@ That residual is **explicitly accepted** for this independently shippable partia
 terms and no others:
 
 1. It is **bounded-input**: magic bytes must match the declared type, declared dimensions are read
-   before any decoder is handed the bytes, animation is refused, and malformed or truncated
-   containers fail closed.
+   before any decoder is handed the bytes, animation is refused, and a container that fails the
+   selected admission checks fails closed. Those checks are a signature, record ordering, a terminal
+   shape and the declared dimensions — **not** CRCs and not compressed content, which stay the
+   browser decoder's business.
 2. It is **user-triggered**: no decoder mounts without a gesture, and the gesture is priced.
 3. It is **recorded prominently**, here and in the authoring skill, rather than left implicit.
 
@@ -355,7 +385,11 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    well-formed or single root.
 6. **`<use>` is rejected outright rather than cycle-checked.** A real answer is a reference-cycle
    detector and is not worth building for a chat illustration. The probe showed the `<img>` sink
-   neutralises `<use>` anyway, so this is authoring policy, not defence.
+   neutralises `<use>` anyway, so this is authoring policy, not defence. Other same-document
+   references are unaffected: a `url(#id)` naming a `<marker>`, `<clipPath>`, gradient or pattern
+   defined inside the payload resolves normally, which is how an author draws an arrowhead. Every
+   reference OUT of the payload remains forbidden by the authoring contract, and this is scoped to the
+   measured `<img src="data:image/svg+xml,…">` sink — it says nothing about inline SVG.
 7. **The external XML entity vector is unmeasured, not passed.** Chrome did not fetch it even in the
    active positive control, so no conclusion is claimed. It is refused by the grammar regardless.
 8. **`image/avif` is not accepted.** An AVIF carries per-item `ispe` extents, and deciding which one

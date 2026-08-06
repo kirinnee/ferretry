@@ -127,14 +127,44 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
    * one and fails an image that is perfectly fine.
    */
   const [renderedSource, setRenderedSource] = useState(block.source);
+  const [renderedPresentation, setRenderedPresentation] = useState(presentation);
   const generation = useRef(0);
-  if (renderedSource !== block.source) {
+  if (renderedSource !== block.source || renderedPresentation !== presentation) {
     setRenderedSource(block.source);
     generation.current += 1;
     setFailed(false);
     // Consent is to bytes, not to a block. New bytes, new decision.
     setApproved(false);
-    setSourcePanel(panel => (panel === 'failure' ? 'closed' : panel));
+    /**
+     * AND THE OVERLAY CLOSES WITH IT, or the reader is trapped.
+     *
+     * Withdrawing approval hides the Fullscreen control, because an unrendered
+     * visual has nothing to enlarge. If the reader was already IN fullscreen on
+     * a rendered illustration when new bytes arrived, that hides the Exit button
+     * out from under them and leaves a full-viewport overlay holding one line of
+     * consent text — escapable by keyboard, and by nothing at all on touch,
+     * where Exit is the only dismiss affordance.
+     *
+     * A source-only update keeps fullscreen: it still has source to show, and
+     * its Exit control never goes away.
+     */
+    if (presentation === 'visual') setFullscreen(false);
+    if (renderedPresentation === presentation) {
+      // Same kind of block, new bytes: the panel is the READER's, except one a
+      // failure opened, which goes when the failure does.
+      setSourcePanel(panel => (panel === 'failure' ? 'closed' : panel));
+    } else {
+      /**
+       * THE KIND OF BLOCK CHANGED, so the panel is re-derived rather than
+       * inherited. A block that becomes source-only while its panel is closed —
+       * the default for a visual type — otherwise shows a note saying "the
+       * authored source is shown below" above nothing at all: no picture, no
+       * source, one sentence pointing at an empty space. Reachable when a
+       * transcript entry with a stable id is rewritten rather than appended to.
+       */
+      setRenderedPresentation(presentation);
+      setSourcePanel(presentation === 'source' ? 'opened' : 'closed');
+    }
   }
 
   const collapse = useCallback(() => setFullscreen(false), []);
@@ -142,6 +172,12 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
 
   const reload = (): void => {
     setFailed(false);
+    // The panel a FAILURE opened is scaffolding for that failure, so it goes
+    // when the failure does — by any route out of it, not only by new bytes.
+    // Clearing `failed` while leaving it open left an unsolicited wall of markup
+    // under a retried image, which is the very thing the ownership rule exists
+    // to prevent. A panel the reader opened is theirs and stays.
+    setSourcePanel(panel => (panel === 'failure' ? 'closed' : panel));
     setRevision(value => value + 1);
   };
 
@@ -175,9 +211,16 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
       src={block.type === 'image' ? `data:${block.mime};base64,${block.payload}` : svgDataUrl(block.payload)}
     />
   ) : presentation === 'visual' ? (
-    <div className="kt-fs-note" data-fy-render-consent="true" data-tone="warn">
-      This {humanType[block.type]} illustration ({payloadSize}) has not been rendered. Its size is bounded, but how much
-      work it takes to draw is not, and it was written by an assistant rather than by you.
+    /**
+     * NO TONE. This is the resting state of every illustration in every
+     * transcript, and an offer is not a warning: `warn` belongs to the declared
+     * limitation and `err` to a failure, so wearing `warn` here made all three
+     * read as the same kind of event and made "nothing has happened yet" look
+     * like something had gone wrong. One sentence, and the price is on the
+     * button rather than said twice.
+     */
+    <div className="kt-fs-note" data-fy-render-consent="true">
+      Rendering starts only when you choose and may use substantial browser resources.
     </div>
   ) : (
     <div className="kt-fs-note" data-tone="warn">
@@ -210,37 +253,55 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
 
   return (
     <div className={fullscreen ? 'kt-overlay fy-render-fullscreen' : undefined} ref={hostRef} {...modal}>
-      <figure
+      {/**
+       * THE CARD IS THE WRAPPER; THE FIGURE IS THE CONTENT.
+       *
+       * The controls are chrome, not part of the illustration, so they sit
+       * OUTSIDE the `<figure>` as its sibling. That buys both halves of what an
+       * earlier arrangement could only trade between: `figcaption` is the
+       * figure's last child (its content model allows only first or last), and
+       * DOM order now equals visual order, so a screen reader and a sighted
+       * reader meet stage, source, caption and controls in the same sequence.
+       * The `order` rules that used to reconcile the two are gone.
+       */}
+      <div
         className="kt-rich-file fy-render"
         data-fy-render-fullscreen={fullscreen ? 'true' : 'false'}
         data-fy-render-presentation={presentation}
         data-fy-render-type={block.type}
       >
-        {/* A stage holding a paragraph must not be squeezed by a long source
-            panel beside it: in two states the paragraph IS the block's whole
-            explanation, so it is the last thing that may shrink. */}
-        <div className="fy-render-stage" data-fy-render-stage={rendered ? 'image' : 'note'}>
-          {stage}
-        </div>
-        {showSource ? (
-          <div className="kt-fs-code scroll-thin" data-fy-render-source="true" id={sourcePanelId}>
-            <pre className="kt-fs-pre">
-              <code>{preview}</code>
-            </pre>
-            {truncated ? (
-              <div className="kt-fs-note">
-                Source preview truncated at {FY_RENDER_LIMITS.sourcePreviewCharacters} characters.
-              </div>
-            ) : null}
+        <figure className="fy-render-figure">
+          {/* A stage holding a paragraph must not be squeezed by a long source
+              panel beside it: in two states the paragraph IS the block's whole
+              explanation, so it is the last thing that may shrink. */}
+          <div className="fy-render-stage" data-fy-render-stage={rendered ? 'image' : 'note'}>
+            {stage}
           </div>
-        ) : null}
+          {showSource ? (
+            <div className="kt-fs-code scroll-thin" data-fy-render-source="true" id={sourcePanelId}>
+              <pre className="kt-fs-pre">
+                <code>{preview}</code>
+              </pre>
+              {truncated ? (
+                <div className="kt-fs-note">
+                  Source preview truncated at {FY_RENDER_LIMITS.sourcePreviewCharacters} characters.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <figcaption className="fy-render-caption">{block.alt}</figcaption>
+        </figure>
         <div className="kt-rich-file-actions fy-render-actions">
           {/* A STABLE LABEL with `aria-expanded`, rather than a label that also
               changes: a toggle that says its state twice invites the reader to
-              wonder which channel is authoritative. `aria-controls` ties the
-              state to the region it actually governs. */}
+              wonder which channel is authoritative.
+
+              `aria-controls` is present ONLY while the panel is. The panel is
+              unmounted when closed, so an unconditional reference points at an
+              id that is not in the document — the default state of every visual
+              block, and exactly what `aria-valid-attr-value` flags. */}
           <Button
-            aria-controls={sourcePanelId}
+            aria-controls={showSource ? sourcePanelId : undefined}
             aria-expanded={showSource}
             onClick={() => setSourcePanel(panel => (panel === 'closed' ? 'opened' : 'closed'))}
             size="sm"
@@ -249,30 +310,43 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
             <Code2 aria-hidden="true" size={14} /> Source
           </Button>
           {/* ONE SLOT, TWO JOBS. Render becomes Reload in place, so the control
-              the reader just pressed is still under the focus ring afterwards. */}
+              the reader just pressed is still under the focus ring afterwards.
+
+              The VISIBLE text stays short — a priced label could not share a row
+              at 390px and pushed every unrendered block to three stacked rows —
+              while the price moves into the accessible name. WCAG 2.5.3 holds
+              because the visible string is contained in the accessible one. */}
           {presentation === 'visual' ? (
             approved ? (
               <Button onClick={reload} size="sm" type="button">
                 <RotateCcw aria-hidden="true" size={14} /> Reload
               </Button>
             ) : (
-              <Button data-fy-render-consent-action="true" onClick={() => setApproved(true)} size="sm" type="button">
-                <ImageIcon aria-hidden="true" size={14} /> Render illustration ({humanType[block.type]}, {payloadSize})
+              <Button
+                aria-label={`Render illustration (${humanType[block.type]}, ${payloadSize})`}
+                data-fy-render-consent-action="true"
+                onClick={() => setApproved(true)}
+                size="sm"
+                type="button"
+              >
+                <ImageIcon aria-hidden="true" size={14} /> Render illustration
               </Button>
             )
           ) : null}
-          {/* The changing label carries the state, so there is no `aria-pressed`
-              to disagree with it. */}
-          <Button onClick={() => setFullscreen(value => !value)} size="sm" type="button">
-            {fullscreen ? <Minimize2 aria-hidden="true" size={14} /> : <Maximize2 aria-hidden="true" size={14} />}
-            {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          </Button>
+          {/* HIDDEN UNTIL THERE IS SOMETHING TO ENLARGE. Before consent a visual
+              block has no picture, no source and no failure, so fullscreen gave
+              a full-viewport overlay holding one line of text and 839px of empty
+              background. The same rule Reload already follows: a control that
+              cannot act is hidden, not shown. The changing label carries the
+              state, so there is no `aria-pressed` to disagree with it. */}
+          {presentation === 'source' || approved || failed ? (
+            <Button onClick={() => setFullscreen(value => !value)} size="sm" type="button">
+              {fullscreen ? <Minimize2 aria-hidden="true" size={14} /> : <Maximize2 aria-hidden="true" size={14} />}
+              {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            </Button>
+          ) : null}
         </div>
-        {/* LAST CHILD, by HTML's content model for `figure` — a `figcaption` must
-            be the first or last child. CSS `order` keeps it above the controls
-            visually, where it reads as a caption rather than as a footnote. */}
-        <figcaption className="fy-render-caption">{block.alt}</figcaption>
-      </figure>
+      </div>
     </div>
   );
 }

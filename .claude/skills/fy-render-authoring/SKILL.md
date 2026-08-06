@@ -64,17 +64,21 @@ If any of that is wrong, your block renders as a plain code fence. It will not w
 
 ## The reader has to press a button
 
-**Your illustration does not draw itself.** The block shows what it would cost and offers a
-**Render illustration** control; nothing decodes until the reader presses it. That is deliberate: the
-size of a payload is bounded, the work of drawing it is not, and you are not the person whose device
-pays for it.
+**Your illustration does not draw itself.** The block offers a **Render illustration** control, and
+**no browser image decoder mounts until the reader presses it**. Your block is still read
+automatically — the header, the base64, the container's records — so inputs that fail those admission
+checks are refused whether or not anybody presses anything. They are a signature, record ordering, a
+terminal shape and the declared size; a file can pass all of them and still be corrupt inside, which
+the browser finds out only when it decodes. What the press gates is that decode: the size of a
+payload is bounded, the work of drawing it is not, and you are not the person whose device pays.
 
 Two consequences worth designing around:
 
 - Write an `alt:` that stands on its own, because for many readers it is all there will be.
-- Approval is to the exact bytes, so every change while your message streams withdraws it. It does
-  not wait for you to finish, though: a reader who presses Render mid-stream will see whatever your
-  SVG amounted to at that moment. Nothing breaks — they can press Reload once it settles.
+- Approval is to the exact bytes, so **any** change while your message streams withdraws it and the
+  block returns to **Render illustration**. There is no Reload to press afterwards; once the stream
+  settles the reader makes a fresh choice. (A reader who presses mid-stream sees whatever your SVG
+  amounted to at that moment, and then gets the offer again when the next bytes land.)
 
 ## Limits
 
@@ -115,6 +119,12 @@ consequences worth knowing before you spend effort on markup that will be discar
 - **Do not rely on script**, including `onload` and `onclick` attributes. Under the same measurement,
   script and script event handlers did not run. Self-contained SMIL or CSS animation is a different
   capability and was not measured either way, so do not read this as "the picture cannot move".
+- **Same-document references are fine; `<use>` is not.** A `url(#id)` pointing at something defined
+  inside your own payload — a `<marker>` arrowhead, a `<clipPath>`, a gradient or pattern fill —
+  resolves normally, so you can draw arrows the ordinary way rather than hand-building polygons.
+  `<use>` stays refused (a cycle detector is not worth building for a chat illustration), and every
+  reference OUT of the payload stays forbidden. This is scoped to the measured
+  `<img src="data:image/svg+xml,…">` sink and says nothing about inline SVG.
 - **Text needs a real font stack** — `font-family="sans-serif"` or similar — because your reader's
   installed fonts are all you get.
 - Give the root an explicit `viewBox` so it scales into the block instead of being cropped.
