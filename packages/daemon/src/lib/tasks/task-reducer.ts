@@ -1,4 +1,5 @@
 import {
+  ACTOR_AUTHORITY_SPLIT_SEMANTICS,
   MAX_TASK_CLARIFICATIONS,
   MAX_TASK_DEPENDENCIES,
   MAX_TASK_FILES,
@@ -22,6 +23,7 @@ import {
   assertActorCanWriteSession,
   assertTaskPhaseTransition,
   isHumanActor,
+  canActorVerifyTaskDone,
   taskPhaseFromStatus,
   taskPhaseMovesBackward,
   taskStatusFromPhase,
@@ -207,6 +209,15 @@ interface PhaseMove {
  * The reason is persisted onto the record for **every** move. kteam only kept it for backward and
  * dropped moves and wrote `null` otherwise, so "why is this built?" was answerable from history but
  * not from the record the board actually renders — a reason accepted and then thrown away.
+ *
+ * WHO acted and WHAT authorized it are two facts, and this is where they stop being one. An earlier
+ * build folded a shared-board `mark_done` grant into the human predicate, so a granted agent's
+ * completion was journalled as `verifiedByHuman` and its research/design advance as
+ * `approvedByHuman`. Records written before that split therefore cannot distinguish a human sign-off
+ * from a granted agent's, and nothing here reclassifies them: a flag guessed after the fact is the
+ * same defect wearing a correction. Read `verifiedByTopAgent`'s ABSENCE on an old record as unknown
+ * rather than as "a human did it", and use the entry's `actor` — which was always honest — to tell
+ * the two apart.
  */
 const movePhase = (
   graph: readonly Task[],
@@ -218,9 +229,10 @@ const movePhase = (
   context: TaskMutationContext,
 ): PhaseMove => {
   const human = isHumanActor(context.actor);
+  const verifiesDone = canActorVerifyTaskDone(context.actor);
   const clearingManualBlock = current.status === 'blocked' && to === current.phase;
   if (!clearingManualBlock) {
-    assertTaskPhaseTransition(current, to, { human, reopen: options.reopen });
+    assertTaskPhaseTransition(current, to, { human, verifiesDone, reopen: options.reopen });
   }
   if (to === 'dropped') assertTaskCanDrop(graph, current.id);
   const backward = !clearingManualBlock && taskPhaseMovesBackward(current, to);
@@ -228,7 +240,20 @@ const movePhase = (
   const status = taskStatusFromPhase(to);
   const next: Task = { ...draftTask, phase: to, status, statusReason: reason };
   const approvedByHuman = !backward && (current.phase === 'research' || current.phase === 'design') && human;
-  const verifiedByHuman = current.phase === 'live' && to === 'done' && human;
+  // Completion is recorded as WHO signed it off, positively on both branches. A board grant is what
+  // let a non-human reach this move, so the record carries its own flag AND the grant it was made
+  // under — never the human flag, and never the mere absence of one, which a reader cannot tell
+  // apart from a record written before this distinction existed.
+  const completedLive = current.phase === 'live' && to === 'done';
+  const verifiedByHuman = completedLive && human;
+  const grant = human ? undefined : context.actor.markDoneAuthorization;
+  const verifiedByTopAgent = completedLive && grant !== undefined;
+  // Every attestation this code writes says so, POSITIVELY. A reader must not have to decide from a
+  // clock whether the writer drew the identity/authority distinction: the instant this reaches any
+  // one daemon is unknowable here, and an un-upgraded host goes on writing conflated records long
+  // past any date chosen in advance. Absence of this stamp is what marks a record unreliable, so a
+  // writer that never learned the distinction cannot accidentally inherit trust.
+  const attests = approvedByHuman || verifiedByHuman || verifiedByTopAgent;
   return {
     next,
     draft: {
@@ -244,6 +269,8 @@ const movePhase = (
         ...(reopeningShipped ? { reopened: true } : {}),
         ...(approvedByHuman ? { approvedByHuman: true } : {}),
         ...(verifiedByHuman ? { verifiedByHuman: true } : {}),
+        ...(verifiedByTopAgent ? { verifiedByTopAgent: true, authorization: grant } : {}),
+        ...(attests ? { attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS } : {}),
       },
     },
   };

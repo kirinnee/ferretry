@@ -101,6 +101,11 @@ const taskCases: SchemaCase[] = [
   { name: 'link field', schema: tasks.TaskLinkFieldSchema, value: 'pr' },
   { name: 'task', schema: tasks.TaskSchema, value: task },
   { name: 'authorization', schema: tasks.TaskAuthorizationProvenanceSchema, value: authorization },
+  {
+    name: 'legacy attestation',
+    schema: tasks.LegacyAttestationSchema,
+    value: { reason: 'predates-actor-authority-split', splitLandedAt: INSTANT },
+  },
   { name: 'activity type', schema: tasks.TaskActivityTypeSchema, value: 'created' },
   { name: 'activity', schema: tasks.TaskActivitySchema, value: createdActivity },
   { name: 'assignee health', schema: tasks.TaskAssigneeHealthSchema, value: 'active' },

@@ -201,6 +201,33 @@ const CreatedTaskActivitySchema = z.object({
   }),
 });
 
+/**
+ * The writer's positive declaration that it kept WHO acted apart from WHAT authorized it.
+ *
+ * Stamped on every human and top-agent attestation written by code that draws the distinction.
+ * Its absence — not its date — is what marks an attestation unreliable, because the instant a fix
+ * reaches any given daemon cannot be known when the fix is written, and old code goes on writing
+ * conflated records until its host is upgraded. Trust is therefore granted on positive evidence
+ * only, which fails closed.
+ */
+export const ACTOR_AUTHORITY_SPLIT_SEMANTICS = 'actor-authority-split';
+
+/**
+ * Attached at READ time to an attestation the daemon cannot vouch for, never stored.
+ *
+ * `approvedByHuman` and `verifiedByHuman` were once written for an agent holding a shared-board
+ * `mark_done` grant, because identity and authority were one predicate. An entry carrying no
+ * `attestationSemantics` was written by that code — whatever its clock said — so it asserts something
+ * that may not be true, and the flag alone gives a reader no way to notice. This says so on the entry
+ * itself. `splitLandedAt` orients a reader on when the defect was fixed; it is not a test anything
+ * applies. It never reclassifies: a marked entry is UNKNOWN, not "an agent".
+ */
+export const LegacyAttestationSchema = z.strictObject({
+  reason: z.literal('predates-actor-authority-split'),
+  splitLandedAt: InstantSchema,
+});
+export type LegacyAttestation = z.infer<typeof LegacyAttestationSchema>;
+
 const StatusTaskActivitySchema = z.object({
   ...TaskActivityBaseShape,
   type: z.literal('status'),
@@ -217,6 +244,9 @@ const StatusTaskActivitySchema = z.object({
     verifiedByHuman: z.literal(true).optional(),
     verifiedByTopAgent: z.literal(true).optional(),
     completionClaim: z.literal(true).optional(),
+    /** Optional because pre-split records cannot have it — that absence is exactly the signal. */
+    attestationSemantics: z.literal(ACTOR_AUTHORITY_SPLIT_SEMANTICS).optional(),
+    legacyAttestation: LegacyAttestationSchema.optional(),
     ...TaskActivityAuthorizationShape,
   }),
 });

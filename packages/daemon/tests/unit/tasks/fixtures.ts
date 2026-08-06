@@ -1,4 +1,4 @@
-import type { Task, TaskErrorCode, TaskId } from '@ferretry/protocol';
+import type { Task, TaskAuthorizationProvenance, TaskErrorCode, TaskId } from '@ferretry/protocol';
 import should from 'should';
 import { TaskError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskActor } from '../../../src/lib/tasks/task-policy.ts';
@@ -70,6 +70,24 @@ export const agent = (overrides: Partial<TaskActor> = {}): TaskActor => ({
 });
 
 export const human = (): TaskActor => ({ kind: 'human', id: 'operator', name: 'Operator', sessionId: null });
+
+/** The grant a board resolves for a top agent, exactly as the task mount hands it to the reducer. */
+export const MARK_DONE_GRANT: TaskAuthorizationProvenance = {
+  boardId: 'board-1',
+  role: 'top_agent',
+  boardEpoch: 4,
+  coordinatorEpoch: 2,
+  runtimeGeneration: 7,
+  action: 'mark_done',
+  requestId: 'click-1',
+};
+
+/** An actor as the task mount leaves it once a shared-board `mark_done` grant is resolved. */
+export const topAgent = (sessionId: string = SESSION_ID): TaskActor => ({
+  ...agent({ sessionId }),
+  boardAuthorizedForSession: sessionId,
+  markDoneAuthorization: MARK_DONE_GRANT,
+});
 
 export const context = (actor: TaskActor = agent(), at = LATER_INSTANT): TaskMutationContext => ({
   actor,

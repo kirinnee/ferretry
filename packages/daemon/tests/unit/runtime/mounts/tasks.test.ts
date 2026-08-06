@@ -1,11 +1,15 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse } from '@ferretry/protocol';
+import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse, Task } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type TaskSubsystem, taskActor, taskLive, taskRoutes } from '../../../../src/lib/runtime/mounts/tasks.ts';
-import { TASK_UNAVAILABLE_MESSAGE, TaskError } from '../../../../src/lib/tasks/index.ts';
+import {
+  ACTOR_AUTHORITY_SPLIT_LANDED_AT,
+  TASK_UNAVAILABLE_MESSAGE,
+  TaskError,
+} from '../../../../src/lib/tasks/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   AT,
@@ -30,6 +34,43 @@ const CREATE = {
   kind: 'feature',
   title: 'Wire the task boards',
   ask: { text: 'mount the boards', source: 'human' },
+} as const;
+
+/** A task as a pre-split daemon left it on disk: shipped, and attested by a flag nobody can check. */
+const legacyTask = () =>
+  ({
+    v: 1,
+    id: 'F1',
+    kind: 'feature',
+    title: 'Wire the task boards',
+    description: '',
+    ask: { text: 'mount the boards', source: 'human' },
+    clarifications: [],
+    workflow: 'quick',
+    phase: 'done',
+    dependsOn: [],
+    status: 'done',
+    statusReason: 'claimed complete',
+    assignee: null,
+    repo: null,
+    files: [],
+    links: { prs: [], branch: null, commits: [], docs: [] },
+    order: null,
+    createdAt: AT,
+    createdBy: 'peer:s1',
+    updatedAt: AT,
+  }) as Task;
+
+/** What the board authorizer resolves for a peer that really does hold `mark_done`. */
+const RESOLVED_GRANT = {
+  boardId: 'board-1',
+  grantId: 'grant-1',
+  sessionId: 's1',
+  role: 'top_agent',
+  allowedActions: ['mark_done'],
+  boardEpoch: 4,
+  coordinatorEpoch: 2,
+  runtimeGeneration: 7,
 } as const;
 
 /** The dispatcher a request is driven through, over the routes and the credentials the daemon uses. */
@@ -583,6 +624,52 @@ describe('the task board mount', () => {
       should(body.activity.map(event => event.type)).deepEqual(['created']);
     });
 
+    it('should mark an unstamped human attestation on read, however recent its timestamp', async () => {
+      // Arrange — a record an UN-UPGRADED host wrote long after this fix was authored. A cutoff
+      // date would read it as trustworthy; the missing semantics stamp is what gives it away.
+      const board = new FakeTaskBoard('s1', {
+        v: 1,
+        tasks: [
+          {
+            task: legacyTask(),
+            activity: [
+              {
+                v: 1,
+                seq: 1,
+                time: '2027-11-02T08:00:00.000Z',
+                actor: 'peer:s1',
+                actorName: null,
+                type: 'status',
+                data: {
+                  from: 'live',
+                  to: 'done',
+                  phaseFrom: 'live',
+                  phaseTo: 'done',
+                  reason: 'claimed complete',
+                  verifiedByHuman: true,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const dispatch = dispatcher({ boards: { s1: board } });
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+      const body = jsonBody(response) as unknown as ScopedTaskDetailResponse;
+
+      // Assert
+      should(response.status).equal(200);
+      const recorded = body.activity[0]?.data as Record<string, unknown>;
+      should(recorded).have.property('legacyAttestation', {
+        reason: 'predates-actor-authority-split',
+        splitLandedAt: ACTOR_AUTHORITY_SPLIT_LANDED_AT,
+      });
+      // The claim itself is left exactly as stored: marked as unreliable, never reclassified.
+      should(recorded).have.property('verifiedByHuman', true);
+    });
+
     it('should return only the history after the sequence the caller already holds', async () => {
       // Arrange
       const { dispatch } = await withTask();
@@ -734,6 +821,7 @@ describe('the task board mount', () => {
         boardActions: {
           authorize: async input => {
             calls.push(input);
+            return RESOLVED_GRANT;
           },
         },
       });
@@ -748,19 +836,33 @@ describe('the task board mount', () => {
       const missing = await dispatch.dispatch(
         post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase: 'done', reason: 'claimed complete' }, agentIn('s1')),
       );
-      const done = await dispatch.dispatch(
+      const anonymous = await dispatch.dispatch(
         post(
           '/v1/sessions/s1/tasks/F1',
           { action: 'phase', phase: 'done', reason: 'claimed complete' },
           { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability' },
         ),
       );
+      const done = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability', 'x-fy-request-id': 'click-1' },
+        ),
+      );
 
       // Assert
       should(missing.status).equal(401);
+      // A grant with no caller-supplied id would journal provenance nothing can be joined back to
+      // one decision, so the completion is refused rather than recorded against an invented key.
+      should(anonymous.status).equal(400);
+      should(jsonBody(anonymous)).have.property('code', 'missing_request_id');
       should(done.status).equal(200);
       should((jsonBody(done) as unknown as ScopedTaskView).phase).equal('done');
-      should(calls).deepEqual([{ targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' }]);
+      should(calls).deepEqual([
+        { targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' },
+        { targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' },
+      ]);
     });
 
     it('should keep a shared live completion unavailable when the board authorizer cannot mount', async () => {

@@ -1,4 +1,11 @@
-import type { Task, TaskId, TaskPhase, TaskStatus, TaskWorkflow } from '@ferretry/protocol';
+import type {
+  Task,
+  TaskAuthorizationProvenance,
+  TaskId,
+  TaskPhase,
+  TaskStatus,
+  TaskWorkflow,
+} from '@ferretry/protocol';
 import { TaskError } from './task-error.ts';
 
 export interface TaskActor {
@@ -8,8 +15,17 @@ export interface TaskActor {
   readonly sessionId: string | null;
   /** Set only after daemon-side task-board authorization for this target. */
   readonly boardAuthorizedForSession?: string;
-  /** A task-board grant explicitly authorized this live → done transition. */
-  readonly mayMarkDone?: boolean;
+  /**
+   * The grant that authorized this actor's `live → done`, as the board resolved it.
+   *
+   * The whole record, never a boolean. A flag can say a permission existed and can never say WHICH,
+   * so a completion journalled from a flag is an attestation nobody can audit against the board it
+   * came from. This carries the board, the role, the epoch triple and the caller's own request id,
+   * which is exactly the provenance the activity record persists — so the fact written down and the
+   * fact the authorizer established are the same object rather than two things that agree until
+   * they do not.
+   */
+  readonly markDoneAuthorization?: TaskAuthorizationProvenance;
 }
 
 const freezePath = (phases: readonly TaskPhase[]): readonly TaskPhase[] => Object.freeze([...phases]);
@@ -64,7 +80,23 @@ export const hasReopenContext = (ask: string, source: string): boolean =>
 export const canActorWriteSession = (actor: TaskActor, sessionId: string): boolean =>
   actor.kind !== 'agent' || actor.sessionId === sessionId || actor.boardAuthorizedForSession === sessionId;
 
-export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human' || actor.mayMarkDone === true;
+/**
+ * WHO the actor is. A board grant is authorization, never identity, so it is deliberately not read
+ * here: an agent holding `mark_done` is still an agent, and a record that called it human would be
+ * answering "did a human verify this?" with a fact nobody established.
+ */
+export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human';
+
+/**
+ * WHAT the actor may do to a live task, which is a different question from who it is.
+ *
+ * A `mark_done` grant authorizes exactly one move — `live → done` — and this is the only gate that
+ * consults it. Every other human-only gate keeps asking `isHumanActor`, so a grant can never reopen
+ * shipped work and never approve its way past research or design, whatever else has changed about
+ * the phase a request finds by the time the board applies it.
+ */
+export const canActorVerifyTaskDone = (actor: TaskActor): boolean =>
+  isHumanActor(actor) || actor.markDoneAuthorization !== undefined;
 
 /** Claims document coordination intent; another task claiming the same path never locks a write. */
 export const canAddAdvisoryFileClaim = (_graph: readonly Task[], _taskId: TaskId, _path: string): boolean => true;
@@ -109,6 +141,8 @@ export const assertTransitionReason = (reason: string | undefined): asserts reas
 
 export interface PhaseTransitionOptions {
   readonly human: boolean;
+  /** Whether this actor may sign off `live → done`: a human, or an agent holding a board grant. */
+  readonly verifiesDone: boolean;
   readonly reopen: boolean;
 }
 
@@ -137,7 +171,7 @@ export const assertTaskPhaseTransition = (task: Task, to: TaskPhase, options: Ph
     }
     return;
   }
-  if (requiresHumanLiveVerification(task, to) && !options.human) {
+  if (requiresHumanLiveVerification(task, to) && !options.verifiesDone) {
     throw new TaskError('approval-required', `${task.id} cannot move live → done without human verification`);
   }
   if (requiresHumanWorkflowApproval(task, to) && !options.human) {

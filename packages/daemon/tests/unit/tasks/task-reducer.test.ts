@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  ACTOR_AUTHORITY_SPLIT_SEMANTICS,
   MAX_TASK_CLARIFICATIONS,
   MAX_TASK_DEPENDENCIES,
   MAX_TASK_FILES,
@@ -11,10 +12,22 @@ import {
   type TaskLinks,
 } from '@ferretry/protocol';
 import should from 'should';
+import { markLegacyAttestations } from '../../../src/lib/tasks/task-attestation.ts';
 import { applyTaskAction, applyLink, createTask, requireTaskEntry } from '../../../src/lib/tasks/task-reducer.ts';
 import type { TaskEntry, TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 import { emptyTaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
-import { LATER_INSTANT, SESSION_ID, agent, context, human, shouldRefuse, snapshotOf, task } from './fixtures.ts';
+import {
+  LATER_INSTANT,
+  MARK_DONE_GRANT,
+  SESSION_ID,
+  agent,
+  context,
+  human,
+  shouldRefuse,
+  snapshotOf,
+  task,
+  topAgent,
+} from './fixtures.ts';
 
 const id = (value: string): TaskId => value as TaskId;
 
@@ -284,6 +297,66 @@ describe('applyTaskAction — status and phase', () => {
     // Assert
     should(outcome.entry.task.phase).equal('done');
     should(lastActivity(outcome.entry).data).have.property('verifiedByHuman', true);
+    should(lastActivity(outcome.entry).data).not.have.property('verifiedByTopAgent');
+    // The positive stamp is what earns this record its trust on read; a human attestation without
+    // it reads as unreliable no matter when it was written.
+    should(lastActivity(outcome.entry).data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
+    should(markLegacyAttestations([lastActivity(outcome.entry)])[0]?.data).not.have.property('legacyAttestation');
+  });
+
+  it('should record a board-granted agent as the top agent, with the grant it acted under', () => {
+    // Arrange — the actor shape the task mount produces after a `mark_done` authorization.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+
+    // Act
+    const outcome = act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, topAgent());
+
+    // Assert
+    should(outcome.entry.task.phase).equal('done');
+    const recorded = lastActivity(outcome.entry);
+    // POSITIVE on both halves: which kind of attestation, and which grant produced it. A reader
+    // never has to infer either from the absence of the other flag.
+    should(recorded.data).have.property('verifiedByTopAgent', true);
+    should(recorded.data).have.property('authorization', MARK_DONE_GRANT);
+    should(recorded.data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
+    // The whole defect: a peer completion journalled as a human verification.
+    should(recorded.data).not.have.property('verifiedByHuman');
+    should(recorded.actor).equal('wilfredo');
+  });
+
+  it('should refuse live to done to an agent whose grant did not name this session', () => {
+    // Arrange — authorized for a DIFFERENT session, so the grant proves nothing here.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+    const elsewhere = agent({ boardAuthorizedForSession: 'session-beta' });
+
+    // Act + Assert
+    shouldRefuse('approval-required', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'not mine to close' }, elsewhere),
+    );
+  });
+
+  it.each([
+    {
+      name: 'reopening shipped work',
+      seed: { phase: 'done', status: 'done' },
+      action: { action: 'reopen', reason: 'regressed', ask: 'fix it', source: 'human:cli' },
+    },
+    {
+      name: 'advancing past design',
+      seed: { workflow: 'design-first', phase: 'design', status: 'designed' },
+      action: { action: 'phase', phase: 'build', reason: 'design is settled' },
+    },
+    {
+      name: 'advancing past research',
+      seed: { workflow: 'research-first', phase: 'research', status: 'researched' },
+      action: { action: 'phase', phase: 'design', reason: 'research is done' },
+    },
+  ] as const)('should refuse $name to a mark-done grant', ({ seed, action }) => {
+    // Arrange
+    const snapshot = snapshotOf(task(seed));
+
+    // Act + Assert — the grant authorizes live → done, and that is the whole of it.
+    shouldRefuse('approval-required', () => act(snapshot, 'F1', action, topAgent()));
   });
 
   it('should require human approval to leave a design phase', () => {
@@ -305,6 +378,8 @@ describe('applyTaskAction — status and phase', () => {
 
     // Assert
     should(lastActivity(outcome.entry).data).have.property('approvedByHuman', true);
+    // The other attestation the old predicate could falsify, so it carries the stamp too.
+    should(lastActivity(outcome.entry).data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
   });
 
   it('should allow a rewind and flag it as backward', () => {

@@ -1,4 +1,5 @@
 import {
+  FY_REQUEST_ID_HEADER,
   type FleetTaskListResponse,
   type ScopedTaskDetailResponse,
   type ScopedTaskSummary,
@@ -22,6 +23,7 @@ import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from 
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  markLegacyAttestations,
   type TaskActor,
   type TaskEntry,
   TaskError,
@@ -434,7 +436,9 @@ async function detail(subsystem: TaskSubsystem, context: RouteContext): Promise<
   const board = boardFor(subsystem, sessionId);
   const read = await board.list().catch(reraise);
   const entry = await board.detail(taskId).catch(reraise);
-  const activity: readonly TaskActivity[] = entry.activity.filter(event => event.seq > after);
+  // Marked on the way OUT, so a reader of an old attestation learns from the entry that the daemon
+  // could not tell a human from a granted agent when it was written. Nothing on disk is touched.
+  const activity: readonly TaskActivity[] = markLegacyAttestations(entry.activity.filter(event => event.seq > after));
   const response: ScopedTaskDetailResponse = {
     sessionId,
     task: scopedView(
@@ -501,6 +505,25 @@ async function create(subsystem: TaskSubsystem, context: RouteContext): Promise<
   );
 }
 
+/**
+ * The caller's own id for this completion, which the authorization record is keyed by.
+ *
+ * Required, and only here. A provenance record whose request id the daemon invented would identify
+ * nothing: the point of the field is that the SAME click, retried, names the same logical decision,
+ * so an auditor can tell one completion from two. Every other actor on this route is unaffected —
+ * a human's `live → done` writes no authorization record and is asked for nothing.
+ */
+function markDoneRequestId(context: RouteContext): string {
+  const value = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+  if (value === '')
+    throw new ApiError(
+      400,
+      `marking a shared-board task done must carry ${FY_REQUEST_ID_HEADER}: the authorization record is keyed by the caller's own id for this completion`,
+      'missing_request_id',
+    );
+  return value;
+}
+
 /** Applies one action to one task. */
 async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
@@ -526,10 +549,22 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
           'task-board authorization is unavailable; refusing to mark the task done',
           'unavailable',
         );
-      await subsystem.boardActions
+      const grant = await subsystem.boardActions
         .authorize({ targetSessionId: sessionId, capability, action: 'mark_done' })
         .catch(reraiseTaskBoardError);
-      actor = { ...actor, boardAuthorizedForSession: sessionId, mayMarkDone: true };
+      actor = {
+        ...actor,
+        boardAuthorizedForSession: sessionId,
+        markDoneAuthorization: {
+          boardId: grant.boardId,
+          role: grant.role,
+          boardEpoch: grant.boardEpoch,
+          coordinatorEpoch: grant.coordinatorEpoch,
+          runtimeGeneration: grant.runtimeGeneration,
+          action: 'mark_done',
+          requestId: markDoneRequestId(context),
+        },
+      };
     }
   }
   const entry = await board.act(taskId, request, actor).catch(reraise);
