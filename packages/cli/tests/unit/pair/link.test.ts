@@ -57,14 +57,27 @@ describe('pairing link check', () => {
     should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7431', reach: 'local-only' }))).equal(PAIR_URL);
   });
 
-  it('should refuse a pairing URL that is not a v1 pairing claim at all', () => {
-    // Without the `v1` prefix the PWA treats the fragment as somebody else's and shows the cold
+  it('should accept every fragment version the daemon can mint, not just the first one', () => {
+    // THE REGRESSION THIS PINS. This reader hard-coded `#v1;`, the daemon learned to mint `#v2;`
+    // whenever it publishes a rendezvous, and `fy pair` then refused the daemon's own link — no code,
+    // no QR, no link, on the one screen that exists to hand a person all three. The fragment has two
+    // readers, the host's own screen is one of them, and only the other one was taught the second
+    // version. It now asks the package that owns the fragment instead of keeping its own list.
+    const v2 = `https://ferretry.pages.dev/pair#v2;url=${encodeURIComponent(DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)};relay=wss%3A%2F%2Frendezvous.example`;
+    should(checkedPairUrl(bent({ pairUrl: v2 }))).equal(v2);
+  });
+
+  it('should refuse a pairing URL that is not a pairing claim at all', () => {
+    // Without a version prefix the PWA treats the fragment as somebody else's and shows the cold
     // screen, so a scan would look like nothing happened rather than like a broken link.
-    should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair#v2;code=X' }))).throw(
-      'pairing URL does not carry a v1 pairing fragment',
+    should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair#v9;code=X' }))).throw(
+      'pairing URL does not carry a pairing fragment',
+    );
+    should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair#somebody-elses' }))).throw(
+      'pairing URL does not carry a pairing fragment',
     );
     should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair' }))).throw(
-      'pairing URL does not carry a v1 pairing fragment',
+      'pairing URL does not carry a pairing fragment',
     );
     should(() => checkedPairUrl(bent({ pairUrl: '/pair#v1;code=X' }))).throw(/pairing URL must be absolute/u);
     should(() => checkedPairUrl(bent({ pairUrl: 'javascript:alert(1)#v1;' }))).throw(
