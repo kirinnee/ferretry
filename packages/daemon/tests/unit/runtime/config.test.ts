@@ -27,9 +27,16 @@ describe('daemon configuration', () => {
     should(defaultDaemonConfig()).containDeep({
       host: '127.0.0.1',
       publicUrl: `http://127.0.0.1:${String(FY_DEFAULT_DAEMON_PORT)}`,
+      advertisement: {
+        kind: 'local-only',
+        url: `http://127.0.0.1:${String(FY_DEFAULT_DAEMON_PORT)}`,
+      },
       corsOrigins: ['https://ferretry.pages.dev'],
     });
-    should(parseDaemonConfig({ host: 'localhost', port: 9000 })).containDeep({ publicUrl: 'http://localhost:9000' });
+    should(parseDaemonConfig({ host: 'localhost', port: 9000 })).containDeep({
+      publicUrl: 'http://localhost:9000',
+      advertisement: { kind: 'local-only', url: 'http://localhost:9000' },
+    });
     should(parseDaemonConfig({ projectRoots: ['~/Work'] }).projectRoots).deepEqual(['~/Work']);
     should(
       parseDaemonConfig({
@@ -141,9 +148,15 @@ describe('daemon configuration', () => {
     // proxy or a tunnel they meant, and moving it would break the deployment they described.
     should(movedDerived.bindUrl).equal('http://127.0.0.1:9200');
     should(movedDerived.publicUrl).equal('http://127.0.0.1:9200');
+    should(movedDerived.advertisement).deepEqual({ kind: 'local-only', url: 'http://127.0.0.1:9200' });
     should(advertisesForeignAddress(movedDerived)).be.false();
     should(movedStated.bindUrl).equal('http://127.0.0.1:9200');
     should(movedStated.publicUrl).equal('https://box.example.test');
+    should(movedStated.advertisement).deepEqual({
+      kind: 'address',
+      url: 'https://box.example.test',
+      origin: 'operator',
+    });
     should(advertisesForeignAddress(movedStated)).be.true();
     // Settling on the port already loaded still records the claim, so the next boot cannot move.
     should(configuredAt(derived, derived.port).portIsRecorded).be.true();
@@ -170,11 +183,42 @@ describe('daemon configuration', () => {
     should(both.host).equal('0.0.0.0');
     // A derived advertisement follows the override; an operator's own one is left where they put it.
     should(portOnly.publicUrl).equal('http://127.0.0.1:9100');
+    should(portOnly.advertisement).deepEqual({ kind: 'local-only', url: 'http://127.0.0.1:9100' });
+    should(both.advertisement).deepEqual({ kind: 'none', refusal: 'wildcard-bind' });
     should(withAdvertisement.publicUrl).equal('https://box.example.test');
+    should(withAdvertisement.advertisement).deepEqual({
+      kind: 'address',
+      url: 'https://box.example.test',
+      origin: 'operator',
+    });
     // Overriding only the host keeps the document's port rather than inventing one.
     should(overriddenBy(parseDaemonConfig({ port: 8_080 }), { host: 'localhost' }).bindUrl).equal(
       'http://localhost:8080',
     );
+  });
+
+  it('should apply the same advertisement decision on load, port settlement, and run override', () => {
+    // The three daemon derivation paths used to each spell `publicUrl ?? bindUrl`, while the client
+    // had a fourth copy. A fix in only one path would work until the port moved or a flag was used.
+    const loaded = parseDaemonConfig({ host: '192.168.1.10', port: 7_431 });
+    const settled = configuredAt(parseDaemonConfig({ host: '192.168.1.10' }), 7_432);
+    const overridden = overriddenBy(parseDaemonConfig({}), { host: '192.168.1.10', port: 7_433 });
+
+    should(loaded.advertisement).deepEqual({
+      kind: 'address',
+      url: 'http://192.168.1.10:7431',
+      origin: 'derived',
+    });
+    should(settled.advertisement).deepEqual({
+      kind: 'address',
+      url: 'http://192.168.1.10:7432',
+      origin: 'derived',
+    });
+    should(overridden.advertisement).deepEqual({
+      kind: 'address',
+      url: 'http://192.168.1.10:7433',
+      origin: 'derived',
+    });
   });
 
   it('should refuse damaged or ambiguous pricing evidence before the daemon can use it', () => {

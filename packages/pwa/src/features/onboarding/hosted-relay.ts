@@ -41,6 +41,8 @@
  * implying a fallback that is more seamless than it is.
  */
 
+import { SocketEndpointSchema } from '@ferretry/relay';
+
 /** The public discovery path from `docs/relay-protocol.md` §13, joined onto the configured origin. */
 export const HOSTED_RELAY_PATH = '/v1/default-relay';
 
@@ -111,19 +113,8 @@ export const bundledRelayDirectory = (): string | undefined => {
  * is a sign the value is not what its sender thought it was.
  */
 const dialableEndpoint = (value: string): string | undefined => {
-  if (value.length > 2_048) return undefined;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return undefined;
-  }
-  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
-  const secure = url.protocol === 'https:' || url.protocol === 'wss:';
-  const insecure = url.protocol === 'http:' || url.protocol === 'ws:';
-  if (!secure && !(insecure && loopback)) return undefined;
-  if (url.search !== '' || url.hash !== '') return undefined;
-  return url.toString().replace(/\/$/u, '');
+  const parsed = SocketEndpointSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 };
 
 /**

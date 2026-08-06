@@ -28,6 +28,7 @@
  * must consume.
  */
 
+import { isLoopbackHost } from '@ferretry/protocol';
 import { z } from 'zod';
 import { parseDaemonId } from './identity.ts';
 
@@ -49,7 +50,7 @@ export const SocketEndpointSchema = z
       context.addIssue({ code: 'custom', message: 'endpoint is not a URL' });
       return z.NEVER;
     }
-    const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+    const loopback = isLoopbackHost(url.hostname);
     const secure = url.protocol === 'https:' || url.protocol === 'wss:';
     const insecure = url.protocol === 'http:' || url.protocol === 'ws:';
     if (!secure && !(insecure && loopback)) {

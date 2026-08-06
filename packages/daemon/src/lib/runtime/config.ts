@@ -1,4 +1,11 @@
-import { type DaemonCapability, daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import {
+  type Advertisement,
+  type DaemonCapability,
+  daemonAddress,
+  decideAdvertisement,
+  FY_DEFAULT_DAEMON_PORT,
+  LOOPBACK,
+} from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
@@ -7,20 +14,6 @@ import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import type { RunOverrides } from './arguments.ts';
 
 const HostSchema = z.string().trim().min(1).max(255);
-
-/**
- * Exactly the spellings that name this machine to itself.
- *
- * ONE COPY, because two surfaces answer the same question from it and used to answer it separately:
- * whether anything off this host can reach the daemon, and what to tell somebody who cannot pair.
- * Anything not in this set — a LAN address, a public one, or the `0.0.0.0` wildcard — accepts
- * connections from off the host.
- */
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
-
-export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK_HOSTS.has(host);
-}
 const PortSchema = z.number().int().min(1).max(65_535);
 const CorsOriginSchema = z
   .url()
@@ -230,7 +223,7 @@ export const CapabilityGrantsDocumentSchema = z
  */
 export const DaemonConfigDocumentSchema = z
   .object({
-    host: HostSchema.default('127.0.0.1'),
+    host: HostSchema.default(LOOPBACK),
     /**
      * The address this daemon owns. OPTIONAL, and the absence means something specific.
      *
@@ -288,8 +281,63 @@ export const DaemonConfigDocumentSchema = z
 export type DaemonConfigDocument = z.output<typeof DaemonConfigDocumentSchema>;
 
 /**
- * The document plus everything derived from it: the port to try, the two addresses, and which of
- * them the document actually recorded.
+ * Every address one host-and-port pair implies, derived in the ONE place all three paths read.
+ *
+ * THREE PATHS REACH IT — the load below, a port moved at boot, and a `--host`/`--port` override — and
+ * each used to compose the advertisement itself. Three copies of one derivation is three chances for
+ * them to disagree, and the disagreement is silent: a daemon that advertises what it does not bind,
+ * or binds what it does not advertise, serves perfectly and hands out a dead address.
+ *
+ * `WHO CAN REACH IT` IS DECIDED HERE TOO, by the protocol, and is not the same fact as `publicUrl`.
+ * The `??` this replaced welded two facts into one field — where I listen, and where I can be reached
+ * — so a default loopback install advertised the loopback address and pairing put it into a QR that,
+ * on the phone reading it, named the phone.
+ */
+function derivedAddresses(input: {
+  readonly host: string;
+  readonly port: number;
+  readonly operatorPublicUrl?: string;
+}): {
+  readonly bindUrl: string;
+  readonly advertisement: Advertisement;
+  readonly publicUrl: string;
+  readonly publicUrlIsRecorded: boolean;
+} {
+  const bindUrl = daemonAddress(input.host, input.port);
+  const advertisement = decideAdvertisement(input);
+  return {
+    bindUrl,
+    advertisement,
+    // The bind is still the ANSWER OF LAST RESORT for the surfaces that need a string no matter what —
+    // a browser origin, a CORS entry, an incumbent probe. What changed is that nothing derives an
+    // AUDIENCE from it: pairing reads `advertisement`, which says outright when there is nobody to
+    // hand this to, rather than handing out a bind instruction and hoping.
+    publicUrl: advertisement.kind === 'none' ? bindUrl : advertisement.url,
+    publicUrlIsRecorded: input.operatorPublicUrl !== undefined,
+  };
+}
+
+/** The recorded advertisement as `decideAdvertisement` wants it: absent rather than empty. */
+function operatorPublicUrl(publicUrl: string | undefined): { readonly operatorPublicUrl?: string } {
+  return publicUrl === undefined ? {} : { operatorPublicUrl: publicUrl };
+}
+
+/**
+ * The operator's own advertisement, carried through a re-derivation, or nothing when it was derived.
+ *
+ * A RECORDED `publicUrl` SURVIVES A MOVED PORT — an operator describing a proxy or a tunnel was not
+ * describing this daemon's socket — while a derived one follows the port, because a derived
+ * advertisement that stayed behind is precisely the defect this file exists to have removed. The
+ * derived `publicUrl` is dropped rather than fed back in, so a re-derivation reads the DOCUMENT's
+ * answer and never the last computation's.
+ */
+function recordedAdvertisement(config: DaemonConfig): { readonly operatorPublicUrl?: string } {
+  return operatorPublicUrl(config.publicUrlIsRecorded ? config.publicUrl : undefined);
+}
+
+/**
+ * The document plus everything derived from it: the port to try, the two addresses, who can reach the
+ * advertised one, and which of them the document actually recorded.
  *
  * `bindUrl` is what this daemon LISTENS on and is therefore what an incumbent probe must ask: a
  * responder is only this boot's problem when it holds the very socket the bind wants. Probing the
@@ -297,7 +345,11 @@ export type DaemonConfigDocument = z.output<typeof DaemonConfigDocumentSchema>;
  * program on a port it was not even going to bind.
  *
  * `publicUrl` is what this daemon is REACHED at, which is the same address unless an operator said
- * otherwise, and it is what pairing links and browser origins carry.
+ * otherwise, and it is what browser origins carry.
+ *
+ * `advertisement` is that address WITH ITS AUDIENCE, and it is what pairing reads. It is a separate
+ * field because "an address" and "an address somebody else can dial" are separate facts, and one
+ * field answering both is the defect this file was rewritten to remove.
  *
  * The two `…IsRecorded` flags exist because a value's ORIGIN changes what may be done with it, and
  * once derivation happens on every read there is otherwise no way to tell a default from a choice.
@@ -306,14 +358,11 @@ export type DaemonConfigDocument = z.output<typeof DaemonConfigDocumentSchema>;
  */
 export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(value => {
   const port = value.port ?? FY_DEFAULT_DAEMON_PORT;
-  const bindUrl = daemonAddress(value.host, port);
   return {
     ...value,
     port,
     portIsRecorded: value.port !== undefined,
-    bindUrl,
-    publicUrl: value.publicUrl ?? bindUrl,
-    publicUrlIsRecorded: value.publicUrl !== undefined,
+    ...derivedAddresses({ host: value.host, port, ...operatorPublicUrl(value.publicUrl) }),
   };
 });
 
@@ -328,19 +377,16 @@ export type DaemonConfig = z.output<typeof DaemonConfigSchema>;
  * did not take. So the port is settled first and threaded through as configuration, which is what it
  * is.
  *
- * An operator's own `publicUrl` SURVIVES the move — they were describing a proxy or a tunnel, not
- * this daemon's socket — while a derived one follows the port, because a derived advertisement that
- * stayed behind is precisely the defect this file exists to have removed.
+ * What survives the move and what follows it is `recordedAdvertisement`'s decision, made once for
+ * this path and the override path alike.
  */
 export function configuredAt(config: DaemonConfig, port: number): DaemonConfig {
   if (port === config.port) return { ...config, portIsRecorded: true };
-  const bindUrl = daemonAddress(config.host, port);
   return {
     ...config,
     port,
     portIsRecorded: true,
-    bindUrl,
-    publicUrl: config.publicUrlIsRecorded ? config.publicUrl : bindUrl,
+    ...derivedAddresses({ host: config.host, port, ...recordedAdvertisement(config) }),
   };
 }
 
@@ -387,14 +433,12 @@ export function overriddenBy(config: DaemonConfig, overrides: RunOverrides): Dae
   if (overrides.host === undefined && overrides.port === undefined) return config;
   const host = overrides.host ?? config.host;
   const port = overrides.port ?? config.port;
-  const bindUrl = daemonAddress(host, port);
   return {
     ...config,
     host,
     port,
     portIsRecorded: overrides.port !== undefined || config.portIsRecorded,
-    bindUrl,
-    publicUrl: config.publicUrlIsRecorded ? config.publicUrl : bindUrl,
+    ...derivedAddresses({ host, port, ...recordedAdvertisement(config) }),
   };
 }
 

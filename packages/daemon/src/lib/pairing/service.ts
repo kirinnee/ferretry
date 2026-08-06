@@ -1,4 +1,6 @@
 import {
+  type Advertisement,
+  type AdvertisementRefusal,
   type DaemonId,
   DaemonIdSchema,
   DaemonNameSchema,
@@ -14,6 +16,7 @@ import {
   type PairingCodeStatusResponse,
   type PairingId,
   PairingIdSchema,
+  type PairingReach,
   PairingRequestSchema,
   type PairingResponse,
   PairingResponseSchema,
@@ -164,7 +167,14 @@ interface ActivePairing {
 interface PairingServiceOptions {
   readonly daemonId: string;
   readonly daemonName: string;
-  readonly daemonUrl: string;
+  /**
+   * WHAT THIS DAEMON HANDS OUT, decided by the configuration and never by a caller.
+   *
+   * An address alone is what this used to take, and an address alone cannot say whether the device
+   * about to read it can dial it. The decision arrives already made, from one owner, so this service
+   * has nothing to derive and no way to derive it differently.
+   */
+  readonly advertisement: Advertisement;
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -185,7 +195,7 @@ const REFUSED = { kind: 'refused' } as const;
 export class PairingService {
   private readonly daemonId: DaemonId;
   private readonly daemonName: string;
-  private readonly daemonUrl: string;
+  private readonly advertisement: Advertisement;
   private readonly pairingAppUrl: string;
   private readonly capabilities: readonly string[];
   private readonly rateLimiter: PairingRateLimiter;
@@ -196,7 +206,7 @@ export class PairingService {
   constructor(private readonly options: PairingServiceOptions) {
     this.daemonId = DaemonIdSchema.parse(options.daemonId);
     this.daemonName = DaemonNameSchema.parse(options.daemonName);
-    this.daemonUrl = new URL(options.daemonUrl).toString();
+    this.advertisement = normalizedAdvertisement(options.advertisement);
     this.pairingAppUrl = new URL(options.pairingAppUrl ?? FERRETRY_PAIRING_APP_URL).toString();
     this.capabilities = [...(options.capabilities ?? ['daemon-api'])];
     this.rateLimiter = options.rateLimiter ?? new PairingRateLimiter(options.clock);
@@ -224,9 +234,33 @@ export class PairingService {
       expiresAt,
       daemonId: this.daemonId,
       daemonName: this.daemonName,
-      daemonUrl: this.daemonUrl,
-      pairUrl: pairingUrl(this.pairingAppUrl, this.daemonUrl, code, this.daemonId),
+      ...this.#link(code),
     });
+  }
+
+  /**
+   * The link half of a mint, or the reason there is none.
+   *
+   * IT TAKES NO REQUEST, AND THAT IS THE GUARD. The plausible shortcut here is to decide from the
+   * caller's own carrier — "this request arrived on loopback, so a loopback address is fine" — and it
+   * is wrong in the commonest case there is: somebody standing at the machine minting a code to scan
+   * with their phone. The minter is local and the redeemer is not. There is no request in scope to
+   * reach for, so the mistake cannot be made here.
+   */
+  #link(
+    code: PairingCode,
+  ):
+    | { readonly daemonUrl: string; readonly pairUrl: string; readonly reach: PairingReach }
+    | { readonly refusal: AdvertisementRefusal } {
+    if (this.advertisement.kind === 'none') return { refusal: this.advertisement.refusal };
+    const daemonUrl = this.advertisement.url;
+    return {
+      daemonUrl,
+      pairUrl: pairingUrl(this.pairingAppUrl, daemonUrl, code, this.daemonId),
+      // The decision's vocabulary translated into the wire's, in the one place that crosses between
+      // them: an address a different device can dial is an address any device can redeem.
+      reach: this.advertisement.kind === 'address' ? 'any-device' : 'local-only',
+    };
   }
 
   status(pairingId: PairingId): PairingCodeStatusResponse | undefined {
@@ -386,6 +420,20 @@ function instant(milliseconds: number): string {
 function pairingCodeFrom(value: unknown): string {
   if (typeof value !== 'object' || value === null || !('code' in value)) return '';
   return typeof value.code === 'string' ? value.code : '';
+}
+
+/**
+ * The advertisement with its address in canonical form.
+ *
+ * The address is normalised ONCE, here, for the reason it always was: `http://box.test` and the same
+ * address with a trailing slash are the same place, and a fragment the protocol checks against a
+ * differently-spelled copy of it fails a comparison about nothing. A refusal has no address to
+ * normalise and is carried through untouched.
+ */
+function normalizedAdvertisement(advertisement: Advertisement): Advertisement {
+  return advertisement.kind === 'none'
+    ? advertisement
+    : { ...advertisement, url: new URL(advertisement.url).toString() };
 }
 
 function pairingUrl(appUrl: string, daemonUrl: string, code: PairingCode, daemonId: DaemonId): string {

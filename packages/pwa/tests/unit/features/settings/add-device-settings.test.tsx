@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import type { PairedDevice, PairedDevicesView, PairingCodeMintResponse, PairingId } from '@ferretry/protocol';
+import type {
+  PairedDevice,
+  PairedDevicesView,
+  PairingCodeMintResponse,
+  PairingId,
+  PairingInvitationLink,
+} from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import {
@@ -21,17 +27,37 @@ const NOW = Date.parse('2026-08-03T12:01:00.000Z');
 const connection = (id = DAEMON_ID) =>
   daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceToken: `token-${id}` });
 
-const minted = (overrides: Partial<PairingCodeMintResponse> = {}): PairingCodeMintResponse => ({
+const code = {
   pairingId: PAIRING_ID,
   code: '7F3K-Q2ND',
   ttlSeconds: 120,
   expiresAt: '2026-08-03T12:02:00.000Z',
   daemonId: DAEMON_ID,
   daemonName: 'workstation',
+} as const;
+
+/** A mint whose address any device can dial, which is the only one that gets a QR. */
+const minted = (overrides: Partial<PairingInvitationLink> = {}): PairingCodeMintResponse => ({
+  ...code,
   daemonUrl: 'https://workstation.example.test',
   pairUrl: `https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=${DAEMON_ID}`,
+  reach: 'any-device',
   ...overrides,
 });
+
+/**
+ * The two mints that are NOT error cases and must still render.
+ *
+ * A loopback-bound daemon is the default install and a wildcard-bound one is serving normally. A panel
+ * tested only against the dialable case is how a QR of `127.0.0.1` reached a phone.
+ */
+const mintedLocalOnly = (): PairingCodeMintResponse =>
+  minted({
+    daemonUrl: 'http://127.0.0.1:7431',
+    pairUrl: `https://ferretry.pages.dev/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=7F3K-Q2ND;fp=${DAEMON_ID}`,
+    reach: 'local-only',
+  });
+const mintedWithoutLink = (): PairingCodeMintResponse => ({ ...code, refusal: 'wildcard-bind' });
 
 const device = (overrides: Partial<PairedDevice> = {}): PairedDevice => ({
   id: DEVICE_ID,
@@ -111,6 +137,40 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('ferretry.pages.dev/pair');
     // The QR is drawn in this tab: an SVG path, not a request to anybody.
     should(marked(renderer, 'data-qr-version')).have.length(1);
+  });
+
+  it('draws no QR for an address only this machine can dial, and says who can redeem it', () => {
+    // THE BLOCKER, IN THE BROWSER. The default daemon advertises loopback, and a QR of that address is
+    // an offer to a phone that would dial ITSELF. The link stays — the browser reading this panel is
+    // exactly the caller it works for — and what replaces the QR is the sentence saying so.
+    // Arrange, Act
+    const renderer = card({ invite: mintedLocalOnly() });
+
+    // Assert
+    should(marked(renderer, 'data-pair-qr')).be.empty();
+    should(marked(renderer, 'data-pair-offer', 'local-only')).have.length(1);
+    should(marked(renderer, 'data-pair-local-only')).have.length(1);
+    should(marked(renderer, 'data-pair-url')).have.length(1);
+    should(marked(renderer, 'data-pair-code')).have.length(1);
+    expect(text(renderer)).toContain('Only a browser on this machine can redeem this link');
+    // Never a dead end: the audience arrives with the one edit that widens it.
+    expect(text(renderer)).toContain('set publicUrl to the address other devices reach this machine at');
+  });
+
+  it('offers no link at all when the daemon has no address, and still shows the code', () => {
+    // A wildcard-bound daemon is serving normally with nothing to hand out. The code was minted and is
+    // redeemable by a browser somebody points at the machine themselves, so it stays on screen; the
+    // link and the QR do not exist to show.
+    // Arrange, Act
+    const renderer = card({ invite: mintedWithoutLink() });
+
+    // Assert
+    should(marked(renderer, 'data-pair-offer', 'refusal')).have.length(1);
+    should(marked(renderer, 'data-pair-qr')).be.empty();
+    should(marked(renderer, 'data-pair-url')).be.empty();
+    should(marked(renderer, 'data-pair-code')).have.length(1);
+    expect(text(renderer)).toContain('binds every interface');
+    expect(text(renderer)).not.toContain('ferretry.pages.dev/pair#');
   });
 
   it('counts down while the code lives and says plainly when it has run out', () => {

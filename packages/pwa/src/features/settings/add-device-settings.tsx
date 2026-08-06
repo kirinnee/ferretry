@@ -23,7 +23,15 @@
  * never restricted. A greyed button with no explanation is the dead end this product keeps removing.
  */
 
-import type { PairedDevice, PairedDevicesView, PairingCodeMintResponse } from '@ferretry/protocol';
+import {
+  localOnlyNotice,
+  type PairedDevice,
+  type PairedDevicesView,
+  type PairingCodeMintResponse,
+  type PairingMintOutcome,
+  pairingMintOutcome,
+  refusalNotice,
+} from '@ferretry/protocol';
 import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
@@ -88,6 +96,67 @@ function InviteSymbol({ pairUrl }: { readonly pairUrl: string }) {
   return (
     <div className="rounded-control border border-border bg-white p-3" data-pair-qr="">
       <QrSymbol matrix={matrix} label="Pairing code for this machine" className="h-auto w-full max-w-[240px]" />
+    </div>
+  );
+}
+
+/**
+ * WHAT THERE IS TO OFFER THE DEVICE BEING ADDED, AND WHO CAN TAKE IT.
+ *
+ * THE QR IS DRAWN FOR ONE OF THREE ANSWERS. A daemon reachable only on its own machine has a link
+ * that is perfectly good for the browser reading this panel and dead on a phone — the address means
+ * THAT PHONE once it is scanned — so the offer says so and withholds the QR rather than drawing an
+ * invitation nothing can accept. A daemon with no address to hand out has no link at all, and the
+ * code below it is still live for a browser somebody points at the machine themselves.
+ *
+ * NOTHING HERE JUDGES REACHABILITY. `reach` arrives on the wire, decided by the daemon's own
+ * configuration, because the device that will redeem the code is not the one rendering this panel.
+ * The sentences come from the protocol too, so this panel and `fy pair` say the same thing.
+ */
+function InviteOffer({ outcome }: { readonly outcome: PairingMintOutcome }) {
+  if (outcome.kind === 'refusal') {
+    const notice = refusalNotice(outcome.refusal);
+    return (
+      <div className="flex min-w-0 flex-col gap-2" data-pair-offer="refusal">
+        <p
+          role="status"
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+          data-pair-no-link=""
+        >
+          {notice.audience}
+        </p>
+        <p className="m-0 text-meta leading-base text-muted">{notice.remedy}</p>
+      </div>
+    );
+  }
+  const local = outcome.reach === 'local-only' ? localOnlyNotice(outcome.daemonUrl) : null;
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-pair-offer={outcome.reach}>
+      {local === null ? (
+        <>
+          <InviteSymbol pairUrl={outcome.pairUrl} />
+          <p className="m-0 text-meta leading-base text-muted">{PAIRING_SCAN_HINT}</p>
+          <p className="m-0 text-meta leading-base text-muted">{PAIRING_TYPE_HINT}</p>
+        </>
+      ) : (
+        <>
+          <p
+            role="status"
+            className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            data-pair-local-only=""
+          >
+            {local.audience}
+          </p>
+          <p className="m-0 text-meta leading-base text-muted">{local.remedy}</p>
+        </>
+      )}
+      {/* `select-all` and `break-all`: this is meant to be selected and retyped, on a phone. */}
+      <code
+        data-pair-url=""
+        className="block select-all break-all rounded-control border border-border bg-surface-2 px-2 py-1 font-mono text-meta text-fg"
+      >
+        {outcome.pairUrl}
+      </code>
     </div>
   );
 }
@@ -251,23 +320,15 @@ export function AddDeviceCard({
             </p>
           ) : (
             <>
-              <InviteSymbol pairUrl={invite.pairUrl} />
-              <p className="m-0 text-meta leading-base text-muted">{PAIRING_SCAN_HINT}</p>
-              {/* The code in words as well as in the link: a person reading a QR out loud reads this. */}
+              <InviteOffer outcome={pairingMintOutcome(invite)} />
+              {/* The code in words as well as in the link: a person reading a QR out loud reads this,
+                  and it is the ONLY thing left to read when there is no link to hand out. */}
               <p className="m-0 flex flex-wrap items-baseline gap-2 text-ui text-fg">
                 <span className="text-meta uppercase tracking-label text-faint">Code</span>
                 <code data-pair-code="" className="select-all font-mono text-title font-semibold tracking-widest">
                   {invite.code}
                 </code>
               </p>
-              <p className="m-0 text-meta leading-base text-muted">{PAIRING_TYPE_HINT}</p>
-              {/* `select-all` and `break-all`: this is meant to be selected and retyped, on a phone. */}
-              <code
-                data-pair-url=""
-                className="block select-all break-all rounded-control border border-border bg-surface-2 px-2 py-1 font-mono text-meta text-fg"
-              >
-                {invite.pairUrl}
-              </code>
               <p className="m-0 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
                 {PAIRING_CODE_DISCLOSURE}
               </p>

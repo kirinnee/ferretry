@@ -1469,6 +1469,7 @@ const HARNESS_INVITE: PairingCodeMintResponse = {
   daemonName: 'workstation',
   daemonUrl: 'https://workstation.example.test',
   pairUrl: HARNESS_PAIR_URL,
+  reach: 'any-device',
 };
 
 /** Two devices, one of them the browser doing the looking, so the "this device" mark is reviewable. */

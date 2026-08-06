@@ -1,4 +1,4 @@
-import type { PairingCodeMintResponse } from '@ferretry/protocol';
+import type { AdvertisementNotice, PairingCodeMintResponse } from '@ferretry/protocol';
 import { QR_INDENT, qrColumns, qrFitsTerminal } from './qr.ts';
 
 /**
@@ -76,13 +76,28 @@ export function renderRemaining(milliseconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+/**
+ * WHAT THIS SCREEN HAS TO OFFER — a QR, a link only this machine can use, or neither.
+ *
+ * ONE FIELD, NOT A LINK AND A FLAG. A QR beside a boolean saying whether to draw it is two facts that
+ * can disagree, and the disagreement is the defect: a QR was drawn for an address no other device
+ * could dial, so a phone read `http://127.0.0.1:…` and dialled ITSELF. Here the QR exists only in the
+ * case that has one, and the two cases that do not carry the sentence saying who can redeem what is
+ * left — which is the whole rule: never offer a link without saying who can redeem it.
+ */
+export type PairingOffer =
+  /** An address any device can dial. The QR is already drawn in block characters. */
+  | { readonly kind: 'qr'; readonly link: string; readonly qr: string }
+  /** An address only a browser on this machine can use. A link, deliberately no QR, and why. */
+  | { readonly kind: 'local-only'; readonly link: string; readonly notice: AdvertisementNotice }
+  /** No address to hand out at all. The code is still live; there is just nowhere to point it. */
+  | { readonly kind: 'refusal'; readonly notice: AdvertisementNotice };
+
 /** Everything the screen needs, gathered so the layout is a pure function of it. */
 export interface PairingInvitation {
   readonly mint: PairingCodeMintResponse;
-  /** The full pairing link, code and fingerprint included. */
-  readonly link: string;
-  /** The QR, already drawn in block characters. */
-  readonly qr: string;
+  /** What can be handed to the device being added, and who that device may be. */
+  readonly offer: PairingOffer;
   /** The terminal width, or nothing when it will not say. */
   readonly columns: number | undefined;
   /** How long the code has left at the moment of printing. */
@@ -125,8 +140,8 @@ export function wrapText(text: string, width: number): string[] {
  * Wrapped to the window that was just called too narrow, because a complaint about wrapping that
  * itself wraps is not a message anyone trusts.
  */
-function tooNarrow(invitation: PairingInvitation, columns: number): string {
-  const needed = qrColumns(invitation.qr) + QR_INDENT;
+function tooNarrow(invitation: PairingInvitation, qr: string, columns: number): string {
+  const needed = qrColumns(qr) + QR_INDENT;
   const notice =
     `The QR needs ${needed} columns and this window has ${columns}, so it is not drawn — a QR that ` +
     `wraps cannot be scanned. Widen the window and run \`${invitation.binaryName} pair\` again, or ` +
@@ -136,34 +151,69 @@ function tooNarrow(invitation: PairingInvitation, columns: number): string {
     .join('\n');
 }
 
-function qrBlock(invitation: PairingInvitation): string {
+function qrBlock(invitation: PairingInvitation, qr: string): string {
   const columns = invitation.columns;
-  if (columns !== undefined && !qrFitsTerminal(invitation.qr, columns)) return tooNarrow(invitation, columns);
-  return indented(invitation.qr);
+  if (columns !== undefined && !qrFitsTerminal(qr, columns)) return tooNarrow(invitation, qr, columns);
+  return indented(qr);
 }
 
-/** The whole screen, from the instruction down to the deadline. */
+/**
+ * The whole screen, from the instruction down to the deadline.
+ *
+ * THE HEADLINE IS DECIDED BY THE OFFER, not fixed. "Scan this with your phone" printed above a
+ * loopback address is the instruction that wasted the owner's evening: the screen said the one thing
+ * that could not work. Each offer says what this code can actually be used for, and the two that
+ * cannot reach a phone say so first, before the code, where somebody reading top-down will see it.
+ */
 export function renderInvitation(invitation: PairingInvitation): string {
-  const headline = "Scan this with your phone's camera — it opens Ferretry ready to pair.";
   const text = (value: string): string => wrapText(value, invitation.columns ?? value.length).join('\n');
   const detail = (value: string): string =>
     wrapText(value, Math.max(1, (invitation.columns ?? Number.POSITIVE_INFINITY) - INDENT.length))
       .map(line => `${INDENT}${line}`)
       .join('\n');
+  const offer = invitation.offer;
+  const headline =
+    offer.kind === 'qr'
+      ? "Scan this with your phone's camera — it opens Ferretry ready to pair."
+      : offer.notice.audience;
+  const body =
+    offer.kind === 'qr'
+      ? [
+          '',
+          text('Or scan this compact QR:'),
+          qrBlock(invitation, offer.qr),
+          '',
+          text('Or open this link — copy the complete line below:'),
+          offer.link,
+        ]
+      : offer.kind === 'local-only'
+        ? [
+            '',
+            text('Open this link in a browser on THIS machine — copy the complete line below:'),
+            offer.link,
+            '',
+            text(offer.notice.remedy),
+          ]
+        : ['', text(offer.notice.remedy)];
   return [
     text(headline),
     '',
     'PAIRING CODE',
     `${INDENT}${invitation.mint.code}`,
     detail(`aloud: ${spellCode(invitation.mint.code)}`),
-    '',
-    text('Or scan this compact QR:'),
-    qrBlock(invitation),
-    '',
-    text('Or open this link — copy the complete line below:'),
-    invitation.link,
+    ...body,
     text(`Expires in ${renderRemaining(invitation.remainingMs)}; the code works once.`),
   ].join('\n');
+}
+
+/**
+ * Said when `--open` was asked for and there is no link to open.
+ *
+ * The screen above already says why there is none, so this does not repeat it. What it must not do is
+ * stay silent: somebody who typed `--open` is waiting for a window.
+ */
+export function renderNoLinkToOpen(): string {
+  return 'There is no link to open — this daemon has no address to hand out, and the reason is above.';
 }
 
 /** The live line while the code is alive. */
@@ -181,9 +231,14 @@ export function renderWaiting(remainingMs: number): string {
  * is safe to print because the protocol refuses a name carrying a control or format character — an
  * escape sequence here would otherwise rewrite the operator's terminal — and it is printed in full
  * rather than truncated so nothing is hidden from whoever is deciding this pairing was expected.
+ *
+ * `daemonHost` is ABSENT when this daemon had no address to hand out. Something redeemed the code
+ * anyway — a browser somebody pointed at the machine themselves — so the ending is reported without
+ * naming an address, rather than inventing one it was never told.
  */
-export function renderPaired(deviceName: string, daemonName: string, daemonHost: string): string {
-  return `${deviceName} is paired with ${daemonName} (${daemonHost}) — it holds its own token now.`;
+export function renderPaired(deviceName: string, daemonName: string, daemonHost?: string): string {
+  const where = daemonHost === undefined ? daemonName : `${daemonName} (${daemonHost})`;
+  return `${deviceName} is paired with ${where} — it holds its own token now.`;
 }
 
 /** The other ordinary ending: nobody scanned it. */
@@ -222,14 +277,18 @@ export function renderOpenedBrowser(): string {
  * Said when it did not, which is not an error.
  *
  * A headless box, an SSH session and a locked-down desktop are all ordinary
- * places to run this. The code is untouched and the screen above still holds the
- * QR and the link, so this says what happened and points at what still works
- * rather than reporting a failure the operator has to interpret.
+ * places to run this. The code is untouched and the screen above still holds
+ * whatever this daemon had to offer, so this says what happened and points at
+ * what still works rather than reporting a failure the operator has to interpret.
+ *
+ * IT DOES NOT NAME THE QR, because there is not always one: a local-only address
+ * is shown as a link with no QR, and sending somebody to scan a code that is not
+ * on their screen is the same dead end in a new place.
  */
 export function renderBrowserRefused(binaryName: string): string {
   return (
     'Could not open a browser on this host — no display, a remote shell, or a desktop that declined. ' +
-    `The code above is untouched: scan the QR, or paste the link into any browser that can reach this machine. ` +
+    `The code above is untouched: use whatever the screen above is showing — the QR, the link, or the code itself. ` +
     `\`${binaryName} pair\` without --open prints the same screen.`
   );
 }

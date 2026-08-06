@@ -32,7 +32,7 @@ Two properties hold by construction rather than by discipline:
 ## The exchange
 
 ```
-POST /v1/pair/code            (admin scope, `pairing.use`)   → { pairingId, code, expiresAt, pairUrl, … }
+POST /v1/pair/code            (admin scope, `pairing.use`)   → { pairingId, code, expiresAt, link+reach | refusal }
 GET  /v1/pair/code/:pairingId (admin scope, `pairing.use`)   → pending | redeemed | expired
 DELETE /v1/pair/code/:pairingId (admin scope, `pairing.use`) → the code's fate, never the code
 POST /v1/pair                 (public)                        → { deviceToken, daemonId, … }
@@ -51,6 +51,24 @@ host** is ungoverned and a caller **off the host** mints while the operator leav
 facts a UI needs before it offers anything — whether this request arrived on the host, and which grant is
 the caller's own — are on `GET /v1/pair/devices` as `hostLocal` and `thisDeviceId`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
+
+### Who may redeem
+
+**Never mint a link without saying who can redeem it.** The advertisement decision has three answers,
+and the mint response carries that answer rather than making each renderer infer it again:
+
+- `reach: "any-device"` accompanies an address another device can dial. The command line and browser
+  panel show the link and draw its QR.
+- `reach: "local-only"` accompanies a loopback address. The link remains valid for a browser on this
+  machine, but neither surface draws a QR: on a phone, loopback names the phone. Both say who can use
+  the link and name the fix beside it: _set `publicUrl` to the address other devices reach this machine
+  at, e.g. `http://192.168.1.10:7431`_.
+- `refusal` replaces `daemonUrl`, `pairUrl`, and `reach` when a wildcard bind or missing port leaves no
+  address to hand out. The daemon still mints the short-lived code; the surfaces show no link and name
+  the same fix.
+
+The requester's own carrier never changes this answer. `ApiRequest.loopback` says who is **minting**,
+not who will **redeem**; the normal phone journey is minted locally and redeemed elsewhere.
 
 ### What bounds a guess
 

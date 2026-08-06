@@ -1,9 +1,11 @@
+import { localOnlyNotice, refusalNotice } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   type PairingInvitation,
   renderExpired,
   renderInvitation,
+  renderNoLinkToOpen,
   renderPaired,
   renderRemaining,
   renderUnconfirmed,
@@ -15,12 +17,12 @@ import { CODE, MINT } from './fixtures';
 
 const QR = ['▀▄█▀▄█▀▄█▀▄█▀▄█▀▄█▀▄█▀▄█', '█▄▀▄█▄▀▄█▄▀▄█▄▀▄█▄▀▄█▄▀▄'].join('\n');
 const LINK = `https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fbox.tailnet-abc.ts.net;code=${CODE};fp=fp`;
+const LOCAL_LINK = `https://ferretry.pages.dev/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=${CODE};fp=fp`;
 
 const invitation = (overrides: Partial<PairingInvitation> = {}): string =>
   renderInvitation({
     mint: MINT,
-    link: LINK,
-    qr: QR,
+    offer: { kind: 'qr', link: LINK, qr: QR },
     columns: 100,
     remainingMs: 120_000,
     binaryName: 'fy',
@@ -44,6 +46,54 @@ describe('pairing screen', () => {
     should(actual).containEql('Expires in 2:00; the code works once.');
     // The code must appear ready to be dictated as well as read.
     should(actual).containEql('  aloud: seven foxtrot three kilo · quebec two november delta');
+  });
+
+  it('should never print the scan instruction over an address a phone cannot dial', () => {
+    // THE DEFECT, AS A SCREEN. A loopback address under "scan this with your phone's camera" is the
+    // exact line that wasted the owner's evening: the phone dials ITSELF and nothing says why. The
+    // link stays — a browser on this machine redeems it perfectly — and the QR does not.
+    const actual = invitation({
+      offer: { kind: 'local-only', link: LOCAL_LINK, notice: localOnlyNotice('http://127.0.0.1:7431') },
+    });
+
+    should(actual).not.containEql("Scan this with your phone's camera");
+    should(actual).not.containEql('Or scan this compact QR:');
+    should(actual).not.containEql(QR.split('\n')[0]);
+    should(actual.split('\n')[0]).containEql('Only a browser on this machine can redeem this link');
+    should(actual).containEql('http://127.0.0.1:7431');
+    should(actual).containEql('Open this link in a browser on THIS machine');
+    should(actual).containEql(LOCAL_LINK);
+    // Never a dead end: the audience comes with the one change that widens it.
+    should(actual).containEql('set publicUrl to the address other devices reach this machine at');
+    // Everything the code needs to be used by hand is still on the screen.
+    should(actual).containEql(`  ${CODE}`);
+    should(actual).containEql('Expires in 2:00; the code works once.');
+  });
+
+  it('should offer no link at all when the daemon has no address, and still print the code', () => {
+    // A wildcard bind is a WORKING daemon with nothing to hand out. Refusing the mint would break
+    // every default install; refusing the LINK and saying so is the whole difference.
+    const actual = invitation({ offer: { kind: 'refusal', notice: refusalNotice('wildcard-bind') } });
+
+    // No link, by any spelling: not the pairing URL, not a fragment, not a QR of either.
+    should(actual).not.containEql('ferretry.pages.dev');
+    should(actual).not.containEql('#v1;');
+    should(actual).not.containEql(QR.split('\n')[0]);
+    should(actual.split('\n')[0]).containEql('binds every interface');
+    should(actual).containEql('set publicUrl to the address other devices reach this machine at');
+    should(actual).containEql(`  ${CODE}`);
+  });
+
+  it('should say so rather than silently doing nothing when --open has no link to open', () => {
+    should(renderNoLinkToOpen()).containEql('no link to open');
+  });
+
+  it('should name the daemon without an address when there was none to name', () => {
+    // The code was redeemed by a browser somebody pointed at the machine themselves. Inventing an
+    // address for the success line would report a fact this command was never told.
+    should(renderPaired('Pixel', 'workstation')).equal(
+      'Pixel is paired with workstation — it holds its own token now.',
+    );
   });
 
   it('should withhold a QR that would wrap and explain it within the same window', () => {

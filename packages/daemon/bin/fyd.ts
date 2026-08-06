@@ -3568,7 +3568,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         subsystem: new PairingService({
           daemonId: state.daemonId,
           daemonName: state.daemonName,
-          daemonUrl: config.publicUrl,
+          // The DECISION, not an address: pairing must be able to say who can redeem what it mints,
+          // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
+          // reading its QR names the phone.
+          advertisement: config.advertisement,
           clock: pairingClock,
           cryptography,
           devices: repository,

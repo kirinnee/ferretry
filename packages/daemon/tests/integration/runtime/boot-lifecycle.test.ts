@@ -14,6 +14,7 @@ import {
   LearningStatusSchema,
   NameSuggestionsSchema,
   PairingCodeMintResponseSchema,
+  pairingMintOutcome,
   PairingCodeStatusResponseSchema,
   PairingResponseSchema,
   ProposalViewSchema,
@@ -699,6 +700,17 @@ describe('daemon boot lifecycle', () => {
     });
     const mintedResponse = await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: admin });
     const minted = PairingCodeMintResponseSchema.parse(await mintedResponse.json());
+    /*
+     * THE ADVERTISEMENT, FROM A DAEMON THAT REALLY BOOTED, ON THE DEFAULT BIND.
+     *
+     * This home records `host: 127.0.0.1` — the default — so this is the exact configuration that used
+     * to answer with a QR of an address that, on the phone reading it, named the phone. The link is
+     * still minted, because a browser on this machine redeems it perfectly; what must be true is that
+     * the response SAYS who that is. The mint request above arrives on loopback and the answer must
+     * not depend on that: this asserts the daemon's configuration decided it, not the requester.
+     */
+    const invitation = pairingMintOutcome(minted);
+    if (invitation.kind !== 'invitation') throw new Error('a loopback-bound daemon still hands out its own address');
     const pairedResponse = await fetch(`${base}/v1/pair`, {
       method: 'POST',
       headers: { origin, 'content-type': 'application/json' },
@@ -733,8 +745,10 @@ describe('daemon boot lifecycle', () => {
     should(preflight.headers.get('access-control-allow-origin')).equal(origin);
     should(mintedResponse.status).equal(201);
     should(minted.ttlSeconds).equal(120);
-    should(new URL(minted.pairUrl).hash).containEql(minted.code);
-    should(new URL(minted.pairUrl).search).not.containEql(minted.code);
+    should(new URL(invitation.pairUrl).hash).containEql(minted.code);
+    should(new URL(invitation.pairUrl).search).not.containEql(minted.code);
+    should(invitation.reach).equal('local-only');
+    should(invitation.daemonUrl).equal(`${base}/`);
     should(pairedResponse.status).equal(200);
     should(pairedResponse.headers.get('access-control-allow-origin')).equal(origin);
     should(paired.daemonId).equal(minted.daemonId);

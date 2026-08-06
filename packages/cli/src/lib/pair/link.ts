@@ -1,4 +1,4 @@
-import type { PairingCodeMintResponse } from '@ferretry/protocol';
+import type { PairingInvitationLink } from '@ferretry/protocol';
 
 /**
  * The last check before a pairing link becomes a QR.
@@ -42,11 +42,11 @@ function assertPairableDaemonUrl(value: string): void {
  * The `v1` prefix is checked too: it is what tells the PWA that a fragment is a pairing claim at all,
  * and a link without it lands on the cold screen as though nobody had scanned anything.
  */
-export function checkedPairUrl(mint: PairingCodeMintResponse): string {
-  const pairUrl = absoluteHttpUrl(mint.pairUrl, 'pairing URL');
+export function checkedPairUrl(invitation: PairingInvitationLink): string {
+  const pairUrl = absoluteHttpUrl(invitation.pairUrl, 'pairing URL');
   if (!pairUrl.hash.startsWith('#v1;')) throw new Error('pairing URL does not carry a v1 pairing fragment');
-  assertPairableDaemonUrl(mint.daemonUrl);
-  return mint.pairUrl;
+  assertPairableDaemonUrl(invitation.daemonUrl);
+  return invitation.pairUrl;
 }
 
 /** The part of the daemon address a human can recognise: the host names the machine, the origin is too long to read. */

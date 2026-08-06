@@ -1,4 +1,5 @@
 export * from './address.ts';
+export * from './advertisement.ts';
 export * from './analytics.ts';
 export * from './analytics-query.ts';
 export * from './attention.ts';
