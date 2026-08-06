@@ -84,11 +84,22 @@ export function renderRemaining(milliseconds: number): string {
  * could dial, so a phone read `http://127.0.0.1:…` and dialled ITSELF. Here the QR exists only in the
  * case that has one, and the two cases that do not carry the sentence saying who can redeem what is
  * left — which is the whole rule: never offer a link without saying who can redeem it.
+ *
+ * `qr`'s `notice` IS OPTIONAL, NOT A SEPARATE KIND, because a relay candidate does not change what is
+ * drawn — a QR is still a QR — it only adds a disclosure the operator did not need when the direct
+ * address alone was redeemable. `reach: 'local-only'` describes the DIRECT address only; a
+ * `relayCandidate` beside it means ANOTHER device can still redeem this link, through the rendezvous,
+ * so the `local-only` kind below — which never draws a QR — must not be reached for that case, or the
+ * screen would say "no QR is drawn" while one sits right below it.
  */
 export type PairingOffer =
-  /** An address any device can dial. The QR is already drawn in block characters. */
-  | { readonly kind: 'qr'; readonly link: string; readonly qr: string }
-  /** An address only a browser on this machine can use. A link, deliberately no QR, and why. */
+  /**
+   * An address any device can dial, or a local-only one a relay candidate also makes redeemable
+   * elsewhere. The QR is already drawn in block characters; `notice` carries the rendezvous
+   * disclosure when a relay is what makes this reachable, and is absent otherwise.
+   */
+  | { readonly kind: 'qr'; readonly link: string; readonly qr: string; readonly notice?: AdvertisementNotice }
+  /** A direct address only a browser on this machine can use, with no relay to widen it. No QR, and why. */
   | { readonly kind: 'local-only'; readonly link: string; readonly notice: AdvertisementNotice }
   /** No address to hand out at all. The code is still live; there is just nowhere to point it. */
   | { readonly kind: 'refusal'; readonly notice: AdvertisementNotice };
@@ -179,6 +190,9 @@ export function renderInvitation(invitation: PairingInvitation): string {
   const body =
     offer.kind === 'qr'
       ? [
+          // The disclosure is a separate thought from the QR itself, and comes first: an operator
+          // who scans before reading it has already made the decision the disclosure is for.
+          ...(offer.notice === undefined ? [] : ['', text(offer.notice.audience), '', text(offer.notice.remedy)]),
           '',
           text('Or scan this compact QR:'),
           qrBlock(invitation, offer.qr),

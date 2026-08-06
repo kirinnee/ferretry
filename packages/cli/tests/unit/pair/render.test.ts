@@ -76,6 +76,44 @@ describe('pairing screen', () => {
     should(actual).containEql('\n\nExpires in');
   });
 
+  it('should draw the QR for a local-only address a relay candidate also makes redeemable elsewhere', () => {
+    // THE NARROWING THIS TASK ADDS. `reach: 'local-only'` still describes the direct address alone,
+    // but a relay candidate beside it means another device CAN redeem this link — through the
+    // rendezvous — so the QR belongs on screen, next to the disclosure the old no-QR notice never
+    // needed to make.
+    const actual = invitation({
+      offer: {
+        kind: 'qr',
+        link: LOCAL_LINK,
+        qr: QR,
+        notice: localOnlyNotice('http://127.0.0.1:7431', 'wss://relay.example'),
+      },
+    });
+
+    should(actual.split('\n')[0]).equal("Scan this with your phone's camera — it opens Ferretry ready to pair.");
+    should(actual).containEql('Or scan this compact QR:');
+    should(actual).containEql(`  ${QR.split('\n')[0]}`);
+    should(actual).containEql('Or open this link — copy the complete line below:');
+    should(actual).containEql(LOCAL_LINK);
+    // The disclosure: the rendezvous is named and what it can and cannot see.
+    should(actual).containEql('wss://relay.example');
+    should(actual).containEql('rendezvous');
+    should(actual).containEql('can never read the code or the exchange');
+    // A QR is genuinely on this screen, so nothing may say otherwise — the exact contradiction the
+    // plain local-only notice would have printed if it had been reused here unchanged.
+    should(actual).not.containEql('no QR is drawn');
+    should(actual).containEql(`  ${CODE}`);
+    should(actual).containEql('Expires in 2:00; the code works once.');
+  });
+
+  it('should draw no QR and no disclosure for a plain any-device offer', () => {
+    // The ordinary case must stay ordinary: no relay was ever named, so nothing about one appears.
+    const actual = invitation();
+
+    should(actual).not.containEql('rendezvous');
+    should(actual).not.containEql('relay');
+  });
+
   it('should offer no link at all when the daemon has no address, and still print the code', () => {
     // A wildcard bind is a WORKING daemon with nothing to hand out. Refusing the mint would break
     // every default install; refusing the LINK and saying so is the whole difference.

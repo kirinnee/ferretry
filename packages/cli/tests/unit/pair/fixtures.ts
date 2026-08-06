@@ -1,4 +1,5 @@
 import {
+  pairingLinkUrl,
   type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
   type PairingInvitationLink,
@@ -55,6 +56,35 @@ export const LOCAL_ONLY_MINT: PairingCodeMintResponse = PairingCodeMintResponseS
   daemonUrl: LOCAL_DAEMON_URL,
   pairUrl: LOCAL_PAIR_URL,
   reach: 'local-only',
+});
+
+/** The one rendezvous a local-only daemon named, so another device has somewhere to dial. */
+export const RELAY_CANDIDATE = 'wss://relay.example';
+
+/**
+ * Built through `pairingLinkUrl` rather than by hand: the schema requires the fragment to be exactly
+ * what the codec would write for this daemon, code, fingerprint and candidate, and a hand-rolled `v2`
+ * string is exactly the second opinion that codec exists to make unnecessary.
+ */
+export const RELAY_PAIR_URL = pairingLinkUrl('https://ferretry.pages.dev/pair', {
+  daemonUrl: LOCAL_DAEMON_URL,
+  code: CODE,
+  daemonId: DAEMON_ID,
+  relayCandidate: RELAY_CANDIDATE,
+});
+
+/**
+ * A daemon whose direct address is loopback — right for a browser on its own machine, dead on any
+ * other — but which also named a rendezvous, so a DIFFERENT device can still redeem this link through
+ * it. `reach: 'local-only'` still describes the direct address alone; `invitationRedeemableByAnotherDevice`
+ * is what turns the candidate into a QR.
+ */
+export const RELAY_LOCAL_ONLY_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({
+  ...minted,
+  daemonUrl: LOCAL_DAEMON_URL,
+  pairUrl: RELAY_PAIR_URL,
+  reach: 'local-only',
+  relayCandidate: RELAY_CANDIDATE,
 });
 
 /** A daemon with no address to hand out at all. The code is still live; there is nowhere to point it. */

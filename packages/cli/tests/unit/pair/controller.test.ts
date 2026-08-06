@@ -25,6 +25,9 @@ import {
   RecordingBrowserOpener,
   RecordingProgress,
   redeemed,
+  RELAY_CANDIDATE,
+  RELAY_LOCAL_ONLY_MINT,
+  RELAY_PAIR_URL,
   ScriptedPairGateway,
   StubQrEncoder,
 } from './fixtures';
@@ -221,6 +224,27 @@ describe('fy pair', () => {
     should(h.progress.events[0]).equal('start:Waiting for the code to be redeemed — 2:00 left');
     // Still the whole command: it waited, and it reported the ending.
     should(h.gateway.polled).eql([PAIRING_ID]);
+    should(h.progress.ending).containEql('Pixel is paired with workstation (127.0.0.1:7431)');
+    should(h.exit.code).be.undefined();
+  });
+
+  it('should draw the QR for a local-only address that also named a rendezvous, and disclose it', async () => {
+    // THE NARROWING THIS TASK ADDS. `reach: 'local-only'` still means the DIRECT address is dead on
+    // another device, but a named relay candidate means a different device can redeem this link
+    // anyway — through the rendezvous — so the QR belongs on screen, alongside the disclosure that a
+    // rendezvous now sees this exchange's metadata.
+    const h = harness({}, new ScriptedPairGateway([redeemed()], RELAY_LOCAL_ONLY_MINT));
+
+    await pair(h);
+
+    should(h.qr.requests).have.length(1);
+    should(h.qr.requests[0]?.value).equal(RELAY_PAIR_URL);
+    should(h.screen.text).containEql(RELAY_CANDIDATE);
+    should(h.screen.text).containEql('rendezvous');
+    // Flattened, since the notice's own word wrap is not what this test is about.
+    should(h.screen.text.replace(/\s+/gu, ' ')).containEql('metadata such as timing and sizes');
+    // The live line must call it a scan: a QR is genuinely on this screen.
+    should(h.progress.events[0]).equal('start:Waiting for the scan — 2:00 left');
     should(h.progress.ending).containEql('Pixel is paired with workstation (127.0.0.1:7431)');
     should(h.exit.code).be.undefined();
   });
