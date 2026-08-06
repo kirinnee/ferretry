@@ -166,7 +166,7 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/file',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await file(filesystem, sessions, context),
@@ -174,7 +174,7 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/changes',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await changes(filesystem, sessions, context),
@@ -182,7 +182,7 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/diff',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await diff(filesystem, sessions, context),
@@ -190,7 +190,7 @@ export function sessionFilesystemRoutes(
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await list(filesystem, sessions, context),

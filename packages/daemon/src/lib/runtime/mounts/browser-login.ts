@@ -95,7 +95,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
     {
       method: 'GET',
       path: '/v1/browser/login',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => await answer(async () => await window.status()),
@@ -103,7 +103,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
     {
       method: 'POST',
       path: '/v1/browser/login',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => await act(window, context),
@@ -113,7 +113,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       // exist, but no per-session runtime composes them into something this mount can call.
       method: 'GET',
       path: '/v1/sessions/:sessionId/browser',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => {
@@ -123,7 +123,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/browser',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => {

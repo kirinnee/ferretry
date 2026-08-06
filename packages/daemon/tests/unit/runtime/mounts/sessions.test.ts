@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { SessionListSchema, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -16,7 +17,7 @@ import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts'
  */
 
 function dispatcher(subsystem: SessionDirectorySubsystem): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(sessionRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 const FIRST = sessionView('s1', { name: 'Wire Subsystems' });

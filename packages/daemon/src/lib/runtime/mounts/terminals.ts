@@ -211,7 +211,7 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/terminals',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await list(subsystem, context),
@@ -219,7 +219,7 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/terminals',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await create(subsystem, context),
@@ -227,7 +227,7 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/terminals/:terminalId',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await detail(subsystem, context),
@@ -235,7 +235,7 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/terminals/:terminalId',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await rename(subsystem, context),
@@ -243,7 +243,7 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
     {
       method: 'DELETE',
       path: '/v1/sessions/:sessionId/terminals/:terminalId',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await close(subsystem, context),
@@ -267,7 +267,7 @@ export function terminalTicketRoutes(
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -310,7 +310,7 @@ export function terminalSocketRoutes(subsystem: TerminalSubsystem): readonly Soc
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
-      scope: 'admin',
+      minimum: 'operator',
       capability: { capability: 'terminal', axis: 'use' },
       accept: async context => {
         const sessionId = pathSessionId(context);

@@ -4,10 +4,11 @@ import type { ApiActor } from './actor.ts';
 /**
  * THE SECOND AUTHORIZATION QUESTION, asked after the first one has already been answered.
  *
- * `RouteScope` answers *which class of credential may reach this route at all*, and it is the
- * daemon's own contract. This answers something the OPERATOR decides for their machine: *and of the
- * things that credential could do, which have I agreed a caller who is NOT standing on this host may
- * do?* The two are stacked, never merged — a grant is consulted only once the scope check has passed,
+ * A route's credential minimum and privileged-arrival declaration answer who may reach it at all;
+ * they are the daemon's own contract. This answers something the OPERATOR decides for their machine:
+ * *and of the things that credential could do, which have I agreed a caller who is NOT standing on
+ * this host may do?* The layers are stacked, never merged — a grant is consulted only once both route
+ * checks have passed,
  * and it can only ever remove what the scope already allowed.
  *
  * ## THE BOUNDARY IS LOOPBACK, AND THAT IS THE WHOLE SIMPLIFICATION
@@ -93,6 +94,17 @@ export interface CapabilityGuard {
    */
   explain(demand: CapabilityDemand, refusal: GrantRefusal): string | undefined;
 }
+
+/**
+ * An explicit guard for a route table that names no capability demands.
+ *
+ * It still refuses if such a demand is added later: a table that outgrows this guard must wire the
+ * real grants decision deliberately instead of silently acquiring an authorization bypass.
+ */
+export const NO_GOVERNED_ROUTES_GUARD: CapabilityGuard = {
+  decide: () => ({ allowed: false, refusal: 'undetermined' }),
+  explain: () => undefined,
+};
 
 /**
  * The error code one refusal answers with.

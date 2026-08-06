@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import {
   DAEMON_CAPABILITIES,
@@ -24,7 +25,10 @@ import { CREDENTIALS, grantSubsystem, human } from './support.ts';
 async function mount(options: Parameters<typeof grantSubsystem>[0] = {}) {
   const subsystem = grantSubsystem(options);
   await subsystem.refresh();
-  return { subsystem, dispatcher: new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS) };
+  return {
+    subsystem,
+    dispatcher: new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
+  };
 }
 
 /** A request that arrived from somewhere other than this host — the only caller grants govern. */
@@ -177,7 +181,7 @@ describe('changing the grants over the API', () => {
     // Arrange
     const subsystem = grantSubsystem({ broken: true });
     await subsystem.refresh().catch(() => undefined);
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const answered = await dispatcher.dispatch(
@@ -197,19 +201,19 @@ describe('changing the grants over the API', () => {
 });
 
 describe('the operator password route', () => {
-  it('should set a password from the host and refuse a paired device outright', async () => {
-    // A device that could clear the password could remove its own gate, which would make the whole
-    // layer advisory. `host` scope is the host's own admin token and nothing else.
+  it('should require privileged arrival while allowing a local paired device', async () => {
+    // The owner chose a local act, not an admin-token-only act. This lets the local UI explain the
+    // requirement and keeps a remote bearer from setting or clearing the password.
     // Arrange
-    const { dispatcher, subsystem } = await mount();
+    const { subsystem } = await mount();
     const credentials = {
       ...CREDENTIALS,
       devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
     };
-    const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials);
+    const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
-    const set = await dispatcher.dispatch(
+    const remoteAdmin = await withDevices.dispatch(
       request({
         method: 'PUT',
         path: '/v1/grants/password',
@@ -218,7 +222,17 @@ describe('the operator password route', () => {
         body: JSON.stringify({ password: 'operator-secret' }),
       }),
     );
-    const byDevice = await withDevices.dispatch(
+    const passwordAfterRemoteAdmin = subsystem.hasPassword();
+    const localDevice = await withDevices.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/grants/password',
+        headers: { authorization: 'Bearer device-secret' },
+        loopback: true,
+        body: JSON.stringify({ password: 'operator-secret' }),
+      }),
+    );
+    const remoteDevice = await withDevices.dispatch(
       request({
         method: 'PUT',
         path: '/v1/grants/password',
@@ -229,10 +243,12 @@ describe('the operator password route', () => {
     );
 
     // Assert
-    should(set.status).equal(200);
-    should(jsonBody(set)).deepEqual({ passwordSet: true });
+    should(remoteAdmin.status).equal(403);
+    should(passwordAfterRemoteAdmin).be.false();
+    should(localDevice.status).equal(200);
+    should(jsonBody(localDevice)).deepEqual({ passwordSet: true });
     should(subsystem.hasPassword()).be.true();
-    should(byDevice.status).equal(403);
+    should(remoteDevice.status).equal(403);
   });
 
   it('should clear the password when none is supplied, and refuse an empty one', async () => {
@@ -247,12 +263,12 @@ describe('the operator password route', () => {
         method: 'PUT',
         path: '/v1/grants/password',
         headers: human,
-        loopback: false,
+        loopback: true,
         body: JSON.stringify({ password: '' }),
       }),
     );
     const cleared = await dispatcher.dispatch(
-      request({ method: 'PUT', path: '/v1/grants/password', headers: human, loopback: false, body: '{}' }),
+      request({ method: 'PUT', path: '/v1/grants/password', headers: human, loopback: true, body: '{}' }),
     );
 
     // Assert
@@ -284,7 +300,7 @@ describe('a failure that is not a grant refusal', () => {
       },
       setPassword: async () => undefined,
     };
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(broken)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(broken)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const unlocked = await dispatcher.dispatch(post('/v1/grants/unlock', { password: 'anything' }));
@@ -317,7 +333,7 @@ describe('the audit read', () => {
     });
     await subsystem.refresh();
     await subsystem.patch({ fleet: { use: true } }, { loopback: true, actor: 'admin-cli' });
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const answered = await dispatcher.dispatch(remote('/v1/grants/audit'));
@@ -334,7 +350,7 @@ describe('the audit read', () => {
     // audit names DEVICES, which is a different disclosure.
     // Arrange
     const { subsystem } = await mount();
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const answered = await dispatcher.dispatch(

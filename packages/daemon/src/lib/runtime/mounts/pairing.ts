@@ -137,7 +137,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/pair',
-      scope: 'public',
+      minimum: 'none',
       noStore: true,
       handle: async ({ request }) => {
         const result = await subsystem.redeem(await pairingBody(request), rateLimitKey(request));
@@ -147,7 +147,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
     {
       method: 'POST',
       path: '/v1/pair/code',
-      scope: 'admin',
+      minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ request }) => {
@@ -158,7 +158,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
     {
       method: 'GET',
       path: '/v1/pair/code/:pairingId',
-      scope: 'admin',
+      minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ params }) => {
@@ -179,7 +179,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
        */
       method: 'DELETE',
       path: '/v1/pair/code/:pairingId',
-      scope: 'admin',
+      minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ params }) => {
@@ -194,7 +194,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
     {
       method: 'GET',
       path: '/v1/pair/devices',
-      scope: 'admin',
+      minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ request, actor }) => jsonResponse(await devicesView(subsystem, request, actor)),
@@ -210,7 +210,7 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
        */
       method: 'DELETE',
       path: '/v1/pair/devices/:deviceId',
-      scope: 'admin',
+      minimum: 'operator',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ request, params, actor }) => {

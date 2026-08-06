@@ -5,7 +5,7 @@ import { ApiRouter, jsonResponse, type ApiRoute } from '../../../src/lib/api/ind
 const route = (method: string, path: string): ApiRoute => ({
   method,
   path,
-  scope: 'admin',
+  minimum: 'operator',
   handle: async () => jsonResponse({ path }),
 });
 

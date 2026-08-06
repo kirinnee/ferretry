@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { FY_REQUEST_ID_HEADER, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -18,7 +19,11 @@ import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './sup
 const REQUEST_ID = 'req-7f3c';
 
 function dispatcher(subsystem = new FakeSessionControl()): { readonly dispatch: ApiDispatcher['dispatch'] } {
-  const instance = new ApiDispatcher(new ApiRouter(sessionControlRoutes(subsystem)), CREDENTIALS);
+  const instance = new ApiDispatcher(
+    new ApiRouter(sessionControlRoutes(subsystem)),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
   return { dispatch: async apiRequest => await instance.dispatch(apiRequest) };
 }
 

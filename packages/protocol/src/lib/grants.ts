@@ -16,7 +16,7 @@
  * ## TWO AXES, NOT ONE
  *
  * The daemon already answers "who is asking" with a token class and "who may reach this route" with
- * a route scope. Neither answers the question an operator actually asks: *I trust this phone to watch
+ * a route's credential minimum and privileged-arrival declaration. Neither answers the question an operator actually asks: *I trust this phone to watch
  * my agents, but I do not trust it to reconfigure the supervisor that decides whether they may spend
  * a session.* That is a per-capability decision, and it has TWO axes rather than one.
  *
@@ -29,10 +29,10 @@
  *
  * ## A GRANT ONLY EVER NARROWS
  *
- * This is a layer ON TOP of the token class and the route scope, never a replacement for either, and
+ * This is a layer ON TOP of the token class and the route declaration, never a replacement for either, and
  * the invariant is one-directional: **a grant can only remove authority a credential already had.**
- * A device token still cannot reach an `admin` route because a grant said `use: true`; the scope
- * check runs first and a grant is never consulted to permit anything. If a grant could widen, the
+ * A device token still cannot reach an `admin-token` route because a grant said `use: true`; the
+ * route checks run first and a grant is never consulted to permit anything. If a grant could widen, the
  * whole authorization model would be decided by a JSON file an operator edits, which is precisely
  * the outcome this contract exists to make unrepresentable.
  *

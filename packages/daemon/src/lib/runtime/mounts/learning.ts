@@ -308,42 +308,42 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
     {
       method: 'GET',
       path: '/v1/learning/status',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async () => await status(subsystem),
     },
     {
       method: 'GET',
       path: '/v1/learning/config',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async () => jsonResponse(subsystem.config()),
     },
     {
       method: 'GET',
       path: '/v1/learning/proposals',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await listProposals(subsystem, context),
     },
     {
       method: 'POST',
       path: '/v1/learning/proposals/:id',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await act(subsystem, context),
     },
     {
       method: 'GET',
       path: '/v1/learning/proposals/:id/patch',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await patch(subsystem, context),
     },
     {
       method: 'POST',
       path: '/v1/learning/run',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context =>
         jsonResponse(

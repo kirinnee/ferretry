@@ -71,12 +71,18 @@ export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): r
   const publicUsage = async () => jsonResponse(document(await currentSnapshot(feed)));
   const versionedUsage = async () => jsonResponse(versionedDocument(await currentSnapshot(feed)));
   return [
-    { method: 'GET', path: '/usage', scope: 'public', noStore: true, handle: publicUsage },
-    { method: 'GET', path: '/v1/usage', scope: 'warden', noStore: true, handle: versionedUsage },
+    { method: 'GET', path: '/usage', minimum: 'none', noStore: true, handle: publicUsage },
+    {
+      method: 'GET',
+      path: '/v1/usage',
+      minimum: 'authenticated',
+      noStore: true,
+      handle: versionedUsage,
+    },
     {
       method: 'GET',
       path: '/metrics',
-      scope: 'public',
+      minimum: 'none',
       noStore: true,
       handle: async () =>
         textResponse(renderUsageMetrics(await currentSnapshot(feed), clock.now()), 200, PROMETHEUS_CONTENT_TYPE),

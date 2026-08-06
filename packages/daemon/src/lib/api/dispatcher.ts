@@ -1,4 +1,4 @@
-import { resolveApiActor } from './actor.ts';
+import { resolveApiActor, type TokenClass } from './actor.ts';
 import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
 import { type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
@@ -50,11 +50,11 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   router: ApiRouter<TRoute>,
   credentials: ApiCredentials,
   request: ApiRequest,
-  tickets?: SocketTicketRedeemer,
-  guard?: CapabilityGuard,
+  tickets: SocketTicketRedeemer | undefined,
+  guard: CapabilityGuard,
 ): RouteAuthorization<TRoute> {
   const lookup = router.lookup(request.method, request.path);
-  if (lookup.kind === 'matched' && lookup.route.scope === 'public')
+  if (lookup.kind === 'matched' && lookup.route.minimum === 'none')
     return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params } };
 
   const presented = authenticate(credentials, {
@@ -82,8 +82,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     };
 
   if (
-    (lookup.route.scope === 'host' && authentication.tokenClass !== 'admin') ||
-    (lookup.route.scope === 'admin' && authentication.tokenClass === 'warden')
+    !meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
+    (lookup.route.privilegedOnly === true && !request.loopback)
   )
     return {
       kind: 'refused',
@@ -107,8 +107,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   /**
    * The OPERATOR's answer, asked last and able only to take away.
    *
-   * The order is the substance. Authentication has already happened, the route's own scope has
-   * already been enforced, and the actor has already been derived from evidence the caller cannot
+   * The order is the substance. Authentication has already happened, the route's credential and
+   * privileged-arrival requirements have already been enforced, and the actor has already been derived from evidence the caller cannot
    * forge — so by the time a grant is consulted the request is one this daemon WOULD have served, and
    * the only thing this can do is decline it. That is the invariant, made structural: there is no
    * branch here that produces `authorized` for a request the code above refused.
@@ -120,7 +120,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
    */
   const demand = lookup.route.capability;
   if (demand !== undefined) {
-    const decision = guard?.decide(demand, {
+    const decision = guard.decide(demand, {
       // The TRANSPORT's answer, never a header's. A relayed hop terminates on this very host, so
       // anything derived from an address would read as local and hand a remote caller the machine.
       loopback: request.loopback,
@@ -132,7 +132,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
         kind: 'refused',
         response: errorResponse(
           403,
-          guard?.explain(demand, decision.refusal) ??
+          guard.explain(demand, decision.refusal) ??
             `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`,
           grantRefusalCode(decision.refusal),
         ),
@@ -145,14 +145,25 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   };
 }
 
+function meetsMinimum(tokenClass: TokenClass, minimum: ScopedRoute['minimum']): boolean {
+  switch (minimum) {
+    case 'none':
+    case 'authenticated':
+      return true;
+    case 'operator':
+      return tokenClass !== 'warden';
+    case 'admin-token':
+      return tokenClass === 'admin';
+  }
+}
+
 /** Turns a request into a response, over the shared authorization boundary above. */
 export class ApiDispatcher {
   constructor(
     private readonly router: ApiRouter,
     private readonly credentials: ApiCredentials,
-    /** The operator's per-capability decision. Absent only in tables that name no capability — a
-     *  governed route reached through a guardless dispatcher is refused, never served. */
-    private readonly guard?: CapabilityGuard,
+    /** The operator's per-capability decision, including an explicit no-governed-routes guard. */
+    private readonly guard: CapabilityGuard,
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {

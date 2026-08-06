@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -18,7 +19,7 @@ import { CREDENTIALS, EchoSecretChildRunner, human, MemorySecretDocuments, secre
 const TOKEN = 'sk-live-0123456789';
 
 function dispatcher(subsystem: SecretSubsystem): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(secretRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(secretRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 async function store(subsystem: SecretSubsystem, name: string, value: string): Promise<void> {
@@ -47,7 +48,7 @@ describe('the secret routes', () => {
     const routes = secretRoutes(secretSubsystem());
 
     // Assert — a warden supervises sessions; it has no business spending the operator's credentials.
-    should(routes.every(route => route.scope === 'admin')).be.true();
+    should(routes.every(route => route.minimum === 'operator')).be.true();
     should(routes.every(route => route.noStore === true)).be.true();
   });
 

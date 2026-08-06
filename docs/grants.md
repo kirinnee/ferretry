@@ -198,9 +198,9 @@ shutting a door is a liability.
 
 ## A grant only ever narrows
 
-The grant layer is consulted **after** authentication and **after** the route's own `RouteScope`
-check. Every branch either keeps the answer those produced or removes it. There is no input that
-turns a refused route into a served one — a device token cannot reach an `admin` route because a
+The grant layer is consulted **after** authentication and after the route's credential minimum and
+`privilegedOnly` checks. Every branch either keeps the answer those produced or removes it. There is no input that
+turns a refused route into a served one — a device token cannot reach an `admin-token` route because a
 grant says `use: true`, and no document an operator writes can make it.
 
 ## Unknown is not permitted

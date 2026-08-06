@@ -92,14 +92,14 @@ export function pinRoutes(pins: PinService): readonly ApiRoute[] {
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/pins',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await list(pins, context),
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/pins',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await apply(pins, context),
     },

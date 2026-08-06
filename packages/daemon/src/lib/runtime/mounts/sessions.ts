@@ -111,14 +111,14 @@ export function sessionRoutes(subsystem: SessionDirectorySubsystem): readonly Ap
     {
       method: 'GET',
       path: '/v1/sessions',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async () => await list(subsystem),
     },
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await read(subsystem, context),
     },

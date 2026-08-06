@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -16,7 +17,7 @@ import { agentIn, CREDENTIALS, FakeSessionSignal, human } from './support.ts';
  */
 
 function dispatcher(subsystem = new FakeSessionSignal()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionSignalRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(sessionSignalRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 function signalRequest(
@@ -231,6 +232,6 @@ describe('the session signal mount', () => {
     // Assert
     should(routes).have.length(1);
     should(routes[0]?.noStore).be.true();
-    should(routes[0]?.scope).equal('admin');
+    should(routes[0]?.minimum).equal('operator');
   });
 });

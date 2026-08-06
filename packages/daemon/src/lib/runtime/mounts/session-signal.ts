@@ -117,7 +117,7 @@ export function sessionSignalRoutes(subsystem: SessionSignalSubsystem): readonly
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/signal',
-      scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await signal(subsystem, context),
     },

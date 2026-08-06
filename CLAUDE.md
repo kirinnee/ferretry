@@ -115,7 +115,7 @@ a device token the daemon keeps only a hash of, and revocation of either. **No r
 token or a digest** — the wire projection has no field for one — and a **pairing code is a live
 credential**, so its QR is generated locally and never by an image service, never announced to a screen
 reader, never persisted, and never screenshotted for real (committed captures use a fixed fake code).
-Minting is governed by the `pairing` capability rather than by the `host` scope, because a browser is
+Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.
 
 ## Migration context

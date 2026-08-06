@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { ProjectInfoSchema, type RegisterProjectRequest } from '@ferretry/protocol';
 import should from 'should';
@@ -15,7 +16,7 @@ const PROJECT = {
 };
 
 const dispatcher = (catalogs: CatalogSubsystem): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(catalogRoutes(catalogs, sessionDirectory())), CREDENTIALS);
+  new ApiDispatcher(new ApiRouter(catalogRoutes(catalogs, sessionDirectory())), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
 describe('the project catalog mount', () => {
   it('registers an explicit folder and returns its wire record', async () => {

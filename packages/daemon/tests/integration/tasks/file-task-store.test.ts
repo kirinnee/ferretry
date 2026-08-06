@@ -8,6 +8,7 @@ import { FileTaskStore } from '../../../src/adapters/tasks/file-task-store.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/tasks/serial-executor.ts';
 import { TaskRecordService } from '../../../src/adapters/tasks/task-record-service.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
 import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { taskRoutes, type TaskSubsystem } from '../../../src/lib/runtime/mounts/tasks.ts';
@@ -91,7 +92,7 @@ const mountedOverMany = (paths: Readonly<Record<string, string>>): ApiDispatcher
     observe: async () => new Map(),
     now: () => INSTANT,
   };
-  return new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 };
 
 /** The single-board case, which is most of them. */

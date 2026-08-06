@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { PIN_SCHEMA_VERSION } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -12,7 +13,7 @@ interface Fixture {
 
 function fixture(options: { readonly instant?: string } = {}): Fixture {
   const routes = pinRoutes(pinService(['s1', 's2'], options.instant ?? AT));
-  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS);
+  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
   return { dispatch: async overrides => await dispatcher.dispatch(request(overrides)) };
 }
 

@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { FY_REQUEST_ID_HEADER, type SessionView, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -16,7 +17,7 @@ import { agentIn, CREDENTIALS, FakeSessionMigrate, human } from './support.ts';
  */
 
 function dispatcher(subsystem = new FakeSessionMigrate()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 /**
@@ -265,7 +266,7 @@ describe('the session migrate mount, replayed', () => {
   }
 
   const mounted = (subsystem: CountingMigrate) =>
-    new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(subsystem)), CREDENTIALS);
+    new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
   it('should refuse a migration that carries no request id, and destroy nothing', async () => {
     // Arrange
@@ -441,7 +442,11 @@ describe('the session migrate mount, replayed', () => {
     // A caller minting fresh request ids forever meets this wall instead of the daemon's heap.
     // Arrange: a mount that admits exactly two migrations.
     const migrator = new CountingMigrate();
-    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 2)), CREDENTIALS);
+    const subject = new ApiDispatcher(
+      new ApiRouter(sessionMigrateRoutes(migrator, 2)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-1')));
@@ -464,7 +469,11 @@ describe('the session migrate mount, replayed', () => {
     // re-destruction hazard the limit exists to prevent.
     // Arrange
     const migrator = new CountingMigrate();
-    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 1)), CREDENTIALS);
+    const subject = new ApiDispatcher(
+      new ApiRouter(sessionMigrateRoutes(migrator, 1)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
     const held = withRequestId(human, 'req-held');
 
     // Act
@@ -484,7 +493,11 @@ describe('the session migrate mount, replayed', () => {
     // A refused preflight destroyed nothing, so it holds no receipt and its slot returns to the pool.
     // Arrange: one admission, and a subsystem that refuses first and then succeeds.
     const migrator = new CountingMigrate([new SessionMigrateError('refused', 'in-flight work refuses this'), 'ok']);
-    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 1)), CREDENTIALS);
+    const subject = new ApiDispatcher(
+      new ApiRouter(sessionMigrateRoutes(migrator, 1)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     const refusedPreflight = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-blocked')));

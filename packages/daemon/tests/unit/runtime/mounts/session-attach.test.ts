@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { SessionAttachTargetSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
@@ -49,6 +50,7 @@ function fixture(attach: SessionAttachSubsystem = attachSubsystem()) {
   const dispatcher = new ApiDispatcher(
     new ApiRouter([...sessionAttachRoutes(attach, sessionDirectory([sessionView('s1')]))]),
     CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
   );
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
@@ -91,7 +93,7 @@ describe('the session attach route', () => {
     // Assert — a filesystem socket path means nothing to a remote client, and handing one over could
     // point it at a coincidentally identical path on a different machine.
     should(response.status).equal(403);
-    should(jsonBody(response)).have.property('code', 'attach_not_local');
+    should(jsonBody(response)).have.property('code', 'forbidden');
     should(attach.asked).deepEqual([]);
   });
 
