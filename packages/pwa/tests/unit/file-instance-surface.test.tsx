@@ -21,9 +21,18 @@ const other = daemonConnection({
 });
 const otherScope = daemonSessionScope(other, 'work');
 
+/**
+ * A pending `Promise` answer is how a read is held OPEN: everything about a
+ * reload that must survive it — the bytes, the mounted nodes, the scroll
+ * offset — is only observable while the reread has not settled.
+ */
+type FileAnswer = FsFile | Error | Promise<FsFile>;
+
 interface Fixture {
   changes?: FsChanges | Error;
-  files?: Record<string, FsFile | Error>;
+  files?: Record<string, FileAnswer>;
+  /** Answers to `?format=base64` — the rich preview's own bounded byte read. */
+  previews?: Record<string, FileAnswer>;
   diffs?: Record<string, string | Error>;
 }
 
@@ -34,7 +43,7 @@ const originalFetch = globalThis.fetch;
 const json = (body: unknown): Response =>
   new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
 
-const route = (url: string): Response => {
+const route = async (url: string): Promise<Response> => {
   const parsed = new URL(url);
   const path = parsed.searchParams.get('path') ?? '';
   if (parsed.pathname.endsWith('/fs/changes')) {
@@ -46,9 +55,12 @@ const route = (url: string): Response => {
     if (answer instanceof Error) throw answer;
     return new Response(answer ?? '', { headers: { 'content-type': 'text/plain' } });
   }
-  const answer = fixture.files?.[path];
+  const preview = parsed.searchParams.get('format') === 'base64';
+  const answer = await (preview ? fixture.previews?.[path] : fixture.files?.[path]);
   if (answer instanceof Error) throw answer;
-  return json(answer ?? { path, content: `contents of ${path}` });
+  return json(
+    answer ?? (preview ? { path, base64: btoa(`bytes of ${path}`) } : { path, content: `contents of ${path}` }),
+  );
 };
 
 beforeEach(() => {
@@ -57,7 +69,7 @@ beforeEach(() => {
   resetFsProbes();
   globalThis.fetch = (async (input: string | URL | Request) => {
     asked.push(String(input));
-    return route(String(input));
+    return await route(String(input));
   }) as unknown as typeof fetch;
 });
 
@@ -220,6 +232,31 @@ describe('a file instance tab body', () => {
     }
   });
 
+  it('renders a failed diff read as a failure with retry, with no diff to keep', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    fixture.diffs = { 'src/api.ts': new Error('git is not on this host') };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      await click(view.container, 'Show git diff for src/api.ts');
+      await settle();
+
+      // Nothing was ever displayed for this key, so there is no stale copy —
+      // the failure panel is the whole answer, and it can be retried.
+      expect(view.container.textContent).toContain('git is not on this host');
+      expect(view.container.textContent).not.toContain('No textual changes in this file.');
+      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+
+      fixture.diffs = { 'src/api.ts': '--- a/src/api.ts\n+++ b/src/api.ts\n@@ -1 +1 @@\n-old\n+new\n' };
+      await click(view.container, 'Retry loading the diff');
+      await settle();
+      expect(view.container.textContent).toContain('new');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('hides the diff control when the session is not a repository', async () => {
     fixture.changes = { repo: false, changes: [] };
     const view = await open(
@@ -258,7 +295,7 @@ describe('a file instance tab body', () => {
       // controls that could only re-ask a settled question.
       expect(view.container.textContent).not.toContain('bytes that must not appear');
       expect(view.container.querySelector('[aria-label="Show raw bytes for src/api.ts"]')).toBeNull();
-      expect(view.container.querySelector('[aria-label="Refresh src/api.ts"]')).toBeNull();
+      expect(view.container.querySelector('[aria-label="Reload src/api.ts"]')).toBeNull();
 
       // And it stays settled: a re-render asks the daemon nothing more.
       const settled = asked.length;
@@ -270,22 +307,232 @@ describe('a file instance tab body', () => {
     }
   });
 
-  it('re-reads the file from the session host on Refresh', async () => {
+  it('re-reads the file from the session host on Reload, and says so in words', async () => {
     fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'first read' } };
     const view = await open(
       <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
     );
     try {
       const before = asked.filter(url => url.includes('/fs/file')).length;
+      // The DoD's word, on the control itself — not only in a tooltip.
+      expect(byLabel(view.container, 'Reload src/api.ts').textContent).toContain('Reload');
 
       fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'second read' } };
-      await click(view.container, 'Refresh src/api.ts');
+      await click(view.container, 'Reload src/api.ts');
       await settle();
 
       expect(asked.filter(url => url.includes('/fs/file')).length).toBeGreaterThan(before);
       expect(view.container.textContent).toContain('second read');
+      // A settled reload leaves no stale copy behind it.
+      expect(view.container.textContent).not.toContain('the copy loaded earlier');
+      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
     } finally {
       await view.unmount();
+    }
+  });
+
+  it('keeps the loaded bytes, the mounted nodes and the reading position while a reload is in flight', async () => {
+    fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'the bytes already on screen' } };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      const pane = must(view.container.querySelector<HTMLElement>('.kt-fs-scroll'), 'the scroller');
+      const body = must(pane.firstElementChild, 'the mounted file body');
+      pane.scrollTop = 120;
+
+      let release: ((file: FsFile) => void) | null = null;
+      fixture.files = {
+        'src/api.ts': new Promise<FsFile>(resolve => {
+          release = resolve;
+        }),
+      };
+      await click(view.container, 'Reload src/api.ts');
+      await settle();
+
+      // Mid-reload: the same nodes, the same offset, and one honest notice.
+      expect(view.container.textContent).toContain('the bytes already on screen');
+      expect(pane.firstElementChild).toBe(body);
+      expect(view.container.querySelector('.kt-fs-scroll')).toBe(pane);
+      expect(pane.scrollTop).toBe(120);
+      const notice = must(view.container.querySelector('.kt-fs-stale'), 'the reload notice');
+      expect(notice.getAttribute('role')).toBe('status');
+      expect(notice.textContent).toContain('showing the copy loaded earlier');
+      expect(byLabel(view.container, 'Reload src/api.ts').getAttribute('aria-busy')).toBe('true');
+      // Never a spinner INSTEAD of the file — that is what loses the position.
+      expect(view.container.textContent).not.toContain('Loading api.ts');
+
+      await interact(async () => {
+        must(release, 'the stalled reload')({ path: 'src/api.ts', content: 'the newly fetched bytes' });
+      });
+      await settle();
+      expect(view.container.textContent).toContain('the newly fetched bytes');
+      expect(view.container.textContent).not.toContain('the bytes already on screen');
+      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+      expect(view.container.querySelector('.kt-fs-scroll')).toBe(pane);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('keeps the last loaded copy visible when the reload fails, and retries from there', async () => {
+    fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'the copy that survived' } };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      fixture.files = { 'src/api.ts': new Error('the session host went away') };
+      await click(view.container, 'Reload src/api.ts');
+      await settle();
+
+      // A failed reread is NOT a failed file: the bytes stay, the failure is said.
+      expect(view.container.textContent).toContain('the copy that survived');
+      expect(view.container.querySelector('[aria-label="Retry loading api.ts"]')).toBeNull();
+      const notice = must(view.container.querySelector('.kt-fs-stale'), 'the failed-reload notice');
+      expect(notice.getAttribute('role')).toBe('alert');
+      expect(notice.textContent).toContain('the session host went away');
+      expect(notice.textContent).toContain('This is the copy loaded earlier');
+
+      fixture.files = { 'src/api.ts': { path: 'src/api.ts', content: 'the retry that worked' } };
+      await interact(() => must(notice.querySelector('button'), 'the try-again control').click());
+      await settle();
+      expect(view.container.textContent).toContain('the retry that worked');
+      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+});
+
+describe('a file instance tab body showing a rich preview', () => {
+  const previewUrls = (): { created: string[]; revoked: string[]; restore: () => void } => {
+    const create = URL.createObjectURL;
+    const revoke = URL.revokeObjectURL;
+    const created: string[] = [];
+    const revoked: string[] = [];
+    URL.createObjectURL = (() => {
+      const url = `blob:instance/${created.length + 1}`;
+      created.push(url);
+      return url;
+    }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = ((url: string) => revoked.push(url)) as typeof URL.revokeObjectURL;
+    return {
+      created,
+      revoked,
+      restore: () => {
+        URL.createObjectURL = create;
+        URL.revokeObjectURL = revoke;
+      },
+    };
+  };
+  const previewReads = (): number => asked.filter(url => url.includes('format=base64')).length;
+
+  it('reaches the sandboxed preview through the surface, for a binary file with no text at all', async () => {
+    // A PDF arrives binary and content-free BY DESIGN. Announcing that as an
+    // empty file is how the whole preview path used to be unreachable here.
+    fixture.files = { 'docs/report.pdf': { path: 'docs/report.pdf', binary: true } };
+    fixture.previews = { 'docs/report.pdf': { path: 'docs/report.pdf', base64: 'JVBERg==' } };
+    const urls = previewUrls();
+    try {
+      const view = await open(
+        <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('docs/report.pdf')} />,
+      );
+      try {
+        const frame = must(view.container.querySelector('iframe'), 'the sandboxed preview frame');
+        expect(frame.getAttribute('sandbox')).toBe('');
+        expect(frame.getAttribute('src')).toBe('blob:instance/1');
+        expect(frame.getAttribute('src')).not.toContain(daemon.deviceToken);
+        expect(view.container.textContent).not.toContain('This file is empty');
+        expect(view.container.textContent).not.toContain('This file is binary');
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      urls.restore();
+    }
+  });
+
+  it('refetches the preview when Reload succeeds, and only then swaps the object URL', async () => {
+    fixture.files = { 'report.html': { path: 'report.html', content: '<h1>one</h1>' } };
+    fixture.previews = { 'report.html': { path: 'report.html', base64: btoa('<h1>one</h1>') } };
+    const urls = previewUrls();
+    try {
+      const view = await open(
+        <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('report.html')} />,
+      );
+      try {
+        expect(must(view.container.querySelector('iframe'), 'the first preview').getAttribute('src')).toBe(
+          'blob:instance/1',
+        );
+        const before = previewReads();
+
+        let release: ((file: FsFile) => void) | null = null;
+        fixture.files = { 'report.html': { path: 'report.html', content: '<h1>two</h1>' } };
+        fixture.previews = {
+          'report.html': new Promise<FsFile>(resolve => {
+            release = resolve;
+          }),
+        };
+        await click(view.container, 'Reload report.html');
+        await settle();
+
+        // Mid-refetch: the earlier document is still the one on screen, and the
+        // object URL it is showing has not been replaced or revoked.
+        expect(must(view.container.querySelector('iframe'), 'the retained preview').getAttribute('src')).toBe(
+          'blob:instance/1',
+        );
+        expect(urls.revoked).toEqual([]);
+        const running = must(view.container.querySelector('.kt-rich-file .kt-fs-stale'), 'the reloading notice');
+        expect(running.getAttribute('role')).toBe('status');
+        expect(running.textContent).toContain('showing the copy loaded earlier');
+
+        await interact(async () => {
+          must(release, 'the stalled preview refetch')({ path: 'report.html', base64: btoa('<h1>two</h1>') });
+        });
+        await settle();
+
+        expect(previewReads()).toBeGreaterThan(before);
+        expect(must(view.container.querySelector('iframe'), 'the reloaded preview').getAttribute('src')).toBe(
+          'blob:instance/2',
+        );
+        // Replaced only when new bytes landed — and the old one is not leaked.
+        expect(urls.revoked).toEqual(['blob:instance/1']);
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      urls.restore();
+    }
+  });
+
+  it('keeps the preview on screen and marks it stale when the refetch fails', async () => {
+    fixture.files = { 'report.html': { path: 'report.html', content: '<h1>one</h1>' } };
+    fixture.previews = { 'report.html': { path: 'report.html', base64: btoa('<h1>one</h1>') } };
+    const urls = previewUrls();
+    try {
+      const view = await open(
+        <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('report.html')} />,
+      );
+      try {
+        fixture.files = { 'report.html': { path: 'report.html', content: '<h1>two</h1>' } };
+        fixture.previews = { 'report.html': new Error('the preview read failed') };
+        await click(view.container, 'Reload report.html');
+        await settle();
+
+        // The parent's reload SUCCEEDED, so the file is new; only the preview
+        // refetch failed, and a blanked frame would be the wrong answer to that.
+        const frame = must(view.container.querySelector('iframe'), 'the retained preview');
+        expect(frame.getAttribute('src')).toBe('blob:instance/1');
+        expect(urls.revoked).toEqual([]);
+        const notice = must(view.container.querySelector('.kt-rich-file .kt-fs-stale'), 'the stale preview notice');
+        expect(notice.getAttribute('role')).toBe('alert');
+        expect(notice.textContent).toContain('the preview read failed');
+        expect(notice.textContent).toContain('This is the copy loaded earlier');
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      urls.restore();
     }
   });
 });

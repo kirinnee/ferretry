@@ -3,9 +3,13 @@
  * session on ONE paired daemon. Ported from `ui/src/components/FilesTab.tsx`.
  *
  * ONE bar carries the path and the actions. Browsing: tree toggle, breadcrumbs,
- * refresh. Viewing: back, the file's path, and its view actions. The original's
+ * Reload. Viewing: back, the file's path, and its view actions. The original's
  * standalone breadcrumb rail is gone on purpose — the crumbs ARE the bar's path
  * segment.
+ *
+ * Reload is the same contract the instance viewer honours: the labelled action
+ * re-reads from the session host, what is already on screen stays there while
+ * it runs and if it fails, and one notice says which copy is being read.
  *
  * MULTI-DAEMON. Every read is addressed to the daemon passed in, and the
  * remembered open-file tabs are keyed by `(daemonId, sessionId)`
@@ -15,7 +19,7 @@
  * loading rather than painting the previous daemon's tree.
  */
 
-import { ArrowLeft, Code2, GitCompareArrows, ListTree, RefreshCw, X } from 'lucide-react';
+import { ArrowLeft, Code2, GitCompareArrows, ListTree, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearchControl } from '../features/session-search/session-search.tsx';
 import { useInputModality } from '../hooks/use-input-modality.ts';
@@ -48,6 +52,8 @@ import {
   Loading,
   Note,
   OpenFileTabs,
+  ReloadAction,
+  StaleNotice,
   Unavailable,
 } from './files-views.tsx';
 
@@ -264,7 +270,7 @@ export const FilesTab = ({
     );
 
   // No bar either: a breadcrumb to a tree that cannot be read, a tree toggle with nothing to toggle
-  // and a Refresh that re-asks a settled question are three more controls that cannot work.
+  // and a Reload that re-asks a settled question are three more controls that cannot work.
   if (unavailable)
     return (
       <div className="kt-fs rounded-md border border-border bg-surface">
@@ -276,6 +282,15 @@ export const FilesTab = ({
   const rawActive = active?.view === 'raw';
   const diffActive = active?.view === 'diff' && active.selection === undefined;
   const treeOpen = filesTreeOpenByDefault(treePref, layout);
+  // The pane shows exactly one resource at a time, and the SAME decision the
+  // instance viewer uses — the hook's own — says whether it is the newest.
+  const shown = diffActive ? diff : active ? file : listing;
+  const shownWhat = active ? (diffActive ? 'the diff' : baseName(active.path)) : dir || 'the session root';
+  const reload = () => {
+    probe.refresh();
+    shown.reload();
+    if (!active) setTreeRefresh(nonce => nonce + 1);
+  };
 
   return (
     // `.kt-fs` owns flex:1 + min-height:0 (files.css) — the pane fills what the
@@ -370,23 +385,11 @@ export const FilesTab = ({
               <GitCompareArrows size={17} aria-hidden="true" />
             </button>
           )}
-          <button
-            type="button"
-            className="kt-fs-icon-button"
-            onClick={() => {
-              probe.refresh();
-              if (diffActive) diff.reload();
-              else if (active) file.reload();
-              else {
-                listing.reload();
-                setTreeRefresh(nonce => nonce + 1);
-              }
-            }}
-            aria-label={probe.refreshing ? 'Refreshing files' : 'Refresh files'}
-            title="Re-read the working tree"
-          >
-            <RefreshCw size={16} className={probe.refreshing ? 'animate-spin' : undefined} aria-hidden="true" />
-          </button>
+          <ReloadAction
+            what={active ? active.path : 'files'}
+            busy={shown.refreshing || probe.refreshing}
+            onReload={reload}
+          />
         </span>
       </div>
 
@@ -401,6 +404,10 @@ export const FilesTab = ({
       {!hostOwnsTabs && tabs.length > 0 && (
         <OpenFileTabs tabs={tabs} activePath={activePath} onActivate={setActivePath} onClose={closeFile} />
       )}
+
+      {/* Directly above the content it is about, and OUTSIDE the scroller: the
+          reading position is part of what a reload preserves. */}
+      <StaleNotice what={shownWhat} status={shown} onRetry={reload} />
 
       <div className="kt-fs-body">
         {treeOpen && (
@@ -420,16 +427,23 @@ export const FilesTab = ({
           />
         )}
         <div ref={paneRef} tabIndex={-1} className="kt-fs-scroll scroll-thin outline-none">
+          {/* Retained content is checked FIRST here too: the reader keeps the
+              bytes and the scroll offset while a reload runs or after it
+              fails, exactly as the instance viewer behaves. */}
           {diffActive && active ? (
-            diff.loading ? (
-              <Loading what="the diff" />
-            ) : diff.error ? (
-              <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
-            ) : parsedDiff?.binary ? (
+            parsedDiff === null ? (
+              diff.loading ? (
+                <Loading what="the diff" />
+              ) : diff.error ? (
+                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
+              ) : (
+                <Note role="status">Nothing to show.</Note>
+              )
+            ) : parsedDiff.binary ? (
               <Note tone="warn" role="status">
                 git reports this pair as binary — there is no textual diff to show.
               </Note>
-            ) : parsedDiff && diffHasBody ? (
+            ) : diffHasBody ? (
               <>
                 <DiffBody parsed={parsedDiff} />
                 {parsedDiff.truncated && (
@@ -443,11 +457,7 @@ export const FilesTab = ({
               <Note role="status">No textual changes in this file.</Note>
             )
           ) : active ? (
-            file.loading ? (
-              <Loading what={baseName(active.path)} />
-            ) : file.error ? (
-              <Failed what={baseName(active.path)} error={file.error} onRetry={file.reload} />
-            ) : file.data ? (
+            file.data ? (
               <FileBody
                 file={file.data}
                 path={active.path}
@@ -457,17 +467,17 @@ export const FilesTab = ({
                 markdown={markdown}
                 preview={{ daemon, scope, revision: file.revision }}
               />
+            ) : file.loading ? (
+              <Loading what={baseName(active.path)} />
+            ) : file.error ? (
+              <Failed what={baseName(active.path)} error={file.error} onRetry={file.reload} />
             ) : (
               <Note role="status">Nothing to show.</Note>
             )
           ) : // "Files still browse normally" is a CLAIM, so it is made only where the listing beside it
           // proves it. Stated unconditionally it contradicted the failure panel underneath it, and a
           // reader had no way to tell which of the two to believe.
-          listing.loading ? (
-            <Loading what={dir || 'the session root'} />
-          ) : listing.error ? (
-            <Failed what={dir || 'the session root'} error={listing.error} onRetry={listing.reload} />
-          ) : listing.data ? (
+          listing.data ? (
             <>
               {probe.state === 'error' && (
                 <Note tone="warn" role="status">
@@ -481,6 +491,10 @@ export const FilesTab = ({
               )}
               <BrowseList listing={listing.data} dir={dir} changes={changeMap} onEnter={setDir} onOpenFile={openFile} />
             </>
+          ) : listing.loading ? (
+            <Loading what={dir || 'the session root'} />
+          ) : listing.error ? (
+            <Failed what={dir || 'the session root'} error={listing.error} onRetry={listing.reload} />
           ) : (
             <Note role="status">Nothing to show.</Note>
           )}

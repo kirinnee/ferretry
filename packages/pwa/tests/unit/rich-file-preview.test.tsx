@@ -265,6 +265,54 @@ describe('rich preview containment', () => {
     }
   });
 
+  /**
+   * What is asserted here is the APP's decision, not a decoder's: bytes that
+   * are not a valid document still reach the same containment — SVG through an
+   * image element, PDF through the zero-permission frame — and rendering them
+   * throws nothing into React. Whether the browser then draws a broken-image
+   * glyph or a viewer error is the browser's business, and happy-dom has no
+   * honest answer for it, so nothing here claims one.
+   */
+  it('routes corrupt SVG and PDF bytes through the same containment, never into the app DOM', async () => {
+    const create = URL.createObjectURL;
+    const revoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => 'blob:preview/corrupt') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    try {
+      previewPayload = { path: 'broken.svg', base64: btoa('<svg><script>truncated') };
+      const svg = await mount(<RichFilePreview daemon={daemon} scope={scope} path="broken.svg" revision={1} />);
+      try {
+        await interact(async () => {
+          for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+        });
+        const image = must(svg.container.querySelector('img'), 'corrupt SVG preview');
+        expect(image.getAttribute('src')).toBe('blob:preview/corrupt');
+        // Never parsed as a document, so the markup inside cannot execute.
+        // (`svg` itself is not a useful probe here — the action icons are SVG.)
+        expect(svg.container.querySelector('script')).toBeNull();
+        expect(svg.container.querySelector('iframe')).toBeNull();
+      } finally {
+        await svg.unmount();
+      }
+
+      previewPayload = { path: 'broken.pdf', base64: btoa('%PDF-1.7 truncated') };
+      const pdf = await mount(<RichFilePreview daemon={daemon} scope={scope} path="broken.pdf" revision={1} />);
+      try {
+        await interact(async () => {
+          for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+        });
+        const frame = must(pdf.container.querySelector('iframe'), 'corrupt PDF frame');
+        expect(frame.getAttribute('sandbox')).toBe('');
+        expect(frame.getAttribute('src')).toBe('blob:preview/corrupt');
+      } finally {
+        await pdf.unmount();
+      }
+    } finally {
+      URL.createObjectURL = create;
+      URL.revokeObjectURL = revoke;
+    }
+  });
+
   it('renders a malformed CSV as an explicit refusal instead of an invented grid', async () => {
     previewPayload = { path: 'broken.csv', base64: btoa('name,note\nAda,"unfinished') };
     const view = await mount(<RichFilePreview daemon={daemon} scope={scope} path="broken.csv" revision={1} />);
