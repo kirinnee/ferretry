@@ -67,11 +67,19 @@ allowed_paths=(
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
 
-# git grep exits 1 for no-match and >1 for a real error (bad pattern, unreadable object). `||`
-# captures the status without tripping errexit; anything above 1 means the scan itself is broken and
-# a broken scan must never read as a clean tree.
+# FILENAMES, NUL-DELIMITED — NOT `grep -n` RECORDS.
+#
+# The previous form read ordinary `git grep -n` output and took the path as everything before the
+# first colon. Git permits a colon in a filename, so a tracked `docs/fy-render.md:evil` produced the
+# record `docs/fy-render.md:evil:1:…`, the split yielded exactly `docs/fy-render.md`, and a real
+# opener in a file nobody allowlisted passed as the allowlisted contract document. A newline in a
+# filename broke the line-oriented read the same way.
+#
+# `-l -z` emits each matching tracked filename once, NUL-terminated, so a path can contain any byte
+# except NUL and still be one complete record. It is read straight from a file with `read -r -d ''`
+# and never assigned into a variable as NUL-bearing data.
 status=0
-git grep -n -E "${opener}" >"${tmp_dir}/raw" 2>"${tmp_dir}/err" || status=$?
+git grep -l -z -E "${opener}" >"${tmp_dir}/matches" 2>"${tmp_dir}/err" || status=$?
 case "${status}" in
 0 | 1) ;;
 *)
@@ -81,8 +89,8 @@ case "${status}" in
   ;;
 esac
 
-# One `git grep -n` line is `<path>:<line>:<text>`, so the path is everything before the first colon.
-# A declared path answers only for itself: exempting a file cannot exempt a neighbour.
+# A declared path answers only for itself: exempting a file cannot exempt a neighbour, and equality
+# is over the WHOLE filename.
 is_allowed() {
   local needle="$1" allowed
   for allowed in "${allowed_paths[@]}"; do
@@ -91,17 +99,21 @@ is_allowed() {
   return 1
 }
 
-violations=''
-while IFS= read -r match || [ -n "${match}" ]; do
-  [ -z "${match}" ] && continue
-  path="${match%%:*}"
+# Violations are counted, and each is printed as it is read. Accumulating them into one variable
+# would put a newline-bearing path back into a line-shaped container.
+violations=0
+: >"${tmp_dir}/report"
+while IFS= read -r -d '' path; do
   is_allowed "${path}" && continue
-  violations+="${match}"$'\n'
-done <"${tmp_dir}/raw"
+  violations=$((violations + 1))
+  # `%q` so a path carrying a newline, a colon or a control character prints as one reviewable,
+  # copy-pasteable token instead of silently becoming two lines of output.
+  printf '  %q\n' "${path}" >>"${tmp_dir}/report"
+done <"${tmp_dir}/matches"
 
-if [ -n "${violations}" ]; then
+if [ "${violations}" -ne 0 ]; then
   echo "❌ fy-render fence openers are conversation-only and must not appear in durable files:" >&2
-  printf '%s' "${violations}" | sed '/^$/d' >&2
+  cat "${tmp_dir}/report" >&2
   cat >&2 <<'GUIDANCE'
 
 `fy-render` renders only inside an assistant's own transcript message (AssistantProse) and is inert
@@ -109,7 +121,9 @@ everywhere else in the app. It must NEVER be used in documentation, handovers, R
 files, or exported artifacts — use the document's native format and ordinary static assets instead.
 A Mermaid diagram in a document is an ordinary fenced block, never an fy-render block.
 
-The syntax is taught in exactly two places, and they are the only files that may contain the opener:
+The syntax is taught in exactly two places, and they are the only files that may contain the opener.
+The comparison is over the WHOLE filename, so a neighbour such as `docs/fy-render.md:evil` is a
+violation and not the allowlisted document:
   - docs/fy-render.md                           (the contract)
   - .claude/skills/fy-render-authoring/SKILL.md (the authoring skill)
 
@@ -120,5 +134,7 @@ GUIDANCE
   exit 1
 fi
 
-scanned="$(git ls-files | wc -l | tr -d ' ')"
+# NUL records, for the same reason the matcher uses them: a tracked filename may
+# contain a newline, and counting lines would report one such file as two.
+scanned="$(git ls-files -z | tr -cd '\0' | wc -c | tr -d ' ')"
 echo "✅ no fy-render fence openers outside their two teaching files: ${scanned} tracked files searched, opener allowed only in docs/fy-render.md and .claude/skills/fy-render-authoring/SKILL.md"

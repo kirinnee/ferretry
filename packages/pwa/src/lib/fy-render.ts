@@ -690,21 +690,40 @@ function readPng(b: Uint8Array): RasterHeader | null {
   let at = 8;
   let animated = false;
   let complete = false;
+  let headers = 0;
+  let dataRuns = 0;
+  let inData = false;
   while (at + 12 <= b.length) {
     const length = u32be(b, at);
     // Subtraction, never addition: `at + 12 + length` can wrap for a u32 length.
     if (length > b.length - at - 12) return null;
+    // A SECOND IHDR IS NOT A PNG. Reading the first and walking past a later,
+    // contradictory one lets a 1×1 decoy set the dimension bound for a file that
+    // also declares 16384×1. A chunk that must be unique is refused when repeated.
+    if (marks(b, at + 4, 'IHDR')) {
+      headers += 1;
+      if (headers > 1) return null;
+    }
     if (marks(b, at + 4, 'acTL')) animated = true;
+    // IDAT chunks are consecutive by the specification. Counting RUNS rather than
+    // chunks means a second run — image data restarting after something else —
+    // is refused, which is the conservative reading of an ambiguous container.
+    if (marks(b, at + 4, 'IDAT')) {
+      if (!inData) dataRuns += 1;
+      inData = true;
+    } else {
+      inData = false;
+    }
     if (marks(b, at + 4, 'IEND')) {
-      // IEND is empty and terminal. A non-zero length, or anything after it, is
-      // a container this parser has not actually understood.
-      complete = length === 0 && at + 12 === b.length;
+      // IEND is empty and terminal, and a PNG with no image data at all is a
+      // shell rather than an image: a signature, a header and an end marker.
+      complete = length === 0 && at + 12 === b.length && dataRuns === 1;
       break;
     }
     at += 12 + length;
   }
-  // A truncated or trailing-byte PNG is refused rather than trusted for its
-  // header alone.
+  // A truncated, trailing-byte, dataless or self-contradicting PNG is refused
+  // rather than trusted for its header alone.
   if (!complete) return null;
   return { mime: 'image/png', width: u32be(b, 16), height: u32be(b, 20), animated };
 }

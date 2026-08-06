@@ -48,8 +48,31 @@ const be32 = (value: number): readonly number[] => [
 ];
 const chars = (text: string): readonly number[] => [...text].map(character => character.charCodeAt(0));
 
-/** A complete PNG: signature, a 13-byte IHDR, optional extra chunks, IEND. */
-const png = (width: number, height: number, extra: readonly number[] = []): Uint8Array =>
+/** One `IDAT`. Its bytes are never decompressed here — only its presence and run are read. */
+const IDAT: readonly number[] = [...be32(2), ...chars('IDAT'), 0x78, 0x01, 0, 0, 0, 0];
+/** A second `IHDR`, which no real PNG carries: the dimension decoy. */
+const secondIhdr = (width: number, height: number): readonly number[] => [
+  ...be32(13),
+  ...chars('IHDR'),
+  ...be32(width),
+  ...be32(height),
+  8,
+  6,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+];
+
+/**
+ * A complete PNG: signature, a 13-byte IHDR, optional extra chunks, one IDAT,
+ * and a zero-length terminal IEND. `data: false` omits the IDAT, which is the
+ * header-and-end shell the parser must now refuse.
+ */
+const png = (width: number, height: number, extra: readonly number[] = [], data = true): Uint8Array =>
   bytes(
     0x89,
     ...chars('PNG\r\n\x1a\n'),
@@ -67,6 +90,7 @@ const png = (width: number, height: number, extra: readonly number[] = []): Uint
     0,
     0,
     ...extra,
+    ...(data ? IDAT : []),
     ...be32(0),
     ...chars('IEND'),
     0,
@@ -774,6 +798,63 @@ describe('fy-render raster header bounds', () => {
     );
     should(reasonOf(image('image/gif', bytes(...gif(64, 48), 0, 0)))).equal('Image payload header could not be read');
     should(reasonOf(image('image/webp', bytes(...webp(64, 48), 0)))).equal('Image payload header could not be read');
+  });
+
+  test('should refuse a PNG carrying a second, contradictory IHDR', () => {
+    // Arrange — a 1×1 first header and a 16384×1 second one. Reading the first
+    // and walking past the second lets the decoy set the bound; no real PNG
+    // carries two.
+    const decoy = png(1, 1, secondIhdr(16384, 1));
+
+    // Assert
+    should(reasonOf(image('image/png', decoy))).equal('Image payload header could not be read');
+    // …and the oversized one alone is still refused on its dimensions, so the
+    // case above cannot be passing for the wrong reason.
+    should(reasonOf(image('image/png', png(16384, 1)))).equal('Image exceeds 8192 pixels on an axis');
+  });
+
+  test('should refuse a PNG that carries no image data at all', () => {
+    // Arrange — signature, header, terminal IEND. Structurally shaped like a
+    // PNG and containing no image; Chrome reports an error for the same bytes.
+    should(reasonOf(image('image/png', png(64, 48, [], false)))).equal('Image payload header could not be read');
+  });
+
+  test('should refuse a PNG whose image data restarts after another chunk', () => {
+    // Arrange — IDAT, something else, IDAT again. The specification requires the
+    // data chunks to be consecutive, and an ambiguous container fails closed.
+    const split = bytes(
+      0x89,
+      ...chars('PNG\r\n\x1a\n'),
+      ...be32(13),
+      ...chars('IHDR'),
+      ...be32(64),
+      ...be32(48),
+      8,
+      6,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      ...IDAT,
+      ...be32(1),
+      ...chars('tEXt'),
+      65,
+      0,
+      0,
+      0,
+      0,
+      ...IDAT,
+      ...be32(0),
+      ...chars('IEND'),
+      0,
+      0,
+      0,
+      0,
+    );
+    should(reasonOf(image('image/png', split))).equal('Image payload header could not be read');
   });
 
   test('should refuse a PNG whose IEND claims a length it cannot have', () => {

@@ -136,6 +136,73 @@ describe('no-fy-render-in-docs gate', () => {
     should(runGate(near).code).equal(0);
   });
 
+  /**
+   * FILENAMES ARE NOT COLON-DELIMITED RECORDS.
+   *
+   * The gate used to read `git grep -n` output and take the path as everything
+   * before the first colon, so a tracked `docs/fy-render.md:evil` produced
+   * `docs/fy-render.md:evil:1:…`, split to exactly `docs/fy-render.md`, and was
+   * waved through as the allowlisted contract document. Git permits both a colon
+   * and a newline in a filename, so both shapes are exercised here.
+   */
+  test('should not mistake a colon-bearing neighbour for the allowlisted file', () => {
+    // Act
+    const run = runGate({ 'docs/fy-render.md:evil': opener(FENCE) });
+
+    // Assert — the comparison is over the WHOLE filename.
+    should(run.code).equal(1);
+    should(run.output).containEql('evil');
+  });
+
+  test('should not mistake a newline-bearing neighbour for the allowlisted file', () => {
+    // Arrange — a path whose first line is exactly the allowlisted one. A
+    // line-oriented read of the match list sees the allowlisted name and stops.
+    const hostile = 'docs/fy-render.md\nevil.md';
+
+    // Act
+    const run = runGate({ [hostile]: opener(FENCE) });
+
+    // Assert
+    should(run.code).equal(1);
+  });
+
+  test('should still allow the two exact paths beside their hostile neighbours', () => {
+    // Arrange — the real files and the impostors in one tree, so the test cannot
+    // pass by refusing everything.
+    const mixed = runGate({
+      'docs/fy-render.md': opener(FENCE),
+      '.claude/skills/fy-render-authoring/SKILL.md': opener(FENCE),
+      'docs/fy-render.md:evil': opener(FENCE),
+    });
+    const cleanPair = runGate({
+      'docs/fy-render.md': opener(FENCE),
+      '.claude/skills/fy-render-authoring/SKILL.md': opener(FENCE),
+    });
+
+    // Assert — read the VIOLATION REPORT, which is the output up to the first
+    // blank line. Every violation also prints standing guidance that names both
+    // teaching files on purpose, so a substring test against the whole output
+    // can never show that only the impostor was reported; and indentation cannot
+    // separate them either, because the guidance bullets are indented too and
+    // both contain "fy-render".
+    should(cleanPair.code).equal(0);
+    should(mixed.code).equal(1);
+    const report = mixed.output.split('\n\n')[0] ?? '';
+    should(report).containEql('evil');
+    should(report).not.containEql('SKILL.md');
+  });
+
+  test('should count a newline-bearing filename once in its clean report', () => {
+    // Arrange — a clean tree holding one ordinary file and one whose name spans
+    // two lines. A line-based count reports three files for these two.
+    const run = runGate({ 'docs/notes.md': '# ordinary\n', 'docs/two\nlines.md': '# also ordinary\n' });
+
+    // Assert — the matcher is NUL-safe, so the tally it prints must be too, or
+    // the gate's own summary contradicts the class of path it now supports.
+    should(run.code).equal(0);
+    should(run.output).containEql('2 tracked files searched');
+  });
+
   test('should ignore a file nobody is committing', () => {
     // Arrange — an untracked scratch file must not fail somebody else's commit.
     const repository = mkdtempSync(join(tmpdir(), 'fy-render-gate-'));
