@@ -688,6 +688,25 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  /*
+   * THE TWO MACHINE-READABLE FACTS A MOUNTED SESSION STATES ABOUT ITS OWN CARRIER AND FEED.
+   *
+   * `ActiveCarrierCard` says the carrier at length, and it lives in Settings — so a reader, or a
+   * compiled-browser journey, looking at a session had nothing to read without navigating away.
+   * Both attributes therefore sit on the session route's own root, and both start at their honest
+   * "nothing has happened yet" value rather than at a guess: `none` is NOT `direct`, because no walk
+   * has measured anything, and `0` is not "an event arrived".
+   */
+  it('states the measured carrier and the live-event cursor on the mounted session route', async () => {
+    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+
+    const session = view.container.querySelector('[data-session="shared"]');
+    expect(session?.getAttribute('data-carrier-kind')).toBe('none');
+    expect(session?.getAttribute('data-live-events')).toBe('0');
+    await view.unmount();
+  });
+
   it('applies the persisted chat measure to the real session surface', async () => {
     const { store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
     await settle();

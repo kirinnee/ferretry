@@ -546,8 +546,19 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** The highest event.sequenceuence this browser has actually received. `0` means none yet. */
+  /** The highest event sequence this browser has actually received. `0` means none yet. */
   const [liveCursor, setLiveCursor] = useState(0);
+  /**
+   * The carrier this daemon's traffic is MEASURED on, subscribed rather than read once.
+   *
+   * `useActiveCarrier` re-renders when the router publishes a new answer, which is what makes the
+   * live-feed effect below re-run the moment a walk decides — and what lets this route state the
+   * carrier on a surface that is mounted whenever a session is open. `ActiveCarrierCard` says the
+   * same thing at length, but it lives in Settings, and a reader (or a harness) looking at a session
+   * should not have to navigate away to find out how its bytes are travelling.
+   */
+  const measuredCarrier = useActiveCarrier(store.carrier, daemonId);
+  const carrierKind = measuredCarrier?.ok === true ? measuredCarrier.method.kind : 'none';
   const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
 
   useEffect(() => {
@@ -603,7 +614,18 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    * something has arrived — so "an event reached this browser" is readable without matching copy.
    */
   useEffect(() => {
-    if (client === null) return;
+    // NOT UNTIL A CARRIER HAS BEEN MEASURED, and that is the whole fix rather than a guard. A
+    // carrier is decided by the first request that walks, so this effect can run before any walk has
+    // finished — and a subscription opened then takes the direct branch, opens a socket at an
+    // address a relayed browser cannot reach, and dies into the catch below with no retry and
+    // nothing on screen.
+    //
+    // THE DEPENDENCY IS THE CHOICE OBJECT, NOT ITS KIND. Depending on the kind alone would leave a
+    // stream subscribed to a carrier the router has replaced whenever the replacement happens to be
+    // the same kind — relay A for relay B. That is not reachable through today's router, which only
+    // ever replaces a winner by way of `undefined`, but "not reachable today" is a fact about one
+    // call site rather than about this effect, and the object costs nothing to depend on.
+    if (client === null || measuredCarrier?.ok !== true) return;
     const abort = new AbortController();
     void client
       .stream(
@@ -617,7 +639,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       )
       .catch(() => undefined);
     return () => abort.abort();
-  }, [client, sessionId]);
+  }, [client, measuredCarrier, sessionId]);
 
   useEffect(() => {
     const foreground = { daemonId, sessionId };
@@ -646,6 +668,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       // that a stream reached this browser polls this rather than watching the transcript's text,
       // which changes for reasons that have nothing to do with the carrier.
       data-live-events={String(liveCursor)}
+      data-carrier-kind={carrierKind}
     >
       {/* These live regions outlive every loading/error/content swap. */}
       <p className="sr-only" role="status" aria-live="polite" data-session-state={sessionState}>

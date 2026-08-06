@@ -203,6 +203,14 @@ export interface AutoDaemonAnswer {
   readonly oversize?: boolean;
   /** Refuse the device grant, the way a daemon refuses a credential it does not know. */
   readonly rejectDevice?: boolean;
+  /** The redemption response a `pair` record is answered with, embedded verbatim as §14 requires. */
+  readonly paired?: unknown;
+  /** Answer a `pair` record with the one generic sealed refusal instead. */
+  readonly pairRefused?: boolean;
+  /** Refuse a `stream` record with the status the direct upgrade would have carried. */
+  readonly streamRefused?: { readonly status: number; readonly body: string };
+  /** Records to push down an opened stream, in order. */
+  readonly streamFrames?: readonly unknown[];
 }
 
 /**
@@ -235,6 +243,39 @@ export const autoDial = (
         }
         if (decoded.frame.kind !== FRAME_KINDS.data) return;
         const message = (await daemon.receive(bytes)) as { t: string; id?: number };
+        // §14's other two credential records. A daemon answers each with its own sealed outcome and
+        // no other; answering them here is what lets a suite drive a pairing or a stream end to end
+        // without the whole rendezvous, which the integration tier already proves.
+        if (message.t === 'pair') {
+          requests.push(message);
+          socket.onBinary?.(
+            await daemon.record(
+              answer.pairRefused === true
+                ? { t: 'pair-refused', protocol: RELAY_PROTOCOL_ID, reason: 'pairing_refused' }
+                : { t: 'paired', protocol: RELAY_PROTOCOL_ID, response: answer.paired },
+            ),
+          );
+          socket.onBinary?.(
+            controlFrame(sessionId, { t: 'closed', code: 4440, reason: 'the pairing exchange is complete' }),
+          );
+          return;
+        }
+        if (message.t === 'stream') {
+          requests.push(message);
+          socket.onBinary?.(
+            await daemon.record(
+              answer.streamRefused === undefined
+                ? { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }
+                : { t: 'stream-refused', protocol: RELAY_PROTOCOL_ID, ...answer.streamRefused },
+            ),
+          );
+          for (const frame of answer.streamFrames ?? []) socket.onBinary?.(await daemon.record(frame));
+          return;
+        }
+        if (message.t === 'data' || message.t === 'stream-close') {
+          requests.push(message);
+          return;
+        }
         if (message.t === 'auth') {
           if (answer.rejectDevice === true) {
             socket.onBinary?.(

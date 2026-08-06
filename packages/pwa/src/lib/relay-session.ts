@@ -480,6 +480,8 @@ export class RelayClientSession {
    */
   #receiving = 0;
   #deferredClose: { readonly code: number; readonly reason: string } | undefined;
+  /** Serialises frame handling, so a later frame never overtakes an earlier one mid-decrypt. */
+  #inbox: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: RelayClientSessionDependencies) {
     this.#ready = new Promise<RelayClientSession>((resolve, reject) => {
@@ -699,10 +701,23 @@ export class RelayClientSession {
    */
   async receiveBinary(bytes: Uint8Array): Promise<void> {
     this.#receiving += 1;
+    // STRICTLY IN ORDER, because an adapter hands frames over without awaiting them. Opening a
+    // record decrypts, so frame N+1 would otherwise start while frame N was still inside
+    // `openRecord` — and the pair that matters is a sealed outcome followed by the rendezvous
+    // saying the session closed. Handled out of order, the close wins and the outcome is dropped:
+    // the daemon minted a grant and the browser reports a failure. §3 already makes a frame's
+    // sequence its nonce; handling them in that order is the same discipline one layer up.
+    const previous = this.#inbox;
+    let release = (): void => undefined;
+    this.#inbox = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    await previous;
     try {
       await this.#handle(bytes);
       await this.#outbox;
     } finally {
+      release();
       this.#receiving -= 1;
       const deferred = this.#receiving === 0 ? this.#deferredClose : undefined;
       if (deferred !== undefined) {
@@ -966,12 +981,17 @@ export class RelayClientSession {
   /**
    * This session stated its outcome and is finished with; a close from here on is expected teardown.
    *
-   * Everything still queued is dropped rather than sent: the daemon has already ended the exchange,
-   * so a record written after it would arrive at nothing.
+   * WHAT IS QUEUED STILL GOES OUT, and that is not laxity — it is the client-initiated close. §14
+   * makes a viewer's leave an explicit sealed `stream-close` record, and `closeStream` queues that
+   * record and concludes in the same breath; dropping the queue here would conclude the session and
+   * throw away the very record that tells the daemon why. Sealing is asynchronous, so "queued" is
+   * where that record is at this instant.
+   *
+   * Nothing NEW can be queued after this: every method that sends checks the phase first, and none
+   * of them accepts `concluded`.
    */
   #conclude(): void {
     this.#phase = 'concluded';
-    this.#waiting.length = 0;
   }
 
   /** The stream ended, from either side, with the taxonomy the direct socket would have carried. */

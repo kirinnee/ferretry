@@ -46,6 +46,7 @@ import {
   relayResponse,
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
+import { redeemPairingOverRelay } from '../../src/lib/relay-pairing.ts';
 import { type RelayClientSession, RelaySessionError } from '../../src/lib/relay-session.ts';
 
 const HOST = 'relay.example';
@@ -53,6 +54,10 @@ const RELAY_URL = `https://${HOST}`;
 const DAEMON_URL = 'https://studio.example';
 const DEVICE_TOKEN = 'fy_device_this-credential-must-never-reach-the-carrier';
 const SECRET_ANSWER = 'the session list a relay operator may not read';
+const PAIRING_CODE = '7F3K-Q2ND';
+const DEVICE_NAME = 'Ferretry PWA';
+/** A grant the pairing API's own schema accepts, because `paired.response` is validated by it. */
+const MINTED_TOKEN = `fy_device_${'m'.repeat(43)}`;
 
 const crypto = new WebCryptoRelayCrypto();
 
@@ -117,7 +122,7 @@ class RelayBridge {
         close: () => undefined,
       },
       dispatch,
-      devices: { identifyDevice: token => (token === DEVICE_TOKEN ? 'phone' : undefined) },
+      devices: { identifyDevice: token => (token === DEVICE_TOKEN || token === MINTED_TOKEN ? 'phone' : undefined) },
       pairing,
       sockets,
       // A REAL `setTimeout` LEFT ARMED WOULD OUTLIVE THE CASE. §14 gives every session a ten-second
@@ -355,5 +360,140 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     should(refusal).be.instanceof(RelaySessionError);
     should((refusal as RelaySessionError).code).equal(RELAY_CLOSE_CODES.daemonAbsent);
     should(carrierSaw(bridge)).not.containEql(DEVICE_TOKEN);
+  });
+});
+
+describe('first pairing and live streams, through the real rendezvous', () => {
+  /**
+   * THE CLAIM THIS FEATURE EXISTS FOR, proved against all three real halves.
+   *
+   * A browser holding nothing but a QR's fingerprint and a two-minute code redeems it across a
+   * rendezvous that can read neither, and comes out the other side with the device grant it needs to
+   * reconnect. `docs/relay-protocol.md` §14 "Pairing sessions" is what is being demonstrated, and the
+   * assertions that matter are the two the document is written around: the CODE and the DEVICE NAME
+   * never appear in anything the rendezvous handled, and neither does the token it minted.
+   */
+  it('should redeem a first pairing without the carrier reading the code, the name or the token', async () => {
+    const identity = await newDaemonIdentity();
+    const bridge = new RelayBridge();
+    const response = {
+      deviceToken: MINTED_TOKEN,
+      daemonId: identity.daemonId,
+      daemonName: 'Studio',
+      capabilities: [],
+      carriers: [{ kind: 'relay' as const, url: RELAY_URL }],
+    };
+    let redeemed: { code: string; deviceName: string } | undefined;
+    await bridge.admitDaemon(identity, answered('{}'), {
+      redeemOverRelay: async attempt => {
+        redeemed = { code: attempt.code, deviceName: attempt.deviceName };
+        return { kind: 'paired', response };
+      },
+    });
+
+    const paired = await redeemPairingOverRelay({
+      crypto,
+      seed: { daemonUrl: DAEMON_URL, daemonId: identity.daemonId, code: PAIRING_CODE },
+      deviceName: DEVICE_NAME,
+      rendezvous: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      dial: () => bridge.dial(identity.daemonId),
+      heartbeat: () => () => undefined,
+    });
+    await bridge.settle();
+
+    // The daemon received exactly what the browser sent, so the exchange really happened.
+    should(redeemed).eql({ code: PAIRING_CODE, deviceName: DEVICE_NAME });
+    should(paired.deviceToken).equal(MINTED_TOKEN);
+    // And the rendezvous carried every byte of it while reading none.
+    const observed = carrierSaw(bridge);
+    should(observed).not.containEql(PAIRING_CODE);
+    should(observed).not.containEql(DEVICE_NAME);
+    should(observed).not.containEql(MINTED_TOKEN);
+  });
+
+  /**
+   * §14 makes success and refusal indistinguishable to an observer: "one sealed record, then the
+   * same close". An operator who could count frames and tell a spent code from a wrong one would
+   * have the oracle the single generic reason exists to deny them.
+   */
+  it('should give a refused pairing the same frame count as a successful one', async () => {
+    const count = async (outcome: 'paired' | 'refused'): Promise<number> => {
+      const identity = await newDaemonIdentity();
+      const bridge = new RelayBridge();
+      await bridge.admitDaemon(identity, answered('{}'), {
+        redeemOverRelay: async () =>
+          outcome === 'refused'
+            ? { kind: 'refused' }
+            : {
+                kind: 'paired',
+                response: {
+                  deviceToken: MINTED_TOKEN,
+                  daemonId: identity.daemonId,
+                  daemonName: 'Studio',
+                  capabilities: [],
+                  carriers: [],
+                },
+              },
+      });
+      await redeemPairingOverRelay({
+        crypto,
+        seed: { daemonUrl: DAEMON_URL, daemonId: identity.daemonId, code: PAIRING_CODE },
+        deviceName: DEVICE_NAME,
+        rendezvous: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+        dial: () => bridge.dial(identity.daemonId),
+        heartbeat: () => () => undefined,
+      }).catch(() => undefined);
+      await bridge.settle();
+      return bridge.observed.length;
+    };
+
+    should(await count('refused')).equal(await count('paired'));
+  });
+
+  /**
+   * The other half of the journey: the token a relayed pairing minted opens an ORDINARY session.
+   *
+   * §14 gives a pairing session no edge to serving — "A device that paired reconnects as an ordinary
+   * request session with the token it was just issued" — so this is the reconnect, and it is the
+   * proof that the grant crossing the sealed record is a grant the daemon actually honours.
+   */
+  it('should let the token a relayed pairing minted open an authenticated session', async () => {
+    const identity = await newDaemonIdentity();
+    const bridge = new RelayBridge();
+    await bridge.admitDaemon(identity, answered(SECRET_ANSWER), {
+      redeemOverRelay: async () => ({
+        kind: 'paired',
+        response: {
+          deviceToken: MINTED_TOKEN,
+          daemonId: identity.daemonId,
+          daemonName: 'Studio',
+          capabilities: [],
+          carriers: [],
+        },
+      }),
+    });
+    const paired = await redeemPairingOverRelay({
+      crypto,
+      seed: { daemonUrl: DAEMON_URL, daemonId: identity.daemonId, code: PAIRING_CODE },
+      deviceName: DEVICE_NAME,
+      rendezvous: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      dial: () => bridge.dial(identity.daemonId),
+      heartbeat: () => () => undefined,
+    });
+    await bridge.settle();
+
+    const session = await openRelaySession({
+      crypto,
+      dial: () => bridge.dial(identity.daemonId),
+      daemon: daemonConnection({
+        daemonId: identity.daemonId,
+        baseUrl: DAEMON_URL,
+        deviceToken: paired.deviceToken,
+      }),
+      method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      heartbeat: () => () => undefined,
+    });
+    should(session.live()).be.true();
+    should(carrierSaw(bridge)).not.containEql(paired.deviceToken);
   });
 });
