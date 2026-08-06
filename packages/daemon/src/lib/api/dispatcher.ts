@@ -4,7 +4,14 @@ import { type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
 import { type ApiRequest, type ApiResponse, headerValue, queryValue, type RouteParameters } from './http.ts';
 import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
-import type { ApiRoute, RouteContext, ScopedRoute, WardenRemedyAuthorizer } from './route.ts';
+import type {
+  ApiRoute,
+  RouteContext,
+  ScopedRoute,
+  WardenRemedyAuthorizer,
+  WardenRemedyDecision,
+  WardenRemedyGrant,
+} from './route.ts';
 import type { ApiRouter } from './router.ts';
 import { SOCKET_TICKET_QUERY_PARAMETER, type SocketTicketRedeemer } from './socket-ticket.ts';
 
@@ -175,21 +182,28 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
         ),
       };
   }
-  const remedyRefusal = wardenRemedyRefusal(
-    lookup.route,
-    authentication.tokenClass,
-    request,
-    lookup.params,
-    actor,
-    remedies,
-  );
-  if (remedyRefusal !== undefined) return { kind: 'refused', response: remedyRefusal };
+  const remedy = wardenRemedyOutcome(lookup.route, authentication.tokenClass, request, lookup.params, actor, remedies);
+  if (remedy.kind === 'refused') return { kind: 'refused', response: remedy.response };
   return {
     kind: 'authorized',
     route: lookup.route,
-    context: { request, params: lookup.params, actor, credential: authentication },
+    context: {
+      request,
+      params: lookup.params,
+      actor,
+      credential: authentication,
+      // Present only when a warden was allowed one, so its ABSENCE means "not acting as a warden"
+      // rather than "acting as one, unrecorded".
+      ...(remedy.kind === 'granted' ? { wardenRemedy: remedy.grant } : {}),
+    },
   };
 }
+
+/** What the remedy axis had to say about one request: nothing, a proven authority, or a refusal. */
+type WardenRemedyOutcome =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'granted'; readonly grant: WardenRemedyGrant }
+  | { readonly kind: 'refused'; readonly response: ApiResponse };
 
 /**
  * The ADMINISTRATOR's answer, asked last and only of a warden.
@@ -200,65 +214,87 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
  * class already earned, and keeps its own attribution. The header cannot promote a caller INTO this
  * check and cannot excuse a caller out of the checks above it.
  *
- * Every path back out of here is either `undefined` — this axis has nothing to say — or a 403 that
- * names what would allow the operation. A denial that says only "forbidden" is a dead end: the
- * warden cannot tell a missing setting from a missing capability from a daemon that was wired wrong,
- * and each of those has a different next step.
+ * Every path back out of here is `absent` — this axis has nothing to say — a `granted` authority the
+ * request carries onward, or a 403 that names what would allow the operation UNDER ITS OWN CODE. A
+ * denial that says only "forbidden" is a dead end, and so is one code covering every cause: a missing
+ * setting, a missing capability, a blank declaration, an unwired boundary and a daemon that lost its
+ * own state have five different next steps and, between them, three different people to fix them.
  */
-function wardenRemedyRefusal(
+function wardenRemedyOutcome(
   route: ScopedRoute,
   tokenClass: TokenClass,
   request: ApiRequest,
   params: RouteParameters,
   actor: ApiActor,
   remedies: WardenRemedyAuthorizer | undefined,
-): ApiResponse | undefined {
-  if (tokenClass !== 'warden') return undefined;
+): WardenRemedyOutcome {
+  if (tokenClass !== 'warden') return { kind: 'absent' };
   const capability = headerValue(request, WARDEN_CAPABILITY_HEADER)?.trim() ?? '';
   const declared = route.wardenRemedy;
   if (declared === undefined) {
     // A route that declares no remedy is one no warden may act on. Serving the request anyway
     // because the header "did not apply" is how forgetting to declare would come to mean unchecked.
-    if (capability === '') return undefined;
-    return errorResponse(
-      403,
+    if (capability === '') return { kind: 'absent' };
+    return refusal(
       `${request.method} ${request.path} declares no warden remedy, so a warden capability cannot authorize it; drop ${WARDEN_CAPABILITY_HEADER} and use a credential that may reach this route on its own`,
       'warden_remedy_undeclared',
     );
   }
   const remedy = declared.trim();
-  // A blank declaration is a wiring fault, not a permissive one. `WardenRemedyName` is `string`, so
-  // nothing stopped it being written; asking an authorizer to rule on a nameless remedy, or naming
-  // one in a refusal, would carry the gap forward instead of stopping at it.
+  // Three failures, three owners, three codes. A blank name is a bug in the route table, an absent
+  // authorizer is a bug in the wiring, and a decisionless authorizer is a daemon that has lost its
+  // own state — and the client rendering these into something a human acts on must be able to tell
+  // them apart without reading the prose.
   if (remedy === '')
-    return errorResponse(
-      403,
+    return refusal(
       `${request.method} ${request.path} declares a blank warden remedy, so this daemon cannot say what a warden would be doing here and is refusing; the route must name the remedy it means`,
-      'warden_remedy_undetermined',
+      'warden_remedy_invalid',
     );
   if (capability === '')
-    return errorResponse(
-      403,
+    return refusal(
       `a warden may ${remedy} here only by presenting the capability of the assignment it was given, in ${WARDEN_CAPABILITY_HEADER}`,
       'warden_capability_required',
     );
   if (remedies === undefined)
-    return errorResponse(
-      403,
+    return refusal(
       `this daemon was built with no warden remedy authorizer, so it cannot say whether a warden may ${remedy} here and is refusing; the route declares a remedy and the boundary serving it must be wired with one`,
-      'warden_remedy_undetermined',
+      'warden_remedy_unwired',
     );
-  const decision = remedies.decide({ remedy, request, params, capability, actor });
-  if (decision === undefined || (!decision.allowed && decision.refusal.trim() === ''))
-    // A refusal with nothing to say is not a quieter refusal, it is an unfinished one — and rendering
-    // its empty sentence would produce exactly the opaque 403 this axis promises never to emit. It is
-    // read as no decision, and the boundary says what it can say on its own.
-    return errorResponse(
-      403,
+  const decision = remedies.decide({ remedy, params, capability, actor });
+  if (decision === undefined || (!decision.allowed && decision.refusal.trim() === '') || unusable(decision, remedy))
+    // A refusal with nothing to say is not a quieter refusal, it is an unfinished one, and an
+    // allowance that names no warden is an authority nothing downstream can journal. Both are read as
+    // no decision, and the boundary says what it can say on its own rather than rendering a gap.
+    return refusal(
       `this daemon reached no decision about whether a warden may ${remedy} here, so it is refusing; an administrator must allow this remedy for the assignment that was given`,
       'warden_remedy_undetermined',
     );
-  return decision.allowed ? undefined : errorResponse(403, decision.refusal.trim(), 'warden_remedy_refused');
+  return decision.allowed
+    ? { kind: 'granted', grant: decision.grant }
+    : refusal(decision.refusal.trim(), 'warden_remedy_refused');
+}
+
+const refusal = (message: string, code: string): WardenRemedyOutcome => ({
+  kind: 'refused',
+  response: errorResponse(403, message, code),
+});
+
+/**
+ * Is an ALLOWANCE too damaged to act on?
+ *
+ * A grant is the evidence a destructive step names its warden by, so a blank field in one is not a
+ * smaller grant — it is a grant that cannot do the one job it exists for. A remedy that disagrees
+ * with the route's is worse: an authority minted for a different question.
+ */
+function unusable(decision: WardenRemedyDecision, remedy: string): boolean {
+  if (!decision.allowed) return false;
+  const { grant } = decision;
+  return (
+    grant.remedy !== remedy ||
+    grant.targetSessionId.trim() === '' ||
+    grant.wardenId.trim() === '' ||
+    grant.assignmentSpawnedAt.trim() === ''
+  );
 }
 
 function meetsMinimum(tokenClass: TokenClass, minimum: ScopedRoute['minimum']): boolean {

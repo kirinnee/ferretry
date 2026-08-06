@@ -32,7 +32,12 @@ import type { AuthenticatedCredential } from './socket-ticket.ts';
  *
  * The classes, weakest first:
  *
- * - `none` — no token at all. Reserved for machine feeds and one-time-code redemption.
+ * - `none` — no token at all. Reserved for machine feeds and one-time-code redemption. ONE THING
+ *   OVERRIDES IT, and it is visible here so a route author does not have to find it in the
+ *   dispatcher: a route that ALSO declares {@link ScopedRoute.wardenRemedy} is not answered
+ *   anonymously, because the shortcut that answers a public route is a shortcut past the remedy check
+ *   too. Adding a remedy to a public route therefore turns it into an authenticated one; the two
+ *   declarations together are almost certainly a mistake, and this is which way it fails.
  * - `authenticated` — any caller this daemon issued a credential to, including a paired device and the
  *   capability-scoped warden. For reads whose subject is the caller and whose body holds no secret.
  * - `operator` — an admin token or a paired device acting as the operator; never the warden.
@@ -57,6 +62,20 @@ export interface RouteContext {
    * attribution and is lossy about authority, so deriving a class back out of one would be guessing.
    */
   readonly credential?: AuthenticatedCredential;
+  /**
+   * The warden's authority to act HERE, minted by the remedy authorizer and present only when it
+   * allowed the request. Server-derived exactly like `actor` and `credential`.
+   *
+   * A HANDLER CANNOT MINT ONE. That is the whole reason it travels on the context rather than being
+   * re-derived downstream: a later step that needs to know it is running under a warden's authority —
+   * to journal it, or to run the second half of a policy that only becomes decidable after an async
+   * resolution — takes this value as an argument, and cannot be reached without the boundary having
+   * said yes first.
+   *
+   * ABSENT IS THE ORDINARY CASE. Every operator, device and admin request has none, and its absence
+   * means "not acting as a warden" rather than "acting as one, unrecorded".
+   */
+  readonly wardenRemedy?: WardenRemedyGrant;
 }
 
 /**
@@ -122,9 +141,21 @@ export interface ScopedRoute extends RoutePattern {
    * THE TYPE PROVES NOTHING ABOUT THE VALUE, so the boundary checks it. {@link WardenRemedyName} is
    * an alias for `string`: a route declaring `''` or `'   '` compiles exactly as well as one
    * declaring a real remedy, and it would otherwise reach the authorizer as a nameless question and
-   * appear in a refusal as a gap in a sentence. A blank declaration is a wiring fault and is refused
-   * for wardens, presented capability or not — the same answer a missing authorizer gets, for the
-   * same reason.
+   * appear in a refusal as a gap in a sentence. A blank declaration is refused for wardens, presented
+   * capability or not, under its own code — distinct from a missing authorizer, because a blank name
+   * is a bug in this file and a missing authorizer is a bug in the wiring.
+   *
+   * THE ANSWER TRAVELS ONWARD. When the authorizer allows the request, its
+   * {@link WardenRemedyGrant} is put on {@link RouteContext.wardenRemedy}, so a handler and anything
+   * it calls act under an authority they could not have minted.
+   *
+   * NO SOCKET ROUTE IS EXPECTED TO DECLARE ONE. A remedy is a destructive action on a session and a
+   * protocol switch is not one. The socket table is wired with the same authorizer regardless — a
+   * boundary whose refusal named a fix nobody could perform would be worse than either a served route
+   * or a declared prohibition — but the wiring is honesty, not an invitation.
+   *
+   * AND IT OVERRIDES `minimum: 'none'`: see {@link CredentialMinimum}. A public route that declares a
+   * remedy stops being answerable anonymously.
    */
   readonly wardenRemedy?: WardenRemedyName;
 }
@@ -144,13 +175,23 @@ export interface ScopedRoute extends RoutePattern {
 export type WardenRemedyName = string;
 
 /**
- * Everything the remedy authorizer is given about one warden request.
+ * Everything the remedy authorizer is given about one warden request — FOUR FIELDS, and the count is
+ * the contract.
  *
- * NONE OF IT IS SELF-REPORTED EXCEPT THE CAPABILITY, WHICH IS EVIDENCE RATHER THAN A CLAIM. `remedy`
- * is what the ROUTE declared, so a caller cannot name its own. `actor` and the token class behind it
- * were derived from the presented credential, so the header can only ever refine WHICH warden is
- * acting and can never establish THAT one is. `capability` is a secret this daemon minted for one
- * assignment, so presenting it proves something.
+ * EVERY FIELD A POLICY *CAN* READ IS A FIELD IT *MIGHT* DECIDE FROM, so this carries only what the
+ * question consumes. It deliberately does NOT carry the request: the header map is the whole header
+ * map, which would hand a policy object the caller's live bearer token and the operator's
+ * five-minute unlock — a value whose own comment says it must never reach anywhere it can outlive
+ * those five minutes — and would leave nothing stopping a `decide` from reading
+ * `x-ferretry-session-id` and deciding from it, which is the header-movable authority this whole axis
+ * exists to close. `method`, `path` and `loopback` are absent for a quieter reason: no conjunct needs
+ * them. The route's identity already arrives as `remedy` — one remedy per route — and `loopback` is
+ * the CARRIER's question, which {@link CapabilityDemand}'s guard already owns; giving it to an
+ * administrator's policy would create a second, quieter definition of a question that has an answer.
+ *
+ * The one thing a policy might want and cannot have is the BODY. `decide` is synchronous and a body
+ * read is not, so any fact that lives in a body — a migration's destination account, say — is not
+ * decidable here and must be checked where it exists, after resolution and before the write.
  *
  * `remedy` and `capability` both arrive trimmed and nonblank because THE BOUNDARY CHECKS THEM, not
  * because either type says so: a blank secret is not a weaker answer but the absence of one, and a
@@ -160,33 +201,75 @@ export type WardenRemedyName = string;
 export interface WardenRemedyPresentation {
   /** The remedy THIS ROUTE declares, trimmed and never blank. Never a value read from the request. */
   readonly remedy: WardenRemedyName;
-  /** The request as it arrived, so a policy can read the target it is about to affect. */
-  readonly request: ApiRequest;
-  /** Path parameters of the MATCHED route, RAW. Decode with `decodeParameter`. Passed so a policy
-   *  reads its target from the routing decision rather than re-parsing a path this boundary has
-   *  already inspected. */
+  /**
+   * Path parameters of the MATCHED route, RAW. Decode with `decodeParameter`.
+   *
+   * THE TARGET LIVES HERE, and that it does is why this question is answerable at a synchronous
+   * boundary at all: every route a warden may act on names its subject in the PATH, never in a body.
+   */
   readonly params: RouteParameters;
-  /** The per-assignment capability the warden presented, trimmed and never blank. */
+  /**
+   * The per-assignment capability the warden presented, trimmed and never blank.
+   *
+   * EVIDENCE, NOT YET A PROOF. This boundary has checked only that a nonblank string arrived; it has
+   * NOT bound it to any assignment. A policy that reads only whether the remedy is enabled, and
+   * assumes the boundary already tied this secret to a target, has skipped the conjunct that makes
+   * the secret mean anything.
+   */
   readonly capability: string;
-  /** The server-derived actor, which names WHICH warden is acting. */
+  /**
+   * The server-derived actor.
+   *
+   * ATTRIBUTION ONLY, and never an input to a decision. It may be the bare `warden` when no session
+   * header was sent, which is exactly why WHICH warden is acting is answered by
+   * {@link WardenRemedyGrant.wardenId} — resolved from the capability — rather than from here.
+   */
   readonly actor: ApiActor;
+}
+
+/**
+ * A warden's proven authority to exercise one remedy on one session.
+ *
+ * WHY IT IS A VALUE AND NOT A BOOLEAN. Two things need it later and neither can re-derive it. A
+ * journal entry has to name WHICH warden acted, and the only unforgeable evidence of that is the
+ * assignment secret that was presented — not `x-ferretry-session-id`, which any caller sets. And the
+ * half of a policy that only becomes decidable after an async resolution has to take this as an
+ * argument, so that half cannot be reached without this half having passed.
+ *
+ * ONLY THE AUTHORIZER MINTS ONE, and it does so from state, so a grant that exists is a grant whose
+ * capability was matched to a live assignment.
+ */
+export interface WardenRemedyGrant {
+  /** The remedy the route declared and the authorizer allowed. */
+  readonly remedy: WardenRemedyName;
+  /** The session this authority is over, read from the path. */
+  readonly targetSessionId: string;
+  /** WHICH warden — resolved from the presented capability, never from a header. */
+  readonly wardenId: string;
+  /** When the assignment behind the capability was created, so a journal entry can say which one. */
+  readonly assignmentSpawnedAt: string;
 }
 
 /**
  * What the remedy authorizer decided.
  *
- * A REFUSAL MUST CARRY ITS SENTENCE. A bare 403 tells a warden nothing it can act on, and the
- * authorizer is the only party that knows whether the missing piece is an administrator's setting,
- * the assignment it holds, or the target it aimed at.
+ * AN ALLOWANCE MUST NAME WHO IT IS FOR, and a refusal must carry its sentence. A bare `true` would
+ * leave the destructive step downstream unable to say which warden it obeyed; a bare 403 tells a
+ * warden nothing it can act on, and the authorizer is the only party that knows whether the missing
+ * piece is an administrator's setting, the assignment it holds, or the target it aimed at.
  *
- * THE TYPE GETS THIS HALF RIGHT AND NO FURTHER. Making `refusal` part of the refused shape means an
- * authorizer cannot forget the field — but `string` admits `''`, and an empty sentence rendered into
- * a 403 is the opaque denial this shape exists to prevent, only harder to notice. So the boundary
- * treats a blank sentence as no decision at all and answers with its own, rather than passing an
- * empty explanation on to the warden.
+ * THE TYPE GETS THIS HALF RIGHT AND NO FURTHER. Making both fields part of their shapes means an
+ * authorizer cannot forget either — but `string` admits `''`, and an empty sentence rendered into a
+ * 403 is the opaque denial this shape exists to prevent, only harder to notice. So the boundary
+ * treats a blank sentence, and a grant with a blank field or a remedy that disagrees with the route,
+ * as no decision at all.
  */
 export type WardenRemedyDecision =
-  | { readonly allowed: true }
+  | {
+      readonly allowed: true;
+      /** The authority the handler and everything downstream act under. */
+      readonly grant: WardenRemedyGrant;
+    }
   | {
       readonly allowed: false;
       /** Names the configuration, credential or condition that would allow this remedy. A blank one
@@ -197,12 +280,25 @@ export type WardenRemedyDecision =
 /**
  * The administrator's per-remedy answer, as the authorization boundary sees it.
  *
- * SYNCHRONOUS and STATELESS, exactly like the operator's guard beside it: this runs in front of every
- * request, so a boundary that awaited a read would put a new failure mode in front of a question that
- * must always have an answer. It holds no state across calls — everything it may consider arrives in
- * the presentation.
+ * SYNCHRONOUS, like the operator's guard beside it: this runs in front of every request and every
+ * socket upgrade, so a boundary that awaited a read would put a filesystem — and a brand new failure
+ * mode — in front of a question that must always have an answer.
  *
- * Returning nothing is legal and means the daemon reached NO decision, which the boundary treats as a
+ * ## IT IS NOT STATELESS, AND THE INVALIDATION CONTRACT IS THE LOAD-BEARING HALF
+ *
+ * The durable answer lives in a document and reading a document is asynchronous, so an implementation
+ * MAY hold a snapshot — the operator's grant service already does exactly this, and it is safe
+ * because of its refresh rule rather than in spite of holding state. The same rule is required here,
+ * and it is a rule about a WRITE rather than a clock:
+ *
+ * - It **MUST** refresh its snapshot on every write to the warden runtime state document, ON THE SAME
+ *   SERIALIZATION CHAIN that performs the write. There is exactly one writer and its writes are
+ *   already serialized, so refresh-on-write closes the window EXACTLY rather than bounding it: an
+ *   assignment stops authorizing at the same instant it stops existing. No polling and no TTL.
+ * - It **MUST** answer `undefined` whenever its snapshot is absent or a refresh has failed. Anything
+ *   else serves a decision that may no longer be true.
+ *
+ * Returning nothing is therefore legal AND required in those cases; the boundary reads it as a
  * refusal. An undetermined answer read as permission is the damaged-state-as-empty-state defect this
  * product has already been bitten by; the safe reading of "nobody can tell me" is "no".
  */

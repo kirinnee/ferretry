@@ -9,12 +9,18 @@ import {
   type CapabilityGuard,
   CLIENT_HEADER,
   type CredentialMinimum,
+  ApiSocketDispatcher,
   jsonResponse,
   NO_GOVERNED_ROUTES_GUARD,
+  OPERATOR_UNLOCK_HEADER,
   SESSION_ID_HEADER,
+  type SocketRoute,
+  SOCKET_TICKET_QUERY_PARAMETER,
+  type SocketTicketRedeemer,
   WARDEN_CAPABILITY_HEADER,
   type WardenRemedyAuthorizer,
   type WardenRemedyDecision,
+  type WardenRemedyGrant,
   type WardenRemedyPresentation,
 } from '../../../src/lib/api/index.ts';
 import { jsonBody, request } from './support.ts';
@@ -517,7 +523,21 @@ describe('the warden remedy axis', () => {
     path: '/v1/sessions/:id/stop',
     minimum,
     wardenRemedy: 'kill',
-    handle: async context => jsonResponse({ actor: context.actor ?? null, params: [...context.params] }),
+    handle: async context =>
+      jsonResponse({
+        actor: context.actor ?? null,
+        params: [...context.params],
+        grant: context.wardenRemedy ?? null,
+      }),
+  });
+
+  /** The authority a satisfied authorizer mints: which remedy, over which session, by which warden. */
+  const grant = (overrides: Partial<WardenRemedyGrant> = {}): WardenRemedyGrant => ({
+    remedy: 'kill',
+    targetSessionId: 's-3',
+    wardenId: 'w-9',
+    assignmentSpawnedAt: '2026-08-06T00:00:00.000Z',
+    ...overrides,
   });
 
   /** Records every presentation it is shown, so a case can assert the authorizer was NOT consulted. */
@@ -531,7 +551,8 @@ describe('the warden remedy axis', () => {
     },
   });
 
-  const allowing = (seen?: WardenRemedyPresentation[]) => authorizer({ allowed: true }, seen);
+  const allowing = (seen?: WardenRemedyPresentation[], minted: WardenRemedyGrant = grant()) =>
+    authorizer({ allowed: true, grant: minted }, seen);
 
   const wardenRequest = (headers: Readonly<Record<string, string>> = {}) =>
     request({
@@ -540,7 +561,7 @@ describe('the warden remedy axis', () => {
       headers: { authorization: 'Bearer warden-secret', [SESSION_ID_HEADER]: 'w-1', ...headers },
     });
 
-  it('should serve a declared remedy to a warden the authorizer allows, as the warden', async () => {
+  it('should serve a declared remedy to a warden the authorizer allows, and carry its grant onward', async () => {
     // Arrange
     const seen: WardenRemedyPresentation[] = [];
     const dispatcher = new ApiDispatcher(
@@ -553,16 +574,51 @@ describe('the warden remedy axis', () => {
     // Act
     const response = await dispatcher.dispatch(wardenRequest({ [WARDEN_CAPABILITY_HEADER]: '  cap-7  ' }));
 
-    // Assert — and everything the policy is handed is server-derived except the capability itself,
-    // which is a secret this daemon minted rather than a claim the caller made about itself.
+    // Assert — the handler acts under an authority it could not have minted, naming a warden resolved
+    // from the presented secret rather than from the session header the actor came from.
     should(response.status).equal(200);
     should(jsonBody(response).actor).equal('warden:w-1');
+    should(jsonBody(response).grant).deepEqual({
+      remedy: 'kill',
+      targetSessionId: 's-3',
+      wardenId: 'w-9',
+      assignmentSpawnedAt: '2026-08-06T00:00:00.000Z',
+    });
     should(seen).have.length(1);
     should(seen[0]?.remedy).equal('kill');
     should(seen[0]?.capability).equal('cap-7');
     should(seen[0]?.actor).equal('warden:w-1');
     should([...(seen[0]?.params ?? [])]).deepEqual([['id', 's-3']]);
-    should(seen[0]?.request.path).equal('/v1/sessions/s-3/stop');
+  });
+
+  it('should hand the authorizer FOUR fields and nothing that could carry a credential', async () => {
+    // THE CONTRACT IS THE COUNT. The request was removed because its header map is the WHOLE header
+    // map: a policy object would be handed the caller's live bearer and the operator's five-minute
+    // unlock, and nothing would stop a `decide` from reading a session header and deciding from it —
+    // the header-movable authority this axis exists to close. Every field a policy CAN read is a
+    // field it MIGHT decide from, so this pins the absences as hard as the presences.
+    // Arrange
+    const seen: WardenRemedyPresentation[] = [];
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([remedial()]),
+      credentials,
+      NO_GOVERNED_ROUTES_GUARD,
+      allowing(seen),
+    );
+
+    // Act — every credential-bearing header this boundary knows about, presented at once.
+    await dispatcher.dispatch(
+      wardenRequest({
+        [WARDEN_CAPABILITY_HEADER]: 'cap-7',
+        [OPERATOR_UNLOCK_HEADER]: 'fy_unlock_abc',
+        [CLIENT_HEADER]: 'cli',
+      }),
+    );
+
+    // Assert
+    should(Object.keys(seen[0] ?? {}).sort()).deepEqual(['actor', 'capability', 'params', 'remedy']);
+    for (const absent of ['request', 'method', 'path', 'loopback', 'headers', 'body', 'query', 'unlock'])
+      should(seen[0]).not.have.property(absent);
   });
 
   it('should refuse a warden on a route whose declared remedy is blank, and trim one that is not', async () => {
@@ -592,13 +648,40 @@ describe('the warden remedy axis', () => {
     // Assert — the blank declaration is refused both ways and reaches no authorizer; the padded one
     // is the same remedy as any other and arrives trimmed.
     should(carrying.status).equal(403);
-    should(jsonBody(carrying).code).equal('warden_remedy_undetermined');
+    should(jsonBody(carrying).code).equal('warden_remedy_invalid');
     should(carrying.body).match(/declares a blank warden remedy/u);
     should(bare.status).equal(403);
-    should(jsonBody(bare).code).equal('warden_remedy_undetermined');
+    should(jsonBody(bare).code).equal('warden_remedy_invalid');
     should(padded.status).equal(200);
     should(seen).have.length(1);
     should(seen[0]?.remedy).equal('kill');
+  });
+
+  it('should refuse an allowance whose grant cannot name what it authorized', async () => {
+    // A grant is the evidence a destructive step names its warden by, so a blank field in one is not
+    // a smaller grant — it is a grant that cannot do the one job it exists for. A remedy that
+    // disagrees with the route's is worse: an authority minted for a different question.
+    // Arrange
+    const damaged = (overrides: Partial<WardenRemedyGrant>) =>
+      new ApiDispatcher(
+        new ApiRouter([remedial()]),
+        credentials,
+        NO_GOVERNED_ROUTES_GUARD,
+        allowing(undefined, grant(overrides)),
+      );
+
+    // Act
+    const carrying = { [WARDEN_CAPABILITY_HEADER]: 'cap-7' };
+    const wrongRemedy = await damaged({ remedy: 'nudge' }).dispatch(wardenRequest(carrying));
+    const noTarget = await damaged({ targetSessionId: ' ' }).dispatch(wardenRequest(carrying));
+    const noWarden = await damaged({ wardenId: '' }).dispatch(wardenRequest(carrying));
+    const noStamp = await damaged({ assignmentSpawnedAt: '  ' }).dispatch(wardenRequest(carrying));
+
+    // Assert — all four are read as no decision at all rather than as a permission.
+    for (const response of [wrongRemedy, noTarget, noWarden, noStamp]) {
+      should(response.status).equal(403);
+      should(jsonBody(response).code).equal('warden_remedy_undetermined');
+    }
   });
 
   it('should refuse a warden that presents no capability, naming the header that would carry one', async () => {
@@ -632,9 +715,10 @@ describe('the warden remedy axis', () => {
     // Act
     const response = await dispatcher.dispatch(wardenRequest({ [WARDEN_CAPABILITY_HEADER]: 'cap-7' }));
 
-    // Assert
+    // Assert — its OWN code: an unwired boundary is a packaging bug and belongs to a different person
+    // than a daemon that has lost its own state.
     should(response.status).equal(403);
-    should(jsonBody(response).code).equal('warden_remedy_undetermined');
+    should(jsonBody(response).code).equal('warden_remedy_unwired');
     should(response.body).match(/must be wired with one/u);
   });
 
@@ -764,7 +848,10 @@ describe('the warden remedy axis', () => {
       }),
     );
 
-    // Assert
+    // Assert — and neither carries a grant, so nothing downstream can mistake a forged header for
+    // the authority a warden would have had to earn.
+    should(jsonBody(asAdmin).grant).be.null();
+    should(jsonBody(asDevice).grant).be.null();
     should(asAdmin.status).equal(200);
     should(jsonBody(asAdmin).actor).equal('admin-cli');
     should(asDevice.status).equal(200);
@@ -843,32 +930,161 @@ describe('the warden remedy axis', () => {
     should(seen).have.length(1);
   });
 
-  it('should fail closed on the shared boundary every other transport authorizes through', async () => {
-    // The socket table authorizes through this same function and wires no authorizer today, so a
-    // remedy declared over there must refuse rather than serve — and an ordinary route must keep
-    // working exactly as it does now.
+  it('should ignore a warden capability presented to a public route that declares no remedy', async () => {
+    // THE ONE EXCEPTION TO "a header on a route with no remedy is 403", and it is worth pinning
+    // because it looks like a hole and is not. The shortcut answers a public route before any header
+    // is inspected, so the capability is ignored rather than refused. Harmless in substance — anyone
+    // at all may reach a public route, with or without a header nobody read.
     // Arrange
-    const router = new ApiRouter([remedial(), echo('/v1/usage', 'authenticated')]);
-
-    // Act — five arguments, exactly as the socket boundary calls it.
-    const declared = authorizeRequest(
-      router,
+    const seen: WardenRemedyPresentation[] = [];
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([echo('/healthz', 'none')]),
       credentials,
-      wardenRequest({ [WARDEN_CAPABILITY_HEADER]: 'cap-7' }),
-      undefined,
       NO_GOVERNED_ROUTES_GUARD,
+      allowing(seen),
     );
-    const ordinary = authorizeRequest(
-      router,
-      credentials,
-      request({ path: '/v1/usage', headers: { authorization: 'Bearer warden-secret' } }),
-      undefined,
-      NO_GOVERNED_ROUTES_GUARD,
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({ path: '/healthz', headers: { [WARDEN_CAPABILITY_HEADER]: 'cap-7' } }),
     );
 
     // Assert
-    should(declared.kind).equal('refused');
-    should(declared.kind === 'refused' && jsonBody(declared.response).code).equal('warden_remedy_undetermined');
-    should(ordinary.kind).equal('authorized');
+    should(response.status).equal(200);
+    should(jsonBody(response).actor).be.null();
+    should(seen).be.empty();
+  });
+
+  it('should refuse a warden authenticated by a redeemed socket ticket, which carries no headers', async () => {
+    // The one credential path that arrives with NO headers at all: a ticket replays exactly the
+    // classification the bearer that bought it produced, so the caller is a warden and has no way to
+    // present a capability. A presentation that read headers would behave differently here from one
+    // that does not; this pins that the axis reads the token class and refuses on the capability.
+    // Arrange
+    const redeemed: SocketTicketRedeemer = {
+      redeem: () => ({ kind: 'authenticated', tokenClass: 'warden' }),
+    };
+    const router = new ApiRouter([remedial()]);
+
+    // Act
+    const decision = authorizeRequest(
+      router,
+      credentials,
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s-3/stop',
+        query: [[SOCKET_TICKET_QUERY_PARAMETER, 'a-real-ticket']],
+      }),
+      redeemed,
+      NO_GOVERNED_ROUTES_GUARD,
+      allowing(),
+    );
+
+    // Assert — authenticated as a warden, then refused for the capability it structurally cannot send.
+    should(decision.kind).equal('refused');
+    should(decision.kind === 'refused' && jsonBody(decision.response).code).equal('warden_capability_required');
+  });
+
+  it('should answer every remedy refusal with a code no other condition uses', async () => {
+    // Distinct codes exist so a client can tell these apart WITHOUT parsing prose, and the thing
+    // rendering them into something a human acts on has to say which of five different people fixes
+    // it. A table catches a collision at authoring time; five sentences that differ only in wording
+    // do not.
+    // Arrange — every refusing condition, each with the smallest world that produces it.
+    const undeclared: ApiRoute = {
+      method: 'POST',
+      path: '/v1/sessions/:id/stop',
+      minimum: 'authenticated',
+      handle: async () => jsonResponse({}),
+    };
+    const carrying = { [WARDEN_CAPABILITY_HEADER]: 'cap-7' };
+    const conditions: readonly (readonly [string, ApiDispatcher, Readonly<Record<string, string>>])[] = [
+      ['undeclared', new ApiDispatcher(new ApiRouter([undeclared]), credentials, NO_GOVERNED_ROUTES_GUARD), carrying],
+      [
+        'blank declaration',
+        new ApiDispatcher(
+          new ApiRouter([{ ...remedial(), wardenRemedy: ' ' }]),
+          credentials,
+          NO_GOVERNED_ROUTES_GUARD,
+          allowing(),
+        ),
+        carrying,
+      ],
+      [
+        'no capability',
+        new ApiDispatcher(new ApiRouter([remedial()]), credentials, NO_GOVERNED_ROUTES_GUARD, allowing()),
+        {},
+      ],
+      ['unwired', new ApiDispatcher(new ApiRouter([remedial()]), credentials, NO_GOVERNED_ROUTES_GUARD), carrying],
+      [
+        'no decision',
+        new ApiDispatcher(new ApiRouter([remedial()]), credentials, NO_GOVERNED_ROUTES_GUARD, authorizer(undefined)),
+        carrying,
+      ],
+      [
+        'refused',
+        new ApiDispatcher(
+          new ApiRouter([remedial()]),
+          credentials,
+          NO_GOVERNED_ROUTES_GUARD,
+          authorizer({ allowed: false, refusal: 'no administrator has allowed this' }),
+        ),
+        carrying,
+      ],
+    ];
+
+    // Act
+    const codes: string[] = [];
+    for (const [, dispatcher, headers] of conditions) {
+      const response = await dispatcher.dispatch(wardenRequest(headers));
+      should(response.status).equal(403);
+      codes.push(String(jsonBody(response).code));
+    }
+
+    // Assert — pairwise distinct, and every one of them says something.
+    should(new Set(codes).size).equal(conditions.length);
+    should(codes).deepEqual([
+      'warden_remedy_undeclared',
+      'warden_remedy_invalid',
+      'warden_capability_required',
+      'warden_remedy_unwired',
+      'warden_remedy_undetermined',
+      'warden_remedy_refused',
+    ]);
+  });
+
+  it('should enforce the axis identically on the socket table, which is wired with the same authorizer', async () => {
+    // `authorizeRequest`'s own contract is that warden scope is enforced the same way on BOTH tables.
+    // An upgrade boundary that could not be wired would have refused with a sentence naming a fix
+    // nobody could perform — an unsatisfiable instruction, and the exact "quietly missing dependency"
+    // this class has already produced once.
+    // Arrange
+    const upgrade: SocketRoute = {
+      method: 'POST',
+      path: '/v1/sessions/:id/stop',
+      minimum: 'authenticated',
+      wardenRemedy: 'kill',
+      accept: async () => async () => ({ open: async () => {}, fromClient: () => {}, close: () => {} }),
+    };
+    const tickets: SocketTicketRedeemer = { redeem: () => undefined };
+    const wired = new ApiSocketDispatcher(
+      new ApiRouter([upgrade]),
+      credentials,
+      tickets,
+      NO_GOVERNED_ROUTES_GUARD,
+      allowing(),
+    );
+    const unwired = new ApiSocketDispatcher(new ApiRouter([upgrade]), credentials, tickets, NO_GOVERNED_ROUTES_GUARD);
+
+    // Act
+    const carrying = { [WARDEN_CAPABILITY_HEADER]: 'cap-7' };
+    const accepted = await wired.upgrade(wardenRequest(carrying));
+    const refused = await unwired.upgrade(wardenRequest(carrying));
+
+    // Assert — no socket route is expected to declare a remedy, but if one does the answer is the
+    // same one the request/response table gives, not an unanswerable refusal.
+    should(accepted.outcome).equal('accepted');
+    should(refused.outcome).equal('refused');
+    should(refused.outcome === 'refused' && jsonBody(refused.response).code).equal('warden_remedy_unwired');
   });
 });
