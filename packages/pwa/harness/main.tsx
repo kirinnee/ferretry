@@ -1868,6 +1868,7 @@ const HARNESS_FS_LISTINGS: Readonly<Record<string, unknown>> = {
       { name: 'node_modules', type: 'dir', ignored: true },
       { name: 'CLAUDE.md', type: 'file', size: 4_812 },
       { name: 'Taskfile.yaml', type: 'file', size: 9_233 },
+      { name: 'coverage.csv', type: 'file', size: 612 },
       { name: 'flake.nix', type: 'file', size: 2_104 },
       { name: '.env', type: 'file', denied: true },
       { name: 'result', type: 'symlink', escapes: true },
@@ -1883,6 +1884,19 @@ const HARNESS_FS_CHANGES = {
     { path: 'Taskfile.yaml', status: '??' },
   ],
 };
+
+/** The two paths whose reload states the file-tab card exists to show. */
+const HARNESS_RELOAD_PENDING = 'RELEASE.md';
+const HARNESS_RELOAD_FAILING = 'DEPLOY.md';
+
+const HARNESS_PREVIEW_CSV = [
+  'package,tier,lines,covered',
+  'cli,unit,1842,1842',
+  'daemon,unit,9137,9137',
+  'daemon,int,2211,2211',
+  'pwa,unit,7420,7420',
+  'relay,unit,1304,1304',
+].join('\n');
 
 /**
  * One real file body, so the file INSTANCE tab (#35) paints its own bytes
@@ -1911,7 +1925,35 @@ const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
     lang: 'yaml',
     content: ['version: "3"', '', 'tasks:', '  test:', '    desc: Run unit, integration and SIT suites'].join('\n'),
   },
+  'coverage.csv': { path: 'coverage.csv', lang: 'csv', content: HARNESS_PREVIEW_CSV },
+  [HARNESS_RELOAD_PENDING]: {
+    path: HARNESS_RELOAD_PENDING,
+    lang: 'markdown',
+    content: ['# Release notes', '', 'The bytes on screen were loaded a moment ago.'].join('\n'),
+  },
+  [HARNESS_RELOAD_FAILING]: {
+    path: HARNESS_RELOAD_FAILING,
+    lang: 'markdown',
+    content: ['# Deploy log', '', 'The bytes on screen were loaded before the host went away.'].join('\n'),
+  },
 };
+
+/**
+ * The rich preview's own bounded byte read (`?format=base64`). One CSV is
+ * enough to show a real table renderer; a PDF or a raster would only prove the
+ * browser can decode, which is not this surface's decision.
+ */
+const HARNESS_FS_PREVIEWS: Readonly<Record<string, unknown>> = {
+  'coverage.csv': { path: 'coverage.csv', base64: btoa(HARNESS_PREVIEW_CSV) },
+};
+
+/**
+ * How many times each path has been read, so the two RELOAD states are real
+ * rather than drawn. Both files answer the first read and then misbehave: one
+ * never settles (the reload is genuinely in flight) and one fails the way a
+ * browser fails. Nothing else in the harness depends on the count.
+ */
+const harnessFileReads = new Map<string, number>();
 
 /**
  * The fleet profile environment the harness daemon publishes.
@@ -1974,14 +2016,17 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.hostname === HARNESS_DAEMON_HOSTS.offline) throw new TypeError('Failed to fetch');
   if (url.hostname === HARNESS_DAEMON_HOSTS.checking) return await new Promise<Response>(() => undefined);
   if (url.hostname !== HARNESS_DAEMON_HOSTS.answering) return await harnessFetch(input, init);
-  if (url.pathname.includes('/fs'))
-    return harnessJson(
-      url.pathname.endsWith('/fs/changes')
-        ? HARNESS_FS_CHANGES
-        : url.pathname.endsWith('/fs/file')
-          ? (HARNESS_FS_FILES[url.searchParams.get('path') ?? ''] ?? { path: url.searchParams.get('path') ?? '' })
-          : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] }),
-    );
+  if (url.pathname.includes('/fs')) {
+    const path = url.searchParams.get('path') ?? '';
+    if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
+    if (!url.pathname.endsWith('/fs/file')) return harnessJson(HARNESS_FS_LISTINGS[path] ?? { entries: [] });
+    if (url.searchParams.get('format') === 'base64') return harnessJson(HARNESS_FS_PREVIEWS[path] ?? { path });
+    const reads = (harnessFileReads.get(path) ?? 0) + 1;
+    harnessFileReads.set(path, reads);
+    if (reads > 1 && path === HARNESS_RELOAD_PENDING) return await new Promise<Response>(() => undefined);
+    if (reads > 1 && path === HARNESS_RELOAD_FAILING) throw new TypeError('Failed to fetch');
+    return harnessJson(HARNESS_FS_FILES[path] ?? { path });
+  }
   // Reads only, and only routes named above. A write has no answer here on
   // purpose: this page keeps no store, so inventing a receipt for one would show
   // a saved secret that nothing holds. Anything else still leaves, where the
@@ -4938,22 +4983,35 @@ function Shell() {
     {
       label: 'File tab body',
       render: () => (
+        // Four bodies, one section: the ordinary read with its worded Reload,
+        // the rich preview that reload path feeds, and the two states a reload
+        // can leave behind. The screenshot pass presses Reload on the last two
+        // — they are real reads that misbehave, not a drawn notice.
         <Card aria-label="File tab body" className="min-w-0 overflow-hidden" id="harness-file-instance">
-          <div className="flex h-[26rem] flex-col" data-harness="file-instance-surface">
-            <FileInstanceSurface
-              daemon={daemon}
-              scope={scope}
-              instance={{
-                id: 'file:CLAUDE.md',
-                kind: 'file',
-                key: 'CLAUDE.md',
-                label: 'CLAUDE.md',
-                title: 'CLAUDE.md',
-                order: 1,
-                revision: 1,
-              }}
-            />
-          </div>
+          {(
+            [
+              ['file-instance-surface', 'CLAUDE.md'],
+              ['file-instance-preview', 'coverage.csv'],
+              ['file-instance-reloading', HARNESS_RELOAD_PENDING],
+              ['file-instance-reload-failed', HARNESS_RELOAD_FAILING],
+            ] as const
+          ).map(([slot, path], index) => (
+            <div className="flex h-[15rem] flex-col" data-harness={slot} key={slot}>
+              <FileInstanceSurface
+                daemon={daemon}
+                scope={scope}
+                instance={{
+                  id: `file:${path}`,
+                  kind: 'file',
+                  key: path,
+                  label: path,
+                  title: path,
+                  order: index + 1,
+                  revision: 1,
+                }}
+              />
+            </div>
+          ))}
         </Card>
       ),
     },

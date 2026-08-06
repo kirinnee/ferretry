@@ -948,11 +948,38 @@ try {
           process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
 
           // The body behind ONE file tab (#35), not the picker: its own path in
-          // the bar, its own raw/diff/refresh controls, its own bytes.
-          const fileInstanceTarget = join(outDir, `file-instance-${viewport.name}.png`);
+          // the bar, its own raw/diff/Reload controls, its own bytes — plus the
+          // rich preview and the two states a Reload can leave behind (#37/#62).
+          //
+          // The last two are DRIVEN, not drawn: their second read never settles
+          // and fails respectively, so pressing Reload is what puts the surface
+          // in the state being reviewed. Capturing before the press would show
+          // two ordinary files and prove nothing.
           await page.locator('#harness-file-instance').scrollIntoViewIfNeeded();
-          await page.getByLabel('File tab body').screenshot({ path: fileInstanceTarget });
-          process.stdout.write(`📸 File tab body -> ${fileInstanceTarget}\n`);
+          for (const [slot, path] of [
+            ['file-instance-reloading', 'RELEASE.md'],
+            ['file-instance-reload-failed', 'DEPLOY.md'],
+          ] as const) {
+            const body = page.locator(`[data-harness="${slot}"]`);
+            await body.scrollIntoViewIfNeeded();
+            await body.getByLabel(`Reload ${path}`).click();
+            await body.locator('.kt-fs-stale').waitFor({ state: 'visible' });
+          }
+          // ONE BODY PER FRAME, at the real viewport. Four stacked bodies do not
+          // fit a 390x844 phone, and borrowing a taller viewport to fit them
+          // would review a layout no reader ever sees.
+          for (const [slot, slug] of [
+            ['file-instance-surface', 'file-instance'],
+            ['file-instance-preview', 'file-preview'],
+            ['file-instance-reloading', 'file-reloading'],
+            ['file-instance-reload-failed', 'file-reload-failed'],
+          ] as const) {
+            const body = page.locator(`[data-harness="${slot}"]`);
+            await body.scrollIntoViewIfNeeded();
+            const target = join(outDir, `${slug}-${viewport.name}.png`);
+            await body.screenshot({ path: target });
+            process.stdout.write(`📸 File tab body ${slug} -> ${target}\n`);
+          }
 
           const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
           // The thumbnail is `loading="lazy"` and the harness stacks it thousands

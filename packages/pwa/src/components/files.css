@@ -98,6 +98,63 @@
   min-height: 44px;
 }
 
+/* The one WORDED action on the bar. It keeps the 44px target and reads
+   "Reload" — handover #37 asks for a visible action, not an arrow whose
+   meaning lives in a tooltip, so the word is never dropped at any width. It
+   costs about 50px next to three icon buttons; the path segment absorbs that
+   because it is the bar's only flexible item and already ellipsises, so 390px
+   stays one uncrowded rail. */
+.kt-fs-reload {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-xs);
+  padding-inline: var(--gap-xs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-tight);
+  white-space: nowrap;
+}
+
+.kt-fs-reload:hover {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+
+.kt-fs-reload[data-busy='true'] {
+  color: var(--fg);
+}
+
+/* ---- the reload's honest state ------------------------------------------
+   OUTSIDE the scroller, between the bar and the body: the reading position is
+   part of what a reload preserves, and a strip inserted above the content
+   would move it. One row, wrapping rather than clipping, so the sentence is
+   readable at 390px. */
+.kt-fs-stale {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) var(--pad-cell-x);
+  border-bottom: var(--stroke) solid var(--border-soft);
+  background: var(--surface-2);
+  color: var(--fg-soft);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-base);
+}
+
+.kt-fs-stale[data-tone='err'] {
+  border-inline-start: 2px solid var(--err);
+  background: var(--err-bg);
+  color: var(--err);
+}
+
 /* ---- open files ----------------------------------------------------------
    Tabs are instance-local to FilesTab; the pane host remains untouched. Each
    activation and close control independently keeps the 44px target floor, and

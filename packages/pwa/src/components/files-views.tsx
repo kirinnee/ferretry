@@ -111,6 +111,84 @@ export const Failed = ({ what, error, onRetry }: FailedProps) => (
   </Note>
 );
 
+export interface ReloadActionProps {
+  /** What is being re-read, for the accessible name. */
+  what: string;
+  busy: boolean;
+  onReload: () => void;
+}
+
+/**
+ * The network reread, WORDED. Handover #37 asks for a visible Reload on the open
+ * file, so this is a labelled control rather than a bare arrow whose meaning
+ * lives in a tooltip — and it is never disabled, because a reader who presses it
+ * again during a slow read is asking for the newest bytes, not making a mistake.
+ *
+ * The accessible name keeps the visible word (WCAG 2.5.3) and adds the target;
+ * the in-flight state is carried by `aria-busy` and by the one live notice
+ * below the bar, so it is announced once rather than by every control that
+ * knows about it.
+ */
+export const ReloadAction = ({ what, busy, onReload }: ReloadActionProps) => (
+  <button
+    type="button"
+    className="kt-fs-reload"
+    data-busy={busy || undefined}
+    aria-busy={busy}
+    aria-label={`Reload ${what}`}
+    title={`Re-read ${what} from the session host`}
+    onClick={onReload}
+  >
+    <RefreshCw size={14} className={busy ? 'animate-spin' : undefined} aria-hidden="true" />
+    <span>Reload</span>
+  </button>
+);
+
+/** Just enough of an `FsResource` to say whether what is on screen is the newest. */
+export interface ReloadStatus {
+  readonly refreshing: boolean;
+  readonly stale: boolean;
+  readonly error: string | null;
+}
+
+export interface StaleNoticeProps {
+  what: string;
+  status: ReloadStatus;
+  onRetry: () => void;
+}
+
+/**
+ * The honest sentence for content that is still on screen but no longer known to
+ * be current. It sits OUTSIDE the scroller on purpose: the reading position is
+ * part of what a reload must preserve, and a note pushed in above the content
+ * would move it.
+ *
+ * The `key` differs between the two tones so a refresh that ends in failure
+ * remounts the region and is announced, instead of silently rewriting the text
+ * of a live region a reader has already heard.
+ */
+export const StaleNotice = ({ what, status, onRetry }: StaleNoticeProps) => {
+  if (!status.stale) return null;
+  if (status.error !== null)
+    return (
+      <div className="kt-fs-stale" data-tone="err" role="alert" key="reload-failed">
+        <span>
+          Could not reload {what}: {status.error}. This is the copy loaded earlier, not the latest bytes.
+        </span>
+        <button type="button" className="kt-btn kt-btn--sm kt-fs-retry" onClick={onRetry}>
+          <RefreshCw size={13} aria-hidden="true" />
+          Try again
+        </button>
+      </div>
+    );
+  return (
+    <div className="kt-fs-stale" role="status" key="reload-running">
+      <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+      <span>Reloading {what} — showing the copy loaded earlier until the new bytes arrive.</span>
+    </div>
+  );
+};
+
 /**
  * The condensed git marker. `role="img"` rather than a bare span: the dot and
  * the counts are a single glyph whose whole meaning is in its label, and a
@@ -380,7 +458,15 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
   const lang = file.lang ?? langFromPath(path);
   const renderedMarkdown = isMarkdownPath(path) && selection === undefined;
   const richKind = richFileKind(path);
-  const showRichPreview = !raw && selection === undefined && richKind !== null && preview !== undefined;
+  // `file.binary || content` is what stops a rich preview from swallowing the
+  // empty-file answer: a PDF legitimately arrives with no text, an actually
+  // empty `.csv` is still an empty file and says so.
+  const showRichPreview =
+    !raw &&
+    selection === undefined &&
+    richKind !== null &&
+    preview !== undefined &&
+    (file.binary === true || !!content);
   const html = useMemo(
     () => (refusal || raw || renderedMarkdown ? null : highlightToHtml(content, lang)),
     [refusal, raw, renderedMarkdown, content, lang],
@@ -403,6 +489,12 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         {refusal}
       </Note>
     );
+  // BEFORE the empty-text answer: a recognised rich type is served from its own
+  // bounded byte read, so a binary response with no `content` is not an empty
+  // file — announcing it as one is how a PDF used to render as "This file is
+  // empty." instead of as a document.
+  if (showRichPreview && preview)
+    return <RichFilePreview daemon={preview.daemon} scope={preview.scope} path={path} revision={preview.revision} />;
   if (!content) return <Note role="status">This file is empty.</Note>;
   if (!raw && renderedMarkdown)
     return (
@@ -410,8 +502,6 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         <Markdown text={content} {...markdown} />
       </div>
     );
-  if (showRichPreview && preview)
-    return <RichFilePreview daemon={preview.daemon} scope={preview.scope} path={path} revision={preview.revision} />;
   if (selection)
     return (
       <>

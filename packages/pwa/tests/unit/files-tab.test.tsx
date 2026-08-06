@@ -260,13 +260,13 @@ describe('the Files tab', () => {
     }
   });
 
-  it('goes back to the list, toggles the folder tree, and refreshes whichever pane is showing', async () => {
+  it('goes back to the list, toggles the folder tree, and reloads whichever pane is showing', async () => {
     fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
     const view = await open(<FilesTab daemon={daemon} scope={scope} />);
     try {
       const listReads = () => asked.filter(url => url.endsWith('/fs')).length;
       const before = listReads();
-      await click(view.container, 'Refresh files');
+      await click(view.container, 'Reload files');
       await settle();
       expect(listReads()).toBeGreaterThan(before);
 
@@ -281,7 +281,7 @@ describe('the Files tab', () => {
       await settle();
       const fileReads = () => asked.filter(url => url.includes('/fs/file')).length;
       const beforeFile = fileReads();
-      await click(view.container, 'Refresh files');
+      await click(view.container, 'Reload a.ts');
       await settle();
       expect(fileReads()).toBeGreaterThan(beforeFile);
 
@@ -309,7 +309,36 @@ describe('the Files tab', () => {
     }
   });
 
-  it('refreshes the diff rather than the file while the diff is showing', async () => {
+  it('keeps the standalone viewer’s bytes on screen when its Reload fails, and says which copy it is', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    fixture.files = { 'a.ts': { path: 'a.ts', content: 'the copy that survived' } };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      expect(view.container.textContent).toContain('the copy that survived');
+
+      fixture.files = { 'a.ts': new Error('the session host went away') };
+      await click(view.container, 'Reload a.ts');
+      await settle();
+
+      // Same decision as the instance viewer, because it is the same decision.
+      expect(view.container.textContent).toContain('the copy that survived');
+      const notice = must(view.container.querySelector('.kt-fs-stale'), 'the failed-reload notice');
+      expect(notice.getAttribute('role')).toBe('alert');
+      expect(notice.textContent).toContain('the session host went away');
+
+      fixture.files = { 'a.ts': { path: 'a.ts', content: 'the retry that worked' } };
+      await interact(() => must(notice.querySelector('button'), 'the try-again control').click());
+      await settle();
+      expect(view.container.textContent).toContain('the retry that worked');
+      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('reloads the diff rather than the file while the diff is showing', async () => {
     fixture.changes = { repo: true, changes: [] };
     fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
     fixture.diffs = { 'a.ts': '@@ -1 +1 @@\n-old\n+new' };
@@ -321,7 +350,7 @@ describe('the Files tab', () => {
       await settle();
       const diffReads = () => asked.filter(url => url.includes('/fs/diff')).length;
       const before = diffReads();
-      await click(view.container, 'Refresh files');
+      await click(view.container, 'Reload a.ts');
       await settle();
       expect(diffReads()).toBeGreaterThan(before);
     } finally {
