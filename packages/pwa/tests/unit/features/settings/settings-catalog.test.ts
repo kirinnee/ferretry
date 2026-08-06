@@ -25,6 +25,7 @@ describe('shared settings catalog', () => {
       'chat-width',
       'composer-markdown',
       'composer-enter-key',
+      'composer-suggestions',
       'theme',
       'dictation',
       'notifications',
@@ -42,7 +43,7 @@ describe('shared settings catalog', () => {
     expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Daemons']);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
       ['text-size', 'theme', 'density', 'chat-width'],
-      ['composer-markdown', 'composer-enter-key', 'dictation', 'notifications'],
+      ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
       [],
     ]);
 
@@ -68,6 +69,7 @@ describe('shared settings catalog', () => {
     expect(settingsSectionForSetting('theme')).toBe('appearance');
     expect(settingsSectionForSetting('composer-markdown')).toBe('behaviour');
     expect(settingsSectionForSetting('composer-enter-key')).toBe('behaviour');
+    expect(settingsSectionForSetting('composer-suggestions')).toBe('behaviour');
     expect(settingsSectionForSetting('notifications')).toBe('behaviour');
     expect(() => settingsSectionDefinition('invented' as never)).toThrow('Unknown settings section: invented');
     expect(() => settingsSectionForSetting('invented' as never)).toThrow(
@@ -94,6 +96,15 @@ describe('shared settings catalog', () => {
     expect(settingsPaletteEntries(alpha, 'balanced')[0]?.settingId).toBe('chat-width');
     expect(settingsPaletteEntries(alpha, 'markdown preview')[0]?.settingId).toBe('composer-markdown');
     expect(settingsPaletteEntries(alpha, 'shift enter')[0]?.settingId).toBe('composer-enter-key');
+    // Vim shares the composer-editing control rather than hiding in a new page.
+    for (const query of ['vim', 'modal', 'hjkl', 'normal mode']) {
+      expect(settingsPaletteEntries(alpha, query).map(entry => entry.settingId)).toContain('composer-markdown');
+    }
+    // The suggestion switches are findable by what a reader would type when a
+    // menu is in the way, not only by this project's own nouns.
+    for (const query of ['suggestion', 'autocomplete', 'sigil', 'typeahead', 'noise']) {
+      expect(settingsPaletteEntries(alpha, query).map(entry => entry.settingId)).toContain('composer-suggestions');
+    }
     expect(settingsPaletteEntries(alpha, 'dark').map(entry => entry.settingId)).toContain('theme');
     expect(settingsPaletteEntries(alpha, 'microphone').map(entry => entry.settingId)).toContain('dictation');
   });
