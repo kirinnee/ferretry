@@ -9,6 +9,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import { WILDCARD_BIND_HOST } from '@ferretry/protocol';
 import should from 'should';
 import {
   chooseRelayCarrierSource,
@@ -172,9 +173,12 @@ describe('what the daemon says about its carrier', () => {
       should(lines).have.length(4);
       should(lines[1]).containEql(host);
       should(lines[1]).match(/nothing can pair with it either/u);
-      // The two steps, in the order they have to happen.
+      // Bind everywhere before advertising one dialable URL. The wildcard keeps loopback working,
+      // so the host's own command can still spend the owner-only credential after applying the fix.
       should(lines[2]).match(/^to pair: set "host" in/u);
       should(lines[2]).containEql(CONFIG_FILE);
+      should(lines[2]).containEql(`"${WILDCARD_BIND_HOST}"`);
+      should(lines[2]).containEql('"publicUrl"');
       should(lines[3]).match(/^to stay reachable once that browser leaves the network/u);
     },
   );

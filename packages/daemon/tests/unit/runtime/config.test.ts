@@ -221,6 +221,31 @@ describe('daemon configuration', () => {
     });
   });
 
+  it('should never call a wildcard bind’s advertisement foreign, because that pairing is the remedy', () => {
+    /*
+     * THE NOTICE THAT TOLD SOMEBODY TO UNDO THE FIX. Pairing's remedy for a daemon no phone can
+     * reach asks for exactly this pair — bind every interface, advertise the one address a device
+     * can dial. A wildcard is a bind instruction rather than a destination, so comparing it with
+     * that advertisement finds them different every single time, and the boot then printed "if that
+     * is not deliberate, remove publicUrl" at an operator who had just deliberately added it.
+     */
+    // Arrange
+    const remedied = parseDaemonConfig({ host: '0.0.0.0', port: 7_431, publicUrl: 'http://192.168.1.10:7431' });
+    const proxied = parseDaemonConfig({ host: '127.0.0.1', port: 7_431, publicUrl: 'https://box.example.test' });
+    const wildcardAlone = parseDaemonConfig({ host: '::', port: 7_431 });
+
+    // Assert — the wildcard cases say nothing; a real proxy deployment is still stated as the fact it is.
+    should(advertisesForeignAddress(remedied)).be.false();
+    should(advertisesForeignAddress(wildcardAlone)).be.false();
+    should(advertisesForeignAddress(proxied)).be.true();
+    // And the advertisement itself is unchanged by any of this: the operator's address, verbatim.
+    should(remedied.advertisement).deepEqual({
+      kind: 'address',
+      url: 'http://192.168.1.10:7431',
+      origin: 'operator',
+    });
+  });
+
   it('should refuse damaged or ambiguous pricing evidence before the daemon can use it', () => {
     // A catalog cannot name two prices for the same effective model instant, and an alias must never
     // be allowed to resolve to two models. Either condition would otherwise make a plausible amount

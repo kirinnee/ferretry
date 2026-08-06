@@ -4,6 +4,7 @@ import {
   daemonAddress,
   decideAdvertisement,
   FY_DEFAULT_DAEMON_PORT,
+  isWildcardHost,
   LOOPBACK,
 } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
@@ -156,7 +157,7 @@ export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
 export const DaemonRelayConfigSchema = z
   .object({
     /** The rendezvous origin, as `SocketEndpointSchema` spells one: secure everywhere, insecure
-     *  only against loopback, and no query or fragment. */
+     *  only on localhost or 127.0.0.1, and no query or fragment. */
     url: SocketEndpointSchema,
     /** Whether to dial at all. A configured address the operator has switched off stays readable
      *  rather than having to be deleted and retyped. */
@@ -417,8 +418,16 @@ export function defaultDaemonConfig(): DaemonConfig {
  * never a refusal. It is worth stating because the historical cause was a defect rather than a
  * choice: homes written before derived values stopped being persisted still carry a `publicUrl`
  * frozen at whatever the port was on the day the home was created.
+ *
+ * A WILDCARD BIND IS NEVER FOREIGN, AND SAYING SO IS THE POINT. A daemon told to accept every
+ * interface has no single address to compare against, and pairing's own remedy now asks for exactly
+ * this pair — bind everywhere, advertise the one address a device can dial. Comparing a wildcard
+ * bind instruction with that advertisement finds them different every time and prints "if that is
+ * not deliberate, remove publicUrl" at the operator who just deliberately added it. A notice that
+ * tells somebody to undo the documented fix is worse than no notice.
  */
 export function advertisesForeignAddress(config: DaemonConfig): boolean {
+  if (isWildcardHost(config.host)) return false;
   return new URL(config.publicUrl).origin !== new URL(config.bindUrl).origin;
 }
 

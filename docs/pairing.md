@@ -32,13 +32,19 @@ Two properties hold by construction rather than by discipline:
 ## The exchange
 
 ```
-POST /v1/pair/code            (admin scope, `pairing.use`)   → { pairingId, code, expiresAt, link+reach | refusal }
-GET  /v1/pair/code/:pairingId (admin scope, `pairing.use`)   → pending | redeemed | expired
-DELETE /v1/pair/code/:pairingId (admin scope, `pairing.use`) → the code's fate, never the code
-POST /v1/pair                 (public)                        → { deviceToken, daemonId, … }
-GET  /v1/pair/devices         (admin scope, `pairing.use`)   → who may reach this machine
-DELETE /v1/pair/devices/:id   (admin scope, `pairing.use`)   → the remaining list
+POST /v1/pair/code            (operator minimum, `pairing.use`)   → { pairingId, code, expiresAt, link+reach | refusal }
+GET  /v1/pair/code/:pairingId (operator minimum, `pairing.use`)   → pending | redeemed | expired
+DELETE /v1/pair/code/:pairingId (operator minimum, `pairing.use`) → the code's fate, never the code
+POST /v1/pair                 (public)                            → { deviceToken, daemonId, … }
+GET  /v1/pair/devices         (operator minimum, `pairing.use`)   → who may reach this machine
+DELETE /v1/pair/devices/:id   (operator minimum, `pairing.use`)   → the remaining list
 ```
+
+**`operator` is the route's credential minimum, not an admin token.** Any credential but a warden's
+meets it — a paired device's token included — which is what lets a browser, whose only credential comes
+from redeeming a pairing code, add the second device. An `admin-token` minimum would have left that
+journey where it started: on the command line. The narrowing that remains is the capability demand
+beside it, and off the host that is the operator's to switch off.
 
 `POST /v1/pair` is the only public route on this surface, and it is public because a device redeeming a
 code has no credential yet — the **code is** the credential for that one request. Everything else either
@@ -61,11 +67,35 @@ and the mint response carries that answer rather than making each renderer infer
   panel show the link and draw its QR.
 - `reach: "local-only"` accompanies a loopback address. The link remains valid for a browser on this
   machine, but neither surface draws a QR: on a phone, loopback names the phone. Both say who can use
-  the link and name the fix beside it: _set `publicUrl` to the address other devices reach this machine
-  at, e.g. `http://192.168.1.10:7431`_.
+  the link and name the fix beside it.
 - `refusal` replaces `daemonUrl`, `pairUrl`, and `reach` when a wildcard bind or missing port leaves no
   address to hand out. The daemon still mints the short-lived code; the surfaces show no link and name
-  the same fix.
+  the fix for **that** reason.
+
+**A remedy that cannot be followed is a dead end with extra steps**, so there is one per reason rather
+than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
+sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own:
+
+| reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local-only`    | **bind first, then advertise**: `"host": "0.0.0.0"` _and_ `"publicUrl"` set to the address other devices reach this machine at, then restart. `publicUrl` alone changes nothing about the interface the daemon listens on, so on its own it turns an honest "only this machine can redeem it" into a QR a phone scans and then cannot connect to. The sentence names the exposure the wildcard opens — it accepts connections from other devices on the network — because that widening is the fix, not a side effect. The wildcard keeps loopback available, so commands on the machine are unaffected. |
+| `wildcard-bind` | `"publicUrl"` alone, then restart — the daemon is already listening everywhere and needs only a single address to hand out.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `no-port`       | start the daemon once so it records the port it takes, or write `"port"` down. `publicUrl` cannot supply an address nothing has bound.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+The example address in each sentence carries **this daemon's** port, taken from the address the reader
+was just shown — a first boot whose preferred port was taken is serving on another one, and an example
+naming the compiled-in default is advice to type the wrong number.
+
+Because the wildcard-plus-`publicUrl` pair is the documented answer rather than a suspicious one,
+`advertisesForeignAddress` reports nothing for a wildcard bind: the boot notice that offers to remove a
+`publicUrl` which "is not deliberate" must never fire at the operator who just deliberately added it.
+
+Where a client on the machine **dials** the daemon is a different fact and is read from the recorded
+bind (`recordedBindAddress`), never from `publicUrl`. A wildcard bind resolves to loopback at the
+recorded port. Reading the advertisement there made an operator who followed the remedy unable to run
+`fy pair` at all — the local client classified the daemon on its own desk as remote and refused to send
+the owner-only token, which is the rule working correctly on the wrong input. `FY_URL` still wins
+outright, and a genuinely remote daemon still requires its own `FY_TOKEN`.
 
 The requester's own carrier never changes this answer. `ApiRequest.loopback` says who is **minting**,
 not who will **redeem**; the normal phone journey is minted locally and redeemed elsewhere.
@@ -119,7 +149,7 @@ row states what its revoke will do before the press.
 | concern                     | module                                                             |
 | --------------------------- | ------------------------------------------------------------------ |
 | the state machine           | `packages/daemon/src/lib/pairing/service.ts`                       |
-| the routes and their scope  | `packages/daemon/src/lib/runtime/mounts/pairing.ts`                |
+| the routes and their minima | `packages/daemon/src/lib/runtime/mounts/pairing.ts`                |
 | durable identity and grants | `packages/daemon/src/adapters/pairing/state-pairing-repository.ts` |
 | the wire contract           | `packages/protocol/src/lib/pairing.ts`                             |
 | the command line            | `packages/cli/src/lib/pair/`                                       |

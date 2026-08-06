@@ -137,6 +137,9 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('ferretry.pages.dev/pair');
     // The QR is drawn in this tab: an SVG path, not a request to anybody.
     should(marked(renderer, 'data-qr-version')).have.length(1);
+    // A phone IS the caller a QR is for, so both the heading and the disclosure may say so here.
+    expect(text(renderer)).toContain('Show this to the device you are adding');
+    expect(text(renderer)).toContain('Show it to the phone you are adding');
   });
 
   it('draws no QR for an address only this machine can dial, and says who can redeem it', () => {
@@ -153,8 +156,14 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-pair-url')).have.length(1);
     should(marked(renderer, 'data-pair-code')).have.length(1);
     expect(text(renderer)).toContain('Only a browser on this machine can redeem this link');
-    // Never a dead end: the audience arrives with the one edit that widens it.
-    expect(text(renderer)).toContain('set publicUrl to the address other devices reach this machine at');
+    // Never a dead end: the audience arrives with the edit that widens it.
+    expect(text(renderer)).toContain('publicUrl');
+    expect(text(renderer)).toContain('to the address other devices reach this machine at');
+    // The heading and the disclosure must not send the reader looking for a phone that cannot use this.
+    expect(text(renderer)).toContain('Open this on this machine');
+    expect(text(renderer)).not.toContain('Show this to the device you are adding');
+    expect(text(renderer)).toContain('Show it to a browser on this machine');
+    expect(text(renderer)).not.toContain('Show it to the phone you are adding');
   });
 
   it('offers no link at all when the daemon has no address, and still shows the code', () => {
@@ -171,6 +180,12 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-pair-code')).have.length(1);
     expect(text(renderer)).toContain('binds every interface');
     expect(text(renderer)).not.toContain('ferretry.pages.dev/pair#');
+    // Nothing here can be shown to anybody, so neither the heading nor the disclosure should say so.
+    expect(text(renderer)).toContain('No link to hand out');
+    expect(text(renderer)).not.toContain('Show this to the device you are adding');
+    expect(text(renderer)).toContain('keep it to yourself');
+    expect(text(renderer)).not.toContain('Show it to the phone you are adding');
+    expect(text(renderer)).not.toContain('Show it to a browser on this machine');
   });
 
   it('counts down while the code lives and says plainly when it has run out', () => {
@@ -186,6 +201,10 @@ describe('AddDeviceCard', () => {
     should(marked(dead, 'data-pair-qr')).be.empty();
     should(marked(dead, 'data-pair-url')).be.empty();
     expect(text(dead)).toContain('can no longer add a device');
+    // And the headline says the code is gone rather than pointing at a hand-off that no longer exists —
+    // there is nothing left on this screen for anybody to be shown.
+    expect(text(dead)).toContain('This code has run out');
+    expect(text(dead)).not.toContain('Show this to the device you are adding');
   });
 
   it('says what the code gives away while it is on screen', () => {

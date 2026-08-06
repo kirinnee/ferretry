@@ -29,6 +29,7 @@ import {
   type SttEnhancementResult,
   TerminalListViewSchema,
   TerminalViewSchema,
+  WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
 import should from 'should';
 import { z } from 'zod';
@@ -3654,6 +3655,8 @@ describe('daemon boot lifecycle', () => {
       should(notice[1]).match(/nothing can pair with it either/u);
       should(notice[2]).match(/^to pair: set "host" in/u);
       should(notice[2]).containEql(join(home, 'config', 'daemon.json'));
+      should(notice[2]).containEql(`"${WILDCARD_BIND_HOST}"`);
+      should(notice[2]).containEql('"publicUrl"');
       should(notice[3]).match(/relay directory again/u);
     });
 

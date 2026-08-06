@@ -1,18 +1,4 @@
-import { FY_DEFAULT_DAEMON_URL, recordedDaemonAddress } from '@ferretry/protocol';
-
-/**
- * Every host name that names THIS machine.
- *
- * `127.0.0.0/8` in full rather than the one familiar address, because the whole block is loopback and
- * an operator who binds `127.0.0.2` to separate two daemons is doing something supported. `.localhost`
- * is included because RFC 6761 reserves it to resolve to loopback and nothing else.
- */
-function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === '::1' || host === '[::1]') return true;
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(host);
-}
+import { FY_DEFAULT_DAEMON_URL, isLoopbackHost, recordedBindAddress } from '@ferretry/protocol';
 
 /**
  * Whether a daemon URL names this machine, and may therefore use the locally minted credential.
@@ -22,6 +8,12 @@ function isLoopbackHost(hostname: string): boolean {
  * classified as remote and refused for want of `FY_TOKEN` — while the owner-only token file that is
  * exactly the right credential sat unread in the state home. The comment beside it already said
  * "targets a remote daemon"; only the code disagreed.
+ *
+ * WHAT COUNTS AS THIS MACHINE IS NOT DECIDED HERE. It used to be: a private copy of the predicate
+ * read the whole of `127.0.0.0/8` and every `.localhost` name while the protocol's own read three
+ * spellings, so one host was two facts at once — `127.0.0.2` was this machine to the token spent on
+ * it and a stranger to the pairing advertisement, which handed a phone a QR code for an address that
+ * resolves to the phone. The protocol owns the whole domain now and this asks it.
  *
  * A URL THAT WILL NOT PARSE IS NOT LOOPBACK. The consequence of guessing wrong in that direction is
  * an admin credential sent off this machine, so the unparseable case takes the refusal.
@@ -43,6 +35,12 @@ export function isLocalDaemonUrl(url: string): boolean {
  * daemon unreachable, which is the failure this resolution exists to prevent. The default is the
  * last resort, for a machine where no daemon has ever written a document.
  *
+ * IT ASKS FOR THE BIND, NOT THE ADVERTISEMENT. `publicUrl` says where somebody ELSE reaches this
+ * machine, and a client that followed it dialled a routed address for a daemon sitting on the same
+ * desk — which `isLocalDaemonUrl` then correctly refused to spend a local credential on, so the one
+ * command that mints a pairing code stopped working the moment its operator took the advice printed
+ * beside it. The two questions have two functions in the protocol now, and this one asks the local one.
+ *
  * `documentText` is passed IN rather than read here so the decision is a pure function of what the
  * file said, including the case where there is no file at all.
  */
@@ -51,11 +49,11 @@ export function resolveDaemonUrl(explicitUrl: string, documentText: string | und
   return recordedAddress(documentText) ?? FY_DEFAULT_DAEMON_URL;
 }
 
-/** The address the daemon wrote down, or `undefined` when the document is absent or unusable. */
+/** The address the daemon bound, or `undefined` when the document is absent or unusable. */
 function recordedAddress(documentText: string | undefined): string | undefined {
   if (documentText === undefined) return undefined;
   try {
-    return recordedDaemonAddress(JSON.parse(documentText));
+    return recordedBindAddress(JSON.parse(documentText));
   } catch {
     // A document this client cannot read leaves it looking at the well-known default, which fails
     // visibly as "the daemon is not answering". The daemon parses the same file strictly and refuses

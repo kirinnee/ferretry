@@ -26,9 +26,28 @@ export const PAIRING_EXPIRY_NOTE =
 /** The line beside a code that has already run out, so a stale screen never reads as a live one. */
 export const PAIRING_EXPIRED_NOTE = 'This code has expired and can no longer add a device. Ask for another one.';
 
-/** What the code actually gives away, said plainly next to it while it is on screen. */
-export const PAIRING_CODE_DISCLOSURE =
-  'Anyone who reads this code within its two minutes can add their device to this machine. Show it to the phone you are adding and nothing else.';
+/** Who the code disclosure can truthfully tell somebody to hand it to. */
+export type PairingOfferKind = 'qr' | 'local-only' | 'refusal';
+
+/**
+ * What the code actually gives away, said plainly next to it while it is on screen.
+ *
+ * WORDED TO WHAT THIS OFFER CAN ACTUALLY REACH. The first sentence — the fact being disclosed — never
+ * changes, but "show it to the phone you are adding" is a lie beside a `local-only` or `refusal` offer:
+ * there is no phone that link works for, and for a `refusal` there is no link at all. Saying so per
+ * offer is the same fix `fy pair`'s headline already has (`render.ts:175-178`) applied to this line.
+ */
+export function pairingCodeDisclosure(offerKind: PairingOfferKind): string {
+  const fact = 'Anyone who reads this code within its two minutes can add their device to this machine.';
+  switch (offerKind) {
+    case 'qr':
+      return `${fact} Show it to the phone you are adding and nothing else.`;
+    case 'local-only':
+      return `${fact} Show it to a browser on this machine and nothing else.`;
+    case 'refusal':
+      return `${fact} There is no link to hand out, so keep it to yourself.`;
+  }
+}
 
 /** How the QR is meant to be used, because the in-app scanner is not the intended path on most phones. */
 export const PAIRING_SCAN_HINT =

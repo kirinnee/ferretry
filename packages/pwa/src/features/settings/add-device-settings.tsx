@@ -42,14 +42,15 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   isThisDevice,
   orderedPairedDevices,
-  PAIRING_CODE_DISCLOSURE,
   PAIRING_EXPIRED_NOTE,
   PAIRING_EXPIRY_NOTE,
   PAIRING_SCAN_HINT,
   PAIRING_TICK_MS,
   PAIRING_TYPE_HINT,
   pairedDeviceSummary,
+  pairingCodeDisclosure,
   pairingCountdown,
+  type PairingOfferKind,
   pairingRefusal,
   revokeConsequence,
 } from '../../lib/pairing-invite.ts';
@@ -99,6 +100,37 @@ function InviteSymbol({ pairUrl }: { readonly pairUrl: string }) {
     </div>
   );
 }
+
+/** Which of the three offers this outcome is, for the copy that must vary with it. */
+function offerKindOf(outcome: PairingMintOutcome): PairingOfferKind {
+  if (outcome.kind === 'refusal') return 'refusal';
+  return outcome.reach === 'local-only' ? 'local-only' : 'qr';
+}
+
+/**
+ * The panel's headline, decided by what THIS offer can actually do.
+ *
+ * `fy pair` fixed the same defect at its own headline (`render.ts:175-178`): a fixed "show this to the
+ * device you are adding" printed over a `local-only` or `refusal` offer sends the reader looking for a
+ * phone that link was never for. CONCISE AND BRANCH-SPECIFIC RATHER THAN THE FULL NOTICE: `InviteOffer`
+ * already renders the protocol-owned `audience`/`remedy` sentence in full immediately below, so
+ * repeating it here would print the same sentence twice back-to-back.
+ */
+function inviteHeadline(outcome: PairingMintOutcome): string {
+  if (outcome.kind === 'refusal') return 'No link to hand out';
+  if (outcome.reach === 'local-only') return 'Open this on this machine';
+  return 'Show this to the device you are adding';
+}
+
+/**
+ * The headline over a code that has run out, which is about the code and never about an offer.
+ *
+ * AN EXPIRED CODE HAS NOTHING TO SHOW ANYBODY. The panel below it withholds the QR, the link and the
+ * code itself, so "show this to the device you are adding" printed above that names a hand-off that
+ * no longer exists — and named it even for a `local-only` or `refusal` offer, where no link a device
+ * could take ever existed at all. It says the one thing that is still true instead.
+ */
+const EXPIRED_HEADLINE = 'This code has run out';
 
 /**
  * WHAT THERE IS TO OFFER THE DEVICE BEING ADDED, AND WHO CAN TAKE IT.
@@ -298,7 +330,9 @@ export function AddDeviceCard({
       {invite !== null && countdown !== null ? (
         <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-label="Pairing code" data-pair-invite="">
           <div className="flex flex-wrap items-baseline gap-2">
-            <p className="m-0 text-ui font-semibold text-fg">Show this to the device you are adding</p>
+            <p className="m-0 text-ui font-semibold text-fg">
+              {countdown.expired ? EXPIRED_HEADLINE : inviteHeadline(pairingMintOutcome(invite))}
+            </p>
             <span
               role="timer"
               aria-live="off"
@@ -330,7 +364,7 @@ export function AddDeviceCard({
                 </code>
               </p>
               <p className="m-0 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
-                {PAIRING_CODE_DISCLOSURE}
+                {pairingCodeDisclosure(offerKindOf(pairingMintOutcome(invite)))}
               </p>
             </>
           )}

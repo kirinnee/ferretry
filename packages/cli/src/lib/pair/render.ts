@@ -193,8 +193,9 @@ export function renderInvitation(invitation: PairingInvitation): string {
             offer.link,
             '',
             text(offer.notice.remedy),
+            '',
           ]
-        : ['', text(offer.notice.remedy)];
+        : ['', text(offer.notice.remedy), ''];
   return [
     text(headline),
     '',
@@ -216,9 +217,16 @@ export function renderNoLinkToOpen(): string {
   return 'There is no link to open — this daemon has no address to hand out, and the reason is above.';
 }
 
-/** The live line while the code is alive. */
-export function renderWaiting(remainingMs: number): string {
-  return `Waiting for the scan — ${renderRemaining(remainingMs)} left`;
+/**
+ * The live line while the code is alive.
+ *
+ * ONLY THE `qr` OFFER IS EVER SCANNED. `local-only` and `refusal` hand the code to a browser or to
+ * nobody, so a countdown that keeps saying "the scan" on those two branches is asking the operator to
+ * watch for something that was never offered.
+ */
+export function renderWaiting(remainingMs: number, offerKind: PairingOffer['kind']): string {
+  const verb = offerKind === 'qr' ? 'Waiting for the scan' : 'Waiting for the code to be redeemed';
+  return `${verb} — ${renderRemaining(remainingMs)} left`;
 }
 
 /**

@@ -2,13 +2,12 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   decideAdvertisement,
-  FY_DEFAULT_DAEMON_PORT,
   isLoopbackHost,
   isLoopbackPeer,
   isWildcardHost,
   localOnlyNotice,
-  recordedDaemonAddress,
   refusalNotice,
+  WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
 
 describe('the advertised address', () => {
@@ -98,52 +97,58 @@ describe('the advertised address', () => {
     });
   });
 
-  it('should read a daemon’s recorded address through the same decision the daemon uses', () => {
-    // Act + Assert — a separate package with its own coverage ledger, which is why it reads the
-    // decision rather than re-deriving it: the two disagreeing is a client dialling an address its
-    // own daemon does not consider its own.
-    should(recordedDaemonAddress({ host: '127.0.0.1', port: 7_432 })).equal('http://127.0.0.1:7432');
-    should(recordedDaemonAddress({ host: '127.0.0.1', port: 7_432, publicUrl: 'https://box.test' })).equal(
-      'https://box.test',
-    );
-    // A document that records a port but no host still names loopback, which is where a daemon binds.
-    should(recordedDaemonAddress({ port: 7_432 })).equal('http://127.0.0.1:7432');
-    // A local-only address is STILL returned: this reader runs on the host, which is the one caller
-    // such an address is right for.
-    should(recordedDaemonAddress({ host: 'localhost', port: 7_432 })).equal('http://localhost:7432');
-  });
-
-  it('should record nothing from a document that records nothing usable', () => {
-    // Act + Assert — every one of these leaves a client at the well-known default, which fails
-    // visibly as "the daemon is not answering" rather than by refusing to run at all.
-    should(recordedDaemonAddress({})).be.undefined();
-    should(recordedDaemonAddress({ host: '127.0.0.1' })).be.undefined();
-    should(recordedDaemonAddress({ port: '7432' })).be.undefined();
-    should(recordedDaemonAddress({ port: 7_432.5 })).be.undefined();
-    should(recordedDaemonAddress({ publicUrl: '   ' })).be.undefined();
-    should(recordedDaemonAddress({ host: '0.0.0.0', port: 7_432 })).be.undefined();
-    should(recordedDaemonAddress(null)).be.undefined();
-    should(recordedDaemonAddress('not a document')).be.undefined();
-  });
-
-  it('should say who can redeem a link and the one change that widens it', () => {
-    // NEVER A DEAD END. Every sentence that withholds something names the edit that stops withholding
-    // it, and the example carries the daemon's REAL port — advice with the default port in it is
-    // advice to type the wrong number.
+  it('should say who can redeem a link and what actually widens it', () => {
+    // NEVER A DEAD END, AND NEVER A REMEDY THAT DOES NOT WORK. `publicUrl` alone is what this used to
+    // say to a loopback bind, and following it left the daemon listening on loopback while the screen
+    // started claiming a phone could dial the advertised address — the same dead end, now confident.
     const local = localOnlyNotice('http://127.0.0.1:7431');
     should(local.audience).containEql('Only a browser on this machine can redeem this link');
     should(local.audience).containEql('http://127.0.0.1:7431');
     should(local.audience).containEql('no QR');
-    should(local.remedy).equal(
-      `set publicUrl to the address other devices reach this machine at, e.g. http://192.168.1.10:${String(FY_DEFAULT_DAEMON_PORT)}`,
-    );
-    should(localOnlyNotice('http://localhost').remedy).equal(local.remedy);
+    // The bind comes FIRST, and the wildcard is the spelling the predicate actually recognises.
+    should(local.remedy).startWith(`bind every interface with "host": "${WILDCARD_BIND_HOST}"`);
+    should(local.remedy).containEql('set "publicUrl" in <FY_HOME>/config/daemon.json');
+    should(local.remedy).containEql('then restart the daemon');
+    // And it promises what makes the fix safe to apply: the machine's own commands do not move.
+    should(local.remedy).containEql('Commands on this machine keep reaching it on loopback');
+    // A REMEDY MUST NAME WHAT IT OPENS. The wildcard is what lets the phone in, and the same edit lets
+    // in everything else on that network — a widening the reader agrees to only if they are told.
+    should(local.remedy).containEql('accepts connections from other devices on your network');
+  });
 
+  it('should carry the daemon’s own port into the example, never the compiled-in default', () => {
+    // ADVICE WITH THE WRONG PORT IN IT IS ADVICE TO TYPE THE WRONG NUMBER. A first boot whose
+    // preferred port was taken is on another one, and an example naming the default points at
+    // whatever else holds it.
+    should(localOnlyNotice('http://127.0.0.1:7500').remedy).containEql('e.g. http://192.168.1.10:7500');
+    // A raw IPv6 loopback advertises through the same bracketed authority, and still yields a v4 example.
+    should(localOnlyNotice('http://[::1]:7502').remedy).containEql('e.g. http://192.168.1.10:7502');
+    // No port in the address is a daemon on the scheme's own port, so the example carries none either.
+    should(localOnlyNotice('http://localhost').remedy).containEql('e.g. http://192.168.1.10,');
+    // An address this cannot parse still yields a remedy: it is the state that most needs one.
+    should(localOnlyNotice('   ').remedy).containEql('e.g. http://192.168.1.10,');
+  });
+
+  it('should give each refusal the remedy that is true for it, and no other', () => {
+    // ONE SENTENCE FOR ALL THREE WAS FALSE FOR TWO OF THEM. A wildcard bind needs only somewhere to
+    // point a device; a missing port has nothing bound at all, so `publicUrl` cannot help it.
     const wildcard = refusalNotice('wildcard-bind');
     should(wildcard.audience).containEql('binds every interface');
-    should(wildcard.remedy).equal(local.remedy);
-    should(refusalNotice('no-port').audience).containEql('no port recorded');
-    should(refusalNotice('loopback-bind').audience).containEql('only advertises loopback');
+    should(wildcard.remedy).startWith('set "publicUrl" in <FY_HOME>/config/daemon.json');
+    should(wildcard.remedy).containEql('then restart the daemon');
+    // It must NOT tell an already-wildcard daemon to bind the wildcard again.
+    should(wildcard.remedy).not.containEql('bind every interface');
+
+    const noPort = refusalNotice('no-port');
+    should(noPort.audience).containEql('no port recorded');
+    should(noPort.remedy).containEql('start the daemon once so it records the port it takes');
+    should(noPort.remedy).containEql('cannot supply an address nothing has bound');
+
+    // Never emitted by the decision, kept for readers that still speak it: the two-step answer, with
+    // no port known to put in the example.
+    const loopback = refusalNotice('loopback-bind');
+    should(loopback.audience).containEql('only advertises loopback');
+    should(loopback.remedy).startWith(`bind every interface with "host": "${WILDCARD_BIND_HOST}"`);
   });
 });
 

@@ -239,6 +239,12 @@ async function daemonBaseUrl(environment: Record<string, string | undefined>, st
  * owner-only token file that is exactly the right credential sat unread. A loopback daemon uses the
  * minted file; a genuinely remote one still must carry its own token, because a local admin
  * credential must never leave this machine.
+ *
+ * THE URL IT DECIDES FROM IS THE BIND. What a daemon advertises to other devices is a different
+ * fact, and reading it here made an operator who advertised a routed address — on the advice of the
+ * pairing screen — unable to run the pairing command at all. Widening the loopback test to admit
+ * that address would have been the same defect wearing a security hole: the document naming it is
+ * writable by anything that can write the state home.
  */
 export async function daemonConnection(
   environment: Record<string, string | undefined>,
@@ -253,7 +259,7 @@ export async function daemonConnection(
   const baseUrl = await daemonBaseUrl(environment, stateHome);
   if (explicitToken === '' && !isLocalDaemonUrl(baseUrl)) {
     throw new Error(
-      `FY_TOKEN is required when the daemon is not on this machine (${baseUrl}); local daemon credentials are never sent remotely`,
+      `FY_TOKEN is required when the daemon is not on this machine (${baseUrl}); local daemon credentials are never sent remotely. Set FY_TOKEN to that daemon's own token.`,
     );
   }
   const token = explicitToken === '' ? await readDaemonToken(`${stateHome}/api-token`) : explicitToken;

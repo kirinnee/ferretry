@@ -80,8 +80,8 @@ export interface PairDeps {
  * Drives `fy pair`.
  *
  * The arc is: mint a code, draw it, then stay and say how it ended. Staying is the point of the command
- * as much as the QR is — the operator is looking at a phone, and a terminal that never acknowledged the
- * scan leaves them to guess whether pairing worked.
+ * as much as the QR is — the operator is watching for an ending, and a terminal that never acknowledged
+ * one leaves them to guess whether pairing worked.
  *
  * THERE IS NO --name. The daemon's mint is bodyless and the DEVICE supplies its own name when it
  * redeems, so a host-side label would have nowhere to go; the name in the success line is the one the
@@ -125,7 +125,7 @@ export class PairController {
     }
     // `--no-wait` is for a script that wants the screen and nothing else; there is no one to tell.
     if (options.wait === false) return;
-    await this.#watch(mint, outcome.kind === 'invitation' ? pairingDaemonHost(outcome.daemonUrl) : undefined);
+    await this.#watch(mint, offer, outcome.kind === 'invitation' ? pairingDaemonHost(outcome.daemonUrl) : undefined);
   }
 
   /**
@@ -178,11 +178,11 @@ export class PairController {
   }
 
   /** Count the code down, and say which of the three endings happened. */
-  async #watch(mint: PairingCodeMintResponse, daemonHost: string | undefined): Promise<void> {
+  async #watch(mint: PairingCodeMintResponse, offer: PairingOffer, daemonHost: string | undefined): Promise<void> {
     const deadline = Date.parse(mint.expiresAt);
     let unanswered: string | undefined;
     while (this.deps.clock.now() < deadline) {
-      this.deps.progress.start(renderWaiting(deadline - this.deps.clock.now()));
+      this.deps.progress.start(renderWaiting(deadline - this.deps.clock.now(), offer.kind));
       try {
         const status = await this.deps.gateway.status(mint.pairingId);
         if (status.status === 'redeemed') {

@@ -17,7 +17,7 @@ const relay: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.exampl
 const hosted: ConnectionMethod = { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' };
 
 describe('socket endpoints', () => {
-  it('should accept secure schemes anywhere and insecure ones only on loopback', () => {
+  it('should accept secure schemes anywhere and insecure ones only where the published CSP allows', () => {
     should(SocketEndpointSchema.parse('https://box.example/')).equal('https://box.example');
     should(SocketEndpointSchema.parse('wss://box.example')).equal('wss://box.example');
     should(SocketEndpointSchema.parse('http://127.0.0.1:7431')).equal('http://127.0.0.1:7431');
@@ -27,6 +27,25 @@ describe('socket endpoints', () => {
     should(SocketEndpointSchema.safeParse('not a url').success).be.false();
     should(SocketEndpointSchema.safeParse('https://box.example/?token=x').success).be.false();
     should(SocketEndpointSchema.safeParse('https://box.example/#fragment').success).be.false();
+  });
+
+  // The endpoint that survives here is dialled by a browser running the published site, and that
+  // site's `connect-src` names exactly two insecure hosts. Every host below IS loopback — the
+  // protocol's own `isLoopbackHost` says so — and the browser blocks every one of them anyway, so
+  // accepting one would store a carrier that can only ever fail before it makes a request.
+  it('should refuse insecure loopback spellings the published CSP does not carry', () => {
+    for (const spelling of ['localhost', '127.0.0.1', 'LOCALHOST']) {
+      should(SocketEndpointSchema.safeParse(`http://${spelling}:7431`).success).be.true();
+      should(SocketEndpointSchema.safeParse(`ws://${spelling}:7431`).success).be.true();
+    }
+    for (const spelling of ['127.0.0.2', '127.255.255.255', 'fy.localhost', '[::1]', '[0:0:0:0:0:0:0:1]']) {
+      should(SocketEndpointSchema.safeParse(`http://${spelling}:7431`).success).be.false();
+      should(SocketEndpointSchema.safeParse(`ws://${spelling}:7431`).success).be.false();
+      // The scheme is the whole difference: TLS makes the same host dialable, so this narrowing
+      // takes nothing away from an operator who serves one properly.
+      should(SocketEndpointSchema.safeParse(`https://${spelling}:7431`).success).be.true();
+      should(SocketEndpointSchema.safeParse(`wss://${spelling}:7431`).success).be.true();
+    }
   });
 
   it('should parse each carrier shape with no relay address baked in', () => {

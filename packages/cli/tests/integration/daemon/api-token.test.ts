@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -49,6 +49,33 @@ describe('daemon API token file', () => {
 
     // Assert
     should(actual.token).equal('remote-secret');
+  });
+
+  it('should still use the local token after an operator advertises a routed address', async () => {
+    /*
+     * THE RUNTIME REGRESSION, END TO END. This is the exact state the pairing screen's remedy leaves
+     * a machine in: bound on every interface so a phone can reach it, advertising the one address
+     * that phone can dial, on a port a first boot chose for itself. Reading that advertisement to
+     * decide where to dial classified the daemon on this very desk as remote, and `fy pair` — the
+     * command that printed the advice — refused to run for want of an FY_TOKEN nobody has.
+     *
+     * The assertions are the two halves that must hold together: loopback AT THE RECORDED PORT, and
+     * the owner-only file rather than a demand for a credential.
+     */
+    // Arrange
+    await writeFile(tokenPath, 'daemon-secret\n', { mode: 0o600 });
+    await mkdir(join(root, 'config'), { recursive: true });
+    await writeFile(
+      join(root, 'config', 'daemon.json'),
+      JSON.stringify({ host: '0.0.0.0', port: 7_555, publicUrl: 'http://192.168.1.10:7555' }),
+    );
+
+    // Act
+    const actual = await daemonConnection({ FY_HOME: root }, root);
+
+    // Assert
+    should(actual.baseUrl).equal('http://127.0.0.1:7555');
+    should(actual.token).equal('daemon-secret');
   });
 
   it('should refuse to send a local token to a remote daemon', async () => {
