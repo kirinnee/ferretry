@@ -190,8 +190,32 @@ const invitationBase = {
   expiresAt: LATER_INSTANT,
 };
 
+/** One board-aggregate row: a task summary that knows which member session owns it. */
+const boardRow = {
+  ...taskSummary,
+  sessionId: 'session-1',
+  sessionName: 'Ada',
+  actions: ['read'],
+};
+const boardMember = { sessionId: 'session-1', name: 'Ada', role: 'worker', active: true };
+const boardTaskList = {
+  v: 1,
+  boardId: 'board-1',
+  boardEpoch: 1,
+  coordinatorEpoch: 1,
+  viewer: { kind: 'member', membership: readMembership },
+  members: [boardMember],
+  rows: [boardRow],
+  updatedAt: INSTANT,
+};
+
 const boardCases: SchemaCase[] = [
   { name: 'board role', schema: boards.TaskBoardRoleSchema, value: 'worker' },
+  { name: 'active board role', schema: boards.TaskBoardActiveRoleSchema, value: 'worker' },
+  { name: 'board member', schema: boards.BoardMemberSchema, value: boardMember },
+  { name: 'board task row', schema: boards.BoardTaskRowSchema, value: boardRow },
+  { name: 'board viewer', schema: boards.BoardViewerSchema, value: { kind: 'human_admin' } },
+  { name: 'board task list', schema: boards.BoardTaskListResponseSchema, value: boardTaskList },
   { name: 'child access', schema: boards.TaskBoardChildAccessSchema, value: 'worker' },
   { name: 'board action', schema: boards.TaskBoardActionSchema, value: 'read' },
   { name: 'membership', schema: boards.TaskBoardMembershipSchema, value: readMembership },

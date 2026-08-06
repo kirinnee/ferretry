@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { TASK_SCHEMA_VERSION, TaskSummarySchema } from './tasks.ts';
 
 export const TASK_BOARD_SCHEMA_VERSION = 1 as const;
 
@@ -223,3 +224,123 @@ export const TaskBoardErrorCodeSchema = z.enum([
   'unavailable',
 ]);
 export type TaskBoardErrorCode = z.infer<typeof TaskBoardErrorCodeSchema>;
+
+/**
+ * ─── The board-scoped task aggregate ────────────────────────────────────────────────────────────
+ *
+ * The wire shape of "every task on the board I am reading", answered by one session-scoped route.
+ *
+ * ## WHY THIS IS NOT `FleetTaskListResponse`, AND WHY THAT MATTERS MORE THAN IT LOOKS
+ *
+ * A shared board is NOT a union of per-session task files. Task ids are allocated inside each
+ * session's own board and start at 1, so several members can each hold an `F1` naming completely
+ * different work. `FleetTaskListResponse` is defined as the session response with `sessionId: null` —
+ * its whole identity is "no scope" — and a caller that keys anything by task id alone will silently
+ * merge two members' rows. Every row here therefore carries a NON-NULLABLE `sessionId`, and the
+ * identity of a row is the pair `{sessionId, id}`, never `id`.
+ *
+ * `ScopedTaskSummary.sessionId` is nullable for the fleet read's sake, which forces its consumers to
+ * re-assert a scope they already knew. That workaround is the tell that the fact had no owner; this
+ * schema is the owner, so nothing downstream needs to repair the value it was handed.
+ *
+ * ## STRICTNESS, STATED RATHER THAN ASSUMED
+ *
+ * The envelope, the viewer arms and a member entry are `strictObject`: they are new shapes owned
+ * entirely here, and an unexpected key in one of them is a defect worth refusing. {@link
+ * BoardTaskRowSchema} is NOT strict, because it extends `TaskSummarySchema`, which is not — making
+ * the row strict would mean restating the whole task summary here, which is exactly the second
+ * definition this file exists to avoid.
+ */
+
+/**
+ * A role a board member can actually hold, DERIVED from the role enum rather than respelled.
+ *
+ * `none` is not a membership — a member entry exists only for an active grant — so a schema that
+ * admitted it would make an unrepresentable state representable. Deriving with `.exclude` rather than
+ * writing the four names again means a new role cannot appear in one list and be forgotten in the
+ * other.
+ */
+export const TaskBoardActiveRoleSchema = TaskBoardRoleSchema.exclude(['none']);
+export type TaskBoardActiveRole = z.infer<typeof TaskBoardActiveRoleSchema>;
+
+/**
+ * One session on the board, as a reader needs to name it.
+ *
+ * `name` is nullable because a session may genuinely have none; a caller renders the id in that case
+ * rather than inventing a label. `active` is the session's liveness, not the grant's: a stopped
+ * member still owns its rows and they are still the board's work.
+ */
+export const BoardMemberSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  name: z.string().nullable(),
+  role: TaskBoardActiveRoleSchema,
+  active: z.boolean(),
+});
+export type BoardMember = z.infer<typeof BoardMemberSchema>;
+
+/**
+ * One task on the board, owned by exactly one member session.
+ *
+ * `actions` is what THIS caller may do to THIS row, computed by the daemon from the caller's grant
+ * (or, for the operator, from the row's own phase) and shipped so a surface can DISABLE rather than
+ * offer-then-fail. It is deliberately a list of permitted actions and never a capability, a grant id
+ * or an authorization record: those are write-path outputs, and putting one on a read row is the
+ * first step towards a client deriving its own authority.
+ */
+export const BoardTaskRowSchema = TaskSummarySchema.safeExtend({
+  sessionId: z.string().min(1),
+  sessionName: z.string().nullable(),
+  actions: z.array(TaskBoardActionSchema),
+}).superRefine((value, context) => {
+  // A set of permissions, expressed as a list. A repeat is a server defect rather than a caller's
+  // mistake, and it is the same rule `TaskBoardMembershipSchema` applies to `allowedActions`.
+  if (new Set(value.actions).size !== value.actions.length) {
+    context.addIssue({ code: 'custom', message: 'actions must be unique', path: ['actions'] });
+  }
+});
+export type BoardTaskRow = z.infer<typeof BoardTaskRowSchema>;
+
+/**
+ * WHO IS READING, as a union — because the operator is not a member and must not be dressed as one.
+ *
+ * A board member is described by its grant. The human operator holds no grant, no role, no allowed
+ * actions and no runtime generation, and `TaskBoardMembershipSchema` cannot express that: its role
+ * list has no `human_admin` and its refinement demands the allowed actions sit inside the role. The
+ * alternative — adding `human_admin` to the board role enum — would put a non-role in
+ * `TASK_BOARD_ROLE_ACTIONS`, in every grant that carries a role, and in every closed-set check that
+ * enumerates them, to describe a caller that has no grant at all.
+ *
+ * So the operator arm carries NOTHING beyond its discriminator. That is not a stub awaiting fields:
+ * it is the complete truth about a reader who is outside the membership model. Note that this
+ * `human_admin` is a *viewer kind* and shares only a spelling with `TaskAuthorizationProvenance`'s
+ * role of the same name — the operator's completions write no authorization record, so nothing here
+ * ever populates that one.
+ */
+export const BoardViewerSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('member'), membership: TaskBoardMembershipSchema }),
+  z.strictObject({ kind: z.literal('human_admin') }),
+]);
+export type BoardViewer = z.infer<typeof BoardViewerSchema>;
+
+/**
+ * Every task on one board, with the board's own identity and the reader's standing on it.
+ *
+ * `boardId` is an OUTPUT and never an input: the route is scoped by the session in its path, so a
+ * caller that cannot name a board cannot ask for the wrong one. The epochs are the BOARD's, not the
+ * caller's, so both viewer arms carry them — a reader with no grant still needs to know the board
+ * moved underneath a list it is holding.
+ *
+ * `v` is the TASK schema version rather than the board's, because what versions this payload is the
+ * shape of its rows.
+ */
+export const BoardTaskListResponseSchema = z.strictObject({
+  v: z.literal(TASK_SCHEMA_VERSION),
+  boardId: z.string().min(1),
+  boardEpoch: NonNegativeIntegerSchema,
+  coordinatorEpoch: NonNegativeIntegerSchema,
+  viewer: BoardViewerSchema,
+  members: z.array(BoardMemberSchema),
+  rows: z.array(BoardTaskRowSchema),
+  updatedAt: InstantSchema,
+});
+export type BoardTaskListResponse = z.infer<typeof BoardTaskListResponseSchema>;
