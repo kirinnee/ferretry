@@ -129,7 +129,7 @@ describe('ApiDispatcher authorization', () => {
     should(asAdmin.status).equal(200);
   });
 
-  it('should let a paired device use operator routes but never host-only routes', async () => {
+  it('should let a paired device use operator routes but never an admin-token route', async () => {
     const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'), echo('/v1/pair/code', 'admin-token', 'POST'));
 
     const operator = await dispatcher.dispatch(
@@ -151,6 +151,27 @@ describe('ApiDispatcher authorization', () => {
     should(hostOnly.status).equal(403);
     should(jsonBody(hostOnly).error).equal('the presented credential may not use POST /v1/pair/code');
     should(hostAdmin.status).equal(200);
+  });
+
+  it('should decide credential minimum and privileged arrival independently', async () => {
+    const dispatcher = dispatcherFor(echo('/v1/local', 'operator', 'POST', true));
+    const localAdmin = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer admin-secret' }, loopback: true }),
+    );
+    const localDevice = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer device-secret' }, loopback: true }),
+    );
+    const remoteAdmin = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer admin-secret' }, loopback: false }),
+    );
+    const remoteDevice = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer device-secret' }, loopback: false }),
+    );
+
+    should(localAdmin.status).equal(200);
+    should(localDevice.status).equal(200);
+    should(remoteAdmin.status).equal(403);
+    should(remoteDevice.status).equal(403);
   });
 
   it('should honour a query token only for a loopback peer', async () => {

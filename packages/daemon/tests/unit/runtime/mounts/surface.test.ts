@@ -260,6 +260,20 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
 });
 
 describe('the mounted daemon surface', () => {
+  it('should declare credential and privileged-arrival requirements independently', () => {
+    const mounted = subsystems();
+    const routes = [...mountedDaemonRoutes(base, mounted), ...mountedSocketRoutes(mounted)];
+    const minima = routes.reduce<Record<string, number>>((counts, route) => {
+      counts[route.minimum] = (counts[route.minimum] ?? 0) + 1;
+      return counts;
+    }, {});
+
+    should(minima).deepEqual({ none: 5, authenticated: 5, operator: 102, 'admin-token': 1 });
+    should(
+      routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
+    ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
+  });
+
   it('should serve the base feeds and every mounted subsystem from one table', () => {
     // Arrange / Act
     const routes = mountedDaemonRoutes(base, subsystems()).map(route => `${route.method} ${route.path}`);

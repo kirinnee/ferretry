@@ -91,7 +91,7 @@ describe('the session attach route', () => {
     // Assert — a filesystem socket path means nothing to a remote client, and handing one over could
     // point it at a coincidentally identical path on a different machine.
     should(response.status).equal(403);
-    should(jsonBody(response)).have.property('code', 'attach_not_local');
+    should(jsonBody(response)).have.property('code', 'forbidden');
     should(attach.asked).deepEqual([]);
   });
 

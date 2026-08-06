@@ -40,10 +40,6 @@ async function attachTarget(
   sessions: SessionDirectorySubsystem,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  // A filesystem socket on the daemon host cannot be acted on by a remote client. Refusing here is
-  // safer than handing a remote caller a path it might coincidentally have on a different machine.
-  if (!context.request.loopback)
-    throw new ApiError(403, 'attaching requires a client on the daemon host', 'attach_not_local');
   const id = sessionId(context);
   const session = await sessions.get(id);
   if (session === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
@@ -57,9 +53,9 @@ async function attachTarget(
 /**
  * The only route that reveals a host tmux address.
  *
- * `admin` and loopback are both required: this hands a human an interactive terminal, and the path
- * is meaningful only on the machine whose daemon proved the process identity. `noStore` because the
- * proof is short-lived — a resume replaces the pane and invalidates it immediately.
+ * An operator credential and privileged arrival are both required: this hands a human an interactive
+ * terminal, and the path is meaningful only on the machine whose daemon proved the process identity.
+ * `noStore` because the proof is short-lived — a resume replaces the pane and invalidates it immediately.
  */
 export function sessionAttachRoutes(
   attach: SessionAttachSubsystem,
@@ -70,6 +66,7 @@ export function sessionAttachRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/attach',
       minimum: 'operator',
+      privilegedOnly: true,
       noStore: true,
       handle: async context => await attachTarget(attach, sessions, context),
     },

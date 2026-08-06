@@ -189,9 +189,10 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
     {
       method: 'PUT',
       path: '/v1/grants/password',
-      // The host's own admin token only. A device that could clear the password could remove its
-      // own gate, which would make the whole layer advisory.
-      minimum: 'admin-token',
+      // Setting the operator password is local, but a paired device on the same machine is still an
+      // operator. Arrival and credential are separate facts, so the UI can explain this before a tap.
+      minimum: 'operator',
+      privilegedOnly: true,
       noStore: true,
       handle: async context => await setPassword(subsystem, context),
     },
