@@ -23,6 +23,25 @@
  */
 export const RELAY_SESSION_CONCLUDED_CLOSE_CODE = 4440 as const;
 
+/**
+ * THE ONLY REASON THAT MAY RIDE BESIDE THAT CODE ON THE WIRE.
+ *
+ * A `closed` control frame is UNSEALED by design — the rendezvous has to read the session identifier
+ * to route it — so every byte of its `reason` is plaintext to the carrier. §14 says the observer
+ * outside the channel "reads the same close for every conclusion and learns nothing from it", and a
+ * per-outcome reason is exactly what deletes that: a viewer's own `stream-close` text is
+ * reader-supplied content, and even the daemon's fixed vocabulary ("stream reader fell behind",
+ * "a stream frame exceeds one relay record") tells a relay operator WHY people stop watching — which
+ * is the disclosure `RELAY_STREAM_CLOSES` in the daemon's link already says the sealed record exists
+ * to prevent.
+ *
+ * IT IS A CONSTANT RATHER THAN A CONVENTION. A parameter that callers are trusted to pass a safe
+ * value into is a rule somebody has to remember; one shared string with nowhere to interpolate is a
+ * rule nothing can break. Nothing is lost by it: the real code and reason have already crossed
+ * inside the sealed record this close follows, which is the whole meaning of `4440`.
+ */
+export const RELAY_SESSION_CONCLUDED_CLOSE_REASON = 'the session concluded' as const;
+
 /** The one-record envelope a §14 `data` record wraps around a run of raw bytes. */
 const DATA_RECORD_ENVELOPE_BYTES = JSON.stringify({ t: 'data', bytes: '' }).length;
 

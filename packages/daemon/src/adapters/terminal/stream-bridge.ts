@@ -118,8 +118,16 @@ export class TerminalStreamBridge {
     if (this.closed) return;
     if ((this.downstream.bufferedBytes?.() ?? 0) > TERMINAL_MAX_BUFFERED_OUTPUT_BYTES) return;
     try {
-      const sent = this.downstream.send(await this.service.capture(this.sessionId, this.terminalId));
-      const result = decideTerminalSend(sent);
+      const snapshot = await this.service.capture(this.sessionId, this.terminalId);
+      // CHECKED AGAIN, BECAUSE THE CAPTURE ABOVE IS AN AWAIT. The check at the top of this method was
+      // the only one, so a capture in flight when `close()` landed still called `downstream.send`
+      // afterwards — a bridge that had been told it was over, writing to a transport that was over
+      // too. On a direct socket that is inert. On a relay it was not: the frame reached a session the
+      // link had already concluded, and the rendezvous answers a frame naming no live session by
+      // closing the DAEMON'S SOCKET, taking every other relayed session with it. The link now refuses
+      // that frame on its own side as well; this is the half that belongs to whoever produced it.
+      if (this.closed) return;
+      const result = decideTerminalSend(this.downstream.send(snapshot));
       if (result.outcome === 'rejected') this.finish(result.close.code, result.close.reason);
     } catch {
       this.finish(TERMINAL_STREAM_CLOSES.redrawFailed.code, TERMINAL_STREAM_CLOSES.redrawFailed.reason);

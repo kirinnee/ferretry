@@ -33,6 +33,7 @@
  * supplied, and every session's record keys are derived per session and die with it.
  */
 
+import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON } from '@ferretry/protocol';
 import {
   answerClientHandshake,
   type ChannelState,
@@ -78,7 +79,6 @@ import {
   sealRecord,
   signRendezvousClaim,
 } from '@ferretry/relay';
-import { RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
 import type { ApiRequest, ApiResponse } from '../api/http.ts';
 import { SOCKET_CLOSES, type SocketDownstream, type SocketHandler, type SocketUpgradeDecision } from '../api/socket.ts';
 import type { PairingRedemption, RelayPairingAttempt } from '../pairing/index.ts';
@@ -151,17 +151,60 @@ export interface RelayLinkScheduler {
 }
 
 /**
- * How long a keyed session may sit without presenting a credential.
+ * How long a session may sit without presenting a credential, counted from the moment it OPENED.
  *
  * That window is the one an internet stranger can hold open against a fingerprint that is public by
- * design — it is in the pairing QR. A session that keyed a channel and then said nothing is either a
- * client that failed or somebody occupying a slot, and neither is worth waiting on.
+ * design — it is in the pairing QR. A session that occupies a slot and then says nothing is either a
+ * client that failed or somebody squatting, and neither is worth waiting on.
+ *
+ * IT IS ARMED BY THE `open`, NOT BY THE HANDSHAKE, and that is the correction rather than a
+ * preference. It used to start at the handshake answer, so `awaiting-hello` had no deadline at all:
+ * a peer could open a session, send no hello, answer heartbeats and hold pre-auth capacity FOREVER.
+ * Two such sockets denied every honest session on the link — requests, streams and pairing alike —
+ * with `4429`, for the price of two idle connections and a fingerprint anybody who saw a QR knows.
+ * One window covering open-through-credential closes that and is also the tighter reading: the
+ * handshake is part of what a client owes before it has said who it is, not a reason to be granted a
+ * second ten seconds.
  */
 export const RELAY_CREDENTIAL_DEADLINE_MS = 10_000;
 
-/** Sessions per link that may be awaiting a credential at once: one honest arrival, one overlapping
- *  retry. A further arrival is refused `4429`, which a client must treat as retryable. */
-export const MAX_PRE_CREDENTIAL_SESSIONS = 2;
+/**
+ * Sessions per link that may be pre-credential at once, before a further arrival is refused `4429`.
+ *
+ * IT WAS TWO, AND TWO WAS SIZED FOR A WORLD §14 REPLACED. The reasoning was "one honest arrival plus
+ * one overlapping retry", which is exactly right for a link whose clients open one session each —
+ * and §14 gives every live feed and every terminal a session of ITS OWN. An ordinary tab now opens a
+ * request session, an event stream and a terminal stream, and a second device does the same, so a
+ * bound of two refuses honest work that did nothing wrong. The refusal is retryable, but this branch
+ * renders it nowhere and the event feed swallows it, so what an owner sees is a live feed that
+ * silently never opens.
+ *
+ * SIX, AND THE ARITHMETIC RATHER THAN A FEELING. The ordinary burst is three per device, and §9
+ * names two devices — "a phone and a laptop, say" — so six is what two honest devices arriving
+ * together actually ask for, under the `maxSessions: 8` §5 publishes so this never promises capacity
+ * the rendezvous will refuse anyway.
+ *
+ * RESERVING SLOTS FOR ESTABLISHED SESSIONS RESERVES NOTHING, and an earlier draft of this comment
+ * chose four on exactly that mistake — "half of eight, so a squatter cannot reach the other half".
+ * There is no other half: EVERY session begins pre-credential, so a bound that refuses new arrivals
+ * protects established sessions only in the sense that it cannot create any.
+ *
+ * RAISING IT NARROWS THE SQUAT RATHER THAN WIDENING IT. With {@link RELAY_CREDENTIAL_DEADLINE_MS}
+ * armed from the `open`, holding every slot costs one fresh arrival per slot per window — six per ten
+ * seconds, 36 per minute, against §9's sliding 30-per-minute admission. So full occupancy is not
+ * sustainable at six and is comfortably sustainable at four (24 per minute), which is the whole
+ * reason this is not the smaller number.
+ *
+ * WHAT IT STILL DOES NOT BUY, said here because the arithmetic above invites the stronger claim: the
+ * arrival limiter is per-RENDEZVOUS and shared, and it refuses whoever arrives when the window is
+ * full. An attacker willing to spend all 30 arrivals holds five of these six and denies honest
+ * clients at the rendezvous instead of here — the refusal moves, the outcome does not. No value
+ * chosen in this file fixes that; it is `packages/relay`'s admission accounting, which has no
+ * per-peer identity to charge. What six does buy is that the ordinary squatter — the one spending
+ * the 24 per minute that fully denied a bound of four — now leaves two slots and six arrivals free,
+ * and the maximal one has to consume the entire budget, which is loud enough to notice.
+ */
+export const MAX_PRE_CREDENTIAL_SESSIONS = 6;
 
 /**
  * The most un-sent stream backlog one session may hold before its overflow policy decides.
@@ -265,13 +308,18 @@ interface LinkSession {
   /** Armed when the channel is keyed, cancelled by the credential record that beats it. */
   credentialDeadline: RelayLinkTimer | undefined;
   /**
-   * Why this session is ending, held until the sealed outcome has ACTUALLY crossed.
+   * That this session is ending, held until the sealed outcome has ACTUALLY crossed.
    *
    * Set when an outcome is decided and cleared by the close that follows it. It exists because
    * "decided" and "delivered" are not the same moment: the outcome is a queued record and a queue
    * only drains while the peer's credit allows.
+   *
+   * A FLAG RATHER THAN THE REASON, and the difference is a disclosure. It held the sentence that went
+   * into the `closed` control — an UNSEALED frame — so a client's own close text and this daemon's
+   * own close taxonomy both reached the carrier in the clear. There is nothing here to leak now; see
+   * {@link RelayLink.conclude}.
    */
-  conclusion: string | undefined;
+  owesConclusion: boolean;
 }
 
 export class RelayLink {
@@ -434,15 +482,15 @@ export class RelayLink {
       this.#endSession(sessionId, RELAY_CLOSE_CODES.protocolError, 'this session identifier is already live');
       return;
     }
-    // A session that has not presented a credential yet costs this daemon a keyed channel and a slot,
-    // and anybody who saw a QR knows the fingerprint that addresses this rendezvous. Two is one honest
-    // arrival plus one overlapping retry; a third is refused as BUSY rather than as an error, because
-    // a client opening several at once did nothing wrong and should retry.
+    // A session that has not presented a credential yet costs this daemon a slot, and anybody who saw
+    // a QR knows the fingerprint that addresses this rendezvous. The bound is above; an arrival past
+    // it is refused as BUSY rather than as an error, because a client opening several at once did
+    // nothing wrong and should retry.
     if (this.#preCredentialSessions() >= MAX_PRE_CREDENTIAL_SESSIONS) {
       this.#endSession(sessionId, RELAY_CLOSE_CODES.rendezvousBusy, 'too many sessions are awaiting a credential');
       return;
     }
-    this.#sessions.set(sessionId.text, {
+    const session: LinkSession = {
       sessionId,
       phase: 'awaiting-hello',
       channel: undefined,
@@ -454,7 +502,26 @@ export class RelayLink {
       sealing: undefined,
       stream: undefined,
       credentialDeadline: undefined,
-      conclusion: undefined,
+      owesConclusion: false,
+    };
+    this.#sessions.set(sessionId.text, session);
+    // ARMED HERE, WHICH IS THE WHOLE POINT OF THE SLOT ABOVE HAVING A BOUND. A slot with no deadline
+    // on it is a slot somebody can hold for as long as they keep a socket open.
+    session.credentialDeadline = this.#armCredentialDeadline(session);
+  }
+
+  /**
+   * The one window a session has to say what it is for, from `open` to its credential record.
+   *
+   * The session is RE-READ rather than closed over: by the time this fires it may have presented a
+   * credential, been ended by the rendezvous, or been replaced by a new one under the same
+   * identifier, and only the live one still occupying a pre-credential slot is this timer's to end.
+   */
+  #armCredentialDeadline(session: LinkSession): RelayLinkTimer {
+    return this.deps.scheduler.after(RELAY_CREDENTIAL_DEADLINE_MS, () => {
+      const live = this.#sessions.get(session.sessionId.text);
+      if (live !== session || (live.phase !== 'awaiting-hello' && live.phase !== 'awaiting-credential')) return;
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'no credential arrived before the deadline');
     });
   }
 
@@ -503,14 +570,9 @@ export class RelayLink {
     this.#consume(session);
     session.channel = openChannel(session.sessionId, answered.keys, 'daemon');
     session.phase = 'awaiting-credential';
-    session.credentialDeadline = this.deps.scheduler.after(RELAY_CREDENTIAL_DEADLINE_MS, () => {
-      // Re-read rather than closing over the session: by the time this fires the session may have
-      // presented a credential, been ended by the rendezvous, or been replaced by a new one under the
-      // same identifier, and only the live one is this timer's to end.
-      const live = this.#sessions.get(session.sessionId.text);
-      if (live !== session || live.phase !== 'awaiting-credential') return;
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'no credential arrived before the deadline');
-    });
+    // NOTHING IS RE-ARMED HERE. The deadline this session is running against was armed by its `open`
+    // and covers the handshake as well as the credential, so answering a hello buys no second window.
+    // The record that presents a credential is what cancels it — see `#credential`.
     // The answer occupies sequence 0 of this direction, which is why it is sent as a frame rather
     // than through the record path: it is the one end-to-end frame that is not a record.
     this.#sendSessionFrame(session, {
@@ -653,7 +715,7 @@ export class RelayLink {
         ? { t: 'paired', protocol: RELAY_PROTOCOL_ID, response: result.response }
         : { t: 'pair-refused', protocol: RELAY_PROTOCOL_ID, reason: 'pairing_refused' },
     );
-    this.#conclude(session, 'the pairing exchange is complete');
+    this.#conclude(session);
   }
 
   // ─── one stream ─────────────────────────────────────────────────────────────────────────────
@@ -680,7 +742,7 @@ export class RelayLink {
           ? { status: decision.response.status, body: decision.response.body }
           : { status: 404, body: 'no stream is served at this path' };
       this.#queue(session, { t: 'stream-refused', protocol: RELAY_PROTOCOL_ID, ...refusal });
-      this.#conclude(session, 'the stream was refused');
+      this.#conclude(session);
       return;
     }
     let handler: SocketHandler;
@@ -695,7 +757,7 @@ export class RelayLink {
         status: 500,
         body: 'the daemon failed to attach this stream',
       });
-      this.#conclude(session, 'the stream could not be attached');
+      this.#conclude(session);
       return;
     }
     session.stream = handler;
@@ -725,9 +787,20 @@ export class RelayLink {
     // The peer's own outcome has already crossed, so this session owes it no sealed record — and the
     // payload it has stopped reading goes with the same reasoning as above, which is also what keeps
     // this close from waiting on credit a departed viewer will never return.
+    //
+    // MARKED BEFORE THE HANDLER IS RELEASED, exactly as `#closeStream` marks it, and the asymmetry
+    // between the two was a live defect rather than an inconsistency. `#sendStream` reads this phase
+    // to decide whether a frame may still be queued, and a handler does not necessarily stop
+    // producing the instant it is told to close: `TerminalStreamBridge.redraw` has already awaited a
+    // pane capture and calls `downstream.send` when it resumes. Left in `streaming`, that late frame
+    // was queued, sealed and put on the wire AFTER `#settle` had deleted this session and told the
+    // rendezvous it was closed — and a daemon frame naming no live session does not end a session
+    // there, it ends the DAEMON's SOCKET. So closing one relayed terminal tab tore down the whole
+    // link: every other stream, the request session and the rendezvous claim with it.
+    session.phase = 'concluding';
     this.#releaseStream(session);
     this.#discardStreamPayload(session);
-    this.#conclude(session, `the client closed this stream: ${message.code} ${message.reason}`);
+    this.#conclude(session);
   }
 
   #onStreamData(session: LinkSession, message: RelayTunnelData): void {
@@ -802,7 +875,7 @@ export class RelayLink {
     // — otherwise the record that says "you missed some" would itself wait behind the ones missed.
     this.#discardStreamPayload(session);
     this.#queue(session, { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code, reason });
-    this.#conclude(session, `the stream closed: ${code} ${reason}`);
+    this.#conclude(session);
   }
 
   /** Tell whatever this session was driving that it is over. Idempotent by construction: the handler
@@ -813,13 +886,38 @@ export class RelayLink {
     stream?.close();
   }
 
-  /** Everything a session holds beyond its own record state: a stream, a deadline, and a pending
-   *  conclusion nothing will deliver now. */
+  /**
+   * Everything a session holds beyond its own record state: a stream, a deadline, a pending
+   * conclusion nothing will deliver now, and a send queue nothing will drain.
+   *
+   * THE PHASE GOES FIRST, and it is what makes the rest safe rather than merely tidy. Every send path
+   * reads it — `#sendStream` refuses, `#closeStream` returns — so a handler that emits a frame from
+   * inside the `close()` below finds a session that will not queue for it. Without that, releasing a
+   * handler could put a record back on a queue this method has just emptied, for a session the
+   * caller is about to tell the rendezvous has ended.
+   */
   #forget(session: LinkSession): void {
+    session.phase = 'concluding';
     session.credentialDeadline?.cancel();
     session.credentialDeadline = undefined;
-    session.conclusion = undefined;
+    session.owesConclusion = false;
+    // Nothing queued can be delivered now. Emptying it is not what makes a late send impossible —
+    // `#flush` may already hold a record under a suspended seal, and the liveness gate there is what
+    // stops that one — but a queue kept past the end of its session is memory held for a peer that
+    // will never read it.
+    session.waiting.length = 0;
     this.#releaseStream(session);
+  }
+
+  /**
+   * Whether this exact session object is still the live one under its identifier.
+   *
+   * IDENTITY, NOT PRESENCE. A session that ended and one that was replaced by a fresh `open` under
+   * the same 16 bytes are both "not this session", and only an identity check says so — a lookup by
+   * key alone would hand an ended session's suspended seal a socket write against its successor.
+   */
+  #live(session: LinkSession): boolean {
+    return this.#sessions.get(session.sessionId.text) === session;
   }
 
   /**
@@ -837,17 +935,30 @@ export class RelayLink {
    * empties the queue. A peer that never returns credit therefore keeps a session that is over but
    * undelivered — bounded by liveness rather than by this, which is the right owner: a socket with no
    * evidence of life is dropped and redialled, and `close()` releases everything on it.
+   *
+   * IT TAKES NO REASON, AND THAT IS THE FIX RATHER THAN AN ECONOMY. It used to take one and put it
+   * straight into the `closed` control below — a frame the rendezvous must be able to read to route
+   * it, so every byte of that string was PLAINTEXT to the carrier. Two call sites made it a real
+   * disclosure: a client's own `stream-close` text is reader-supplied content ("the viewer left this
+   * stream" crossed the wire verbatim), and `#closeStream` sent this daemon's own taxonomy
+   * ("stream reader fell behind"), which tells a relay operator exactly why people stop watching —
+   * the disclosure {@link RELAY_STREAM_CLOSES} above says the sealed record exists to prevent, and
+   * the oracle §14's "same close for every conclusion" property forbids. Removing the parameter is
+   * what makes it unrepeatable: there is no longer anywhere for a caller to put one.
+   *
+   * Nothing is lost. The real code and reason crossed a moment earlier inside the sealed
+   * `stream-close`, `paired`, `pair-refused` or `stream-refused` record — which is the entire meaning
+   * of `4440`, and the only reason a client is allowed to treat this close as expected teardown.
    */
-  #conclude(session: LinkSession, reason: string): void {
-    session.conclusion = reason;
+  #conclude(session: LinkSession): void {
+    session.owesConclusion = true;
     this.#outbox = this.#outbox.then(() => this.#settle(session));
   }
 
   /** Send the concluding close, but only once nothing is still waiting to be sealed. */
   #settle(session: LinkSession): void {
-    const reason = session.conclusion;
-    if (reason === undefined || session.waiting.length > 0) return;
-    session.conclusion = undefined;
+    if (!session.owesConclusion || session.waiting.length > 0) return;
+    session.owesConclusion = false;
     this.#forget(session);
     this.#sessions.delete(session.sessionId.text);
     this.#sendFrame({
@@ -857,7 +968,8 @@ export class RelayLink {
       payload: encodeControlMessage({
         t: 'closed',
         code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
-        reason,
+        // The shared constant, never a description of this session. See `#conclude` above.
+        reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
       }),
     });
   }
@@ -962,8 +1074,10 @@ export class RelayLink {
         // under the same sequence number — two AEAD invocations under one key and one nonce. Only
         // one of them could ever reach a socket, so it is not an exposure; it is still an invariant
         // worth keeping literal rather than conditional, because "one nonce, one seal" is auditable
-        // by reading and "one nonce, one ciphertext anybody kept" is not. Below this line every
-        // seal produces exactly one frame that is sent, and the sequence advances exactly once.
+        // by reading and "one nonce, one ciphertext anybody kept" is not. Below this line one seal
+        // produces at most one frame on the wire and advances the sequence at most once — never
+        // twice, which is the half that matters. The liveness gate is the "at most": a session that
+        // ended under its own seal sends nothing and advances nothing, and its channel dies with it.
         session.sealing = pending;
         const sealed = await sealRecord(this.deps.crypto, channel, pending.plaintext);
         session.sealing = undefined;
@@ -973,6 +1087,18 @@ export class RelayLink {
           this.#endSession(session.sessionId, sealed.code, sealed.reason);
           return;
         }
+        // THE SESSION MAY HAVE ENDED UNDER THAT SEAL, and this is the one check between a produced
+        // ciphertext and a socket. `#endSession` runs from the INBOUND path — a malformed credit, a
+        // stream record carrying unusable bytes, a repeated request identifier — and the inbound path
+        // suspends on `openRecord` exactly where this one suspends on `sealRecord`, so the two
+        // interleave. It sends the session's `closed` control immediately; a frame put on the wire
+        // after that names no live session at the rendezvous, and the rendezvous answers THAT by
+        // closing the daemon's whole socket rather than one session.
+        //
+        // The ciphertext is dropped rather than sent, and the counters are not advanced with it. That
+        // does not spend a sequence number twice: this channel dies with its session, a reconnection
+        // is a NEW session with new keys (§9), and nothing can seal under this nonce again.
+        if (!this.#live(session)) return;
         session.waiting.shift();
         // The mirror of the write-back in `#onRecord`, and for the same reason: a record arriving
         // while this seal was suspended has already advanced the receive counter, and assigning the
