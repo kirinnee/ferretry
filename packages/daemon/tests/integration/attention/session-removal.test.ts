@@ -229,7 +229,15 @@ describe('a warden escalation when its session leaves the registry', () => {
     // Assert — the index drops it and the pass says so, but the ledger is untouched and its row is
     // still ACTIVE. Clearing it would claim a session whose layout cannot be read no longer needs a
     // human, which is the one thing that must never be written into the audit.
+    //
+    // WHICH FIELD REPORTS IT IS PINNED IN BOTH DIRECTIONS, because the obvious guess is wrong and a
+    // reader who assumes `unhealable` would believe this session escalates to a self-restart.
+    // `surveySessionDirectories` skips a refused marker, so the directory is absent from the
+    // post-repair on-disk set that `unhealable` is filtered from, and the session can only ever
+    // surface as a stale row. Both are folded into the same `fleet.index_incoherent` event, so it is
+    // still reported — under the honest name.
     should(pass.staleRows).containEql(SESSION);
+    should(pass.unhealable).be.empty();
     should(opened.storage.findSession(parseSessionId(SESSION))).be.undefined();
     const durable = await ledgerText(opened.paths);
     should(durable).containEql(ESCALATION.sourceRef);
