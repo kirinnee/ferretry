@@ -200,4 +200,12 @@ describe('task snapshot validation and serialization', () => {
     should(() => validateTaskSnapshot(input)).throw(TaskError);
     should(() => validateTaskSnapshot(input)).throw(/exists more than once/u);
   });
+
+  it('should refuse to serialize the legacy outer version after migration', () => {
+    // The v1 reader is a migration input only. Letting a current writer preserve it would reopen
+    // the rollback path that strips a receipt an older Zod schema does not know.
+    const legacy = { v: 1, tasks: [] } as unknown as TaskSnapshot;
+
+    should(() => validateTaskSnapshot(legacy)).throw(/schema version is unknown/u);
+  });
 });

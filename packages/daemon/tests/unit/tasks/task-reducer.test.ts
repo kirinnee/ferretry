@@ -443,6 +443,26 @@ describe('applyTaskAction — status and phase', () => {
     should(replayed.entry.activity).have.length(completed.entry.activity.length);
   });
 
+  it('should refuse an incoherent peer replay identity before applying any transition', () => {
+    // Arrange — direct reducer callers must not turn a mismatched identity/body pair into an
+    // ordinary completion attempt, even before a durable receipt exists to compare it against.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+    const malformedIdentity = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'a different click' } as const,
+      },
+    };
+
+    // Act + Assert
+    shouldRefuse('invalid', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, malformedIdentity),
+    );
+    should(snapshot.tasks[0]?.task.phase).equal('live');
+    should(snapshot.tasks[0]?.activity).have.length(1);
+  });
+
   it('should refuse a reused peer completion id when its body or lifecycle no longer matches', () => {
     // Arrange
     const completion = act(
