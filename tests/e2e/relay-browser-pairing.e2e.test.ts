@@ -713,6 +713,11 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * cannot be. The trigger is the waiting-then-working signal pair, which appends exactly two
          * durable journal events and leaves the session where it started; ORDER IS LOAD-BEARING,
          * because `working` on a session that is not parked appends nothing at all.
+         *
+         * Both events must be proven to cross, not just one. The wait below therefore targets
+         * `before + 2` — the cursor leaving `before` AND `before + 1` — rather than a bare change
+         * from `before`: that fires on the first event, settles at `before + 1`, and would read a
+         * lone `waiting` as if the whole pair had landed.
          */
         await browser.page.goto(`${origin.origin}/d/${fingerprint}/session/${session.sessionId}`, {
           waitUntil: 'networkidle',
@@ -733,11 +738,16 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const before = Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events'));
         const parked = await signalSession(environment, session.sessionId, 'waiting', eventMarker);
         const resumed = await signalSession(environment, session.sessionId, 'working', eventMarker);
+        const expected = before + 2;
+        // Wait for the cursor to reach `before + 2` (both events crossed), not merely to leave `before`.
         const advanced = await browser.page
-          .waitForSelector(`[data-live-events]:not([data-live-events="${String(before)}"])`, { timeout: 30_000 })
+          .waitForSelector(
+            `[data-live-events]:not([data-live-events="${String(before)}"]):not([data-live-events="${String(before + 1)}"])`,
+            { timeout: 30_000 },
+          )
           .then(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')))
-          .catch(() => before);
-        if (advanced <= before) {
+          .catch(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')));
+        if (advanced < expected) {
           /**
            * The discriminator: did the browser OPEN a stream session at all?
            *
@@ -752,11 +762,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           ).length;
           ledger.fail(
             'live-stream-rendered',
-            `no live event reached the browser: data-live-events stayed at ${String(before)}. ` +
+            `the waiting-then-working pair did not both reach the browser: data-live-events reached ${String(advanced)} ` +
+              `(${String(advanced - before)} of the expected 2), starting from ${String(before)}. ` +
               `The signal pair answered ${String(parked)} then ${String(resumed)}, so the daemon appended two durable events. ` +
               `The rendezvous saw ${String(streams)} client session(s) in total (${String(pairingArrivals)} for pairing, ` +
               `${String(authArrivals - pairingArrivals)} for the authenticated request session) — ` +
-              `${streams > authArrivals ? 'a stream session WAS opened and carried no frames' : 'NO stream session was ever opened'}. ` +
+              `${streams > authArrivals ? 'a stream session WAS opened' : 'NO stream session was ever opened'}. ` +
               `Console: ${browser.console.slice(-6).join(' | ') || 'silent'}`,
           );
         }
@@ -766,7 +777,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         if (payloadLeaks.length !== 0) ledger.fail('live-stream-rendered', payloadLeaks.join('; '));
         ledger.prove(
           'live-stream-rendered',
-          `data-live-events advanced in Chrome after a real daemon event carrying ${eventMarker}, and that marker appears in no relay-observable frame`,
+          `data-live-events advanced by 2 in Chrome after the waiting-then-working signal pair (carrying ${eventMarker}), proving both events crossed the relay, and that marker appears in no relay-observable frame`,
         );
 
         // A noted step does not abort, so the journey can reach here with one still unproven. It is
