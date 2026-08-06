@@ -177,4 +177,59 @@ describe('the project catalog mount', () => {
       code: 'project_registration_failed',
     });
   });
+
+  it('answers 422 and mutates nothing when a relative project path arrives', async () => {
+    const registered: RegisterProjectRequest[] = [];
+    const response = await (
+      await dispatcher({
+        projects: async () => [],
+        registerProject: async entry => {
+          registered.push(entry);
+          return PROJECT;
+        },
+        skills: async () => ({ harness: 'codex', skills: [] }),
+      })
+    ).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/projects',
+        headers: human,
+        body: JSON.stringify({ kind: 'existing-folder', path: 'relative/path' }),
+      }),
+    );
+
+    // A relative path is parseable but refused on policy, so it is a 422, not a 400 — and the
+    // catalog subsystem is never reached, so nothing is mutated.
+    const body = jsonBody(response);
+    should(response.status).equal(422);
+    should(body.code).equal('project_registration_failed');
+    should(String(body.error).includes('absolute')).be.true();
+    should(registered).be.empty();
+  });
+
+  it('answers 400 for a genuinely malformed registration body', async () => {
+    const registered: RegisterProjectRequest[] = [];
+    const response = await (
+      await dispatcher({
+        projects: async () => [],
+        registerProject: async entry => {
+          registered.push(entry);
+          return PROJECT;
+        },
+        skills: async () => ({ harness: 'codex', skills: [] }),
+      })
+    ).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/projects',
+        headers: human,
+        body: '{not json',
+      }),
+    );
+
+    // Only a schema refusal is promoted to 422; a body that cannot be read as JSON stays 400.
+    should(response.status).equal(400);
+    should(jsonBody(response)).match({ code: 'invalid_json' });
+    should(registered).be.empty();
+  });
 });

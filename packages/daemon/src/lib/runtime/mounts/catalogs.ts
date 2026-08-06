@@ -24,6 +24,13 @@ async function registerProject(catalogs: CatalogSubsystem, context: RouteContext
   try {
     return jsonResponse(await catalogs.registerProject(await parseBody(context.request, RegisterProjectRequestSchema)));
   } catch (error) {
+    // A body that parses but fails this endpoint's schema — a relative project path — is a
+    // request the daemon refuses on policy rather than one it cannot read. Answer 422 for
+    // that refusal; a genuinely unreadable or non-JSON body stays 400, and domain refusals
+    // such as `project_exists` pass through unchanged.
+    if (error instanceof ApiError && error.code === 'invalid_request') {
+      throw new ApiError(422, error.message, 'project_registration_failed');
+    }
     if (error instanceof ApiError) throw error;
     throw new ApiError(
       422,
