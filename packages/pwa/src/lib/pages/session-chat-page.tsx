@@ -13,6 +13,7 @@ import {
   sessionReferenceSurface,
 } from '../../components/reference-surface.tsx';
 import {
+  isPromptKnownBusy,
   type RuntimeControlApi,
   RuntimeEffortControls,
   RuntimeModelControls,
@@ -501,6 +502,30 @@ export function SessionChatPage({
     [canControl, session],
   );
   const busy = statusMark(session).klass === 'active';
+  /**
+   * THE RUNTIME CHIPS ASK A DIFFERENT QUESTION THAN THE TRANSCRIPT DOES.
+   *
+   * `busy` above is session LIVENESS — is there work happening — and that is the
+   * right fact for a transcript tail and for a composer that keeps accepting
+   * text while a turn runs. A runtime switch is not about liveness at all: the
+   * daemon refuses one unless the harness is sitting at an idle prompt
+   * (`paneRefusal` in `session/runtime-control/policy.ts`), because `/model`
+   * typed behind a running turn either vanishes or arrives as conversation.
+   *
+   * Reading `statusMark(...).klass === 'active'` here substituted the first
+   * question for the second, and `statusMark` answers `active` for EVERY
+   * non-terminal, non-waiting session. So both chips were disabled on every
+   * ordinary `running` session no matter how ready its prompt was, and the only
+   * way to reach a live sheet was a session that happened to be `waiting` — a
+   * reader could never open the model or reasoning sheet on the sessions they
+   * actually work in.
+   *
+   * What readiness MEANS is not decided here. `isPromptKnownBusy` owns that
+   * tri-state and explains it; this trigger and the submissions inside the
+   * sheets read the one predicate, so a chip can never open onto a sheet that
+   * could only refuse, or refuse what a sheet would have sent.
+   */
+  const runtimeSwitchBusy = isPromptKnownBusy(session.state);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
   const compact = presentation === 'sheet';
@@ -650,7 +675,7 @@ export function SessionChatPage({
                 <>
                   {runtimeApi === null ? null : (
                     <ComposerRuntime
-                      busy={busy}
+                      busy={runtimeSwitchBusy}
                       canControl={canControl}
                       renderEffortControls={lifecycle => (
                         <RuntimeEffortControls

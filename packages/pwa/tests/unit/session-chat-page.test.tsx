@@ -183,6 +183,141 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('opens the runtime sheet on a running session whose prompt is ready, and loads its catalog', async () => {
+    // THE CHIPS ASK ABOUT THE PROMPT, THE TRANSCRIPT ASKS ABOUT LIVENESS. This
+    // page used to answer both with `statusMark(...).klass === 'active'`, which
+    // is `active` for every ordinary `running` session — so both chips were dead
+    // on exactly the sessions a reader works in, and the only reachable sheet
+    // was on a session that happened to be `waiting`. The transcript and the
+    // composer must keep the liveness answer; only the chips move.
+    // Arrange
+    const ready = sessionView('runtime-ready', { state: { promptReady: true, status: 'running' } });
+    const catalogCalls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/runtime-models')) {
+        catalogCalls.push(new URL(url).pathname);
+        return Response.json({
+          harness: 'claude',
+          source: 'wrapper-inventory',
+          choices: [{ value: 'claude-opus-5', label: 'Opus 5', reasoningEfforts: [] }],
+        });
+      }
+      return route(input);
+    }) as typeof fetch;
+    const runtimeClient: SessionChatClient = { ...client([], ready), runtime: async () => ready };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={ready}
+      />,
+    );
+
+    try {
+      // Assert — the two questions are answered separately, and only one moved.
+      expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
+      expect(page.root.findByType(Transcript).props.busy).toBe(true);
+      expect(page.root.findByType(Composer).props.busy).toBe(true);
+
+      // Act — the reader taps the chip the old gate had disabled.
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(false);
+      run(() => modelChip.props.onClick());
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+
+      // Assert — the sheet reached the catalog and rendered its labelled list.
+      expect(catalogCalls).toEqual(['/v1/sessions/runtime-ready/runtime-models']);
+      const choices = page.root.findAll(
+        node => node.type === 'ul' && node.props['aria-label'] === 'Switch claude model in place',
+      );
+      expect(choices).toHaveLength(1);
+      expect(
+        (choices[0] as ReactTestInstance).findAllByType('button').map(button => button.props['aria-label']),
+      ).toEqual(['Switch model in place to Opus 5']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('lets a running session with no reported readiness attempt the switch anyway', async () => {
+    // ABSENT IS UNKNOWN, NOT BUSY. The shipping daemon omits `promptReady` for
+    // idle sessions whose runtime-control POST it then accepts after inspecting
+    // the live pane, so pre-refusing on a missing field takes away a control the
+    // reader actually has. The chip opens, and the daemon stays the authority.
+    // Arrange
+    const unknown = sessionView('runtime-unknown', { state: { status: 'running' } });
+    const runtimeClient: SessionChatClient = { ...client([], unknown), runtime: async () => unknown };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={unknown}
+      />,
+    );
+
+    try {
+      // Assert
+      expect(unknown.state.promptReady).toBeUndefined();
+      expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(false);
+
+      // Act — the sheet opens and offers its choices rather than a refusal.
+      run(() => modelChip.props.onClick());
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+
+      // Assert — no pre-refusal warning, because nothing said the prompt is busy.
+      expect(
+        page.root.findAll(
+          node => typeof node.type === 'string' && node.children.join('').startsWith('Wait for an idle prompt before'),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('refuses the runtime chips on an explicitly busy prompt, without disabling the composer', async () => {
+    // `false` is the one answer that IS evidence: the daemon said this pane is
+    // mid-turn, so the refusal is stated at the trigger rather than spending a
+    // tap to reach a sheet that can only say no.
+    // Arrange
+    const busyPrompt = sessionView('runtime-busy', { state: { promptReady: false, status: 'running' } });
+    const runtimeClient: SessionChatClient = { ...client([], busyPrompt), runtime: async () => busyPrompt };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={busyPrompt}
+      />,
+    );
+
+    try {
+      // Assert
+      expect(page.root.findByType(ComposerRuntime).props.busy).toBe(true);
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(true);
+      expect(modelChip.props.title).toBe('Busy: wait for an idle prompt to switch.');
+      // A refused SWITCH is not a refused session: the reader may still type.
+      expect(page.root.findByType(Composer).props.disabled).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('fences a composer runtime command to its live daemon and publishes its returned observation', async () => {
     const next = sessionView('shared', { state: { observedModel: 'gpt-5.6-sol' } });
     const calls: Array<{ id: string; command: unknown; requestId: string | undefined }> = [];

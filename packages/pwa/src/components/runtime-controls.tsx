@@ -111,6 +111,32 @@ export const isEffortActionUnsupported = (failure: unknown): boolean => {
 export const runtimeControlUnavailableMessage = (control: 'model' | 'effort'): string =>
   `The running daemon is older than this web UI and does not provide in-session ${control} switching. Update the daemon build to enable it; restarting the same build will not help.`;
 
+/**
+ * WHETHER THE PROMPT IS KNOWN TO BE BUSY — never whether it is known to be idle.
+ *
+ * `promptReady` is optional on the wire and carries THREE answers, not two:
+ * `true` is an idle prompt, `false` is a busy one, and ABSENT is a daemon that
+ * did not say. Both sheets used to read `=== true`, which folds the third answer
+ * into the second and refuses on no evidence. That is not theoretical: the
+ * shipping daemon omits the field for idle sessions whose runtime-control POST
+ * it then accepts, because it inspects the LIVE PANE at command time — so
+ * reading absent as busy disabled controls the daemon would have honoured.
+ *
+ * The pane inspection is also why deferring is safe rather than reckless. The
+ * daemon refuses a genuinely busy pane itself (`paneRefusal` in
+ * `session/runtime-control/policy.ts`) and the refusal is surfaced verbatim
+ * below, so an unknown prompt costs a round trip and an honest message, while a
+ * pre-refusal costs the reader a capability they actually had. Explicit `false`
+ * still pre-refuses and says why: that one IS evidence.
+ *
+ * EXPORTED BECAUSE THE CHIP AND THE SUBMISSION MUST AGREE. `SessionChatPage`
+ * decides whether the trigger opens at all and these bodies decide whether a
+ * choice can be sent; spelling the same tri-state twice is exactly how a chip
+ * that opens onto a sheet that can only refuse — or worse, the reverse — gets
+ * built. One predicate, read from both ends, and the rationale lives here.
+ */
+export const isPromptKnownBusy = (state: SessionView['state']): boolean => state.promptReady === false;
+
 const failureMessage = (failure: unknown): string => {
   if (failure instanceof Error) return failure.message;
   const fields = failureFields(failure);
@@ -234,7 +260,7 @@ export function RuntimeModelControls({
 }: RuntimeModelControlsProps) {
   const { config, state } = view;
   const terminal = TERMINAL_STATUSES.has(state.status);
-  const promptReady = state.promptReady === true;
+  const promptRefused = isPromptKnownBusy(state);
   const { catalog, error: catalogError } = useRuntimeModelCatalog(
     catalogs,
     daemon,
@@ -270,7 +296,7 @@ export function RuntimeModelControls({
     config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, selectedCodexModel ?? undefined);
 
   async function runModelCommand(model?: string, effort?: string) {
-    if (!canControl || terminal || !promptReady || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
     const targeted = Boolean(model);
     setSubmittingTarget({ model: model ?? 'native-picker', ...(effort ? { effort } : {}) });
     setFailure(null);
@@ -337,12 +363,12 @@ export function RuntimeModelControls({
         Changes the model inside this running session. It does not move accounts, relaunch the pane, or discard its
         context.
       </p>
-      {promptReady ? null : (
+      {promptRefused ? (
         <p className="mt-2 text-meta text-warn leading-base">
           Wait for an idle prompt before switching model. The daemon refuses a busy pane instead of queueing this
           command.
         </p>
-      )}
+      ) : null}
 
       {runtimeControlUnavailable ? (
         <p className="mt-2 rounded-control border border-warn-border bg-surface-2 p-3 text-ui text-warn" role="alert">
@@ -352,7 +378,7 @@ export function RuntimeModelControls({
         <RuntimeReasoningStep
           backDisabled={submitting}
           currentEffort={state.observedModel === selectedCodexModel.value ? state.observedReasoningEffort : undefined}
-          disabled={submitting || !promptReady}
+          disabled={submitting || promptRefused}
           model={selectedCodexModel}
           onBack={() => setSelectedCodexModel(null)}
           onChoose={effort => void runModelCommand(selectedCodexModel.value, effort)}
@@ -362,7 +388,7 @@ export function RuntimeModelControls({
         <RuntimeModelChoices
           choices={catalog?.choices ?? null}
           currentModel={state.observedModel}
-          disabled={submitting || !promptReady}
+          disabled={submitting || promptRefused}
           error={catalogError}
           harness={config.harness}
           onChoose={choice => {
@@ -375,7 +401,7 @@ export function RuntimeModelControls({
 
       {codexPickerFallback && !runtimeControlUnavailable ? (
         <NativePickerButton
-          disabled={submitting || !promptReady}
+          disabled={submitting || promptRefused}
           onClick={() => void runModelCommand()}
           submitting={submitting}
         />
@@ -699,7 +725,7 @@ export function RuntimeEffortControls({
 }: RuntimeEffortControlsProps) {
   const { config, state } = view;
   const terminal = TERMINAL_STATUSES.has(state.status);
-  const promptReady = state.promptReady === true;
+  const promptRefused = isPromptKnownBusy(state);
   const [submitting, setSubmitting] = useState(false);
   const [codexSubmittingEffort, setCodexSubmittingEffort] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -728,7 +754,7 @@ export function RuntimeEffortControls({
     config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, currentCodexModel, true);
 
   async function runEffortCommand(level: string) {
-    if (!canControl || terminal || !promptReady || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
     setSubmitting(true);
     setCodexSubmittingEffort(null);
     setFailure(null);
@@ -750,7 +776,7 @@ export function RuntimeEffortControls({
   }
 
   async function runCodexEffort(model: RuntimeModelChoice, effort: string) {
-    if (!canControl || terminal || !promptReady || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
     setSubmitting(true);
     setCodexSubmittingEffort(effort);
     setFailure(null);
@@ -773,7 +799,7 @@ export function RuntimeEffortControls({
   }
 
   async function openCodexPickerFallback() {
-    if (!canControl || terminal || !promptReady || submitting || runtimeControlUnavailable) return;
+    if (!canControl || terminal || promptRefused || submitting || runtimeControlUnavailable) return;
     setSubmitting(true);
     setCodexSubmittingEffort(null);
     setFailure(null);
@@ -821,19 +847,19 @@ export function RuntimeEffortControls({
   return (
     <div className="mt-4 border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
       <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
-      {promptReady ? null : (
+      {promptRefused ? (
         <p className="mt-2 text-meta text-warn leading-base">
           Wait for an idle prompt before changing the reasoning level. The daemon refuses a busy pane instead of
           queueing this command.
         </p>
-      )}
+      ) : null}
 
       {runtimeControlUnavailable ? (
         <p className="mt-2 rounded-control border border-warn-border bg-surface-2 p-3 text-ui text-warn" role="alert">
           {runtimeControlUnavailableMessage('effort')}
         </p>
       ) : config.harness === 'claude' ? (
-        <ClaudeEffortChoices disabled={submitting || !promptReady} onChoose={level => void runEffortCommand(level)} />
+        <ClaudeEffortChoices disabled={submitting || promptRefused} onChoose={level => void runEffortCommand(level)} />
       ) : (
         <div className="mt-3">
           {catalogError ? (
@@ -851,7 +877,7 @@ export function RuntimeEffortControls({
           ) : currentCodexModel ? (
             <RuntimeReasoningChoices
               currentEffort={state.observedReasoningEffort}
-              disabled={submitting || !promptReady}
+              disabled={submitting || promptRefused}
               model={currentCodexModel}
               onChoose={effort => void runCodexEffort(currentCodexModel, effort)}
               submittingEffort={codexSubmittingEffort ?? undefined}
@@ -864,7 +890,7 @@ export function RuntimeEffortControls({
           )}
           {codexPickerFallback && !runtimeControlUnavailable ? (
             <NativePickerButton
-              disabled={submitting || !promptReady}
+              disabled={submitting || promptRefused}
               onClick={() => void openCodexPickerFallback()}
               submitting={submitting}
             />

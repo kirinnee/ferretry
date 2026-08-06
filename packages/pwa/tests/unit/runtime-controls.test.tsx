@@ -6,6 +6,7 @@ import {
   codexPickerFallbackNeeded,
   effortDisplayName,
   isEffortActionUnsupported,
+  isPromptKnownBusy,
   isRuntimeEndpointUnavailable,
   type RuntimeControlCommand,
   RuntimeEffortControls,
@@ -120,6 +121,17 @@ describe('runtime failure classification', () => {
   test('the skew message names the control and refuses to promise a restart helps', () => {
     expect(runtimeControlUnavailableMessage('model')).toContain('in-session model switching');
     expect(runtimeControlUnavailableMessage('effort')).toContain('restarting the same build will not help');
+  });
+});
+
+describe('isPromptKnownBusy', () => {
+  test('answers only for an explicit false, so an unreported prompt stays unknown', () => {
+    // The one predicate the composer's chip and these sheets both read. Three
+    // answers, not two: absent is a daemon that did not say, and the daemon's
+    // own live pane inspection is what decides that case.
+    expect(isPromptKnownBusy(view({ state: { promptReady: false } }).state)).toBe(true);
+    expect(isPromptKnownBusy(view({ state: { promptReady: true } }).state)).toBe(false);
+    expect(isPromptKnownBusy(view({ state: { promptReady: undefined } }).state)).toBe(false);
   });
 });
 
@@ -318,6 +330,37 @@ describe('RuntimeModelControls', () => {
     const screen = await mount(<RuntimeModelControls {...props({ view: view({ state: { promptReady: false } }) })} />);
     expect(screen.container.textContent).toContain('Wait for an idle prompt before switching model');
     expect(byText(screen.container, 'Opus 5').disabled).toBe(true);
+    await screen.unmount();
+  });
+
+  test('attempts the switch when the daemon reported no readiness at all, and surfaces its refusal', async () => {
+    // ABSENT IS UNKNOWN, NOT BUSY. The shipping daemon omits `promptReady` for
+    // idle sessions whose POST it then accepts after inspecting the live pane,
+    // so a missing field must not pre-refuse. The pane inspection is what makes
+    // deferring safe: when the pane really is mid-turn the daemon says so, and
+    // that sentence is what the reader is shown.
+    // Arrange
+    const unknown = view({ state: { promptReady: undefined } });
+    const { api, sent } = recorder({
+      status: 409,
+      message: 'a runtime control is available only while the harness is waiting at an idle prompt',
+    });
+    const screen = await mount(<RuntimeModelControls {...props({ api, view: unknown })} />);
+
+    // Assert — nothing is pre-refused on no evidence.
+    expect(unknown.state.promptReady).toBeUndefined();
+    expect(screen.container.textContent).not.toContain('Wait for an idle prompt');
+    expect(byText(screen.container, 'Opus 5').disabled).toBe(false);
+
+    // Act — the attempt reaches the daemon, which is the authority on the pane.
+    await click(byText(screen.container, 'Opus 5'));
+
+    // Assert
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.command).toEqual({ action: 'model', model: 'claude-opus-5' });
+    expect(must(screen.container.querySelector('[role="alert"]'), 'the refusal').textContent).toContain(
+      'waiting at an idle prompt',
+    );
     await screen.unmount();
   });
 
@@ -522,6 +565,43 @@ describe('RuntimeEffortControls', () => {
   test('warns while the pane is busy', async () => {
     const screen = await mount(<RuntimeEffortControls {...props({ view: view({ state: { promptReady: false } }) })} />);
     expect(screen.container.textContent).toContain('Wait for an idle prompt before changing the reasoning level');
+    await screen.unmount();
+  });
+
+  test('attempts a level when the daemon reported no readiness at all', async () => {
+    // The reasoning sheet answers the third state the same way the model sheet
+    // does: absent is unknown, the attempt goes out, and the live pane decides.
+    // Arrange
+    const unknown = view({ state: { promptReady: undefined } });
+    const { api, sent } = recorder();
+    const screen = await mount(<RuntimeEffortControls {...props({ api, view: unknown })} />);
+
+    // Assert
+    expect(screen.container.textContent).not.toContain('Wait for an idle prompt');
+    expect(byLabel(screen.container, 'Set reasoning effort to high').disabled).toBe(false);
+
+    // Act
+    await click(byLabel(screen.container, 'Set reasoning effort to high'));
+
+    // Assert
+    expect(sent[0]!.command).toEqual({ action: 'effort', effort: 'high' });
+    await screen.unmount();
+  });
+
+  test('holds a level back on an explicitly busy pane rather than sending it', async () => {
+    // `false` IS evidence, so this one never leaves the browser.
+    // Arrange
+    const { api, sent } = recorder();
+    const screen = await mount(
+      <RuntimeEffortControls {...props({ api, view: view({ state: { promptReady: false } }) })} />,
+    );
+
+    // Act
+    await click(byLabel(screen.container, 'Set reasoning effort to high'));
+
+    // Assert
+    expect(sent).toHaveLength(0);
+    expect(byLabel(screen.container, 'Set reasoning effort to high').disabled).toBe(true);
     await screen.unmount();
   });
 
