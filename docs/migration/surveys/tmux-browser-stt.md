@@ -73,13 +73,24 @@ The remaining source capabilities are:
 `freeTextQuestionRegion`, `freeTextPageShowsQuestion`, `StructuredAnswerOutcome`,
 `StructuredQuestionDriveError`, `structuredAnswerRefusal`.
 
-**Why the full family is not ported here.** These exist to answer a harness's own multiple-choice / multi-select
-/ free-text question by keystroke, and they refuse rather than guess when the pane does not
-provably show the question being answered. Ferretry has no structured-question surface at all:
-there is no `PendingQuestion` in `@ferretry/protocol`, no `/v1/sessions/:id/answer` route, and
-nothing that records a question. Porting the readers with no question to read would put ~900 lines
-of unmountable code in the tree, which both repo gates correctly refuse. It is one unit's work:
-the protocol type, the store, the route, and then these readers.
+**Why the full family is still not ported.** These exist to answer a harness's own multiple-choice /
+multi-select / free-text question by keystroke, and they refuse rather than guess when the pane does
+not provably show the question being answered.
+
+The reason recorded here originally — that Ferretry had no structured-question surface at all, no
+`PendingQuestion`, no answer route and nothing that recorded a question — **stopped being true and
+this paragraph did not.** All three exist: `PendingQuestionSchema` in `packages/protocol/src/lib/session.ts`,
+`POST /v1/sessions/:sessionId/answer` in `packages/daemon/src/lib/runtime/mounts/session-answer.ts`,
+and `projectStructuredQuestion` writing the question into durable state on every session read.
+
+What is actually left is the matcher family above, and it is wanted for two named things rather than
+for the answer itself: the **bound abandon** (see §1.3 and the map's `interrupt` row), which needs to
+re-bind a question on the pane before pressing Escape; and the **answer-failure recovery** the source
+performs and Ferretry does not — snapshotting the pane, releasing the form, and telling the human to
+reply in prose. Without those, a drive that fails leaves the question pending and the session
+unspeakable-to, because a send refuses any session holding an unanswered question. The narrower
+binder Ferretry ships (bind the question text, every option label and the cursor, then require a
+visible advance) is enough to ANSWER a question and is not enough to ABANDON or RELEASE one.
 
 The nearest thing Ferretry does have is `lib/session/harness/picker-screen.ts` +
 `dismiss.ts` — the same discipline (classify the pane, re-verify immediately before every send,
@@ -87,27 +98,27 @@ refuse on an unknown screen) applied to Codex's model picker rather than to agen
 
 ### 1.3 `TmuxController` methods (lines 1344–2371)
 
-| Source method     | Ferretry                                                                           |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `alive`           | `lib/tmux/controller.ts`                                                           |
-| `listSessions`    | `lib/tmux/controller.ts`                                                           |
-| `capture`         | `lib/tmux/controller.ts` (`capture(session, history)`)                             |
-| `captureVisible`  | `lib/tmux/controller.ts` (`capture(session, false)`)                               |
-| `promptReady`     | `lib/tmux/pane.ts` — pure, out of the class                                        |
-| `state`           | `lib/tmux/controller.ts`                                                           |
-| `launch`          | `lib/tmux/controller.ts` + `adapters/session/lifecycle/…-launcher.ts`              |
-| `stop`            | `lib/tmux/controller.ts`                                                           |
-| `waitReady`       | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**            |
-| `inject`          | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**            |
-| `send`            | `adapters/…/tmux-session-lifecycle-launcher.ts` `deliver` — **this PR**            |
-| `paneProcessId`   | **GAP** — `#{pane_pid}` args exist (`panePidArguments`), no caller                 |
-| `processTreePids` | **GAP** — process-tree walk; see `lib/migrate/process-table.ts` (adjacent)         |
-| `subprocessAlive` | **GAP** — depends on `processTreePids`                                             |
-| `typeIntoQueue`   | **GAP** — mid-turn native-queue typing (`tab to queue`)                            |
-| `interrupt`       | **GAP** — no interrupt route exists                                                |
-| `answerQuestion`  | PARTIAL — `adapters/session/question/tmux-structured-question-driver.ts`; see §1.2 |
-| `cancelQuestion`  | **GAP** — see §1.2                                                                 |
-| `snapshot`        | Partly — `adapters/session/resume/tmux-resume-launcher.ts` `snapshot`              |
+| Source method     | Ferretry                                                                                                                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alive`           | `lib/tmux/controller.ts`                                                                                                                                                                                                                                                                 |
+| `listSessions`    | `lib/tmux/controller.ts`                                                                                                                                                                                                                                                                 |
+| `capture`         | `lib/tmux/controller.ts` (`capture(session, history)`)                                                                                                                                                                                                                                   |
+| `captureVisible`  | `lib/tmux/controller.ts` (`capture(session, false)`)                                                                                                                                                                                                                                     |
+| `promptReady`     | `lib/tmux/pane.ts` — pure, out of the class                                                                                                                                                                                                                                              |
+| `state`           | `lib/tmux/controller.ts`                                                                                                                                                                                                                                                                 |
+| `launch`          | `lib/tmux/controller.ts` + `adapters/session/lifecycle/…-launcher.ts`                                                                                                                                                                                                                    |
+| `stop`            | `lib/tmux/controller.ts`                                                                                                                                                                                                                                                                 |
+| `waitReady`       | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**                                                                                                                                                                                                                  |
+| `inject`          | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**                                                                                                                                                                                                                  |
+| `send`            | `adapters/…/tmux-session-lifecycle-launcher.ts` `deliver` — **this PR**                                                                                                                                                                                                                  |
+| `paneProcessId`   | **GAP** — `#{pane_pid}` args exist (`panePidArguments`), no caller                                                                                                                                                                                                                       |
+| `processTreePids` | **GAP** — process-tree walk; see `lib/migrate/process-table.ts` (adjacent)                                                                                                                                                                                                               |
+| `subprocessAlive` | **GAP** — depends on `processTreePids`                                                                                                                                                                                                                                                   |
+| `typeIntoQueue`   | **GAP** — mid-turn native-queue typing (`tab to queue`)                                                                                                                                                                                                                                  |
+| `interrupt`       | **GAP** — no interrupt route exists                                                                                                                                                                                                                                                      |
+| `answerQuestion`  | PARTIAL — `adapters/session/question/tmux-structured-question-driver.ts`; see §1.2. The drive is served and now durably idempotent (`lib/session/question/{answer-ledger,coordinator}.ts`). The source's failure recovery — snapshot, `cancelQuestion`, release to prose — is NOT ported |
+| `cancelQuestion`  | **GAP** — see §1.2                                                                                                                                                                                                                                                                       |
+| `snapshot`        | Partly — `adapters/session/resume/tmux-resume-launcher.ts` `snapshot`                                                                                                                                                                                                                    |
 
 **`paneProcessId` / `subprocessAlive` — GAP with a live consequence.** kteam uses the pane pid and
 its process tree to tell "the harness exited but tmux kept the pane" from "the harness is running a

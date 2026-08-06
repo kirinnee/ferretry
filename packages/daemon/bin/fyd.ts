@@ -138,7 +138,7 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
-import { TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
+import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -219,6 +219,8 @@ import {
   type AnalyticsPricingRate,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
+  AnswerRequestConflict,
+  AnswerUnconfirmed,
   type ApiServerHandle,
   type ApiServerPort,
   type ArgumentAnswer,
@@ -408,6 +410,7 @@ import {
   SignalRefused,
   type SocketTicketBroker,
   SocketTicketRegistry,
+  StructuredAnswerCoordinator,
   StructuredQuestionRefused,
   StructuredQuestionService,
   SttEnhancementService,
@@ -1715,11 +1718,12 @@ function createSessionSendSubsystem(
  * an absent question or a blind keystroke.
  */
 function createSessionAnswerSubsystem(
+  paths: FoundationPaths,
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   tmux: TmuxController,
+  clock: ClockPort,
 ): SessionAnswerSubsystem {
-  const settled = new Map<string, SessionView>();
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
     if (id === undefined)
@@ -1766,34 +1770,80 @@ function createSessionAnswerSubsystem(
       milliseconds => Bun.sleep(milliseconds),
     ),
   );
-  return {
-    answer: async (reference, request) => {
-      const id = require(reference);
-      const key = `${id}:${request.requestId}`;
-      const already = settled.get(key);
-      if (already !== undefined) return already;
-      await service
-        .answer({
-          id,
-          toolUseId: request.toolUseId,
-          labels: request.labels,
-          ...(request.other === undefined ? {} : { other: request.other }),
-          ...(request.responses === undefined ? {} : { responses: request.responses }),
-          ...(request.answers === undefined ? {} : { answers: request.answers }),
-        })
-        .catch(error => {
-          if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
-          if (error instanceof SessionAnswerError) throw error;
-          throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));
-        });
+  const coordinator = new StructuredAnswerCoordinator({
+    service,
+    ledger: new FileAnswerLedger(id => createSessionPaths(paths, id).directory, clock),
+    // Its own queue: an answer holds its lock across proving a live form advanced, and must not make
+    // every unrelated document write in this daemon wait behind a terminal. It must also not be
+    // STORAGE's queue — clearing the answered form re-enters that one under the same session key, so
+    // holding it across the drive would make the clear wait for the drive that waits for the clear.
+    serial: new KeyedSerialExecutor(),
+    clock,
+    // Reconciliation reads the state document and nothing else, so an unreadable one is missing
+    // evidence rather than evidence of absence: it quarantines instead of re-driving.
+    state: async id => {
+      const parsed = SessionStateSchema.safeParse(await storage.readState(id).catch(() => undefined));
+      return parsed.success ? parsed.data : undefined;
+    },
+    // RE-READ, never cached. The answer's outcome is that the form is settled; the view is derived
+    // state that keeps moving, and a stored copy would answer a replay with a session as it was.
+    view: async id => {
       const view = await sessions.get(id).catch(() => undefined);
       if (view === undefined)
         throw new SessionAnswerError(
           'failed',
           `session ${id} answer was confirmed but its updated documents are unreadable`,
         );
-      settled.set(key, view);
       return view;
+    },
+    // The existing human-attention mechanism rather than a second one: the same two state fields
+    // every other quarantine writes, plus a journal line naming the request nothing could resolve.
+    quarantine: async (id, record) => {
+      await storage
+        .updateState(id, current => {
+          const parsed = SessionStateSchema.safeParse(current);
+          if (!parsed.success) return current;
+          return {
+            ...(current as Record<string, unknown>),
+            needsHumanKind: 'structured-answer-unconfirmed',
+            needsHuman: `an answer to ${record.toolUseId} was sent and never confirmed; answer it at the session`,
+          } as typeof current;
+        })
+        .catch(() => undefined);
+      await storage
+        .append(id, 'interaction.answer_unconfirmed', {
+          toolUseId: record.toolUseId,
+          requestId: record.requestId,
+          acceptedAt: record.acceptedAt,
+        })
+        .catch(() => undefined);
+    },
+  });
+  return {
+    answer: async (reference, request) => {
+      const id = require(reference);
+      return await coordinator
+        .answer({
+          id,
+          requestId: request.requestId,
+          request: {
+            toolUseId: request.toolUseId,
+            labels: request.labels,
+            ...(request.other === undefined ? {} : { other: request.other }),
+            ...(request.responses === undefined ? {} : { responses: request.responses }),
+            ...(request.answers === undefined ? {} : { answers: request.answers }),
+          },
+        })
+        .catch(error => {
+          // Three different next actions, so three different refusals: fix the request, use a fresh
+          // id, or go and look at the session. Collapsing them would tell a caller to retry in the
+          // one case where retrying is the thing that must not happen.
+          if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
+          if (error instanceof AnswerRequestConflict) throw new SessionAnswerError('conflict', error.message);
+          if (error instanceof AnswerUnconfirmed) throw new SessionAnswerError('unconfirmed', error.message);
+          if (error instanceof SessionAnswerError) throw error;
+          throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));
+        });
     },
   };
 }
@@ -4095,7 +4145,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
-        sessionAnswer: createSessionAnswerSubsystem(storage, sessions, launchTmux),
+        sessionAnswer: createSessionAnswerSubsystem(paths, storage, sessions, launchTmux, clock),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRuntime: new SessionRuntimeControlService({
