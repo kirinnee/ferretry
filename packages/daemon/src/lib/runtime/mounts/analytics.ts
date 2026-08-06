@@ -133,6 +133,7 @@ export function analyticsRoutes(subsystem: AnalyticsSubsystem): readonly ApiRout
       method: 'GET',
       path: '/v1/analytics',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: context => Promise.resolve(query(subsystem, context)),
     },

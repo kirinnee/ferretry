@@ -28,6 +28,7 @@ export function healthRoutes(clock: MillisecondClockPort, startedAtMs: number): 
       method: 'GET',
       path: '/healthz',
       scope: 'public',
+      minimum: 'none',
       noStore: true,
       handle: async () =>
         noStore(

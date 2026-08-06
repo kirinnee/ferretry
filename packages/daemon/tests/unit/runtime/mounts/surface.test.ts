@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
+import { minimumForScope, privilegedOnlyForScope } from '../../../../src/lib/api/route.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import {
   createMountedDispatcher,
@@ -260,6 +261,13 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
 });
 
 describe('the mounted daemon surface', () => {
+  it('should derive every compatibility declaration from its legacy scope', () => {
+    for (const route of mountedDaemonRoutes(base, subsystems())) {
+      should(route.minimum).equal(minimumForScope(route.scope));
+      should(route.privilegedOnly).equal(privilegedOnlyForScope(route.scope));
+    }
+  });
+
   it('should serve the base feeds and every mounted subsystem from one table', () => {
     // Arrange / Act
     const routes = mountedDaemonRoutes(base, subsystems()).map(route => `${route.method} ${route.path}`);

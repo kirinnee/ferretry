@@ -8,6 +8,8 @@ import {
   type CapabilityGuard,
   CLIENT_HEADER,
   jsonResponse,
+  minimumForScope,
+  privilegedOnlyForScope,
   type RouteScope,
   SESSION_ID_HEADER,
 } from '../../../src/lib/api/index.ts';
@@ -24,6 +26,8 @@ const echo = (path: string, scope: RouteScope, method = 'GET'): ApiRoute => ({
   method,
   path,
   scope,
+  minimum: minimumForScope(scope),
+  ...(privilegedOnlyForScope(scope) === true ? { privilegedOnly: true } : {}),
   handle: async context => jsonResponse({ actor: context.actor ?? null, params: [...context.params] }),
 });
 
@@ -291,6 +295,8 @@ describe('ApiDispatcher error handling', () => {
     method: 'GET',
     path: '/boom',
     scope,
+    minimum: minimumForScope(scope),
+    ...(privilegedOnlyForScope(scope) === true ? { privilegedOnly: true } : {}),
     handle: async () => {
       throw error;
     },
@@ -364,6 +370,7 @@ describe('the operator grant layer', () => {
     method: 'GET',
     path: '/v1/fleet/plan',
     scope: 'admin',
+    minimum: 'operator',
     capability: { capability: 'fleet', axis: 'use' },
     handle: async () => jsonResponse({ plan: [] }),
   });
@@ -439,6 +446,7 @@ describe('the operator grant layer', () => {
       method: 'GET',
       path: '/v1/sessions',
       scope: 'admin',
+      minimum: 'operator',
       handle: async () => jsonResponse([]),
     };
     const dispatcher = new ApiDispatcher(new ApiRouter([ungoverned]), credentials, guard(false));

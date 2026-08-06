@@ -20,6 +20,7 @@ export function foreignHistoryRoutes(subsystem: ForeignHistorySubsystem): readon
       method: 'GET',
       path: '/v1/imports/history',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async () => {
         const listing = await subsystem.list();
@@ -45,6 +46,7 @@ export function foreignHistoryRoutes(subsystem: ForeignHistorySubsystem): readon
       method: 'GET',
       path: '/v1/imports/history/:importId',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => {
         const id = context.params.get('importId');

@@ -19,6 +19,29 @@ import type { AuthenticatedCredential } from './socket-ticket.ts';
  */
 export type RouteScope = 'public' | 'warden' | 'admin' | 'host';
 
+/** The least credential class that may use a route. */
+export type CredentialMinimum = 'none' | 'authenticated' | 'operator' | 'admin-token';
+
+/** Compatibility mapping while route tables carry both declarations. */
+export function minimumForScope(scope: RouteScope): CredentialMinimum {
+  switch (scope) {
+    case 'public':
+      return 'none';
+    case 'warden':
+      return 'authenticated';
+    case 'admin':
+      return 'operator';
+    case 'host':
+      return 'admin-token';
+  }
+}
+
+/** Compatibility mapping while route tables carry both declarations. */
+export function privilegedOnlyForScope(scope: RouteScope): true | undefined {
+  void scope;
+  return undefined;
+}
+
 /** Everything a handler is allowed to know about the caller. */
 export interface RouteContext {
   readonly request: ApiRequest;
@@ -55,6 +78,13 @@ export interface RoutePattern {
  *  by both tables, so one authorization boundary serves both and neither can drift. */
 export interface ScopedRoute extends RoutePattern {
   readonly scope: RouteScope;
+  /**
+   * The credential part of {@link scope}, made explicit while the legacy total order is retired.
+   * The surface inventory proves this is derived exactly for every route before dispatch reads it.
+   */
+  readonly minimum: CredentialMinimum;
+  /** An independent arrival requirement, unused by legacy scopes. */
+  readonly privilegedOnly?: true;
   /**
    * What the OPERATOR must additionally have agreed to, when this route is one of the five things
    * they are asked about.

@@ -25,6 +25,7 @@ export function socketTicketRoutes(subsystem: SocketTicketSubsystem): readonly A
       method: 'POST',
       path: '/v1/events/ticket',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async ({ credential }) => {
         // A non-public route always has one, so this is unreachable by construction — and it refuses

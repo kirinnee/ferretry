@@ -229,6 +229,7 @@ export function sessionMigrateRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/migrate',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await migrate(subsystem, guard, context),
     },

@@ -6,6 +6,7 @@ const route = (method: string, path: string): ApiRoute => ({
   method,
   path,
   scope: 'admin',
+  minimum: 'operator',
   handle: async () => jsonResponse({ path }),
 });
 

@@ -13,6 +13,7 @@ import {
   type SocketRoute,
 } from '../../../src/lib/api/socket.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { minimumForScope, privilegedOnlyForScope } from '../../../src/lib/api/route.ts';
 import {
   TERMINAL_MAX_CONTROL_FRAME_BYTES,
   TERMINAL_MAX_INPUT_FRAME_BYTES,
@@ -38,6 +39,8 @@ function streamRoute(refusal?: unknown, scope: SocketRoute['scope'] = 'admin'): 
     method: 'GET',
     path: '/v1/sessions/:sessionId/stream',
     scope,
+    minimum: minimumForScope(scope),
+    ...(privilegedOnlyForScope(scope) === true ? { privilegedOnly: true } : {}),
     accept: async context => {
       if (refusal !== undefined) throw refusal;
       const attachment: SocketAttachment = async (downstream: SocketDownstream) => {

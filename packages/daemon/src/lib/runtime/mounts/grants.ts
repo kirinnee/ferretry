@@ -154,6 +154,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       // Any authenticated caller, including a warden: a subject of the decision must be able to read
       // the decision. It discloses no secret — booleans and reasons, never the password.
       scope: 'warden',
+      minimum: 'authenticated',
       noStore: true,
       handle: async context => jsonResponse(subsystem.view(presentationOf(context))),
     },
@@ -164,6 +165,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       // has no business learning which phones an operator has paired. It is not capability-gated for
       // the same reason the grant read is not — the caller who was refused is the one asking.
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.history(GRANT_AUDIT_MAX_ENTRIES).catch(refuse)),
     },
@@ -171,6 +173,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/grants/unlock',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context => await unlock(subsystem, context),
     },
@@ -178,6 +181,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       method: 'PATCH',
       path: '/v1/grants',
       scope: 'admin',
+      minimum: 'operator',
       noStore: true,
       handle: async context =>
         jsonResponse(
@@ -192,6 +196,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       // The host's own admin token only. A device that could clear the password could remove its
       // own gate, which would make the whole layer advisory.
       scope: 'host',
+      minimum: 'admin-token',
       noStore: true,
       handle: async context => await setPassword(subsystem, context),
     },
