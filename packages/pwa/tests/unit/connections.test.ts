@@ -205,6 +205,23 @@ describe('DaemonConnectionStore', () => {
     unsubscribe();
   });
 
+  it('replaces carriers only for the pairing that authenticated the refresh', () => {
+    const store = new DaemonConnectionStore();
+    const paired = store.add(connection('a'));
+    const replacement = [
+      { kind: 'direct' as const, daemonUrl: paired.baseUrl },
+      { kind: 'relay' as const, relayUrl: 'https://new-relay.example.test', operator: 'self' as const },
+    ];
+    const changedToken = daemonConnection({ ...paired, deviceToken: 'token-rotated' });
+    const changedBaseUrl = daemonConnection({ ...paired, baseUrl: 'https://moved.example.test' });
+
+    should(store.replaceCarriers(changedToken, replacement)).equal(paired);
+    should(store.replaceCarriers(changedBaseUrl, replacement)).equal(paired);
+    should(store.get(paired.daemonId)?.carriers).deepEqual([{ kind: 'direct', daemonUrl: paired.baseUrl }]);
+
+    should(store.replaceCarriers(paired, replacement)?.carriers).deepEqual(replacement);
+  });
+
   it('loads tolerantly and keeps saving after a repository failure', async () => {
     const repository = new MemoryRepository(persisted([row('saved', 4)], 'saved'), false, true);
     const store = await DaemonConnectionStore.open({ repository, now: () => 9 });

@@ -354,10 +354,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       if (!response.ok) return;
       const view = DaemonCarriersViewSchema.safeParse(await response.json().catch(() => undefined));
       if (!view.success) return;
-      connections.replaceCarriers(
-        daemon.daemonId,
-        publishedConnectionMethods(view.data.carriers, await hostedRelayUrl),
-      );
+      connections.replaceCarriers(daemon, publishedConnectionMethods(view.data.carriers, await hostedRelayUrl));
     })().catch(() => undefined);
   });
 

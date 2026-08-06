@@ -812,10 +812,12 @@ chosen by trying it, not by a health check.**
 
 1. every `direct` carrier, in the order the daemon published them;
 2. then every `relay`, in the order the daemon published them;
-3. **only a TRANSPORT failure advances.** Any HTTP response is an answer — `503` included — and stops
-   the walk: the daemon is reachable and saying so. Advancing on a status would send the client to
-   another address for the same daemon to arrive at the answer it already had, and report "nothing was
-   reachable" about a daemon that replied every time;
+3. **only a TRANSPORT failure from a replay-safe `GET` or `HEAD` advances.** Any HTTP response is an
+   answer — `503` included — and stops the walk: the daemon is reachable and saying so. A failed
+   mutation is also reported rather than sent to another carrier, because a lost response does not
+   prove the daemon did not apply it. Advancing on a status would send the client to another address
+   for the same daemon to arrive at the answer it already had, and report "nothing was reachable" about
+   a daemon that replied every time;
 4. the winner is remembered **for the life of that connection**, so a browser on the network a
    rendezvous exists for does not pay a failed direct attempt per call. **A round in which nothing
    worked is not remembered** — it served no request, so there is no answer to keep, and a later

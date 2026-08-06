@@ -370,9 +370,14 @@ export class DaemonConnectionStore {
    * through, it would leave a reachable daemon with nothing to dial and no request
    * left that could ever learn otherwise, so the known-working cache stands.
    */
-  replaceCarriers(id: DaemonId, carriers: readonly ConnectionMethod[]): DaemonConnectionRecord | undefined {
-    const existing = this.get(id);
+  replaceCarriers(daemon: DaemonConnection, carriers: readonly ConnectionMethod[]): DaemonConnectionRecord | undefined {
+    const existing = this.get(daemon.daemonId);
     if (existing === undefined) return undefined;
+    // This refresh was authenticated with this exact pairing. The daemon ID is
+    // deliberately durable across a re-pair, so it cannot fence a delayed old
+    // credential's response by itself. Carriers are excluded on purpose: this
+    // operation is the authoritative replacement of that cache.
+    if (existing.baseUrl !== daemon.baseUrl || existing.deviceToken !== daemon.deviceToken) return existing;
     if (carriers.length === 0) return existing;
     const updated = daemonConnection({ ...existing, carriers });
     if (sameDaemonCarriers(existing.carriers, updated.carriers)) return existing;
@@ -382,7 +387,9 @@ export class DaemonConnectionStore {
       pairedAt: existing.pairedAt,
       lastSelectedAt: existing.lastSelectedAt,
     };
-    const connections = this.#snapshot.connections.map(candidate => (candidate.daemonId === id ? record : candidate));
+    const connections = this.#snapshot.connections.map(candidate =>
+      candidate.daemonId === daemon.daemonId ? record : candidate,
+    );
     this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
     return record;
   }

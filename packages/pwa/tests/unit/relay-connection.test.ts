@@ -160,7 +160,7 @@ describe('a stored pairing registry', () => {
     store.subscribe(() => {
       notifications += 1;
     });
-    should(store.replaceCarriers(record.daemonId, [])).equal(store.get(record.daemonId));
+    should(store.replaceCarriers(record, [])).equal(store.get(record.daemonId));
     should(store.get(record.daemonId)?.carriers).eql([{ kind: 'direct', daemonUrl: DAEMON_URL }, SELF_RELAY]);
     should(notifications).equal(0);
   });
@@ -186,12 +186,12 @@ describe('a stored pairing registry', () => {
     );
     const record = store.add(connection(FINGERPRINT));
     const direct = { kind: 'direct' as const, daemonUrl: DAEMON_URL };
-    should(store.replaceCarriers(record.daemonId, [direct, SELF_RELAY])?.carriers).eql([direct, SELF_RELAY]);
+    should(store.replaceCarriers(record, [direct, SELF_RELAY])?.carriers).eql([direct, SELF_RELAY]);
     // Idempotent: the same answer is not a new snapshot.
-    should(store.replaceCarriers(record.daemonId, [direct, SELF_RELAY])?.carriers).eql([direct, SELF_RELAY]);
+    should(store.replaceCarriers(record, [direct, SELF_RELAY])?.carriers).eql([direct, SELF_RELAY]);
     // Replacement, not merge: a withdrawn relay disappears and a new pair takes its place.
-    should(store.replaceCarriers(record.daemonId, [direct])?.carriers).eql([direct]);
-    should(store.replaceCarriers(record.daemonId, [direct, HOSTED_RELAY, SELF_RELAY])?.carriers).eql([
+    should(store.replaceCarriers(record, [direct])?.carriers).eql([direct]);
+    should(store.replaceCarriers(record, [direct, HOSTED_RELAY, SELF_RELAY])?.carriers).eql([
       direct,
       HOSTED_RELAY,
       SELF_RELAY,
@@ -206,7 +206,7 @@ describe('a stored pairing registry', () => {
 
   it('should say nothing about a daemon that is not paired', () => {
     const store = new DaemonConnectionStore();
-    should(store.replaceCarriers(connection(FINGERPRINT).daemonId, [SELF_RELAY])).be.undefined();
+    should(store.replaceCarriers(connection(FINGERPRINT), [SELF_RELAY])).be.undefined();
   });
 });
 

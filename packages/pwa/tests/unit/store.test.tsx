@@ -458,6 +458,61 @@ describe('StoreProvider', () => {
     ]);
   });
 
+  it('does not let an old pairing refresh replace a re-paired daemon cache', async () => {
+    const daemon = daemonConnection({
+      daemonId: `fy_daemon_${'d'.repeat(43)}`,
+      baseUrl: 'https://daemon.example.test',
+      deviceToken: `fy_device_${'o'.repeat(43)}`,
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+        { kind: 'relay', relayUrl: 'https://old-relay.example.test' },
+      ],
+    });
+    const repaired = daemonConnection({
+      ...daemon,
+      deviceToken: `fy_device_${'n'.repeat(43)}`,
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://daemon.example.test' },
+        { kind: 'relay', relayUrl: 'https://new-relay.example.test' },
+      ],
+    });
+    let refreshRequested!: () => void;
+    const requested = new Promise<void>(resolve => {
+      refreshRequested = resolve;
+    });
+    let releaseRefresh!: (response: Response) => void;
+    const delayedRefresh = new Promise<Response>(resolve => {
+      releaseRefresh = resolve;
+    });
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      fetcher: async input => {
+        if (String(input).endsWith('/v1/carriers')) {
+          refreshRequested();
+          return await delayedRefresh;
+        }
+        return Response.json({ ok: true });
+      },
+    });
+    store.connections.add(daemon);
+
+    await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
+    await requested;
+    store.connections.remove(daemon.daemonId);
+    store.connections.add(repaired);
+    releaseRefresh(
+      Response.json({
+        carriers: [
+          { kind: 'direct', url: 'https://daemon.example.test' },
+          { kind: 'relay', url: 'https://stale-relay.example.test' },
+        ],
+      }),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(store.connections.get(daemon.daemonId)?.carriers).toEqual(repaired.carriers);
+  });
+
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {
     const store = await memoryStore();
     const view = await mount(

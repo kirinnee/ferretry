@@ -56,15 +56,15 @@ import {
   sameDaemonCarrier,
   sameDaemonConnection,
 } from './daemon-connection.ts';
-import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import {
+  RelayClientSession,
   type RelayClientSessionDependencies,
   type RelayClientSocket,
-  RelayClientSession,
+  RelaySessionError,
   type RelayTunnelAnswer,
   type RelayTunnelClientMessage,
-  RelaySessionError,
 } from './relay-session.ts';
+import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 
 /* ---------- the socket adapter seam --------------------------------------- */
 
@@ -406,6 +406,19 @@ const transportFailure = (reason: unknown): string => {
 };
 
 /**
+ * A carrier walk may only replay a request whose repeated application is safe.
+ *
+ * A rejected browser fetch says the response did not arrive; it does NOT prove
+ * the daemon did not receive a mutation. Reads have no such ambiguity, so they
+ * retain the direct-then-relay recovery path while a write is reported to its
+ * caller to decide whether a retry is appropriate.
+ */
+const replaySafe = (init: RequestInit): boolean => {
+  const method = (init.method ?? 'GET').toUpperCase();
+  return method === 'GET' || method === 'HEAD';
+};
+
+/**
  * Every request for one daemon, on whichever carrier that daemon is reachable over.
  *
  * It is a `DaemonFetch`, so nothing downstream has to know a carrier exists: the
@@ -582,6 +595,13 @@ export class DaemonCarrierRouter {
       } catch (reason) {
         if (reason instanceof RelayAnswerError) throw reason.cause;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
+        // A direct fetch rejection can follow receipt of a POST/PUT/etc. Record its
+        // failed probe for the same disclosure a completed walk produces, but do not
+        // send that possibly-applied request to the next carrier.
+        if (!replaySafe(init)) {
+          this.#decide(entry, probes);
+          throw reason;
+        }
       }
     }
     this.#decide(entry, probes);

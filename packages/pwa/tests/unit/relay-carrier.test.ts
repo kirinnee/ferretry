@@ -8,8 +8,8 @@
  * different right behaviour and each has been the wrong one somewhere.
  */
 
-import { HEARTBEAT_GRACE_SECONDS, HEARTBEAT_SECONDS, RELAY_CLOSE_CODES } from '@ferretry/relay';
 import { describe, it } from 'bun:test';
+import { HEARTBEAT_GRACE_SECONDS, HEARTBEAT_SECONDS, RELAY_CLOSE_CODES } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
 import {
@@ -376,11 +376,12 @@ describe('the carrier router', () => {
           }),
     });
     const auto = autoDial(identity, options.answer ?? {});
+    const network = options.network;
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
       dial: auto.dial,
       heartbeat: () => () => undefined,
-      ...(options.network === undefined ? {} : { network: async () => await options.network!() }),
+      ...(network === undefined ? {} : { network: async () => await network() }),
     });
     router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
     return { router, daemon, auto };
@@ -440,7 +441,7 @@ describe('the carrier router', () => {
     should(seen).eql(['https://other-direct.example/v1/projects?page=2']);
   });
 
-  it('should fall back to the relay when direct cannot be reached, and say why', async () => {
+  it('should fall back to the relay for a replay-safe GET when direct cannot be reached, and say why', async () => {
     const changes: number[] = [];
     const { router, daemon } = await routerFor({
       relay: RELAY,
@@ -459,6 +460,40 @@ describe('the carrier router', () => {
     // The winner keeps the traffic: direct is not re-probed on every call.
     should((await router.fetch(`${DAEMON_URL}/v1/usage`)).status).equal(200);
     await settle(5);
+  });
+
+  it('should report a failed fresh mutation without replaying it over a relay', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const bodies: string[] = [];
+    let dials = 0;
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      heartbeat: () => () => undefined,
+      network: async (_input, init) => {
+        bodies.push(String(init?.body));
+        throw new TypeError('the daemon accepted the request but its response was lost');
+      },
+      dial: () => {
+        dials += 1;
+        return autoDial(identity).dial();
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    const mutation = { method: 'POST', body: JSON.stringify({ prompt: 'start one session' }) };
+
+    await should(router.send(daemon, `${DAEMON_URL}/v1/sessions`, mutation)).be.rejectedWith(
+      'the daemon accepted the request but its response was lost',
+    );
+
+    should(bodies).eql([mutation.body]);
+    should(dials).equal(0);
+    should(router.choice(daemon.daemonId)?.ok).be.false();
   });
 
   it('should walk multiple relays in published order until one transports an answer', async () => {
