@@ -56,7 +56,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   fleet: 'the agent fleet',
   terminal: 'session terminals',
   browser: 'the browser',
-  filesystem: 'session working trees',
+  filesystem: 'the project filesystem',
   warden: 'fleet supervision',
   pairing: 'device pairing',
 };
@@ -68,7 +68,7 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   fleet: 'Agent fleet',
   terminal: 'Session terminals',
   browser: 'Browser',
-  filesystem: 'Session files',
+  filesystem: 'Project filesystem',
   warden: 'Fleet supervision',
   pairing: 'Device pairing',
 };
@@ -87,7 +87,7 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
   fleet: 'Account manifests, wrappers written into accounts, plans, usage and apply.',
   terminal: 'Opening a shell on this machine, typing into it, and streaming what it prints.',
   browser: 'The login window and per-session control of a browser you are signed into.',
-  filesystem: 'Reading the files in a session’s working tree.',
+  filesystem: 'Reading project files, registering host folders, and running Git init or clone.',
   warden: 'Supervision status, sweeps, and how much quota the daemon may spend unattended.',
   pairing:
     'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a remote browser can never undo.',
@@ -304,10 +304,11 @@ export const openReasonLabel = (reason: OpenReason): string => OPEN_REASON_LABEL
 /**
  * HOW MUCH ACCESS THIS CAPABILITY IS, so the dangerous ones do not look like the mild ones.
  *
- * Five rows that read alike make a person weigh `filesystem` and `fleet` the same, and they are not the
- * same: one reads files in a working tree, the other writes executables into accounts. The weight is a
- * property of what the capability REACHES — the reasoning already written down in `CAPABILITY_REACH` —
- * so it is declared per capability rather than derived from whether it happens to be on.
+ * Five rows that read alike make a person weigh a read-only capability and one that writes the host the
+ * same. `filesystem` is broad because its configure axis can create folders and run Git, even though its
+ * use axis only reads project files. The weight is a property of the MOST the capability reaches — the
+ * reasoning already written down in `CAPABILITY_REACH` — so it is declared per capability rather than
+ * derived from whether it happens to be on.
  *
  * ENCODED IN FORM AS WELL AS COLOUR. Three filled pips out of three is legible to somebody who cannot
  * distinguish the tones, on a monochrome print, and in a screenshot pasted into an issue. Colour alone
@@ -323,8 +324,8 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   terminal: 'broad',
   // Drives a browser somebody is already signed into, so it inherits every session in it.
   browser: 'moderate',
-  // Reads a working tree. Real exposure, no write and no execution.
-  filesystem: 'narrow',
+  // Reads project files and can create host folders by running Git init or clone.
+  filesystem: 'broad',
   // Decides how much of somebody's quota the machine may spend unattended, but reaches no further.
   warden: 'moderate',
   // BROAD, and it is the only row whose weight is about what comes NEXT. Pairing reaches nothing on the

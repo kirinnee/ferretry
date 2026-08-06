@@ -43,7 +43,7 @@ presents every loopback-looking signal it can.
 | `fleet`      | the account manifest, plan, usage, assets, proposals and `fleet apply` |
 | `terminal`   | opening, writing to and streaming session terminals                    |
 | `browser`    | the human login window and per-session browser control                 |
-| `filesystem` | the read-only session working-tree surface                             |
+| `filesystem` | reading session working trees and registering projects on the host     |
 | `warden`     | supervision status, sweeps and the warden configuration                |
 | `pairing`    | pairing codes, the paired-device list, and Web Push enrolment          |
 
@@ -278,12 +278,13 @@ command says so at the moment somebody might be tempted to do that instead.
   model accepts this — a tunnel needs shell access, and anybody with that can read the admin token
   anyway — but `pairing` is the capability where it matters most, so it is written down rather than
   discovered.
-- **`configure` has no route of its own for `terminal`, `browser`, `filesystem` or `pairing`.** Those four
+- **`configure` has no route of its own for `terminal`, `browser` or `pairing`.** Those three
   subsystems have no host settings the API can change today, so their configure axis governs exactly
   one thing: whether a remote caller may re-grant that capability. It is not decoration — it is the
-  coarse switch's own lock — but it is narrower than `fleet` and `warden`, whose configure axis gates
-  real host-changing routes (`PUT /v1/fleet/environment`, `POST /v1/fleet/apply`,
-  `PATCH /v1/warden/config`).
+  coarse switch's own lock. `filesystem.configure` also gates `POST /v1/projects`, because registering
+  a project may create a directory, initialise Git or clone a repository at an arbitrary absolute host
+  path. Like the real host-changing routes governed by `fleet.configure` and `warden.configure`, this
+  remains permissive by default and does not govern a loopback caller.
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a

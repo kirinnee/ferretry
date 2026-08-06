@@ -224,7 +224,7 @@ describe('what a refused caller is told', () => {
   it('should name each capability as a person reads it', () => {
     // Assert
     should(capabilityNoun('fleet')).equal('the agent fleet');
-    should(capabilityNoun('filesystem')).equal('session working trees');
+    should(capabilityNoun('filesystem')).equal('the project filesystem');
     should(describeDemand('fleet', 'configure')).equal('fleet.configure');
   });
 });

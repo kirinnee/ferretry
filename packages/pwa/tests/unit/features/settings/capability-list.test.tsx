@@ -210,13 +210,13 @@ describe('how much each capability hands over', () => {
       .slice(3);
     expect(new Set(weights).size).toBeGreaterThan(1);
     expect(weights).toContain('broad');
-    expect(weights).toContain('narrow');
+    expect(weights).toContain('moderate');
   });
 
-  it('weighs the two capabilities that run or write programs as the widest', () => {
+  it('weighs every capability that runs programs or writes host files as the widest', () => {
     expect(capabilityWeight('fleet')).toBe('broad');
     expect(capabilityWeight('terminal')).toBe('broad');
-    expect(capabilityWeight('filesystem')).toBe('narrow');
+    expect(capabilityWeight('filesystem')).toBe('broad');
   });
 
   it('declares a weight for every capability the protocol has, so a sixth cannot render unmarked', () => {
