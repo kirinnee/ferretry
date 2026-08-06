@@ -42,6 +42,7 @@ import {
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
+  type RelayCrypto,
   type RelayFrame,
   type SessionId,
   type SessionKeys,
@@ -1500,5 +1501,178 @@ describe('an outcome that has not crossed yet', () => {
     should(stream.closed).have.length(1);
     should(concluded(harnessed.wire)).be.true();
     should(harnessed.link.report().sessions).equal(0);
+  });
+});
+
+/**
+ * The real crypto, with one record operation held open until a test lets it finish.
+ *
+ * `Object.create` rather than a spread, because the real crypto is a class instance and a spread
+ * would drop every method it inherits. Only the two record operations are wrapped.
+ */
+function heldCrypto(which: 'open' | 'seal' = 'open'): RelayCrypto & { hold(): void; release(): void } {
+  let resume: (() => void) | undefined;
+  let holding = false;
+  const wait = async (): Promise<void> => {
+    if (holding) await new Promise<void>(resolve => (resume = resolve));
+  };
+  const gated = Object.create(crypto_) as RelayCrypto & { hold(): void; release(): void };
+  gated.open = async (key, nonce, aad, ciphertext) => {
+    if (which === 'open') await wait();
+    return await crypto_.open(key, nonce, aad, ciphertext);
+  };
+  gated.seal = async (key, nonce, aad, plaintext) => {
+    if (which === 'seal') await wait();
+    return await crypto_.seal(key, nonce, aad, plaintext);
+  };
+  gated.hold = () => {
+    holding = true;
+  };
+  gated.release = () => {
+    holding = false;
+    resume?.();
+    resume = undefined;
+  };
+  return gated;
+}
+
+/** Sequence numbers of every record the daemon has put on the wire, in order. */
+const recordSequences = (sent: Wire): number[] =>
+  sent.frames.filter(frame => frame.kind === FRAME_KINDS.data).map(frame => frame.sequence);
+
+/** Let the event loop run until `ready`, so a test waits for real asynchronous work rather than a tick. */
+async function until(ready: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (ready()) return;
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+  throw new Error('timed out waiting for the link');
+}
+
+describe('two directions sharing one channel value', () => {
+  it('should never let a receive rewind the send counter, because a sequence IS a nonce', async () => {
+    // THE DEFECT THIS PINS, and it is the worst one available in this module. `ChannelState` carries
+    // BOTH counters. Each direction used to write the WHOLE value back after its own await, from a
+    // copy captured before it — so whichever finished last silently rewound the other. Rewinding the
+    // RECEIVE counter surfaces as an intermittent `4420`. Rewinding the SEND counter is silent, and
+    // it is a NONCE REUSE: a record's sequence number is its AEAD nonce, so two records go out under
+    // one key and one nonce, which is the single arithmetic mistake AES-256-GCM does not survive.
+    //
+    // Timing normally decides which lands last, which is why this is unprovable by repetition. The
+    // held crypto makes the order a fact of the test.
+    const crypto = heldCrypto();
+    const stream = fakeStream();
+    const sent = wire();
+    const link = new RelayLink({
+      crypto,
+      identity,
+      relayHost: HOST,
+      socket: sent.socket,
+      dispatch: async () => json(200, {}),
+      sockets: accepts(stream),
+      devices: {
+        identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
+      },
+      pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
+      scheduler: { after: () => ({ cancel: () => undefined }) },
+    });
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const opened = await openSession(link, sent, sessionOne());
+    const streaming = await clientSend(link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+
+    // Arrange — one client record whose decryption is held mid-flight. It has already captured the
+    // channel; it has not yet written its counter back.
+    crypto.hold();
+    const sealed = await sealRecord(crypto_, streaming, utf8Bytes(JSON.stringify({ t: 'data', text: 'typed' })));
+    if (!sealed.ok) throw new Error(sealed.reason);
+    const receiving = link.receiveBinary(encodeFrame(sealed.frame));
+
+    // Act — the daemon sends WHILE that receive is suspended, so the send counter advances first.
+    const before = recordSequences(sent).length;
+    downstream.send('{"kind":"event","n":1}');
+    await until(() => recordSequences(sent).length > before);
+
+    // Act — the held receive now finishes and writes its counter back.
+    crypto.release();
+    await receiving;
+    downstream.send('{"kind":"event","n":2}');
+    await settle(link);
+
+    // Assert — every record this daemon sealed used its own sequence number, once. A repeat here is
+    // two records under one key and one nonce.
+    const sequences = recordSequences(sent);
+    should(new Set(sequences).size).equal(sequences.length);
+    should([...sequences].sort((left, right) => left - right)).deepEqual(sequences);
+    // Assert — and the client's own record was still accepted, so the receive counter is intact too.
+    should(stream.fromClientFrames).deepEqual(['typed']);
+  });
+
+  it('should never let a send rewind the receive counter, which is the intermittent 4420', async () => {
+    // The mirror order. Here the SEAL finishes last, so it is the sender that would have written a
+    // stale receive counter back — and that symptom is not silent: the next client record arrives at
+    // a channel that has forgotten it already read one, and the session dies blaming the carrier for
+    // frames it delivered perfectly. Both orders are fixed by the same rule, and both are pinned
+    // because only one of them announces itself.
+    const crypto = heldCrypto('seal');
+    const stream = fakeStream();
+    const sent = wire();
+    const link = new RelayLink({
+      crypto,
+      identity,
+      relayHost: HOST,
+      socket: sent.socket,
+      dispatch: async () => json(200, {}),
+      sockets: accepts(stream),
+      devices: {
+        identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
+      },
+      pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
+      scheduler: { after: () => ({ cancel: () => undefined }) },
+    });
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const opened = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+
+    // Arrange — a seal suspended mid-flight, having already captured the channel.
+    crypto.hold();
+    downstream.send('{"kind":"event","n":1}');
+    await new Promise(resolve => setTimeout(resolve, 1));
+
+    // Act — a client record crosses and advances the receive counter while that seal is suspended.
+    // It is NOT awaited: `receiveBinary` waits for the outbox at the end, and the outbox is exactly
+    // what the held seal is blocking. The counter write-back has already happened by then, which is
+    // the state this test needs — a receive that has advanced, and a sender still holding a copy
+    // captured before it.
+    const first = await sealRecord(crypto_, channel, utf8Bytes(JSON.stringify({ t: 'data', text: 'first' })));
+    if (!first.ok) throw new Error(first.reason);
+    const receiving = link.receiveBinary(encodeFrame(first.frame));
+    await new Promise(resolve => setTimeout(resolve, 1));
+    crypto.release();
+    await receiving;
+    channel = first.state;
+
+    // Act — a second client record, which only a channel that kept its receive counter can open.
+    await clientSend(link, channel, { t: 'data', text: 'second' });
+    await settle(link);
+
+    // Assert — both keystrokes reached the pane and the session is still alive.
+    should(stream.fromClientFrames).deepEqual(['first', 'second']);
+    should(link.report().sessions).equal(1);
   });
 });

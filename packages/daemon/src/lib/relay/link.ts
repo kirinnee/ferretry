@@ -521,7 +521,12 @@ export class RelayLink {
       this.#endSession(session.sessionId, opened.code, opened.reason);
       return;
     }
-    session.channel = opened.state;
+    // ONLY THIS DIRECTION'S COUNTER, and re-read rather than written from the copy captured above.
+    // `ChannelState` carries BOTH sequences, and sealing runs on its own queue while this await is
+    // suspended — so writing the whole value back would silently rewind whatever the sender advanced
+    // in the meantime. A rewound RECEIVE counter is an intermittent `4420`; a rewound SEND counter is
+    // silent and is a nonce reuse, because a record's sequence number IS its AEAD nonce.
+    session.channel = { ...(session.channel ?? channel), receiveSequence: opened.state.receiveSequence };
     this.#consume(session);
     const message = decodeTunnelClientMessage(opened.plaintext);
     if (message === null) {
@@ -930,7 +935,10 @@ export class RelayLink {
           return;
         }
         session.waiting.shift();
-        session.channel = sealed.state;
+        // The mirror of the write-back in `#onRecord`, and for the same reason: a record arriving
+        // while this seal was suspended has already advanced the receive counter, and assigning the
+        // whole channel here would put it back. Each direction owns exactly one number.
+        session.channel = { ...(session.channel ?? channel), sendSequence: sealed.state.sendSequence };
         session.send = recordSent(session.send);
         this.deps.socket.send(encodeFrame(sealed.frame));
       }
