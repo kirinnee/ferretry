@@ -279,9 +279,56 @@ const answered =
     body,
   });
 
-/** Everything the rendezvous handled, as one searchable string. */
-const carrierSaw = (bridge: RelayBridge): string =>
-  bridge.observed.map(bytes => utf8Text(bytes) ?? bytes.join(',')).join('\0');
+/**
+ * WHICH SECRETS THE RENDEZVOUS COULD ACTUALLY READ, searched over the BYTES it handled.
+ *
+ * THE PREVIOUS SHAPE COULD NOT FAIL ON THE FRAMES IT EXISTED TO POLICE. It rendered each frame as
+ * `utf8Text(bytes) ?? bytes.join(',')` and asked for a substring — and `utf8Text` decodes with
+ * `fatal: true`, so a sealed record, whose ciphertext is essentially never valid UTF-8, became the
+ * decimal text `"81,244,7,…"`. An ASCII needle can never appear in that, so every `not.containEql`
+ * against a binary frame passed by construction. A credential riding in the unsealed part of a
+ * binary frame — a path in an AAD header, a token spliced beside ciphertext — is exactly the leak
+ * this file's headline claim is about, and it was the one shape the search could not see.
+ *
+ * So the haystack is the raw bytes and the needle is encoded, never the other way round. Each
+ * secret is looked for as its UTF-8 bytes and as the ASCII of its base64 — the two encodings a leak
+ * plausibly takes on a wire that carries base64url payloads — the same pair
+ * `tests/e2e/support/relay-harness.ts` searches for, so the in-process tier and the compiled-browser
+ * tier now make the same claim by the same method.
+ *
+ * A hit reports the LABEL and the frame index and NEVER the value: a leak report that printed the
+ * credential would be a second copy of the defect it is reporting.
+ */
+const carrierLeaks = (
+  /** Structural rather than the class, so the negative control below can hand it frames directly. */
+  bridge: { readonly observed: readonly Uint8Array[] },
+  secrets: Readonly<Record<string, string>>,
+): readonly string[] => {
+  const haystack = bridge.observed.map(bytes => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  const leaks: string[] = [];
+  for (const [label, secret] of Object.entries(secrets)) {
+    // An empty needle is in every frame. Refuse it rather than report a leak nobody has.
+    if (secret === '') throw new Error(`the leak search was given an empty needle for ${label}`);
+    const needles = [Buffer.from(secret, 'utf8'), Buffer.from(Buffer.from(secret, 'utf8').toString('base64'), 'utf8')];
+    for (const [index, frame] of haystack.entries()) {
+      if (needles.some(needle => frame.includes(needle))) {
+        leaks.push(`${label} appeared in relay-observable frame #${String(index)}`);
+        break;
+      }
+    }
+  }
+  return leaks;
+};
+
+/**
+ * The frames the rendezvous handled, as text, for a DIAGNOSTIC and never for a privacy claim.
+ *
+ * Kept apart from {@link carrierLeaks} on purpose. Text is what a person reads when a case fails;
+ * it is not what an absence assertion may be made against, and collapsing the two is what produced
+ * the vacuous search above.
+ */
+const carrierText = (bridge: { readonly observed: readonly Uint8Array[] }): string =>
+  bridge.observed.map(bytes => utf8Text(bytes) ?? `<${String(bytes.byteLength)} sealed bytes>`).join('\0');
 
 describe('a relayed session, browser to daemon, through the real rendezvous', () => {
   it('should carry a request and its answer without the carrier reading either', async () => {
@@ -339,12 +386,15 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     should(served?.loopback).be.false();
 
     // ── and now the only assertion that makes any of it worth having ──
-    const seen = carrierSaw(bridge);
     should(bridge.observed.length).be.greaterThan(4);
-    should(seen).not.containEql(DEVICE_TOKEN);
-    should(seen).not.containEql('deviceToken');
-    should(seen).not.containEql(SECRET_ANSWER);
-    should(seen).not.containEql('/v1/sessions');
+    should(
+      carrierLeaks(bridge, {
+        'the device token': DEVICE_TOKEN,
+        'the name of the credential field': 'deviceToken',
+        'the answer body': SECRET_ANSWER,
+        'the route the request asked for': '/v1/sessions',
+      }),
+    ).be.empty();
     // The fingerprint IS visible, in the URL, because it is what addresses the
     // rendezvous. §10 discloses that rather than pretending otherwise.
     should(identity.daemonId.startsWith('fy_daemon_')).be.true();
@@ -377,7 +427,7 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     ).be.rejected();
     await bridge.settle();
 
-    should(carrierSaw(bridge)).not.containEql(DEVICE_TOKEN);
+    should(carrierLeaks(bridge, { 'the device token': DEVICE_TOKEN })).be.empty();
   });
 
   it('should refuse a client at a rendezvous no daemon holds rather than parking it', async () => {
@@ -401,7 +451,7 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     );
     should(refusal).be.instanceof(RelaySessionError);
     should((refusal as RelaySessionError).code).equal(RELAY_CLOSE_CODES.daemonAbsent);
-    should(carrierSaw(bridge)).not.containEql(DEVICE_TOKEN);
+    should(carrierLeaks(bridge, { 'the device token': DEVICE_TOKEN })).be.empty();
   });
 });
 
@@ -447,10 +497,13 @@ describe('first pairing and live streams, through the real rendezvous', () => {
     should(redeemed).eql({ code: PAIRING_CODE, deviceName: DEVICE_NAME });
     should(paired.deviceToken).equal(MINTED_TOKEN);
     // And the rendezvous carried every byte of it while reading none.
-    const observed = carrierSaw(bridge);
-    should(observed).not.containEql(PAIRING_CODE);
-    should(observed).not.containEql(DEVICE_NAME);
-    should(observed).not.containEql(MINTED_TOKEN);
+    should(
+      carrierLeaks(bridge, {
+        'the pairing code': PAIRING_CODE,
+        'the device name the browser sent': DEVICE_NAME,
+        'the minted device token': MINTED_TOKEN,
+      }),
+    ).be.empty();
   });
 
   /**
@@ -536,7 +589,7 @@ describe('first pairing and live streams, through the real rendezvous', () => {
       heartbeat: () => () => undefined,
     });
     should(session.live()).be.true();
-    should(carrierSaw(bridge)).not.containEql(paired.deviceToken);
+    should(carrierLeaks(bridge, { 'the grant the pairing just issued': paired.deviceToken })).be.empty();
   });
 });
 
@@ -739,11 +792,14 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
     should(terminal.fromClient[1]).equal(RESIZE_CONTROL);
 
     // ── and the assertion this whole file exists for, now for a live stream ──
-    const seen = carrierSaw(terminal.bridge);
-    should(seen).not.containEql(DEVICE_TOKEN);
-    should(seen).not.containEql(terminal.streamPath);
-    should(seen).not.containEql(RESIZE_CONTROL);
-    should(seen).not.containEql('ferretry@studio');
+    should(
+      carrierLeaks(terminal.bridge, {
+        'the device token': DEVICE_TOKEN,
+        'the stream path the browser asked to open': terminal.streamPath,
+        'the resize control the viewer sent': RESIZE_CONTROL,
+        'what the shell printed': 'ferretry@studio',
+      }),
+    ).be.empty();
   });
 
   /**
@@ -799,7 +855,72 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
 
     should(terminal.released()).equal(1);
     should(terminal.closed).eql([{ code: 1000, reason: 'the viewer left this stream' }]);
-    // The leave crossed as a sealed record, so the rendezvous learned neither why nor from whom.
-    should(carrierSaw(terminal.bridge)).not.containEql('the viewer left this stream');
+    /**
+     * THE LEAVE IS SEALED IN BOTH DIRECTIONS — and this assertion is here because it was not.
+     *
+     * `RelayClientSession.closeStream` (`src/lib/relay-session.ts`) seals `{t:'stream-close', code,
+     * reason}`, which was always right. The daemon's answer to it was not: it interpolated that same
+     * reason into the session's concluding CONTROL frame, and a control message is unsealed by
+     * design because the rendezvous has to route it. So the reason a person stopped watching was
+     * readable by the carrier, contradicting the invariant stated beside `RELAY_STREAM_CLOSES` in
+     * that same file — "a relay that could read close reasons could read why people stop watching."
+     *
+     * `packages/daemon/src/lib/relay/link.ts` now concludes every session with
+     * `RELAY_SESSION_CONCLUDED_CLOSE_REASON`, one protocol-owned string with nowhere to interpolate,
+     * so `4440` says only that the session ended. The real code and reason have already crossed
+     * inside the sealed record, which is what `4440` has always meant.
+     *
+     * THIS FOUND IT, AND THE OLD HELPER COULD NOT HAVE. Every frame it searched was rendered by
+     * `utf8Text(bytes) ?? bytes.join(',')`, and a sealed frame is not valid UTF-8, so it compared an
+     * ASCII needle against decimal digits and passed. The search is over raw bytes now, and the
+     * negative control below is what proves it can still fail.
+     */
+    should(
+      carrierLeaks(terminal.bridge, {
+        'the reason the viewer gave': 'the viewer left this stream',
+        'the device token': DEVICE_TOKEN,
+        'what the shell printed': 'ferretry@studio',
+      }),
+    ).be.empty();
+  });
+
+  /**
+   * THE NEGATIVE CONTROL, and without it every assertion above is a claim about a search nobody has
+   * proved can fail.
+   *
+   * The search these cases rest on used to be blind to exactly one thing: a secret sitting in a
+   * frame whose bytes are not valid UTF-8, which is every sealed record on the wire. So this feeds
+   * the search a frame of that exact shape — a lone `0x80` continuation byte, which no UTF-8
+   * decoder will accept, with an ASCII credential in the middle of it — and requires a hit. A
+   * search that cannot find a needle it was handed directly is a search whose silence means
+   * nothing, and this case turns that from an argument into a failure.
+   *
+   * The base64 needle is here for the same reason: §14 payloads travel base64url inside a JSON
+   * envelope, so a credential leaking through a payload field arrives base64-encoded rather than
+   * raw, and a search that only knew the raw form would miss the likelier of the two.
+   */
+  it('should find a secret hidden inside a frame no UTF-8 decoder will read', () => {
+    // 0x80 is a continuation byte with no lead byte, and 0xff appears in no UTF-8 sequence at all,
+    // so both frames below decode to nothing — the exact shape of every sealed record on the wire.
+    const rawFrame = { observed: [Uint8Array.from([0x80, ...utf8Bytes(DEVICE_TOKEN), 0xff])] };
+    const base64Frame = {
+      observed: [Uint8Array.from([0x80, ...utf8Bytes(Buffer.from(DEVICE_TOKEN, 'utf8').toString('base64')), 0xff])],
+    };
+
+    // Unreadable as text — which is precisely why the text rendering may not carry a privacy claim.
+    should(carrierText(rawFrame)).not.containEql(DEVICE_TOKEN);
+    should(carrierText(base64Frame)).not.containEql(DEVICE_TOKEN);
+    // And found anyway, in both of the encodings a leak plausibly takes.
+    should(carrierLeaks(rawFrame, { 'the device token': DEVICE_TOKEN })).eql([
+      'the device token appeared in relay-observable frame #0',
+    ]);
+    should(carrierLeaks(base64Frame, { 'the device token': DEVICE_TOKEN })).eql([
+      'the device token appeared in relay-observable frame #0',
+    ]);
+    // A secret nothing carried is still absent, so the search is not simply answering "yes".
+    should(carrierLeaks(rawFrame, { 'a credential nobody sent': MINTED_TOKEN })).be.empty();
+    // An empty needle would match every frame ever recorded; the search refuses it rather than
+    // reporting a leak that is an artefact of asking for nothing.
+    should(() => carrierLeaks(rawFrame, { nothing: '' })).throw(/empty needle/u);
   });
 });

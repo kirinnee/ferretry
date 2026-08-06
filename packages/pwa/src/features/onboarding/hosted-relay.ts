@@ -209,11 +209,17 @@ export const HOSTED_RELAY_ROW_NOTE =
  * IT THEN SAID `Direct — pairing is always direct`, WHICH IS THE SAME MISTAKE A
  * THIRD TIME. That claim came from `docs/relay-protocol.md` §13 when pairing had
  * no relayed path; §14 has since given first contact a session mode of its own,
- * and `exchangePairing` in `lib/store.tsx` walks direct, then the link's own
- * rendezvous candidate, then the advertised hosted one. So a redemption that
- * completed says nothing about which carrier completed it, and a screen that
- * prints `Direct` is guessing again — just with a sentence that reads as a
- * protocol rule rather than as the guess it is.
+ * and `exchangePairing` in `lib/store.tsx` walks direct, then the ONE rendezvous
+ * this build discovered for itself from the hosted directory advertisement. So a
+ * redemption that completed says nothing about which carrier completed it, and a
+ * screen that prints `Direct` is guessing again — just with a sentence that reads
+ * as a protocol rule rather than as the guess it is.
+ *
+ * (An earlier draft of this paragraph described a middle leg — "the link's own
+ * rendezvous candidate" — from the withdrawn `v2` fragment. No link names a
+ * rendezvous: `PairingLinkSeed` has three fields, `relayPairingCandidates` offers
+ * at most the discovered hosted address, and a stray `relay=` is an ignored
+ * unknown field. The order this function may state is two legs, not three.)
  *
  * WHAT ONBOARDING HONESTLY KNOWS IS THE ORDER, NOT THE ANSWER: direct is tried
  * first, and the fallback the reader picked carries it when direct does not work.
@@ -337,9 +343,16 @@ export const HOSTED_RELAY_DISABLED_NOTE =
  * Said when the page does not know, which is neither of the other two.
  *
  * PAIRING DOES DEPEND ON THIS ANSWER NOW, and the line that said otherwise was written when it could
- * not: `exchangePairing` walks direct, then the rendezvous named in the link, then the hosted address
- * this read supplies — so a link that names no rendezvous of its own has no relayed path to pair over
- * while the advertisement is unknown. Direct pairing is unaffected, which is the part worth keeping.
+ * not: `exchangePairing` walks direct and then the hosted rendezvous THIS READ SUPPLIES, which is the
+ * only relayed first-contact candidate there is. No link names one — the fragment carries daemon
+ * address, code and fingerprint and nothing else — so while the advertisement is unknown there is no
+ * relayed path to pair over at all. That makes this read load-bearing rather than decorative: a
+ * failed one fails closed to direct-only first contact. Direct pairing is unaffected, which is the
+ * part worth keeping.
+ *
+ * (This paragraph used to name a middle leg, "the rendezvous named in the link". That was the
+ * withdrawn `v2` fragment; `relayPairingCandidates` has offered exactly one candidate since
+ * `7a0d4633`, and the conclusion below is if anything stronger without it.)
  */
 export const HOSTED_RELAY_UNDETERMINED_NOTE =
   'Treat the fallback as unavailable until this page can confirm it. Direct still works whenever the daemon is ' +

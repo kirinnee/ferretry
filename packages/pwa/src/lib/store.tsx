@@ -196,17 +196,59 @@ export interface ExchangePairingOptions {
 }
 
 /**
- * What the direct attempt established, as the two facts a walk has to tell apart.
+ * What the direct attempt established, as the facts a walk has to tell apart.
  *
  * `answered` means the DAEMON judged this code and the answer is final — an expired code, a spent
- * budget, a response that would not parse. `unreachable` means nothing reached it, which is the only
- * outcome a rendezvous can help with. Modelled as a result rather than as two exception classes
- * because the distinction IS this function's answer, and an answer is a return value.
+ * budget, a response that would not parse. `unreachable` means nothing reached it, which is the
+ * outcome a rendezvous can help with. Modelled as a result rather than as exception classes because
+ * the distinction IS this function's answer, and an answer is a return value.
+ *
+ * `ambiguous` IS THE THIRD FACT, AND IT USED TO BE FOLDED INTO `unreachable` INCORRECTLY. The catch
+ * below read every failure — the deadline's own abort included — as "nothing reached the daemon".
+ * That is true of a refused connection and a DNS failure; it is not true of a fetch this walk itself
+ * cancelled at four seconds. A reachable-but-slow daemon — a tailnet, a loaded host, the persistence
+ * await inside the pairing service's own `grant` — can receive `POST /v1/pair`, consume the code and
+ * mint a device while this side has already given up waiting for the answer. The walk then carries
+ * the same single-use code to the rendezvous and is told, correctly, that it is spent.
+ *
+ * It advances the walk exactly as `unreachable` does, because the relay really is worth trying: the
+ * daemon may equally have received nothing. What it changes is what a reader is told when the relay
+ * leg then reports a sealed refusal — see `exchangePairing`. A code this walk merely FAILED to
+ * redeem and a code it may have redeemed under a name nobody can see are different problems with
+ * different remedies, and only one of them leaves a device paired.
  */
 type DirectRedemption =
   | { readonly kind: 'paired'; readonly response: PairingResponse }
   | { readonly kind: 'answered'; readonly error: Error }
-  | { readonly kind: 'unreachable'; readonly error: Error };
+  | { readonly kind: 'unreachable'; readonly error: Error }
+  | { readonly kind: 'ambiguous'; readonly error: Error };
+
+/**
+ * A sealed refusal that arrived after THIS walk cancelled its own direct attempt.
+ *
+ * A subclass rather than a new class, deliberately: the daemon genuinely refused, so every consumer
+ * that asks "was this a refusal or a transport failure" — `pairing-screen.tsx` is the one that
+ * matters — must keep getting `refusal` and must keep telling the reader to mint a fresh code. What
+ * this adds is the half that screen cannot know: minting again is necessary and may not be
+ * sufficient, because a device may already be paired under a grant nobody holds.
+ *
+ * It is not exported. Nothing outside this module needs to distinguish it — the message is the
+ * whole payload — and an export whose only consumer is a test is an export the dead-code gate is
+ * right to refuse.
+ */
+class AmbiguousDirectPairingError extends RelayPairingRefusedError {
+  constructor(refusal: unknown) {
+    super();
+    this.name = 'AmbiguousDirectPairingError';
+    // The sealed refusal that prompted this, kept on the standard field rather than a second one.
+    this.cause = refusal;
+    this.message =
+      'this pairing code is spent, and the direct attempt to this daemon may be what spent it: it was ' +
+      'cancelled after four seconds without an answer, so the daemon may have completed that pairing ' +
+      'and issued a device token this browser never received. Check the daemon for a device you do not ' +
+      'recognise and revoke it, then run `fy pair` for a fresh code.';
+  }
+}
 
 /**
  * The direct half: one reader-supplied, single-use fragment code, exchanged with its own daemon.
@@ -267,9 +309,14 @@ async function exchangePairingDirect(
       signal: deadline.signal,
     });
   } catch (reason) {
-    // An abort is a transport failure like any other: nothing reached the daemon, so the walk may go
-    // on to a rendezvous. It is deliberately NOT `answered` — the daemon has judged nothing.
-    return { kind: 'unreachable', error: reason instanceof Error ? reason : new Error(String(reason)) };
+    // AN ABORT IS NOT THE SAME FACT AS A REFUSED CONNECTION, and reading it as one is what this
+    // branch used to do. Both advance the walk — neither is `answered`, because the daemon has
+    // stated nothing to this browser — but only one of them proves the request never landed. The
+    // signal is this walk's own and nothing else aborts it, so `aborted` here means the deadline
+    // fired: the fetch was cancelled mid-flight and the daemon's side of it is unobserved. See
+    // `DirectRedemption` for what that costs and `exchangePairing` for who is told about it.
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+    return { kind: deadline.signal.aborted ? 'ambiguous' : 'unreachable', error };
   } finally {
     // The fallback controller's timer is cleared whether the fetch answered, refused, or aborted, so
     // a settled request leaves no armed timer behind. The native static owns no clearable timer, and
@@ -295,7 +342,10 @@ async function exchangePairingDirect(
  * A SEALED REFUSAL ENDS THE WALK TOO, for the same reason and one layer in. §14: "A sealed
  * `pair-refused` is the opposite: the exchange happened, the answer is final for that attempt." It
  * arrives as its own error class precisely so this loop cannot mistake it for a carrier that did not
- * work.
+ * work. WHAT the reader is told about that refusal depends on how the direct leg ended: a refusal
+ * after an attempt this walk CANCELLED at its own deadline may be the walk reporting on a pairing it
+ * caused, so that one case carries the extra sentence and the extra remedy. See
+ * `AmbiguousDirectPairingError`.
  *
  * WHAT IS REPORTED WHEN EVERYTHING FAILS is the FIRST failure, not the last. The direct attempt is
  * the one whose answer a reader can act on — "that code is expired" — while the relay attempts that
@@ -333,7 +383,18 @@ export async function exchangePairing(
     } catch (reason) {
       // A sealed refusal is the DAEMON's answer and ends the walk; anything else is this rendezvous
       // not working, which is the next one's turn.
-      if (reason instanceof RelayPairingRefusedError) throw reason;
+      //
+      // A REFUSAL THAT FOLLOWS AN AMBIGUOUS DIRECT ATTEMPT IS REPORTED DIFFERENTLY, and it is the
+      // one sequence where "that code is spent" is an incomplete answer. This walk cancelled its own
+      // direct POST at the deadline without seeing how the daemon answered it, then presented the
+      // same single-use code here and was told it is gone. The likeliest two explanations are that
+      // the code expired or was already used by somebody else — and that the CANCELLED attempt is
+      // what used it, in which case the daemon has minted a device token this browser never
+      // received and there is now a paired device nobody holds. Only the reader can tell which, and
+      // only if they are told to look.
+      if (reason instanceof RelayPairingRefusedError) {
+        throw direct.kind === 'ambiguous' ? new AmbiguousDirectPairingError(reason) : reason;
+      }
       continue;
     }
     // Deliberately outside the catch above: a response that paired but named no rendezvous this

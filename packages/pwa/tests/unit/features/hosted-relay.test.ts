@@ -212,8 +212,10 @@ describe('activeCarrierStatus', () => {
     // written and is not now. It then said `Direct — pairing is always direct`,
     // which is the SAME unmeasured claim wearing a protocol rule as a disguise:
     // `docs/relay-protocol.md` §14 gave first contact a relayed session mode, and
-    // `exchangePairing` walks direct, then the link's rendezvous, then the hosted
-    // one. So what this may state is the ORDER, and it must not state an answer.
+    // `exchangePairing` walks direct, then the ONE rendezvous this build discovered
+    // for itself. (An earlier version of this comment named a middle leg, "the
+    // link's rendezvous" — the withdrawn `v2` fragment. No link carries one.) So
+    // what this may state is the ORDER, and it must not state an answer.
     for (const chosen of ['direct', 'default-relay', 'own-relay', undefined] as const) {
       expect(activeCarrierStatus(chosen)).toContain('Not measured yet');
       expect(activeCarrierStatus(chosen)).toContain('tried directly first');
