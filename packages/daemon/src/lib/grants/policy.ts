@@ -134,7 +134,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   fleet: 'the agent fleet',
   terminal: 'session terminals',
   browser: 'the browser',
-  filesystem: 'session working trees',
+  filesystem: 'the project filesystem',
   warden: 'fleet supervision',
   pairing: 'device pairing',
 };

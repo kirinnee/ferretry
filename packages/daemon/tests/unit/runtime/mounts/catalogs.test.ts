@@ -15,11 +15,22 @@ const PROJECT = {
   createdAt: '2026-08-04T00:00:00.000Z',
 };
 
-async function dispatcher(catalogs: CatalogSubsystem, configureFilesystem = true): Promise<ApiDispatcher> {
+interface FilesystemGrant {
+  readonly use: boolean;
+  readonly configure: boolean;
+}
+
+const FILESYSTEM_GRANTED: FilesystemGrant = { use: true, configure: true };
+const FILESYSTEM_DISABLED: FilesystemGrant = { use: false, configure: false };
+
+async function dispatcher(
+  catalogs: CatalogSubsystem,
+  filesystem: FilesystemGrant = FILESYSTEM_GRANTED,
+): Promise<ApiDispatcher> {
   const grants = grantSubsystem({
     grants: {
       ...DEFAULT_CAPABILITY_GRANTS,
-      filesystem: { use: true, configure: configureFilesystem },
+      filesystem,
     },
   });
   await grants.refresh();
@@ -27,7 +38,7 @@ async function dispatcher(catalogs: CatalogSubsystem, configureFilesystem = true
 }
 
 describe('the project catalog mount', () => {
-  it('registers an explicit folder and returns its wire record', async () => {
+  it('lets a remote caller register while the permissive filesystem default is enabled', async () => {
     const registered: RegisterProjectRequest[] = [];
     const response = await (
       await dispatcher({
@@ -64,7 +75,7 @@ describe('the project catalog mount', () => {
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
       },
-      false,
+      FILESYSTEM_DISABLED,
     );
 
     const response = await surface.dispatch(
@@ -92,7 +103,7 @@ describe('the project catalog mount', () => {
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
       },
-      false,
+      FILESYSTEM_DISABLED,
     );
 
     const response = await surface.dispatch(
@@ -107,7 +118,7 @@ describe('the project catalog mount', () => {
     should(response.status).equal(403);
     should(jsonBody(response)).deepEqual({
       error:
-        'the operator of this machine has not granted the UI permission to change the settings for session working trees. Grant it on the host with `fy daemon config set filesystem --configure`.',
+        'the operator of this machine has not granted the UI permission to change the settings for the project filesystem. Grant it on the host with `fy daemon config set filesystem --configure`.',
       code: 'grant_not_granted',
     });
     should(registered).be.empty();
@@ -124,7 +135,7 @@ describe('the project catalog mount', () => {
         registerProject: async () => PROJECT,
         skills: async () => ({ harness: 'codex', skills: [] }),
       },
-      false,
+      FILESYSTEM_DISABLED,
     );
 
     const response = await surface.dispatch(request({ path: '/v1/projects', headers: human }));

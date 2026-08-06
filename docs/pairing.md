@@ -215,6 +215,6 @@ row states what its revoke will do before the press.
   absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
   camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first
   gets the paste field rather than a bundled decoder every visitor would have to download.
-- **`pairing.configure` governs no route.** Like `terminal`, `browser` and `filesystem`, its configure
+- **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).
