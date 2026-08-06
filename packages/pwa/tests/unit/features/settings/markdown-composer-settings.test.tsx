@@ -128,6 +128,8 @@ describe('MarkdownComposerSettings', () => {
       expect(switches(renderer)[1]?.props['aria-checked']).toBe(true);
       // Escape has no on-screen key, so the limit is stated rather than implied.
       expect(VIM_COMPOSER_EXPLANATION).toContain('Off by default');
+      expect(VIM_COMPOSER_EXPLANATION).toContain('normal and insert');
+      expect(VIM_COMPOSER_EXPLANATION).not.toContain('visual');
       expect(VIM_COMPOSER_EXPLANATION).toContain('physical keyboard');
       expect(tree).toContain(VIM_COMPOSER_EXPLANATION);
       expect(tree).toContain('native textarea keeps input');
