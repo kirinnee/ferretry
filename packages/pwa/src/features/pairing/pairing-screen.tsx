@@ -8,7 +8,9 @@
  *
  * WHAT ARRIVES HERE, IN ORDER OF HOW OFTEN IT HAPPENS. The design's pairing
  * flow (`docs/design/split-proposal.md` §5) puts the daemon's QR in the
- * terminal and on a loopback page, and the QR encodes a link to `/pair#v1;…`.
+ * terminal and on a loopback page, and the QR encodes a link to `/pair#v…;…` —
+ * `v1` for a daemon reachable at its own address, `v2` when the link also names a
+ * rendezvous another device can redeem through.
  * So the common arrival is a phone's ORDINARY camera app opening this page
  * already carrying the code, and this screen's job there is a confirmation, not
  * a form. A cold open gets the camera button. Paste is the last-resort path and
@@ -292,7 +294,7 @@ export function PairingScreen({
               autoComplete="off"
               className="h-control w-full rounded-control border border-border bg-surface-2 px-control-x font-mono text-meta text-fg placeholder:text-faint focus:border-accent"
               onChange={event => setLink(event.target.value)}
-              placeholder="https://…/pair#v1;…"
+              placeholder="https://…/pair#…"
               spellCheck={false}
               value={link}
             />
