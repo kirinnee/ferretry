@@ -140,10 +140,11 @@
    free: no children, no padding, no border, no rule, so an unused region costs
    zero pixels while remaining in the accessibility tree.
 
-   One row on a phone, not three. The message stays on a single line with its
-   own ellipsis and the full text in `title`; the retry and dismiss controls
-   keep their 44px targets beside it, so a failure costs ~44px of reading area
-   instead of ~150px, and the reader can take even that back. */
+   ONE ROW on a phone, not three: the message shares this line with the retry
+   and dismiss controls, which keep their 44px targets, so a failure costs ~60px
+   of reading area instead of ~150px and the reader can take even that back. How
+   the message itself survives that one row is decided below, on
+   `.kt-fs-stale-text`, and it is not a `title`. */
 .kt-fs-stale {
   display: flex;
   min-width: 0;

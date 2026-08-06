@@ -230,9 +230,15 @@ export const FilesTab = ({
   // in that state — a listing request would only earn a second panel contradicting the first.
   const unavailable = probe.state === 'unsupported';
 
+  // Opening a file nulls this key and Back re-arms it, so `refetchOnRearm` is
+  // what makes Back a fresh read: an agent creates and deletes files while the
+  // reader is inside one, and a browse list served from before they opened it
+  // would hide exactly that, silently. The file's own bytes below are the
+  // opposite case and keep the default.
   const listing = useFsResource<FsListing>(
     stateMatchesScope && !active && !unavailable ? `list:${key}:${dir}` : null,
     useCallback(signal => fsApi.list(daemon, scope, dir, signal), [daemon, scope, dir]),
+    { refetchOnRearm: true },
   );
 
   const diffPath = !unavailable && active?.view === 'diff' && active.selection === undefined ? active.path : null;

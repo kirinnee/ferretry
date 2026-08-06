@@ -305,6 +305,39 @@ describe('the Files tab', () => {
     }
   });
 
+  it('re-reads the directory on the way Back, so a file the agent added is not hidden', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      const listReads = () => asked.filter(url => url.endsWith('/fs')).length;
+      const fileReads = () => asked.filter(url => url.includes('/fs/file')).length;
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      const listsBefore = listReads();
+      const filesBefore = fileReads();
+
+      // The agent works while the reader is inside a file: the tree it comes
+      // back to is not the one it left.
+      fixture.listings = {
+        '': {
+          entries: [
+            { name: 'a.ts', type: 'file' },
+            { name: 'written-while-reading.ts', type: 'file' },
+          ],
+        },
+      };
+
+      await click(view.container, 'Back to the file list');
+      await settle();
+      expect(listReads()).toBe(listsBefore + 1);
+      expect(view.container.textContent).toContain('written-while-reading.ts');
+      // Back is not a reload of everything: the file's own bytes are untouched.
+      expect(fileReads()).toBe(filesBefore);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('starts with the tree collapsed on a phone, and opens it only when asked', async () => {
     setViewport(PHONE_WIDTH);
     fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };

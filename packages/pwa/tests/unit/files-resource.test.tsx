@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import { useFsResource, type FsResource } from '../../src/components/files-resource.ts';
+import { useFsResource, type FsResource, type FsResourceOptions } from '../../src/components/files-resource.ts';
 import { interact, mount, must } from '../support/dom.ts';
 
 interface ProbeProps {
   resourceKey: string | null;
   load: (signal: AbortSignal) => Promise<string>;
   onResource: (resource: FsResource<string>) => void;
+  options?: FsResourceOptions;
 }
 
-const Probe = ({ resourceKey, load, onResource }: ProbeProps) => {
-  const resource = useFsResource<string>(resourceKey, load);
+const Probe = ({ resourceKey, load, onResource, options }: ProbeProps) => {
+  const resource = useFsResource<string>(resourceKey, load, options);
   onResource(resource);
   // `data` FIRST: a retained value is what the panes show while a reread runs
   // or after it fails, so the probe has to read the same way they do.
@@ -218,7 +219,8 @@ describe('the Files async resource', () => {
 
     // A surface that flips to the diff and back drops the key and re-arms it.
     // The value is still here, and asking again would spend a round trip on
-    // bytes the reader is already looking at while `refreshing` said nothing.
+    // bytes the reader is already looking at. This is the DEFAULT — a resource
+    // whose subject moves under the reader opts out with `refetchOnRearm`.
     await view.render(probe(null));
     await view.render(probe('file:a'));
     expect(reads).toBe(1);
@@ -232,6 +234,54 @@ describe('the Files async resource', () => {
     await interact(() => latestOf(() => latest, 're-armed resource').reload());
     expect(reads).toBe(2);
     expect(text(view.container)).toBe('bytes from read 2');
+    await view.unmount();
+  });
+
+  it('does ask again on a re-arm when the resource asked for it, over the value still on screen', async () => {
+    let reads = 0;
+    let release: ((value: string) => void) | null = null;
+    let latest: FsResource<string> | null = null;
+    const load = async (): Promise<string> => {
+      reads += 1;
+      if (reads === 1) return 'the directory as it was';
+      return new Promise<string>(resolve => {
+        release = resolve;
+      });
+    };
+    const probe = (resourceKey: string | null) => (
+      <Probe
+        resourceKey={resourceKey}
+        load={load}
+        options={{ refetchOnRearm: true }}
+        onResource={resource => {
+          latest = resource;
+        }}
+      />
+    );
+    const view = await mount(probe('list:root'));
+    expect(text(view.container)).toBe('the directory as it was');
+
+    // A listing whose key is dropped and re-armed — the shape of opening a file
+    // and pressing Back — reads again, because an agent may have created or
+    // deleted a file while the reader was inside one.
+    await view.render(probe(null));
+    await view.render(probe('list:root'));
+    expect(reads).toBe(2);
+    const rearmed = latestOf(() => latest, 're-armed resource');
+    // And it is a read the surface can REPORT: the old list is still shown, and
+    // `refreshing` says out loud that it is not the newest.
+    expect(rearmed.data).toBe('the directory as it was');
+    expect(rearmed.refreshing).toBe(true);
+    expect(rearmed.stale).toBe(true);
+    expect(rearmed.loading).toBe(false);
+    expect(rearmed.revision).toBe(1);
+
+    await interact(() => {
+      must(release, 'the stalled re-read')('the directory after the agent wrote');
+    });
+    expect(text(view.container)).toBe('the directory after the agent wrote');
+    expect(latestOf(() => latest, 'the re-read resource').revision).toBe(2);
+    expect(reads).toBe(2);
     await view.unmount();
   });
 
