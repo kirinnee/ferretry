@@ -218,7 +218,7 @@ unsafe". Read an acceptance as "this is within the caps", never as "this will re
 A control that cannot act is hidden, not shown disabled — a disabled Reload on a block that is only
 ever text is a promise the build does not keep.
 
-### Nothing decodes until the reader asks
+### No browser decoder runs until the reader asks
 
 **No browser decoder mounts automatically.** A payload's size is bounded; the work of drawing it is
 not, and a transcript is written by an assistant rather than by the reader. So the stage says what
@@ -310,7 +310,7 @@ half-written payload before it sees the whole one. Four rules follow, and they a
 
 The two types stream differently, and the difference is visible. An `svg` payload is admitted by
 prefix, so the block persists and updates as it grows. A raster is not: the selected container checks
-require a terminal shape and valid record ordering, so a partially-received one fails them, does not
+require a terminal shape and the selected record ordering, so a partially-received one fails them, does not
 parse, and the fence stays an ordinary escaped code fence until the last byte arrives — the block
 appears once, rather than being
 repeatedly mounted and discarded. In neither case does a browser image decoder run without a press.

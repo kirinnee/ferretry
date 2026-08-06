@@ -20,9 +20,11 @@
  * message has stopped growing, so a reader who presses Render while an `svg` is
  * still arriving DOES decode a partial one — lexically admitted, inside every
  * cap, and their own deliberate choice. A partial RASTER cannot mount, but for a
- * different reason: the grammar's container checks demand a structurally
- * complete file, so an unfinished one never parses. The gate guarantees no
- * automatic mount and no inherited consent; it does not guarantee completeness.
+ * different reason: the grammar's container checks require a terminal shape and
+ * the selected record ordering, which an unfinished file fails, so it never
+ * parses. The gate guarantees no automatic mount and no inherited consent; it
+ * guarantees neither completeness nor validity — CRCs and compressed content are
+ * the browser decoder's business, after the gesture.
  *
  * THE `<img>` SINK IS A SECURITY INVARIANT, not an implementation detail. An
  * authored SVG reaches this page only as the `src` of an HTML `<img>`, and a

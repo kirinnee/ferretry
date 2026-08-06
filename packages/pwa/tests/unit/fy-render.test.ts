@@ -110,7 +110,7 @@ const png = (width: number, height: number, extra: readonly number[] = [], data 
 /** The `acTL` chunk is what makes a PNG an APNG. */
 const APNG_CONTROL: readonly number[] = [...be32(8), ...chars('acTL'), ...be32(3), ...be32(0), 0, 0, 0, 0];
 
-/** A complete JPEG: SOI, the given frame headers, SOS, EOI. */
+/** An admission-shaped JPEG: SOI, the given frame headers, SOS, EOI — no entropy data. */
 const sof = (width: number, height: number): readonly number[] => [
   0xff,
   0xc0,
@@ -135,7 +135,7 @@ const sof = (width: number, height: number): readonly number[] => [
 const jpeg = (...frames: readonly (readonly number[])[]): Uint8Array =>
   bytes(0xff, 0xd8, ...frames.flat(), 0xff, 0xda, 0, 8, 1, 1, 0, 0, 63, 0, 0xff, 0xd9);
 
-/** A complete GIF: header, logical screen, `frames` image descriptors, trailer. */
+/** An admission-shaped GIF: header, logical screen, `frames` image descriptors, trailer. */
 const gif = (width: number, height: number, frames = 1, frameWidth = width, frameHeight = height): Uint8Array =>
   bytes(
     ...chars('GIF89a'),
@@ -166,7 +166,12 @@ const gif = (width: number, height: number, frames = 1, frameWidth = width, fram
     0x3b,
   );
 
-/** A complete WebP: a RIFF whose declared size matches, carrying VP8X. */
+/**
+ * An admission-shaped WebP: a RIFF whose declared size matches, carrying a VP8X
+ * canvas record. A `VP8X` alone is not a decodable WebP — there is no image
+ * data here at all — which is exactly why this is named for what the parser
+ * reads rather than for being a file.
+ */
 const webp = (width: number, height: number, animated = false, trailing: readonly number[] = []): Uint8Array => {
   const body_ = [
     ...chars('VP8X'),
