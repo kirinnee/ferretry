@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { normalizeAnalyticsModelIdentity } from '../../../src/lib/analytics/model-identity.ts';
+import { normalizeAnalyticsModelIdentity } from '../../src/lib/analytics-model-identity.ts';
 
 describe('normalizeAnalyticsModelIdentity', () => {
   it('should keep selector variants and provider revisions separate from identity', () => {
@@ -18,6 +18,18 @@ describe('normalizeAnalyticsModelIdentity', () => {
       contextWindow: 1_000_000,
       revision: '20251001',
     });
+  });
+
+  it('should read a dated revision suffix in either spelling', () => {
+    // Act
+    const dashed = normalizeAnalyticsModelIdentity('model-a-2026-07-01');
+    const at = normalizeAnalyticsModelIdentity('model-a@20260701');
+    const fractional = normalizeAnalyticsModelIdentity('model-a[0.2m]');
+
+    // Assert
+    should(dashed?.revision).equal('2026-07-01');
+    should(at?.revision).equal('20260701');
+    should(fractional?.contextWindow).equal(200_000);
   });
 
   it('should normalize case and configured aliases to one stable identity', () => {
@@ -42,19 +54,23 @@ describe('normalizeAnalyticsModelIdentity', () => {
     ];
 
     // Act
-    const actual = normalizeAnalyticsModelIdentity('SHARED', aliases);
+    const ambiguous = normalizeAnalyticsModelIdentity('SHARED', aliases);
+    const unmatched = normalizeAnalyticsModelIdentity('model-c', aliases);
 
     // Assert
-    should(actual?.modelId).equal('shared');
+    should(ambiguous?.modelId).equal('shared');
+    should(unmatched?.modelId).equal('model-c');
   });
 
   it('should return null when no model evidence exists', () => {
     // Act
     const missing = normalizeAnalyticsModelIdentity(null);
+    const undefined_ = normalizeAnalyticsModelIdentity(undefined);
     const blank = normalizeAnalyticsModelIdentity('   ');
 
     // Assert
     should(missing).be.null();
+    should(undefined_).be.null();
     should(blank).be.null();
   });
 });

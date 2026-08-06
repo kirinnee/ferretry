@@ -3,22 +3,41 @@ import should from 'should';
 import {
   snapshotAnalyticsUsagePricing,
   type AnalyticsPricingRate,
+  type AnalyticsPricingRates,
   type AnalyticsTokenUsage,
 } from '../../../src/lib/analytics/pricing.ts';
+
+/** Every slot stated, so a fixture says which charges do not apply instead of leaving them out. */
+const rates = (
+  input: number,
+  cachedInput: number,
+  output: number,
+  patch: Partial<AnalyticsPricingRates> = {},
+): AnalyticsPricingRates => ({
+  input,
+  output,
+  cachedInput,
+  cacheWrite: null,
+  cacheWrite5m: null,
+  cacheWrite1h: null,
+  reasoning: null,
+  image: null,
+  tool: null,
+  ...patch,
+});
 
 const openAiRate: AnalyticsPricingRate = {
   pricingKey: 'openai:model-a@2026-07-01',
   modelId: 'model-a',
   aliases: ['MODEL-A-preview'],
   provider: 'openai',
-  ratesUsdMicrosPerMillion: {
-    input: 2_000_000,
-    cachedRead: 200_000,
-    cacheWrite: 2_500_000,
-    output: 10_000_000,
-  },
-  verifiedAt: '2026-07-01',
+  currency: 'USD',
+  rates: rates(2_000_000, 200_000, 10_000_000, { cacheWrite: 2_500_000 }),
+  source: { kind: 'manual' },
+  verifiedAt: '2026-07-01T00:00:00Z',
   validFrom: '2026-07-01T00:00:00Z',
+  validThrough: null,
+  lastSyncedAt: null,
 };
 
 const usage: AnalyticsTokenUsage = {
@@ -44,8 +63,10 @@ describe('snapshotAnalyticsUsagePricing', () => {
       pricingKey: 'openai:model-a@2026-07-01',
       modelId: 'model-a',
       provider: 'openai',
-      ratesUsdMicrosPerMillion: openAiRate.ratesUsdMicrosPerMillion,
-      verifiedAt: '2026-07-01',
+      // The stored projection: the slots this build multiplies, with an unstated charge left off
+      // rather than written down as a zero.
+      ratesUsdMicrosPerMillion: { input: 2_000_000, cachedRead: 200_000, output: 10_000_000, cacheWrite: 2_500_000 },
+      verifiedAt: '2026-07-01T00:00:00Z',
       validFrom: '2026-07-01T00:00:00Z',
       validThrough: null,
     });
@@ -57,7 +78,7 @@ describe('snapshotAnalyticsUsagePricing', () => {
     const newer = {
       ...openAiRate,
       pricingKey: 'openai:model-a@2026-07-15',
-      ratesUsdMicrosPerMillion: { ...openAiRate.ratesUsdMicrosPerMillion, output: 20_000_000 },
+      rates: { ...openAiRate.rates, output: 20_000_000 },
       validFrom: '2026-07-15T00:00:00.000Z',
       validThrough: '2026-08-01T00:00:00.000Z',
     };
@@ -75,13 +96,7 @@ describe('snapshotAnalyticsUsagePricing', () => {
     const rate: AnalyticsPricingRate = {
       ...openAiRate,
       provider: 'anthropic',
-      ratesUsdMicrosPerMillion: {
-        input: 5_000_000,
-        cachedRead: 500_000,
-        cacheWrite5m: 6_250_000,
-        cacheWrite1h: 10_000_000,
-        output: 25_000_000,
-      },
+      rates: rates(5_000_000, 500_000, 25_000_000, { cacheWrite5m: 6_250_000, cacheWrite1h: 10_000_000 }),
     };
 
     // Act
@@ -96,7 +111,7 @@ describe('snapshotAnalyticsUsagePricing', () => {
     );
     const missingRates = snapshotAnalyticsUsagePricing(
       { ...usage, cacheWrite5mInputTokens: 40_000, cacheWrite1hInputTokens: 60_000 },
-      [{ ...rate, ratesUsdMicrosPerMillion: { input: 1, cachedRead: 1, output: 1 } }],
+      [{ ...rate, rates: rates(1, 1, 1) }],
     );
     const priced = snapshotAnalyticsUsagePricing(
       { ...usage, cacheWrite5mInputTokens: 40_000, cacheWrite1hInputTokens: 60_000 },
@@ -132,20 +147,17 @@ describe('snapshotAnalyticsUsagePricing', () => {
     // Arrange
     const missingWriteRate = {
       ...openAiRate,
-      ratesUsdMicrosPerMillion: { input: 1, cachedRead: 1, output: 1 },
+      rates: rates(1, 1, 1),
     };
     const negativeRate = {
       ...openAiRate,
-      ratesUsdMicrosPerMillion: { ...openAiRate.ratesUsdMicrosPerMillion, input: -1 },
+      rates: { ...openAiRate.rates, input: -1 },
     };
     const hugeRate = {
       ...openAiRate,
-      ratesUsdMicrosPerMillion: {
-        input: Number.MAX_SAFE_INTEGER,
-        cachedRead: Number.MAX_SAFE_INTEGER,
+      rates: rates(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, {
         cacheWrite: Number.MAX_SAFE_INTEGER,
-        output: Number.MAX_SAFE_INTEGER,
-      },
+      }),
     };
 
     // Act

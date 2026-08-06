@@ -8,6 +8,10 @@ export const AnalyticsLabelSchema = z.enum([
   'id',
   'agent',
   'model',
+  // The model a transcript was PRICED against, which is not always the model a person selected: a
+  // selector spelling and a transcript spelling disagree often enough that grouping cost by `model`
+  // silently attributes it to the wrong row.
+  'pricing_model',
   'context_window',
   'harness',
   'mode',
@@ -71,6 +75,15 @@ export const AnalyticsAggregateResultSchema = z.object({
   cacheWriteInputTokens: AnalyticsMeasureSchema,
   cacheWrite5mInputTokens: AnalyticsMeasureSchema,
   cacheWrite1hInputTokens: AnalyticsMeasureSchema,
+  /**
+   * Reasoning tokens, which are billed at their own rate.
+   *
+   * OPTIONAL BECAUSE NOTHING FOLDS IT YET. The rate slot exists in `AnalyticsPricingRatesSchema`, and
+   * a build that has not learned to count these must report their absence rather than a zero an
+   * operator would read as "this model does no reasoning". A responder that omits the key is saying
+   * exactly that; it is not the same as `{ value: null }`, which is a measure that was attempted.
+   */
+  reasoningTokens: AnalyticsMeasureSchema.optional(),
   equivalentApiCostUsdMicros: AnalyticsMeasureSchema,
   turns: AnalyticsMeasureSchema,
   durationMs: AnalyticsMeasureSchema,
@@ -103,6 +116,8 @@ export const AnalyticsRawSessionSchema = z.object({
   cacheWriteInputTokens: z.number().finite().nonnegative().nullable(),
   cacheWrite5mInputTokens: z.number().finite().nonnegative().nullable(),
   cacheWrite1hInputTokens: z.number().finite().nonnegative().nullable(),
+  /** Reasoning tokens; see the aggregate measure for why an omitted key is not a zero. */
+  reasoningTokens: z.number().finite().nonnegative().nullable().optional(),
   turns: z.number().finite().nonnegative().nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
   timeToFirstOutputMs: z.number().finite().nonnegative().nullable(),

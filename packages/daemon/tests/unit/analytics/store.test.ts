@@ -34,15 +34,23 @@ const RATE: AnalyticsPricingRate = {
   modelId: 'claude-opus-5',
   aliases: ['opus-5'],
   provider: 'anthropic',
-  ratesUsdMicrosPerMillion: {
+  currency: 'USD',
+  rates: {
     input: 15_000_000,
-    cachedRead: 1_500_000,
+    output: 75_000_000,
+    cachedInput: 1_500_000,
+    cacheWrite: null,
     cacheWrite5m: 18_750_000,
     cacheWrite1h: 30_000_000,
-    output: 75_000_000,
+    reasoning: null,
+    image: null,
+    tool: null,
   },
+  source: { kind: 'manual' },
   verifiedAt: '2026-08-01T00:00:00.000Z',
   validFrom: '2026-08-01T00:00:00.000Z',
+  validThrough: null,
+  lastSyncedAt: null,
 };
 
 const SECOND_RATE: AnalyticsPricingRate = {
@@ -117,11 +125,7 @@ describe('analyticsPricingCatalogFingerprint', () => {
     const base = analyticsPricingCatalogFingerprint([RATE]);
 
     // Act / Assert
-    should(
-      analyticsPricingCatalogFingerprint([
-        { ...RATE, ratesUsdMicrosPerMillion: { ...RATE.ratesUsdMicrosPerMillion, output: 1 } },
-      ]),
-    ).not.equal(base);
+    should(analyticsPricingCatalogFingerprint([{ ...RATE, rates: { ...RATE.rates, output: 1 } }])).not.equal(base);
     should(analyticsPricingCatalogFingerprint([{ ...RATE, validThrough: '2026-09-01T00:00:00.000Z' }])).not.equal(base);
     should(analyticsPricingCatalogFingerprint([{ ...RATE, aliases: ['opus-5', 'opus'] }])).not.equal(base);
     should(analyticsPricingCatalogFingerprint([])).not.equal(base);

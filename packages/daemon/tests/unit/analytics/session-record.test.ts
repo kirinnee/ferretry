@@ -14,14 +14,23 @@ const catalog: readonly AnalyticsPricingRate[] = [
     modelId: 'transcript-model',
     aliases: ['TRANSCRIPT-MODEL-preview'],
     provider: 'openai',
-    ratesUsdMicrosPerMillion: {
+    currency: 'USD',
+    rates: {
       input: 1_000_000,
-      cachedRead: 100_000,
-      cacheWrite: 1_250_000,
       output: 5_000_000,
+      cachedInput: 100_000,
+      cacheWrite: 1_250_000,
+      cacheWrite5m: null,
+      cacheWrite1h: null,
+      reasoning: null,
+      image: null,
+      tool: null,
     },
-    verifiedAt: '2026-01-01',
+    source: { kind: 'manual' },
+    verifiedAt: '2026-01-01T00:00:00Z',
     validFrom: '2026-01-01T00:00:00Z',
+    validThrough: null,
+    lastSyncedAt: null,
   },
 ];
 
@@ -82,7 +91,12 @@ describe('deriveAnalyticsSessionRecord', () => {
     should(actual.raw.contextWindow).equal(200_000);
     should(actual.pricing).have.property('kind', 'priced');
     if (actual.pricing?.kind === 'priced') {
-      should(actual.pricing.rate.ratesUsdMicrosPerMillion).deepEqual(catalog[0]!.ratesUsdMicrosPerMillion);
+      should(actual.pricing.rate.ratesUsdMicrosPerMillion).deepEqual({
+        input: 1_000_000,
+        cachedRead: 100_000,
+        output: 5_000_000,
+        cacheWrite: 1_250_000,
+      });
     }
   });
 

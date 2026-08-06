@@ -40,6 +40,7 @@ function labelValues(record: AnalyticsRawSession): LabelValues {
     id: record.id,
     agent: record.agent,
     model: record.model,
+    pricing_model: record.pricingModel,
     context_window: record.contextWindow === null ? null : String(record.contextWindow),
     harness: record.harness,
     mode: record.mode,

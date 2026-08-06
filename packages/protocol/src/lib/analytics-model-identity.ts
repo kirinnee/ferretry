@@ -1,3 +1,13 @@
+/**
+ * How a model spelling becomes one comparable identity — for every program that has to agree.
+ *
+ * THE DECISION LIVES HERE rather than in the daemon that first needed it. A price is looked up by
+ * normalized identity, and a browser that renders, edits or previews that price has to reach the same
+ * answer as the daemon that applied it, or the two disagree about which row an operator just edited.
+ * A constant would not have been enough: the question a caller asks is "are these the same model",
+ * and that is a function, not a table.
+ */
+
 export interface AnalyticsModelAliasGroup {
   readonly modelId: string;
   readonly aliases: readonly string[];

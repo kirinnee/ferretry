@@ -2,29 +2,28 @@ import {
   normalizeAnalyticsModelIdentity,
   type AnalyticsModelAliasGroup,
   type AnalyticsModelIdentity,
-} from './model-identity.ts';
+  type AnalyticsPricingRate,
+  type AnalyticsPricingRates,
+} from '@ferretry/protocol';
 
-export type AnalyticsPricingProvider = 'openai' | 'anthropic';
+export type { AnalyticsPricingProvider, AnalyticsPricingRate, AnalyticsPricingRates } from '@ferretry/protocol';
 
-export interface AnalyticsPricingRates {
+/**
+ * The rate numbers frozen onto a priced session, in the shape the index already stores.
+ *
+ * DELIBERATELY NOT the catalog's rates object. A stored row is evidence of what a session was
+ * actually charged at, and the columns holding it were written by earlier boots; widening them to
+ * follow every catalog slot is a schema migration, not a rename. The catalog stays the one place a
+ * price is DECIDED, and this is the narrower record of what that decision produced for the slots this
+ * build knows how to multiply.
+ */
+export interface EffectiveAnalyticsPricingRates {
   readonly input: number;
   readonly cachedRead: number;
   readonly cacheWrite?: number;
   readonly cacheWrite5m?: number;
   readonly cacheWrite1h?: number;
   readonly output: number;
-}
-
-export interface AnalyticsPricingRate {
-  readonly pricingKey: string;
-  readonly modelId: string;
-  readonly aliases: readonly string[];
-  readonly provider: AnalyticsPricingProvider;
-  /** Integer USD micros per million tokens. */
-  readonly ratesUsdMicrosPerMillion: AnalyticsPricingRates;
-  readonly verifiedAt: string;
-  readonly validFrom: string;
-  readonly validThrough?: string;
 }
 
 export interface AnalyticsTokenUsage {
@@ -43,8 +42,8 @@ export interface AnalyticsTokenUsage {
 export interface EffectiveAnalyticsPricingSnapshot {
   readonly pricingKey: string;
   readonly modelId: string;
-  readonly provider: AnalyticsPricingProvider;
-  readonly ratesUsdMicrosPerMillion: AnalyticsPricingRates;
+  readonly provider: AnalyticsPricingRate['provider'];
+  readonly ratesUsdMicrosPerMillion: EffectiveAnalyticsPricingRates;
   readonly verifiedAt: string;
   readonly validFrom: string;
   readonly validThrough: string | null;
@@ -94,9 +93,27 @@ function isTokenCount(value: number | null | undefined): value is number {
 }
 
 function ratesAreValid(rates: AnalyticsPricingRates): boolean {
-  return [rates.input, rates.cachedRead, rates.output, rates.cacheWrite, rates.cacheWrite5m, rates.cacheWrite1h]
-    .filter((rate): rate is number => rate !== undefined)
+  return Object.values(rates)
+    .filter((rate): rate is number => rate !== null)
     .every(rate => Number.isSafeInteger(rate) && rate >= 0);
+}
+
+/**
+ * Project the catalog's rates onto the narrower record a priced session keeps.
+ *
+ * A slot the catalog states as `null` is left OFF the stored record rather than written as a zero:
+ * "this model has no cache write charge" and "this model's cache writes are free" are different
+ * claims, and a row that turned the first into the second would total up without complaint.
+ */
+function storedRates(rates: AnalyticsPricingRates): EffectiveAnalyticsPricingRates {
+  return {
+    input: rates.input,
+    cachedRead: rates.cachedInput,
+    output: rates.output,
+    ...(rates.cacheWrite === null ? {} : { cacheWrite: rates.cacheWrite }),
+    ...(rates.cacheWrite5m === null ? {} : { cacheWrite5m: rates.cacheWrite5m }),
+    ...(rates.cacheWrite1h === null ? {} : { cacheWrite1h: rates.cacheWrite1h }),
+  };
 }
 
 function matchingRate(
@@ -113,7 +130,7 @@ function matchingRate(
         return (
           from !== null &&
           createdAt >= from &&
-          (entry.validThrough === undefined || (through !== null && createdAt <= through))
+          (entry.validThrough === null || (through !== null && createdAt <= through))
         );
       })
       .sort((left, right) => Date.parse(right.validFrom) - Date.parse(left.validFrom))[0] ?? null
@@ -136,7 +153,7 @@ function tokenCost(
     return { kind: 'unknown', reason: 'incomplete_token_counts' };
   }
   if (!counts.every(isTokenCount)) return { kind: 'unknown', reason: 'invalid_token_counts' };
-  if (!ratesAreValid(rate.ratesUsdMicrosPerMillion)) {
+  if (!ratesAreValid(rate.rates)) {
     return { kind: 'unknown', reason: 'invalid_rate_table' };
   }
 
@@ -147,10 +164,10 @@ function tokenCost(
   const uncached = input - cachedRead - cacheWrite;
   if (uncached < 0) return { kind: 'unknown', reason: 'negative_uncached_input' };
 
-  const rates = rate.ratesUsdMicrosPerMillion;
+  const rates = rate.rates;
   let numerator =
     BigInt(uncached) * BigInt(rates.input) +
-    BigInt(cachedRead) * BigInt(rates.cachedRead) +
+    BigInt(cachedRead) * BigInt(rates.cachedInput) +
     BigInt(output) * BigInt(rates.output);
 
   if (rate.provider === 'anthropic' && cacheWrite > 0) {
@@ -168,14 +185,14 @@ function tokenCost(
     if (usage.cacheWrite5mInputTokens + usage.cacheWrite1hInputTokens !== cacheWrite) {
       return { kind: 'unknown', reason: 'inconsistent_anthropic_cache_write_split' };
     }
-    if (rates.cacheWrite5m === undefined || rates.cacheWrite1h === undefined) {
+    if (rates.cacheWrite5m === null || rates.cacheWrite1h === null) {
       return { kind: 'unknown', reason: 'invalid_rate_table' };
     }
     numerator +=
       BigInt(usage.cacheWrite5mInputTokens) * BigInt(rates.cacheWrite5m) +
       BigInt(usage.cacheWrite1hInputTokens) * BigInt(rates.cacheWrite1h);
   } else if (cacheWrite > 0) {
-    if (rates.cacheWrite === undefined) return { kind: 'unknown', reason: 'invalid_rate_table' };
+    if (rates.cacheWrite === null) return { kind: 'unknown', reason: 'invalid_rate_table' };
     numerator += BigInt(cacheWrite) * BigInt(rates.cacheWrite);
   }
 
@@ -217,10 +234,10 @@ export function snapshotAnalyticsUsagePricing(
       pricingKey: rate.pricingKey,
       modelId: normalizeAnalyticsModelIdentity(rate.modelId)!.modelId,
       provider: rate.provider,
-      ratesUsdMicrosPerMillion: { ...rate.ratesUsdMicrosPerMillion },
+      ratesUsdMicrosPerMillion: storedRates(rate.rates),
       verifiedAt: rate.verifiedAt,
       validFrom: rate.validFrom,
-      validThrough: rate.validThrough ?? null,
+      validThrough: rate.validThrough,
     },
     equivalentApiCostUsdMicros: cost.value,
   };

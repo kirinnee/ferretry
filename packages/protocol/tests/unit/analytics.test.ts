@@ -172,6 +172,7 @@ describe('analytics schemas', () => {
       'id',
       'agent',
       'model',
+      'pricing_model',
       'context_window',
       'harness',
       'mode',
@@ -190,6 +191,10 @@ describe('analytics schemas', () => {
     const parsedLabels = analytics.ParsedAnalyticsQuerySchema.parse({ ...parsedQuery, groupBy: labels }).groupBy;
 
     // Assert
+    // Listed here AND checked against the schema, because a list that only proves no wrong member
+    // reads exactly the same when a member is missing.
+    should([...labels].sort()).deepEqual([...analytics.AnalyticsLabelSchema.options].sort());
+    should([...aggregations].sort()).deepEqual([...analytics.AnalyticsAggregationSchema.options].sort());
     for (const value of aggregations) should(analytics.AnalyticsAggregationSchema.parse(value)).equal(value);
     for (const value of labels) should(analytics.AnalyticsLabelSchema.parse(value)).equal(value);
     should(parsedLabels).deepEqual(labels);
@@ -223,7 +228,29 @@ describe('analytics schemas', () => {
     // Assert
     should(parsedQueryValue.aggregation).be.undefined();
     should(parsedSession).not.have.property('tree');
+    should(parsedSession).not.have.property('reasoningTokens');
     should(parsedIndex).not.have.property('lastTokenRefreshAt');
+  });
+
+  it('should carry reasoning tokens when a build counts them, and omit the key when none does', () => {
+    // An omitted key says this build does not fold reasoning tokens at all. A `{ value: null }`
+    // measure says it tried and could not, and a zero would say the model did no reasoning — three
+    // different claims that a single optional field keeps distinguishable.
+    // Arrange
+    const countedSession = { ...rawSession, reasoningTokens: 4_096 };
+    const countedAggregate = { ...aggregateResult, reasoningTokens: unknownMeasure };
+
+    // Act
+    const parsedSession = analytics.AnalyticsRawSessionSchema.parse(countedSession);
+    const parsedAggregate = analytics.AnalyticsAggregateResultSchema.parse(countedAggregate);
+
+    // Assert
+    should(parsedSession.reasoningTokens).equal(4_096);
+    should(
+      analytics.AnalyticsRawSessionSchema.parse({ ...rawSession, reasoningTokens: null }).reasoningTokens,
+    ).be.null();
+    should(parsedAggregate.reasoningTokens).deepEqual(unknownMeasure);
+    should(analytics.AnalyticsAggregateResultSchema.parse(aggregateResult)).not.have.property('reasoningTokens');
   });
 
   it('should accept the inclusive bounds of every percentage and known-count constraint', () => {

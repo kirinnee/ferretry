@@ -30,15 +30,23 @@ const RATES: readonly AnalyticsPricingRate[] = [
     modelId: 'claude-opus-5',
     aliases: [],
     provider: 'anthropic',
-    ratesUsdMicrosPerMillion: {
+    currency: 'USD',
+    rates: {
       input: 15_000_000,
-      cachedRead: 1_500_000,
+      output: 75_000_000,
+      cachedInput: 1_500_000,
+      cacheWrite: null,
       cacheWrite5m: 18_750_000,
       cacheWrite1h: 30_000_000,
-      output: 75_000_000,
+      reasoning: null,
+      image: null,
+      tool: null,
     },
+    source: { kind: 'manual' },
     verifiedAt: '2026-08-01T00:00:00.000Z',
     validFrom: '2026-08-01T00:00:00.000Z',
+    validThrough: null,
+    lastSyncedAt: null,
   },
 ];
 
@@ -333,9 +341,7 @@ describe('AnalyticsIngestionService.ingest', () => {
     await test.service.ingest();
 
     // Act
-    test.setPricing([
-      { ...RATES[0]!, ratesUsdMicrosPerMillion: { ...RATES[0]!.ratesUsdMicrosPerMillion, output: 150_000_000 } },
-    ]);
+    test.setPricing([{ ...RATES[0]!, rates: { ...RATES[0]!.rates, output: 150_000_000 } }]);
     const second = await test.service.ingest();
 
     // Assert

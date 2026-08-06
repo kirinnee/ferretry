@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AnalyticsRawSession } from '@ferretry/protocol';
+import { ANALYTICS_PRICING_RATE_SLOTS, type AnalyticsRawSession } from '@ferretry/protocol';
 import type { FoundationPaths } from '../paths.ts';
 import type { FileSystemPort } from '../ports.ts';
 import type { AnalyticsPricingRate, AnalyticsUsagePricingSnapshot } from './pricing.ts';
@@ -174,15 +174,16 @@ export function analyticsPricingCatalogFingerprint(catalog: readonly AnalyticsPr
         rate.modelId,
         [...rate.aliases].sort().join(','),
         rate.provider,
-        rate.ratesUsdMicrosPerMillion.input,
-        rate.ratesUsdMicrosPerMillion.cachedRead,
-        rate.ratesUsdMicrosPerMillion.cacheWrite,
-        rate.ratesUsdMicrosPerMillion.cacheWrite5m,
-        rate.ratesUsdMicrosPerMillion.cacheWrite1h,
-        rate.ratesUsdMicrosPerMillion.output,
+        rate.currency,
+        // Every slot, read through the protocol's own list: a rate the catalog grows must change the
+        // fingerprint, and a hand-written field list is exactly how one would silently stop doing so.
+        ...ANALYTICS_PRICING_RATE_SLOTS.map(slot => rate.rates[slot]),
+        rate.source.kind,
+        rate.source.kind === 'provider_sync' ? rate.source.sourceUrl : null,
         rate.verifiedAt,
         rate.validFrom,
         rate.validThrough,
+        rate.lastSyncedAt,
       ]),
     )
     .sort();

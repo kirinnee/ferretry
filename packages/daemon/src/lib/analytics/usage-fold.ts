@@ -1,5 +1,5 @@
+import { normalizeAnalyticsModelIdentity } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptHarness, TranscriptIssueCode } from '../transcript/types.ts';
-import { normalizeAnalyticsModelIdentity } from './model-identity.ts';
 import type { AnalyticsTokenUsage } from './pricing.ts';
 
 /** A session's token total, as this daemon can prove it from that session's own transcript. */

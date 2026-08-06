@@ -1,5 +1,8 @@
-import type { AnalyticsRawSession } from '@ferretry/protocol';
-import { normalizeAnalyticsModelIdentity, type AnalyticsModelIdentity } from './model-identity.ts';
+import {
+  normalizeAnalyticsModelIdentity,
+  type AnalyticsModelIdentity,
+  type AnalyticsRawSession,
+} from '@ferretry/protocol';
 import {
   snapshotAnalyticsUsagePricing,
   type AnalyticsPricingRate,
