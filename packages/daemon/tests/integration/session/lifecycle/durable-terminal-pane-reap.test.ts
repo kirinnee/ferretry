@@ -221,3 +221,86 @@ describe('durable terminal pane reap adapters', () => {
     should(await subject.controller.alive(subject.record.config.tmuxSession)).be.true();
   });
 });
+
+/**
+ * One hand-edited registration, read by the two callers that want opposite things from it.
+ *
+ * A sweep KILLS, so a ledger it cannot read whole is not one it may act on at all. A settings
+ * surface reports, so it wants the panes that ARE readable plus the name of the one that is not —
+ * a thrown exception there took the whole resource-limit panel down on one bad file.
+ */
+describe('a registration ledger with one damaged document', () => {
+  const DAMAGED = 'reap-damaged';
+
+  async function damage(subject: ReapFixture, text: string): Promise<void> {
+    const sessionId = parseSessionId(DAMAGED);
+    await subject.storage.writeState(sessionId, { id: sessionId, status: 'running' });
+    await subject.files.writeTextAtomic(createSessionPaths(subject.storage.paths, sessionId).terminalPane, text);
+  }
+
+  it('should name the damaged session and still hand back every readable registration', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    await damage(subject, '{ not json at all');
+
+    // Act
+    const scanned = await subject.store.scan(DAEMON);
+
+    // Assert
+    should(scanned.registrations.map(value => value.sessionId)).deepEqual(['reap-session']);
+    should(scanned.damaged.map(value => value.sessionId)).deepEqual([DAMAGED]);
+  });
+
+  it('should refuse the REAP view of that same ledger', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    await damage(subject, '{ not json at all');
+
+    // Act / Assert
+    await should(subject.store.registrations(DAEMON)).be.rejectedWith(/unreadable terminal pane registration/u);
+  });
+
+  it('should let the session listing carry on past it', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    await damage(subject, '{ not json at all');
+
+    // Act / Assert -- the limits surface reads this, and one bad file may not blank it.
+    should((await subject.store.sessions(DAEMON)).map(value => value.sessionId)).deepEqual(['reap-session']);
+  });
+
+  it('should refuse every shape that is not a complete, safe registration', async () => {
+    // Arrange -- each of these is a distinct way a document stops being authority for a pane.
+    const shapes: readonly { readonly text: string; readonly reported: RegExp }[] = [
+      { text: JSON.stringify({ daemonId: 7 }), reported: /malformed/u },
+      { text: JSON.stringify({ daemonId: DAEMON, sessionId: DAMAGED }), reported: /incomplete/u },
+      {
+        text: JSON.stringify({
+          daemonId: DAEMON,
+          sessionId: DAMAGED,
+          tmuxSession: 'fy-damaged',
+          paneId: 'not-a-pane-id',
+          pid: 4242,
+          processStartTicks: 99,
+        }),
+        reported: /invalid/u,
+      },
+    ];
+
+    for (const shape of shapes) {
+      const subject = await fixture();
+      await damage(subject, shape.text);
+
+      // Act
+      const scanned = await subject.store.scan(DAEMON);
+
+      // Assert
+      should(scanned.damaged).have.length(1);
+      const [first] = scanned.damaged;
+      should(first === undefined ? '' : String(first.error)).match(shape.reported);
+    }
+  });
+});

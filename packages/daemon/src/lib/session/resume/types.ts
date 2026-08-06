@@ -117,6 +117,21 @@ export class ResumeCancelled extends ResumeRefused {
   }
 }
 
+/**
+ * A replacement pane was created but its process identity could not be recorded durably.
+ *
+ * This is not an ordinary readiness or delivery failure. A later probe may quite truthfully see
+ * the pane alive, but preserving it would leave every durable reader addressing the incarnation
+ * the revive replaced. Recovery must therefore surface the failure even when teardown also failed
+ * and the unregistered replacement is still present.
+ */
+export class UnregisteredResumeReplacement extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'UnregisteredResumeReplacement';
+  }
+}
+
 /** The legacy duplicate-work suppression fired. Only ever raised against an automatic reviver. */
 export class ReviveDedupeConflict extends ResumeRefused {
   constructor(

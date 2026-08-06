@@ -4,6 +4,7 @@ import {
   type FoundationPaths,
   hasSafeTerminalPaneIdentity,
   parseSessionId,
+  type SessionId,
   type SessionLifecycleRecord,
   type TmuxController,
 } from '../../../lib/index.ts';
@@ -85,23 +86,41 @@ export class DurableTerminalPaneRegistrar {
   ) {}
 
   async register(record: SessionLifecycleRecord): Promise<void> {
-    const identity = await this.tmux.paneIdentity(record.config.tmuxSession);
+    await this.registerSession(record.config.id, record.config.tmuxSession);
+  }
+
+  /** Replaces the durable identity after a resume launches a new incarnation of the same pane. */
+  async registerSession(sessionId: SessionId, tmuxSession: string): Promise<void> {
+    const identity = await this.tmux.paneIdentity(tmuxSession);
     if (identity === undefined) throw new Error('tmux did not prove the launched pane identity');
     const ticks = await processStartTicks(identity.pid);
     if (ticks === undefined) throw new Error('the launched pane process has no stable incarnation identity');
     const registration: RegisteredTerminalPane = {
       daemonId: this.daemonId,
-      sessionId: record.config.id,
-      tmuxSession: record.config.tmuxSession,
+      sessionId,
+      tmuxSession,
       paneId: identity.paneId,
       pid: identity.pid,
       processStartTicks: ticks,
     };
     await this.files.writeTextAtomic(
-      createSessionPaths(this.paths, record.config.id).terminalPane,
+      createSessionPaths(this.paths, sessionId).terminalPane,
       `${JSON.stringify(registration)}\n`,
     );
   }
+}
+
+/** One registration that exists on disk and could not be read as one. */
+export interface DamagedTerminalPaneRegistration {
+  readonly sessionId: string;
+  /** The refusal itself, so a caller reports the reason rather than inventing one. */
+  readonly error: unknown;
+}
+
+/** Every registration this daemon owns, and every one it could not read. */
+export interface TerminalPaneRegistrationScan {
+  readonly registrations: readonly RegisteredTerminalPane[];
+  readonly damaged: readonly DamagedTerminalPaneRegistration[];
 }
 
 /** Reads registrations only from each durable session directory, never from a tmux name listing. */
@@ -112,20 +131,51 @@ export class DurableTerminalPaneStore {
     private readonly paths: FoundationPaths,
   ) {}
 
-  async registrations(daemonId: string): Promise<readonly RegisteredTerminalPane[]> {
-    const values: RegisteredTerminalPane[] = [];
+  /**
+   * Every registration, with the unreadable ones NAMED rather than thrown or dropped.
+   *
+   * Two callers want opposite things from one damaged document and both are right. A reap that
+   * cannot read the whole ledger must not sweep at all — it kills processes, and a partial view is
+   * how it would kill the wrong one — so `registrations` still refuses. A settings surface that
+   * reports resource limits must not go dark because one file was hand-edited; it wants the panes
+   * it CAN prove plus a warning naming the ones it cannot. This is the one read both are composed
+   * from, so the two can never come to disagree about what is on disk.
+   */
+  async scan(daemonId: string): Promise<TerminalPaneRegistrationScan> {
+    const registrations: RegisteredTerminalPane[] = [];
+    const damaged: DamagedTerminalPaneRegistration[] = [];
     for (const id of await this.storage.sessionIdsOnDisk()) {
       const text = await this.files.readText(createSessionPaths(this.paths, id).terminalPane);
       if (text === undefined) continue;
-      const value = durableRegistration(text, daemonId, id);
-      if (value !== undefined) values.push(value);
+      try {
+        const value = durableRegistration(text, daemonId, id);
+        if (value !== undefined) registrations.push(value);
+      } catch (error) {
+        damaged.push({ sessionId: id, error });
+      }
     }
-    return values;
+    return { registrations, damaged };
   }
 
+  /** The reap's view: a ledger with any damage in it is not a ledger a sweep may act on. */
+  async registrations(daemonId: string): Promise<readonly RegisteredTerminalPane[]> {
+    const scanned = await this.scan(daemonId);
+    const damaged = scanned.damaged[0];
+    if (damaged !== undefined) throw damaged.error;
+    return scanned.registrations;
+  }
+
+  /**
+   * The durable state of each session that has a registration.
+   *
+   * Read from the tolerant scan: a session whose registration cannot be read has no state to
+   * contribute, and refusing the whole listing for it would take down the resource-limit surface
+   * that reads this. The reap is unaffected — it asks for `registrations` in the same breath, and
+   * that still refuses.
+   */
   async sessions(daemonId: string): Promise<readonly DurableTerminalSession[]> {
     const values: DurableTerminalSession[] = [];
-    for (const registration of await this.registrations(daemonId)) {
+    for (const registration of (await this.scan(daemonId)).registrations) {
       const state = fields(await this.storage.readState(parseSessionId(registration.sessionId)));
       const status = state?.status;
       const finishedAt = state?.finishedAt;

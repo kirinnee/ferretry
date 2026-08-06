@@ -7,6 +7,7 @@ import {
   ResumeRefused,
   ReviveDedupeConflict,
   SessionResumeService,
+  UnregisteredResumeReplacement,
   type LaunchGate,
   type PaneObservation,
   type ResumeLauncher,
@@ -341,6 +342,26 @@ describe('session resume service', () => {
     should(world.repository.events).containEql('session.resume_false_terminal_averted');
     should(world.launcher.calls).not.containEql('kill:failed resume cleanup');
     should(world.monitors.calls).deepEqual(['stop', 'start']);
+  });
+
+  it('should fail an unregistered replacement even when the failure probe finds it alive', async () => {
+    // Arrange — a live pane normally averts a false terminal, but this pane has no durable process
+    // identity. Preserving it would make every reaper, attach and cgroup reader address the pane it
+    // replaced instead.
+    const world = build(target(), NO_PANE);
+    world.launcher.relaunchError = new UnregisteredResumeReplacement(
+      'replacement registration failed and teardown failed',
+    );
+    world.launcher.exitConfirmed = false;
+    world.launcher.exitPane = { alive: true, dead: false, promptReady: true };
+
+    // Act / Assert
+    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(UnregisteredResumeReplacement);
+    should(world.launcher.calls).containEql('confirmExit');
+    should(world.launcher.calls).containEql('kill:failed resume cleanup');
+    should(world.repository.events).containEql('session.failed');
+    should(world.repository.events).not.containEql('session.resume_false_terminal_averted');
+    should(world.monitors.calls).deepEqual(['stop']);
   });
 
   it('should schedule a backed-off retry when an automatic attempt has budget left', async () => {

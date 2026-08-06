@@ -48,22 +48,50 @@ describe('CgroupConfigCard', () => {
     });
   });
 
-  it('states restart and unknown apply state rather than claiming success', () => {
+  it('states restart and apply warnings rather than claiming success', () => {
     const renderer = render(<CgroupConfigCard connection={connection('a')} view={view()} onSave={() => {}} />);
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain('Restart required before the change applies to: ');
     expect(text).toContain('agent-one');
-    expect(text).toContain('Apply state unknown: ');
+    expect(text).toContain('Resource-limit warning: ');
     expect(text).toContain('scope agent-two could not be read');
     expect(text).toContain('daemon and Warden stay outside that slice');
   });
 
-  it('does not render editable controls where enforcement is unavailable', () => {
-    const renderer = render(<CgroupConfigCard connection={connection('mac')} view={view(false)} onSave={() => {}} />);
+  it('offers only a safe disable action where enforcement is unavailable', async () => {
+    const saved: unknown[] = [];
+    const renderer = render(
+      <CgroupConfigCard
+        connection={connection('mac')}
+        view={view(false)}
+        onSave={patch => {
+          saved.push(patch);
+        }}
+      />,
+    );
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain('unavailable on this platform');
     expect(text).not.toContain('Apply resource limits');
     expect(renderer.root.findAllByType('input')).toHaveLength(0);
+    expect(renderer.root.findAllByType('button')).toHaveLength(1);
+    await runAsync(async () => {
+      renderer.root.findAllByType('button')[0]?.props.onClick();
+      await Promise.resolve();
+    });
+    expect(saved).toEqual([{ enabled: false }]);
+  });
+
+  it('renders no inert action when unsupported enforcement is already disabled', () => {
+    const unsupported = view(false);
+    const renderer = render(
+      <CgroupConfigCard
+        connection={connection('mac')}
+        view={{ ...unsupported, config: { ...unsupported.config, enabled: false } }}
+        onSave={() => {}}
+      />,
+    );
+    expect(renderer.root.findAllByType('input')).toHaveLength(0);
+    expect(renderer.root.findAllByType('button')).toHaveLength(0);
   });
 
   it('keeps an unavailable daemon as unknown instead of treating it as uncapped', async () => {

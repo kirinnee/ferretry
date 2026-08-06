@@ -20,6 +20,7 @@ import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
+import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
@@ -102,6 +103,13 @@ export interface MountedSubsystems {
   readonly carriers: readonly DaemonCarrier[];
   /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
   readonly fleet: FleetSubsystem;
+  /** How much of this machine the managed fleet may take: the aggregate every agent shares, the
+   *  ceiling on any one of them, and whether either is enforced. It is the read side of the same
+   *  seam the session launch uses — one saved document, one conversion to host-manager properties —
+   *  so what the settings panel reports is what the next launch will write. This daemon and the
+   *  supervision it runs are outside the capped slice, and the surface PROVES both from placements
+   *  rather than repeating the claim. */
+  readonly cgroups: CgroupSubsystem;
   /** The daemon-scoped timer target that refreshes the mounted fleet's quota and health evidence.
    *  It serves no route: an unattended pass exists to make the existing routes current before anyone
    *  asks them. Keeping it here proves production constructs it rather than leaving a dead timer. */
@@ -258,6 +266,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
     // so their mount owns the admin scope and cannot shadow any session route below.
     ...fleetRoutes(subsystems.fleet),
+    // Resource limits register beside the fleet they bound, and are governed by the same capability
+    // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
+    // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this
+    // table can neither shadow nor be shadowed by anything around it.
+    ...cgroupRoutes(subsystems.cgroups),
     // Imported harness history is intentionally outside `/v1/sessions`: no foreign transcript has
     // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
     // looking like one.

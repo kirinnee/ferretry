@@ -722,7 +722,36 @@ try {
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {
             await selectDaemonPanel(wardenFrame, label);
-            await wardenFrame.locator(ready).first().waitFor({ state: 'visible' });
+            const readySurface = wardenFrame.locator(ready).first();
+            await readySurface.waitFor({ state: 'visible' });
+            if (slug === 'resource-limits') {
+              // Keep a top frame as navigation context, then compose the acceptance frame at the
+              // native viewport. The compact two-column mobile editors leave enough room between
+              // the enforcement toggle and final warning for BOTH endpoints (and every control
+              // between them) to remain in one honest 390x844 screenshot.
+              const toggle = readySurface.getByRole('checkbox');
+              await toggle.scrollIntoViewIfNeeded();
+              const toggleTarget = join(outDir, `settings-daemon-resource-limits-toggle-${viewport.name}.png`);
+              await page.screenshot({ path: toggleTarget });
+              process.stdout.write(`📸 Settings daemon Resource limits toggle ${viewport.name} -> ${toggleTarget}\n`);
+
+              // Bring the final warning into view, then minimally restore the toggle. If the two
+              // endpoints do not fit together, fail instead of silently emitting incomplete proof.
+              const warning = readySurface.getByRole('alert').last();
+              await warning.waitFor({ state: 'visible' });
+              await warning.scrollIntoViewIfNeeded();
+              await toggle.scrollIntoViewIfNeeded();
+              const [toggleBox, warningBox] = await Promise.all([toggle.boundingBox(), warning.boundingBox()]);
+              const frameHeight = page.viewportSize()?.height;
+              if (
+                toggleBox === null ||
+                warningBox === null ||
+                frameHeight === undefined ||
+                toggleBox.y < 0 ||
+                warningBox.y + warningBox.height > frameHeight
+              )
+                throw new Error(`resource-limit evidence does not fit in the ${viewport.name} viewport`);
+            }
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);

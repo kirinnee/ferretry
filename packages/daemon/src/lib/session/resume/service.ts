@@ -13,6 +13,7 @@ import { planRetry } from './retry.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
   ResumeRefused,
+  UnregisteredResumeReplacement,
   type LaunchGate,
   type PaneObservation,
   type ResumeActor,
@@ -190,7 +191,7 @@ export class SessionResumeService {
     error: unknown,
   ): Promise<ResumeOutcome> {
     const exit = await this.ports.launcher.confirmExit(target.id).catch(() => ({ confirmed: true, pane: deadPane() }));
-    if (!exit.confirmed) {
+    if (!exit.confirmed && !(error instanceof UnregisteredResumeReplacement)) {
       const preserved = await this.ports.repository.transition(target.id, {
         event: 'session.resume_false_terminal_averted',
         status: 'running',
@@ -202,6 +203,14 @@ export class SessionResumeService {
     await this.ports.launcher.snapshot(target.id).catch(() => undefined);
     await this.ports.launcher.kill(target.id, 'failed resume cleanup').catch(() => undefined);
     const reason = failureMessage(error);
+    // A live replacement without a durable identity cannot be preserved or retried. Retrying may
+    // create a second replacement while the first still exists, and a fresh monitor would be
+    // unable to address the live pane safely. Record the failed state and make the integrity error
+    // visible even when the independent probe found the unregistered pane alive.
+    if (error instanceof UnregisteredResumeReplacement) {
+      await this.ports.repository.transition(target.id, { event: 'session.failed', status: 'failed', reason });
+      throw error;
+    }
     const retry = planRetry(target, policy, this.settings);
     if (retry.kind === 'retry') {
       const scheduled = await this.ports.repository.transition(target.id, {

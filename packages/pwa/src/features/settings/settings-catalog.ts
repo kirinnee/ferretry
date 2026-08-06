@@ -256,6 +256,46 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'account', 'quota', 'token', 'wrapper', 'supervision'],
   },
+  {
+    /**
+     * The panel somebody looks for when the machine is on fire, reachable by the words they would
+     * actually type at that moment.
+     *
+     * "Slow", "hot", "fan", "swap" and "out of memory" are in the list because those are the
+     * SYMPTOMS a person searches by — not "cgroup", which is the kernel's word for the mechanism and
+     * means nothing to anyone who has not already found this panel. A palette that only matched the
+     * implementation noun would leave the control unfindable by exactly the person whose laptop is
+     * being eaten by an agent.
+     */
+    id: 'resource-limits',
+    label: 'Resource limits',
+    description:
+      'CPU and RAM caps for the agents this daemon runs, fleet-wide and per agent, and whether they are enforced. Daemon-wide — opens this daemon’s settings.',
+    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+    keywords: [
+      'cpu',
+      'ram',
+      'memory',
+      'resource',
+      'resources',
+      'limit',
+      'limits',
+      'cap',
+      'caps',
+      'quota',
+      'throttle',
+      'cgroup',
+      'cgroups',
+      'slice',
+      'slow',
+      'hot',
+      'fan',
+      'swap',
+      'out of memory',
+      'runaway',
+      'performance',
+    ],
+  },
 ] as const;
 
 const SETTINGS_BY_ID = new Map(SETTINGS_DEFINITIONS.map(definition => [definition.id, definition]));

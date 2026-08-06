@@ -123,6 +123,19 @@ describe('shared settings catalog', () => {
     expect(settingsPaletteEntries(alpha, '').some(item => item.id === 'setting-link-warden')).toBe(false);
   });
 
+  test('makes the resource-limit panel findable by the symptoms rather than the kernel word', () => {
+    const limits = SETTINGS_LINKS.find(link => link.id === 'resource-limits');
+    expect(limits?.href(beta)).toBe('/d/daemon-beta/settings#daemons');
+    // "cgroup" is the mechanism and is in the list; the others are what a person types when an agent
+    // is eating the machine, and matching only the mechanism would leave the control unfindable by
+    // exactly the person who needs it.
+    for (const query of ['cpu', 'ram', 'memory', 'throttle', 'cgroup', 'slow', 'out of memory', 'runaway']) {
+      expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-resource-limits')?.href).toBe(
+        '/d/daemon-alpha/settings#daemons',
+      );
+    }
+  });
+
   test('builds deep links only for known setting ids and scopes them to one daemon', () => {
     expect(isSettingId('theme')).toBe(true);
     expect(isSettingId('dictation')).toBe(true);
