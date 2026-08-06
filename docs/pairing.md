@@ -187,16 +187,16 @@ row states what its revoke will do before the press.
 
 ## Where it lives
 
-| concern                          | module                                                             |
-| -------------------------------- | ------------------------------------------------------------------ |
-| the state machine                | `packages/daemon/src/lib/pairing/service.ts`                       |
-| the routes and their minima      | `packages/daemon/src/lib/runtime/mounts/pairing.ts`                |
-| the carrier refresh              | `packages/daemon/src/lib/runtime/mounts/carriers.ts`               |
-| durable identity and grants      | `packages/daemon/src/adapters/pairing/state-pairing-repository.ts` |
-| the wire contract                | `packages/protocol/src/lib/pairing.ts`                             |
-| the command line                 | `packages/cli/src/lib/pair/`                                       |
-| the browser panel                | `packages/pwa/src/features/settings/add-device-settings.tsx`       |
-| the QR encoder                   | `packages/pwa/src/lib/qr-code.ts`                                  |
+| concern                     | module                                                             |
+| --------------------------- | ------------------------------------------------------------------ |
+| the state machine           | `packages/daemon/src/lib/pairing/service.ts`                       |
+| the routes and their minima | `packages/daemon/src/lib/runtime/mounts/pairing.ts`                |
+| the carrier refresh         | `packages/daemon/src/lib/runtime/mounts/carriers.ts`               |
+| durable identity and grants | `packages/daemon/src/adapters/pairing/state-pairing-repository.ts` |
+| the wire contract           | `packages/protocol/src/lib/pairing.ts`                             |
+| the command line            | `packages/cli/src/lib/pair/`                                       |
+| the browser panel           | `packages/pwa/src/features/settings/add-device-settings.tsx`       |
+| the QR encoder              | `packages/pwa/src/lib/qr-code.ts`                                  |
 
 ## Declared GAPs
 
