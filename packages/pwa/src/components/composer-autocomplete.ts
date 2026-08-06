@@ -2,22 +2,35 @@
  * The composer's trigger engine — detection, ranking and token replacement.
  *
  * Ported from kteam's `src/components/composer-autocomplete-engine.ts`. `/`
- * does something (commands and skills), while a LEADING RUN of `@` selects one
- * reference family. This module is the pure half: it decides what a trigger is,
- * what "best match" means, and what the draft looks like after a candidate is
- * accepted. Providers deliberately do less — they receive the active query and
- * return candidate data. This module also carries the source hook controller
- * that drives a live textarea. The rendered listbox belongs to kteam's separate
+ * does something (commands and skills), a LEADING RUN of `@` selects one
+ * reference family, and each family's own sigil opens it directly. This module
+ * is the pure half: it decides what a trigger is, what "best match" means, and
+ * what the draft looks like after a candidate is accepted. Providers
+ * deliberately do less — they receive the active query and return candidate
+ * data. This module also carries the source hook controller that drives a live
+ * textarea. The rendered listbox belongs to kteam's separate
  * `src/components/ComposerAutocomplete.tsx`, not the assigned engine source,
  * and remains an explicit migration gap; engine coverage must not be mistaken
  * for a complete, visible composer surface.
  *
- * `!` shell mode is NOT here and is not coming back without a decision. It
- * needs a new tmux inject send path, which is the mechanism behind kteam's
- * measured triple-execution bug, and a SHELL COMMAND running three times is
- * materially worse than a prompt running three times. There is deliberately no
- * dormant `!` branch to re-enable: adding one is a design decision that has to
- * be made again, with an exactly-once daemon action, not a flag someone flips.
+ * `!` IS ATTENTION HERE, AND NOTHING ELSE. `!` shell mode is NOT in this file
+ * and is not coming back without a decision: it needs a new tmux inject send
+ * path, which is the mechanism behind kteam's measured triple-execution bug,
+ * and a SHELL COMMAND running three times is materially worse than a prompt
+ * running three times. The `!` branch below opens the Attention family, it can
+ * never run anything, and it is not that decision being quietly reversed.
+ *
+ * THE DIRECT SIGILS ARE DELIBERATELY HARDER TO OPEN THAN `@`, `/` or `%`.
+ * Those three are acts nobody performs by accident. `:`, `&`, `!` and `$` are
+ * ordinary prose — `note: `, `A & B`, `done!`, `$HOME` — so a menu that behaved
+ * like the others would appear mid-sentence and, because the first row is
+ * selected on `@` and `/`, would answer the reader's Enter by inserting a
+ * reference instead of sending their message. Two rules prevent that, and both
+ * are load-bearing rather than polish:
+ *
+ *   AT LEAST ONE QUERY CHARACTER. A bare sigil never opens anything.
+ *   NOTHING IS PRESELECTED. The list opens with no active row, so Enter falls
+ *   straight through to the host until ArrowDown or a pointer chooses a row.
  */
 
 import {
@@ -31,19 +44,30 @@ import {
   useRef,
   useState,
 } from 'react';
+import {
+  acceptsDirectReferenceQuery,
+  DIRECT_REFERENCE_SIGILS,
+  type DirectReferenceSigil,
+  isReferenceLeftBoundary,
+} from '../lib/references.ts';
 import { fieldScore } from '../shell/palette-ranking.ts';
 
 /**
- * `%` IS ITS OWN TRIGGER RATHER THAN A SIXTH `@` TIER.
+ * `%` IS ITS OWN TRIGGER RATHER THAN A FIFTH `@` TIER.
  *
  * The `@` run is repetition-as-selection, and the families behind it are all
- * FLEET-WIDE records: files in the session tree, agents, tasks, attention, pins.
- * A surface is not one of those — it is a live thing inside THIS session, and a
- * sixth tier would have been `@@@@@@`, six keystrokes for the family a reader
+ * FLEET-WIDE records: files in the session tree, agents, tasks, attention. A
+ * surface is not one of those — it is a live thing inside THIS session, and a
+ * fifth tier would have been `@@@@@`, five keystrokes for the family a reader
  * reaches for while watching an agent work. It also keeps the tiers stable:
  * renumbering them would have moved every existing family under the reader.
+ *
+ * The direct sigils come from the reference grammar itself, so this union has
+ * exactly one owner for the four of them: adding a fifth family's sigil to
+ * `references.ts` adds it here, and a picker can never offer a sigil the
+ * renderer would not parse.
  */
-export type ComposerTrigger = '/' | '@' | '%';
+export type ComposerTrigger = '/' | '@' | '%' | DirectReferenceSigil;
 
 export type ComposerAutocompleteKind =
   | 'command'
@@ -53,27 +77,89 @@ export type ComposerAutocompleteKind =
   | 'directory'
   | 'task'
   | 'attention'
-  | 'pin'
   | 'surface';
 
 export interface ComposerReferenceTierLegendItem {
-  readonly tier: 1 | 2 | 3 | 4 | 5;
+  readonly tier: 1 | 2 | 3 | 4;
   readonly trigger: string;
   readonly label: string;
+  /** The sigil that opens this family directly. Files have none: `@` IS tier 1. */
+  readonly direct?: DirectReferenceSigil;
 }
 
 /**
  * Frequency order, not alphabetical order. Files and source locations are typed
  * most; people are next; durable fleet records follow. Kept as data so provider
- * routing, UI teaching and tests cannot drift independently.
+ * routing, UI teaching and tests cannot drift independently — including the
+ * tier-to-direct-sigil mapping, which is the same fact read from the other end.
+ *
+ * THERE IS NO FIFTH TIER. Pins were one; they are a top link strip rather than
+ * a reference family (handover #63), and readable composer text rather than a
+ * second grammar. Template libraries are not a tier either — no build of this
+ * app has ever had one, and this list is the guard that keeps it that way.
  */
 export const COMPOSER_REFERENCE_TIERS: readonly ComposerReferenceTierLegendItem[] = [
   { tier: 1, trigger: '@', label: 'Files' },
-  { tier: 2, trigger: '@@', label: 'Agents' },
-  { tier: 3, trigger: '@@@', label: 'Tasks' },
-  { tier: 4, trigger: '@@@@', label: 'Attention' },
-  { tier: 5, trigger: '@@@@@', label: 'Pins' },
+  { tier: 2, trigger: '@@', label: 'Agents', direct: ':' },
+  { tier: 3, trigger: '@@@', label: 'Tasks', direct: '&' },
+  { tier: 4, trigger: '@@@@', label: 'Attention', direct: '!' },
 ];
+
+/**
+ * Which suggestion families a host offers. Every switch is SUGGESTIONS ONLY: a
+ * disabled family still parses, still proves and still links wherever a reader
+ * authored it, and `addReferenceToComposer` still inserts one. Turning a menu
+ * off removes an offer, never a capability.
+ *
+ * `/` and `%` are deliberately not governed. `/` is the harness command line —
+ * a reader who has typed it at the start of an empty draft is not writing prose
+ * — and `%` cannot be typed by accident either.
+ */
+export interface ComposerSuggestionSwitches {
+  /**
+   * The WHOLE `@` ladder, bare `@` files included, not only the repeated tiers.
+   *
+   * That is the harder reading of the two and it is the one the Settings switch
+   * promises out loud — "files with @, agents with @@, tasks with @@@, attention
+   * with @@@@". Exempting tier 1 would have left a reader who switched `@`
+   * suggestions off still getting a file menu, which is a copy that lies rather
+   * than a menu that helps. Authoring `@src/api.ts` by hand still parses, still
+   * proves and still links, and "Add to chat" still inserts one.
+   */
+  readonly mentionSuggestions: boolean;
+  /** The `:` `&` `!` direct sigils. */
+  readonly directReferenceSuggestions: boolean;
+  /** `$` skills. `/` skills are unaffected, so a skill is always reachable. */
+  readonly skillSuggestions: boolean;
+}
+
+/** Absent means enabled, so a host that knows nothing about these gets today's
+ *  behaviour and an older stored preference reads as "all on". The field names
+ *  are `DeviceControls`' own, because the persisted preference and the
+ *  suppression rule are one fact and a rename between them is where it breaks. */
+export const DEFAULT_COMPOSER_SUGGESTIONS: ComposerSuggestionSwitches = {
+  mentionSuggestions: true,
+  directReferenceSuggestions: true,
+  skillSuggestions: true,
+};
+
+/**
+ * The one place a switch decides anything.
+ *
+ * Providers answer `shouldOpen` from it and the tier legend is filtered by it,
+ * so a chip can never teach a menu that will not open. Enforcing it in the host
+ * instead would take `@` and `/` down with it, which is exactly what these
+ * switches must not do.
+ */
+export function composerSuggestionsAllow(
+  suggestions: ComposerSuggestionSwitches,
+  match: Pick<ComposerTriggerMatch, 'trigger'>,
+): boolean {
+  if (match.trigger === '@') return suggestions.mentionSuggestions;
+  if (match.trigger === '$') return suggestions.skillSuggestions;
+  if (match.trigger === '/' || match.trigger === '%') return true;
+  return suggestions.directReferenceSuggestions;
+}
 
 export interface ComposerSelection {
   readonly start: number;
@@ -168,6 +254,20 @@ export interface ComposerAutocompleteController extends ComposerAutocompleteSnap
   readonly blocksRefocus: boolean;
   syncSelection(selection: ComposerSelection): void;
   handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
+  /**
+   * The IME seam, in two halves, because a composition is a state and not a key.
+   *
+   * `handleKeyDown` already refuses a composing keystroke, but detection runs
+   * from `onChange`, which fires on every composition UPDATE. Without this a
+   * Japanese, Chinese or Korean composition containing `:` or `&` opens a menu
+   * over the IME's own candidate window, and accepting there would rewrite
+   * bytes the IME still owns. So: no list opens while a composition is active,
+   * and `endComposition` re-detects against the caret the IME finally left —
+   * a reference the composition ended on is offered immediately rather than
+   * waiting for one more keystroke.
+   */
+  startComposition(): void;
+  endComposition(selection?: ComposerSelection): void;
   accept(index: number): void;
   close(): void;
   readonly textareaAria: {
@@ -315,23 +415,79 @@ function percentTrigger(value: string, caret: number): ComposerTriggerMatch | nu
 }
 
 /**
+ * The direct family sigils: `:` agents, `&` tasks, `!` attention, `$` skills.
+ *
+ * Three rules, and each one exists because prose contains these characters:
+ *
+ *   THE GRAMMAR'S OWN LEFT BOUNDARY, imported rather than restated. A picker
+ *   that opened where `findReferences` refuses would insert a token the
+ *   renderer can never prove, so `note:`, `R&D`, `done!` and `US$5` are inert
+ *   by construction rather than by a list of special cases.
+ *   THE GRAMMAR'S OWN TOKEN SHAPE, so a query that can never complete never
+ *   opens a menu: `$HOME` is a shell variable, `&x` is not a task id.
+ *   AT LEAST ONE QUERY CHARACTER, so a bare sigil is always prose. `A & B` and
+ *   an emphatic `Yes!` are the common case, not the edge case.
+ *
+ * The nearest sigil to the caret wins, so a draft that contains several is
+ * answered about the one being typed. Each backward scan uses `previousSigil`
+ * for the reason recorded there: a bare `lastIndexOf` never terminates.
+ */
+function directTrigger(value: string, caret: number): ComposerTriggerMatch | null {
+  const before = value.slice(0, caret);
+  let best: ComposerTriggerMatch | null = null;
+  for (const sigil of DIRECT_REFERENCE_SIGILS) {
+    let start = before.lastIndexOf(sigil);
+    while (start >= 0) {
+      const query = value.slice(start + 1, caret);
+      if (
+        query !== '' &&
+        !TOKEN_SPACE.test(query) &&
+        isReferenceLeftBoundary(start === 0 ? undefined : value[start - 1]) &&
+        acceptsDirectReferenceQuery(sigil, query)
+      ) {
+        if (best === null || start > best.start)
+          best = { trigger: sigil, triggerText: sigil, query, start, end: tokenEnd(value, caret), caret };
+        break;
+      }
+      start = previousSigil(before, sigil, start - 1);
+    }
+  }
+  return best;
+}
+
+/**
  * Detect the trigger at a collapsed textarea caret.
  *
- * `/` is limited to the first non-whitespace byte, and `@` and `%` are valid at a
- * token boundary. `&`, `?` and `#` are ordinary Markdown/prose: tasks and
- * attention are browsed through `@`, while their canonical inserted forms stay
- * `&F12` and `!A3`. A non-collapsed textarea selection never opens a list.
+ * `/` is limited to the first non-whitespace byte; `@` and `%` are valid at a
+ * token boundary; the four direct sigils are valid where the reference grammar
+ * would accept the token they begin. A non-collapsed textarea selection never
+ * opens a list.
  *
- * `@` is tried before `%` so a path containing a percent sign stays one file
- * query: `@src/a%b` is a filename, and hijacking its tail as a surface token
- * would replace half of what the reader typed.
+ * ORDER IS LOAD-BEARING, and every step of it is a token one of the others
+ * would otherwise eat:
+ *
+ *   `@` before `%`, so a path containing a percent sign stays one file query —
+ *   `@src/a%b` is a filename, and hijacking its tail would replace half of what
+ *   the reader typed.
+ *   `@` and `%` before the direct sigils, so the interior colon of
+ *   `%terminal:ab12` and the line selector of `@src/api.ts:120` stay inside
+ *   their own token instead of opening an agent menu.
+ *   `/` before `$`, which never actually collides — `/` only opens at the
+ *   first non-whitespace byte — but keeps the skills pair reading in one place.
  */
 export function detectComposerTrigger(value: string, selection: ComposerSelection): ComposerTriggerMatch | null {
   const safe = clampSelection(value, selection);
   if (safe.start !== safe.end) return null;
   const caret = safe.end;
-  return atTrigger(value, caret) ?? percentTrigger(value, caret) ?? slashTrigger(value, caret);
+  return (
+    atTrigger(value, caret) ?? percentTrigger(value, caret) ?? slashTrigger(value, caret) ?? directTrigger(value, caret)
+  );
 }
+
+/** Whether a trigger's menu may select a row before the reader has chosen one.
+ *  A direct sigil never does: see this module's header. */
+const preselects = (trigger: ComposerTrigger): boolean =>
+  !(DIRECT_REFERENCE_SIGILS as readonly string[]).includes(trigger);
 
 /**
  * Replace exactly the active token and return the caret to its new end.
@@ -460,6 +616,7 @@ export function useComposerAutocomplete({
     readonly start: number;
   } | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [composing, setComposing] = useState(false);
   const [load, setLoad] = useState<LoadState>(IDLE_LOAD);
   const pendingSelection = useRef<{ readonly expectedValue: string; readonly selection: ComposerSelection } | null>(
     null,
@@ -479,7 +636,12 @@ export function useComposerAutocomplete({
     dismissed.triggerText === matchTriggerText &&
     dismissed.start === match.start;
   const open =
-    match !== null && provider !== null && !disabled && !tokenDismissed && (provider.shouldOpen?.(match) ?? true);
+    match !== null &&
+    provider !== null &&
+    !disabled &&
+    !composing &&
+    !tokenDismissed &&
+    (provider.shouldOpen?.(match) ?? true);
   const requestKey =
     open && match && provider ? `${provider.id}:${match.start}:${matchTriggerText}:${match.query}` : '';
 
@@ -505,7 +667,7 @@ export function useComposerAutocomplete({
         contextLabel: result.contextLabel,
         notice: result.notice,
       });
-      setActiveIndex(firstEnabled(candidates));
+      setActiveIndex(preselects(match.trigger) ? firstEnabled(candidates) : -1);
     };
     const failed = (error: unknown) => {
       if (abort.signal.aborted || (error as { readonly name?: string })?.name === 'AbortError') return;
@@ -550,7 +712,11 @@ export function useComposerAutocomplete({
 
   const currentLoad: LoadState = load.key === requestKey ? load : { ...IDLE_LOAD, status: open ? 'loading' : 'idle' };
   const candidates = currentLoad.candidates;
-  const boundedActive = activeIndex >= 0 && activeIndex < candidates.length ? activeIndex : firstEnabled(candidates);
+  // The fallback is where "nothing preselected" would otherwise leak back in:
+  // an out-of-range or absent index re-derives the first enabled row, and for a
+  // direct sigil that is precisely the Enter theft the -1 above prevented.
+  const fallbackActive = match !== null && preselects(match.trigger) ? firstEnabled(candidates) : -1;
+  const boundedActive = activeIndex >= 0 && activeIndex < candidates.length ? activeIndex : fallbackActive;
   const commit = useCallback(
     (replacement: TokenReplacement) => {
       pendingSelection.current = { expectedValue: replacement.value, selection: replacement.selection };
@@ -600,8 +766,14 @@ export function useComposerAutocomplete({
         return true;
       }
       if (event.key !== 'Enter' && event.key !== 'Tab') return false;
+      // NOTHING SELECTED MEANS THE KEY IS NOT OURS. An open list with no active
+      // row used to consume Enter anyway and insert nothing, which was harmless
+      // only while every list preselected its first row. A direct-sigil menu
+      // opens with none, so swallowing Enter here would eat the send of a
+      // message that merely contains `A & B`.
+      if (boundedActive < 0) return false;
       event.preventDefault();
-      if (boundedActive >= 0) accept(boundedActive);
+      accept(boundedActive);
       return true;
     },
     [accept, boundedActive, candidates, close, open],
@@ -621,6 +793,11 @@ export function useComposerAutocomplete({
     listboxId: resolvedListboxId,
     blocksRefocus: open,
     syncSelection: next => setSelection(pendingComposerInputSelection(next)),
+    startComposition: () => setComposing(true),
+    endComposition: next => {
+      setComposing(false);
+      if (next !== undefined) setSelection(pendingComposerInputSelection(next));
+    },
     handleKeyDown,
     accept,
     close,

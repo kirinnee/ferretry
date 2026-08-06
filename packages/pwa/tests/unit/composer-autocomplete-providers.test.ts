@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Pin, TerminalListView } from '@ferretry/protocol';
+import type { SessionView, TerminalListView } from '@ferretry/protocol';
 import type {
   ComposerProviderContext,
   ComposerTrigger,
@@ -7,10 +7,13 @@ import type {
 } from '../../src/components/composer-autocomplete.ts';
 import {
   type ComposerAttentionItem,
+  type ComposerSkillsCatalog,
   type ComposerTaskSummary,
   createComposerAutocompleteProviders,
+  createDirectReferenceProviders,
   createFilesProvider,
   createReferencesProvider,
+  createSkillSigilProvider,
   createSkillsProvider,
   createSurfacesProvider,
   loadSkillsCatalog,
@@ -448,6 +451,115 @@ describe('composer files provider', () => {
   });
 });
 
+describe('composer $ skills sigil', () => {
+  const catalogResponse = {
+    harness: 'claude',
+    skills: [{ name: 'summary', description: 'Give a fast recap' }],
+  };
+
+  it('offers skills only, inserts what the harness invokes, and shares one catalog read with /', async () => {
+    let requests = 0;
+    const fetcher: DaemonFetch = async () => {
+      requests += 1;
+      return json(catalogResponse);
+    };
+    const shared = new Map<string, ComposerSkillsCatalog>();
+    const slash = createSkillsProvider({ daemon: daemonA, scope: scopeA, fetcher, catalog: shared });
+    const dollar = createSkillSigilProvider({ daemon: daemonA, scope: scopeA, fetcher, catalog: shared });
+
+    const dollarRows = await dollar.candidates(context('$', 'sum'));
+    const slashRows = await slash.candidates(context('/', 'sum'));
+
+    // ONE request for both sigils: two caches would be two answers that can
+    // fail apart, and a reader would see skills under one sigil and not the other.
+    expect(requests).toBe(1);
+    expect(dollarRows.candidates.map(row => row.kind)).toEqual(['skill']);
+    expect(dollarRows.candidates[0]?.replacement).toBe('/summary');
+    expect(dollarRows.contextLabel).toContain('$ skills');
+    expect(slashRows.candidates.map(row => row.kind)).toEqual(['command', 'skill']);
+    // `$` has nothing to answer with until a catalog exists; `/` has built-ins.
+    expect(
+      createSkillSigilProvider({ daemon: daemonA, scope: scopeA, fetcher }).initialCandidates?.(context('$', 's')),
+    ).toBeUndefined();
+    expect(dollar.initialCandidates?.(context('$', 's'))?.candidates).toHaveLength(1);
+  });
+
+  it('inserts the Codex form when the daemon reports a Codex session', async () => {
+    const provider = createSkillSigilProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => json({ ...catalogResponse, harness: 'codex' }),
+    });
+
+    expect((await provider.candidates(context('$', 'sum'))).candidates[0]?.replacement).toBe('$summary');
+  });
+
+  it('prefers a catalog the host already read, and never fetches one behind it', async () => {
+    const supplied: ComposerSkillsCatalog = {
+      harness: 'claude',
+      skills: [{ name: 'deploy', description: 'Ship it' }],
+    };
+    let warmed = 0;
+    const provider = createSkillSigilProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => {
+        throw new Error('a host-supplied catalog must not fetch');
+      },
+      getSkills: received => {
+        expect(received).toEqual(scopeA);
+        return supplied;
+      },
+      waitForSkills: async () => {
+        warmed += 1;
+      },
+    });
+
+    expect(provider.snapshotKey).toBe(supplied);
+    expect(provider.initialCandidates?.(context('$', 'dep'))?.candidates[0]?.replacement).toBe('/deploy');
+    expect((await provider.candidates(context('$', 'dep'))).candidates[0]?.label).toBe('deploy');
+    expect(warmed).toBe(1);
+  });
+
+  it('falls back to its own request when the host has not read a catalog yet', async () => {
+    const provider = createSkillSigilProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => json(catalogResponse),
+      // `undefined` is "not read yet", never "there are no skills".
+      getSkills: () => undefined,
+    });
+
+    expect(provider.snapshotKey).toBeUndefined();
+    expect((await provider.candidates(context('$', 'sum'))).candidates[0]?.label).toBe('summary');
+  });
+
+  it('says the catalog is unavailable rather than pretending there are no skills', async () => {
+    const provider = createSkillSigilProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => json({ error: 'this paired device may not enumerate session skills' }, 403),
+    });
+
+    const result = await provider.candidates(context('$', 'sum'));
+    expect(result.candidates).toEqual([]);
+    expect(result.notice).toContain('may not enumerate session skills');
+    expect(result.notice).toContain('/name still works');
+  });
+
+  it('propagates an abort rather than reporting a failure the reader caused', async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    const provider = createSkillSigilProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => json(catalogResponse),
+    });
+
+    await expect(provider.candidates(context('$', 'sum', aborted.signal))).rejects.toThrow();
+  });
+});
+
 describe('composer reference families', () => {
   const agent = sessionView('agent-session', {
     config: {
@@ -463,18 +575,6 @@ describe('composer reference families', () => {
   const attention: readonly ComposerAttentionItem[] = [
     { id: 'A3', subject: 'Choose the rollout window', source: 'question' },
   ];
-  const pins: readonly Pin[] = [
-    {
-      id: '11111111-1111-4111-8111-111111111111',
-      at: 1,
-      kind: 'note',
-      text: 'Ship after QA',
-      by: 'agent',
-      createdBy: 'agent-session',
-      createdByName: 'ottis',
-    },
-  ];
-
   const providerFor = (which: 'a' | 'b') => {
     const scope = which === 'a' ? scopeA : scopeB;
     const daemon = which === 'a' ? daemonA : daemonB;
@@ -496,19 +596,14 @@ describe('composer reference families', () => {
         expect(received).toEqual(scope);
         return attention;
       },
-      getPins: received => {
-        expect(received).toEqual(scope);
-        return pins;
-      },
     });
   };
 
-  it('projects daemon-scoped agents, tasks, attention, and pins into canonical authored text', () => {
+  it('projects daemon-scoped agents, tasks, and attention into canonical authored text', () => {
     const provider = providerFor('a');
     const agents = provider.initialCandidates?.(referenceContext(2, 'ott'));
     const taskRows = provider.initialCandidates?.(referenceContext(3, 'F12'));
     const attentionRows = provider.initialCandidates?.(referenceContext(4, 'A3'));
-    const pinRows = provider.initialCandidates?.(referenceContext(5, 'ship'));
 
     expect(agents?.candidates[0]).toMatchObject({
       kind: 'agent',
@@ -529,13 +624,7 @@ describe('composer reference families', () => {
       detail: 'Choose the rollout window',
       replacement: '!A3',
     });
-    expect(pinRows?.candidates[0]).toMatchObject({
-      kind: 'pin',
-      label: 'pin: Ship after QA',
-      detail: 'Note pin · Pinned by ottis',
-      replacement: 'pin: Ship after QA',
-    });
-    for (const result of [agents, taskRows, attentionRows, pinRows]) {
+    for (const result of [agents, taskRows, attentionRows]) {
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('daemon-a'))).toBe(true);
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('same/session'))).toBe(
         true,
@@ -550,8 +639,8 @@ describe('composer reference families', () => {
     expect(providerA.initialCandidates?.(referenceContext(2, 'ott'))?.candidates[0]?.id).not.toBe(
       providerB.initialCandidates?.(referenceContext(2, 'ott'))?.candidates[0]?.id,
     );
-    expect(providerA.initialCandidates?.(referenceContext(5, 'ship'))?.candidates[0]?.id).not.toBe(
-      providerB.initialCandidates?.(referenceContext(5, 'ship'))?.candidates[0]?.id,
+    expect(providerA.initialCandidates?.(referenceContext(4, 'A3'))?.candidates[0]?.id).not.toBe(
+      providerB.initialCandidates?.(referenceContext(4, 'A3'))?.candidates[0]?.id,
     );
 
     let liveTasks: readonly ComposerTaskSummary[] = tasks;
@@ -581,28 +670,156 @@ describe('composer reference families', () => {
       waitForAttentionItems: async () => {
         warmed.push('attention');
       },
-      waitForPins: async () => {
-        warmed.push('pins');
-      },
     });
 
     await provider.candidates(referenceContext(3, ''));
     await provider.candidates(referenceContext(4, ''));
-    await provider.candidates(referenceContext(5, ''));
-    expect(warmed).toEqual(['tasks', 'attention', 'pins']);
-    const unsupported = await provider.candidates(referenceContext(6, ''));
+    expect(warmed).toEqual(['tasks', 'attention']);
+    const unsupported = await provider.candidates(referenceContext(5, ''));
     expect(unsupported.candidates).toEqual([]);
-    expect(unsupported.notice).toContain('one to five @ signs');
-    expect(provider.legend).toHaveLength(5);
+    expect(unsupported.notice).toContain('one to four @ signs');
+    expect(provider.legend).toHaveLength(4);
+    // The fifth tier is gone rather than empty: no pins family, and nothing
+    // that could quietly become a template library either.
+    expect(provider.legend?.some(item => /pin|template/iu.test(item.label))).toBe(false);
   });
 
-  it('builds one action, one reference and one surface provider, refusing crossed scopes at the boundary', () => {
+  it('opens each family from its own sigil, reading the very same host getters', () => {
+    const reads: string[] = [];
+    const options = {
+      daemon: daemonA,
+      scope: scopeA,
+      getSessions: () => {
+        reads.push('sessions');
+        return [agent];
+      },
+      getTasks: () => {
+        reads.push('tasks');
+        return tasks;
+      },
+      getAttentionItems: () => {
+        reads.push('attention');
+        return attention;
+      },
+    };
+    const ladder = createReferencesProvider(options);
+    const [agents, taskProvider, attentionProvider] = createDirectReferenceProviders(options);
+
+    expect([agents?.trigger, taskProvider?.trigger, attentionProvider?.trigger]).toEqual([':', '&', '!']);
+    expect(agents?.candidates(context(':', 'ott'))).toMatchObject({
+      contextLabel: ': fleet agents',
+      candidates: [{ replacement: ':ottis' }],
+    });
+    expect(taskProvider?.initialCandidates?.(context('&', 'F12'))).toMatchObject({
+      contextLabel: '& fleet tasks',
+      candidates: [{ replacement: '&F12' }],
+    });
+    expect(attentionProvider?.initialCandidates?.(context('!', 'A3'))).toMatchObject({
+      contextLabel: '! unresolved attention',
+      candidates: [{ replacement: '!A3' }],
+    });
+    // The same rows the ladder offers, from the same read — one fact, two doors.
+    expect(ladder.initialCandidates?.(referenceContext(3, 'F12'))?.candidates[0]?.replacement).toBe(
+      taskProvider?.initialCandidates?.(context('&', 'F12'))?.candidates[0]?.replacement,
+    );
+    expect(new Set(reads)).toEqual(new Set(['sessions', 'tasks', 'attention']));
+  });
+
+  it('warms a direct family exactly like its tier does, and republishes a moved store', async () => {
+    const warmed: string[] = [];
+    let liveTasks: readonly ComposerTaskSummary[] = tasks;
+    const [, taskProvider, attentionProvider] = createDirectReferenceProviders({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => liveTasks,
+      waitForTasks: async () => {
+        warmed.push('tasks');
+      },
+      waitForAttentionItems: async () => {
+        warmed.push('attention');
+      },
+    });
+
+    const before = taskProvider?.snapshotKey;
+    expect(await taskProvider?.candidates(context('&', 'F12'))).toMatchObject({ candidates: [{ label: '&F12' }] });
+    expect(await attentionProvider?.candidates(context('!', 'A3'))).toMatchObject({ candidates: [] });
+    expect(warmed).toEqual(['tasks', 'attention']);
+    expect(taskProvider?.snapshotKey).toBe(before);
+
+    liveTasks = [{ id: 'F13', title: 'Updated snapshot', status: 'blocked' }];
+    expect(taskProvider?.snapshotKey).not.toBe(before);
+  });
+
+  it('publishes a stable snapshot per family, and a new one only when that family moves', () => {
+    let liveSessions: readonly SessionView[] = [agent];
+    let liveAttention: readonly ComposerAttentionItem[] = attention;
+    const [agents, , attentionProvider] = createDirectReferenceProviders({
+      daemon: daemonA,
+      scope: scopeA,
+      getSessions: () => liveSessions,
+      getAttentionItems: () => liveAttention,
+    });
+
+    const agentsBefore = agents?.snapshotKey;
+    const attentionBefore = attentionProvider?.snapshotKey;
+    expect(agents?.snapshotKey).toBe(agentsBefore);
+    expect(attentionProvider?.snapshotKey).toBe(attentionBefore);
+
+    // A fleet slice that moved republishes agents and leaves Attention alone:
+    // re-asking every family because one store moved is how a menu flickers.
+    liveSessions = [agent, sessionView('second-session', { config: { teammate: 'zelda' } })];
+    expect(agents?.snapshotKey).not.toBe(agentsBefore);
+    expect(attentionProvider?.snapshotKey).toBe(attentionBefore);
+
+    liveAttention = [{ id: 'A4', subject: 'Another question', source: 'question' }];
+    expect(attentionProvider?.snapshotKey).not.toBe(attentionBefore);
+  });
+
+  it('abandons a warmed direct family whose request was already aborted', async () => {
+    const aborted = new AbortController();
+    const [, taskProvider] = createDirectReferenceProviders({
+      daemon: daemonA,
+      scope: scopeA,
+      waitForTasks: async () => {
+        aborted.abort();
+      },
+    });
+
+    await expect(taskProvider?.candidates(context('&', 'F12', aborted.signal))).rejects.toThrow();
+  });
+
+  it('answers shouldOpen from the switches, per family, without disabling the rest', () => {
+    const off = {
+      daemon: daemonA,
+      scope: scopeA,
+      suggestions: { mentionSuggestions: false, directReferenceSuggestions: false, skillSuggestions: false },
+    };
+    const ladder = createReferencesProvider(off);
+    const direct = createDirectReferenceProviders(off);
+
+    expect(ladder.shouldOpen?.(match('@', 'src', 1))).toBe(false);
+    expect(ladder.shouldOpen?.(match('@', 'ott', 2))).toBe(false);
+    expect(direct.every(provider => provider.shouldOpen?.(match(provider.trigger, 'x')) === false)).toBe(true);
+    // The same providers with the switches on open everywhere.
+    expect(createReferencesProvider({ daemon: daemonA, scope: scopeA }).shouldOpen?.(match('@', 'ott', 2))).toBe(true);
+    expect(
+      createDirectReferenceProviders({ daemon: daemonA, scope: scopeA }).every(
+        provider => provider.shouldOpen?.(match(provider.trigger, 'x')) === true,
+      ),
+    ).toBe(true);
+  });
+
+  it('builds one provider per trigger, refusing crossed scopes at the boundary', () => {
     expect(
       createComposerAutocompleteProviders({ daemon: daemonA, scope: scopeA }).map(provider => provider.trigger),
-    ).toEqual(['/', '@', '%']);
+    ).toEqual(['/', '$', '@', ':', '&', '!', '%']);
     expect(() => createSkillsProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
+    expect(() => createSkillSigilProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createFilesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createReferencesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
+    expect(() => createDirectReferenceProviders({ daemon: daemonA, scope: scopeB })).toThrow(
+      'composer scope must belong',
+    );
     expect(() => createSurfacesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
   });
 });

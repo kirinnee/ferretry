@@ -3,9 +3,12 @@ import type { AttentionId } from '@ferretry/protocol';
 import should from 'should';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
+  acceptsDirectReferenceQuery,
+  DIRECT_REFERENCE_SIGILS,
   findReferences,
   formatCodeReference,
   formatReference,
+  isReferenceLeftBoundary,
   parseReferenceHref,
   parseReferenceToken,
   REFERENCE_CLOSED_ATTRIBUTE,
@@ -964,6 +967,84 @@ describe('surface references', () => {
 
       // Assert
       should(tree).deepEqual(paragraph('maybe %terminal:live'));
+    });
+  });
+});
+
+describe('the composer-facing half of the grammar', () => {
+  describe('isReferenceLeftBoundary', () => {
+    test('should answer for the same characters the scanner itself accepts', () => {
+      // Act & Assert — nothing before a token is the `^` half of the rule.
+      should(isReferenceLeftBoundary(undefined)).be.true();
+      for (const previous of [' ', '\n', '\t', '(', '[', '{', '"', "'", '`', '<', '>', '=', '—', '–'])
+        should(isReferenceLeftBoundary(previous)).be.true();
+      for (const previous of ['a', 'Z', '9', '_', '-', '.', '/', ':', '&', '!', '$', '@', '%', ',', ';'])
+        should(isReferenceLeftBoundary(previous)).be.false();
+    });
+
+    test('should agree with what findReferences actually links', () => {
+      // Arrange — the decision exists so a picker cannot open where the scanner
+      // refuses, so the two are asserted against each other rather than apart.
+      const prefixes = [' ', '(', 'x', ':', '.', ''];
+
+      for (const prefix of prefixes) {
+        // Act
+        const linked = findReferences(`${prefix}:zelda`).length === 1;
+
+        // Assert
+        should(linked).equal(isReferenceLeftBoundary(prefix === '' ? undefined : prefix));
+      }
+    });
+  });
+
+  describe('acceptsDirectReferenceQuery', () => {
+    test('should name exactly the four sigils that open a family of their own', () => {
+      // Assert — `@`, `%` and `/` are composer triggers, not token prefixes.
+      should([...DIRECT_REFERENCE_SIGILS]).deepEqual([':', '&', '!', '$']);
+    });
+
+    test('should accept every prefix of a complete token, and the bare sigil', () => {
+      // Arrange — a picker decides on half-typed bytes, so each proper prefix of
+      // a real token has to stay viable all the way up to the token itself.
+      const complete: readonly [(typeof DIRECT_REFERENCE_SIGILS)[number], string][] = [
+        [':', 'zelda'],
+        ['&', 'F12'],
+        ['!', 'A31'],
+        ['$', 'summary'],
+      ];
+
+      for (const [sigil, body] of complete)
+        for (let length = 0; length <= body.length; length++) {
+          // Act & Assert
+          should(acceptsDirectReferenceQuery(sigil, body.slice(0, length))).be.true();
+          // And the completed token really is one this grammar parses.
+          should(parseReferenceToken(`${sigil}${body}`)).not.be.null();
+        }
+    });
+
+    test('should refuse a query no token of that family could ever start with', () => {
+      // Act & Assert — `$HOME` is the reason skills are lowercase-only, and
+      // `!a3` is the reason attention is not case-folded.
+      should(acceptsDirectReferenceQuery('$', 'HOME')).be.false();
+      should(acceptsDirectReferenceQuery('$', 'PATH')).be.false();
+      should(acceptsDirectReferenceQuery('!', 'a3')).be.false();
+      should(acceptsDirectReferenceQuery('!', 'B3')).be.false();
+      should(acceptsDirectReferenceQuery('!', 'A0')).be.false();
+      should(acceptsDirectReferenceQuery('&', 'x1')).be.false();
+      should(acceptsDirectReferenceQuery('&', 'F1234567890')).be.false();
+      should(acceptsDirectReferenceQuery(':', '1zelda')).be.false();
+      should(acceptsDirectReferenceQuery(':', 'a'.repeat(33))).be.false();
+    });
+
+    test('should fold case exactly where the token grammar folds it', () => {
+      // Act & Assert — agents and tasks are case-insensitive; attention and
+      // skills are not, and a picker must not offer what the parser refuses.
+      should(acceptsDirectReferenceQuery(':', 'Zelda')).be.true();
+      should(acceptsDirectReferenceQuery('&', 'f12')).be.true();
+      should(acceptsDirectReferenceQuery('$', 'Summary')).be.false();
+      should(parseReferenceToken(':Zelda')).deepEqual({ kind: 'agent', name: 'zelda' });
+      should(parseReferenceToken('&f12')).deepEqual({ kind: 'task', id: 'F12' });
+      should(parseReferenceToken('$Summary')).be.null();
     });
   });
 });
