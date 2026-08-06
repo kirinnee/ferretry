@@ -1,0 +1,101 @@
+/* ---- fy-render -------------------------------------------------------------
+   A quiet instrument panel inside the transcript, not a card competing with it.
+
+   Everything geometric here is a token the rest of the shell already uses, and
+   the block deliberately borrows `.kt-rich-file*` and `.kt-fs-*` wholesale from
+   `files.css`: the source and error states of an illustration should read as the
+   same surface as every other code and note surface in the app, because they
+   are the same thing. What is added below is only what those classes cannot
+   know — the illustration plane's proportions, and the fullscreen overlay.
+
+   NO TOUCH-TARGET OVERRIDE. `.kt-btn--sm` already resolves its height through
+   `max(--control-h-sm-desktop, --target-floor)`, and `--target-floor` is 44px on
+   a coarse pointer. Restating 44px here would inflate desktop density for no
+   gain and put the number in a second place. */
+.fy-render {
+  margin-block: var(--gap-md);
+  border: var(--stroke) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+/* The illustration is the dominant plane: it gets the lighter background and
+   the height, and the caption and controls stay chrome around it. */
+.fy-render-stage {
+  display: flex;
+  min-height: 120px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: var(--stroke) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.fy-render-image {
+  padding: var(--gap-sm);
+}
+
+/* A source-only block has no illustration, so the stage must not reserve room
+   for one: a 120px band of nothing above a note reads as something still
+   loading, which is exactly the wrong thing to say about a declared limitation.
+   Here the note IS the stage, and the source panel below is the dominant plane. */
+.fy-render[data-fy-render-presentation='source'] .fy-render-stage {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* Below the image, not beside it: a caption that competes for the eye is a
+   second title. */
+.fy-render-caption {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* ---- fullscreen ------------------------------------------------------------
+   An in-app overlay rather than the Fullscreen API: `Element.requestFullscreen`
+   is unavailable on iOS Safari, which is a first-class target for this PWA, and
+   an overlay keeps Escape and the focus trap in the app's own single stack
+   (`useDialogFocus`) instead of splitting them between the app and the browser.
+
+   `z-index: 50` is the app's established dialog/sheet layer — the same number
+   `rename-sheet`, `migrate-sheet`, `attachment-unlock-prompt`, the command
+   palette and the context menu use. There is no z-index token in this codebase
+   to read it from, and inventing one here would give a scale its first member
+   and no owner, so the literal matches its peers instead. The layers ABOVE it
+   are deliberate: the bulk-stop confirmation (60), the side pane (70/80) and
+   the portrait gate (200) must all be able to cover an open illustration. */
+.fy-render-fullscreen {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  overflow: auto;
+  padding: var(--pad-panel);
+  background: var(--bg);
+  inset: 0;
+  overscroll-behavior: contain;
+}
+
+.fy-render-fullscreen > .fy-render {
+  flex: 1 1 auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The illustration gets the whole plane here; the transcript-width ceiling from
+   `.kt-rich-file-image` is a reading-column constraint, not one that belongs to
+   a reader who has deliberately asked for the biggest possible view. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-image {
+  max-height: none;
+}

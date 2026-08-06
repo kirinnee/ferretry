@@ -26,24 +26,25 @@ laundered a defect into something every gate was right to pass.
 
 ## Validators
 
-| Script                        | Runs as                                  | Enforces                                                      |
-| ----------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
-| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                                  |
-| `cli-contracts.sh`            | `a-cli-contracts`                        | the 19 workspace/CLI/release contracts below                  |
-| `closed-set-agreement.sh`     | `a-closed-set-agreement`                 | copied cross-package closed sets have identical members       |
-| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                                  |
-| `composition-invocation.sh`   | `a-composition-invocation`               | every constructed composition-root field has a caller         |
-| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root         |
-| `conflict-markers.sh`         | `a-conflict-markers`                     | marker shapes occur only in explicitly declared teaching docs |
-| `contract-registry.sh`        | `a-contract-registry`                    | executable, documented and wired contract inventories agree   |
-| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's        |
-| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                            |
-| `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is used as a value in the PWA      |
-| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths       |
-| `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory |
-| `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree          |
-| `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree     |
-| `typecheck.sh`                | `typecheck`                              | every workspace package participates in the TypeScript build  |
+| Script                        | Runs as                                  | Enforces                                                          |
+| ----------------------------- | ---------------------------------------- | ----------------------------------------------------------------- |
+| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                                      |
+| `cli-contracts.sh`            | `a-cli-contracts`                        | the 19 workspace/CLI/release contracts below                      |
+| `closed-set-agreement.sh`     | `a-closed-set-agreement`                 | copied cross-package closed sets have identical members           |
+| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                                      |
+| `composition-invocation.sh`   | `a-composition-invocation`               | every constructed composition-root field has a caller             |
+| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root             |
+| `conflict-markers.sh`         | `a-conflict-markers`                     | marker shapes occur only in explicitly declared teaching docs     |
+| `contract-registry.sh`        | `a-contract-registry`                    | executable, documented and wired contract inventories agree       |
+| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's            |
+| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                |
+| `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is used as a value in the PWA          |
+| `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their two teaching files |
+| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths           |
+| `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory     |
+| `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree              |
+| `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree         |
+| `typecheck.sh`                | `typecheck`                              | every workspace package participates in the TypeScript build      |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
 
@@ -314,6 +315,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/composition-invocation.sh      # every world field has a caller
 ./scripts/validate/daemon-scope.sh                # no PWA surface reads another daemon's data
 ./scripts/validate/fetch-binding.sh               # no stored fetch builtin can throw "Illegal invocation"
+./scripts/validate/no-fy-render-in-docs.sh        # illustrations stay in conversation, out of durable files
 ./scripts/validate/closed-set-agreement.sh        # copied cross-package enumerations still agree
 ./scripts/validate/contract-registry.sh           # every contract is documented and wired
 ./scripts/validate/route-agreement.sh             # paths, verbs and declared method debt agree

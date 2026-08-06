@@ -18,6 +18,7 @@ export * from '../components/files-resource.ts';
 export * from '../components/files-tab.tsx';
 export * as filesTabModel from '../components/files-tab-model.ts';
 export * from '../components/files-views.tsx';
+export * from '../components/fy-render-block.tsx';
 export * from '../components/input-waveform.tsx';
 export * from '../components/markdown.tsx';
 export * as migrateModel from '../components/migrate-model.ts';
@@ -230,6 +231,10 @@ export * from './drafts.ts';
 export * from './event-transport.ts';
 export * from './fleet-grouping.ts';
 export * from './fleet-store.ts';
+// Namespaced, like the other `*-model` modules: the grammar's `FyRenderBlock`
+// TYPE and `fy-render-block.tsx`'s component share the domain noun, and a flat
+// re-export of both would be an ambiguous member rather than two clear ones.
+export * as fyRender from './fy-render.ts';
 export * from './github-pr.ts';
 export * from './grants.ts';
 export * from './highlight.ts';
