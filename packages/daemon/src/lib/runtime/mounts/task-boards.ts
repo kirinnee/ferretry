@@ -3,6 +3,7 @@ import {
   type TaskBoardChildAccess,
   TaskBoardChildGrantApprovalSchema,
   TaskBoardChildGrantRequestSchema,
+  TaskBoardCoordinatorReplacementSchema,
   TaskBoardCreateRequestSchema,
   type TaskBoardCreateResponse,
   type TaskBoardErrorCode,
@@ -33,9 +34,9 @@ import { isTaskBoardError, TaskBoardError } from '../../task-boards/error.ts';
 import { TaskBoardInvitationService } from '../../task-boards/invitation-service.ts';
 import { TaskBoardMembershipService } from '../../task-boards/membership-service.ts';
 import type {
-  TaskBoardAuthorization,
   TaskBoardCredential,
   TaskBoardCredentialIssuer,
+  TaskBoardMemberAuthorization,
   TaskBoardRepository,
   TaskBoardRepositoryState,
   TaskBoardSession,
@@ -76,7 +77,7 @@ import type {
  * than papered over: the alternative channel, typing an export into a live pane, would write the
  * secret into the terminal transcript the agent later quotes back.
  *
- * WHAT IS DELIBERATELY NOT SERVED, all three for reasons upstream of wiring:
+ * WHAT IS DELIBERATELY NOT SERVED, both for reasons upstream of wiring:
  *
  *   * `POST /mark-done` and `POST /grants/revoke` — THERE IS NO SERVICE. `TaskBoardOperationKind`
  *     names `mark-done.set` and `grant.revoke`, `TaskBoardAuditEvent` names their audit events, and
@@ -86,14 +87,14 @@ import type {
  *     coordinator-replacement perform internally. Mounting these means WRITING the domain, which is a
  *     port rather than a wiring, and a hand-rolled revoke at the route layer would be an
  *     authorization decision made outside the only place that makes them.
- *   * `POST /coordinator/replace` — the service exists and its AUTHORITY MODEL does not fit the wire.
- *     `ReplaceCoordinatorCommand` takes an `administratorSessionId` checked by a
- *     `TaskBoardAdministrator` predicate, so the domain expects a SESSION to hold administrator
- *     authority. The command is authenticated by `FY_BOARD_ADMIN_CAPABILITY` — the human operator,
- *     who is not a session and has no id to put in that field or in the audit entry it becomes.
- *     Choosing what `canAdminister` returns, and whom the replacement is attributed to, is a
- *     deliberate decision about who may take a coordinator's authority away; it is not derivable from
- *     anything in this repository, so it is left rather than guessed.
+ *
+ * `POST /coordinator/replace` USED TO BE A THIRD, and the reason it no longer is names the defect it
+ * was hiding. The mount recorded its authority model as undecided — the command wanted an administrator
+ * SESSION and the wire authenticates the human operator, who is not one. That was never an open design
+ * question: the operator IS a principal, `human_admin`, and the port of the board domain simply dropped
+ * the non-session principal that carried it. Restoring it (`lib/task-boards/types.ts`) makes the route
+ * a wiring again, and the decision it records is truthful: `actorSessionId: null`, `actorName: 'user'`,
+ * rather than a session's name on a human's decision.
  */
 
 /** The environment variable the CLI reads a peer's board capability from. A wire contract with
@@ -174,13 +175,7 @@ function services(issuer: TaskBoardCredentialIssuer): TaskBoardServices {
     creation: new TaskBoardCreationService(),
     children: new TaskBoardChildGrantService(authorization),
     invitations: new TaskBoardInvitationService(authorization, hash),
-    /**
-     * NO SESSION ADMINISTERS A BOARD TODAY, and this mount serves no route that would need one: the
-     * coordinator replacement is not mounted precisely because the wire authenticates an operator
-     * while this predicate expects a session. Answering `false` is the fail-closed statement of that,
-     * so the one method behind it can never be reached through a mounted route by accident.
-     */
-    membership: new TaskBoardMembershipService(authorization, () => false),
+    membership: new TaskBoardMembershipService(authorization),
   };
 }
 
@@ -249,7 +244,7 @@ export interface TaskBoardTaskActionAuthorizer {
     readonly targetSessionId: string;
     readonly capability: string;
     readonly action: TaskBoardAction;
-  }): Promise<TaskBoardAuthorization>;
+  }): Promise<TaskBoardMemberAuthorization>;
 }
 
 export function taskBoardTaskActionAuthorizer(world: TaskBoardSubsystem): TaskBoardTaskActionAuthorizer {
@@ -699,6 +694,54 @@ async function relinquish(subsystem: MountedTaskBoards, context: RouteContext): 
 }
 
 /**
+ * The operator moves a board's coordinator key into another live tree.
+ *
+ * WHY THIS IS AN OPERATOR ROUTE AND NOT A MEMBER ONE. Taking the coordinator's authority away is the
+ * one board decision no member may make about itself: a membership root that could re-appoint the
+ * coordinator governing it would hold both halves of the approval it is supposed to be checked by. The
+ * caller is therefore the non-session principal — proved by the same board admin capability that
+ * creates boards — and the reducer refuses any authorization carrying a session id.
+ *
+ * The body names a MEMBER of the board rather than the board, because that is the address the CLI has:
+ * `sessionId` locates the board through its binding, exactly as every other member-addressed route
+ * does, and `replacementSessionId` is the unbound descendant that becomes the coordinator.
+ */
+async function replaceCoordinator(subsystem: MountedTaskBoards, context: RouteContext): Promise<ApiResponse> {
+  await requireOperator(subsystem, context.request);
+  const request = await parseBody(context.request, TaskBoardCoordinatorReplacementSchema);
+  const at = subsystem.now();
+  const capability = subsystem.issuer.capability();
+  const outcome = await subsystem.repository
+    .transaction(async state => {
+      const sessions = await subsystem.sessions.snapshot();
+      const binding = state.bindings.find(candidate => candidate.sessionId === request.sessionId);
+      if (binding === undefined)
+        throw new TaskBoardError('not-found', `session ${request.sessionId} has no central task-board scope`);
+      return subsystem.services.membership.replaceCoordinator(
+        state,
+        sessions,
+        {
+          boardId: binding.boardId,
+          administrator: subsystem.services.authorization.administrator(state, binding.boardId, 'human_admin'),
+          coordinatorSessionId: request.replacementSessionId,
+          requestId: derivedRequestId(subsystem.issuer, [
+            'coordinator.replace',
+            binding.boardId,
+            request.replacementSessionId,
+          ]),
+          at,
+        },
+        { grantId: subsystem.issuer.id('grant'), capability },
+      );
+    })
+    .catch(reraise);
+  // After the commit, and only to the session the grant was minted for — the same order `create` uses,
+  // for the same reason: a secret must never exist in a pane for a grant that failed to commit.
+  await subsystem.deliver(outcome.membership.sessionId, { [BOARD_CAPABILITY_VARIABLE]: capability.value });
+  return jsonResponse(outcome.membership satisfies TaskBoardMembership);
+}
+
+/**
  * `admin` scope throughout.
  *
  * The bearer token decides whether a request may be served at all; the capability headers above
@@ -779,6 +822,13 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       noStore: true,
       handle: async context => await relinquish(subsystem, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/task-boards/coordinator/replace',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await replaceCoordinator(subsystem, context),
     },
   ];
 }

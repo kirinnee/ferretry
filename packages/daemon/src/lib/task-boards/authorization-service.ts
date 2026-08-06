@@ -9,6 +9,8 @@ import type {
   TaskBoard,
   TaskBoardAuthorization,
   TaskBoardCredential,
+  TaskBoardMemberAuthorization,
+  TaskBoardNonSessionPrincipal,
   TaskBoardRepositoryState,
   TaskBoardSession,
 } from './types.ts';
@@ -17,7 +19,12 @@ export interface CentralTaskScope {
   readonly kind: 'board';
   readonly sessionId: string;
   readonly board: TaskBoard;
-  readonly authorization: TaskBoardAuthorization;
+  /**
+   * A MEMBER's authorization, because a task scope is only ever resolved from a board capability. The
+   * completion record the task mount journals names the peer that acted, so widening this to the
+   * base type would make that name nullable for an actor which can never be a non-session principal.
+   */
+  readonly authorization: TaskBoardMemberAuthorization;
 }
 
 export interface TaskBoardAuthorizationOptions {
@@ -26,8 +33,49 @@ export interface TaskBoardAuthorizationOptions {
 
 export type TaskBoardCapabilityHash = (capability: string) => string;
 
+/**
+ * The grant id a non-session principal's decisions are attributed to.
+ *
+ * It is a NAME, not a grant: no such row exists in any board, nothing can be authorized by presenting
+ * it, and it is never minted. It exists so an applied operation has a stable, readable actor field for
+ * an actor that is not a member.
+ */
+export const TASK_BOARD_OPERATOR_GRANT_ID = 'human-admin';
+
+/** What the audit trail calls the human operator. */
+export const TASK_BOARD_OPERATOR_ACTOR_NAME = 'user';
+
 export class TaskBoardAuthorizationService {
   constructor(private readonly hashCapability: TaskBoardCapabilityHash) {}
+
+  /**
+   * The authorization of a principal that is NOT a session, for one exact board.
+   *
+   * WHAT THIS DOES AND DOES NOT PROVE. It does not authenticate anybody: the board admin capability is
+   * verified where it is presented, in `requireOperator`, exactly as it already is for board creation.
+   * What this owns is the shape of the resulting decision — no session id, no runtime generation, no
+   * borrowed grant, and no action list, because the operator's authority is its ROLE and every action
+   * in `allowedActions` is a member's verb. A reducer that wants an operator must therefore check the
+   * role, and one that wants a member cannot be handed this at all: the member type is narrower.
+   */
+  administrator(
+    state: TaskBoardRepositoryState,
+    boardId: string,
+    principal: TaskBoardNonSessionPrincipal,
+  ): TaskBoardAuthorization {
+    const board = state.boards.find(candidate => candidate.id === boardId);
+    if (board === undefined) throw new TaskBoardError('not-found', 'the task board was not found');
+    return {
+      boardId: board.id,
+      grantId: TASK_BOARD_OPERATOR_GRANT_ID,
+      sessionId: null,
+      role: principal,
+      allowedActions: [],
+      boardEpoch: board.boardEpoch,
+      coordinatorEpoch: board.coordinatorEpoch,
+      runtimeGeneration: null,
+    };
+  }
 
   authorize(
     state: TaskBoardRepositoryState,
@@ -35,7 +83,7 @@ export class TaskBoardAuthorizationService {
     credential: TaskBoardCredential,
     action: TaskBoardAction,
     options: TaskBoardAuthorizationOptions = {},
-  ): TaskBoardAuthorization {
+  ): TaskBoardMemberAuthorization {
     const binding = state.bindings.find(candidate => candidate.sessionId === credential.sessionId);
     if (binding === undefined)
       throw new TaskBoardError('forbidden', 'the session has no explicit task-board membership');
@@ -86,16 +134,33 @@ export class TaskBoardAuthorizationService {
     action: TaskBoardAction,
     options: TaskBoardAuthorizationOptions = {},
   ): CentralTaskScope {
-    const targetBinding = state.bindings.find(candidate => candidate.sessionId === sessionId);
-    if (targetBinding === undefined) {
-      throw new TaskBoardError('not-found', `session ${sessionId} has no central task-board scope`);
-    }
+    /**
+     * THE ACTOR IS AUTHORIZED FIRST, and the order is load-bearing rather than tidy. A target may now
+     * be a session with no binding at all — a retired one — so a caller who asked about an arbitrary
+     * id before proving its own membership would learn which sessions this daemon has retired. Proving
+     * the actor first makes every answer below a statement to somebody already on the board.
+     */
     const authorization = this.authorize(state, sessions, credential, action, options);
-    if (authorization.boardId !== targetBinding.boardId) {
-      throw new TaskBoardError('forbidden', 'the actor does not belong to the target task board');
-    }
     const board = state.boards.find(candidate => candidate.id === authorization.boardId);
     if (board === undefined) throw new TaskBoardError('unavailable', 'the authoritative task board is unavailable');
+    const targetBinding = state.bindings.find(candidate => candidate.sessionId === sessionId);
+    if (targetBinding !== undefined) {
+      /**
+       * A live binding wins outright, and it wins even when the target is ALSO retired here: a session
+       * that took membership somewhere else is that board's member, and a stale retirement entry on
+       * this one must never reach across.
+       */
+      if (targetBinding.boardId !== board.id)
+        throw new TaskBoardError('forbidden', 'the actor does not belong to the target task board');
+      return { kind: 'board', sessionId, board, authorization };
+    }
+    /**
+     * Retired on THIS board, so its tasks stayed where they were when its tree retired. A retired id
+     * is a target and never an actor: it names no capability and holds no binding, so `authorize`
+     * above refuses it outright if it ever tries to act.
+     */
+    if (!board.retiredSessionIds.includes(sessionId))
+      throw new TaskBoardError('not-found', `session ${sessionId} has no central task-board scope`);
     return { kind: 'board', sessionId, board, authorization };
   }
 }

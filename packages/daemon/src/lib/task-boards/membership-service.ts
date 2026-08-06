@@ -1,5 +1,5 @@
 import type { TaskBoardMembership, TaskBoardRelinquishResponse } from '@ferretry/protocol';
-import type { TaskBoardAuthorizationService } from './authorization-service.ts';
+import { TASK_BOARD_OPERATOR_ACTOR_NAME, type TaskBoardAuthorizationService } from './authorization-service.ts';
 import {
   appendTaskBoardAudit,
   bindingForGrant,
@@ -10,9 +10,15 @@ import {
   taskBoardFingerprint,
 } from './domain-helpers.ts';
 import { TaskBoardError } from './error.ts';
-import { CURRENT_COORDINATOR_ACTIONS, isCurrentCoordinator, sessionLineage } from './policy.ts';
+import {
+  CURRENT_COORDINATOR_ACTIONS,
+  isCurrentCoordinator,
+  liveMembershipRootGrant,
+  sessionLineage,
+} from './policy.ts';
 import type {
   TaskBoard,
+  TaskBoardAuthorization,
   TaskBoardCredential,
   TaskBoardGrant,
   TaskBoardMutation,
@@ -29,8 +35,14 @@ export interface RelinquishMembershipCommand {
 
 export interface ReplaceCoordinatorCommand {
   readonly boardId: string;
-  readonly administratorSessionId: string;
-  readonly replacementSessionId: string;
+  /**
+   * The principal taking the coordinator's authority away. It is a non-session principal by
+   * construction: the operator holds the board admin capability, and no member of a board — not even a
+   * membership root — may re-appoint the coordinator that governs it.
+   */
+  readonly administrator: TaskBoardAuthorization;
+  /** The unbound live descendant of a live membership root which becomes the new coordinator. */
+  readonly coordinatorSessionId: string;
   readonly requestId: string;
   readonly at: string;
 }
@@ -42,7 +54,20 @@ export interface ReplaceCoordinatorMaterial {
 
 export type CoordinatorReplacementResult = { readonly replaced: true; readonly membership: TaskBoardMembership };
 
-export type TaskBoardAdministrator = (boardId: string, sessionId: string) => boolean;
+/**
+ * Board-owned, append-only and deduplicated: a session retires once and stays retired.
+ *
+ * Retirement is not the inverse of membership and cannot be derived from the grants — a revoked grant
+ * says the session may not ACT, while this list says its tasks are still addressable BY the board. The
+ * two answers differ for exactly the sessions a handover retires, which is why the fact is stored.
+ */
+function withRetiredSessions(existing: readonly string[], retiring: readonly string[]): readonly string[] {
+  const retired = [...existing];
+  for (const sessionId of retiring) {
+    if (!retired.includes(sessionId)) retired.push(sessionId);
+  }
+  return retired;
+}
 
 function requireBoard(state: TaskBoardRepositoryState, boardId: string): TaskBoard {
   const board = state.boards.find(candidate => candidate.id === boardId);
@@ -63,10 +88,7 @@ function refreshBindings(
 }
 
 export class TaskBoardMembershipService {
-  constructor(
-    private readonly authorization: TaskBoardAuthorizationService,
-    private readonly canAdminister: TaskBoardAdministrator,
-  ) {}
+  constructor(private readonly authorization: TaskBoardAuthorizationService) {}
 
   relinquish(
     state: TaskBoardRepositoryState,
@@ -121,6 +143,18 @@ export class TaskBoardMembershipService {
         .filter(candidate => candidate.active && candidate.membershipRootSessionId === grant.sessionId)
         .map(candidate => candidate.id),
     );
+    /**
+     * Every session this tree ever held, not merely the ones still active. A coordinator replaced one
+     * phase earlier is already revoked by the time the old root relinquishes, and it is precisely the
+     * session whose tasks a reader is most likely to want afterwards; retiring only the live grants
+     * would drop it.
+     */
+    const retiredSessionIds = withRetiredSessions(board.retiredSessionIds, [
+      grant.sessionId,
+      ...board.grants
+        .filter(candidate => candidate.membershipRootSessionId === grant.sessionId)
+        .map(candidate => candidate.sessionId),
+    ]);
     const grants = board.grants.map(candidate => {
       if (revokedIds.has(candidate.id))
         return {
@@ -137,6 +171,7 @@ export class TaskBoardMembershipService {
       boardEpoch,
       mutationGeneration: board.mutationGeneration + 1,
       grants,
+      retiredSessionIds,
       appliedOperations: [
         ...board.appliedOperations,
         {
@@ -157,7 +192,7 @@ export class TaskBoardMembershipService {
       requestId,
       actorSessionId: authorization.sessionId,
       outcome: 'applied',
-      detail: { revokedGrantCount: revokedIds.size },
+      detail: { revokedGrantCount: revokedIds.size, retiredSessionCount: retiredSessionIds.length },
     });
     return {
       state: replaceTaskBoard(state, updated, {
@@ -175,13 +210,26 @@ export class TaskBoardMembershipService {
   ): TaskBoardMutation<CoordinatorReplacementResult> {
     const requestId = requireTaskBoardRequestId(command.requestId);
     const board = requireBoard(state, command.boardId);
-    if (!this.canAdminister(board.id, command.administratorSessionId))
-      throw new TaskBoardError('forbidden', 'coordinator replacement requires explicit board administrator authority');
-    const replacement = requireTaskBoardSession(sessions, command.replacementSessionId);
+    /**
+     * The authority is the PRINCIPAL, re-checked here rather than trusted from the caller. A member's
+     * authorization can never satisfy this: it carries a session id and one of the member roles, and
+     * both are wrong here. That is what stops a board capability — including a root's — from reaching
+     * the one operation that could hand the board's approval key to another tree.
+     */
+    const administrator = command.administrator;
+    if (
+      (administrator.role !== 'human_admin' && administrator.role !== 'daemon') ||
+      administrator.sessionId !== null ||
+      administrator.runtimeGeneration !== null ||
+      administrator.boardId !== board.id
+    ) {
+      throw new TaskBoardError('forbidden', 'coordinator replacement requires the board operator principal');
+    }
+    const replacement = requireTaskBoardSession(sessions, command.coordinatorSessionId);
     const fingerprint = taskBoardFingerprint([
       'coordinator.replace',
       board.id,
-      command.administratorSessionId,
+      administrator.role,
       replacement.id,
       replacement.incarnation,
       replacement.runtimeGeneration,
@@ -196,21 +244,33 @@ export class TaskBoardMembershipService {
       return { state, result: { replaced: true, membership: membershipForGrant(grant) } };
     }
     const lineage = sessionLineage(sessions, replacement.id);
-    const roots = board.grants.filter(
-      candidate =>
-        candidate.active && candidate.role === 'top_agent' && candidate.membershipRootSessionId === candidate.sessionId,
-    );
-    const root = lineage === null ? undefined : roots.find(candidate => lineage.slice(1).includes(candidate.sessionId));
+    /**
+     * The tree the new coordinator is re-homed into must be LIVE, not merely un-revoked: its root has
+     * to resolve to a running session at the grant's exact incarnation and runtime generation, and to
+     * still hold a current binding. A root grant outlives the pane it was written for, and a
+     * coordinator rooted in a tree that has already stopped is a board whose only approval key belongs
+     * to nobody. During a two-root handover this is also what puts the key in the surviving tree: name
+     * a descendant of the retiring root and the relinquish that follows revokes it.
+     */
+    const root =
+      lineage === null
+        ? null
+        : (lineage
+            .slice(1)
+            .map(ancestor =>
+              liveMembershipRootGrant({ board, bindings: state.bindings, sessions, sessionId: ancestor }),
+            )
+            .find(candidate => candidate !== null) ?? null);
     if (
       !replacement.active ||
       replacement.parentSessionId === null ||
       lineage === null ||
-      root === undefined ||
+      root === null ||
       state.bindings.some(binding => binding.sessionId === replacement.id)
     ) {
       throw new TaskBoardError(
         'forbidden',
-        'the replacement coordinator must be an unbound live descendant of exactly one membership root',
+        'the replacement coordinator must be an unbound live descendant of exactly one live membership root',
       );
     }
     const previous = board.grants.find(candidate => candidate.id === board.coordinatorGrantId);
@@ -234,7 +294,7 @@ export class TaskBoardMembershipService {
       coordinatorEpoch,
       active: true,
       grantedAt: command.at,
-      grantedBySessionId: command.administratorSessionId,
+      grantedBySessionId: null,
     };
     const grants = [
       ...board.grants.map(candidate =>
@@ -243,7 +303,7 @@ export class TaskBoardMembershipService {
               ...candidate,
               active: false,
               revokedAt: command.at,
-              revokedBySessionId: command.administratorSessionId,
+              revokedBySessionId: null,
               revokeReason: 'coordinator replaced',
             }
           : candidate.active
@@ -272,14 +332,26 @@ export class TaskBoardMembershipService {
       grants,
       childGrantIntents: refusedIntents,
       invitations: refusedInvitations,
+      /**
+       * The outgoing coordinator retires in the SAME write that revokes it. Doing it here rather than
+       * leaving it to the later relinquish is the whole point: between the two there is otherwise an
+       * interval in which the old coordinator holds no binding and appears on no board, and its tasks
+       * are addressable by nobody.
+       */
+      retiredSessionIds: withRetiredSessions(board.retiredSessionIds, [previous.sessionId]),
       appliedOperations: [
         ...board.appliedOperations,
         {
           requestId,
           kind: 'coordinator.replace',
           fingerprint,
-          actorSessionId: command.administratorSessionId,
-          actorGrantId: null,
+          /**
+           * The operator is not a session and gets no session's name. `actorGrantId` carries the
+           * principal's own id rather than the root's: the root did not decide this, it is only where
+           * the new coordinator was re-homed.
+           */
+          actorSessionId: null,
+          actorGrantId: administrator.grantId,
           actorRuntimeGeneration: null,
           resultGrantId: coordinator.id,
           resultSessionId: replacement.id,
@@ -291,9 +363,10 @@ export class TaskBoardMembershipService {
       at: command.at,
       event: 'coordinator.replaced',
       requestId,
-      actorSessionId: command.administratorSessionId,
+      actorSessionId: null,
+      actorName: administrator.role === 'human_admin' ? TASK_BOARD_OPERATOR_ACTOR_NAME : 'daemon',
       outcome: 'applied',
-      detail: { replacementSessionId: replacement.id },
+      detail: { coordinatorSessionId: replacement.id, membershipRootSessionId: root.sessionId },
     });
     return {
       state: replaceTaskBoard(state, updated, {

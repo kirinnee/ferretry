@@ -216,19 +216,17 @@
 #     would have dropped `now`, `deliver` and `operatorCapabilityHash` onto the floor for any world
 #     supplied as an instance rather than a literal.
 #
-# THREE ROUTES ARE STILL NOT SERVED, and none of them is a wiring:
+# TWO ROUTES ARE STILL NOT SERVED, and neither of them is a wiring:
 #   * `POST /mark-done` and `POST /grants/revoke` — NO REDUCER EXISTS. `TaskBoardOperationKind` names
 #     `mark-done.set` and `grant.revoke`, the audit events name them, the protocol declares both
 #     request and response schemas, and nothing in `src/lib/task-boards` implements either. The only
 #     revocations that exist are the ones relinquish and coordinator-replacement perform internally.
 #     Mounting these means PORTING the domain.
-#   * `POST /coordinator/replace` — the reducer exists and its authority model does not fit the wire.
-#     `ReplaceCoordinatorCommand` takes an `administratorSessionId` checked by a
-#     `TaskBoardAdministrator` predicate, so the domain expects a SESSION to hold administrator
-#     authority; the command is authenticated by the OPERATOR, who is not a session and has no id for
-#     that field or for the audit entry it becomes. Deciding who may take a coordinator's authority
-#     away is a security decision, not a wiring one, so the mount passes a predicate that answers
-#     `false` and serves no route that reaches it.
+#   `POST /coordinator/replace` was a third until the missing principal was restored. Its authority
+#   model was recorded as undecided because the command wanted an administrator SESSION while the wire
+#   authenticates the human operator; the operator is simply a non-session principal (`human_admin`),
+#   which the port of this domain had dropped. With it back the route is a wiring, it is served, and
+#   its audit entry names `actorSessionId: null` / `actorName: user` instead of a borrowed session.
 #
 # ONE LIMITATION IN THE PRODUCT, stated because it is not obvious from the routes. A capability is
 # delivered through the session's ENVIRONMENT STORE — the seam that already carries

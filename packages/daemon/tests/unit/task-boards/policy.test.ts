@@ -11,6 +11,7 @@ import {
   isAcceptedInvitationMembership,
   isCapabilityBoundToSession,
   isInvitationProofBoundToSession,
+  liveMembershipRootGrant,
   sameTaskBoardActions,
   sessionLineage,
 } from '../../../src/lib/task-boards/policy.ts';
@@ -84,6 +85,7 @@ function board(input: Partial<TaskBoard> = {}): TaskBoard {
     invitations: input.invitations ?? [],
     appliedOperations: input.appliedOperations ?? [],
     audit: input.audit ?? [],
+    retiredSessionIds: input.retiredSessionIds ?? [],
     createdAt: input.createdAt ?? at,
     updatedAt: input.updatedAt ?? at,
   };
@@ -443,6 +445,103 @@ describe('membership-widening policy', () => {
       coordinatorMayRequest: false,
       coordinatorMayApprove: true,
       wardenMayWiden: false,
+    });
+  });
+});
+
+/**
+ * A live membership root: the tree a coordinator may be re-homed into.
+ *
+ * A grant row outlives the pane it was written for — nothing revokes it when a session dies — so every
+ * case here is a way "an active root grant" and "a root that is actually there" come apart. Handing the
+ * board's only approval key to a descendant of a stopped tree would leave nobody able to approve
+ * anything, which is the outage this walk exists to prevent.
+ */
+describe('the live membership root grant', () => {
+  const ROOT_SESSION = session({ id: 'root' });
+
+  function bindingFor(subject: TaskBoard, grantId: string, identity: TaskBoardSession): TaskBoardBinding {
+    const held = subject.grants.find(candidate => candidate.id === grantId);
+    if (held === undefined) throw new Error(`test fixture is missing ${grantId}`);
+    return {
+      boardId: subject.id,
+      grantId: held.id,
+      sessionId: identity.id,
+      sessionIncarnation: identity.incarnation,
+      runtimeGeneration: identity.runtimeGeneration,
+      capability: `secret:${grantId}`,
+      role: held.role,
+      allowedActions: held.allowedActions,
+      boardEpoch: subject.boardEpoch,
+      coordinatorEpoch: subject.coordinatorEpoch,
+      updatedAt: at,
+    };
+  }
+
+  function resolve(
+    overrides: {
+      readonly grants?: readonly TaskBoardGrant[];
+      readonly session?: TaskBoardSession | null;
+      readonly bindings?: (subject: TaskBoard) => readonly TaskBoardBinding[];
+    } = {},
+  ): string | null {
+    const subject = board(overrides.grants === undefined ? {} : { grants: overrides.grants });
+    const identity = overrides.session === undefined ? ROOT_SESSION : overrides.session;
+    return (
+      liveMembershipRootGrant({
+        board: subject,
+        bindings: (overrides.bindings ?? (candidate => [bindingFor(candidate, 'grant-root', ROOT_SESSION)]))(subject),
+        sessions: identity === null ? [] : [identity],
+        sessionId: 'root',
+      })?.id ?? null
+    );
+  }
+
+  it('should resolve a root only while its session, its grant and its binding all still agree', () => {
+    // Arrange + Act
+    const actual = {
+      liveBoundRoot: resolve(),
+      unknownSession: resolve({ session: null }),
+      stoppedSession: resolve({ session: { ...ROOT_SESSION, active: false } }),
+      revivedSession: resolve({ session: { ...ROOT_SESSION, runtimeGeneration: 2 } }),
+      reincarnatedSession: resolve({ session: { ...ROOT_SESSION, incarnation: 'root-later' } }),
+      revokedGrant: resolve({
+        grants: board().grants.map(candidate =>
+          candidate.id === 'grant-root' ? { ...candidate, active: false } : candidate,
+        ),
+      }),
+      notItsOwnRoot: resolve({
+        grants: board().grants.map(candidate =>
+          candidate.id === 'grant-root' ? { ...candidate, membershipRootSessionId: 'elsewhere' } : candidate,
+        ),
+      }),
+      notATopAgent: resolve({
+        grants: board().grants.map(candidate =>
+          candidate.id === 'grant-root' ? { ...candidate, role: 'coordinator' as const } : candidate,
+        ),
+      }),
+      unbound: resolve({ bindings: () => [] }),
+      staleBindingEpoch: resolve({
+        bindings: subject => [{ ...bindingFor(subject, 'grant-root', ROOT_SESSION), boardEpoch: 2 }],
+      }),
+      bindingOfAnotherBoard: resolve({
+        bindings: subject => [{ ...bindingFor(subject, 'grant-root', ROOT_SESSION), boardId: 'board-2' }],
+      }),
+    };
+
+    // Assert — one resolution, and every disagreement is a refusal rather than a best effort.
+    should(actual).deepEqual({
+      liveBoundRoot: 'grant-root',
+      unknownSession: null,
+      stoppedSession: null,
+      revivedSession: null,
+      reincarnatedSession: null,
+      revokedGrant: null,
+      notItsOwnRoot: null,
+      notATopAgent: null,
+      unbound: null,
+      staleBindingEpoch: null,
+      bindingOfAnotherBoard: null,
     });
   });
 });

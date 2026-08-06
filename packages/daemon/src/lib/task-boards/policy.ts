@@ -195,6 +195,54 @@ export function hasExplicitInvitationAuthority(
   return isCurrentCoordinator(board, grant) && grant.allowedActions.includes('invite_approve');
 }
 
+/**
+ * The membership root grant of a session that is STILL THERE — active on the board and active in the
+ * session directory, at the exact incarnation and runtime generation the grant was written for.
+ *
+ * A board row outlives the session it describes: nothing revokes a grant when a pane dies, which is why
+ * `isCapabilityBoundToSession` re-checks liveness on every authenticated call. Coordinator replacement
+ * presents no member capability at all — the operator's authority is not a session's — so the tree it
+ * re-homes the coordinator into has to be proved live HERE, or a succession would hand the board's only
+ * approval key to a descendant of a root that stopped hours ago.
+ */
+export function liveMembershipRootGrant(input: {
+  readonly board: TaskBoard;
+  readonly bindings: readonly TaskBoardBinding[];
+  readonly sessions: readonly TaskBoardSession[];
+  readonly sessionId: string;
+}): TaskBoardGrant | null {
+  const { board, bindings, sessions, sessionId } = input;
+  const session = sessionById(sessions, sessionId);
+  if (session === null || !session.active) return null;
+  const grant =
+    board.grants.find(
+      candidate =>
+        candidate.active &&
+        candidate.role === 'top_agent' &&
+        candidate.sessionId === sessionId &&
+        candidate.membershipRootSessionId === sessionId &&
+        candidate.sessionIncarnation === session.incarnation &&
+        candidate.runtimeGeneration === session.runtimeGeneration,
+    ) ?? null;
+  if (grant === null) return null;
+  /**
+   * A grant with no CURRENT binding is a root that cannot act: the binding is where its capability
+   * lives, and `refreshBindings` drops one the moment its grant or its epochs go stale. Requiring it
+   * here is what makes "an active root" mean "a root that could make this call itself".
+   */
+  const bound = bindings.some(
+    binding =>
+      binding.boardId === board.id &&
+      binding.grantId === grant.id &&
+      binding.sessionId === sessionId &&
+      binding.sessionIncarnation === session.incarnation &&
+      binding.runtimeGeneration === session.runtimeGeneration &&
+      binding.boardEpoch === board.boardEpoch &&
+      binding.coordinatorEpoch === board.coordinatorEpoch,
+  );
+  return bound ? grant : null;
+}
+
 /** Wardens may observe/recover runtime state, but can never widen membership. */
 export function canWardenWidenBoardMembership(): false {
   return false;

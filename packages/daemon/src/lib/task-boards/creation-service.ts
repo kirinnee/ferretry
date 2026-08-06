@@ -139,6 +139,7 @@ export class TaskBoardCreationService {
       invitations: [],
       appliedOperations: [],
       audit: [],
+      retiredSessionIds: [],
       createdAt: command.at,
       updatedAt: command.at,
     };

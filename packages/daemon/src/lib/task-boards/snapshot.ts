@@ -173,6 +173,8 @@ const AuditEntrySchema = z.strictObject({
   ]),
   requestId: z.string().min(1),
   actorSessionId: z.string().min(1).nullable(),
+  /** Optional because only a non-session principal has one; every older entry has none. */
+  actorName: z.string().min(1).optional(),
   outcome: z.enum(['applied', 'replayed', 'denied']),
   detail: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
 });
@@ -212,6 +214,15 @@ const BoardSchema = z.strictObject({
   invitations: z.array(InvitationSchema),
   appliedOperations: z.array(AppliedOperationSchema),
   audit: z.array(AuditEntrySchema),
+  /**
+   * Defaulted rather than required, and this is the ONE place in the document where that is the
+   * fail-closed direction. Every board written before succession existed has no such key, and an
+   * empty list is exactly what those documents mean: nobody has retired yet. A required field would
+   * make the whole document refuse to parse — the refusal this codec's header argues for — over an
+   * absence that widens nothing. A retired id is only ever a target, so defaulting it to empty
+   * grants no access that was not already granted.
+   */
+  retiredSessionIds: z.array(z.string().min(1)).default([]),
   createdAt: InstantSchema,
   updatedAt: InstantSchema,
 });

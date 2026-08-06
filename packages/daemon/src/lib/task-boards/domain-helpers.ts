@@ -65,6 +65,7 @@ export function appendTaskBoardAudit(
     readonly event: TaskBoardAuditEvent;
     readonly requestId: string;
     readonly actorSessionId: string | null;
+    readonly actorName?: string;
     readonly outcome: TaskBoardAuditEntry['outcome'];
     readonly detail?: TaskBoardAuditEntry['detail'];
   },
@@ -75,6 +76,9 @@ export function appendTaskBoardAudit(
     event: input.event,
     requestId: input.requestId,
     actorSessionId: input.actorSessionId,
+    // Spread rather than assigned: an entry for a member carries no key at all, so a reader cannot
+    // mistake an absent name for an empty one.
+    ...(input.actorName === undefined ? {} : { actorName: input.actorName }),
     outcome: input.outcome,
     detail: input.detail ?? {},
   };

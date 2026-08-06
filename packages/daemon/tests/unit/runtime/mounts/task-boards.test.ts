@@ -834,6 +834,69 @@ describe('the task board membership mount, at its edges', () => {
     should(jsonBody(response).error).match(/the invitation was not accepted: it is expired/u);
   });
 
+  it('should let the operator move the coordinator key, and deliver it only to the new coordinator', async () => {
+    // Arrange
+    const world = await withBoard();
+    const before = world.capabilityFor('coordinator');
+
+    // Act — `root` names the board; `grandchild` is an unbound descendant of the same live root.
+    const response = await post(
+      world,
+      '/coordinator/replace',
+      { sessionId: 'root', replacementSessionId: 'grandchild' },
+      operator(world),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    const body = TaskBoardMembershipSchema.parse(jsonBody(response));
+    should(body).match({ sessionId: 'grandchild', role: 'coordinator' });
+    // The secret went to the new coordinator's environment and to nobody else's, and the response
+    // carries no capability at all.
+    should(world.delivered.at(-1)?.[0]).equal('grandchild');
+    should(JSON.stringify(body)).not.match(/[0-9a-f]{32}/u);
+    // The old key is fenced: the previous coordinator can no longer approve anything.
+    const refused = await post(world, '/child-grants/approve', { grantRequestId: 'anything' }, peer(before ?? ''));
+    should(refused.status).equal(403);
+  });
+
+  it('should refuse a coordinator replacement that presents no operator capability', async () => {
+    // Arrange
+    const world = await withBoard();
+
+    // Act — a member's own board capability is not the operator's, whatever its role.
+    const missing = await post(world, '/coordinator/replace', {
+      sessionId: 'root',
+      replacementSessionId: 'grandchild',
+    });
+    const member = await post(
+      world,
+      '/coordinator/replace',
+      { sessionId: 'root', replacementSessionId: 'grandchild' },
+      { 'x-fy-board-admin-capability': world.capabilityFor('root') ?? '' },
+    );
+
+    // Assert
+    should(missing.status).equal(401);
+    should(member.status).equal(403);
+  });
+
+  it('should report a coordinator replacement naming a session on no board as not found', async () => {
+    // Arrange
+    const world = await withBoard();
+
+    // Act
+    const response = await post(
+      world,
+      '/coordinator/replace',
+      { sessionId: 'outsider', replacementSessionId: 'grandchild' },
+      operator(world),
+    );
+
+    // Assert
+    should(response.status).equal(404);
+  });
+
   it('should not disguise a defect as a domain refusal', async () => {
     // Arrange — anything that is not a `TaskBoardError` is a bug in the daemon rather than an answer a
     // client can act on, so it must not be flattened into a 4xx.

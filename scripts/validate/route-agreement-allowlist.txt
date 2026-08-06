@@ -59,11 +59,10 @@ unserved PATCH /v1/sessions/*/terminals/* # DEFECT: the PWA renames a terminal w
 
 # `FyTaskBoardGateway` dials `${TASK_BOARD_ROUTE_PREFIX}${path}` where `path` is destructured out of a
 # twelve-arm switch whose arms return `{ path: '/create', … }`. All twelve arms are READ, so these are
-# the three exact suffixes nothing serves — not one aggregate `/v1/task-boards*` line standing in for
+# the two exact suffixes nothing serves — not one aggregate `/v1/task-boards*` line standing in for
 # twelve addresses. That aggregate also absorbed the nine arms that DO have a route, so any of them could
 # be renamed with this gate green, and a thirteenth arm would have been absorbed on the day it landed.
 unserved * /v1/task-boards/mark-done # DEFECT: the CLI dials it; packages/daemon serves no such route
-unserved * /v1/task-boards/coordinator/replace # DEFECT: the CLI dials it; packages/daemon serves no such route
 unserved * /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages/daemon serves no such route
 
 # `FyApiClient.#post` builds `/v1/sessions/${id}/${action}` and nine sites in its own file pass `action`
@@ -118,6 +117,7 @@ verb-unproven POST /v1/task-boards/invitations/approve # ANALYSIS: fy-task-board
 verb-unproven POST /v1/task-boards/invitations/accept # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
 verb-unproven POST /v1/task-boards/invitations/verify # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
 verb-unproven POST /v1/task-boards/membership/relinquish # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
+verb-unproven POST /v1/task-boards/coordinator/replace # ANALYSIS: fy-task-board-gateway.ts:60 ternary init, POST arm
 
 # The path is wrapped in a path-COMPOSING helper — `withPath(filesystemPath(id), path)` — so the init
 # sits on the outer `client.request(…)` call, one level further out than the expression being read.
