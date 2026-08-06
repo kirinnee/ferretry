@@ -23,17 +23,17 @@
  * `DaemonId`, so a row cannot deep-link into a different paired daemon.
  */
 
-import { Bot, FileText, GitPullRequest, TriangleAlert } from 'lucide-react';
 import type { TaskBoardLane, TaskSummary } from '@ferretry/protocol';
-import type { DaemonId } from '../../lib/daemon-connection.ts';
+import { Bot, FileText, GitPullRequest, TriangleAlert } from 'lucide-react';
 import { cn } from '../../lib/class-names.ts';
+import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { parseGithubPr } from '../../lib/github-pr.ts';
 import { Badge, Label } from '../../shell/primitives.tsx';
 import { TaskAssigneeLink } from './task-assignee-link.tsx';
 import {
+  absoluteTimestamp,
   type TaskAskOrigin,
   type TaskFileConflict,
-  absoluteTimestamp,
   taskAskOrigin,
   taskBoardLane,
   taskBoardState,
@@ -59,6 +59,8 @@ export interface TaskRowProps {
   /** Human-facing completion is offered only for work awaiting live verification. */
   readonly onMarkDone?: (task: TaskSummary) => void;
   readonly markingDone?: boolean;
+  /** Puts this proved board task into the current session's composer draft. */
+  readonly onAddToChat?: (task: TaskSummary) => void;
 }
 
 export function TaskRow({
@@ -73,6 +75,7 @@ export function TaskRow({
   showAskOriginMarker = true,
   onMarkDone,
   markingDone = false,
+  onAddToChat,
 }: TaskRowProps) {
   const lane = taskBoardLane(task.phase);
   const boardState = taskBoardState(task);
@@ -152,18 +155,31 @@ export function TaskRow({
           )}
         </span>
       </button>
-      {onMarkDone !== undefined && task.phase === 'live' ? (
-        <div className="mt-1 flex justify-end">
-          <button
-            aria-label={`Mark ${taskReference(task.id)} done`}
-            className="kt-btn kt-btn--sm"
-            data-variant="primary"
-            disabled={markingDone}
-            onClick={() => onMarkDone(task)}
-            type="button"
-          >
-            {markingDone ? 'Marking done…' : 'Mark done'}
-          </button>
+      {onAddToChat !== undefined || (onMarkDone !== undefined && task.phase === 'live') ? (
+        <div className="mt-1 flex flex-wrap justify-end gap-1.5">
+          {onAddToChat !== undefined ? (
+            <button
+              aria-label={`Add ${taskReference(task.id)} to chat`}
+              className="kt-btn kt-btn--sm"
+              onClick={() => onAddToChat(task)}
+              title={`Use ${taskReference(task.id)} in this session's message`}
+              type="button"
+            >
+              Add to chat
+            </button>
+          ) : null}
+          {onMarkDone !== undefined && task.phase === 'live' ? (
+            <button
+              aria-label={`Mark ${taskReference(task.id)} done`}
+              className="kt-btn kt-btn--sm"
+              data-variant="primary"
+              disabled={markingDone}
+              onClick={() => onMarkDone(task)}
+              type="button"
+            >
+              {markingDone ? 'Marking done…' : 'Mark done'}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {(showAssignee || pr !== null) && (

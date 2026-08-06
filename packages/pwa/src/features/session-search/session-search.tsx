@@ -10,6 +10,7 @@
  */
 
 import {
+  FY_REQUEST_ID_HEADER,
   ScopedTaskDetailResponseSchema,
   ScopedTaskSummarySchema,
   type ScopedTaskView,
@@ -20,10 +21,12 @@ import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { type FsListing, fsApi } from '../../components/files-api.ts';
 import { SessionTaskKanban, SessionTaskList } from '../../components/session-tasks.tsx';
+import { taskReference } from '../../features/tasks/task-board-model.ts';
 import { TaskQuickSummary } from '../../features/tasks/task-row.tsx';
 import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
+import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
 
 export type SessionSearchResourceState = 'loading' | 'ready' | 'unavailable';
@@ -63,6 +66,32 @@ const INITIAL: SearchSnapshot = {
   tasks: [],
   files: [],
 };
+
+/**
+ * A snapshot CARRIES the session it describes.
+ *
+ * The snapshot used to be a bare piece of state cleared by the load effect. That
+ * made the scope prop and the evidence two facts with two update schedules: a
+ * render published the new scope immediately while the effect that clears the
+ * old evidence is passive, so one committed render paired daemon beta's scope
+ * with daemon alpha's ready task list. Everything downstream then read that pair
+ * as the truth — the reference surface proved `&F6` against a session that has
+ * no F6, and an Add to chat or Mark Done fired in that window addressed beta
+ * with a task it took from alpha.
+ *
+ * Keying it makes the mismatch unrepresentable rather than merely brief: the
+ * render derives INITIAL whenever the stored key is not the key being rendered,
+ * so "we have not read THIS session yet" is a synchronous consequence of the
+ * scope rather than the outcome of an effect that has not run.
+ */
+interface KeyedSnapshot {
+  /** `daemonSessionKey(scope)`, or `''` for no scope — never a real key. */
+  readonly key: string;
+  readonly snapshot: SearchSnapshot;
+}
+
+/** The key a scope's evidence is filed under. `null` gets one no scope can equal. */
+const snapshotKey = (scope: DaemonSessionScope | null): string => (scope === null ? '' : daemonSessionKey(scope));
 
 const taskText = (task: ScopedTaskView): string =>
   [
@@ -194,26 +223,42 @@ export function SessionSearchProvider({
   readonly focusSignal: number;
   readonly children: ReactNode;
 }) {
-  const [snapshot, setSnapshot] = useState<SearchSnapshot>(INITIAL);
+  const [stored, setStored] = useState<KeyedSnapshot>({ key: '', snapshot: INITIAL });
   const [query, setQuery] = useState('');
   const openers = useRef<SessionSearchOpeners | null>(null);
+  const key = snapshotKey(scope);
+  // DERIVED, not cleared. Evidence filed under another session is not this
+  // session's evidence, and this is the line that says so during the very render
+  // that publishes the new scope.
+  const snapshot = stored.key === key ? stored.snapshot : INITIAL;
+
+  // Every async completion publishes to the key that STARTED it, and builds on
+  // that key's own snapshot — never on whatever happens to be stored. A read
+  // that finishes after the reader moved on can therefore only ever write under
+  // the session it asked about.
+  const publish = useCallback((forKey: string, update: (current: SearchSnapshot) => SearchSnapshot): void => {
+    setStored(current => ({
+      key: forKey,
+      snapshot: update(current.key === forKey ? current.snapshot : INITIAL),
+    }));
+  }, []);
 
   useEffect(() => {
     setQuery('');
-    if (scope === null) {
-      setSnapshot(INITIAL);
-      return;
-    }
+    if (scope === null) return;
     const controller = new AbortController();
-    setSnapshot(INITIAL);
+    // No `setStored(INITIAL)` here: the loading state for a session this
+    // provider has not read yet is already what `snapshot` derives above, and
+    // writing it would be a second, later answer to the same question.
+    const forKey = daemonSessionKey(scope);
     void readTasks(connection, scope, controller.signal).then(
       tasks => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({ ...current, taskState: 'ready', taskError: null, tasks }));
+          publish(forKey, current => ({ ...current, taskState: 'ready', taskError: null, tasks }));
       },
       reason => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({
+          publish(forKey, current => ({
             ...current,
             taskState: 'unavailable',
             taskError: failureMessage(reason),
@@ -224,11 +269,11 @@ export function SessionSearchProvider({
     void readFiles(connection, scope, controller.signal).then(
       files => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({ ...current, fileState: 'ready', fileError: null, files }));
+          publish(forKey, current => ({ ...current, fileState: 'ready', fileError: null, files }));
       },
       reason => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({
+          publish(forKey, current => ({
             ...current,
             fileState: 'unavailable',
             fileError: failureMessage(reason),
@@ -237,7 +282,7 @@ export function SessionSearchProvider({
       },
     );
     return () => controller.abort();
-  }, [connection, scope]);
+  }, [connection, publish, scope]);
 
   const setOpeners = useCallback((next: SessionSearchOpeners | null) => {
     openers.current = next;
@@ -356,6 +401,7 @@ export function SessionTasksSearchSurface() {
   const [optimistic, setOptimistic] = useState<ReadonlyMap<string, ScopedTaskView>>(new Map());
   const [markingDoneKey, setMarkingDoneKey] = useState<string | null>(null);
   const [markDoneError, setMarkDoneError] = useState<string | null>(null);
+  const [referenceMessage, setReferenceMessage] = useState('');
   const tasks = useMemo(
     () =>
       search.tasks
@@ -388,10 +434,15 @@ export function SessionTasksSearchSurface() {
       setMarkDoneError(null);
       setMarkingDoneKey(overlayKey);
       setOptimistic(current => new Map(current).set(overlayKey, optimisticTask));
+      // ONE id per logical Mark Done, minted here rather than per transport
+      // attempt: a retry of the same click is the SAME operation, and the daemon
+      // deduplicates on this header. Minting it deeper down would give a
+      // re-sent request a fresh identity and complete the task twice.
+      const requestId = crypto.randomUUID();
       try {
         const target = daemonRequest(search.connection, `${taskPath(scope)}/${encodeURIComponent(task.id)}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: requestId },
           body: JSON.stringify({ action: 'phase', phase: 'done', reason: 'Marked done from Tasks.' }),
         });
         const response = await fetch(target.url, target.init);
@@ -410,6 +461,32 @@ export function SessionTasksSearchSurface() {
       }
     },
     [markingDoneKey, search.connection, search.scope, search.tasks],
+  );
+
+  // Add to chat — put THIS task's reference into THIS session's draft.
+  //
+  // The scope carried here is the one the rows were read under, so the token
+  // lands in the composer of the daemon and session that actually owns the
+  // task. That is not a nicety: a task id is session-local, so `&F12` delivered
+  // into another session's draft names a different piece of work, and the agent
+  // reading it would have no way to know.
+  //
+  // What LANDS in the draft is formatted by the one canonical renderer inside
+  // `addReferenceToComposer`, never assembled here, so an id the grammar cannot
+  // write down is refused rather than pasted in as prose that never resolves.
+  // There is deliberately no second refusal branch on this side: `TaskIdSchema`
+  // already parsed every id on this surface, so a local guard would be a claim
+  // about a danger the boundary has eliminated. The SPOKEN token comes from
+  // `taskReference`, which is also what labels the button, so the sentence and
+  // the control it answers can never name the task differently.
+  const addToChat = useCallback(
+    (task: TaskSummary): void => {
+      const scope = search.scope;
+      if (scope === null) return;
+      const outcome = addReferenceToComposer({ kind: 'task', id: task.id }, scope);
+      setReferenceMessage(addReferenceMessage(outcome, taskReference(task.id)));
+    },
+    [search.scope],
   );
 
   if (search.scope === null) return null;
@@ -460,11 +537,21 @@ export function SessionTasksSearchSurface() {
           {markDoneError}
         </p>
       ) : null}
+      <p
+        className={
+          referenceMessage === '' ? 'sr-only' : 'm-0 rounded-control bg-surface-2 px-2 py-1.5 text-ui text-muted'
+        }
+        data-task-add-status=""
+        role="status"
+      >
+        {referenceMessage}
+      </p>
       <div className="min-h-0 overflow-auto">
         {view === 'list' ? (
           <SessionTaskList
             daemonId={search.scope.daemonId}
             markingDoneId={markingDoneId}
+            onAddToChat={addToChat}
             onMarkDone={markDone}
             onOpen={setSelectedId}
             tasks={tasks}
@@ -474,6 +561,7 @@ export function SessionTasksSearchSurface() {
             compact={compact}
             daemonId={search.scope.daemonId}
             markingDoneId={markingDoneId}
+            onAddToChat={addToChat}
             onMarkDone={markDone}
             onOpen={setSelectedId}
             tasks={tasks}

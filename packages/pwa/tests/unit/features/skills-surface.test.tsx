@@ -45,10 +45,15 @@ const deferred = <Value,>() => {
 };
 
 const buttons = (container: HTMLElement): HTMLButtonElement[] => [...container.querySelectorAll('button')];
-const rowFor = (container: HTMLElement, invocation: string): HTMLButtonElement =>
+const useFor = (container: HTMLElement, invocation: string): HTMLButtonElement =>
   must(
-    buttons(container).find(button => button.getAttribute('aria-label')?.startsWith(`Insert ${invocation} `)),
-    `the ${invocation} row`,
+    buttons(container).find(button => button.getAttribute('aria-label') === `Use ${invocation} in chat`),
+    `the ${invocation} use action`,
+  );
+const detailFor = (container: HTMLElement, invocation: string): HTMLButtonElement =>
+  must(
+    buttons(container).find(button => button.getAttribute('aria-label') === `View full detail for ${invocation}`),
+    `the ${invocation} detail action`,
   );
 const refresh = (container: HTMLElement): HTMLButtonElement =>
   must(container.querySelector<HTMLButtonElement>('button[aria-label="Refresh skills"]'), 'the refresh button');
@@ -79,9 +84,32 @@ describe('SkillsCatalogList', () => {
     expect([...container.querySelectorAll('h3')].map(heading => heading.textContent)).toEqual(['Global', 'Project']);
     expect([...container.querySelectorAll('ul')].every(list => list.children.length > 0)).toBe(true);
     expect([...container.querySelectorAll('code')].map(code => code.textContent)).toEqual(['/kteam', '/run']);
-    expect(rowFor(container, '/run').getAttribute('aria-label')).toBe(
-      'Insert /run into composer draft. Launch the project app. Available for Claude and Codex.',
+    expect(useFor(container, '/run').textContent).toContain('Use in chat');
+    expect(detailFor(container, '/run').textContent).toContain('View full detail');
+    await unmount();
+  });
+
+  it('keeps use and full detail as separate actions', async () => {
+    const inserted: string[] = [];
+    const { container, unmount } = await mount(
+      <SkillsCatalogList
+        catalog={claudeCatalog}
+        query=""
+        onInsert={value => {
+          inserted.push(value);
+        }}
+      />,
     );
+
+    await interact(() => detailFor(container, '/run').click());
+    const detail = must(container.querySelector<HTMLElement>('[data-skill-detail="run"]'), 'the full skill detail');
+    expect(detail.textContent).toContain('Launch the project app.');
+    expect(detail.textContent).toContain('Project');
+    expect(detail.textContent).toContain('Available for Claude and Codex');
+    expect(inserted).toEqual([]);
+
+    await interact(() => useFor(container, '/run').click());
+    expect(inserted).toEqual(['/run']);
     await unmount();
   });
 
@@ -91,11 +119,13 @@ describe('SkillsCatalogList', () => {
       <SkillsCatalogList
         catalog={{ harness: 'codex', skills: claudeCatalog.skills }}
         query=""
-        onInsert={value => inserted.push(value)}
+        onInsert={value => {
+          inserted.push(value);
+        }}
       />,
     );
 
-    await interact(() => rowFor(container, '$kteam').click());
+    await interact(() => useFor(container, '$kteam').click());
     expect(inserted).toEqual(['$kteam']);
     await unmount();
   });
@@ -120,7 +150,13 @@ describe('SkillsSurface', () => {
     const inserted: string[] = [];
     const loader: SkillsCatalogLoader = async () => claudeCatalog;
     const { container, unmount } = await mount(
-      <SkillsSurface scope={scope} onInsert={value => inserted.push(value)} loadCatalog={loader} />,
+      <SkillsSurface
+        scope={scope}
+        onInsert={value => {
+          inserted.push(value);
+        }}
+        loadCatalog={loader}
+      />,
     );
 
     expect(container.textContent).toContain('Claude · inserts /name');
@@ -131,7 +167,7 @@ describe('SkillsSurface', () => {
     expect(container.textContent).toContain('1 of 2');
     expect(container.querySelectorAll('code')).toHaveLength(1);
 
-    await interact(() => rowFor(container, '/kteam').click());
+    await interact(() => useFor(container, '/kteam').click());
     expect(inserted).toEqual(['/kteam']);
     expect(must(container.querySelector('[aria-live="polite"]'), 'the live region').textContent).toBe(
       'Inserted /kteam into the composer draft. Review it before sending.',

@@ -62,6 +62,7 @@ const SECTIONS = [
   'harness-skills',
   'harness-thinking-indicator',
   'harness-task-board',
+  'harness-task-list-refs',
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
@@ -1015,6 +1016,21 @@ try {
             await element.screenshot({ path: sectionTarget });
             process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
           }
+
+          // #43: a Skills row carries two actions, and the second one's whole
+          // point is a state the resting frame cannot show. Expand one detail
+          // and capture the section again, so a reviewer sees the disclosed
+          // content and the primary/secondary hierarchy beside it rather than
+          // two buttons and a promise.
+          const skills = page.locator('#harness-skills');
+          await skills.scrollIntoViewIfNeeded();
+          await skills
+            .getByRole('button', { name: /^View full detail for/u })
+            .first()
+            .click();
+          const skillsDetailTarget = join(outDir, `${viewport.name}-harness-skills-detail.png`);
+          await skills.screenshot({ path: skillsDetailTarget });
+          process.stdout.write(`📸 ${viewport.name} skills detail -> ${skillsDetailTarget}\n`);
 
           const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
           await page.getByLabel('Send ledger rows').screenshot({ path: ledgerTarget });

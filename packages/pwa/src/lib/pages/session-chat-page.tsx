@@ -22,7 +22,12 @@ import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
+import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
+import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
+import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
+import { SessionSkillsSurface } from '../../features/skills/session-skills-surface.tsx';
+import type { SkillsCatalogLoader } from '../../features/skills/skills-api.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, sessionActionSpecs } from '../../shell/session-actions.ts';
@@ -35,11 +40,13 @@ import {
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
+import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
+import type { DaemonPinClient } from '../pin-client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
@@ -60,6 +67,10 @@ export interface SessionChatPageProps {
   readonly accountPicker?: DaemonAccountPickerStore;
   /** Cached daemon usage feed; never the live fleet-usage probe. */
   readonly usage?: DaemonUsageStore;
+  /** Document-lifetime daemon-scoped pin boards. */
+  readonly pins?: DaemonPinClient;
+  /** Daemon-global browser-login state, invalidated with its pairing. */
+  readonly browserLogin?: DaemonBrowserLoginStore;
   readonly session: SessionView;
   readonly entries: readonly TranscriptEntry[];
   readonly client: SessionChatClient;
@@ -158,16 +169,27 @@ function SessionSearchWorkspaceActions({ scope }: { readonly scope: ReturnType<t
 interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
   readonly connection: DaemonConnection;
   readonly session: SessionView;
+  readonly daemonSessions?: readonly SessionView[];
+  readonly onNavigate?: (to: string) => void;
   readonly readSnapshot?: PaneSnapshotReader;
   /** The one reference surface this session reads with, files included. */
   readonly references: ReferenceSurface;
+  /**
+   * The session's ONE skills catalog read, threaded down rather than started
+   * here: the page already holds it, because the reference surface proves an
+   * inserted `/floop` from the same names this pane lists.
+   */
+  readonly skills: SkillsCatalogLoader;
 }
 
 function WorkspaceSurface({
   connection,
   session,
+  daemonSessions,
+  onNavigate,
   readSnapshot,
   references,
+  skills,
   scope,
   tab,
   presentation,
@@ -183,6 +205,26 @@ function WorkspaceSurface({
     body = <FileInstanceSurface daemon={connection} scope={scope} instance={tab.instance} markdown={references} />;
   } else if (tab.id === 'tasks') {
     body = <SessionTasksSearchSurface />;
+  } else if (tab.id === 'skills') {
+    // #43. The loader comes from the page's own read, so opening this pane
+    // JOINS that read instead of asking the daemon a second time.
+    body = <SessionSkillsSurface connection={connection} loadCatalog={skills} scope={scope} />;
+  } else if (tab.id === 'lineage') {
+    body =
+      daemonSessions === undefined ? (
+        <p className="m-3 text-ui text-muted" role="status">
+          Loading lineage…
+        </p>
+      ) : (
+        <LineageSurfaceContent
+          daemonId={connection.daemonId}
+          sessionId={session.config.id}
+          sessions={daemonSessions}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
+        />
+      );
+  } else if (tab.id === 'analytics') {
+    body = <SessionAnalyticsSurface connection={connection} scope={scope} />;
   } else if (tab.id === 'files') {
     // The picker: tree, listing, breadcrumbs. Every open it produces becomes a
     // file tab in the pane's own strip, so this surface holds no second strip.
@@ -272,6 +314,18 @@ export function SessionChatPage({
   onNavigate,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
+  const search = useSessionSearch();
+  const referenceTasks =
+    search.scope?.daemonId === scope.daemonId &&
+    search.scope.sessionId === scope.sessionId &&
+    search.taskState === 'ready'
+      ? search.tasks
+      : undefined;
+  // #43. The session's ONE skills read, owned here for the same reason the task
+  // snapshot is: both the pane and the reference surface need it, and two reads
+  // would be two owners that disagree after a refresh. `names` is undefined
+  // until a catalog has actually been read — unread, never "no skills".
+  const skills = useSessionSkills(connection, scope);
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
   // churn cannot rebuild the surface and re-parse every rendered Markdown block
@@ -286,9 +340,11 @@ export function SessionChatPage({
         scope,
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
+        ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
+        ...(skills.names === undefined ? {} : { skills: skills.names }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
       }),
-    [connection, scope, session.config.cwd, fleetIdentity, onNavigate],
+    [connection, scope, session.config.cwd, fleetIdentity, referenceTasks, skills.names, onNavigate],
   );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -449,6 +505,9 @@ export function SessionChatPage({
           connection={connection}
           references={references}
           session={session}
+          skills={skills.load}
+          {...(daemonSessions === undefined ? {} : { daemonSessions })}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
         />
       )}

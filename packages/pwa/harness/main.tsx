@@ -77,7 +77,7 @@ import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
-import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
+import { SessionTaskKanban, SessionTaskList } from '../src/components/session-tasks.tsx';
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
@@ -4144,6 +4144,7 @@ function Shell() {
           <SessionTaskKanban
             compact={phone}
             daemonId={daemon.daemonId}
+            onAddToChat={() => {}}
             onMarkDone={() => {}}
             onOpen={() => {}}
             tasks={[
@@ -4158,6 +4159,29 @@ function Shell() {
               { ...TASKS[2]!, phase: 'done', status: 'done' },
             ]}
           />
+        </section>
+      ),
+    },
+    {
+      // #43: the same rows in the LIST view, with the reference action a reader
+      // uses to point an agent at exactly one task, and the sentence that says
+      // where it went.
+      label: 'Task list reference actions',
+      render: () => (
+        <section aria-label="Task list reference actions" className="flex flex-col gap-2" id="harness-task-list-refs">
+          <SessionTaskList
+            daemonId={daemon.daemonId}
+            onAddToChat={() => {}}
+            onMarkDone={() => {}}
+            onOpen={() => {}}
+            tasks={[
+              { ...TASKS[0]!, phase: 'live', status: 'live' },
+              { ...TASKS[1]!, phase: 'build', status: 'in_progress' },
+            ]}
+          />
+          <p className="m-0 rounded-control bg-surface-2 px-2 py-1.5 text-ui text-muted" role="status">
+            Added &amp;F12 to this session&apos;s message.
+          </p>
         </section>
       ),
     },

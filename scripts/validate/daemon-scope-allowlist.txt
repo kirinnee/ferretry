@@ -66,6 +66,4 @@ invalidate DaemonAttachmentBlobCache # a per-mount useRef in attachment-gallery.
 # surface is not mounted, so there is no instance to register. Delete the line in the PR that mounts
 # it, and add the store to the `caches:` array in lib/store.tsx in the same change.
 invalidate DaemonAttentionClient # unmounted: no construction site in packages/pwa/src. The attention surface is reached only from tests and the harness.
-invalidate DaemonPinClient # unmounted: no construction site in packages/pwa/src. The pins board is reached only from tests and the harness.
-invalidate DaemonBrowserLoginStore # unmounted: no construction site in packages/pwa/src. The remote-browser login flow is not wired into the app.
 invalidate DaemonRuntimeModelCatalogStore # unmounted: no construction site in packages/pwa/src. runtime-controls.tsx names the type as the port it wants; nothing supplies one.

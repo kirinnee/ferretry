@@ -21,6 +21,7 @@ import {
 import { readAccountPickerCatalog, readAccountPickerHealth } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
+import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
 import {
   type DaemonConnectionRepository,
   DaemonConnectionStore,
@@ -33,6 +34,7 @@ import { documentDraftStore } from './drafts.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
+import { DaemonPinClient } from './pin-client.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
@@ -195,6 +197,8 @@ export interface AppStore {
   readonly projects: DaemonProjectsStore;
   readonly accountPicker: DaemonAccountPickerStore;
   readonly usage: DaemonUsageStore;
+  readonly pins: DaemonPinClient;
+  readonly browserLogin: DaemonBrowserLoginStore;
   readonly stt: SttSettingsStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
   readonly pushDevices: DaemonPushDevices;
@@ -315,6 +319,11 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
   });
   const usage = new DaemonUsageStore(daemonUsagePort(carried));
+  const pins = new DaemonPinClient(undefined, carried);
+  const browserLogin = new DaemonBrowserLoginStore(daemon => ({
+    status: async () => await browserLoginPort(await clients.client(daemon)).status(),
+    act: async action => await browserLoginPort(await clients.client(daemon)).act(action),
+  }));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
@@ -335,6 +344,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       projects,
       accountPicker,
       usage,
+      pins,
+      browserLogin,
       notificationPreferences,
       pushDevices,
       documentDraftStore,
@@ -373,6 +384,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     projects,
     accountPicker,
     usage,
+    pins,
+    browserLogin,
     stt,
     notificationPreferences,
     pushDevices,
