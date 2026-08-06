@@ -54,6 +54,17 @@ export interface ResumePolicy {
    */
   readonly dedupeSharedRecoveryScope: boolean;
   /**
+   * Whether a PERSON with operator standing asked, as opposed to anything else that can reach here.
+   *
+   * `automatic` cannot answer this question, because `peer` is not automatic and is also not an
+   * operator: another daemon relaying a request is a program, and the released structured-answer
+   * advisory exists precisely to be dismissed by a human who looked at the terminal. Only
+   * `admin-cli` and `admin-ui` resolve to true; peer, warden, daemon and unknown never do, and an
+   * absent value is false — so a hand-built policy that forgets the field gets the safe answer
+   * rather than operator standing.
+   */
+  readonly humanOperator?: boolean | undefined;
+  /**
    * Whether a LIVE, healthy pane must be replaced rather than typed into.
    *
    * A plain resume takes the send shortcut when the harness is still at a prompt, because the
@@ -132,6 +143,28 @@ export class UnregisteredResumeReplacement extends Error {
   }
 }
 
+/**
+ * The replacement pane launched, but the released advisory could not be durably acknowledged.
+ *
+ * It is its own class because the honest report is two facts at once: the revive WORKED, and the
+ * warning the operator meant to dismiss is still standing. Recovery must therefore not relaunch
+ * again, must not call the replacement a terminal failure, and must still hand the live pane to a
+ * monitor — while the caller learns the dismissal did not happen.
+ */
+export class ResumeAcknowledgementFailed extends Error {
+  constructor(
+    readonly id: SessionId,
+    options?: ErrorOptions,
+  ) {
+    super(
+      `session ${id} was revived, but its structured-answer advisory could not be acknowledged, so the ` +
+        `warning still stands: ${options?.cause instanceof Error ? options.cause.message : String(options?.cause ?? 'no reason given')}`,
+      options,
+    );
+    this.name = 'ResumeAcknowledgementFailed';
+  }
+}
+
 /** The legacy duplicate-work suppression fired. Only ever raised against an automatic reviver. */
 export class ReviveDedupeConflict extends ResumeRefused {
   constructor(
@@ -200,6 +233,33 @@ export interface ResumeLauncher {
    * pane and process tree are another, and only their agreement justifies a terminal verdict.
    */
   confirmExit(id: SessionId): Promise<{ readonly confirmed: boolean; readonly pane: PaneObservation }>;
+}
+
+/**
+ * Durable dismissal of the released structured-answer advisory, and nothing else.
+ *
+ * Deliberately one method with no arguments beyond the session: the resume slice must not know
+ * which ledger row is being closed, because choosing the row is exactly where the old
+ * composition-root wrapper went wrong — it selected by `needsHuman.includes(toolUseId)` and would
+ * happily close several rows, or a failed one. The composition picks the single owned record under
+ * the answer queue and fails closed when there is not exactly one.
+ *
+ * A rejection means the advisory stands. It is never a claim that the structured answer landed.
+ *
+ * IT MUST NOT TAKE THE ANSWER QUEUE ITSELF. The resume service already holds it — that is the whole
+ * mechanism, see `SessionResumePorts.serial` — and the queue is not reentrant, so a nested
+ * acquisition here would deadlock the dismissal against itself.
+ */
+export interface ResumeAnswerAttention {
+  /**
+   * `actor` is ATTRIBUTION, never authorization. The policy already decided whether this dismissal
+   * may happen; passing the actor through means the audit line names the operator who asked, and it
+   * means the composition root does not get a second, drifting copy of the eligibility test.
+   *
+   * A crash-gap retry — the row already `acknowledged`, the advisory still standing — appends
+   * nothing and returns, so the clear can finish.
+   */
+  acknowledge(id: SessionId, actor: ResumeActor): Promise<void>;
 }
 
 /** Where a revived agent reads its new turn. */

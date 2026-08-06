@@ -1,8 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
+import {
+  firstWriteReleasedAnswerAttention,
+  parseSessionId,
+  type SerialExecutor,
+  type SessionId,
+} from '../../../../src/lib/index.ts';
 import {
   defaultSessionResumeSettings,
+  ResumeAcknowledgementFailed,
   ResumeCancelled,
   ResumeRefused,
   ReviveDedupeConflict,
@@ -10,6 +17,8 @@ import {
   UnregisteredResumeReplacement,
   type LaunchGate,
   type PaneObservation,
+  type ResumeActor,
+  type ResumeAnswerAttention,
   type ResumeLauncher,
   type ResumeMonitorControl,
   type ResumeRepository,
@@ -17,6 +26,23 @@ import {
   type ResumeTransition,
   type ResumeTurnStore,
 } from '../../../../src/lib/session/resume/index.ts';
+
+/** The advisory a bare human relaunch may dismiss, and the blocking one it may never touch. */
+const RELEASED = 'structured-answer-released-unconfirmed';
+const UNCONFIRMED = 'structured-answer-unconfirmed';
+
+/**
+ * The composition root's own first-write advisory sentence, through the builder that owns it.
+ *
+ * It is the strongest identity case in the codebase for the queue fixture below: it names only the
+ * TOOL, so two different request ids over one tool render this exact same string.
+ */
+const FIRST_WRITE_ADVISORY = firstWriteReleasedAnswerAttention('tool-1');
+
+/** Let every already-resolved continuation run, without inventing a timer to wait on. */
+const drain = async (): Promise<void> => {
+  for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+};
 
 const SETTINGS = defaultSessionResumeSettings;
 const ID = parseSessionId('session-1');
@@ -29,6 +55,10 @@ function target(overrides: Partial<ResumeTarget> = {}): ResumeTarget {
 
 class FakeRepository implements ResumeRepository {
   readonly transitions: ResumeTransition[] = [];
+  /** Refuse one named transition, to prove a second failure cannot mask the first. */
+  failEvent: ResumeTransition['event'] | undefined;
+  /** Observe each accepted transition, for the fixtures that assert ORDER against other work. */
+  onTransition: ((change: ResumeTransition) => void) | undefined;
 
   constructor(
     private current: ResumeTarget | undefined,
@@ -44,7 +74,9 @@ class FakeRepository implements ResumeRepository {
   }
 
   async transition(_id: SessionId, change: ResumeTransition): Promise<ResumeTarget> {
+    if (change.event === this.failEvent) throw new Error(`the journal refused ${change.event}`);
     this.transitions.push(change);
+    this.onTransition?.(change);
     const base = this.current ?? target();
     this.current = {
       ...base,
@@ -158,6 +190,32 @@ class FakeGate implements LaunchGate {
   }
 }
 
+/**
+ * The durable dismissal, recorded rather than performed.
+ *
+ * It shares the launcher's `calls` array in the tests that care about ORDER, because the whole
+ * contract is that the acknowledgement lands after the relaunch and delivery and before the state
+ * clears — and three separate spies cannot show that.
+ */
+class FakeAnswerAttention implements ResumeAnswerAttention {
+  readonly acknowledged: ResumeActor[] = [];
+  /** The transitions already journalled at the moment of the call — how "before the clear" is proved. */
+  eventsWhenCalled: readonly string[] = [];
+  failure: Error | undefined;
+
+  constructor(
+    private readonly trace: string[],
+    private readonly events: () => readonly string[],
+  ) {}
+
+  async acknowledge(_id: SessionId, actor: ResumeActor): Promise<void> {
+    this.trace.push('acknowledge');
+    this.acknowledged.push(actor);
+    this.eventsWhenCalled = [...this.events()];
+    if (this.failure) throw this.failure;
+  }
+}
+
 /** A serial executor for the unit tier: the real one is an adapter and belongs to the other ledger. */
 const inlineSerial: SerialExecutor = {
   run: async (_key, work) => await work(),
@@ -174,11 +232,12 @@ function build(
   const launcher = new FakeLauncher(pane);
   const turns = new FakeTurns();
   const monitors = new FakeMonitors();
+  const answerAttention = new FakeAnswerAttention(launcher.calls, () => repository.events);
   const service = new SessionResumeService(
-    { repository, launcher, turns, monitors, gate, serial: inlineSerial },
+    { repository, launcher, turns, monitors, gate, serial: inlineSerial, answerAttention },
     SETTINGS,
   );
-  return { service, repository, launcher, turns, monitors, gate };
+  return { service, repository, launcher, turns, monitors, gate, answerAttention };
 }
 
 describe('session resume service', () => {
@@ -447,5 +506,408 @@ describe('session resume service', () => {
     // Assert
     should(operator.repository.transitions[0]).have.property('retryAttempt', 0);
     should(scheduled.repository.transitions[0]).not.have.property('retryAttempt');
+  });
+});
+
+describe('session resume answer-advisory acknowledgement', () => {
+  const advisory = (overrides: Partial<ResumeTarget> = {}): ResumeTarget =>
+    target({ status: 'running', needsHumanKind: RELEASED, ...overrides });
+
+  /** The last transition a successful revive writes; the clear rides on this one or on nothing. */
+  const resumedTransition = (world: ReturnType<typeof build>): ResumeTransition | undefined =>
+    world.repository.transitions.findLast(change => change.event === 'session.resumed');
+
+  it('should release the pane, relaunch, deliver, acknowledge, and only then clear', async () => {
+    // Arrange — the whole point of the ordering: a clear with no durable record behind it is a
+    // warning that vanished with nothing saying a person dismissed it.
+    const world = build(advisory(), LIVE);
+
+    // Act
+    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    should(actual.disposition).equal('revived');
+    should(world.launcher.calls).deepEqual([
+      'snapshot',
+      'kill:pane cleanup before revive',
+      'relaunch',
+      'deliver',
+      'acknowledge',
+    ]);
+    should(world.answerAttention.eventsWhenCalled).not.containEql('session.resumed');
+    should(resumedTransition(world)).have.property('clearNeedsHuman', true);
+  });
+
+  it('should attribute the dismissal to the operator the service already authorized', async () => {
+    // Arrange
+    const world = build(advisory(), LIVE);
+
+    // Act
+    await world.service.resume({ id: ID, actor: 'admin-ui' });
+
+    // Assert — attribution, not authorization: the action bit decided, this only records who.
+    should(world.answerAttention.acknowledged).deepEqual(['admin-ui']);
+  });
+
+  it('should reach a bare operator relaunch on a live pane instead of refusing it as already running', async () => {
+    // Arrange — the advisory is not an input modal, so this session took the send shortcut and a
+    // message-free resume hit `already running`: the one action that may dismiss the warning was
+    // unreachable on exactly the sessions carrying it.
+    const world = build(advisory(), LIVE);
+
+    // Act
+    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    should(actual.disposition).equal('revived');
+    should(world.launcher.calls).containEql('relaunch');
+  });
+
+  it('should treat a message-bearing resume as prose that neither acknowledges nor clears', async () => {
+    // Arrange
+    const world = build(advisory(), LIVE);
+
+    // Act
+    const actual = await world.service.resume({ id: ID, message: 'answer it in prose', actor: 'admin-cli' });
+
+    // Assert
+    should(actual.disposition).equal('sent');
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.repository.transitions).deepEqual([]);
+  });
+
+  it('should refuse a peer the dismissal and leave the advisory standing', async () => {
+    // Arrange — `peer` is explicit but is not a person: a relaying daemon never looked at the
+    // terminal, so it may not close a warning that exists to be read.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+
+    // Act
+    const actual = await world.service.resume({ id: ID, actor: 'peer' });
+
+    // Assert
+    should(actual.disposition).equal('revived');
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+  });
+
+  it('should refuse a hand-built policy that never claimed operator standing', async () => {
+    // Arrange — an absent `humanOperator` is false, so a policy written without the field cannot
+    // acquire operator privileges by omission.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+
+    // Act
+    await world.service.resume({ id: ID, policy: { automatic: false, dedupeSharedRecoveryScope: false } });
+
+    // Assert
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+  });
+
+  it('should not let a supplied policy hand operator standing to a peer', async () => {
+    // Arrange — the forgery this closes. `ResumeRequest.policy` is a real override for the fields
+    // that say HOW to resume, but `humanOperator` is the capability to dismiss a warning a person is
+    // meant to read. As a whole-policy override it was grantable: a peer could spell the bit itself,
+    // take the bare relaunch path, and file the acknowledgement under `peer`.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+
+    // Act
+    await world.service.resume({
+      id: ID,
+      actor: 'peer',
+      policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true },
+    });
+
+    // Assert — the resume still happens; the privilege does not.
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+  });
+
+  it('should not let an unnamed caller hand itself operator standing', async () => {
+    // Arrange — omitting the actor resolves to `unknown`, the safest actor there is; a policy that
+    // claims the bit anyway must not be how a caller escapes being unrecognised.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+
+    // Act
+    await world.service.resume({
+      id: ID,
+      policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true },
+    });
+
+    // Assert
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+  });
+
+  it('should fail closed for an operator whose supplied policy withholds the bit', async () => {
+    // Arrange — narrowing works in the other direction too: the axis can be taken away by the
+    // caller, so an admin resume under a policy that does not claim it dismisses nothing.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+
+    // Act
+    await world.service.resume({
+      id: ID,
+      actor: 'admin-cli',
+      policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: false },
+    });
+
+    // Assert
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+  });
+
+  it('should still dismiss when a supplied policy and the actor BOTH carry operator standing', async () => {
+    // Arrange — narrowing must not become a ban: a trusted caller that states the bit AND is an
+    // admin keeps the capability, or the override becomes useless to the callers that need it.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+
+    // Act
+    await world.service.resume({
+      id: ID,
+      actor: 'admin-ui',
+      policy: { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true },
+    });
+
+    // Assert
+    should(world.answerAttention.acknowledged).deepEqual(['admin-ui']);
+    should(resumedTransition(world)).have.property('clearNeedsHuman', true);
+  });
+
+  it('should pass every other supplied override through untouched', async () => {
+    // Arrange — only the privilege axis is derived. A scheduled retry still pins its expected status
+    // and still keeps its own retry counter, which is the whole reason the override exists.
+    const world = build(target({ status: 'retrying', retryAttempt: 2, transientRetryBudget: 3 }), NO_PANE);
+
+    // Act
+    await world.service.resume({
+      id: ID,
+      policy: { automatic: true, dedupeSharedRecoveryScope: false, expectedStatus: 'retrying' },
+    });
+
+    // Assert — `resetRetryAttempt` false is what an automatic retry against `retrying` produces, so
+    // the guard and the counter both survived the overlay.
+    should(world.repository.transitions[0]).not.have.property('retryAttempt');
+  });
+
+  it('should never dismiss the blocking unconfirmed kind, even for an operator', async () => {
+    // Arrange — a possibly-live form is not something a relaunch can reason about.
+    const world = build(advisory({ status: 'stopped', needsHumanKind: UNCONFIRMED }), NO_PANE);
+
+    // Act
+    await world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+  });
+
+  it('should not acknowledge when the old pane could not be released', async () => {
+    // Arrange
+    const world = build(advisory(), LIVE);
+    world.launcher.cleanupFails = true;
+
+    // Act / Assert
+    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejected();
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.repository.events).not.containEql('session.resumed');
+  });
+
+  it('should not acknowledge when the relaunch itself failed', async () => {
+    // Arrange
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.launcher.relaunchError = new Error('tmux refused the pane');
+
+    // Act / Assert
+    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/tmux refused the pane/u);
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.repository.events).containEql('session.failed');
+  });
+
+  it('should not acknowledge when the turn could not be delivered', async () => {
+    // Arrange
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.launcher.deliverError = new Error('injection timed out');
+
+    // Act / Assert
+    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/injection timed out/u);
+    should(world.answerAttention.acknowledged).deepEqual([]);
+  });
+
+  it('should keep the advisory when a preserved harness survived a failed relaunch', async () => {
+    // Arrange — a probe finding the pane alive is not a person dismissing a warning.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.launcher.deliverError = new Error('injection timed out');
+    world.launcher.exitConfirmed = false;
+    world.launcher.exitPane = LIVE;
+
+    // Act
+    const actual = await world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    should(actual.disposition).equal('preserved');
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(
+      world.repository.transitions.findLast(change => change.event === 'session.resume_false_terminal_averted'),
+    ).not.have.property('clearNeedsHuman');
+  });
+
+  it('should keep the advisory when the replacement could not be registered', async () => {
+    // Arrange
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.launcher.relaunchError = new UnregisteredResumeReplacement('replacement registration failed');
+
+    // Act / Assert
+    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(UnregisteredResumeReplacement);
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.repository.events).containEql('session.failed');
+  });
+
+  it('should keep the advisory, the live pane and its monitor when the dismissal itself throws', async () => {
+    // Arrange — the revive WORKED; only the dismissal failed. Relaunching again would leave two
+    // panes, and calling it a terminal failure would lie about a session that is plainly running.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.answerAttention.failure = new Error('answer ledger is unwritable');
+
+    // Act
+    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    await should(failure).be.rejectedWith(ResumeAcknowledgementFailed);
+    await should(failure).be.rejectedWith(/answer ledger is unwritable/u);
+    should(world.launcher.calls.filter(call => call === 'relaunch')).have.length(1);
+    should(world.launcher.calls).not.containEql('kill:failed resume cleanup');
+    should(world.repository.events).not.containEql('session.failed');
+    should(resumedTransition(world)).not.have.property('clearNeedsHuman');
+    // Started AFTER the lock was released, exactly as the successful path does it.
+    should(world.monitors.calls).deepEqual(['stop', 'start']);
+    should(world.gate.releases).equal(1);
+  });
+
+  it('should surface a failed final clear and still supervise the live replacement', async () => {
+    // Arrange — the dismissal is durable and the pane is up; only the write that clears the advisory
+    // failed. Reporting nothing would be a lie, relaunching would make a second pane, and leaving it
+    // unsupervised is how a stalled agent goes unnoticed. The warning simply STAYS UP: projection
+    // does not retire a standing released advisory on the strength of an acknowledged row — that row
+    // stops it being re-minted — so a later bare-admin resume is what finishes the clear, and the
+    // real journey proves that retry end to end.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.repository.failEvent = 'session.resumed';
+
+    // Act
+    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    await should(failure).be.rejectedWith(/the journal refused session\.resumed/u);
+    should(world.answerAttention.acknowledged).deepEqual(['admin-cli']);
+    should(world.launcher.calls.filter(call => call === 'relaunch')).have.length(1);
+    should(world.launcher.calls).not.containEql('kill:failed resume cleanup');
+    should(world.monitors.calls).deepEqual(['stop', 'start']);
+    // Nothing cleared: the only transition that carries the clear is the one that was refused, so no
+    // accepted transition in this attempt can have retired the advisory.
+    should(world.repository.transitions.filter(change => change.clearNeedsHuman === true)).deepEqual([]);
+  });
+
+  it('should give the old pane its monitor back when the release failed and dismiss nothing', async () => {
+    // Arrange — the monitor is disarmed BEFORE the pane is destroyed, so a snapshot or kill that
+    // fails leaves a live pane that nothing is watching. It is also, plainly, not a dismissal.
+    const world = build(advisory(), LIVE);
+    world.launcher.cleanupFails = true;
+
+    // Act
+    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    await should(failure).be.rejectedWith(/pane is already gone/u);
+    should(world.launcher.calls).not.containEql('relaunch');
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.repository.events).not.containEql('session.resumed');
+    should(world.monitors.calls).deepEqual(['stop', 'start']);
+  });
+
+  it('should keep reporting the dismissal failure when the state write also refuses', async () => {
+    // Arrange — a second failure here used to replace the acknowledgement error, which also lost the
+    // monitor: only `ResumeAcknowledgementFailed` starts one, so a live replacement was left with
+    // nothing watching it.
+    const world = build(advisory({ status: 'stopped' }), NO_PANE);
+    world.answerAttention.failure = new Error('answer ledger is unwritable');
+    world.repository.failEvent = 'session.resumed';
+
+    // Act
+    const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
+
+    // Assert
+    await should(failure).be.rejectedWith(ResumeAcknowledgementFailed);
+    await should(failure).be.rejectedWith(/answer ledger is unwritable/u);
+    should(world.monitors.calls).deepEqual(['stop', 'start']);
+    should(world.launcher.calls.filter(call => call === 'relaunch')).have.length(1);
+  });
+
+  it('should still refuse a live session holding a newer question while the advisory stands', async () => {
+    // Arrange — the advisory does not license replacing a pane that is mid-conversation.
+    const world = build(advisory({ pendingQuestion: { toolUseId: 'tool-2' } }), LIVE);
+
+    // Act / Assert
+    await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/answer or abandon/u);
+    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.launcher.calls).deepEqual([]);
+  });
+
+  it('should hold the answer queue from the acknowledgement to the clear, so a newer advisory cannot land inside it', async () => {
+    // THE RACE THIS CLOSES. The dismissal appends its record and then clears the warning, and those
+    // are two awaits. If the answer queue were a different executor from resume's, a projection
+    // could publish a NEWER advisory in between and the clear would erase a warning nobody had read.
+    //
+    // COMPARING THE MESSAGE DOES NOT FIX IT, which is why this fixture uses the strongest identity
+    // case available: the composition root's first-write sentence names only the TOOL, so a second
+    // request id over the same tool renders a byte-identical string. A compare-and-swap on
+    // kind+message would see "the warning I acknowledged" and delete the new one. Only serializing
+    // the whole interval keeps T2 out until the clear has happened.
+    const serial = new KeyedSerialExecutor();
+    const repository = new FakeRepository(advisory({ status: 'stopped' }));
+    const launcher = new FakeLauncher(NO_PANE);
+    const monitors = new FakeMonitors();
+    const trace: string[] = [];
+    /** The one standing warning, as the state document would hold it. */
+    let standing: string | undefined = FIRST_WRITE_ADVISORY;
+    repository.onTransition = change => {
+      if (change.event === 'session.resumed' && change.clearNeedsHuman === true) {
+        trace.push('clear');
+        standing = undefined;
+      }
+    };
+    const held = Promise.withResolvers<void>();
+    const answerAttention: ResumeAnswerAttention = {
+      acknowledge: async () => {
+        trace.push('append');
+        await held.promise;
+      },
+    };
+    const service = new SessionResumeService(
+      { repository, launcher, turns: new FakeTurns(), monitors, gate: new FakeGate(), serial, answerAttention },
+      SETTINGS,
+    );
+
+    // Act — start the dismissal, let it reach the append, then queue a projection that installs a
+    // byte-identical advisory for the SAME tool under a different request id.
+    const dismissal = service.resume({ id: ID, actor: 'admin-cli' });
+    await drain();
+    should(trace).deepEqual(['append']);
+    const projection = serial.run(ID, async () => {
+      trace.push('T2');
+      standing = FIRST_WRITE_ADVISORY;
+    });
+    await drain();
+
+    // Assert — T2 is still waiting: the resume owns the key.
+    should(trace).deepEqual(['append']);
+
+    // Act — release the acknowledgement and let everything settle.
+    held.resolve();
+    await dismissal;
+    await projection;
+
+    // Assert — the order is append, clear, then T2, and T2's warning survives.
+    should(trace).deepEqual(['append', 'clear', 'T2']);
+    should(standing).equal(FIRST_WRITE_ADVISORY);
+    should(monitors.calls).deepEqual(['stop', 'start']);
   });
 });

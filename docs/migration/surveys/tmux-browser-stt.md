@@ -103,19 +103,48 @@ whether the release was CONFIRMED, and the two branches are deliberately differe
 
 **Monitor evidence reconciles those `accepted` rows without re-driving anything.**
 `reconcileAnswerEvidence` promotes a receipt to `confirmed` only on the authoritative
-`lastAnsweredQuestionToolUseId` stamp, and to `quarantined` when the transcript proves the form
-advanced without proving which answer landed; an unchanged active form stays `accepted` and
-therefore remains a hard quarantine. No answer key is ever sent a second time on ledger or monitor
-evidence alone.
+`lastAnsweredQuestionToolUseId` stamp, and to `quarantined` only when the transcript POSITIVELY
+proves that form advanced without proving which answer landed: a `tool-result` for that exact
+`toolUseId`, or a different question drawn in its place. **A terminal `completed`/`aborted` turn is
+not release evidence.** It says nothing about the pane, so it cannot prove a rendered selector
+stopped being drawn; `projectStructuredQuestion` leaves such a form `pending` and its receipt
+`accepted`, which keeps prose REFUSED rather than minting a prose-permitting advisory from an
+assumption. An unchanged active form stays `accepted` and therefore remains a hard quarantine. No
+answer key is ever sent a second time on ledger or monitor evidence alone.
 
-**The released advisory persists across prose.** `structured-answer-released-unconfirmed` is
-advisory rather than an input modal — `authorizeSend` and the resume policy both exempt that one
-attention kind, so prose continues while it stands, and the projection re-asserts it on every
-subsequent read instead of letting ordinary traffic erase it. It clears on exactly two things:
-authoritative confirmation of that answer, or an explicit durable human relaunch/clear (an
-`admin-cli` / `admin-ui` revive or preserve, which appends an `acknowledged` ledger record before
-clearing the state). Pane death, cancellation failure, and restart replay remain fail-closed and
-never authorize a second drive.
+**The released advisory survives reads and ordinary prose.**
+`structured-answer-released-unconfirmed` is advisory rather than an input modal — `authorizeSend`
+and the resume policy both exempt that one attention kind, so prose continues while it stands, and
+the projection re-asserts it from the ledger on every subsequent read instead of letting ordinary
+traffic erase it. That re-assertion is EXACT and per record: the standing message is compared against
+the sentence this daemon would have minted for a given ledger record, never searched for the tool id,
+so `tool-1` does not own a message naming `tool-10`, ids carrying whitespace or the sentence's own
+delimiter words work, and a message owned by anything other than exactly one record fails closed to
+NOT owned rather than guessing which operation a person read about. A durable `acknowledged` row
+suppresses the RE-MINT for its own tool and does nothing else: it does not itself clear an advisory
+that is already standing, because a read is not a clear owner.
+
+**It clears on exactly two things, and a read is neither.** Later authoritative confirmation of that
+answer, or the successful explicit BARE human-admin relaunch (`admin-cli` / `admin-ui`, no message)
+completing its own final clear. That relaunch is one chain in one order, holding the answer queue
+throughout: release the old pane, get a successful replacement and delivery, append exactly one
+durable `acknowledged` record for the single quarantined operation the standing advisory names, and
+only then clear that exact attention in the `session.resumed` transition. A crash between the append
+and the clear leaves an acknowledged row beside a standing advisory and a retry finishes it — the
+opposite order would leave a cleared warning with nothing recording that a person dismissed it. A
+live pane keeps that bare-admin path reachable: the dismissal gives up the send shortcut and takes the
+relaunch rather than meeting `already running`, because otherwise the one action that may dismiss the
+warning would be unavailable on exactly the healthy sessions that carry it. Nothing else clears it — not
+old-pane cleanup, not the relaunch or the delivery by itself, not `preserved` false-terminal
+recovery, not a `peer`, `warden`, `daemon` or unknown actor, not a message-bearing resume or live
+send, and not a failed acknowledgment; every failure in that chain leaves the advisory standing, and
+an acknowledgment failure recovers the replacement to a supervised running session rather than
+launching a second pane or reporting a terminal verdict about it. An `acknowledged` record is human
+dismissal ONLY: it never writes `lastAnsweredQuestionToolUseId` and never means the structured answer
+landed. The blocking `structured-answer-unconfirmed` kind never clears through resume at all. The
+dismissal is additive to the `UnregisteredResumeReplacement` teardown path, which is unchanged. Pane
+death, cancellation failure, and restart replay remain fail-closed and never authorize a second
+drive.
 
 The nearest thing Ferretry does have is `lib/session/harness/picker-screen.ts` +
 `dismiss.ts` — the same discipline (classify the pane, re-verify immediately before every send,

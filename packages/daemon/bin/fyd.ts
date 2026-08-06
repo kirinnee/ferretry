@@ -282,6 +282,7 @@ import {
   FleetRefreshService,
   ForeignHistoryImporter,
   type FoundationPaths,
+  firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
   HARNESS_PICKER_COMMAND,
@@ -344,6 +345,7 @@ import {
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
   ResumeCancelled,
+  type ResumeAnswerAttention,
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
@@ -358,6 +360,7 @@ import {
   refuseOccupiedAddress,
   refuseUnbindableAddress,
   relaunchCommand,
+  releasedAnswerAttentionOwnedBy,
   relayCarrierRemedy,
   relayCarriersNeedDiscovery,
   renderConfiguration,
@@ -688,7 +691,19 @@ export interface DaemonWorld {
    * The launcher is passed IN rather than captured so overriding `createResumeLauncher` on a world
    * actually changes what revives.
    */
-  readonly createSessionResume: (storage: DaemonStorage, launcher: ResumeLauncher) => SessionResumeService;
+  readonly createSessionResume: (
+    storage: DaemonStorage,
+    launcher: ResumeLauncher,
+    /** Where the released structured-answer advisory is durably dismissed; see
+     *  `createResumeAnswerAttention`. Passed IN for the launcher's reason: it is built from the
+     *  answer ledger and the answer queue, which belong to the mounted subsystems rather than the
+     *  world, and a second construction would dismiss on a queue nothing else holds. */
+    answerAttention: ResumeAnswerAttention,
+    /** The session's ANSWER/monitor queue, used as the resume service's own serializer. Passed in
+     *  because it belongs to the mounted subsystems, and shared because a dismissal must hold it
+     *  from the old pane's release through the final clear — see `SessionResumePorts.serial`. */
+    serial: KeyedSerialExecutor,
+  ) => SessionResumeService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
    *  instead of one probe per session. Its sources are configured and its refresh
    *  period is the fleet's declared `usage.interval`, so it is built once both
@@ -1626,8 +1641,6 @@ function createSessionResumeSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   service: SessionResumeService,
-  answerLedger: FileAnswerLedger,
-  answerSerial: KeyedSerialExecutor,
 ): SessionResumeSubsystem {
   return {
     resume: async (reference, actor, message) => {
@@ -1635,62 +1648,9 @@ function createSessionResumeSubsystem(
       if (id === undefined)
         throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
       if (storage.findSession(id) === undefined) throw new SessionResumeError('not_found', `no session ${reference}`);
-      const before = SessionStateSchema.safeParse(await storage.readState(id));
-      const outcome = await service
+      await service
         .resume({ id, actor, ...(message === undefined ? {} : { message }) })
         .catch((error: unknown) => resumeRefusal(error));
-      // A prose delivery through the live-pane shortcut is progress, not acknowledgement. Only an
-      // explicit HUMAN relaunch that actually cleared needsHuman may close the append-only answer
-      // ambiguity. Append the acknowledgement before re-clearing state: a crash between those two
-      // operations then leaves projection able to finish the clear, never able to resurrect it.
-      if (
-        before.success &&
-        (actor === 'admin-cli' || actor === 'admin-ui') &&
-        (outcome.disposition === 'revived' || outcome.disposition === 'preserved') &&
-        (before.data.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND ||
-          before.data.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND)
-      ) {
-        await answerSerial.run(id, async () => {
-          const records = await answerLedger.all(id);
-          const named = [...records.values()].filter(
-            record =>
-              record.outcome !== 'confirmed' &&
-              record.outcome !== 'withdrawn' &&
-              (before.data.pendingQuestion?.toolUseId === record.toolUseId ||
-                before.data.needsHuman?.includes(record.toolUseId) === true),
-          );
-          for (const record of named) {
-            await answerLedger.append(id, {
-              ...record,
-              outcome: 'acknowledged',
-              reason:
-                'an explicit human relaunch cleared the structured-answer attention without confirming its answer',
-            });
-            await storage
-              .append(id, 'interaction.answer_acknowledged', {
-                toolUseId: record.toolUseId,
-                requestId: record.requestId,
-                actor,
-                resolution: 'explicit-human-relaunch',
-              })
-              .catch(() => undefined);
-          }
-          if (named.length === 0) return;
-          await storage.updateState(id, current => {
-            const parsed = SessionStateSchema.safeParse(current);
-            if (!parsed.success) return current;
-            if (
-              parsed.data.needsHumanKind !== STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND &&
-              parsed.data.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND
-            )
-              return current;
-            const next = { ...(current as Record<string, unknown>) };
-            delete next.needsHuman;
-            delete next.needsHumanKind;
-            return next as typeof current;
-          });
-        });
-      }
       // Read back through the SAME reader the list and the single read serve, so a revive answers with
       // the view those surfaces will show rather than a projection of the resume outcome.
       const view = await sessions.get(id).catch(() => undefined);
@@ -1700,6 +1660,109 @@ function createSessionResumeSubsystem(
           `session ${id} was revived but its documents do not satisfy the protocol`,
         );
       return view;
+    },
+  };
+}
+
+/**
+ * The durable half of dismissing a released structured-answer advisory.
+ *
+ * THIS REPLACES A WRAPPER THAT RAN AFTER THE SERVICE, and every clause below is one of the ways
+ * that wrapper was wrong. It read the state BEFORE the resume and appended AFTER it, so the service
+ * had already cleared the attention by the time the record was written — the opposite of the order
+ * the survey claims. It accepted `preserved`, which is a relaunch that failed. It did not require a
+ * message-free request, so prose could dismiss the warning. It selected by
+ * `needsHuman.includes(toolUseId)` and looped over EVERY match, so one dismissal could close
+ * several tools, including a `failed` one. And it cleared the state itself, giving the daemon two
+ * owners for one decision.
+ *
+ * Here the service decides and calls this; this one only picks the record and appends.
+ *
+ * IT TAKES NO LOCK OF ITS OWN, and that is load-bearing twice over. The resume service is built on
+ * the SAME answer/monitor executor (see `createSessionResume`), so by the time this runs the answer
+ * queue is already held for this session — a nested acquisition would deadlock the dismissal
+ * against itself, and it would buy nothing, because the queue it wants is the one it is inside.
+ * Holding that queue across the whole critical section is also what makes the clear that follows
+ * safe: no drive and no projection can publish a newer advisory between this append and it.
+ *
+ * THE RECORD IS THE ONE THE STANDING ADVISORY NAMES, decided by `releasedAnswerAttentionOwnedBy` —
+ * the projection's own ownership predicate, reused rather than reimplemented. Counting quarantined
+ * rows was the first thing wrong with the obvious version: a session carrying an unrelated older
+ * quarantine would refuse to dismiss the warning actually on screen. Looking for the tool id inside
+ * the prose was the second: `tool-1` matches a sentence about `tool-10`, and neither a tool id nor a
+ * request id is constrained enough to be recovered from a sentence at all. The predicate compares
+ * the standing message against the exact one this daemon would have minted FOR THAT RECORD, so a
+ * message this daemon did not write owns nothing.
+ *
+ * PER RECORD, NOT PER TOOL. Two request ids may name one rendered form, and the canonical message
+ * carries both — so collapsing the owners by tool id would call two genuinely distinct operations
+ * one owner and dismiss whichever came first.
+ *
+ * FAIL CLOSED ON ANYTHING BUT EXACTLY ONE OWNER. Zero means nothing in the ledger claims the warning
+ * on screen, and inventing an owner would fabricate a dismissal; several mean the daemon cannot tell
+ * WHICH operation the person read about — which is the honest answer for the composition root's
+ * first-write wording, since it names only the tool and several records may share one. Both leave
+ * the advisory standing, which is the recoverable direction: a warning that stays up can be
+ * dismissed again, a record that was wrongly closed cannot be reopened.
+ *
+ * AN ALREADY-ACKNOWLEDGED OWNER IS SUCCESS, NOT A CONFLICT. The append is durable before the state
+ * clears, so a crash in that gap leaves exactly this shape: the row says `acknowledged` and the
+ * advisory still stands. Refusing there would strand the session forever on the one path meant to
+ * recover it, so the retry appends nothing, returns, and lets the service finish the clear.
+ */
+function createResumeAnswerAttention(storage: DaemonStorage, answerLedger: FileAnswerLedger): ResumeAnswerAttention {
+  return {
+    acknowledge: async (id, actor) => {
+      const state = SessionStateSchema.safeParse(await storage.readState(id));
+      if (!state.success)
+        throw new Error(
+          `session ${id} has no readable state document, so the structured-answer advisory it carries ` +
+            `cannot be matched to the operation it names; the advisory stands`,
+        );
+      const records = [...(await answerLedger.all(id)).values()];
+      // OWNERSHIP IS COUNTED OVER EVERY RECORD, not over the dismissable ones. The rendered
+      // sentence is not an injective encoding of the pair that built it — `(requestId "r",
+      // toolUseId "t for u")` and `(requestId "r for t", toolUseId "u")` render the same string,
+      // and the composition root's first write renders the same string for every request id that
+      // ever named its tool. Counting only the candidates would let a `confirmed` co-owner sit
+      // outside the count, leaving exactly one candidate and an ambiguity the guard exists to
+      // catch. So: exactly one owner in the whole ledger, THEN that owner must be dismissable.
+      const owners = records.filter(record => releasedAnswerAttentionOwnedBy(state.data, record));
+      if (owners.length !== 1)
+        throw new Error(
+          `the released structured-answer advisory on session ${id} is owned by ${owners.length} answer ` +
+            `operations rather than exactly one, so there is no single dismissal to record; it stands`,
+        );
+      // biome-ignore lint/style/noNonNullAssertion: the list was just checked to hold exactly one
+      const record = owners[0]!;
+      // Already closed, and the advisory is still up: this is the crash gap between the append and
+      // the clear, so the retry does nothing here and lets the service finish the clear.
+      if (record.outcome === 'acknowledged') return;
+      // `failed`, `accepted`, `confirmed` and `withdrawn` are other things entirely, and rewriting
+      // any of them as `acknowledged` would misreport what happened to that operation.
+      if (record.outcome !== 'quarantined')
+        throw new Error(
+          `the answer operation owning the advisory on session ${id} reads as ${record.outcome}, not a ` +
+            `released quarantine, so dismissing it would misreport what happened; the advisory stands`,
+        );
+      await answerLedger.append(id, {
+        ...record,
+        outcome: 'acknowledged',
+        reason: 'an explicit human relaunch dismissed the structured-answer advisory without confirming its answer',
+      });
+      // Best effort, and deliberately after the ledger: the audit line is for a reader, the
+      // ledger row is the decision, and a journal that will not accept a line must not undo one.
+      await storage
+        .append(id, 'interaction.answer_acknowledged', {
+          toolUseId: record.toolUseId,
+          requestId: record.requestId,
+          // The operator the SERVICE already authorized, carried through for attribution. Nothing
+          // here re-decides eligibility from it — that decision is the action bit, and a second
+          // copy of the test living down here is exactly how the old wrapper drifted.
+          actor,
+          resolution: 'explicit-human-relaunch',
+        })
+        .catch(() => undefined);
     },
   };
 }
@@ -2006,7 +2069,11 @@ function createSessionAnswerSubsystem(
                 ? parsed.data.status
                 : 'awaiting_user',
             needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-            needsHuman: `an answer to ${record.toolUseId} may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed`,
+            // The projection's own builder, not a copy of its sentence: this first write IS one of
+            // the two messages `releasedAnswerAttentionOwnedBy` recognises, so a second literal here
+            // would be a fact with two owners — and the day they drifted, ownership would silently
+            // read false and the advisory would become undismissable.
+            needsHuman: firstWriteReleasedAnswerAttention(record.toolUseId),
           };
           if (parsed.data.pendingQuestion?.toolUseId === record.toolUseId) delete next.pendingQuestion;
           return next as typeof current;
@@ -3781,17 +3848,19 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
    *  subsystems must get the same one the world publishes rather than a second construction. */
-  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher) =>
+  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher, answerAttention, serial) =>
     new SessionResumeService(
       {
         repository: new StorageResumeRepository(storage),
         launcher,
+        answerAttention,
         turns: resumeTurns,
         monitors: new NoMonitorSupervision(),
         gate: launchGate,
-        // Its own queue: a revive must not serialize behind storage-wide work while it holds a
-        // half-replaced terminal.
-        serial: new KeyedSerialExecutor(),
+        // The session's OWN answer/monitor queue, not a private one: a dismissal must hold it from
+        // the old pane's release through the durable acknowledgement to the final clear, or a
+        // projection publishes a newer advisory into the middle of it. See the port's own field.
+        serial,
       },
       defaultSessionResumeSettings,
     );
@@ -4149,7 +4218,16 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // ONE resume service for this opened storage, shared by the revive and the migration: its
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
-      const resume = createSessionResume(storage, reviver);
+      const resume = createSessionResume(
+        storage,
+        reviver,
+        createResumeAnswerAttention(storage, answerLedger),
+        // THE ANSWER QUEUE ITSELF, not a private executor. Every writer of structured-answer
+        // attention already takes this key — the drives and the quarantine writer through the
+        // coordinator, the monitor's reprojection through `runIfIdle` — so handing it to resume is
+        // what makes a dismissal atomic against them from the old pane's release to the final clear.
+        answerSerial,
+      );
       // The session's own voice, over the SAME launcher the revive holds — see the subsystem's header
       // for why a second tmux adapter would misfile the final frame of every completed pane.
       // Hoisted, because the monitor loop below reads the same documents through the same narrowing:
@@ -4396,7 +4474,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessions,
         catalogs,
         sessionControl,
-        sessionResume: createSessionResumeSubsystem(storage, sessions, resume, answerLedger, answerSerial),
+        sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
         sessionAnswer: createSessionAnswerSubsystem(
           storage,
