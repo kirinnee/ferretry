@@ -26,7 +26,7 @@ import { TaskQuickSummary } from '../../features/tasks/task-row.tsx';
 import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
 
 export type SessionSearchResourceState = 'loading' | 'ready' | 'unavailable';
@@ -66,6 +66,32 @@ const INITIAL: SearchSnapshot = {
   tasks: [],
   files: [],
 };
+
+/**
+ * A snapshot CARRIES the session it describes.
+ *
+ * The snapshot used to be a bare piece of state cleared by the load effect. That
+ * made the scope prop and the evidence two facts with two update schedules: a
+ * render published the new scope immediately while the effect that clears the
+ * old evidence is passive, so one committed render paired daemon beta's scope
+ * with daemon alpha's ready task list. Everything downstream then read that pair
+ * as the truth — the reference surface proved `&F6` against a session that has
+ * no F6, and an Add to chat or Mark Done fired in that window addressed beta
+ * with a task it took from alpha.
+ *
+ * Keying it makes the mismatch unrepresentable rather than merely brief: the
+ * render derives INITIAL whenever the stored key is not the key being rendered,
+ * so "we have not read THIS session yet" is a synchronous consequence of the
+ * scope rather than the outcome of an effect that has not run.
+ */
+interface KeyedSnapshot {
+  /** `daemonSessionKey(scope)`, or `''` for no scope — never a real key. */
+  readonly key: string;
+  readonly snapshot: SearchSnapshot;
+}
+
+/** The key a scope's evidence is filed under. `null` gets one no scope can equal. */
+const snapshotKey = (scope: DaemonSessionScope | null): string => (scope === null ? '' : daemonSessionKey(scope));
 
 const taskText = (task: ScopedTaskView): string =>
   [
@@ -197,26 +223,42 @@ export function SessionSearchProvider({
   readonly focusSignal: number;
   readonly children: ReactNode;
 }) {
-  const [snapshot, setSnapshot] = useState<SearchSnapshot>(INITIAL);
+  const [stored, setStored] = useState<KeyedSnapshot>({ key: '', snapshot: INITIAL });
   const [query, setQuery] = useState('');
   const openers = useRef<SessionSearchOpeners | null>(null);
+  const key = snapshotKey(scope);
+  // DERIVED, not cleared. Evidence filed under another session is not this
+  // session's evidence, and this is the line that says so during the very render
+  // that publishes the new scope.
+  const snapshot = stored.key === key ? stored.snapshot : INITIAL;
+
+  // Every async completion publishes to the key that STARTED it, and builds on
+  // that key's own snapshot — never on whatever happens to be stored. A read
+  // that finishes after the reader moved on can therefore only ever write under
+  // the session it asked about.
+  const publish = useCallback((forKey: string, update: (current: SearchSnapshot) => SearchSnapshot): void => {
+    setStored(current => ({
+      key: forKey,
+      snapshot: update(current.key === forKey ? current.snapshot : INITIAL),
+    }));
+  }, []);
 
   useEffect(() => {
     setQuery('');
-    if (scope === null) {
-      setSnapshot(INITIAL);
-      return;
-    }
+    if (scope === null) return;
     const controller = new AbortController();
-    setSnapshot(INITIAL);
+    // No `setStored(INITIAL)` here: the loading state for a session this
+    // provider has not read yet is already what `snapshot` derives above, and
+    // writing it would be a second, later answer to the same question.
+    const forKey = daemonSessionKey(scope);
     void readTasks(connection, scope, controller.signal).then(
       tasks => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({ ...current, taskState: 'ready', taskError: null, tasks }));
+          publish(forKey, current => ({ ...current, taskState: 'ready', taskError: null, tasks }));
       },
       reason => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({
+          publish(forKey, current => ({
             ...current,
             taskState: 'unavailable',
             taskError: failureMessage(reason),
@@ -227,11 +269,11 @@ export function SessionSearchProvider({
     void readFiles(connection, scope, controller.signal).then(
       files => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({ ...current, fileState: 'ready', fileError: null, files }));
+          publish(forKey, current => ({ ...current, fileState: 'ready', fileError: null, files }));
       },
       reason => {
         if (!controller.signal.aborted)
-          setSnapshot(current => ({
+          publish(forKey, current => ({
             ...current,
             fileState: 'unavailable',
             fileError: failureMessage(reason),
@@ -240,7 +282,7 @@ export function SessionSearchProvider({
       },
     );
     return () => controller.abort();
-  }, [connection, scope]);
+  }, [connection, publish, scope]);
 
   const setOpeners = useCallback((next: SessionSearchOpeners | null) => {
     openers.current = next;

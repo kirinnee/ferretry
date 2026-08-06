@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { FY_REQUEST_ID_HEADER, type ScopedTaskView } from '@ferretry/protocol';
 import { useEffect } from 'react';
+import { sessionReferenceSurface } from '../../src/components/reference-surface.tsx';
 import {
   filterSessionSearchResults,
   matchesSessionSearch,
   SessionSearchProvider,
+  type SessionSearchResourceState,
   SessionTasksSearchSurface,
   useSessionSearch,
 } from '../../src/features/session-search/session-search.tsx';
@@ -388,6 +390,120 @@ describe('Add to chat from the current-session task board', () => {
       expect(mine.draft).toBe('&F6 ');
     } finally {
       run(() => surface.unmount());
+    }
+  });
+});
+
+/**
+ * The published scope and the published evidence must describe the SAME session
+ * in every single render, not merely once the effects have run.
+ *
+ * A render publishes new props immediately; an effect that clears stale state is
+ * passive and runs after the commit. When the snapshot was unkeyed, that gap was
+ * one committed render in which daemon beta's scope travelled with daemon
+ * alpha's ready task list — and everything downstream reads the pair, so the
+ * reference surface proved `&F6` against a session that has no F6, and an Add to
+ * chat or Mark Done fired in that window addressed beta with alpha's task.
+ *
+ * This records the context value on EVERY render, during render, because an
+ * observation taken in an effect is exactly the observation that misses it.
+ */
+describe('the published scope and the published evidence never disagree', () => {
+  interface Observation {
+    readonly daemonId: string | undefined;
+    readonly taskState: SessionSearchResourceState;
+    readonly taskIds: readonly string[];
+    /** What the workspace's reference surface would prove from THIS pairing. */
+    readonly resolvesF6: boolean;
+  }
+
+  function ScopeProbe({ onObserve }: { readonly onObserve: (observation: Observation) => void }) {
+    const search = useSessionSearch();
+    // Mirrors SessionChatPage: ready evidence for the scope on screen becomes
+    // the task snapshot the session's one reference surface proves against.
+    const referenceTasks = search.taskState === 'ready' ? search.tasks : undefined;
+    const surface =
+      search.scope === null
+        ? null
+        : sessionReferenceSurface({
+            connection: search.connection,
+            scope: search.scope,
+            ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
+          });
+    onObserve({
+      daemonId: search.scope?.daemonId,
+      taskState: search.taskState,
+      taskIds: search.tasks.map(task => task.id),
+      resolvesF6: surface?.taskReferenceResolver?.('F6') === true,
+    });
+    return null;
+  }
+
+  test('never pairs the new session with the previous session evidence, not even for one render', async () => {
+    const alpha = daemonConnection({
+      daemonId: 'alpha',
+      baseUrl: 'https://alpha.example.test',
+      deviceToken: 'alpha-token',
+    });
+    const beta = daemonConnection({
+      daemonId: 'beta',
+      baseUrl: 'https://beta.example.test',
+      deviceToken: 'beta-token',
+    });
+    // The same session id on both daemons — the arrangement in which a stale
+    // pairing is invisible to any check that compares session ids alone.
+    const alphaScope = daemonSessionScope(alpha, 'shared');
+    const betaScope = daemonSessionScope(beta, 'shared');
+    const alphaTask = task({ id: 'F6', sessionId: 'shared' });
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const owned = url.host === 'alpha.example.test' ? [alphaTask] : [];
+      if (url.pathname.endsWith('/tasks/F6'))
+        return Response.json({ activity: [], sessionId: 'shared', task: alphaTask });
+      if (url.pathname.endsWith('/tasks')) return Response.json({ tasks: owned });
+      if (url.pathname.endsWith('/fs')) return Response.json({ entries: [] });
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+
+    const seen: Observation[] = [];
+    const observe = (observation: Observation): void => {
+      seen.push(observation);
+    };
+    const tree = render(
+      <SessionSearchProvider connection={alpha} focusSignal={0} scope={alphaScope}>
+        <ScopeProbe onObserve={observe} />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      // Guard the guard: without this the test would pass on a provider that
+      // never reaches ready at all.
+      expect(seen.some(o => o.daemonId === 'alpha' && o.taskState === 'ready' && o.taskIds.includes('F6'))).toBe(true);
+      expect(seen.some(o => o.daemonId === 'alpha' && o.resolvesF6)).toBe(true);
+
+      const before = seen.length;
+      await runAsync(async () => {
+        tree.update(
+          <SessionSearchProvider connection={beta} focusSignal={0} scope={betaScope}>
+            <ScopeProbe onObserve={observe} />
+          </SessionSearchProvider>,
+        );
+        await settle();
+      });
+
+      const onBeta = seen.slice(before).filter(o => o.daemonId === 'beta');
+      expect(onBeta.length).toBeGreaterThan(0);
+      // Not one observation of beta may carry alpha's task…
+      expect(onBeta.filter(o => o.taskIds.includes('F6'))).toEqual([]);
+      // …and none may let the production reference composition prove it there.
+      expect(onBeta.filter(o => o.resolvesF6)).toEqual([]);
+      // The very first render under beta already reports unread rather than
+      // inheriting alpha's ready: that is what makes it synchronous.
+      expect(onBeta[0]?.taskState).toBe('loading');
+      // Beta's own read still lands, so this is a reset and not a freeze.
+      expect(seen.at(-1)).toMatchObject({ daemonId: 'beta', taskState: 'ready', taskIds: [] });
+    } finally {
+      run(() => tree.unmount());
     }
   });
 });
