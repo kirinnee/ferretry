@@ -154,6 +154,105 @@ describe('the Files async resource', () => {
     await view.unmount();
   });
 
+  it('drops the failure the moment its replacement is asked for', async () => {
+    let release: ((value: string) => void) | null = null;
+    let reads = 0;
+    let latest: FsResource<string> | null = null;
+    const view = await mount(
+      <Probe
+        resourceKey="file:a"
+        load={() => {
+          reads += 1;
+          if (reads === 1) return Promise.resolve('the bytes that stayed');
+          if (reads === 2) return Promise.reject(new Error('daemon refused'));
+          return new Promise<string>(resolve => {
+            release = resolve;
+          });
+        }}
+        onResource={resource => {
+          latest = resource;
+        }}
+      />,
+    );
+    expect(text(view.container)).toBe('the bytes that stayed');
+    await interact(() => latestOf(() => latest, 'the settled resource').reload());
+    expect(latestOf(() => latest, 'the failed resource').error).toBe('daemon refused');
+
+    // The retry is the newer fact. A settled failure and an unsettled attempt
+    // are different states, and every consumer reads that off this one place —
+    // so the error goes when the read that replaces it starts, not when it ends.
+    await interact(() => latestOf(() => latest, 'the failed resource').reload());
+    const retrying = latestOf(() => latest, 'the retrying resource');
+    expect(retrying.error).toBeNull();
+    expect(retrying.refreshing).toBe(true);
+    expect(retrying.stale).toBe(true);
+    expect(retrying.data).toBe('the bytes that stayed');
+    expect(retrying.revision).toBe(1);
+
+    await interact(async () => {
+      must(release, 'the stalled retry')('the bytes that replaced them');
+    });
+    expect(text(view.container)).toBe('the bytes that replaced them');
+    expect(latestOf(() => latest, 'the retried resource').revision).toBe(2);
+    await view.unmount();
+  });
+
+  it('does not ask again for a key it already answered, when that key is merely re-armed', async () => {
+    let reads = 0;
+    let latest: FsResource<string> | null = null;
+    const load = async (): Promise<string> => {
+      reads += 1;
+      return `bytes from read ${reads}`;
+    };
+    const probe = (resourceKey: string | null) => (
+      <Probe
+        resourceKey={resourceKey}
+        load={load}
+        onResource={resource => {
+          latest = resource;
+        }}
+      />
+    );
+    const view = await mount(probe('file:a'));
+    expect(text(view.container)).toBe('bytes from read 1');
+
+    // A surface that flips to the diff and back drops the key and re-arms it.
+    // The value is still here, and asking again would spend a round trip on
+    // bytes the reader is already looking at while `refreshing` said nothing.
+    await view.render(probe(null));
+    await view.render(probe('file:a'));
+    expect(reads).toBe(1);
+    const rearmed = latestOf(() => latest, 're-armed resource');
+    expect(rearmed.data).toBe('bytes from read 1');
+    expect(rearmed.refreshing).toBe(false);
+    expect(rearmed.loading).toBe(false);
+    expect(rearmed.revision).toBe(1);
+
+    // Reload is how newer bytes are asked for; it moves the generation.
+    await interact(() => latestOf(() => latest, 're-armed resource').reload());
+    expect(reads).toBe(2);
+    expect(text(view.container)).toBe('bytes from read 2');
+    await view.unmount();
+  });
+
+  it('does ask again when the key it re-arms had FAILED, because nothing else can retry it', async () => {
+    let reads = 0;
+    const load = async (): Promise<string> => {
+      reads += 1;
+      if (reads === 1) throw new Error('daemon refused');
+      return 'bytes from the second attempt';
+    };
+    const probe = (resourceKey: string | null) => <Probe resourceKey={resourceKey} load={load} onResource={() => {}} />;
+    const view = await mount(probe('file:a'));
+    expect(text(view.container)).toBe('daemon refused');
+
+    await view.render(probe(null));
+    await view.render(probe('file:a'));
+    expect(reads).toBe(2);
+    expect(text(view.container)).toBe('bytes from the second attempt');
+    await view.unmount();
+  });
+
   it('clears the previous key’s data instead of showing it under the new key', async () => {
     const bodies = new Map([
       ['file:a', 'contents of A'],

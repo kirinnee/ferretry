@@ -125,6 +125,17 @@ const byLabel = (container: HTMLElement, label: string): HTMLElement =>
 const click = (container: HTMLElement, label: string): Promise<void> =>
   interact(() => byLabel(container, label).click());
 
+/**
+ * Both reload notices are ALWAYS mounted and start empty — an already-populated
+ * live region is the one screen readers miss — so "no notice" is empty text
+ * rather than an absent node.
+ */
+const notices = (container: HTMLElement, tone: 'status' | 'alert'): HTMLElement =>
+  must(container.querySelector<HTMLElement>(`.kt-fs > .kt-fs-stale[role="${tone}"]`), `the ${tone} reload notice`);
+
+const noticeText = (container: HTMLElement): string =>
+  [...container.querySelectorAll('.kt-fs-stale')].map(node => node.textContent ?? '').join('');
+
 describe('the Files tab', () => {
   it('browses the paired daemon, walks into a folder and back out through the crumbs', async () => {
     fixture.listings = {
@@ -324,15 +335,47 @@ describe('the Files tab', () => {
 
       // Same decision as the instance viewer, because it is the same decision.
       expect(view.container.textContent).toContain('the copy that survived');
-      const notice = must(view.container.querySelector('.kt-fs-stale'), 'the failed-reload notice');
-      expect(notice.getAttribute('role')).toBe('alert');
+      const notice = notices(view.container, 'alert');
       expect(notice.textContent).toContain('the session host went away');
+      expect(notices(view.container, 'status').textContent).toBe('');
 
       fixture.files = { 'a.ts': { path: 'a.ts', content: 'the retry that worked' } };
-      await interact(() => must(notice.querySelector('button'), 'the try-again control').click());
+      await interact(() => must(notice.querySelector<HTMLElement>('.kt-fs-retry'), 'the try-again control').click());
       await settle();
       expect(view.container.textContent).toContain('the retry that worked');
-      expect(view.container.querySelector('.kt-fs-stale')).toBeNull();
+      expect(noticeText(view.container)).toBe('');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('keeps the rendered diff and its choice when a diff reload fails in the standalone viewer', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    fixture.diffs = { 'a.ts': '--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+the diff on screen' };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      await click(view.container, 'Show git diff for a.ts');
+      await settle();
+      const pane = must(view.container.querySelector<HTMLElement>('.kt-fs-scroll'), 'the scroller');
+      const body = must(pane.firstElementChild, 'the rendered diff');
+      expect(view.container.textContent).toContain('the diff on screen');
+
+      fixture.diffs = { 'a.ts': new Error('git went away mid-read') };
+      await click(view.container, 'Reload a.ts');
+      await settle();
+
+      // Node identity is the reading-position evidence — happy-dom lays nothing
+      // out, so an unchanged `scrollTop` would prove only that nobody wrote it.
+      expect(view.container.textContent).toContain('the diff on screen');
+      expect(pane.firstElementChild).toBe(body);
+      expect(byLabel(view.container, 'Show a.ts normally').getAttribute('aria-pressed')).toBe('true');
+      const notice = notices(view.container, 'alert');
+      expect(notice.textContent).toContain('Could not reload the diff');
+      expect(notice.textContent).toContain('git went away mid-read');
+      expect(view.container.textContent).not.toContain('Could not load the diff');
     } finally {
       await view.unmount();
     }

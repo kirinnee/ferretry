@@ -1915,6 +1915,8 @@ const HARNESS_FS_CHANGES = {
 /** The two paths whose reload states the file-tab card exists to show. */
 const HARNESS_RELOAD_PENDING = 'RELEASE.md';
 const HARNESS_RELOAD_FAILING = 'DEPLOY.md';
+const HARNESS_RELOAD_FAILURE =
+  'the session working tree is being rewritten by a checkout, so this file cannot be read right now';
 
 const HARNESS_PREVIEW_CSV = [
   'package,tier,lines,covered',
@@ -1975,12 +1977,29 @@ const HARNESS_FS_PREVIEWS: Readonly<Record<string, unknown>> = {
 };
 
 /**
- * How many times each path has been read, so the two RELOAD states are real
- * rather than drawn. Both files answer the first read and then misbehave: one
- * never settles (the reload is genuinely in flight) and one fails the way a
- * browser fails. Nothing else in the harness depends on the count.
+ * The two RELOAD states are REAL reads that misbehave, not drawn notices: each
+ * of these paths answers once and then either never settles (a reload genuinely
+ * in flight) or fails the way a browser fails.
+ *
+ * The `served` flag lives ON THE FIXTURE, and it is re-armed by page entry: this
+ * module is evaluated once per document, so every capture that navigates starts
+ * from `served: false`. A shared counter keyed by path made "read exactly once"
+ * a property of the whole page instead of a property of one fixture — a second
+ * body reading the same path would silently consume the good answer and leave
+ * the card loading forever, which the screenshot pass could only experience as a
+ * hang. EACH DRIVEN PATH BELONGS TO EXACTLY ONE BODY; the pass's explicit
+ * timeouts (`screenshot.ts`) turn a violation of that into a named failure in
+ * seconds rather than a wait.
  */
-const harnessFileReads = new Map<string, number>();
+interface DrivenRead {
+  readonly onRepeat: 'never-settles' | 'fails';
+  served: boolean;
+}
+
+const HARNESS_DRIVEN_READS: Readonly<Record<string, DrivenRead>> = {
+  [HARNESS_RELOAD_PENDING]: { onRepeat: 'never-settles', served: false },
+  [HARNESS_RELOAD_FAILING]: { onRepeat: 'fails', served: false },
+};
 
 /**
  * The fleet profile environment the harness daemon publishes.
@@ -2108,10 +2127,21 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
     if (!url.pathname.endsWith('/fs/file')) return harnessJson(HARNESS_FS_LISTINGS[path] ?? { entries: [] });
     if (url.searchParams.get('format') === 'base64') return harnessJson(HARNESS_FS_PREVIEWS[path] ?? { path });
-    const reads = (harnessFileReads.get(path) ?? 0) + 1;
-    harnessFileReads.set(path, reads);
-    if (reads > 1 && path === HARNESS_RELOAD_PENDING) return await new Promise<Response>(() => undefined);
-    if (reads > 1 && path === HARNESS_RELOAD_FAILING) throw new TypeError('Failed to fetch');
+    const driven = HARNESS_DRIVEN_READS[path];
+    if (driven !== undefined) {
+      if (driven.served) {
+        // A REFUSAL WITH REASONS, not a bare "failed to fetch": the notice has
+        // to be reviewed carrying the kind of sentence a daemon actually sends,
+        // which is what makes the compact/expanded pair worth looking at.
+        if (driven.onRepeat === 'fails')
+          return new Response(JSON.stringify({ error: HARNESS_RELOAD_FAILURE }), {
+            status: 503,
+            headers: { 'content-type': 'application/json' },
+          });
+        return await new Promise<Response>(() => undefined);
+      }
+      driven.served = true;
+    }
     return harnessJson(HARNESS_FS_FILES[path] ?? { path });
   }
   // Reads only, and only routes named above. A write has no answer here on
@@ -5261,16 +5291,21 @@ function Shell() {
         // the rich preview that reload path feeds, and the two states a reload
         // can leave behind. The screenshot pass presses Reload on the last two
         // — they are real reads that misbehave, not a drawn notice.
+        //
+        // The preview body is TALLER on purpose. Row 62 requires the raw / open /
+        // download fallbacks to survive, so a slot that cuts the actions row off
+        // the bottom edge is evidence for the opposite of what it claims; 24rem
+        // is what fits the bar, a five-row table and that row at 390px.
         <Card aria-label="File tab body" className="min-w-0 overflow-hidden" id="harness-file-instance">
           {(
             [
-              ['file-instance-surface', 'CLAUDE.md'],
-              ['file-instance-preview', 'coverage.csv'],
-              ['file-instance-reloading', HARNESS_RELOAD_PENDING],
-              ['file-instance-reload-failed', HARNESS_RELOAD_FAILING],
+              ['file-instance-surface', 'CLAUDE.md', 'h-[15rem]'],
+              ['file-instance-preview', 'coverage.csv', 'h-[24rem]'],
+              ['file-instance-reloading', HARNESS_RELOAD_PENDING, 'h-[15rem]'],
+              ['file-instance-reload-failed', HARNESS_RELOAD_FAILING, 'h-[15rem]'],
             ] as const
-          ).map(([slot, path], index) => (
-            <div className="flex h-[15rem] flex-col" data-harness={slot} key={slot}>
+          ).map(([slot, path, height], index) => (
+            <div className={`flex ${height} flex-col`} data-harness={slot} key={slot}>
               <FileInstanceSurface
                 daemon={daemon}
                 scope={scope}
