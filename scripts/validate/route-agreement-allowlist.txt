@@ -85,7 +85,6 @@ unreached GET /usage # CORRECT: public usage feed for external readers
 unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
 
 # Surfaces with no shipped client yet. Each is a route somebody built and nobody wired.
-unreached POST /v1/projects # no client registers a project; only the GET is read
 unreached GET /v1/fleet/plan # no client dials it; `fy fleet plan` computes locally
 unreached GET /v1/fleet/usage # no client dials it
 # Found by reading the verb of the call a `new URL(…)` is handed to. The PWA's environment settings

@@ -51,7 +51,7 @@
  * as another.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { ProjectInfo, SessionView } from '@ferretry/protocol';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import type { UiControls } from './controls.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';
@@ -70,19 +70,23 @@ export const baseName = (path: string): string => {
 };
 
 /**
- * A folder a daemon has registered as a project. Structural on purpose: no
- * Ferretry endpoint serves this yet, so pinning it to a protocol schema would
- * be inventing a wire shape ahead of the daemon that has to produce it.
+ * A folder a daemon has registered as a project, as GROUPING reads it.
+ *
+ * Every field is `ProjectInfoSchema`'s own. `/v1/projects` has been served since
+ * PR #136 and `@ferretry/protocol` owns that record, so this is a VIEW of it and
+ * never a second declaration: a `source` the daemon adds cannot go stale here,
+ * because the enum is picked from the wire type rather than retyped beside it.
+ *
+ * Only `name` and `path` are required, and that is a statement about grouping
+ * rather than about the wire. `projectKeyFor` decides which of two nested roots
+ * a session belongs to using nothing but the path, so a caller that has only
+ * those two (a fixture, a folder a reader typed) is still a legal input. The
+ * durable metadata is optional here and PRESENT in practice — the store hands
+ * grouping whole parsed records — which is what lets a surface render
+ * provenance without a second read.
  */
-export interface FleetProject {
-  readonly name: string;
-  readonly path: string;
-  /** Durable registry metadata; grouping intentionally needs only name + path. */
-  readonly id?: string;
-  readonly source?: 'existing-folder' | 'clone' | 'new-folder' | 'confirmed-discovery';
-  readonly createdAt?: string;
-  readonly git?: { readonly commonDirectory: string };
-}
+export type FleetProject = Readonly<Pick<ProjectInfo, 'name' | 'path'>> &
+  Readonly<Partial<Pick<ProjectInfo, 'id' | 'source' | 'createdAt' | 'git'>>>;
 
 /**
  * The four controls that narrow a fleet. Taken as a subset of `UiControls`

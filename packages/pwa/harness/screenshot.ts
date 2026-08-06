@@ -45,6 +45,18 @@ const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
 const ATTENTION_ONLY = process.argv.includes('--attention-only');
+const PROJECTS_ONLY = process.argv.includes('--projects-only');
+
+/**
+ * The Projects hub states, each on a page of its own.
+ *
+ * A page rather than an element inside the gallery for the reason the fleet
+ * frames already document: the hub is taller than a phone, and an element
+ * capture inside a scroller clips to the wrong region. Every one of these is a
+ * state the shipped component can really be in — `ProjectsHub` takes plain
+ * values, so nothing here is posed.
+ */
+const PROJECTS_FRAMES = ['hub', 'empty', 'loading', 'error', 'refused', 'registered', 'already-registered'] as const;
 
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
@@ -579,6 +591,135 @@ try {
             await taskBoard.scrollIntoViewIfNeeded();
             await taskBoard.screenshot({ path: target });
             process.stdout.write(`📸 task board ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+            continue;
+          }
+          if (PROJECTS_ONLY) {
+            for (const frame of PROJECTS_FRAMES) {
+              await page.goto(`${server.url}#projects-${frame}`);
+              await page.reload();
+              await page.locator(`#harness-projects-${frame}-page`).waitFor({ state: 'visible' });
+              // The refusal lives INSIDE the form, beside the entries it promises
+              // are still there — so a capture of the closed hub would show none of
+              // it. Reproduce the state a reader is actually in: the form open, the
+              // draft they typed still in the field, and the daemon's own sentence
+              // under it.
+              if (frame === 'refused') {
+                await page.getByRole('button', { name: 'Add project' }).click();
+                await page.locator('[data-add-project-form]').waitFor({ state: 'visible' });
+                await page.locator('[data-project-mode="new-folder"]').click();
+                await page.getByLabel('Folder to create').fill('/home/pilot/work/deep/nested');
+                await page.locator('[data-project-draft-problem]').waitFor({ state: 'hidden' });
+              }
+              const viewportTarget = join(outDir, `${viewport.name}-projects-${frame}-viewport.png`);
+              await page.screenshot({ path: viewportTarget });
+              // Production locks html/body to one viewport, which is what the
+              // required evidence above must be taken under. Release it only on
+              // this standalone document before the supplemental full-page shot,
+              // or Chromium measures the whole height and paints one screen.
+              const fullTarget = join(outDir, `${viewport.name}-projects-${frame}.png`);
+              await page.evaluate(() => {
+                document.documentElement.style.height = 'auto';
+                document.documentElement.style.overflow = 'auto';
+                document.body.style.height = 'auto';
+                document.body.style.overflow = 'auto';
+              });
+              await page.screenshot({ path: fullTarget, fullPage: true });
+              process.stdout.write(`📸 ${viewport.name} projects ${frame} -> ${viewportTarget} + ${fullTarget}\n`);
+            }
+
+            /**
+             * THE FORM, REACHED BY DRIVING IT.
+             *
+             * Every state below comes from the real controls — the disclosure, the
+             * mode radios, the git checkbox — because a posed form proves nothing
+             * about the one a reader has to operate, and because the disclosure
+             * moving focus into the path field is itself part of what is under
+             * review. The two assertions are the point of the pass: a screenshot
+             * cannot tell a form that fits from one whose controls are below the
+             * thumb floor, and it cannot tell a page that fits from one scrolling
+             * sideways off a phone.
+             */
+            await page.goto(`${server.url}#projects-hub`);
+            await page.reload();
+            await page.locator('#harness-projects-hub-page').waitFor({ state: 'visible' });
+            await page.getByRole('button', { name: 'Add project' }).click();
+            await page.locator('[data-add-project-form]').waitFor({ state: 'visible' });
+
+            /**
+             * The floor is a POINTER fact, not a viewport fact.
+             *
+             * `h-control` composes the touch floor itself — `themes.css` resolves
+             * it as max(theme height, --target-floor) on a coarse pointer — so the
+             * same class is 44px on the phone context above and the theme's own
+             * dense 28px on a mouse-driven desktop. Asserting 44px at both widths
+             * would therefore fail the design system rather than this form, and
+             * hardcoding 44px in the component would delete the density every
+             * other panel keeps. WCAG 2.5.8's 24px minimum still applies with a
+             * fine pointer, and that is what is checked there.
+             */
+            const controlFloor = viewport.name === 'mobile' ? TOUCH_TARGET_MINIMUM : 24;
+
+            for (const mode of ['existing-folder', 'new-folder', 'clone'] as const) {
+              if (mode !== 'existing-folder') {
+                // The LABEL, not the input: the radios are `sr-only`, so the
+                // label is the thing with a hit area and the only thing a reader
+                // can actually press.
+                await page.locator(`[data-project-mode="${mode}"]`).click();
+                await page.locator(`[data-project-mode="${mode}"][data-project-mode-selected="true"]`).waitFor();
+              }
+              // The one destructive option a reader has to opt into, captured
+              // CHECKED: an unchecked box proves nothing about the state that
+              // runs `git init` on their disk.
+              if (mode === 'new-folder') await page.locator('input[type="checkbox"]').check();
+              const formTarget = join(outDir, `${viewport.name}-projects-form-${mode}.png`);
+              await page.screenshot({ path: formTarget });
+              process.stdout.write(`📸 ${viewport.name} projects form ${mode} -> ${formTarget}\n`);
+
+              const geometry = await page.evaluate(minimum => {
+                const root = document.documentElement;
+                // WHAT IS MEASURED IS THE HIT AREA, not the painted box. An input
+                // WRAPPED by its label is pressed anywhere in that label — the
+                // `sr-only` radios have no box at all and the git checkbox paints
+                // a 16px square — so the label is the control and it is in this
+                // set. An input associated only by `for=` has no such stand-in and
+                // is measured on its own.
+                const controls = [
+                  ...document.querySelectorAll<HTMLElement>(
+                    '[data-add-project-form] button, [data-add-project-form] label',
+                  ),
+                  ...[...document.querySelectorAll<HTMLElement>('[data-add-project-form] input')].filter(
+                    input => input.closest('label') === null,
+                  ),
+                ];
+                return {
+                  scrollWidth: root.scrollWidth,
+                  clientWidth: root.clientWidth,
+                  undersized: controls
+                    .map(element => ({
+                      what: element.tagName.toLowerCase() + (element.id === '' ? '' : `#${element.id}`),
+                      height: Math.round(element.getBoundingClientRect().height),
+                    }))
+                    .filter(entry => entry.height > 0 && entry.height < minimum),
+                  focused: document.activeElement?.tagName.toLowerCase() ?? null,
+                };
+              }, controlFloor);
+
+              if (geometry.scrollWidth > geometry.clientWidth) {
+                fail(
+                  `the ${mode} form made the page scroll horizontally at ${viewport.name} ` +
+                    `(${geometry.scrollWidth}px in ${geometry.clientWidth}px)`,
+                );
+              }
+              if (geometry.undersized.length > 0) {
+                fail(
+                  `the ${mode} form has controls below ${controlFloor}px at ${viewport.name}: ` +
+                    geometry.undersized.map(entry => `${entry.what} ${entry.height}px`).join(', '),
+                );
+              }
+              process.stdout.write(
+                `   projects form ${mode} @ ${viewport.name}: page scroll x=false focus=${geometry.focused ?? '(none)'}\n`,
+              );
+            }
             continue;
           }
           if (!SETTINGS_ONLY) {
