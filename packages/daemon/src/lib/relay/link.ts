@@ -563,6 +563,16 @@ export class RelayLink {
       return;
     }
     const answered = await answerClientHandshake(this.deps.crypto, this.deps.identity, session.sessionId, hello);
+    // THE CREDENTIAL DEADLINE COVERS THIS AWAIT NOW, so it can end the session inside it. Arming at
+    // the `open` is what made that reachable — the timer used to be armed AFTER this line, so nothing
+    // could expire during a handshake — and the resumed continuation would otherwise key a channel,
+    // set a phase over the `concluding` that `#forget` wrote, and put the handshake ANSWER on the wire
+    // behind the `closed` control the timer already sent. That frame names no live session, and the
+    // rendezvous answers one of those by closing the daemon's whole socket.
+    //
+    // Checked BEFORE `answered.ok`, deliberately: refusing a dead session with `#endSession` would
+    // send a SECOND `closed` for it, which is the same violation reached politely.
+    if (!this.#live(session)) return;
     if (!answered.ok) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, answered.reason);
       return;
@@ -590,6 +600,13 @@ export class RelayLink {
       return;
     }
     const opened = await openRecord(this.deps.crypto, channel, frame);
+    // The mirror of the check in `#onHandshake`, and for the same reason: this await is inside the
+    // credential window too, so the deadline can end and delete the session while a record is being
+    // decrypted. The continuation would then credit the peer, dispatch a credential against a session
+    // the rendezvous has been told is over, or — because `#forget` left the phase `concluding` rather
+    // than a mode this method serves — fall through and send a SECOND `closed` for it. Every one of
+    // those puts a frame on the wire for a session that is not there.
+    if (!this.#live(session)) return;
     if (!opened.ok) {
       this.#endSession(session.sessionId, opened.code, opened.reason);
       return;

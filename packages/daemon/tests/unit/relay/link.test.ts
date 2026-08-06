@@ -1554,18 +1554,29 @@ describe('an outcome that has not crossed yet', () => {
 });
 
 /**
- * The real crypto, with one record operation held open until a test lets it finish.
+ * The real crypto, with one operation held open until a test lets it finish.
  *
  * `Object.create` rather than a spread, because the real crypto is a class instance and a spread
- * would drop every method it inherits. Only the two record operations are wrapped.
+ * would drop every method it inherits.
+ *
+ * `handshake` gates `generateEphemeralKeyPair`, which is the FIRST await inside
+ * `answerClientHandshake` — so holding it suspends the daemon's whole handshake rather than some
+ * later part of it, which is the window the credential deadline now covers.
  */
-function heldCrypto(which: 'open' | 'seal' = 'open'): RelayCrypto & { hold(): void; release(): void } {
+function heldCrypto(which: 'open' | 'seal' | 'handshake' = 'open'): RelayCrypto & {
+  hold(): void;
+  release(): void;
+} {
   let resume: (() => void) | undefined;
   let holding = false;
   const wait = async (): Promise<void> => {
     if (holding) await new Promise<void>(resolve => (resume = resolve));
   };
   const gated = Object.create(crypto_) as RelayCrypto & { hold(): void; release(): void };
+  gated.generateEphemeralKeyPair = async () => {
+    if (which === 'handshake') await wait();
+    return await crypto_.generateEphemeralKeyPair();
+  };
   gated.open = async (key, nonce, aad, ciphertext) => {
     if (which === 'open') await wait();
     return await crypto_.open(key, nonce, aad, ciphertext);
@@ -2072,3 +2083,149 @@ const relayVisibleText = (sent: Wire): string =>
     .filter(frame => frame.kind !== FRAME_KINDS.data)
     .map(frame => utf8Text(frame.payload) ?? '')
     .join('\n');
+
+/** A claimed link with controllable timers, on crypto a test can suspend at a chosen operation. */
+interface HeldCredentialLink {
+  readonly crypto: RelayCrypto & { hold(): void; release(): void };
+  readonly link: RelayLink;
+  readonly sent: Wire;
+  readonly timers: FakeTimer[];
+}
+
+/**
+ * A claimed link whose credential deadline a test fires by hand.
+ *
+ * Separate from {@link heldStreamingLink} because these cases need the SCHEDULER as well as the
+ * crypto: the interleave under test is the deadline expiring inside an await, and a ten-second real
+ * timer cannot be aimed at a window that is microseconds wide.
+ */
+async function heldCredentialLink(which: 'handshake' | 'open'): Promise<HeldCredentialLink> {
+  const crypto = heldCrypto(which);
+  const sent = wire();
+  const timers: FakeTimer[] = [];
+  const link = new RelayLink({
+    crypto,
+    identity,
+    relayHost: HOST,
+    socket: sent.socket,
+    dispatch: async () => json(200, {}),
+    sockets: async () => ({ outcome: 'unclaimed' }),
+    devices: {
+      identifyDevice: token => (token === DEVICE_TOKEN ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined),
+    },
+    pairing: { redeemOverRelay: async () => ({ kind: 'refused' }) },
+    scheduler: {
+      after: (milliseconds, action) => {
+        const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
+        timers.push(timer);
+        return {
+          cancel: () => {
+            timer.cancelled = true;
+          },
+        };
+      },
+    },
+  });
+  await link.receiveBinary(challenge());
+  await link.receiveBinary(claimed());
+  return { crypto, link, sent, timers };
+}
+
+describe('a credential deadline that fires inside an await', () => {
+  it('should not answer a handshake for a session the deadline ended while the crypto was suspended', async () => {
+    // THE DEFECT THIS PINS, AND IT WAS INTRODUCED BY ARMING THE DEADLINE AT THE `open`. The timer used
+    // to start when the handshake ANSWER was produced, so nothing could expire during
+    // `answerClientHandshake`; covering `awaiting-hello` put that await inside the window. The
+    // continuation then keyed a channel, wrote `awaiting-credential` over the `concluding` that
+    // `#forget` had just set, and put the handshake answer on the wire BEHIND the `closed` control the
+    // timer had already sent — a frame naming no live session, which the rendezvous answers by closing
+    // the daemon's whole socket.
+    const { crypto, link, sent, timers } = await heldCredentialLink('handshake');
+    await link.receiveBinary(control({ t: 'open' }, sessionOne()));
+    const pending = await startClientHandshake(crypto_, sessionOne(), identity.daemonId);
+
+    // Act — the daemon's handshake suspends inside its own key generation.
+    crypto.hold();
+    const handshaking = link.receiveBinary(
+      encodeFrame({
+        kind: FRAME_KINDS.handshake,
+        sessionId: sessionOne(),
+        sequence: HANDSHAKE_FRAME_SEQUENCE,
+        payload: encodeHandshakeMessage(pending.hello),
+      }),
+    );
+    await new Promise(resolve => setTimeout(resolve, 1));
+
+    // Act — and the credential window expires while it is suspended.
+    timers[0]?.fire();
+    const closedAt = sent.frames.length - 1;
+    crypto.release();
+    await handshaking;
+
+    // Assert — the deadline ended it, and NOTHING followed that close: no handshake answer, no credit.
+    should(controlOf(sent.frames[closedAt])).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'no credential arrived before the deadline',
+    });
+    should(sent.frames).have.length(closedAt + 1);
+    should(link.report().sessions).equal(0);
+    // Assert — one session ended, never the link.
+    should(sent.closes).be.empty();
+  });
+
+  it('should not credit or dispatch a credential the deadline outran mid-decrypt', async () => {
+    // The analogous race one await later, which predates the change above: the deadline can fire while
+    // the FIRST record is being decrypted. The resumed continuation credited the peer against a
+    // deleted session and then — because `#forget` leaves the phase `concluding` rather than a mode
+    // this method serves — fell through to `#endSession` and sent a SECOND `closed` for a session the
+    // rendezvous had already been told was gone. Checking the phase alone would not have caught it;
+    // identity is the guard, and it is also what protects against a fresh `open` reusing the
+    // identifier.
+    const { crypto, link, sent, timers } = await heldCredentialLink('open');
+    const opened = await openSession(link, sent, sessionOne());
+    const credential = await sealRecord(
+      crypto_,
+      opened.channel,
+      utf8Bytes(JSON.stringify({ t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: DEVICE_TOKEN })),
+    );
+    if (!credential.ok) throw new Error(credential.reason);
+
+    // Act — the credential record's decryption is suspended...
+    crypto.hold();
+    const receiving = link.receiveBinary(encodeFrame(credential.frame));
+    await new Promise(resolve => setTimeout(resolve, 1));
+
+    // ...and the window it was racing closes first.
+    timers[0]?.fire();
+    const closedAt = sent.frames.length - 1;
+    crypto.release();
+    await receiving;
+
+    // Assert — one close, and nothing at all after it.
+    should(controlOf(sent.frames[closedAt])).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'no credential arrived before the deadline',
+    });
+    should(sent.frames).have.length(closedAt + 1);
+    should(link.report().sessions).equal(0);
+    should(sent.closes).be.empty();
+    // Assert — and the device was never authenticated, so no `authenticated` record was owed.
+    should(sent.frames.filter(frame => frame.kind === FRAME_KINDS.data)).be.empty();
+  });
+
+  it('should still serve a handshake and a credential that beat the deadline', async () => {
+    // The liveness checks must not cost the ordinary path anything, so the same two awaits are driven
+    // with the timer left un-fired: the session keys, authenticates and serves as normal.
+    const { link, sent, timers } = await heldCredentialLink('open');
+    const opened = await openSession(link, sent, sessionOne());
+    await clientSend(link, opened.channel, { t: 'auth', protocol: RELAY_PROTOCOL_ID, deviceToken: DEVICE_TOKEN });
+
+    // Assert — the window is cancelled by the record that answered it, and the session is serving.
+    should(timers[0]?.cancelled).be.true();
+    should(link.report().sessions).equal(1);
+    const answered = await clientRead(sent, opened.channel);
+    should(answered.message).containDeep({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID });
+  });
+});
