@@ -22,6 +22,7 @@ import type {
   IServiceDefinitionSupervisor,
   IServiceFilePort,
   IStateHomeClaimPort,
+  RetainedSnapshotInventory,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
 
@@ -243,8 +244,12 @@ export class FakeNixGcRoot implements INixGcRootPort {
 export class FakeLifecycleLock implements IDaemonLifecycleLockPort {
   readonly trail: string[] = [];
   readonly requests: DaemonLifecycleClaimRequest[] = [];
+  /** Exact claim paths released, so multi-claim tests can prove reverse-order cleanup. */
+  readonly releasedPaths: string[] = [];
   /** Set to refuse the way a claim held by a live peer does. */
   refusal: Error | undefined;
+  /** One-based acquisition number that refuses; defaults to the first request. */
+  refusalAt = 1;
   /** Reported from `release`, the way an unremovable claim directory is. */
   residue: string | undefined;
   /** Announced through the caller's own notice, the way a contended first attempt does. */
@@ -252,11 +257,12 @@ export class FakeLifecycleLock implements IDaemonLifecycleLockPort {
 
   acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim> {
     this.requests.push(request);
-    if (this.refusal !== undefined) return Promise.reject(this.refusal);
+    if (this.refusal !== undefined && this.requests.length === this.refusalAt) return Promise.reject(this.refusal);
     this.trail.push(`acquire:${request.verb}`);
     if (this.holder !== undefined) request.waiting(this.holder);
     return Promise.resolve({
       release: () => {
+        this.releasedPaths.push(request.lockPath);
         this.trail.push(`release:${request.verb}`);
         return Promise.resolve(this.residue);
       },
@@ -301,6 +307,15 @@ export class FakeSnapshots implements IDaemonSnapshotPort {
   buildAnswer: DaemonSnapshotBuild = { ...daemonSnapshot(), created: true };
   listAnswer: readonly DaemonSnapshot[] = [daemonSnapshot()];
   currentError: Error | undefined;
+  /**
+   * The cheap inventory, which defaults to naming exactly what `listAnswer` holds.
+   *
+   * Overridable on its own because the two answers are allowed to disagree: a damaged sibling is
+   * precisely the case where the verifying listing fails and the inventory still names the healthy
+   * entries. A store that cannot be read at all is `retainedError`.
+   */
+  retainedAnswer: RetainedSnapshotInventory | undefined;
+  retainedError: Error | undefined;
 
   build(): Promise<DaemonSnapshotBuild> {
     this.calls.push('build');
@@ -322,6 +337,18 @@ export class FakeSnapshots implements IDaemonSnapshotPort {
   list(): Promise<readonly DaemonSnapshot[]> {
     this.calls.push('list');
     return Promise.resolve(this.listAnswer);
+  }
+
+  retained(): Promise<RetainedSnapshotInventory> {
+    this.calls.push('retained');
+    if (this.retainedError !== undefined) return Promise.reject(this.retainedError);
+    return Promise.resolve(
+      this.retainedAnswer ?? {
+        snapshots: this.listAnswer.map(snapshot => ({ id: snapshot.id, sourceBinary: snapshot.sourceBinary })),
+        complete: true,
+        unreadable: [],
+      },
+    );
   }
 }
 

@@ -222,10 +222,11 @@ describe('daemon lifecycle claim', () => {
     should(await readdir(join(root, 'lifecycle'))).be.empty();
   });
 
-  it('should report an abandoned claim as removable rather than as work in progress', async () => {
+  it('should report a non-visible owner without declaring its live claim abandoned', async () => {
     // Arrange — the crash case, stated out loud: a killed lifecycle command leaves its claim behind,
-    // and nothing takes it over automatically, because a reaper that reads a dead claim and then
-    // renames it can move a live successor's claim instead.
+    // and nothing takes it over automatically. Exact-name unlink plus rmdir would be race-safe; the
+    // unsafe input is the liveness verdict, because a live owner in another PID namespace can look
+    // dead here. Availability loses until a person independently rules out a live holder.
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
     await mkdir(lockPath, { recursive: true });
@@ -243,13 +244,13 @@ describe('daemon lifecycle claim', () => {
     // Assert
     await should(refusal).be.rejectedWith(DaemonLifecycleBusyError);
     await should(refusal).be.rejectedWith(/owner 4242, since 2026-08-06T00:00:00.000Z/u);
-    await should(refusal).be.rejectedWith(/no longer running, so the claim was abandoned/u);
+    await should(refusal).be.rejectedWith(/not visible from this invocation's PID namespace/u);
+    await should(refusal).be.rejectedWith(/verify independently that no lifecycle command is running/u);
   });
 
-  it('should call a claim naming this very invocation a leak rather than a live peer', async () => {
-    // Arrange — this invocation is the one waiting, so it is demonstrably not the one holding.
-    // Reporting it as live would advise a person against clearing the only thing blocking every
-    // lifecycle command on the host.
+  it("should not treat numeric pid equality as proof that a claim is this invocation's leak", async () => {
+    // Arrange — two PID namespaces may assign the same number to different live processes sharing
+    // this filesystem. Equality is not identity proof, so it must delay in the safe direction.
     const root = await createTemporaryRoot();
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
     await mkdir(lockPath, { recursive: true });
@@ -258,7 +259,7 @@ describe('daemon lifecycle claim', () => {
 
     // Act + Assert
     await should(lock().acquire({ lockPath, verb: 'start', waitMs: 0, waiting: neverWaits })).be.rejectedWith(
-      /this very invocation/u,
+      /that owner is still running/u,
     );
   });
 

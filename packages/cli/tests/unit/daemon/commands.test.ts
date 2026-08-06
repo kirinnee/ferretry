@@ -206,8 +206,8 @@ describe('daemon command surface', () => {
 
     // Assert — the two mutating verbs also reconcile garbage-collection roots against the retained
     // set, which is the listing each of them makes; only `list` leaves the store untouched.
-    should(build.snapshots.calls).deepEqual(['build', 'list']);
-    should(promote.snapshots.calls).deepEqual([`promote:sha256-${'b'.repeat(64)}`, 'list']);
+    should(build.snapshots.calls).deepEqual(['build', 'retained']);
+    should(promote.snapshots.calls).deepEqual([`promote:sha256-${'b'.repeat(64)}`, 'retained']);
     should(list.snapshots.calls).deepEqual(['list', 'current']);
   });
 

@@ -363,6 +363,42 @@ describe('daemon restart', () => {
     should(out.lines[0]).equal('warn: fyd was not running; starting it');
     should(out.text).containEql('ok: fyd restarted (pid 4242)');
   });
+
+  it('should discover an incomplete sibling inventory before stopping a healthy daemon', async () => {
+    // Arrange — the warning is tolerant, but it must be discovered while the healthy incumbent is
+    // still untouched. The regression did the all-or-nothing listing only after `stop`.
+    const trail: string[] = [];
+    const snapshots = new FakeSnapshots();
+    snapshots.retainedAnswer = {
+      snapshots: [{ id: daemonSnapshot().id, sourceBinary: daemonSnapshot().sourceBinary }],
+      complete: false,
+      unreadable: [{ path: '/snapshots/interrupted', reason: 'is mutable because its build did not finish' }],
+    };
+    const retained = snapshots.retained.bind(snapshots);
+    snapshots.retained = async () => {
+      trail.push('retained');
+      return await retained();
+    };
+    const subject = harness({
+      snapshots,
+      probes: [health(), undefined, health()],
+      serviceReports: [stoppedReport],
+      serviceFallback: stoppedReport,
+    });
+    const stop = subject.service.stop.bind(subject.service);
+    subject.service.stop = async request => {
+      trail.push('stop');
+      await stop(request);
+    };
+
+    // Act
+    await subject.controller.restart();
+
+    // Assert
+    should(trail).deepEqual(['retained', 'stop']);
+    should(subject.out.text).containEql('skipped snapshot inventory entry /snapshots/interrupted');
+    should(subject.service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+  });
 });
 
 describe('daemon status', () => {
@@ -615,6 +651,33 @@ describe('nix garbage-collection root', () => {
     should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${built.id}` }]);
   });
 
+  it('should pin the snapshot just built even when an incomplete inventory omits it', async () => {
+    // Arrange — the build result is verified knowledge. A sibling that makes the tolerant inventory
+    // incomplete must prevent releases, but it must not hide the snapshot this command just created
+    // from the additive side of reconciliation.
+    const built = daemonSnapshot({ id: `sha256-${'d'.repeat(64)}`, sourceBinary: STORE_BINARY });
+    const snapshots = new FakeSnapshots();
+    snapshots.buildAnswer = { ...built, created: true };
+    snapshots.retainedAnswer = {
+      snapshots: [],
+      complete: false,
+      unreadable: [{ path: '/snapshots/interrupted', reason: 'its build did not finish' }],
+    };
+    const nix = new FakeNixGcRoot();
+    nix.heldNames = [`sha256-${'9'.repeat(64)}`];
+    const subject = fromTheStore({ snapshots, nix });
+
+    // Act
+    await subject.controller.buildSnapshot();
+
+    // Assert — known protection is added, while neither the unknown root nor the superseded safety
+    // net is released from an inventory that is not the whole truth.
+    should(subject.nix.realPaths).deepEqual([STORE_BINARY]);
+    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${built.id}` }]);
+    should(subject.nix.released).be.empty();
+    should(subject.out.text).containEql('left every garbage-collection root in place');
+  });
+
   it('should release a root whose snapshot is no longer retained, and only that one', async () => {
     // Arrange — the one lifetime that ends a root: the snapshot it protects is gone from the store,
     // so the closure is being held for a rollback candidate that does not exist.
@@ -644,6 +707,128 @@ describe('nix garbage-collection root', () => {
 
     // Assert
     should(subject.nix.released).be.empty();
+  });
+
+  it.each([
+    {
+      verb: 'restart',
+      options: {
+        probes: [health(), undefined, health()],
+        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
+        serviceFallback: stoppedReport,
+      },
+      run: (controller: DaemonController) => controller.restart(),
+    },
+    {
+      verb: 'start',
+      options: {
+        probes: [undefined, health()],
+        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
+      },
+      run: (controller: DaemonController) => controller.start(),
+    },
+    { verb: 'install', options: { probes: [undefined, health()] }, run: (c: DaemonController) => c.install() },
+  ])('should carry $verb through one unreadable snapshot rather than fail on it', async ({ options, run, verb }) => {
+    // Arrange — an interrupted build leaves a directory no later build repairs, by design. When the
+    // reconciliation read the VERIFYING listing, one of those disabled every mutating verb, and
+    // `restart` stopped the daemon and then refused to start it again.
+    const promoted = daemonSnapshot({ sourceBinary: STORE_BINARY });
+    const snapshots = new FakeSnapshots();
+    snapshots.currentAnswer = promoted;
+    snapshots.buildAnswer = { ...promoted, created: true };
+    const damagedId = `sha256-${'9'.repeat(64)}`;
+    snapshots.retainedAnswer = {
+      snapshots: [{ id: promoted.id, sourceBinary: STORE_BINARY }],
+      complete: false,
+      unreadable: [{ path: `/snapshots/${damagedId}`, reason: 'is mutable, so a build of it did not finish' }],
+    };
+    const nix = new FakeNixGcRoot();
+    nix.heldNames = [damagedId];
+    const subject = fromTheStore({ ...options, snapshots, nix });
+
+    // Act
+    await run(subject.controller);
+
+    // Assert — the daemon is up on the exact artifact this verb verified, the damaged entry is named,
+    // and NOTHING is released, because an entry that could not be read is a snapshot that is still
+    // there and its root is still the only thing holding its closure.
+    should(subject.service.startedExecutables.concat(subject.service.installedExecutables)).containEql(
+      promoted.binaryPath,
+    );
+    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${promoted.id}` }]);
+    should(subject.nix.released).be.empty();
+    should(subject.out.text).containEql('skipped snapshot inventory entry');
+    should(subject.out.text).containEql('did not finish');
+    should(subject.out.text).containEql('left every garbage-collection root in place');
+    should(subject.out.text).containEql(verb === 'install' ? 'user service installed' : 'fyd');
+  });
+
+  it('should complete uninstall through one unreadable snapshot without releasing any root', async () => {
+    // Arrange — uninstall removes the definition before it reconciles. A damaged sibling must not
+    // turn that completed removal into a reported failure or authorize removal of an unknown root.
+    const retained = daemonSnapshot({ sourceBinary: STORE_BINARY });
+    const damagedId = `sha256-${'8'.repeat(64)}`;
+    const snapshots = new FakeSnapshots();
+    snapshots.retainedAnswer = {
+      snapshots: [{ id: retained.id, sourceBinary: retained.sourceBinary }],
+      complete: false,
+      unreadable: [{ path: `/snapshots/${damagedId}`, reason: 'is mutable because its build did not finish' }],
+    };
+    const nix = new FakeNixGcRoot();
+    nix.heldNames = [damagedId];
+    const subject = fromTheStore({ snapshots, nix });
+
+    // Act
+    await subject.controller.uninstall();
+
+    // Assert — the definition is gone, the operator gets both the warning and truthful success, and
+    // the held root remains because its matching snapshot may be the unreadable entry.
+    should(subject.service.calls).containEql('uninstall');
+    should(subject.nix.released).be.empty();
+    should(subject.out.text).containEql(`skipped snapshot inventory entry /snapshots/${damagedId}`);
+    should(subject.out.text).containEql('left every garbage-collection root in place');
+    should(subject.out.text).containEql('user service removed');
+  });
+
+  it('should hold and launch the verified snapshot even when the whole inventory is unreadable', async () => {
+    // Arrange — the strongest form of the same rule: the store cannot be read at all. This is a
+    // safety net for a rollback that might happen later; the daemon in front of the operator is the
+    // thing that has to keep working.
+    const snapshots = new FakeSnapshots();
+    snapshots.currentAnswer = daemonSnapshot({ sourceBinary: STORE_BINARY });
+    snapshots.retainedError = new Error('/snapshots could not be read: EACCES');
+    const nix = new FakeNixGcRoot();
+    nix.heldNames = [`sha256-${'7'.repeat(64)}`];
+    const subject = fromTheStore({
+      snapshots,
+      nix,
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+    });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(subject.service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${daemonSnapshot().id}` }]);
+    should(subject.nix.released).be.empty();
+    should(subject.out.text).containEql('inventory read failed');
+    should(subject.out.text).containEql('fyd ready');
+  });
+
+  it('should reconcile against the cheap inventory rather than the verifying listing', async () => {
+    // Arrange — the verifying listing digests every retained executable, so putting it on the
+    // lifecycle's critical path made `start` cost more the longer a host had been building snapshots,
+    // and spent the claim's budget on hashing. Reconciliation needs a snapshot named, never proven.
+    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(subject.snapshots.calls).containEql('retained');
+    should(subject.snapshots.calls).not.containEql('list');
   });
 
   it('should keep the roots outside the state home, which the daemon refuses to share', async () => {
@@ -688,7 +873,7 @@ describe('nix garbage-collection root', () => {
     await subject.controller.install();
 
     // Assert
-    should(snapshots.calls).deepEqual(['current', 'build', `promote:${built.id}`, 'list']);
+    should(snapshots.calls).deepEqual(['current', 'build', `promote:${built.id}`, 'retained']);
     should(nix.realPaths).deepEqual([STORE_BINARY]);
     should(nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${built.id}` }]);
   });
@@ -769,7 +954,7 @@ describe('daemon snapshots', () => {
     await controller.install();
 
     // Assert
-    should(snapshots.calls).deepEqual(['current', 'build', `promote:${snapshots.buildAnswer.id}`, 'list']);
+    should(snapshots.calls).deepEqual(['current', 'build', `promote:${snapshots.buildAnswer.id}`, 'retained']);
     should(service.calls).containEql('install');
     should(out.text).containEql(`built and promoted ${snapshots.buildAnswer.id}`);
   });
@@ -813,7 +998,7 @@ describe('daemon snapshots', () => {
     await controller.promoteSnapshot(older.id);
 
     // Assert
-    should(snapshots.calls).deepEqual([`promote:${older.id}`, 'list']);
+    should(snapshots.calls).deepEqual([`promote:${older.id}`, 'retained']);
     should(out.text).equal(
       `ok: fyd snapshot ${older.id} promoted; the running daemon is unchanged until the next managed launch`,
     );
@@ -864,8 +1049,9 @@ describe('daemon snapshots', () => {
  * Each mutating verb reconciles garbage-collection roots and then writes a service definition or
  * launches an executable, and those halves have to agree about which snapshot is in play. A peer that
  * interleaves them leaves a unit naming one snapshot while the roots hold another's closure, so the
- * whole verb runs inside one daemon-keyed claim — and the reporting verbs stay outside it, because a
- * `status` that waited on a slow `restart` would make the tool useless exactly when it is needed.
+ * whole verb runs inside one ordered daemon-keyed claim set — and the reporting verbs stay outside
+ * it, because a `status` that waited on a slow `restart` would make the tool useless exactly when it
+ * is needed.
  */
 describe('daemon lifecycle serialization', () => {
   it.each([
@@ -893,9 +1079,10 @@ describe('daemon lifecycle serialization', () => {
     { verb: 'status', claimed: undefined, options: {}, run: (c: DaemonController) => c.status({}) },
     { verb: 'logs', claimed: undefined, options: {}, run: (c: DaemonController) => c.logs({}) },
     { verb: 'snapshot list', claimed: undefined, options: {}, run: (c: DaemonController) => c.listSnapshots({}) },
-  ])('should run $verb inside the daemon-keyed claim named $claimed', async ({ options, claimed, run }) => {
+  ])('should run $verb inside the daemon-keyed claims named $claimed', async ({ options, claimed, run }) => {
     // Arrange
     const subject = harness(options);
+    const lockPaths = layout().lifecycleLocks;
 
     // Act
     await run(subject.controller);
@@ -903,35 +1090,45 @@ describe('daemon lifecycle serialization', () => {
     // Assert — a reporting verb takes nothing: a `status` that queued behind a slow `restart` would
     // be useless exactly when somebody needs it.
     should(subject.lifecycle.trail).deepEqual(
-      claimed === undefined ? [] : [`acquire:${claimed}`, `release:${claimed}`],
+      claimed === undefined
+        ? []
+        : [...lockPaths.map(() => `acquire:${claimed}`), ...lockPaths.map(() => `release:${claimed}`)],
     );
     should(subject.lifecycle.requests.map(request => request.lockPath)).deepEqual(
-      claimed === undefined ? [] : [layout().lifecycleLock],
+      claimed === undefined ? [] : lockPaths,
     );
+    should(subject.lifecycle.releasedPaths).deepEqual(claimed === undefined ? [] : [...lockPaths].reverse());
   });
 
-  it('should claim the daemon-keyed path for a snapshot promotion too', async () => {
+  it('should claim every daemon-keyed path for a snapshot promotion too', async () => {
     // Arrange — promotion moves the pointer a launch reads and registers a root, so it is a mutating
     // lifecycle step even though it starts nothing.
     const subject = harness({});
+    const lockPaths = layout().lifecycleLocks;
 
     // Act
     await subject.controller.promoteSnapshot(daemonSnapshot().id);
 
     // Assert
-    should(subject.lifecycle.trail).deepEqual(['acquire:snapshot promote', 'release:snapshot promote']);
+    should(subject.lifecycle.trail).deepEqual([
+      ...lockPaths.map(() => 'acquire:snapshot promote'),
+      ...lockPaths.map(() => 'release:snapshot promote'),
+    ]);
+    should(subject.lifecycle.releasedPaths).deepEqual([...lockPaths].reverse());
   });
 
-  it('should wait for a peer up to a whole shutdown plus a whole startup', async () => {
-    // Arrange — a peer inside `restart` legitimately holds the claim for both waits, so a shorter
-    // bound would refuse commands that were only ever queued behind a healthy one.
+  it('should give every claim shutdown, startup, and reconciliation headroom', async () => {
+    // Arrange — a peer inside `restart` legitimately spends both waits plus promoted-snapshot and
+    // root-reconciliation work, so a shorter bound would refuse a command queued behind a healthy one.
     const subject = harness({ probes: [health()] });
 
     // Act
     await subject.controller.start();
 
     // Assert
-    should(subject.lifecycle.requests[0]?.waitMs).equal(2_000);
+    should(subject.lifecycle.requests.map(request => request.waitMs)).deepEqual(
+      layout().lifecycleLocks.map(() => 32_000),
+    );
   });
 
   it('should do no work at all when the claim is refused', async () => {
@@ -946,16 +1143,45 @@ describe('daemon lifecycle serialization', () => {
     should(subject.service.calls).be.empty();
     should(subject.snapshots.calls).be.empty();
     should(subject.nix.pinned).be.empty();
+    should(subject.lifecycle.releasedPaths).be.empty();
   });
 
   it('should give the claim up even when the verb fails', async () => {
     // Arrange — a start that never becomes ready must not leave the host unable to run any other
     // lifecycle command.
     const subject = harness({ probes: [undefined], serviceFallback: stoppedReport });
+    const lockPaths = layout().lifecycleLocks;
 
     // Act + Assert
     await should(subject.controller.start()).be.rejectedWith(DaemonStartupFailedError);
-    should(subject.lifecycle.trail).deepEqual(['acquire:start', 'release:start']);
+    should(subject.lifecycle.trail).deepEqual([
+      ...lockPaths.map(() => 'acquire:start'),
+      ...lockPaths.map(() => 'release:start'),
+    ]);
+    should(subject.lifecycle.releasedPaths).deepEqual([...lockPaths].reverse());
+  });
+
+  it('should give back an earlier claim when a later ownership target is busy', async () => {
+    // Arrange — a manager-backed platform claims four ownership targets. A refusal on the final,
+    // direct-fallback target must not strand any earlier claim or run any lifecycle work.
+    const lifecycle = new FakeLifecycleLock();
+    const lockPaths = layout().lifecycleLocks;
+    lifecycle.refusal = new Error('the direct-fallback lifecycle claim is busy');
+    lifecycle.refusalAt = lockPaths.length;
+    const subject = harness({ lifecycle, probes: [undefined, health()], serviceReports: [stoppedReport] });
+
+    // Act + Assert
+    await should(subject.controller.start()).be.rejectedWith(/direct-fallback lifecycle claim is busy/u);
+    const acquired = lockPaths.slice(0, -1);
+    should(subject.lifecycle.trail).deepEqual([
+      ...acquired.map(() => 'acquire:start'),
+      ...acquired.map(() => 'release:start'),
+    ]);
+    should(subject.lifecycle.requests.map(request => request.lockPath)).deepEqual(lockPaths);
+    should(subject.lifecycle.releasedPaths).deepEqual([...acquired].reverse());
+    should(subject.service.calls).be.empty();
+    should(subject.snapshots.calls).be.empty();
+    should(subject.nix.pinned).be.empty();
   });
 
   it('should say what is holding the claim rather than appear to hang', async () => {
@@ -968,7 +1194,7 @@ describe('daemon lifecycle serialization', () => {
     await subject.controller.start();
 
     // Assert
-    should(subject.out.text).containEql('fyd start is waiting up to 2s for another lifecycle command to finish');
+    should(subject.out.text).containEql('fyd start is waiting up to 32s for another lifecycle command to finish');
     should(subject.out.text).containEql('owner 4242');
   });
 

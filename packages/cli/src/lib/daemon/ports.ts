@@ -134,7 +134,7 @@ export type DaemonLifecycleVerb =
 export interface DaemonLifecycleClaimRequest {
   readonly lockPath: string;
   readonly verb: DaemonLifecycleVerb;
-  /** How long a peer may legitimately hold it — for this caller, a whole stop plus a whole start. */
+  /** How long this caller is willing to wait for this individual claim; the adapter owns no budget policy. */
   readonly waitMs: number;
   /** Called once when a peer holds the claim, so a wait of that length is visible rather than a hang. */
   readonly waiting: (holder: string) => void;
@@ -190,18 +190,67 @@ export interface DaemonSnapshotBuild extends DaemonSnapshot {
   readonly created: boolean;
 }
 
+/** One retained snapshot as garbage-collection reconciliation needs it: NAMED, never proven. */
+export interface RetainedSnapshot {
+  readonly id: string;
+  /** The source recorded in its manifest, which is the closure a root has to hold. */
+  readonly sourceBinary: string;
+}
+
+/** One retained-store entry that could not be trusted, as adapter facts rather than rendered prose. */
+export interface RetainedSnapshotIssue {
+  readonly path: string;
+  readonly reason: string;
+}
+
+/**
+ * What the store still retains, read cheaply and per entry.
+ *
+ * Two properties the verifying listing cannot have, and both are load-bearing:
+ *
+ * 1. **Per-entry tolerance.** An interrupted build leaves a directory that no later build repairs, by
+ *    design. A listing that fails on the first such entry put one damaged sibling on the critical path
+ *    of every mutating verb — `restart` stopped the daemon and then refused to start it again.
+ * 2. **No proof.** Reconciliation needs an id and a source, never a verified executable. Digesting
+ *    every retained binary made `start` cost more the longer a host had been building snapshots, and
+ *    spent the lifecycle claim's budget on hashing.
+ *
+ * The discriminant is the whole point of the shape: it says whether these entries are the WHOLE
+ * retained set. A caller may only ever ADD protection from an incomplete inventory, because an entry
+ * that could not be read is a snapshot that still exists. The union makes two dangerous lies
+ * unrepresentable: a complete inventory with skipped entries, and an incomplete one with no evidence
+ * explaining why it cannot be trusted.
+ */
+export type RetainedSnapshotInventory =
+  | {
+      readonly snapshots: readonly RetainedSnapshot[];
+      readonly complete: true;
+      readonly unreadable: readonly [];
+    }
+  | {
+      readonly snapshots: readonly RetainedSnapshot[];
+      readonly complete: false;
+      readonly unreadable: readonly [RetainedSnapshotIssue, ...RetainedSnapshotIssue[]];
+    };
+
 /**
  * Immutable daemon artifacts and their atomic promoted pointer.
  *
  * `undefined` from `current` means durable evidence says this store has never been promoted. A
  * missing or malformed pointer after promotion, manifest, marker or artifact throws: damaged durable
  * state must never be mistaken for an empty store and bootstrapped over.
+ *
+ * `list` is the OPERATOR REPORT and stays fully verified — a listing that says a snapshot is there is
+ * saying it can be run. `retained` is the cheap inventory the lifecycle reconciles against, and the
+ * two are kept apart because they answer different questions.
  */
 export interface IDaemonSnapshotPort {
   build(): Promise<DaemonSnapshotBuild>;
   promote(id: string): Promise<DaemonSnapshot>;
   current(): Promise<DaemonSnapshot | undefined>;
   list(): Promise<readonly DaemonSnapshot[]>;
+  /** Names every retained snapshot without proving any of them; never fails for one bad entry. */
+  retained(): Promise<RetainedSnapshotInventory>;
 }
 
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */

@@ -19,13 +19,26 @@
  * superseded. A directory releases with no such decision: unlink the token file, whose name only this
  * holder knows, then `rmdir`, which the kernel refuses unless the directory is empty.
  *
- * **Nothing is ever taken over automatically, and that is deliberate.** Reclaiming an abandoned claim
- * needs an atomic compare-and-replace a filesystem does not offer: a reaper that reads a dead claim
- * and then renames it can move a live successor's claim instead. So a crashed lifecycle command leaves
- * its claim behind, the refusal names the claim, the verb that was running, its owner and whether that
- * owner is still alive, and a person removes it. That is a worse failure to recover from and a much
- * better one to have — and it costs nothing a person cannot see, because `status` and `logs` are not
- * serialized and keep working throughout.
+ * **Nothing is ever taken over automatically, and the honest reason is the liveness verdict, not the
+ * primitives.** The two primitives below would reclaim safely: `unlink` of a claim file by exact name
+ * followed by `rmdir` can only ever fail against a successor, never destroy one. What cannot be
+ * trusted is `alive(owner)`. A pid is meaningful only inside its own namespace, so an owner running in
+ * a container, a different namespace, or under another user can be reported dead while it is very much
+ * alive — and a reaper acting on that verdict would unlink a LIVE holder's proof and let a second
+ * invocation in, which is the interleaving this whole file exists to prevent, produced by the code
+ * meant to recover from it. A false "still running" only delays somebody; a false "no longer running"
+ * corrupts a lifecycle.
+ *
+ * **The cost of that choice is real and is not argued away.** The caller supplies a wait budget for
+ * EACH claim and may acquire an ordered set of them. A crash, an OOM kill or a power loss can therefore
+ * leave one or more claim directories that block every mutating verb for that daemon until a person
+ * independently rules out a live holder and removes EACH one. The controller and layout own the exact
+ * budget and claim count; the durable handover records their current 140-second/four-claim policy. On
+ * an unattended host that is a daemon that cannot be restarted remotely. What keeps it a recoverable
+ * failure rather than a silent one: each refusal names one claim, the verb that was running, its owner,
+ * whether that owner is visible from this invocation's PID namespace, the limits of that observation
+ * and the exact directory involved. A retry may expose the next residue, while `status`, `logs` and
+ * `snapshot list` stay unserialized so everything needed to diagnose it keeps working.
  *
  * Modelled on `FleetApplyLock` in `@ferretry/fleet`, whose docblock argues the same design at length.
  * It is not reused: that lock guards a fleet directory, derives its path from the fleet manifest and
@@ -216,19 +229,17 @@ export class FileDaemonLifecycleLock implements IDaemonLifecycleLockPort {
   }
 
   /**
-   * Whether the holder is still working.
+   * Whether the holder is visible from this invocation's PID namespace.
    *
-   * A claim naming *this* invocation is a leak, not a live peer: this invocation is the one waiting, so
-   * it is demonstrably not the one holding. Reporting it as live would advise a person against clearing
-   * the only thing blocking every lifecycle command on the host.
+   * Even numeric equality with this invocation's pid is not identity proof: two PID namespaces can
+   * assign the same number to different live processes sharing this filesystem. Every positive answer
+   * therefore delays in the safe direction, while a negative answer is explicitly reported as
+   * inconclusive and never authorises reclaim by itself.
    */
   #liveness(owner: number): string {
-    if (owner === globalThis.process.pid) {
-      return 'that is this very invocation, so an earlier command left the claim behind and it can be removed';
-    }
     return this.processes.alive(owner)
       ? 'that owner is still running'
-      : 'that owner is no longer running, so the claim was abandoned and it can be removed';
+      : "that owner is not visible from this invocation's PID namespace; it may still be running in another namespace or as another user, so verify independently that no lifecycle command is running before removing the claim";
   }
 
   /**

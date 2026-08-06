@@ -44,7 +44,7 @@ export interface SnapshotGcRootPlan {
    * Released because nothing can ever run that snapshot again, so the closure is held for a rollback
    * candidate that does not exist. This is the ONLY reason a root is released — never a stop, and
    * never an uninstall, both of which used to withdraw protection from snapshots that were still
-   * sitting in the store waiting to be promoted.
+   * sitting in the store waiting to be promoted. And never on an incomplete inventory: see `complete`.
    */
   readonly release: readonly string[];
 }
@@ -66,6 +66,15 @@ export interface SnapshotGcRootRequest {
    * command per snapshot on every lifecycle verb.
    */
   readonly launching: string | undefined;
+  /**
+   * Whether `closures` is the WHOLE retained set.
+   *
+   * When it is not, this plan may only ADD protection. A root with no matching closure is
+   * indistinguishable from a root whose snapshot merely could not be read this run, and releasing on
+   * that guess would drop the closure of a snapshot that is still sitting in the store — the exact
+   * failure per-snapshot roots exist to prevent, arrived at by the code that maintains them.
+   */
+  readonly complete: boolean;
 }
 
 /**
@@ -88,5 +97,6 @@ export function planSnapshotGcRoots(request: SnapshotGcRootRequest): SnapshotGcR
           },
         ],
   );
+  if (!request.complete) return { pin, release: [] };
   return { pin, release: request.held.filter(root => !retained.has(root.name)).map(root => root.path) };
 }

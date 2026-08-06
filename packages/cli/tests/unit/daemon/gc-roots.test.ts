@@ -34,6 +34,7 @@ describe('snapshot garbage-collection root plan', () => {
       ],
       held: [],
       launching: NEWER,
+      complete: true,
     });
 
     // Assert — two snapshots, two roots. The older one is a rollback candidate, and a rollback
@@ -55,6 +56,7 @@ describe('snapshot garbage-collection root plan', () => {
       ],
       held: held(NEWER, OLDER),
       launching: undefined,
+      complete: true,
     });
 
     // Assert — registering a root runs a Nix command, and doing it for every retained snapshot on
@@ -73,6 +75,7 @@ describe('snapshot garbage-collection root plan', () => {
       ],
       held: held(NEWER, OLDER),
       launching: NEWER,
+      complete: true,
     });
 
     // Assert — a root is a link plus a registration Nix keeps elsewhere, and only the link is ours to
@@ -88,6 +91,7 @@ describe('snapshot garbage-collection root plan', () => {
       closures: [{ snapshotId: NEWER, storePath: NEWER_STORE }],
       held: held(NEWER, OLDER),
       launching: undefined,
+      complete: true,
     });
 
     // Assert — the only lifetime that ends a root. The closure is being held for a rollback candidate
@@ -102,11 +106,28 @@ describe('snapshot garbage-collection root plan', () => {
       closures: [],
       held: [{ name: 'left-behind', path: '/somewhere/else/left-behind' }],
       launching: undefined,
+      complete: true,
     });
 
     // Assert — the path travels back from discovery rather than being re-derived here, so a root that
     // was written under one rule can never be looked for under another.
     should(plan.release).deepEqual(['/somewhere/else/left-behind']);
+  });
+
+  it('should release nothing at all when the inventory is not the whole retained set', () => {
+    // Arrange — an entry that could not be read is a snapshot that is STILL THERE, and a root with no
+    // matching closure is indistinguishable from one whose snapshot merely could not be read.
+    const plan = planSnapshotGcRoots({
+      rootDirectory: ROOTS,
+      closures: [{ snapshotId: NEWER, storePath: NEWER_STORE }],
+      held: held(NEWER, OLDER),
+      launching: NEWER,
+      complete: false,
+    });
+
+    // Assert — protection is still ADDED, because that can only ever be safe; nothing is withdrawn.
+    should(plan.pin).deepEqual([{ snapshotId: NEWER, storePath: NEWER_STORE, rootPath: `${ROOTS}/${NEWER}` }]);
+    should(plan.release).be.empty();
   });
 
   it('should ask for nothing for a snapshot built outside the store', () => {
@@ -116,6 +137,7 @@ describe('snapshot garbage-collection root plan', () => {
       closures: [{ snapshotId: NEWER, storePath: undefined }],
       held: [],
       launching: NEWER,
+      complete: true,
     });
 
     // Assert

@@ -8,6 +8,7 @@ import type {
   DaemonStartHandle,
   IClockPort,
   IDaemonHealthPort,
+  IDaemonLifecycleClaim,
   IDaemonLifecycleLockPort,
   IDaemonLogPort,
   IDaemonOutput,
@@ -15,6 +16,8 @@ import type {
   IDaemonSupervisor,
   INixGcRootPort,
   IServiceDefinitionSupervisor,
+  RetainedSnapshot,
+  RetainedSnapshotInventory,
 } from './ports.ts';
 import { livenessOf } from './probe.ts';
 import {
@@ -49,6 +52,12 @@ export class DaemonStartupFailedError extends Error {
     this.name = 'DaemonStartupFailedError';
   }
 }
+
+/**
+ * What a holder may spend outside its readiness and shutdown waits: verifying the promoted snapshot
+ * and reconciling roots. A peer waits this much longer before refusing.
+ */
+const LIFECYCLE_RECONCILIATION_ALLOWANCE_MS = 30_000;
 
 export class DaemonShutdownFailedError extends Error {
   constructor(message: string) {
@@ -89,8 +98,8 @@ export interface DaemonControllerDeps {
  * mutating verb reconciles garbage-collection roots and then writes a service definition or launches
  * an executable, and those two halves have to agree about which snapshot is in play: two invocations
  * that interleave them leave a unit file naming one snapshot while the roots hold another's closure.
- * A claim keyed on the daemon's own lock path is what makes the pair atomic against a peer invocation,
- * and it is taken in the public verb rather than deeper down so no verb can ever nest inside another.
+ * Claims keyed on every ownership target are what make the pair atomic against a peer invocation, and
+ * they are taken in the public verb rather than deeper down so no verb can ever nest inside another.
  */
 export class DaemonController {
   private readonly readiness: ReadinessPolicy;
@@ -191,15 +200,18 @@ export class DaemonController {
   }
 
   async #restart(): Promise<void> {
-    // Verify the complete promoted artifact before stopping the incumbent. Damaged snapshot state
-    // must leave the currently running daemon alone, not turn a repairable refusal into downtime.
+    // Verify the complete promoted artifact AND discover every inventory problem before stopping the
+    // incumbent. Reconciliation is tolerant, so a damaged sibling is a warning rather than a refusal,
+    // but an operator must hear that warning while the healthy daemon is still untouched — never only
+    // after restart has already created downtime.
     const snapshot = await this.#ensurePromotedSnapshot();
+    const inventory = await this.#inventory();
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
     // Restart is when an upgraded executable is picked up, so the roots are reconciled here too.
-    await this.#holdRetainedClosures(snapshot);
+    await this.#holdRetainedClosures(snapshot, inventory);
     const handle = await owner.start(snapshot.binaryPath);
     const ready = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
@@ -233,8 +245,10 @@ export class DaemonController {
   async #buildSnapshot(): Promise<void> {
     const snapshot = await this.deps.snapshots.build();
     // A snapshot with no root is a rollback candidate a garbage collection can quietly disarm before
-    // anybody ever promotes it, so the root exists from the moment the snapshot does.
-    await this.#holdRetainedClosures(undefined);
+    // anybody ever promotes it, so the root exists from the moment the snapshot does. Pass the exact
+    // verified build result as explicitly known protection: a tolerant but incomplete inventory may
+    // omit this entry, and that uncertainty must not disarm the snapshot the command just created.
+    await this.#holdRetainedClosures(snapshot);
     this.deps.out.success(
       `${this.#name} snapshot ${snapshot.id} ${snapshot.created ? 'built' : 'already complete'} from ${snapshot.sourceBinary}`,
     );
@@ -274,26 +288,41 @@ export class DaemonController {
    * The wait bound is this controller's own policy rather than the adapter's guess: a peer inside a
    * `restart` may legitimately hold the claim for a whole shutdown followed by a whole startup, and a
    * bound shorter than that would refuse commands that were only ever queued behind a healthy one.
+   * The allowance on top is the work those two policies do not describe — verifying the promoted
+   * artifact and reconciling roots — because a bound equal to the holder's best case refuses a peer
+   * for no reason but the holder having been thorough.
    */
   async #serialized<T>(verb: DaemonLifecycleVerb, work: () => Promise<T>): Promise<T> {
-    const waitMs = this.shutdown.deadlineMs + this.readiness.deadlineMs;
-    const claim = await this.deps.lifecycle.acquire({
-      lockPath: this.deps.layout.lifecycleLock,
-      verb,
-      waitMs,
-      waiting: holder =>
-        this.deps.out.warn(
-          `${this.#name} ${verb} is waiting up to ${String(Math.round(waitMs / 1_000))}s for another lifecycle command to finish (${holder})`,
-        ),
-    });
+    const waitMs = this.shutdown.deadlineMs + this.readiness.deadlineMs + LIFECYCLE_RECONCILIATION_ALLOWANCE_MS;
+    const claims: IDaemonLifecycleClaim[] = [];
     try {
+      // The layout supplies one semantic order, independent of unresolved path spelling. Holding an
+      // earlier claim while waiting for a later one is therefore deadlock-free even when two
+      // invocations overlap on only one target or reach it through different aliases.
+      for (const lockPath of this.deps.layout.lifecycleLocks) {
+        claims.push(
+          await this.deps.lifecycle.acquire({
+            lockPath,
+            verb,
+            waitMs,
+            waiting: holder =>
+              this.deps.out.warn(
+                `${this.#name} ${verb} is waiting up to ${String(Math.round(waitMs / 1_000))}s for another lifecycle command to finish (${holder})`,
+              ),
+          }),
+        );
+      }
       return await work();
     } finally {
-      const residue = await claim.release();
-      if (residue !== undefined) {
-        this.deps.out.warn(
-          `${this.#name} lifecycle claim ${residue} could not be released; remove it once no ${this.#name} lifecycle command is running`,
-        );
+      // Release in the reverse acquisition order. This also gives back a partial set when a later
+      // acquisition is refused, before any lifecycle work has run.
+      for (let index = claims.length - 1; index >= 0; index -= 1) {
+        const residue = await claims[index]?.release();
+        if (residue !== undefined) {
+          this.deps.out.warn(
+            `${this.#name} lifecycle claim ${residue} could not be released; remove it once no ${this.#name} lifecycle command is running`,
+          );
+        }
       }
     }
   }
@@ -303,19 +332,28 @@ export class DaemonController {
    *
    * `nix shell github:…` is a supported way to run this. A snapshot's executable is an ordinary copy,
    * but its ELF interpreter, RPATH or script interpreter can still name the Nix output recorded as
-   * `sourceBinary` in its verified manifest, and that output is what a root has to hold. Any other
-   * source resolves outside the store and is left alone.
+   * `sourceBinary` in its manifest, and that output is what a root has to hold. Any other source
+   * resolves outside the store and is left alone.
    *
    * Every retained snapshot is considered, not just the one being launched, because the ROLLBACK
    * candidates are the snapshots this exists to keep runnable. A failure is reported and the verb
    * continues: an unheld daemon that runs beats a working install refused over a root that did not
    * take. The superseded single root is dropped only once nothing needed a root that failed to take,
    * since while a pin is failing that old root may be the only thing holding one of these closures.
+   *
+   * NOTHING HERE MAY FAIL A VERB. This reconciliation is a safety net for a rollback that might happen
+   * later; the daemon in front of the operator is the thing that has to keep working. Reading the
+   * inventory is tolerant per entry, an inventory that is not the whole truth releases nothing at all,
+   * and a store that cannot be read at all still lets the captured snapshot be held and launched.
    */
-  async #holdRetainedClosures(launching: DaemonSnapshot | undefined): Promise<void> {
+  async #holdRetainedClosures(
+    launching: DaemonSnapshot | undefined,
+    capturedInventory?: RetainedSnapshotInventory,
+  ): Promise<void> {
     const rootDirectory = this.deps.layout.nixGcRootDirectory;
+    const inventory = capturedInventory ?? (await this.#inventory());
     const closures: SnapshotClosure[] = [];
-    for (const snapshot of await this.#retained(launching)) {
+    for (const snapshot of this.#withLaunching(inventory.snapshots, launching)) {
       const resolved = await this.deps.nix.realPath(snapshot.sourceBinary);
       closures.push({ snapshotId: snapshot.id, storePath: nixStorePathOf(resolved) });
     }
@@ -324,6 +362,7 @@ export class DaemonController {
       closures,
       held: await this.deps.nix.held(rootDirectory),
       launching: launching?.id,
+      complete: inventory.complete,
     });
     let unheld = false;
     for (const pin of plan.pin) {
@@ -338,20 +377,61 @@ export class DaemonController {
       );
     }
     for (const rootPath of plan.release) await this.deps.nix.release(rootPath);
-    if (!unheld) await this.deps.nix.release(this.deps.layout.supersededNixGcRoot);
+    // The superseded root goes only from a run that knows the whole retained set and held all of it.
+    // It is one link with no snapshot name on it, so while anything is unread or unheld it may be the
+    // only thing holding a closure something still needs.
+    if (!unheld && inventory.complete) await this.deps.nix.release(this.deps.layout.supersededNixGcRoot);
   }
 
   /**
-   * The snapshots a root is owed, which is every retained one plus the exact snapshot being launched.
+   * The cheap retained inventory, and what to say when it is not the whole truth.
    *
-   * The launching snapshot is added rather than assumed present: this verb captured and verified it
-   * before the listing, and a snapshot that will be executed must be held whether or not the listing
-   * agrees about the store's contents.
+   * A store that cannot be read at all is reported as an empty INCOMPLETE inventory rather than as a
+   * failure, so the verb continues holding and launching what it already verified. That is the
+   * difference between a damaged sibling snapshot being a warning and it being an outage: the
+   * verifying listing this used to call is all-or-nothing, so one interrupted build — which no later
+   * build repairs, by design — disabled every mutating verb, and `restart` stopped the daemon before
+   * discovering it.
    */
-  async #retained(launching: DaemonSnapshot | undefined): Promise<readonly DaemonSnapshot[]> {
-    const retained = await this.deps.snapshots.list();
-    if (launching === undefined || retained.some(snapshot => snapshot.id === launching.id)) return retained;
-    return [...retained, launching];
+  async #inventory(): Promise<RetainedSnapshotInventory> {
+    const inventory = await this.deps.snapshots.retained().catch((error: unknown) => {
+      return {
+        snapshots: [],
+        complete: false as const,
+        unreadable: [
+          {
+            path: this.deps.layout.snapshotRoot,
+            reason: `inventory read failed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ] as const,
+      };
+    });
+    for (const issue of inventory.unreadable) {
+      this.deps.out.warn(`${this.#name} skipped snapshot inventory entry ${issue.path}: ${issue.reason}`);
+    }
+    if (!inventory.complete) {
+      this.deps.out.warn(
+        `${this.#name} left every garbage-collection root in place because that inventory is incomplete; ` +
+          `a root is released only when its snapshot is known to be gone, and an entry that cannot be read ` +
+          `is a snapshot that is still there`,
+      );
+    }
+    return inventory;
+  }
+
+  /**
+   * The snapshots a root is owed: the inventory plus the exact snapshot being launched.
+   *
+   * The launching snapshot is added rather than assumed present. This verb captured and verified it
+   * before the inventory was read, and a snapshot that is about to be executed must be held whether
+   * or not the inventory agrees about the store's contents.
+   */
+  #withLaunching(
+    inventory: readonly RetainedSnapshot[],
+    launching: DaemonSnapshot | undefined,
+  ): readonly RetainedSnapshot[] {
+    if (launching === undefined || inventory.some(snapshot => snapshot.id === launching.id)) return inventory;
+    return [...inventory, { id: launching.id, sourceBinary: launching.sourceBinary }];
   }
 
   /** The supervisor that currently owns the daemon: the service manager when one is installed. */

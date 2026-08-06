@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -53,6 +53,44 @@ describe('file service store', () => {
 
     // Assert
     should(await Bun.file(path).text()).equal('second');
+  });
+
+  it('should publish the definition whole, leaving no temporary beside it', async () => {
+    // Arrange — a plain write truncates first, so a crash in the middle leaves a unit or plist the
+    // service manager rejects, and `install` is the only verb that would ever rewrite it. This one is
+    // built under a private name in the same directory and renamed on, so a reader sees the old
+    // complete file or the new complete one. Debris in a systemd unit directory is its own problem.
+    const path = join(root, 'fyd.service');
+
+    // Act
+    await subject.writePrivate(path, 'first');
+    await subject.writePrivate(path, '[Unit]\nDescription=fyd\n');
+
+    // Assert
+    should(await readdir(root)).deepEqual(['fyd.service']);
+    should(await Bun.file(path).text()).equal('[Unit]\nDescription=fyd\n');
+    should((await stat(path)).mode & 0o777).equal(0o600);
+  });
+
+  it('should leave the installed definition whole when publication stops after the staged fsync', async () => {
+    // Arrange — fail at the exact boundary after the complete private file is durable and before its
+    // atomic rename. A truncate-in-place implementation would already have damaged `first` here.
+    const path = join(root, 'fyd.service');
+    await subject.writePrivate(path, 'first');
+    const interrupted = new FileServiceStore({
+      afterStagedSync: () => Promise.reject(new Error('simulated interruption before publish')),
+    });
+
+    // Act + Assert
+    await should(interrupted.writePrivate(path, '[Unit]\nDescription=replacement\n')).be.rejectedWith(
+      /simulated interruption/u,
+    );
+    should(await Bun.file(path).text()).equal('first');
+    should(await readdir(root)).deepEqual(['fyd.service']);
+
+    // And once publication succeeds, the only other observable state is the whole replacement.
+    await subject.writePrivate(path, '[Unit]\nDescription=replacement\n');
+    should(await Bun.file(path).text()).equal('[Unit]\nDescription=replacement\n');
   });
 
   it('should create a nested directory tree in one call', async () => {

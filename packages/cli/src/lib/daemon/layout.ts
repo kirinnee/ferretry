@@ -1,4 +1,4 @@
-import { isAbsolute, join, normalize, parse } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
 export type DaemonManagerKind = 'systemd' | 'launchd' | 'direct';
@@ -84,12 +84,26 @@ export interface DaemonLayout {
    */
   readonly supersededNixGcRoot: string;
   /**
-   * The claim that serializes this daemon's mutating lifecycle commands across separate invocations.
+   * The claims that serialize this daemon's mutating lifecycle commands across separate invocations.
    *
-   * Daemon-keyed, so two daemons on one host never wait for each other, and outside the state home
-   * for the same reason the roots are.
+   * **Keyed on every ownership target the verbs may actually use, not on where this CLI keeps its own
+   * files.** Under a state-directory key, one shell exporting `XDG_STATE_HOME` and another taking the
+   * default took two different claims, contended for nothing, and interleaved the root update and the
+   * definition write over the SAME unit file and the same daemon — the precise failure the claims
+   * exist to prevent, reachable in spite of them. A systemd host therefore claims its unit file and
+   * logical user-manager unit; a launchd host claims its plist and domain/label. Both also claim the
+   * daemon-qualified state home because either platform falls back to a direct child when no
+   * definition is installed. Finally, the snapshot store stands for itself and the roots derived from
+   * the same state directory, so two environments cannot share those artifacts without excluding one
+   * another.
+   *
+   * The array is already in one SEMANTIC acquisition order: manager target, snapshot/root ownership,
+   * manager definition, direct daemon. Ordering by role rather than unresolved path spelling keeps
+   * alias paths and different locale settings from reversing two physical claims into a deadlock.
+   * Category-qualified hidden names prevent two roles from aliasing one claim accidentally. Two
+   * daemon names remain independent.
    */
-  readonly lifecycleLock: string;
+  readonly lifecycleLocks: readonly [string, ...string[]];
 }
 
 export class InvalidDaemonEnvironmentError extends Error {
@@ -189,9 +203,13 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
   const snapshotRoot = join(stateDirectory, product, 'daemon-snapshots', daemonName);
+  const manager = managerForPlatform(input.platform);
+  const systemdUnitName = `${daemonName}.service`;
+  const systemdUnitFile = join(configHome, 'systemd', 'user', systemdUnitName);
+  const launchAgentFile = join(homeDirectory, 'Library', 'LaunchAgents', `${launchdLabel}.plist`);
 
   return {
-    manager: managerForPlatform(input.platform),
+    manager,
     daemonName,
     product,
     stateHome,
@@ -199,16 +217,86 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     logFile: join(logDirectory, `${daemonName}.log`),
     snapshotRoot,
     searchPath: input.searchPath,
-    systemdUnitName: `${daemonName}.service`,
-    systemdUnitFile: join(configHome, 'systemd', 'user', `${daemonName}.service`),
+    systemdUnitName,
+    systemdUnitFile,
     launchdLabel,
     launchdDomain,
     launchdServiceTarget: `${launchdDomain}/${launchdLabel}`,
-    launchAgentFile: join(homeDirectory, 'Library', 'LaunchAgents', `${launchdLabel}.plist`),
+    launchAgentFile,
     nixGcRootDirectory: join(stateDirectory, product, 'nix', 'snapshots', daemonName),
     supersededNixGcRoot: join(stateDirectory, product, 'nix', daemonName),
-    lifecycleLock: join(stateDirectory, product, 'lifecycle', `${daemonName}.lock`),
+    lifecycleLocks: lifecycleLocksFor(manager, {
+      systemdUnitName,
+      systemdUnitFile,
+      launchdLabel,
+      launchAgentFile,
+      snapshotRoot,
+      stateHome,
+      daemonName,
+      userId,
+    }),
   };
+}
+
+/** The artifacts a lifecycle claim can be keyed on, one per way of owning the daemon. */
+interface LifecycleArtifacts {
+  readonly systemdUnitName: string;
+  readonly systemdUnitFile: string;
+  readonly launchdLabel: string;
+  readonly launchAgentFile: string;
+  readonly snapshotRoot: string;
+  readonly stateHome: string;
+  readonly daemonName: string;
+  readonly userId: number;
+}
+
+/**
+ * Where the claims live, decided by everything the mutating verbs may own on this host.
+ *
+ * The shared manager target covers commands sent to one systemd unit or launchd label even when two
+ * environments resolve different definition paths. `/tmp` is the one stable cross-environment
+ * directory on both supported platforms; the uid keeps users independent, and its sticky bit means
+ * another user can at worst occupy the predictable name and make the lifecycle fail closed. The
+ * definition claim covers the actual file, the direct claim covers the state home used when that file
+ * is absent, and the snapshot claim covers both the store and the root directory derived from the same
+ * `XDG_STATE_HOME`.
+ *
+ * Checking which owner is active before acquiring would merely move the race. The fixed role order
+ * below is therefore load-bearing: unresolved aliases can spell the same directories in opposite
+ * lexical orders, but they cannot move a physical claim from one semantic position to another.
+ */
+function lifecycleLocksFor(manager: DaemonManagerKind, artifacts: LifecycleArtifacts): readonly [string, ...string[]] {
+  const snapshots = claimBeside(artifacts.snapshotRoot, 'snapshot-store');
+  const direct = claimBeside(artifacts.stateHome, `${artifacts.daemonName}.direct`);
+  if (manager === 'direct') return [snapshots, direct];
+  const definition = claimBeside(
+    manager === 'systemd' ? artifacts.systemdUnitFile : artifacts.launchAgentFile,
+    'definition',
+  );
+  const target = join(
+    '/tmp',
+    `.${String(artifacts.userId)}.${manager}.${
+      manager === 'systemd' ? artifacts.systemdUnitName : artifacts.launchdLabel
+    }.target.lifecycle.lock`,
+  );
+  return [target, snapshots, definition, direct];
+}
+
+/**
+ * A hidden, injective identity beside an artifact.
+ *
+ * Length-prefix BOTH components before joining them. Merely adding a leading dot collapses `foo` and
+ * `.foo`, while punctuation-delimited tuples collapse boundaries such as `(a, b.c)` and `(a.b, c)`.
+ * A claim residue must never make either pair look like the same owner and block an unrelated daemon.
+ */
+function claimBeside(artifact: string, qualifier: string): string {
+  const name = basename(artifact);
+  return join(dirname(artifact), `.${claimComponent(name)}.${claimComponent(qualifier)}.lifecycle.lock`);
+}
+
+/** A filename-safe, exactly decodable component; the length makes punctuation inside it irrelevant. */
+function claimComponent(value: string): string {
+  return `${String(value.length)}-${value}`;
 }
 
 /**
