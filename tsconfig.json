@@ -7,6 +7,9 @@
     "allowJs": true,
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
+    "paths": {
+      "@ferretry/relay/adapters": ["./packages/relay/src/adapters/index.ts"]
+    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
