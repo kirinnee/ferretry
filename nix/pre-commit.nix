@@ -127,10 +127,9 @@ pre-commit-lib.run {
       enable = true;
       name = "Hosted relay configuration";
       entry = validator "scripts/validate/relay-config.sh";
-      # The daemon and the PWA are in this list because a session crosses a relay only if BOTH ends
-      # are on it: the gate now also pins the discovery path both halves read and the release chain
-      # that gives the daemon a directory to ask at all.
-      files = "^(packages/relay/wrangler\\.(hosted\\.json|jsonc)|packages/relay/src/adapters/(worker|hosted-control)\\.ts|packages/daemon/src/lib/relay/discovery\\.ts|packages/daemon/src/adapters/system/runtime-environment\\.ts|packages/pwa/src/features/onboarding/hosted-relay\\.ts|scripts/release/compile\\.sh|\\.github/workflows/(relay-hosted|cd)\\.yaml|scripts/validate/relay-config\\.sh)$";
+      # Both ends import the same source default, and the release compiler is deliberately included
+      # so a per-build define cannot return while Nix remains direct-only.
+      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/relay-directory-origin|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(relay-hosted|cd|pwa-pages)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };

@@ -23,14 +23,14 @@
  * `/v1/default-relay` would NOT reach the Worker: an unrouted path is rewritten
  * to this app's own HTML, a 200 that is not an advertisement. The relay therefore
  * gets its own hostname, and that one shared, non-user-identifying origin is
- * baked in at build time by `vite.config.ts` from `FY_RELAY_DIRECTORY_ORIGIN`.
+ * baked in at build time by `vite.config.ts` from `@ferretry/relay`'s shared
+ * `HOSTED_RELAY_DIRECTORY_ORIGIN` source constant.
  *
  * The constant is an ORIGIN, not an address anyone has to trust: the kill switch
  * still lives behind it, so `null` withdraws the relay without an app release,
- * and nothing user-identifying is in the bundle. If the variable is unset — a
- * local build, a fork, a deploy that has not configured it — there is NO
- * directory, this module makes no request, and the answer is `undetermined`. It
- * never invents a hostname.
+ * and nothing user-identifying is in the bundle. The temporary source default
+ * means local builds and forks discover Ferretry's relay too; it is an accepted
+ * trade-off documented beside the constant, not a guessed hostname.
  *
  * WHAT IS STILL HONESTLY MISSING, now that both ends dial: not the transport — `fyd`
  * dials a rendezvous and `packages/pwa/src/lib/relay-carrier.ts` arrives at one — but
@@ -86,16 +86,13 @@ export const NO_RELAY_DIRECTORY: HostedRelayFallback = Object.freeze(
 /**
  * The origin baked in at build time, or nothing.
  *
- * `vite.config.ts` replaces this identifier with a string literal from
- * `FY_RELAY_DIRECTORY_ORIGIN`, which the Pages workflow takes from the same
- * repository variable the hosted relay's own deploy uses. Read through `typeof`
- * because every other consumer of this module — the unit suite, the review
- * harness, a `bun build` of either — has no such define, and a free identifier
- * would throw rather than degrade.
+ * `vite.config.ts` replaces this identifier with the shared source constant.
+ * Read through `typeof` because the unit suite and review harness do not load
+ * Vite's define, and a free identifier would throw rather than degrade.
  *
- * An empty string is the unset case and is deliberately NOT a URL: there is no
- * fallback literal here, and an origin that fails the endpoint rule is refused
- * downstream rather than dialled.
+ * An origin that fails the endpoint rule is refused downstream rather than
+ * dialled. `NO_RELAY_DIRECTORY` remains for an old binary or a deliberately
+ * absent test define; the current source build always carries the default.
  */
 declare const __FY_RELAY_DIRECTORY__: string | undefined;
 

@@ -73,11 +73,12 @@ automatic fallback. No **carrier** address is compiled in: each build carries on
 **discovery origin** it reads the advertisement from — a service address, never a user's — while the
 relay endpoint and the daemon URL are runtime values. The hosted default therefore comes from a
 no-store runtime advertisement whose operator can change or disable it without a release.
-**Both ends discover it**: the PWA from its build-time `FY_RELAY_DIRECTORY_ORIGIN`, the daemon from
-`__FY_RELAY_DIRECTORY__` — the same value, resolved by the same
-`scripts/ci/relay-directory-origin.sh`, because a session crosses a relay only if both ends are on
-it. A daemon that read no advertisement was reachable from nothing but its own host, which is why
-`scripts/validate/relay-config.sh` pins that release chain. An explicit `relay` block in
+**Both ends discover it** from `HOSTED_RELAY_DIRECTORY_ORIGIN` in `@ferretry/relay`, compiled into
+the PWA and daemon on every build route. It is temporarily Ferretry's personal `workers.dev`
+subdomain; moving to a product domain changes that single source fact. Forks consequently discover
+Ferretry's hosted directory too — an accepted owner trade-off until that move. A daemon that read
+no advertisement was reachable from nothing but its own host, which is why
+`scripts/validate/relay-config.sh` pins that source chain. An explicit `relay` block in
 `config/daemon.json` **wins and is never overwritten**, `enabled: false` included, and every failure
 to discover fails closed to direct-only with the consequence and the remedy said out loud.
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
