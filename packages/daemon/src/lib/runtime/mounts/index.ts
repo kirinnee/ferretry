@@ -17,7 +17,7 @@ import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
-import { browserLoginRoutes } from './browser-login.ts';
+import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
@@ -167,6 +167,8 @@ export interface MountedSubsystems {
    *  a person signs into by hand so the agent's browser profile is primed. Per-session browser
    *  AUTOMATION is not mounted — the mount's own header names what is missing and why. */
   readonly browserLogin: BrowserLoginLifecycle;
+  /** One browser host per daemon, owning the real worker, page projection and viewer socket. */
+  readonly browser: BrowserMountedSubsystem;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -312,7 +314,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
     // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
     // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
-    ...browserLoginRoutes(subsystems.browserLogin),
+    ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser, subsystems.socketTickets),
     ...nameRoutes(subsystems.names),
     ...learningRoutes(subsystems.learning),
     ...recommendRoutes(subsystems.recommend),
@@ -363,6 +365,7 @@ export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly Soc
     // optional session filter one route rather than a second dispatcher.
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions),
     ...terminalSocketRoutes(subsystems.terminals),
+    ...browserSocketRoutes(subsystems.browser),
   ];
 }
 

@@ -34,6 +34,8 @@ export interface WorkerClientOptions {
   readonly runtime: string;
   /** Absolute path to the worker script. */
   readonly workerEntry: string;
+  /** A compiled worker executable is invoked directly; a source worker is invoked through Bun. */
+  readonly workerExecutable?: boolean;
   /** Argument the worker connects to; opaque to the client. */
   readonly endpoint: string;
   readonly cwd?: string;
@@ -158,13 +160,18 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
   static async connect(options: WorkerClientOptions): Promise<BrowserWorkerClient> {
-    const child = Bun.spawn([options.runtime, options.workerEntry, options.endpoint], {
-      cwd: options.cwd ?? dirname(options.workerEntry),
-      env: workerEnvironment(options.environment ?? {}),
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'ignore',
-    });
+    const child = Bun.spawn(
+      options.workerExecutable
+        ? [options.workerEntry, options.endpoint]
+        : [options.runtime, options.workerEntry, options.endpoint],
+      {
+        cwd: options.cwd ?? dirname(options.workerEntry),
+        env: workerEnvironment(options.environment ?? {}),
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'ignore',
+      },
+    );
     const client = new BrowserWorkerClient(child, options);
     try {
       await withTimeout(
