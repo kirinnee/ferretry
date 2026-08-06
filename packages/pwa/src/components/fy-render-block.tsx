@@ -9,8 +9,8 @@
  *
  * NO DECODER MOUNTS WITHOUT A GESTURE. A bounded payload is still an unbounded
  * amount of rasterising, and a transcript is written by an agent rather than by
- * the reader, so an illustration is offered and not performed: the stage says
- * what rendering will cost, and one control starts it. The approval belongs to
+ * the reader, so an illustration is offered and not performed: the stage states
+ * the resource risk, and one control starts it. The approval belongs to
  * the EXACT `block.source` and is discarded the moment those bytes change, so a
  * streamed message cannot inherit consent granted to an earlier draft of itself.
  * There is deliberately no always-render setting: it would put the automatic

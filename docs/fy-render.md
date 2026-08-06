@@ -335,7 +335,8 @@ terms and no others:
    selected admission checks fails closed. Those checks are a signature, record ordering, a terminal
    shape and the declared dimensions — **not** CRCs and not compressed content, which stay the
    browser decoder's business.
-2. It is **user-triggered**: no decoder mounts without a gesture, and the gesture is priced.
+2. It is **user-triggered**: no decoder mounts without a gesture, and the control that starts one
+   names the type and the bounded payload size in its accessible name.
 3. It is **recorded prominently**, here and in the authoring skill, rather than left implicit.
 
 **This is not resource isolation.** It does not satisfy row #65's executable, resource-bounded
