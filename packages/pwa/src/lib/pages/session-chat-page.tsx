@@ -35,11 +35,13 @@ import {
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
+import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
+import type { DaemonPinClient } from '../pin-client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
@@ -60,6 +62,10 @@ export interface SessionChatPageProps {
   readonly accountPicker?: DaemonAccountPickerStore;
   /** Cached daemon usage feed; never the live fleet-usage probe. */
   readonly usage?: DaemonUsageStore;
+  /** Document-lifetime daemon-scoped pin boards. */
+  readonly pins?: DaemonPinClient;
+  /** Daemon-global browser-login state, invalidated with its pairing. */
+  readonly browserLogin?: DaemonBrowserLoginStore;
   readonly session: SessionView;
   readonly entries: readonly TranscriptEntry[];
   readonly client: SessionChatClient;

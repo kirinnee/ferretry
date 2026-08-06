@@ -599,6 +599,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
+          browserLogin={store.browserLogin}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           dictationSettings={dictation.settings}
@@ -616,6 +617,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           onRefresh={refresh}
           onSessionChange={publishSession}
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
+          pins={store.pins}
           refreshError={sessionIssue}
           session={session}
           usage={store.usage}
