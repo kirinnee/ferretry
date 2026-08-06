@@ -16,7 +16,7 @@ import {
   useConnectionSnapshot,
 } from '../../src/lib/store.tsx';
 import { interact, mount, must } from '../support/dom.ts';
-import { newDaemonIdentity, relayCrypto, settle as settleTasks } from '../support/relay.ts';
+import { autoDial, newDaemonIdentity, relayCrypto, settle as settleTasks } from '../support/relay.ts';
 
 const RELAY_DIRECTORY = 'https://directory.example.test';
 const HOSTED_RELAY_URL = 'https://hosted-relay.example.test';
@@ -165,6 +165,164 @@ describe('exchangePairing', () => {
         }),
       ),
     ).rejects.toThrow('does not match its fingerprint');
+  });
+
+  /*
+   * A RUNTIME WITHOUT `AbortSignal.timeout` USED TO PAIR WITH NOTHING. The unguarded static call
+   * threw a `TypeError` before `fetcher` was reached, the catch read it as direct-unreachable, and a
+   * v1/direct-only link — which has no rendezvous to fall back to — reported that programming error
+   * as the transport verdict. The fallback controller path must still contact a reachable direct
+   * daemon, and the static is restored in `finally` so a thrown assertion cannot leak the absence
+   * into a later case.
+   */
+  it('pairs directly even when the runtime omits AbortSignal.timeout', async () => {
+    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    const requests: string[] = [];
+    try {
+      const connection = await exchangePairing(
+        { daemonUrl: 'https://daemon.example.test', daemonId, code: 'one-time-code' },
+        async input => {
+          requests.push(String(input));
+          return Response.json({
+            daemonId,
+            deviceToken: `fy_device_${'t'.repeat(43)}`,
+            daemonName: 'workstation',
+            capabilities: [],
+            carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
+          });
+        },
+      );
+
+      // THE DIRECT DAEMON WAS CALLED — the missing static no longer prevents the fetch — and the
+      // walk's first leg paired, so no rendezvous was spent.
+      expect(requests).toEqual(['https://daemon.example.test/v1/pair']);
+      expect(String(connection.daemonId)).toBe(daemonId);
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: nativeTimeout,
+        configurable: true,
+        writable: true,
+      });
+    }
+    expect(typeof AbortSignal.timeout).toBe('function');
+  });
+
+  /*
+   * THE FALLBACK TIMER, NOT THE NATIVE STATIC, IS WHAT HAS TO DEADLINE A HUNG DIRECT FETCH. A
+   * blackholed address never rejects on its own, so the fallback controller's timer firing at the
+   * injected short deadline is what classifies direct as unreachable and hands the same single-use
+   * code to the rendezvous. The static is removed to force the controller path; the relay leg is a
+   * scripted daemon that seals a real redemption, so the case proves the whole walk rather than a
+   * mock of it.
+   */
+  it('aborts a hung direct fetch at the injected deadline over the fallback timer and pairs over the relay', async () => {
+    const identity = await newDaemonIdentity();
+    const RELAY = 'wss://relay.mine.test';
+    const response = {
+      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      daemonId: identity.daemonId,
+      daemonName: 'Studio',
+      capabilities: [],
+      carriers: [{ kind: 'relay', url: RELAY }],
+    };
+    const auto = autoDial(identity, { paired: response });
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    const directStarted = Date.now();
+    let abortedAt: number | undefined;
+    try {
+      const connection = await exchangePairing(
+        {
+          daemonUrl: 'https://studio.example',
+          daemonId: identity.daemonId,
+          code: '7F3K-Q2ND',
+          relay: { kind: 'relay', relayUrl: RELAY },
+        },
+        {
+          fetcher: async (_input, init) =>
+            await new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener(
+                'abort',
+                () => {
+                  abortedAt = Date.now() - directStarted;
+                  reject(new DOMException('the direct fetch was aborted', 'AbortError'));
+                },
+                { once: true },
+              );
+            }),
+          relayCrypto,
+          relayDial: auto.dial,
+          directTimeoutMs: 20,
+        },
+      );
+
+      // The walk moved past the aborted direct leg and redeemed the same code over the rendezvous,
+      // which is §1's direct-first walk when direct does not answer.
+      expect(String(connection.daemonId)).toBe(identity.daemonId);
+      const pairRequest = auto.requests[0] as { t: string; code: string; deviceName: string };
+      expect(pairRequest.t).toBe('pair');
+      expect(pairRequest.code).toBe('7F3K-Q2ND');
+      expect(pairRequest.deviceName).toBe('Ferretry PWA');
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: nativeTimeout,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    // THE TIMER FIRED AT THE INJECTED ~20ms, not the four-second default, so the hung fetch was
+    // classified unreachable and the relay leg ran well inside the code's two-minute life.
+    expect(abortedAt).toBeGreaterThanOrEqual(10);
+    expect(abortedAt).toBeLessThan(1000);
+  });
+
+  /*
+   * NO TIMER SURVIVES A SETTLED DIRECT FETCH. The native static owns an internal timer no `clear()`
+   * reaches, so this case forces the controller path and then reads the signal the fetcher received:
+   * had the fallback timer not been cleared in the direct fetch's `finally`, it would have aborted
+   * that signal well inside the wait below. An un-aborted signal past the deadline is the proof, not
+   * an assertion against a mock. The static is restored in `finally` — the same shape every
+   * monkeypatch in this file follows — which is the guarantee that a thrown assertion restores it.
+   */
+  it('clears the fallback timer once a direct fetch settles, and restores the static it stubbed', async () => {
+    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
+    const success = Response.json({
+      daemonId,
+      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      daemonName: 'workstation',
+      capabilities: [],
+      carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
+    });
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    let directSignal: AbortSignal | undefined;
+    try {
+      const connection = await exchangePairing(
+        { daemonUrl: 'https://daemon.example.test', daemonId, code: 'code' },
+        {
+          fetcher: async (_input, init) => {
+            directSignal = init?.signal ?? undefined;
+            return success;
+          },
+          directTimeoutMs: 30,
+        },
+      );
+      expect(String(connection.daemonId)).toBe(daemonId);
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: nativeTimeout,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    // Had `clear()` not run, the 30ms fallback timer would have aborted this signal inside the wait.
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(directSignal?.aborted).toBe(false);
+    expect(typeof AbortSignal.timeout).toBe('function');
   });
 });
 

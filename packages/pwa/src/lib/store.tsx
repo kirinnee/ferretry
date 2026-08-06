@@ -215,12 +215,35 @@ type DirectRedemption =
  * exchange has not issued yet, so this request cannot go through the carrier router — and routing a
  * RE-pair through an existing session would exchange a fresh code under the credential it replaces.
  */
+/**
+ * The direct half's deadline, as the one signal a fetch can take plus the timer it owes back.
+ *
+ * `AbortSignal.timeout` is the right primitive when the runtime ships it, but it is not universal —
+ * older browsers and some embedded webviews provide `AbortController` without the static — and the
+ * unguarded call the walk used to make threw a `TypeError` BEFORE `fetcher` was reached, so a
+ * reachable direct daemon answered nothing and the catch below misread a capability gap as transport
+ * unreachable. Prefer the native static when present; otherwise arm a controller and a timer, and
+ * hand back the clear that has to run once the fetch has settled so the fallback timer is not left
+ * armed behind a request that already answered. An actual abort stays an abort — this only decides
+ * how the deadline is built, not how its firing is read.
+ */
+const directDeadline = (timeoutMs: number): { readonly signal: AbortSignal; readonly clear: () => void } => {
+  const native = (AbortSignal as { timeout?: (delay: number) => AbortSignal }).timeout;
+  if (typeof native === 'function') {
+    return { signal: native.call(AbortSignal, timeoutMs), clear: () => undefined };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+};
+
 async function exchangePairingDirect(
   seed: PairingSeed,
   fetcher: DaemonFetch,
   timeoutMs: number,
 ): Promise<DirectRedemption> {
   const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
+  const deadline = directDeadline(timeoutMs);
   let response: Response;
   try {
     response = await fetcher(endpoint, {
@@ -238,13 +261,20 @@ async function exchangePairingDirect(
       // code's own life is two minutes, so an unbounded direct attempt can outlive the credential the
       // walk was going to redeem. Every other leg of this feature has a deadline — `driveRelaySession`
       // arms one before a session opens, and calls a carrier that neither answers nor closes "a
-      // refusal, not a wait" — and this was the one place that rule was not applied.
-      signal: AbortSignal.timeout(timeoutMs),
+      // refusal, not a wait" — and this was the one place that rule was not applied. The signal itself
+      // comes from `directDeadline` above, which keeps this leg working on a runtime without the
+      // `AbortSignal.timeout` static rather than throwing before the fetch.
+      signal: deadline.signal,
     });
   } catch (reason) {
     // An abort is a transport failure like any other: nothing reached the daemon, so the walk may go
     // on to a rendezvous. It is deliberately NOT `answered` — the daemon has judged nothing.
     return { kind: 'unreachable', error: reason instanceof Error ? reason : new Error(String(reason)) };
+  } finally {
+    // The fallback controller's timer is cleared whether the fetch answered, refused, or aborted, so
+    // a settled request leaves no armed timer behind. The native static owns no clearable timer, and
+    // clearing one that has already fired is a no-op.
+    deadline.clear();
   }
   if (!response.ok) return { kind: 'answered', error: new Error(await pairingFailure(response)) };
   const value = PairingResponseSchema.safeParse(await response.json().catch(() => undefined));
