@@ -87,6 +87,9 @@ export class RunnerSessionGit implements SessionGit {
    * it before trusting `hasHead`.
    */
   async repoInfo(cwd: GitWorkingDirectory, budget?: SpawnBudget): Promise<SessionRepoInfo> {
+    // The index checks before calling, and the adapter repeats the check because this port is public:
+    // an already-spent budget is not a licence to spawn a child with a zero-millisecond timeout.
+    if (budget?.expired() === true) return { repo: false, prefix: '', hasHead: false };
     // Never throws for "not a repo": that is a valid state the viewer reports so a client hides its diff
     // affordances.
     const inside = await this.text(
@@ -126,6 +129,8 @@ export class RunnerSessionGit implements SessionGit {
    * the changes list, obtained here by Git's own default rather than by a flag.
    */
   async listFiles(cwd: GitWorkingDirectory, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList> {
+    // No command was asked, so the empty list is explicitly incomplete rather than confidently empty.
+    if (budget?.expired() === true) return { paths: [], truncated: true };
     const execution = await this.runner.run({
       args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
       cwd,

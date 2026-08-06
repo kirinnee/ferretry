@@ -851,7 +851,7 @@ describe('RunnerSessionGit.listFiles', () => {
  * was running must not be the reason a new child is spawned. Neither property is observable through a
  * real repository — both are about what is NOT run — so both are proven against a runner that counts.
  */
-describe('RunnerSessionGit.repoInfo under a budget', () => {
+describe('RunnerSessionGit under a budget', () => {
   const INSIDE = 'true\n/pinned/root\n\n';
 
   /** A runner that answers every command identically and records what it was asked to start. */
@@ -867,6 +867,22 @@ describe('RunnerSessionGit.repoInfo under a budget', () => {
         timedOut: false,
       });
     },
+  });
+
+  it('should start no command for a budget that was already spent', async () => {
+    // Arrange
+    const invocations: GitInvocation[] = [];
+    const subject = new RunnerSessionGit(counting(invocations));
+    const spent = { expired: () => true, remainingMs: () => 0 };
+
+    // Act
+    const info = await subject.repoInfo('/pinned/session', spent);
+    const listed = await subject.listFiles('/pinned/session', 128, spent);
+
+    // Assert
+    should(invocations).be.empty();
+    should(info).eql({ repo: false, prefix: '', hasHead: false });
+    should(listed).eql({ paths: [], truncated: true });
   });
 
   it('should start no second command once the budget is spent by the first', async () => {
