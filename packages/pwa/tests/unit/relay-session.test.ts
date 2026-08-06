@@ -58,7 +58,7 @@ const opened = async (overrides: Partial<RelayClientSessionDependencies> = {}): 
   const session = new RelayClientSession({
     crypto: relayCrypto,
     daemonId: identity.daemonId,
-    deviceToken: DEVICE_TOKEN,
+    mode: { kind: 'auth', deviceToken: DEVICE_TOKEN },
     socket,
     ...overrides,
   });
@@ -164,7 +164,7 @@ describe('a relay session reading frames from its carrier', () => {
     const session = new RelayClientSession({
       crypto: relayCrypto,
       daemonId: identity.daemonId,
-      deviceToken: DEVICE_TOKEN,
+      mode: { kind: 'auth', deviceToken: DEVICE_TOKEN },
       socket,
     });
     await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(4)));

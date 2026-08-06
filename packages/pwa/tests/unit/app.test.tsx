@@ -61,7 +61,7 @@ const beta = daemonConnection({
 });
 const GAMMA_ID = `fy_daemon_${'g'.repeat(43)}`;
 const GAMMA_TOKEN = `fy_device_${'t'.repeat(43)}`;
-const GAMMA_FRAGMENT = `v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=${GAMMA_ID}`;
+const GAMMA_FRAGMENT = `v1;url=https%3A%2F%2Fgamma.example.test;code=7F3K-Q2ND;fp=${GAMMA_ID}`;
 
 const HOSTED_RELAY = { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' } as const;
 

@@ -1,4 +1,4 @@
-import { DaemonCarriersViewSchema, PairingResponseSchema } from '@ferretry/protocol';
+import { DaemonCarriersViewSchema, type PairingResponse, PairingResponseSchema } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { RelayCrypto } from '@ferretry/relay';
 import { publishedConnectionMethods } from '@ferretry/relay';
@@ -30,11 +30,14 @@ import {
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
+import { DaemonEventTransport, daemonEventTicket } from './event-transport.ts';
 import { documentDraftStore } from './drafts.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import { DaemonPinClient } from './pin-client.ts';
+import { redeemPairingOverRelay, relayPairingCandidates } from './relay-pairing.ts';
+import { RelayPairingRefusedError } from './relay-session.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
@@ -168,25 +171,118 @@ const pairingFailure = async (response: Response): Promise<string> => {
   return typeof body?.error === 'string' ? body.error : `Pairing failed (HTTP ${response.status})`;
 };
 
-/** Exchanges one reader-supplied, single-use fragment code with its own daemon. */
+/** How this browser names itself to a daemon it is asking to trust it. */
+const PAIRING_DEVICE_NAME = 'Ferretry PWA';
+
+export interface ExchangePairingOptions {
+  readonly fetcher?: DaemonFetch;
+  readonly hostedRelayUrl?: string;
+  /** WebCrypto by default. Needed only when a redemption falls back to a rendezvous. */
+  readonly relayCrypto?: RelayCrypto;
+  /** The browser WebSocket by default. Injected so no suite opens one. */
+  readonly relayDial?: RelayDial;
+}
+
+/**
+ * What the direct attempt established, as the two facts a walk has to tell apart.
+ *
+ * `answered` means the DAEMON judged this code and the answer is final — an expired code, a spent
+ * budget, a response that would not parse. `unreachable` means nothing reached it, which is the only
+ * outcome a rendezvous can help with. Modelled as a result rather than as two exception classes
+ * because the distinction IS this function's answer, and an answer is a return value.
+ */
+type DirectRedemption =
+  | { readonly kind: 'paired'; readonly response: PairingResponse }
+  | { readonly kind: 'answered'; readonly error: Error }
+  | { readonly kind: 'unreachable'; readonly error: Error };
+
+/**
+ * The direct half: one reader-supplied, single-use fragment code, exchanged with its own daemon.
+ *
+ * Unrouted on purpose and it stays that way. A relayed session is opened with a credential this
+ * exchange has not issued yet, so this request cannot go through the carrier router — and routing a
+ * RE-pair through an existing session would exchange a fresh code under the credential it replaces.
+ */
+async function exchangePairingDirect(seed: PairingSeed, fetcher: DaemonFetch): Promise<DirectRedemption> {
+  const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
+  let response: Response;
+  try {
+    response = await fetcher(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: seed.code, deviceName: PAIRING_DEVICE_NAME }),
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    });
+  } catch (reason) {
+    return { kind: 'unreachable', error: reason instanceof Error ? reason : new Error(String(reason)) };
+  }
+  if (!response.ok) return { kind: 'answered', error: new Error(await pairingFailure(response)) };
+  const value = PairingResponseSchema.safeParse(await response.json().catch(() => undefined));
+  if (!value.success) return { kind: 'answered', error: new Error('the daemon returned an invalid pairing response') };
+  return { kind: 'paired', response: value.data };
+}
+
+/**
+ * Exchanges one reader-supplied, single-use fragment code — over whichever carrier reaches its daemon.
+ *
+ * THE WALK IS §1'S, AND PAIRING IS NO LONGER ITS EXCEPTION: direct first, always; then the link's own
+ * rendezvous candidate; then the discovery advertisement's hosted one. Only a TRANSPORT failure
+ * advances it. A daemon that answered — `409`, `429`, a schema refusal — is reachable and saying so,
+ * and carrying the same single-use code to a rendezvous after that would spend a second attempt from
+ * a five-guess budget to be told the same thing.
+ *
+ * A SEALED REFUSAL ENDS THE WALK TOO, for the same reason and one layer in. §14: "A sealed
+ * `pair-refused` is the opposite: the exchange happened, the answer is final for that attempt." It
+ * arrives as its own error class precisely so this loop cannot mistake it for a carrier that did not
+ * work.
+ *
+ * WHAT IS REPORTED WHEN EVERYTHING FAILS is the FIRST failure, not the last. The direct attempt is
+ * the one whose answer a reader can act on — "that code is expired" — while the relay attempts that
+ * followed it are a browser's own recovery, and reporting "the rendezvous did not answer" to somebody
+ * whose real problem is an expired code sends them to fix their network.
+ */
 export async function exchangePairing(
   seed: PairingSeed,
-  fetcher: DaemonFetch = browserFetch,
-  hostedRelayUrl?: string,
+  fetcherOrOptions: DaemonFetch | ExchangePairingOptions = browserFetch,
+  hostedRelayUrlArgument?: string,
 ): Promise<DaemonConnection> {
-  const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
-  const response = await fetcher(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: seed.code, deviceName: 'Ferretry PWA' }),
-    cache: 'no-store',
-    credentials: 'omit',
-    referrerPolicy: 'no-referrer',
-  });
-  if (!response.ok) throw new Error(await pairingFailure(response));
-  const value = PairingResponseSchema.safeParse(await response.json().catch(() => undefined));
-  if (!value.success) throw new Error('the daemon returned an invalid pairing response');
-  return pairedDaemonConnection(seed, value.data, hostedRelayUrl);
+  const options: ExchangePairingOptions =
+    typeof fetcherOrOptions === 'function'
+      ? {
+          fetcher: fetcherOrOptions,
+          ...(hostedRelayUrlArgument === undefined ? {} : { hostedRelayUrl: hostedRelayUrlArgument }),
+        }
+      : fetcherOrOptions;
+  const fetcher = options.fetcher ?? browserFetch;
+  const hostedRelayUrl = options.hostedRelayUrl;
+  const direct = await exchangePairingDirect(seed, fetcher);
+  if (direct.kind === 'paired') return pairedDaemonConnection(seed, direct.response, hostedRelayUrl);
+  if (direct.kind === 'answered') throw direct.error;
+
+  for (const rendezvous of relayPairingCandidates(seed, hostedRelayUrl)) {
+    let response: PairingResponse;
+    try {
+      response = await redeemPairingOverRelay({
+        crypto: options.relayCrypto ?? new WebCryptoRelayCrypto(),
+        seed,
+        deviceName: PAIRING_DEVICE_NAME,
+        rendezvous,
+        ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+      });
+    } catch (reason) {
+      // A sealed refusal is the DAEMON's answer and ends the walk; anything else is this rendezvous
+      // not working, which is the next one's turn.
+      if (reason instanceof RelayPairingRefusedError) throw reason;
+      continue;
+    }
+    // Deliberately outside the catch above: a response that paired but named no rendezvous this
+    // browser crossed is a decided outcome, not a carrier that failed. The grant exists and this
+    // device is discarding it, and dialling the next rendezvous would mint a second one to discard.
+    return pairedDaemonConnection(seed, response, hostedRelayUrl, rendezvous);
+  }
+  throw direct.error;
 }
 
 export interface AppStore {
@@ -279,9 +375,13 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     fallback.kind === 'available' ? fallback.relayUrl : undefined,
   );
 
+  // One adapter for the document, shared by the carrier router and by a redemption that has to fall
+  // back to a rendezvous. A second instance would be harmless and is still worth not having: it is
+  // the same WebCrypto either way, and one value is one thing a suite has to replace.
+  const relayCrypto = options.relayCrypto ?? new WebCryptoRelayCrypto();
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
-    crypto: options.relayCrypto ?? new WebCryptoRelayCrypto(),
+    crypto: relayCrypto,
     ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
     // The same one-per-load promise both other readers await; the router waits on it only after a
     // daemon's own carriers have all failed, so nothing on the ordinary path pays for the read.
@@ -303,9 +403,34 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
    * a daemon that is only reachable through the relay is reported reachable rather
    * than reported down by a probe that never tried the relay.
    */
+  /**
+   * THE LIVE EVENT STREAM IS WIRED, AND IT WAS NOT BEFORE.
+   *
+   * `DaemonEventTransport` has been in this package, unit-tested, and constructed by nothing:
+   * `daemonApiClient` never passed an `eventTransport`, so the typed client fell back to the
+   * protocol package's own `WebSocketEventTransport`, which dials the daemon's address directly and
+   * knows nothing about a carrier. On a relayed connection that is a socket opened at precisely the
+   * address the relay exists because the browser cannot reach — a subscribed viewer receiving
+   * nothing, forever, which is the failure this protocol spends §7 and §9 avoiding.
+   *
+   * Both halves it declared and never received are supplied here: the ACTIVE CARRIER, so it can tell
+   * which kind of stream to open, and the router's `openStream`, so a relayed one is a §14 stream
+   * session rather than a socket. `choice()` is read per call rather than captured because a carrier
+   * is measured, and the answer at connect time is not the answer when a stream reconnects.
+   */
   const clients = new DaemonApiPool(
     options.connectClient ??
-      (async daemon => await daemonApiClient(daemon, { transport: new DaemonHttpTransport(daemon, carried) })),
+      (async daemon =>
+        await daemonApiClient(daemon, {
+          transport: new DaemonHttpTransport(daemon, carried),
+          eventTransport: new DaemonEventTransport(
+            daemon,
+            async paired => await daemonEventTicket(paired, carried, () => carrier.activeMethod(paired.daemonId)),
+            undefined,
+            () => carrier.activeMethod(daemon.daemonId),
+            async (paired, request) => await carrier.openStream(paired, request),
+          ),
+        })),
   );
   const fleetPort: DaemonFleetPort = {
     list: async daemon => await (await clients.client(daemon)).list(),
@@ -392,7 +517,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushService,
     readDefaultRelay,
     pair: async seed => {
-      const connection = await exchangePairing(seed, fetcher, await hostedRelayUrl);
+      const connection = await exchangePairing(seed, {
+        fetcher,
+        relayCrypto,
+        ...(options.relayDial === undefined ? {} : { relayDial: options.relayDial }),
+        ...((await hostedRelayUrl) === undefined ? {} : { hostedRelayUrl: await hostedRelayUrl }),
+      });
       connections.add(connection);
       return connection;
     },

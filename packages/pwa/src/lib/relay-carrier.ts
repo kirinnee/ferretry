@@ -62,6 +62,8 @@ import {
   type RelayClientSessionDependencies,
   type RelayClientSocket,
   RelaySessionError,
+  type RelaySessionMode,
+  type RelayStreamFrame,
   type RelayTunnelAnswer,
   type RelayTunnelClientMessage,
 } from './relay-session.ts';
@@ -306,6 +308,15 @@ export interface OpenRelaySessionOptions {
   readonly daemon: DaemonConnection;
   readonly method: Extract<ConnectionMethod, { kind: 'relay' }>;
   readonly heartbeat?: RelayHeartbeatSchedule;
+  /**
+   * What this session is for. A request session by default, because that is every existing caller.
+   *
+   * A PAIRING session never comes through here: it has no `DaemonConnection` to be opened against —
+   * there is no device token yet and no daemon in the registry — so it is dialled by
+   * `relay-pairing.ts` instead. What does come through here is a stream session, which has both.
+   */
+  readonly mode?: RelaySessionMode;
+  readonly onData?: RelayClientSessionDependencies['onData'];
 }
 
 /**
@@ -322,26 +333,28 @@ export interface OpenRelaySessionOptions {
  * resolves and a screen that never says why — the "absent evidence read as a
  * benign result" shape this repository keeps paying for.
  */
-export const openRelaySession = async ({
-  crypto,
-  dial,
-  daemon,
-  method,
-  heartbeat = browserHeartbeat,
-}: OpenRelaySessionOptions): Promise<RelayClientSession> => {
-  const url = connectionSocketUrl(method, daemon.daemonId, 'client');
-  if (url === null) {
-    // `connectionSocketUrl` refuses a fingerprint a rendezvous cannot address. That
-    // is a refusal, not an address to improvise around.
-    throw new RelaySessionError('this daemon fingerprint cannot address a rendezvous', RELAY_CLOSE_CODES.protocolError);
-  }
-  const socket = dial(url);
-  const session = new RelayClientSession({
-    crypto,
-    daemonId: daemon.daemonId,
-    deviceToken: daemon.deviceToken,
-    socket,
-  });
+/**
+ * WIRE ONE SOCKET TO ONE SESSION AND WAIT FOR THE ONE THING THAT SESSION IS FOR.
+ *
+ * Extracted so a pairing attempt and a request or stream session share it byte for byte rather than
+ * carrying two copies of the deadline arithmetic. There is exactly one difference between the two
+ * uses and it is `keepAlive`: a session that goes on to carry traffic keeps its heartbeat, while a
+ * pairing session has stated its outcome and is about to be closed by the daemon, so leaving a
+ * thirty-second interval armed behind it would keep a timer alive for a conversation that is over.
+ */
+export const driveRelaySession = async <T>({
+  socket,
+  session,
+  heartbeat,
+  settled,
+  keepAlive,
+}: {
+  readonly socket: RelayCarrierSocket;
+  readonly session: RelayClientSession;
+  readonly heartbeat: RelayHeartbeatSchedule;
+  readonly settled: Promise<T>;
+  readonly keepAlive: boolean;
+}): Promise<T> => {
   const timers = new Set<() => void>();
   const stop = (): void => {
     for (const cancel of timers) cancel();
@@ -362,16 +375,46 @@ export const openRelaySession = async ({
     session.carrierClosed(code, reason);
   };
   try {
-    const ready = await session.ready();
+    const value = await settled;
+    if (!keepAlive) {
+      stop();
+      return value;
+    }
     // The deadline covered getting here and nothing after it; the heartbeat covers
     // the rest. Leaving it armed would close a working session.
     deadline();
     timers.delete(deadline);
-    return ready;
+    return value;
   } catch (reason) {
     stop();
     throw reason;
   }
+};
+
+export const openRelaySession = async ({
+  crypto,
+  dial,
+  daemon,
+  method,
+  heartbeat = browserHeartbeat,
+  mode,
+  onData,
+}: OpenRelaySessionOptions): Promise<RelayClientSession> => {
+  const url = connectionSocketUrl(method, daemon.daemonId, 'client');
+  if (url === null) {
+    // `connectionSocketUrl` refuses a fingerprint a rendezvous cannot address. That
+    // is a refusal, not an address to improvise around.
+    throw new RelaySessionError('this daemon fingerprint cannot address a rendezvous', RELAY_CLOSE_CODES.protocolError);
+  }
+  const socket = dial(url);
+  const session = new RelayClientSession({
+    crypto,
+    daemonId: daemon.daemonId,
+    mode: mode ?? { kind: 'auth', deviceToken: daemon.deviceToken },
+    socket,
+    ...(onData === undefined ? {} : { onData }),
+  });
+  return await driveRelaySession({ socket, session, heartbeat, settled: session.ready(), keepAlive: true });
 };
 
 /* ---------- the router every daemon-bound request goes through ------------- */
@@ -396,11 +439,59 @@ export interface DaemonCarrierRouterOptions {
   readonly hostedRelay?: () => Promise<string | undefined>;
 }
 
+/**
+ * One live rendezvous session this router is holding, and which rendezvous it is on.
+ *
+ * THE RENDEZVOUS IS STORED BESIDE THE SESSION RATHER THAN BEING THE KEY, and that is the change one
+ * session per stream forced. There used to be exactly one session per rendezvous, so the address was
+ * a sufficient key; §14 now has a tab hold a request session, an event stream and a terminal stream
+ * on the SAME rendezvous at once, so the key has to distinguish jobs while the teardown rules still
+ * ask about the address.
+ */
+interface CarrierSession {
+  readonly relayUrl: string;
+  readonly session: Promise<RelayClientSession>;
+}
+
 interface CarrierEntry {
   readonly connection: DaemonConnection;
   choice: ConnectionChoice | undefined;
-  readonly sessions: Map<string, Promise<RelayClientSession>>;
+  /**
+   * EVERY SESSION THIS ROUTER HOLDS FOR THIS DAEMON — request, stream, all of them.
+   *
+   * §14 makes this a conformance rule rather than a housekeeping preference: "every session a client
+   * holds for a daemon — request, stream or pairing — must be owned by the same structure that
+   * unpairing and carrier-set replacement tear down. A stream session outside that structure is a
+   * live socket presenting a device grant that revoking the pairing can no longer reach from the
+   * device's side."
+   *
+   * So a stream session is registered HERE and nowhere else. `clearDaemon` and `#refreshed` walk this
+   * map, and a session they cannot see is one an unpair can never close.
+   */
+  readonly sessions: Map<string, CarrierSession>;
 }
+
+/**
+ * One stream to open: the daemon's own route, exactly as a direct upgrade would address it.
+ *
+ * NO TICKET, AND THAT IS A REFUSAL RATHER THAN AN OMISSION. §14: "Single-use socket tickets exist
+ * because a browser cannot attach a header to a WebSocket; here the credential is the record, so
+ * there is nothing for a ticket to do. `ticket` or `token` in a stream's `query` is refused with
+ * `4400` … A client must also not BUY a ticket it means to spend here." So a caller decides not to
+ * mint one before it calls this, not after.
+ */
+export interface RelayStreamRequest {
+  readonly path: string;
+  readonly query?: readonly (readonly [string, string])[];
+  readonly onData: (frame: RelayStreamFrame) => void;
+}
+
+/** The request session's key. One per rendezvous, because §14 gives a request session no identity. */
+const requestSessionKey = (relayUrl: string): string => `request ${relayUrl}`;
+
+/** A stream session's key: one per rendezvous per stream, because each stream IS its own session. */
+const streamSessionKey = (relayUrl: string, path: string, query: readonly (readonly [string, string])[]): string =>
+  `stream ${relayUrl} ${path} ${query.map(([name, value]) => `${name}=${value}`).join('&')}`;
 
 /**
  * Same daemon, same address, same grant — only the published carrier set moved.
@@ -552,13 +643,70 @@ export class DaemonCarrierRouter {
     return this.#entries.get(daemonId)?.choice;
   }
 
+  /**
+   * The carrier a request has been MEASURED on, or nothing.
+   *
+   * `undefined` covers both "no walk has finished yet" and "the last walk found nothing", and the
+   * two are deliberately one answer here: a caller asking which kind of stream to open has no use
+   * for a carrier that did not carry anything. Read per call rather than captured, because a carrier
+   * is a measurement and the answer when a stream reconnects is not the answer when it first opened.
+   */
+  activeMethod(daemonId: DaemonId): ConnectionMethod | undefined {
+    const chosen = this.#entries.get(daemonId)?.choice;
+    return chosen?.ok === true ? chosen.method : undefined;
+  }
+
+  /**
+   * ONE LIVE STREAM, OVER THE RENDEZVOUS THIS DAEMON'S TRAFFIC IS ALREADY ON.
+   *
+   * §14 gives a stream its own session — "the socket IS the session, so the session layer already
+   * owns the stream's ordering, its flow control, its teardown and its cancellation" — and the
+   * alternative it names as rejected is the one this method must not quietly reintroduce: multiplexed
+   * onto the request session, thirty-two outstanding terminal frames would starve and then KILL the
+   * fleet requests underneath them.
+   *
+   * IT DOES NOT WALK. A stream is opened on the carrier a request has already been measured on, and
+   * `undefined` — nothing measured yet — is not a reason to probe: the caller has a direct socket for
+   * that case and is better at opening one than this class is. A DIRECT winner therefore answers
+   * `null` rather than an error, which is not a failure but the ordinary answer "you can open this
+   * yourself".
+   *
+   * A REFUSAL FROM THE RENDEZVOUS IS NOT A CARRIER TO REPLACE. §14 requires the session-ceiling
+   * refusal in particular to be "rendered with its reason … rather than surfacing as a stream that
+   * never opens, because a person with three tabs open did nothing wrong and can act on the
+   * sentence", so it is thrown with its close code intact for the caller to say out loud.
+   */
+  async openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession | null> {
+    const entry = this.#entry(daemon);
+    const chosen = entry.choice;
+    if (chosen?.ok !== true || chosen.method.kind !== 'relay') return null;
+    const method = chosen.method;
+    const query = request.query ?? [];
+    return await this.#hold(entry, streamSessionKey(method.relayUrl, request.path, query), method.relayUrl, () =>
+      openRelaySession({
+        crypto: this.#crypto,
+        dial: this.#dial,
+        daemon: entry.connection,
+        method,
+        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
+        mode: {
+          kind: 'stream',
+          deviceToken: entry.connection.deviceToken,
+          path: request.path,
+          ...(query.length === 0 ? {} : { query }),
+        },
+        onData: request.onData,
+      }),
+    );
+  }
+
   /** Unpair and re-pair invalidation: a carrier is live state, never durable. */
   clearDaemon(daemonId: DaemonId): void {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
     this.#entries.delete(daemonId);
-    for (const session of entry.sessions.values()) {
-      void session.then(
+    for (const held of entry.sessions.values()) {
+      void held.session.then(
         connected => connected.close('this daemon was re-paired or unpaired'),
         () => undefined,
       );
@@ -751,13 +899,13 @@ export class DaemonCarrierRouter {
   #refreshed(current: CarrierEntry, daemon: DaemonConnection): CarrierEntry {
     const carriers = daemonCarriers(daemon);
     const published = new Set(carriers.flatMap(method => (method.kind === 'relay' ? [method.relayUrl] : [])));
-    const sessions = new Map<string, Promise<RelayClientSession>>();
-    for (const [relayUrl, session] of current.sessions) {
-      if (published.has(relayUrl)) {
-        sessions.set(relayUrl, session);
+    const sessions = new Map<string, CarrierSession>();
+    for (const [key, held] of current.sessions) {
+      if (published.has(held.relayUrl)) {
+        sessions.set(key, held);
         continue;
       }
-      void session.then(
+      void held.session.then(
         // True of a rendezvous the daemon withdrew AND of a fallback it never published, which is
         // every session this branch can be holding.
         connected => connected.close('this rendezvous is not named in the carriers this daemon publishes'),
@@ -831,30 +979,49 @@ export class DaemonCarrierRouter {
     entry: CarrierEntry,
     method: Extract<ConnectionMethod, { kind: 'relay' }>,
   ): Promise<RelayClientSession> {
-    const existing = entry.sessions.get(method.relayUrl);
+    return await this.#hold(entry, requestSessionKey(method.relayUrl), method.relayUrl, () =>
+      openRelaySession({
+        crypto: this.#crypto,
+        dial: this.#dial,
+        daemon: entry.connection,
+        method,
+        ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
+      }),
+    );
+  }
+
+  /**
+   * Open, register and fence one session, whatever job it is for.
+   *
+   * Extracted from the request path unchanged so a stream session inherits every rule it already
+   * enforced — the reuse-while-live check, the removal of a dial that failed, and above all the
+   * stale-entry fence below. A second implementation of any of those would be a second place for a
+   * live rendezvous holding this device's grant to escape an unpair.
+   */
+  async #hold(
+    entry: CarrierEntry,
+    key: string,
+    relayUrl: string,
+    open: () => Promise<RelayClientSession>,
+  ): Promise<RelayClientSession> {
+    const existing = entry.sessions.get(key);
     if (existing !== undefined) {
-      const current = await existing.catch(() => undefined);
-      if (current?.live() === true) return current;
-      entry.sessions.delete(method.relayUrl);
+      const current = await existing.session.catch(() => undefined);
+      if (current?.live() === true || current?.streaming() === true) return current;
+      entry.sessions.delete(key);
     }
-    const opening = openRelaySession({
-      crypto: this.#crypto,
-      dial: this.#dial,
-      daemon: entry.connection,
-      method,
-      ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-    });
-    entry.sessions.set(method.relayUrl, opening);
+    const opening = open();
+    entry.sessions.set(key, { relayUrl, session: opening });
     let session: RelayClientSession;
     try {
       session = await opening;
     } catch (reason) {
-      if (entry.sessions.get(method.relayUrl) === opening) entry.sessions.delete(method.relayUrl);
+      if (entry.sessions.get(key)?.session === opening) entry.sessions.delete(key);
       throw reason;
     }
     const held = this.#entries.get(entry.connection.daemonId);
-    if (held === entry || held?.sessions.get(method.relayUrl) === opening) return session;
-    entry.sessions.delete(method.relayUrl);
+    if (held === entry || held?.sessions.get(key)?.session === opening) return session;
+    entry.sessions.delete(key);
     // `close` is idempotent, so a re-pair that already closed this promise's session and this
     // sentence do not fight; either way it ends, and the caller is told rather than handed a
     // session no unpair could reach.

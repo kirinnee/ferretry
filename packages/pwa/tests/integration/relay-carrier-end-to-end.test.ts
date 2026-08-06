@@ -26,7 +26,11 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
 import { type ApiRequest, type ApiResponse, headersFrom } from '../../../daemon/src/lib/api/http.ts';
-import { RelayLink } from '../../../daemon/src/lib/relay/link.ts';
+import {
+  RelayLink,
+  type RelayLinkDependencies,
+  type RelayPairingRedeemer,
+} from '../../../daemon/src/lib/relay/link.ts';
 import {
   type RelayEnvironment,
   RendezvousDurableObject,
@@ -85,9 +89,17 @@ class RelayBridge {
   }
 
   /** Bring the daemon in first: §9 refuses a client at a rendezvous no daemon holds. */
+  /**
+   * @param dispatch how the daemon answers a §14 request session.
+   * @param pairing how it answers a §14 pairing session. Refuses by default, because a redemption
+   *   that succeeded by accident is exactly the thing these cases are here to catch.
+   * @param sockets how it answers a §14 stream session's protocol switch.
+   */
   async admitDaemon(
     identity: Awaited<ReturnType<typeof newDaemonIdentity>>,
     dispatch: RelayApiDispatch,
+    pairing: RelayPairingRedeemer = { redeemOverRelay: async () => ({ kind: 'refused' }) },
+    sockets: RelayLinkDependencies['sockets'] = async () => ({ outcome: 'unclaimed' }),
   ): Promise<void> {
     await this.rendezvous.fetch(
       new Request(`${RELAY_URL}/v1/rendezvous/${identity.daemonId}/daemon`, { headers: { Upgrade: 'websocket' } }),
@@ -106,6 +118,18 @@ class RelayBridge {
       },
       dispatch,
       devices: { identifyDevice: token => (token === DEVICE_TOKEN ? 'phone' : undefined) },
+      pairing,
+      sockets,
+      // A REAL `setTimeout` LEFT ARMED WOULD OUTLIVE THE CASE. §14 gives every session a ten-second
+      // credential deadline, and this suite settles in microseconds — so the timer would never fire
+      // and would keep the process alive after the assertions passed. Cancelled explicitly rather
+      // than relied on: a suite that hangs is a suite nobody reads the output of.
+      scheduler: {
+        after: (milliseconds, action) => {
+          const handle = setTimeout(action, milliseconds);
+          return { cancel: () => clearTimeout(handle) };
+        },
+      },
     });
     this.#drain();
     await this.settle();
