@@ -278,7 +278,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 5, operator: 102, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 5, operator: 106, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
