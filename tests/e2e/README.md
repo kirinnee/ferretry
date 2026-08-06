@@ -58,5 +58,48 @@ on success or failure; the suite runner also handles interrupts. Never bypass
 these helpers or reuse their resources across journeys.
 
 Run the tier with `task test:e2e`. It typechecks the harness and runs without a
-coverage ledger. Playwright is intentionally not installed yet; add it when PWA
-browser journeys land. The separate CI job is still pending lead-owned wiring.
+coverage ledger. The separate CI job is still pending lead-owned wiring, so a
+regression test placed here is not yet a guard.
+
+## Browser journeys
+
+`support/relay-harness.ts` adds the four things a browser journey needs that the
+fixture has no opinion about, each registered on a teardown that releases on
+pass, failure and interrupt:
+
+- `startRendezvous(root, teardown)` — `packages/relay`'s own `relayFetch` and
+  `RendezvousDurableObject` in their own OS process, over real WebSockets, with
+  every frame in both directions appended to a JSONL observation log. See
+  `support/rendezvous-process.ts` for exactly what Bun substitutes for the
+  Workers runtime and what it therefore cannot prove.
+- `startDirectSinkhole(teardown)` — a loopback address that accepts a TCP
+  connection, **counts** it, and destroys it. Advertise it as the daemon's
+  `publicUrl` so a browser's direct attempt demonstrably happens and
+  demonstrably fails at transport; on one machine, "direct is unreachable" has
+  to be arranged rather than assumed.
+- `buildPwaBundle()` / `startPwaOrigin(dist, teardown)` — the REAL `vite build`
+  output on a loopback origin, under the published site's own
+  `public/_headers` CSP and `public/_redirects` SPA routes. Built once per suite
+  run into `$FY_E2E_RUN_ROOT`, never into a journey's own root: that root is
+  removed when its journey disposes, and the next journey then serves nothing.
+- `launchChrome(teardown, { userAgent? })` — real Chrome via `playwright-core`,
+  resolved at runtime from `packages/pwa` because this repository installs
+  isolated and `playwright-core` is not resolvable from `tests/`.
+
+Point the daemon at a document with `--config <path outside FY_HOME>`. A
+`config/daemon.json` written into an empty `FY_HOME` makes that home "non-empty
+with no layout-version marker" and the daemon refuses to open it.
+
+`relay-browser-pairing.e2e.test.ts` is the journey those pieces exist for. Its
+second test is RED on purpose while §14 relayed pairing and stream sessions are
+unbuilt: it records a step ledger, fails naming the FIRST unproven step, and
+writes the whole ledger to `$FY_E2E_RELAY_REPORT` (default
+`<tmpdir>/fy-e2e-relay-journey.md`). Its first test guards every moving part of
+the harness itself, so the red one stays a statement about the product.
+
+Known and deliberately not taken: `wrangler` 4.93 is on the devshell `PATH` and
+its `workerd` starts, but that binary's newest supported compatibility date is
+older than `packages/relay/wrangler.jsonc` pins, so `wrangler dev` refuses the
+Worker. Running it would mean overriding the deployment's compatibility date,
+and it would cost the frame observation log unless a recording proxy went in
+front. Reconsider if the toolchain moves.
