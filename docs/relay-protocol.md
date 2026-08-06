@@ -920,8 +920,9 @@ parses this advertisement from the directory origin Vite compiles into the bundl
 last-resort hosted carrier after the daemon's published set fails, supplies the **only** relayed
 first-pairing candidate after direct fails, and lets a surface disclose whether an address is
 Ferretry's rendezvous or somebody's own. A failed, malformed or switched-off read guesses nothing.
-For first pairing the result is a direct-only walk with no relayed first contact; for an already
-paired device it removes the last-resort hosted carrier but leaves direct and the daemon-published set.
+When that discovery read fails, first pairing has only the direct candidate and therefore no relayed
+first contact; for an already paired device the failure removes the last-resort hosted carrier but
+leaves direct and the daemon-published set.
 
 **Both ends discover it now, and that asymmetry was a shipped defect.** A session crosses a relay
 only if BOTH ends are on it, and until `packages/daemon/src/lib/relay/discovery.ts` existed only the
