@@ -163,13 +163,26 @@ export interface ReferenceMatch {
 
 const INTEGER = /^[1-9][0-9]*$/u;
 const FILE_TOKEN = /^@(?!@)([/.\p{L}\p{N}_+@#-]*[\p{L}\p{N}_+@#-])(?::([1-9][0-9]*)(?:-([1-9][0-9]*))?)?$/u;
-const AGENT_NAME = /^[a-z][a-z0-9-]{0,31}$/iu;
-const AGENT_TOKEN = /^:([a-z][a-z0-9-]{0,31})$/iu;
+/**
+ * The BODY of each sigil token, written once.
+ *
+ * Each of these shapes used to be spelled three times — in the `…_ID`/`…_NAME`
+ * validator, in the `…_TOKEN` parser, and again inside `CANDIDATE_ALTERNATIVES`
+ * below — and a composer that offers a picker for the same tokens would have
+ * been a fourth. Three copies of `[a-z][a-z0-9-]{0,31}` agree only for as long
+ * as nobody edits one of them.
+ */
+const AGENT_NAME_BODY = '[a-z][a-z0-9-]{0,31}';
+const TASK_ID_BODY = '[BFIC][0-9]{1,9}';
+const ATTENTION_ID_BODY = 'A[1-9][0-9]*';
+const SKILL_NAME_BODY = '[a-z][a-z0-9-]{0,63}';
+const AGENT_NAME = new RegExp(`^${AGENT_NAME_BODY}$`, 'iu');
+const AGENT_TOKEN = new RegExp(`^:(${AGENT_NAME_BODY})$`, 'iu');
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const TASK_ID = /^[BFIC][0-9]{1,9}$/iu;
-const TASK_TOKEN = /^&([BFIC][0-9]{1,9})$/iu;
-const ATTENTION_ID = /^A[1-9][0-9]*$/u;
-const ATTENTION_TOKEN = /^!(A[1-9][0-9]*)$/u;
+const TASK_ID = new RegExp(`^${TASK_ID_BODY}$`, 'iu');
+const TASK_TOKEN = new RegExp(`^&(${TASK_ID_BODY})$`, 'iu');
+const ATTENTION_ID = new RegExp(`^${ATTENTION_ID_BODY}$`, 'u');
+const ATTENTION_TOKEN = new RegExp(`^!(${ATTENTION_ID_BODY})$`, 'u');
 /**
  * A surface key is deliberately dot-free. Daemon terminal ids are twelve hex
  * characters and page keys are `page-<n>`, so a dot buys nothing — and it would
@@ -185,8 +198,8 @@ const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu
 // variable a message contains. Namespaced invocation forms a harness may accept
 // elsewhere (`plugin:skill`, `apps/web:deploy`) are NOT references, because
 // their separators are this grammar's own boundaries.
-const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/u;
-const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
+const SKILL_NAME = new RegExp(`^${SKILL_NAME_BODY}$`, 'u');
+const SKILL_TOKEN = new RegExp(`^[/$](${SKILL_NAME_BODY})$`, 'u');
 
 // Each alternative owns its right boundary. A colon may naturally follow
 // agent/task/attention prose, but it cannot terminate a file candidate because
@@ -200,18 +213,82 @@ const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
 // quoted strings, not `String.raw`, because a backtick is one of the boundary
 // characters and `String.raw` would keep the backslash escaping it needs — which
 // a `u`-mode character class rejects as an invalid escape.
-const BOUNDARY_BEFORE = '(^|[\\s([{"\'`<>=—–])';
+const BOUNDARY_BEFORE_CHARS = '\\s([{"\'`<>=—–';
+const BOUNDARY_BEFORE = `(^|[${BOUNDARY_BEFORE_CHARS}])`;
 const BOUNDARY_AFTER = '(?=$|[\\s)\\]}"\'`,;!?<>:.=—–])';
 const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
 const CANDIDATE_ALTERNATIVES = [
-  `:[a-z][a-z0-9-]{0,31}${BOUNDARY_AFTER}`,
-  `&[BFIC][0-9]{1,9}${BOUNDARY_AFTER}`,
-  `!A[1-9][0-9]*${BOUNDARY_AFTER}`,
+  `:${AGENT_NAME_BODY}${BOUNDARY_AFTER}`,
+  `&${TASK_ID_BODY}${BOUNDARY_AFTER}`,
+  `!${ATTENTION_ID_BODY}${BOUNDARY_AFTER}`,
   `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
-  `[/$][a-z][a-z0-9-]{0,63}${BOUNDARY_AFTER}`,
+  `[/$]${SKILL_NAME_BODY}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
 ];
 const REFERENCE_CANDIDATE = new RegExp(`${BOUNDARY_BEFORE}(${CANDIDATE_ALTERNATIVES.join('|')})`, 'giu');
+const LEFT_BOUNDARY = new RegExp(`^[${BOUNDARY_BEFORE_CHARS}]$`, 'u');
+
+/**
+ * May a reference token BEGIN after this character?
+ *
+ * Exported as the decision rather than as the character set, because the
+ * composer asks exactly this question while a token is still being typed and
+ * an independent answer there is the defect this repository names: a picker
+ * that opens where the grammar refuses inserts a token the renderer can never
+ * prove, and the reader sees a reference that silently stays prose.
+ *
+ * `undefined` means "nothing precedes it", which is the `^` half of the same
+ * rule. Note that the `@` and `%` scans in the composer engine deliberately use
+ * a WIDER rule of their own (`see:@src` opens a file picker) — that divergence
+ * predates this function and is recorded in `docs/reference-standard.md`.
+ */
+export function isReferenceLeftBoundary(previous: string | undefined): boolean {
+  return previous === undefined || LEFT_BOUNDARY.test(previous);
+}
+
+/**
+ * The sigils that open a picker for a complete token of their own family.
+ *
+ * `@` and `%` are absent on purpose: they are the composer's own triggers (a
+ * repeated-`@` run selects a family, `%` opens surfaces) rather than a token
+ * whose first character is the whole prefix. `/` is absent because it opens the
+ * harness command line, which is not a reference family.
+ */
+export const DIRECT_REFERENCE_SIGILS = [':', '&', '!', '$'] as const;
+export type DirectReferenceSigil = (typeof DIRECT_REFERENCE_SIGILS)[number];
+
+/**
+ * What a HALF-TYPED token of each family may still look like.
+ *
+ * A picker has to decide on incomplete bytes: `&F` is not a task reference and
+ * never will be on its own, but it can still become `&F12`, while `&x` cannot
+ * become anything. Every pattern here is the body above with its final
+ * quantifier relaxed to admit the empty tail — and only that, so a query these
+ * accept is exactly a query some complete token starts with.
+ *
+ * The mapped type is the completeness proof: a fifth direct sigil is a compile
+ * error here rather than a family that silently offers nothing.
+ */
+const DIRECT_SIGIL_PREFIX = {
+  // Every prefix of an agent name is itself a valid agent name.
+  ':': new RegExp(`^${AGENT_NAME_BODY}$`, 'iu'),
+  '&': /^[BFIC][0-9]{0,9}$/iu,
+  // Case-sensitive, exactly as `ATTENTION_TOKEN` is: `!a3` is not a reference.
+  '!': /^A(?:[1-9][0-9]*)?$/u,
+  // Lowercase only, which is what keeps `$HOME` and `$PATH` out of the picker.
+  $: new RegExp(`^${SKILL_NAME_BODY}$`, 'u'),
+} as const satisfies { readonly [Sigil in DirectReferenceSigil]: RegExp };
+
+/**
+ * Could this partially typed query still grow into a complete token for `sigil`?
+ *
+ * An empty query answers `true` — a bare sigil is the prefix of every token in
+ * its family. Whether a picker should OPEN there is a different question, and
+ * one the composer owns: opening on a bare `:` would put a menu over `note: `.
+ */
+export function acceptsDirectReferenceQuery(sigil: DirectReferenceSigil, query: string): boolean {
+  return query === '' || DIRECT_SIGIL_PREFIX[sigil].test(query);
+}
 
 function positiveInteger(value: string | undefined): number | undefined {
   if (!value || !INTEGER.test(value)) return undefined;

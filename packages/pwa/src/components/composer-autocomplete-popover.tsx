@@ -36,7 +36,6 @@ import {
   ListChecks,
   Loader2,
   type LucideIcon,
-  Pin,
   SearchX,
   ShieldAlert,
   Sparkles,
@@ -80,7 +79,6 @@ const KIND_ICON: Record<ComposerAutocompleteKind, LucideIcon> = {
   directory: Folder,
   task: ListChecks,
   attention: Bell,
-  pin: Pin,
   // A surface is a live thing in this session; the square glyph reads as the pane
   // it lives in, which is what the reader is about to point an agent at.
   surface: SquareTerminal,

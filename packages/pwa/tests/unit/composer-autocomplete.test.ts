@@ -4,7 +4,10 @@ import {
   COMPOSER_REFERENCE_TIERS,
   type ComposerAutocompleteCandidate,
   type ComposerSelection,
+  type ComposerSuggestionSwitches,
   type ComposerTriggerMatch,
+  composerSuggestionsAllow,
+  DEFAULT_COMPOSER_SUGGESTIONS,
   detectComposerTrigger,
   MAX_AUTOCOMPLETE_RESULTS,
   nextComposerCandidateIndex,
@@ -13,6 +16,7 @@ import {
   replaceComposerTrigger,
   type TokenReplacement,
 } from '../../src/components/composer-autocomplete.ts';
+import { findReferences } from '../../src/lib/references.ts';
 
 const caret = (at: number): ComposerSelection => ({ start: at, end: at });
 
@@ -33,16 +37,25 @@ const candidate = (
 ): ComposerAutocompleteCandidate => ({ id, label, kind: 'skill', replacement: `/${id}`, ...patch });
 
 describe('COMPOSER_REFERENCE_TIERS', () => {
-  test('should list the five families in frequency order, sigil run matching tier', () => {
+  test('should list the four families in frequency order, sigil run matching tier', () => {
     // Assert — kept as data so provider routing, UI teaching and tests cannot drift.
-    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual([
-      'Files',
-      'Agents',
-      'Tasks',
-      'Attention',
-      'Pins',
-    ]);
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Tasks', 'Attention']);
     should(COMPOSER_REFERENCE_TIERS.every(item => item.trigger === '@'.repeat(item.tier))).equal(true);
+  });
+
+  test('should admit no fifth tier, for pins, templates or anything else', () => {
+    // Assert — the ladder is a closed set. Pins are a link strip (#63) and no
+    // build of this app has ever had a template library; both have arrived as
+    // proposed `@` tiers before, and this list is the guard.
+    should(COMPOSER_REFERENCE_TIERS).have.length(4);
+    should(COMPOSER_REFERENCE_TIERS.some(item => /pin|template/iu.test(item.label))).equal(false);
+    should(detect('line\n@@@@@pin')).match({ referenceTier: 5 });
+  });
+
+  test('should name each family the direct sigil that opens it, files excepted', () => {
+    // Assert — one table, read from both ends: the ladder teaches it and the
+    // direct providers route by it.
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.direct)).deepEqual([undefined, ':', '&', '!']);
   });
 });
 
@@ -108,7 +121,6 @@ describe('detectComposerTrigger for @', () => {
     { value: '@@ott', triggerText: '@@', tier: 2, query: 'ott', start: 0 },
     { value: 'see @@@F12', triggerText: '@@@', tier: 3, query: 'F12', start: 4 },
     { value: 'resolve @@@@A3', triggerText: '@@@@', tier: 4, query: 'A3', start: 8 },
-    { value: 'line\n@@@@@pin', triggerText: '@@@@@', tier: 5, query: 'pin', start: 5 },
   ];
 
   for (const { value, triggerText, tier, query, start } of tiers) {
@@ -130,8 +142,8 @@ describe('detectComposerTrigger for @', () => {
     should(detect('@@')).match({ referenceTier: 2, query: '' });
     should(detect('@@ott')).match({ referenceTier: 2, query: 'ott' });
     should(detect('@@@ott')).match({ referenceTier: 3, query: 'ott' });
-    // An unknown run still opens so the legend can teach the five supported
-    // families instead of making the sixth sigil look broken.
+    // An unknown run still opens so the legend can teach the four supported
+    // families instead of making the fifth sigil look broken.
     should(detect('@@@@@@')).match({ referenceTier: 6, query: '' });
   });
 
@@ -214,6 +226,97 @@ describe('detectComposerTrigger backward scan', () => {
   }
 });
 
+describe('detectComposerTrigger for the direct family sigils', () => {
+  const direct = [
+    { value: ':zel', trigger: ':', query: 'zel', start: 0 },
+    { value: 'ask :zelda', trigger: ':', query: 'zelda', start: 4 },
+    { value: 'track &F1', trigger: '&', query: 'F1', start: 6 },
+    { value: '&F12', trigger: '&', query: 'F12', start: 0 },
+    { value: 'resolve !A3', trigger: '!', query: 'A3', start: 8 },
+    { value: 'run $sum', trigger: '$', query: 'sum', start: 4 },
+    { value: '(:zel', trigger: ':', query: 'zel', start: 1 },
+    { value: 'line\n&B7', trigger: '&', query: 'B7', start: 5 },
+  ];
+
+  for (const { value, trigger, query, start } of direct) {
+    test(`should open the family menu for ${JSON.stringify(value)}`, () => {
+      // Act & Assert — no tier: a direct sigil selects its family outright.
+      should(detect(value)).match({ trigger, triggerText: trigger, query, start, end: value.length });
+      should(detect(value)?.referenceTier).be.undefined();
+    });
+  }
+
+  test('should stay shut until at least one query character exists', () => {
+    // Act & Assert — a bare sigil is prose far more often than it is an intent,
+    // and an empty-query menu would answer Enter for a reader who typed `A & `.
+    should(detect(':')).be.null();
+    should(detect('see &')).be.null();
+    should(detect('yes!')).be.null();
+    should(detect('costs $')).be.null();
+  });
+
+  test('should refuse anything the reference grammar itself would refuse', () => {
+    // Act & Assert — the picker never offers a token the renderer cannot prove.
+    should(detect('$HOME')).be.null();
+    should(detect('echo $PATH')).be.null();
+    should(detect('&x1')).be.null();
+    should(detect('!B3')).be.null();
+    should(detect('!a3')).be.null();
+    should(detect(':1zelda')).be.null();
+  });
+
+  test('should require the grammar’s own left boundary, not a wider one', () => {
+    // Act & Assert — `note:` and `US$5` are words; the sigil must BEGIN a token.
+    should(detect('note:zelda')).be.null();
+    should(detect('a:b')).be.null();
+    should(detect('R&D3')).be.null();
+    should(detect('US$5')).be.null();
+    should(detect('done!A3')).be.null();
+  });
+
+  test('should answer about the sigil nearest the caret', () => {
+    // Act & Assert — a draft can hold several; the one being typed wins.
+    should(detect('ask :zelda about &F1')).match({ trigger: '&', query: 'F1', start: 17 });
+    should(detect('ask :zelda about &F1', 10)).match({ trigger: ':', query: 'zelda', start: 4 });
+  });
+
+  test('should keep scanning left and settle when no earlier sigil qualifies', () => {
+    // Act & Assert — the trailing `:` is glued to a word, and the leading one
+    // now owns a query the grammar refuses, so neither opens anything.
+    should(detect(':zelda:x')).be.null();
+  });
+
+  test('should insert a token this build can prove, for every family', () => {
+    // Arrange — what the picker replaces the token with has to be a reference.
+    const cases: readonly [string, string][] = [
+      [':zel', ':zelda'],
+      ['&F1', '&F12'],
+      ['!A', '!A3'],
+      ['$sum', '/summary'],
+    ];
+
+    for (const [draft, replacement] of cases) {
+      // Act
+      const actual = replaceComposerTrigger(draft, detected(draft), replacement);
+
+      // Assert
+      should(actual.value).equal(`${replacement} `);
+      should(findReferences(actual.value).map(found => found.raw)).deepEqual([replacement]);
+    }
+  });
+
+  test('should let the surface and file grammars keep their own interior colons', () => {
+    // Act & Assert — `%` and `@` are tried first precisely for this.
+    should(detect('%terminal:ab12')).match({ trigger: '%', query: 'terminal:ab12' });
+    should(detect('@src/api.ts:120')).match({ trigger: '@', query: 'src/api.ts:120' });
+  });
+
+  test('should terminate rather than rescan a rejected leading sigil', () => {
+    // Act & Assert — the `lastIndexOf(-1)` freeze, once per new sigil.
+    for (const value of [':a b', '&F1 x', '!A3 x', '$a b', ':: ', '&& ']) should(detect(value)).be.null();
+  });
+});
+
 describe('detectComposerTrigger refusals', () => {
   const prose = [
     'Is this right?',
@@ -228,8 +331,6 @@ describe('detectComposerTrigger refusals', () => {
     'issue (#123)',
     'see #F12',
     '&',
-    '&F12',
-    'see &F12',
     '?A3',
     'resolve ?A3',
     'Tom & Jerry',
@@ -259,10 +360,13 @@ describe('detectComposerTrigger refusals', () => {
     should(detectComposerTrigger('@src', { start: -3, end: -3 })).be.null();
   });
 
-  test('should leave ! as ordinary text until an exactly-once shell action exists', () => {
-    // Act & Assert
+  test('should read ! as Attention only, never as the shell mode it once was', () => {
+    // Act & Assert — `!A3` opens the Attention family; a command line does not
+    // open anything, and there is no dormant branch that could run one.
     should(detect('!')).be.null();
     should(detect('!git status')).be.null();
+    should(detect('!ls')).be.null();
+    should(detect('!A3')).match({ trigger: '!', query: 'A3' });
   });
 });
 
@@ -327,6 +431,52 @@ describe('replaceComposerTrigger', () => {
     // `findReferences` parses.
     should(task).deepEqual({ value: 'track &F12 ', selection: { start: 11, end: 11 } });
     should(attention).deepEqual({ value: 'resolve !A3 ', selection: { start: 12, end: 12 } });
+  });
+});
+
+describe('composerSuggestionsAllow', () => {
+  const off = (patch: Partial<ComposerSuggestionSwitches>): ComposerSuggestionSwitches => ({
+    ...DEFAULT_COMPOSER_SUGGESTIONS,
+    ...patch,
+  });
+  const allow = (suggestions: ComposerSuggestionSwitches, value: string): boolean => {
+    const match = detect(value);
+    if (match === null) throw new Error(`no trigger detected in ${JSON.stringify(value)}`);
+    return composerSuggestionsAllow(suggestions, match);
+  };
+
+  test('should offer every family by default', () => {
+    // Act & Assert
+    should(DEFAULT_COMPOSER_SUGGESTIONS).deepEqual({
+      mentionSuggestions: true,
+      directReferenceSuggestions: true,
+      skillSuggestions: true,
+    });
+    for (const value of ['@sr', '@@ott', ':zel', '&F1', '!A3', '$sum', '/sum', '%term'])
+      should(allow(DEFAULT_COMPOSER_SUGGESTIONS, value)).equal(true);
+  });
+
+  test('should suppress the whole @ ladder, bare @ included', () => {
+    // Act & Assert — the Settings switch names all four tiers, so exempting
+    // tier 1 would make its own copy untrue.
+    const suggestions = off({ mentionSuggestions: false });
+    for (const value of ['@src', '@@ott', '@@@F12', '@@@@A3']) should(allow(suggestions, value)).equal(false);
+    should(allow(suggestions, ':zel')).equal(true);
+  });
+
+  test('should suppress the three direct sigils together and nothing else', () => {
+    // Act & Assert
+    const suggestions = off({ directReferenceSuggestions: false });
+    for (const value of [':zel', '&F1', '!A3']) should(allow(suggestions, value)).equal(false);
+    for (const value of ['$sum', '/sum', '@@ott', '%term']) should(allow(suggestions, value)).equal(true);
+  });
+
+  test('should suppress $ while / keeps every skill reachable', () => {
+    // Act & Assert — the asymmetry is the point: a switch removes a second way
+    // in, never the only one.
+    const suggestions = off({ skillSuggestions: false });
+    should(allow(suggestions, '$sum')).equal(false);
+    should(allow(suggestions, '/sum')).equal(true);
   });
 });
 
