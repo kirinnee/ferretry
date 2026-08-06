@@ -21,7 +21,9 @@ nix/
 ├── env.nix        # group packages by purpose
 ├── shells.nix     # define dev environments
 ├── fmt.nix        # configure formatters (treefmt)
-└── pre-commit.nix # configure git hooks
+├── pre-commit.nix # configure git hooks
+└── git-hooks.nix  # install those hooks across linked worktrees
+    └── git-hooks/ # the installer and its worktree regression proof
 
 flake.nix          # main flake (orchestrator)
 .envrc             # direnv (watches nix files, loads the default shell)
@@ -46,17 +48,25 @@ Inputs today:
 The outputs use `with rec { ... }` so modules can reference each other. `eachSystem` enumerates
 the release targets (linux amd64/arm64 and macOS arm64), so the flake does not advertise an
 unsupported Intel macOS binary. Each module is
-imported with only the parameters it needs, and the pre-commit check's `shellHook` is threaded
-into `shells.nix`:
+imported with only the parameters it needs, and the hook installer's `shellHook` is threaded into
+`shells.nix`:
 
 ```nix
 devShells = import ./nix/shells.nix {
   inherit pkgs env packages;
-  shellHook = checks.pre-commit-check.shellHook;
+  shellHook = gitHooks.shellHookFor {
+    configFile = pre-commit.config.configFile;
+    generatedConfigPath = pre-commit.config.configPath;
+    installStages = pre-commit.config.installStages;
+  };
 };
 ```
 
-That is what installs the git hooks when you enter the shell. Exported outputs are `checks`
+That is what installs the git hooks when you enter the shell. `checks.pre-commit-check.shellHook`
+is deliberately **not** used for it — see
+[Linting](../linting/index.md#hook-installation-across-worktrees) for why, and note that
+`shellHookFor` asserts its own launchers agree with the stages and config filename
+`nix/pre-commit.nix` declares, rather than restating them. Exported outputs are `checks`
 (`pre-commit-check`, `format`), `formatter`, `packages`, `apps`, and `devShells`.
 
 `packages.default` joins the `fy` CLI and `fyd` daemon, so
@@ -133,13 +143,16 @@ Supported programs: https://github.com/numtide/treefmt-nix#supported-programs
 the treefmt formatter hook comes first. The full inventory and the rules for adding one live
 in [Linting](../linting/index.md); this section covers only the nix mechanics.
 
-Two helpers keep the hooks honest:
+Three helpers keep the hooks honest:
 
 - `validator` wraps a repo shell script in an explicit `PATH` built from a
   `pkgs.buildEnv` (bash, git, jq, ripgrep, yq-go, coreutils, findutils, grep, sed, awk). A
   validator therefore cannot accidentally depend on a host-installed binary.
 - `bun-tool` invokes `./node_modules/.bin/<name>` for the JS/TS gates (Biome, Knip,
   `tsc`).
+- `hook-proof` does the same for `nix/git-hooks/worktree-proof.sh`, the one gate that proves the
+  devshell's own hook installation rather than a repository fact — which is why it lives beside
+  the installer under `nix/` rather than in `scripts/validate/`, and why its `PATH` adds `cmp`.
 
 **Deliberate trade-off**: the JS/TS hooks use the workspace's own `node_modules` (installed by
 `task setup`) rather than a nix-built fixed-output tooling derivation. That keeps the flake
@@ -159,16 +172,43 @@ Hook types:
 | Linter    | Checks file quality | `a-shellcheck`, `a-biome`            |
 | Enforcer  | Validates policies  | `a-cli-contracts`, `a-action-pins-*` |
 
+### nix/git-hooks.nix — hook installation
+
+**Purpose**: put the hooks `pre-commit.nix` declares into the Git common directory, from any of
+this repository's mandatory linked worktrees, concurrently, without writing anything once the
+state is already right. The full design and the decisions behind it are in
+[Linting](../linting/index.md#hook-installation-across-worktrees); this section covers only the
+nix mechanics.
+
+- `launchers` is a directory of one small launcher per installed stage, built with `writeText`
+  rather than `writeShellScript` **because the latter writes a store path as the shebang**. A
+  launcher must be byte-identical on every revision, or two worktrees on two `flake.lock`s
+  rewrite each other's on every entry.
+- `shellHookFor` takes `configFile`, `configPath` and `installStages` from
+  `checks.pre-commit-check.config` and asserts the last two match what the launchers baked in, so
+  a stage added in `pre-commit.nix` fails evaluation instead of silently never being installed.
+- `runtime` is this module's `validator`-equivalent `PATH`, used by both the installer and the
+  proof gate.
+- `nix/git-hooks/install.sh` holds the logic, so it is a real `*.sh` — shellcheck-clean and
+  executable under the same gates as every other script — rather than an inline nix string.
+
+**Deliberate trade-off**: `a-git-hooks-worktree` runs the working tree's `install.sh` but the
+_store's_ launchers, so a change to `nix/git-hooks.nix` needs a `direnv reload` before the gate
+measures it. `install.sh` is where the behaviour lives; the launcher is six lines and no store
+path.
+
 ### .envrc — direnv configuration
 
 **Purpose**: load the default dev shell automatically and reload it when the nix files change.
 
 ```bash
-watch_file "./nix/env.nix" "./nix/fmt.nix" "./nix/packages.nix" "./nix/shells.nix" "./nix/pre-commit.nix" "./flake.nix"
+watch_file "./nix/env.nix" "./nix/ferretry.nix" "./nix/fmt.nix" "./nix/git-hooks.nix" "./nix/git-hooks/install.sh" "./nix/packages.nix" "./nix/shells.nix" "./nix/pre-commit.nix" "./flake.nix"
 use flake
 ```
 
 1. `watch_file` — every nix module plus `flake.nix`, so editing any of them triggers a reload.
+   `nix/git-hooks/install.sh` is listed too: it reaches the store through the flake, so an edit
+   is invisible to the running shell until a reload copies it there.
 2. `use flake` — loads the default shell.
 3. Optional `PATH_add` — for repo-local paths only (see below).
 
@@ -391,6 +431,7 @@ Each file has a single responsibility:
 - `shells.nix` = which shells include which groups (composition)
 - `fmt.nix` = how files are formatted
 - `pre-commit.nix` = what runs before commits
+- `git-hooks.nix` = how those hooks reach every linked worktree
 - `.envrc` = watches nix files and loads the default shell
 
 ### Composability
