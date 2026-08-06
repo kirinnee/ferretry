@@ -42,11 +42,11 @@ the daemon** — handed to a device when it redeems a pairing code, and refresha
 its kill switch — is provided by [PR #202](https://github.com/kirinnee/ferretry/pull/202); a daemon
 resolves its `{ kind: 'relay', source: 'discovery' }` entry from that advertisement, and a browser now
 reads it only to say whose rendezvous a published address is.
-**The transport now exists on both sides** — `fyd` dials a rendezvous and carries a session, and the
+**The transport exists on both sides** — `fyd` dials a rendezvous and carries a session, and the
 browser arrives at one, attempting direct first and falling back automatically. What a session can
-carry is no longer only request/response: §14 specifies three session shapes — requests, live
-streams, and first pairing — and "What is not built yet" in §13 says which of them each end has
-actually implemented.
+carry is not only request/response: §14 defines three session shapes — requests, live streams, and
+first pairing — and all three are built on both ends, so a device with no route to a daemon can
+pair with it and then watch it work. §13 records what is still outstanding around them.
 
 Three addresses are involved and they are deliberately not the same thing:
 
@@ -876,13 +876,27 @@ outside it. Pairing attempts direct first, like everything else — but it no lo
 direct: §14's pairing session is what makes a daemon pairable by a phone that can never reach its
 address, and the published relays are what that phone navigates by afterwards.
 
-### What is not built yet
+### What is built, and what is not
 
-The relay, the control plane, the caps and the disclosure text are implemented and tested. **The
-transport gap is now closed on both ends: `fyd` dials, and the browser arrives.** What remains is
-narrower and is listed exactly below — the §14 session modes that are specified but not yet
-implemented (streams and pairing), the version-2 pairing fragment they lean on, a live rate-limit
-identity defect, and one screen that has not caught up with §1.
+The relay, the control plane, the caps and the disclosure text are implemented and tested. **All
+three §14 session modes are now built on both ends** — requests, live streams, and first pairing —
+so a phone that can never reach a daemon's address can pair with it and then watch it work. What
+remains is listed exactly below and is narrower than it was: an operator still edits the carrier
+list by hand, several browser call sites still dial direct only, and one onboarding screen has not
+caught up with §1.
+
+**What proved it, and what that proof does not cover.** A real Google Chrome, holding the link a
+compiled `fy pair` printed, redeems a first-pairing code across a real rendezvous process against a
+freshly compiled standalone `fyd` — after opening a connection to the advertised direct address and
+having it fail at transport — then reconnects as an ordinary authenticated session over the same
+rendezvous and renders a live event the daemon appended. The code, the minted token, the device name
+and the event payload appear in none of the frames the rendezvous handled.
+`tests/e2e/relay-browser-pairing.e2e.test.ts` is that journey. Its honest limits are the ones
+`tests/e2e/README.md` records and §12 already draws: real Chrome, real compiled binaries, real
+WebSockets and the **real** rendezvous state machine, with Cloudflare's own runtime substituted —
+hibernation, the auto-responder, durable storage and alarms are ports, not `workerd`. So it proves
+this protocol's behaviour end to end and still proves nothing about Cloudflare. **That tier does not
+run in CI**, so a regression placed there is not yet a guard.
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
 parses this advertisement from `@ferretry/relay`'s build-time `HOSTED_RELAY_DIRECTORY_ORIGIN`. In the browser that
@@ -953,8 +967,9 @@ Four properties of that client are worth stating here because they are contract,
   refusals on shared per-daemon state instead both duplicated the disclosure under the concurrent
   requests of an ordinary page load and made a transient failure permanent until a re-pair.
 
-Five named pieces. PR #202 provides the first two, the third is now built on both ends with the
-declared gaps below, the fourth is on screen, and the fifth is outstanding:
+Five named pieces. PR #202 provides the first two, the third is now built on both ends in all three
+session modes with the narrower gaps declared below, the fourth is on screen, and the fifth is
+outstanding:
 
 1. **A build-time discovery origin on BOTH ends** — imported from the one
    `@ferretry/relay` source constant. The relay lives on its own hostname, so the
@@ -987,40 +1002,36 @@ declared gaps below, the fourth is on screen, and the fifth is outstanding:
      `<state home>/config/daemon.json` today. Those entries are an OVERRIDE rather than the only way
      to get a carrier: a document that declares no rendezvous takes whichever relay this section
      advertises, as the discovery entry it means.
-   - **Stream sessions are specified and not yet implemented on either end.** §14 now defines the
-     envelope that carries `/v1/events` and terminal streams over a relay — one session per stream,
-     the same socket route table and authorization boundary a direct upgrade reaches. Until both
-     ends implement it, the browser keeps REFUSING these on a relay carrier rather than opening a
-     socket at an address the relay exists because it cannot reach, so a relayed connection is a
-     working request/response surface with no live updates and says so. That refusal text cites the
-     old "no envelope exists" reasoning and must be retired with the gap it described. (This list
-     used to name a third shape, the byte-shaped dictation routes. Recognition moved into the
-     browser and those routes were deleted, so the exclusion list got **shorter**, not longer.)
-   - **Pairing sessions are specified and not yet implemented on either end.** This document used to
-     state the opposite — that the pairing exchange cannot be relayed, because a relayed session is
-     opened with the device grant `POST /v1/pair` has not issued yet, and that closing the gap
-     "needs an out-of-band enrolment path this protocol does not have". That last clause was the
-     error, and §14 retires it with the reasoning stated rather than deleted: the out-of-band
-     enrolment path has existed all along — the **QR**, which hands the device the daemon's
-     fingerprint before any carrier is dialled, so the daemon is proved end-to-end through the
-     rendezvous before a pairing record could exist. What was actually missing was a session mode,
-     not a proof. Until both ends implement §14's pairing session, a phone that cannot reach a
-     daemon's address still cannot pair with it, and the mint surfaces still describe reach as if
-     the direct address were the only redemption path — `reach: "local-only"` and `refusal` no
-     longer mean "unredeemable from another device", and the reach vocabulary plus
-     `localOnlyNotice`/`refusalNotice` need a relay-aware answer in the pairing contract before a
-     remedy sends an operator to fix an address that no longer blocks them.
-   - **The pairing link needs its v2 fragment.** §14's pairing session lets the link name one relay
-     candidate, which requires the explicitly versioned `#v2` fragment form and a reader that
-     accepts both forms. The reader ships **before** any daemon emits v2 — the ordering is stated in
-     §14 and is release-notes material, not an implementation detail.
-   - **The relayed rate-limit identity is a live defect today.** A relayed request reaches the
-     daemon's route table with no client address, so every fixed-window rate limiter that keys by
-     peer collapses every relayed caller on earth into one shared anonymous bucket — one small
-     window, handed to the whole internet, refusing honest devices because a stranger was busy. §14
-     states the rule that fixes it: a relayed caller's rate-limit identity is derived from its
-     rendezvous session, never from a shared placeholder. This predates pairing sessions and must be
-     fixed with or before them.
+   - **Stream sessions — built.** §14's envelope carries `/v1/events` and terminal streams over a
+     relay: one session per stream, dispatched through the daemon's own socket route table, so a
+     relayed viewer passes the same authorization boundary and per-capability guard a direct upgrade
+     does. The browser no longer refuses these on a relay carrier — the refusal that used to say "no
+     envelope exists" is gone with the gap it described. (This list used to name a third shape, the
+     byte-shaped dictation routes. Recognition moved into the browser and those routes were deleted,
+     so the exclusion list got **shorter**, not longer.)
+   - **Pairing sessions — built.** This document used to state the opposite: that the pairing
+     exchange cannot be relayed, because a relayed session is opened with the device grant
+     `POST /v1/pair` has not issued yet, and that closing the gap "needs an out-of-band enrolment
+     path this protocol does not have". That last clause was the error, and §14 retires it with the
+     reasoning stated rather than deleted: the out-of-band enrolment path has existed all along —
+     the **QR**, which hands the device the daemon's fingerprint before any carrier is dialled, so
+     the daemon is proved end-to-end through the rendezvous before a pairing record could exist.
+     What was actually missing was a session mode, not a proof. A phone that cannot reach a daemon's
+     address now pairs with it: the sealed pre-auth exchange mints the grant, the session closes,
+     and the browser reconnects as an ordinary authenticated request session.
+   - **The v2 pairing link — built.** A daemon that publishes a rendezvous mints the `#v2` fragment
+     naming the first relay in the same frozen published array a redemption answers with, composed
+     through the protocol's one fragment writer. Readers accept v1 and v2 from that same codec, and
+     `scripts/validate/cli-contracts.sh` pins the version set to the WRITER so a third reader cannot
+     silently fall behind again — which is a gate that exists because exactly that happened: `fy
+pair` refused the daemon's own link for one commit. **The release ordering still holds and is
+     not optional**: a daemon build that emits v2 must not ship ahead of a browser build that reads
+     it, or a v2 link reads as no link at all. Within this branch the readers land together.
+   - **The relayed rate-limit identity — fixed.** A relayed request used to reach the daemon's route
+     table with no client address, so every fixed-window limiter keying by peer collapsed every
+     relayed caller on earth into one shared anonymous bucket. A relayed caller is now keyed by its
+     rendezvous session, stamped inside the ONE constructor that builds a relayed request, so the
+     repair covers every rate-limited relayed route rather than the pairing one alone.
    - **Not every browser call site is routed yet.** The composition root hands the carrier-aware
      fetcher to everything it already injects one into — the projects, usage and push ports, and now
      the TYPED API CLIENT, whose transport used to dial the daemon's own address itself. That last
@@ -1030,7 +1041,7 @@ declared gaps below, the fourth is on screen, and the fifth is outstanding:
      tried the relay. The feature modules that default their `fetcher` parameter to `browserFetch`
      — the direct network — (`learning-api.ts`, `attention-client.ts`, `pin-client.ts`,
      `web-terminals.ts`, `remote-browser.ts`, `skills-api.ts`, `files-api.ts`,
-     `attachment-source.ts`, `runtime-models.ts`, `stt/*`, `analytics-api.ts`) are still
+     `attachment-source.ts`, `runtime-models.ts`, `stt/*`) are still
      direct-only. They FAIL rather than mislead — a request to an unreachable daemon address is a
      visible error, not a blank screen — but until the fetcher is threaded to them those surfaces
      are unavailable over a relay. `stt/*` stays on this list on purpose and for the ordinary reason:
@@ -1051,14 +1062,14 @@ PR #202 also surfaced the live advertisement state in onboarding, and that scree
 says a relay is not dialled by anything — which was true when it was written and is not now. Piece 5
 is where it is corrected.
 
-**Deploying a relay now gets you a remote connection**, for everything the implemented tunnel
-carries: any request/response route, on any daemon whose fingerprint a browser pinned by pairing
-with it at least once. It does not yet get you live updates, terminal streams, first-time pairing
-over the relay, or the feature surfaces listed in piece 3 above — those first three are now
-specified in §14 and remain unbuilt on both ends, which is a different state than unspecified: code
-can now be written against one contract instead of three audits.
-The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and
-on the live sweep, so disabling the hosted relay stops traffic regardless of what any client believes.
+**Deploying a relay now gets you the whole journey**: first pairing for a device that has never
+reached the daemon directly, every request/response route afterwards, and the live event and
+terminal streams that make the phone worth opening twice. What it does not get you is the feature
+surfaces listed in piece 3 above, which fail visibly rather than misleading, and a carrier list an
+operator can edit with a command.
+The kill switch does not wait on any of it: `relayUrl: null` is enforced by this Worker at admission
+and on the live sweep, so disabling the hosted relay stops traffic regardless of what any client
+believes.
 
 ---
 
@@ -1530,8 +1541,8 @@ boundary at all. What keeps that route unreachable over a relay today is not its
 unthreaded fetcher, which §13 piece 3 records.
 
 **And nothing else is excluded by shape any more.** Requests, live events, terminal streams and
-first pairing each have a session mode above; what stands between this section and a working phone
-is implementation state, and §13 names each remaining piece exactly. None of it changes the
+first pairing each have a session mode above, and each is built on both ends; §13 names what is
+still outstanding around them, none of it a shape this tunnel cannot carry. None of it changes the
 rendezvous: every message this section added is sealed record plaintext the relay cannot read, and
 the one novelty visible outside the channel — the `4440` close — is an ordinary code inside the
 range §5's `closed` message already carries, which a deployed rendezvous forwards today without

@@ -84,13 +84,16 @@ to discover fails closed to direct-only with the consequence and the remedy said
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. The PWA's interim three-way carrier chooser
-and self-hosting route are still there and removing them is still an explicit GAP. **Pairing over a
-relay is now specified** (protocol §14): a sealed one-attempt `pair` record on a pre-auth session,
-sent only after the daemon is proved against the QR-pinned fingerprint — never an anonymous routed
-request — with a separate relay guess budget so an internet stranger cannot expire a code a LAN
-device could still redeem. Live event and terminal streams over a relay are specified in the same
-section, one session per stream. Both are unbuilt on both ends; protocol §13 names each remaining
-piece and its state.
+and self-hosting route are still there and removing them is still an explicit GAP. **First contact
+is no longer direct-only.** A relay session commits to one of three modes with its first sealed
+record (protocol §14): a request session, one live event or terminal stream, or a one-attempt
+`pair` — sent only after the daemon is proved against the QR-pinned fingerprint, never as an
+anonymous routed request, with its own relay guess budget so an internet stranger cannot expire a
+code a LAN device could still redeem. A daemon that publishes a rendezvous names it in a `#v2`
+pairing fragment, so **a device that can never reach the daemon's address pairs anyway** and then
+reconnects as an ordinary authenticated session. All three modes are built on both ends; read §14
+for the state machine and §13 for what is still outstanding around it rather than restating either
+here.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one

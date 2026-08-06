@@ -63,8 +63,16 @@ requests, so "`POST /v1/pair` is the only public route on this surface" stays li
 credential-less request path exists for the next `minimum: 'none'` route to inherit. Direct is still
 attempted first, like every other exchange in this product; the rendezvous is the fallback, not a
 choice. What a relay operator can and cannot observe about a redemption is §10 and §13 of the same
-document: fingerprint, IPs, timing and frame shape — never the code, the token, the device name, or
-the outcome.
+document: fingerprint, client IP, timing and frame shape, and the fact that a first pairing happened
+— never the code, the minted device token, the device name, the payload, or the outcome of the
+exchange itself.
+
+**What the device does next is ordinary.** The pairing session ends the moment its outcome is
+sealed, so the browser reconnects with the grant it was just issued and speaks the ordinary
+authenticated request session — the same one a device paired over the LAN uses — and opens a
+separate relay session per live stream when it wants events or a terminal. There is no relayed mode
+a paired device stays in: pairing is one exchange, and everything after it is the product's normal
+traffic over whichever carrier the walk won.
 
 ### What a redemption hands back
 
@@ -156,7 +164,13 @@ binary — **before** any daemon emits v2. The ordering is contract; release not
 
 **A remedy that cannot be followed is a dead end with extra steps**, so there is one per reason rather
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
-sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own:
+sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own.
+
+Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
+`local-only` daemon that also publishes a rendezvous is already redeemable from another device, so
+its remedy is the upgrade to a connection with no third party on the path rather than the unlock it
+reads as here — `localOnlyNotice` says so itself when a candidate is present, and this table is the
+no-rendezvous wording:
 
 | reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -266,7 +280,9 @@ row states what its revoke will do before the press.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).
-- **Relayed redemption is specified and not yet implemented on either end.** The contract — the sealed
-  record, the budgets, the v2 fragment, the ordering — is [relay-protocol.md](relay-protocol.md) §14,
-  and §13 of the same document tracks which pieces exist. Until both ends implement it, a phone that
-  cannot reach a daemon's address still cannot pair with it.
+- **A v2 daemon must not ship ahead of a v2 reader.** A daemon mints the `#v2` fragment the moment it
+  publishes a rendezvous, and a browser or CLI that only reads `#v1` treats such a link as no link at
+  all — no QR, no code, direct pairing included. The readers land with the writer in this branch, and
+  `scripts/validate/cli-contracts.sh` pins the version set to the writer so a third reader cannot fall
+  behind silently; the release ordering itself is still a release-notes fact rather than something a
+  gate can enforce.
