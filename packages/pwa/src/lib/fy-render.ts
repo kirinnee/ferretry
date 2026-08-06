@@ -513,30 +513,34 @@ function svgCanvasRefusal(tag: string): string | null {
   const viewBox = parseViewBox(tag);
   if (viewBox !== null && overCanvasBounds(viewBox.width, viewBox.height)) return `SVG viewBox exceeds ${CANVAS_LIMIT}`;
 
-  const declaredWidth = rootAttribute(tag, 'width');
-  const declaredHeight = rootAttribute(tag, 'height');
-  // Omitted dimensions are allowed only behind a bounded, positive viewBox —
-  // otherwise the canvas is whatever the container gives it, and that is not a
-  // bound at all.
-  if (declaredWidth === null || declaredHeight === null)
-    return viewBox === null ? 'SVG must declare width and height, or a bounded viewBox' : null;
-
-  const width = parseSvgLength(declaredWidth);
-  const height = parseSvgLength(declaredHeight);
-  if (width === null || height === null) return 'SVG width and height must be unitless, px, or a percentage';
-
-  const resolve = (length: Exclude<SvgLength, null>, extent: number): number | null => {
-    if ('px' in length) return length.px > 0 ? length.px : null;
-    if (length.percent <= 0 || length.percent > 100) return null;
+  /**
+   * ONE AXIS AT A TIME, and an omitted axis is not a reason to stop reading.
+   *
+   * An earlier draft returned as soon as EITHER axis was missing behind a
+   * viewBox, so `width="999999" viewBox="0 0 10 10"` and `width="999%"` with the
+   * height left out were both accepted on the strength of the axis that was not
+   * there. Omission may only ever mean "inherit the bounded viewBox extent"; it
+   * may never excuse the axis that IS declared.
+   */
+  const axis = (declared: string | null, extent: number | undefined): number | string => {
+    if (declared === null) {
+      // Nothing to read: the viewBox is the only thing that can bound it.
+      return extent ?? 'SVG must declare width and height, or a bounded viewBox';
+    }
+    const length = parseSvgLength(declared);
+    if (length === null) return 'SVG width and height must be unitless, px, or a percentage';
+    if ('px' in length) return length.px > 0 ? length.px : 'SVG width and height must be positive';
+    if (extent === undefined) return 'SVG percentage dimensions require a bounded viewBox';
+    if (length.percent <= 0 || length.percent > 100)
+      return 'SVG percentage dimensions must be above 0% and at most 100%';
     return (length.percent / 100) * extent;
   };
-  const usesPercent = 'percent' in width || 'percent' in height;
-  if (usesPercent && viewBox === null) return 'SVG percentage dimensions require a bounded viewBox';
-  const resolvedWidth = resolve(width, viewBox?.width ?? 0);
-  const resolvedHeight = resolve(height, viewBox?.height ?? 0);
-  if (resolvedWidth === null || resolvedHeight === null)
-    return 'SVG width and height must be positive, and percentages at most 100%';
-  if (overCanvasBounds(resolvedWidth, resolvedHeight)) return `SVG canvas exceeds ${CANVAS_LIMIT}`;
+
+  const width = axis(rootAttribute(tag, 'width'), viewBox?.width);
+  if (typeof width === 'string') return width;
+  const height = axis(rootAttribute(tag, 'height'), viewBox?.height);
+  if (typeof height === 'string') return height;
+  if (overCanvasBounds(width, height)) return `SVG canvas exceeds ${CANVAS_LIMIT}`;
   return null;
 }
 
@@ -826,23 +830,32 @@ function readWebp(b: Uint8Array): RasterHeader | null {
     const body = at + 8;
     if (size > b.length - body) return null;
     if (marks(b, at, 'ANIM') || marks(b, at, 'ANMF')) animated = true;
-    // MAX-BOUND EVERY dimension record. Gating on the first one lets a small
-    // leading `VP8X`/`VP8L`/`VP8 ` hide a larger record later in the same file.
-    if (marks(b, at, 'VP8X') && size >= 10) {
+    /**
+     * MAX-BOUND EVERY dimension record. Gating on the first one lets a small
+     * leading `VP8X`/`VP8L`/`VP8 ` hide a larger record later in the same file.
+     *
+     * RECOGNITION AND SIZE ARE SEPARATE TESTS. Folding the size into the arm
+     * (`marks(…) && size >= 10`) makes an undersized record fall through as
+     * though it were an unknown chunk, so a valid earlier record could carry a
+     * file whose real dimension record is unreadable. Recognised-but-too-short
+     * is a container this parser has not understood, and that fails closed.
+     */
+    if (marks(b, at, 'VP8X')) {
+      if (size < 10) return null;
       found = true;
       animated = animated || ((b[body] ?? 0) & 0x02) !== 0;
       width = Math.max(width, u24le(b, body + 4) + 1);
       height = Math.max(height, u24le(b, body + 7) + 1);
-    } else if (marks(b, at, 'VP8L') && size >= 5) {
-      if (b[body] !== 0x2f) return null;
+    } else if (marks(b, at, 'VP8L')) {
+      if (size < 5 || b[body] !== 0x2f) return null;
       found = true;
       const bits =
         ((b[body + 1] ?? 0) | ((b[body + 2] ?? 0) << 8) | ((b[body + 3] ?? 0) << 16) | ((b[body + 4] ?? 0) << 24)) >>>
         0;
       width = Math.max(width, (bits & 0x3fff) + 1);
       height = Math.max(height, ((bits >>> 14) & 0x3fff) + 1);
-    } else if (marks(b, at, 'VP8 ') && size >= 10) {
-      if (b[body + 3] !== 0x9d || b[body + 4] !== 0x01 || b[body + 5] !== 0x2a) return null;
+    } else if (marks(b, at, 'VP8 ')) {
+      if (size < 10 || b[body + 3] !== 0x9d || b[body + 4] !== 0x01 || b[body + 5] !== 0x2a) return null;
       found = true;
       width = Math.max(width, u16le(b, body + 6) & 0x3fff);
       height = Math.max(height, u16le(b, body + 8) & 0x3fff);
