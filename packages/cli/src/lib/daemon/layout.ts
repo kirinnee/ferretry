@@ -59,15 +59,37 @@ export interface DaemonLayout {
   readonly launchdServiceTarget: string;
   readonly launchAgentFile: string;
   /**
-   * Where the Nix garbage-collection root for the daemon executable is kept.
+   * The directory holding ONE Nix garbage-collection root per retained daemon snapshot.
+   *
+   * A directory rather than a single link, because a root's lifetime is its SNAPSHOT's lifetime. One
+   * root per daemon could protect only the closure of whatever was promoted last, so the snapshot a
+   * rollback would select kept its verified executable and lost the loader and shared libraries that
+   * executable still needs — `nix-collect-garbage` deleted them, and the rollback the store was built
+   * to make safe stopped being runnable. Every retained snapshot gets its own root and keeps it.
    *
    * Deliberately NOT under the state home. The state home is the daemon's, and its layout model
    * refuses any entry it has not declared — a CLI-created directory there is exactly the defect that
-   * made the daemon unable to start on a fresh machine. It is also a symbolic link, and the daemon's
-   * filesystem port refuses symbolic links anywhere inside the state home. It belongs to the CLI's
-   * own installation, so it lives beside the CLI's other installation artifacts.
+   * made the daemon unable to start on a fresh machine. These are also symbolic links, and the
+   * daemon's filesystem port refuses symbolic links anywhere inside the state home. They belong to
+   * the CLI's own installation, so they live beside the CLI's other installation artifacts.
    */
-  readonly nixGcRoot: string;
+  readonly nixGcRootDirectory: string;
+  /**
+   * The one-per-daemon root earlier releases kept, which the per-snapshot roots above replace.
+   *
+   * Named so it can be RELEASED rather than left holding a store path nothing can account for. It is
+   * a sibling of the per-snapshot directory instead of its parent on purpose: a symbolic link cannot
+   * also be the directory the new roots live in, so reusing that name would have made an upgraded
+   * install unable to create any root at all.
+   */
+  readonly supersededNixGcRoot: string;
+  /**
+   * The claim that serializes this daemon's mutating lifecycle commands across separate invocations.
+   *
+   * Daemon-keyed, so two daemons on one host never wait for each other, and outside the state home
+   * for the same reason the roots are.
+   */
+  readonly lifecycleLock: string;
 }
 
 export class InvalidDaemonEnvironmentError extends Error {
@@ -183,6 +205,24 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     launchdDomain,
     launchdServiceTarget: `${launchdDomain}/${launchdLabel}`,
     launchAgentFile: join(homeDirectory, 'Library', 'LaunchAgents', `${launchdLabel}.plist`),
-    nixGcRoot: join(stateDirectory, product, 'nix', daemonName),
+    nixGcRootDirectory: join(stateDirectory, product, 'nix', 'snapshots', daemonName),
+    supersededNixGcRoot: join(stateDirectory, product, 'nix', daemonName),
+    lifecycleLock: join(stateDirectory, product, 'lifecycle', `${daemonName}.lock`),
   };
+}
+
+/**
+ * The garbage-collection root that holds one snapshot's runtime closure.
+ *
+ * THE ONLY place a snapshot identity becomes a root path. The controller decides which snapshots need
+ * roots and the adapter registers them, and neither may spell this join itself: a root the CLI writes
+ * under one rule and reads back under another is a root that protects a closure nobody can find
+ * again, which is the same defect as no root at all. Discovering held roots therefore returns the
+ * paths it found rather than re-deriving them, so this function is the sole writer of the mapping.
+ *
+ * The identity is checked as a plain name because it becomes a filename: a snapshot id is
+ * `sha256-<64 hex digits>`, and anything carrying a separator would silently retarget the write.
+ */
+export function daemonSnapshotGcRoot(rootDirectory: string, snapshotId: string): string {
+  return join(requireDirectory(rootDirectory, 'nix root directory'), requireName(snapshotId, 'snapshot id'));
 }

@@ -80,6 +80,19 @@ export interface IDaemonHealthPort {
 }
 
 /**
+ * One garbage-collection root that exists right now, reported with the path it was found at.
+ *
+ * The path travels back with the name so a caller that wants to drop a root passes back what
+ * discovery returned. Re-deriving it would make this the second place a snapshot identity becomes a
+ * root path, and `daemonSnapshotGcRoot` is deliberately the only one.
+ */
+export interface HeldGcRoot {
+  /** Directory entry name, which for a root this CLI wrote is the snapshot id it protects. */
+  readonly name: string;
+  readonly path: string;
+}
+
+/**
  * Pinning a Nix store path so it cannot be garbage-collected.
  *
  * A daemon installed with `nix shell` has no garbage-collection root of its own: the store path is
@@ -89,19 +102,68 @@ export interface IDaemonHealthPort {
  * refuse the install.
  *
  * Every method reports rather than throws. A daemon that runs but is unpinned is strictly better than
- * a daemon that refuses to start because a pin did not take.
+ * a daemon that refuses to start because a pin did not take, and a root directory that cannot be read
+ * is answered as "nothing is held" so the caller pins rather than refuses.
  */
 export interface INixGcRootPort {
   /** Resolve symbolic links, so a profile or shim path is classified by what it actually points at. */
   realPath(path: string): Promise<string>;
+  /** Every root currently in `directory`; empty when it does not exist yet. */
+  held(directory: string): Promise<readonly HeldGcRoot[]>;
   /**
    * Register an indirect GC root at `rootPath` for `storePath`.
    *
    * `undefined` on success; otherwise the reason it could not, for the caller to warn with.
    */
   pin(storePath: string, rootPath: string): Promise<string | undefined>;
-  /** Drop a root. An absent root is success — an uninstall must release the store path, not fail. */
+  /** Drop a root. An absent root is success — releasing must retire the store path, not fail. */
   release(rootPath: string): Promise<void>;
+}
+
+/** The mutating daemon-lifecycle commands, named in a claim so a refusal can say what is running. */
+export type DaemonLifecycleVerb =
+  | 'install'
+  | 'uninstall'
+  | 'start'
+  | 'stop'
+  | 'restart'
+  | 'snapshot build'
+  | 'snapshot promote';
+
+/** What a lifecycle claim is asked for, so the wait bound stays the caller's policy rather than the adapter's. */
+export interface DaemonLifecycleClaimRequest {
+  readonly lockPath: string;
+  readonly verb: DaemonLifecycleVerb;
+  /** How long a peer may legitimately hold it — for this caller, a whole stop plus a whole start. */
+  readonly waitMs: number;
+  /** Called once when a peer holds the claim, so a wait of that length is visible rather than a hang. */
+  readonly waiting: (holder: string) => void;
+}
+
+/** A held lifecycle claim. Released exactly once, by the holder that took it. */
+export interface IDaemonLifecycleClaim {
+  /**
+   * Give the claim up.
+   *
+   * Never throws — it runs after the work it protected, and a tidy-up failure must not replace that
+   * work's own outcome. Anything left behind travels back as the path a person has to look at.
+   */
+  release(): Promise<string | undefined>;
+}
+
+/**
+ * Serializing this daemon's mutating lifecycle commands across separate invocations.
+ *
+ * Two `fy daemon` invocations are unrelated to each other, so an in-object queue orders nothing: one
+ * could write the service definition between another's garbage-collection root update and its own
+ * definition write, leaving a unit that names one snapshot while the roots protect a different one.
+ * The daemon they contend for is identified by a path, so the claim lives at a path too.
+ *
+ * `acquire` throws when the claim cannot be taken; refusing a lifecycle command is safe, whereas
+ * proceeding without exclusion is what produces the mismatch above.
+ */
+export interface IDaemonLifecycleLockPort {
+  acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim>;
 }
 
 /** The daemon identity persisted in a snapshot, never inferred from its containing directory. */

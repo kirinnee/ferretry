@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { InvalidDaemonEnvironmentError, managerForPlatform, resolveDaemonLayout } from '../../../src/lib/daemon/layout';
+import {
+  daemonSnapshotGcRoot,
+  InvalidDaemonEnvironmentError,
+  managerForPlatform,
+  resolveDaemonLayout,
+} from '../../../src/lib/daemon/layout';
 import { environment, HOME, layout } from './fixtures';
 
 describe('manager for platform', () => {
@@ -95,15 +100,65 @@ describe('daemon layout', () => {
     { name: 'XDG_STATE_HOME when the operator set one', input: '/tmp/xdg-state', expected: '/tmp/xdg-state' },
     { name: '~/.local/state when it is unset', input: undefined, expected: `${HOME}/.local/state` },
     { name: '~/.local/state when it is blank', input: '  ', expected: `${HOME}/.local/state` },
-  ])('should put the Nix GC root under $name', ({ input, expected }) => {
+  ])('should put the Nix GC roots and the lifecycle claim under $name', ({ input, expected }) => {
     // Act
     const actual = layout({ stateDirectory: input });
 
     // Assert — never under the state home. That directory is the daemon's, its layout model refuses
     // any entry it has not declared, and its filesystem port refuses symbolic links anywhere inside
-    // it — and this root is a symbolic link.
-    should(actual.nixGcRoot).equal(`${expected}/ferretry/nix/fyd`);
-    should(actual.nixGcRoot.startsWith(`${actual.stateHome}/`)).be.false();
+    // it — and these roots are symbolic links.
+    should(actual.nixGcRootDirectory).equal(`${expected}/ferretry/nix/snapshots/fyd`);
+    should(actual.lifecycleLock).equal(`${expected}/ferretry/lifecycle/fyd.lock`);
+    should(actual.nixGcRootDirectory.startsWith(`${actual.stateHome}/`)).be.false();
+    should(actual.lifecycleLock.startsWith(`${actual.stateHome}/`)).be.false();
+  });
+
+  it('should keep the superseded single root beside the per-snapshot directory, not above it', () => {
+    // Act
+    const actual = layout({ stateDirectory: '/tmp/xdg-state' });
+
+    // Assert — a symbolic link cannot also be the directory the new roots live in, so reusing that
+    // name would leave an upgraded installation unable to create any root at all.
+    should(actual.supersededNixGcRoot).equal('/tmp/xdg-state/ferretry/nix/fyd');
+    should(actual.nixGcRootDirectory.startsWith(`${actual.supersededNixGcRoot}/`)).be.false();
+  });
+
+  it('should give every daemon its own lifecycle claim so two daemons never wait for each other', () => {
+    // Act
+    const first = layout({ stateDirectory: '/tmp/state', daemonName: 'one' });
+    const second = layout({ stateDirectory: '/tmp/state', daemonName: 'two' });
+
+    // Assert
+    should(first.lifecycleLock).not.equal(second.lifecycleLock);
+  });
+
+  describe('snapshot garbage-collection root', () => {
+    it('should name the root after the snapshot it protects, and nothing else', () => {
+      // Act — the ONE mapping from a snapshot identity to a root path, so the writer and the reader
+      // of a root can never disagree about where it is.
+      const actual = daemonSnapshotGcRoot('/tmp/state/ferretry/nix/snapshots/fyd', `sha256-${'a'.repeat(64)}`);
+
+      // Assert
+      should(actual).equal(`/tmp/state/ferretry/nix/snapshots/fyd/sha256-${'a'.repeat(64)}`);
+    });
+
+    it.each([
+      { name: 'a path separator', id: '../../../etc/fyd' },
+      { name: 'an empty identity', id: '' },
+    ])('should refuse $name rather than let it retarget the write', ({ id }) => {
+      // Act + Assert — a root path is a filename, and a filename that can be steered is a write that
+      // can be steered.
+      should(() => daemonSnapshotGcRoot('/tmp/state/ferretry/nix/snapshots/fyd', id)).throw(
+        InvalidDaemonEnvironmentError,
+      );
+    });
+
+    it('should refuse a relative root directory rather than resolve it against the cwd', () => {
+      // Act + Assert
+      should(() => daemonSnapshotGcRoot('nix/snapshots/fyd', `sha256-${'a'.repeat(64)}`)).throw(
+        /nix root directory must be an absolute path/,
+      );
+    });
   });
 
   it('should reject a relative XDG_STATE_HOME rather than resolve it against the cwd', () => {

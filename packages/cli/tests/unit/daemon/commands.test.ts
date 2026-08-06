@@ -10,6 +10,7 @@ import {
   absentReport,
   CapturedOutput,
   FakeHealth,
+  FakeLifecycleLock,
   FakeLogs,
   FakeNixGcRoot,
   FakeSnapshots,
@@ -63,6 +64,7 @@ function run(
         health: new FakeHealth(probes),
         logs,
         nix: new FakeNixGcRoot(),
+        lifecycle: new FakeLifecycleLock(),
         snapshots,
         clock: new SteppingClock(),
         out,
@@ -202,9 +204,10 @@ describe('daemon command surface', () => {
     const list = run(['daemon', 'snapshot', 'list']);
     await list.parsed;
 
-    // Assert
-    should(build.snapshots.calls).deepEqual(['build']);
-    should(promote.snapshots.calls).deepEqual([`promote:sha256-${'b'.repeat(64)}`]);
+    // Assert — the two mutating verbs also reconcile garbage-collection roots against the retained
+    // set, which is the listing each of them makes; only `list` leaves the store untouched.
+    should(build.snapshots.calls).deepEqual(['build', 'list']);
+    should(promote.snapshots.calls).deepEqual([`promote:sha256-${'b'.repeat(64)}`, 'list']);
     should(list.snapshots.calls).deepEqual(['list', 'current']);
   });
 
