@@ -37,7 +37,8 @@
  * 2. COMMANDS AND SETTINGS ARE INJECTED. kteam hard-coded its one command
  *    (browser login) and imported the settings catalog directly. Both are props
  *    here: the shell's chrome should not be the second place that decides what
- *    the app can do.
+ *    the app can do. Settings arrive through the catalog's query function, not
+ *    a second list this component searches under a weaker rule.
  */
 
 import {
@@ -85,12 +86,15 @@ const ANNOUNCE_DEBOUNCE_MS = 300;
 /** Stable identities so an omitted prop does not re-derive the result list on
  *  every render. */
 const NO_COMMANDS: readonly PaletteCommand[] = [];
-const NO_SETTINGS: readonly PaletteSettingsEntry[] = [];
+const NO_SETTINGS = (): readonly PaletteSettingsEntry[] => [];
 
 /** A top-bar destination that may also carry the mark the bar draws for it. */
 export interface PaletteDestinationSource extends AppBarDestinationLike {
   readonly Icon?: LucideIcon;
 }
+
+/** One settings owner answers the whole search question for this daemon. */
+export type PaletteSettingsSource = (daemon: DaemonId, query: string) => readonly PaletteSettingsEntry[];
 
 /**
  * Icons come from the bar for its own destinations, so the same page is not
@@ -124,7 +128,7 @@ export interface CommandPaletteProps {
    */
   readonly onOpenSetting?: (settingId: string) => void;
   readonly commands?: readonly PaletteCommand[];
-  readonly settings?: readonly PaletteSettingsEntry[];
+  readonly settings?: PaletteSettingsSource;
   readonly destinations?: readonly PaletteDestinationSource[];
   /**
    * True when the reader is on touch. Their palette gets the dialog focused
@@ -132,6 +136,8 @@ export interface CommandPaletteProps {
    * on-screen keyboard over the results they opened the palette to read.
    */
   readonly touchAffected?: boolean;
+  /** False on a session route, where Cmd/Ctrl+K belongs to file/task search. */
+  readonly shortcutAvailable?: boolean;
 }
 
 export function CommandPalette({
@@ -146,6 +152,7 @@ export function CommandPalette({
   settings = NO_SETTINGS,
   destinations = APP_BAR_DESTINATIONS,
   touchAffected = false,
+  shortcutAvailable = true,
 }: CommandPaletteProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -167,9 +174,10 @@ export function CommandPalette({
     autoFocus: focusPolicy.dialogAutoFocus,
   });
 
+  const matchedSettings = useMemo(() => settings(daemon, query), [daemon, query, settings]);
   const groups = useMemo(
-    () => paletteResults({ query, daemon, sessions, destinations, commands, settings }),
-    [query, daemon, sessions, destinations, commands, settings],
+    () => paletteResults({ query, daemon, sessions, destinations, commands, settings: matchedSettings }),
+    [query, daemon, sessions, destinations, commands, matchedSettings],
   );
   const activeIndex = clampActiveIndex(active, groups.results.length);
   const activeEntry = activeIndex >= 0 ? groups.results[activeIndex] : undefined;
@@ -239,7 +247,7 @@ export function CommandPalette({
         onNavigate(result.entry.href);
         return;
       }
-      if (layout === 'drawer' && onOpenSetting) {
+      if (result.entry.settingId !== null && layout === 'drawer' && onOpenSetting) {
         // The palette's focus trap must restore before the settings sheet takes
         // focus, exactly like the details → settings handoff.
         const settingId = result.entry.settingId;
@@ -308,7 +316,7 @@ export function CommandPalette({
             aria-controls={PALETTE_IDS.listbox}
             aria-activedescendant={activeEntry ? paletteResultId(activeEntry) : undefined}
             aria-autocomplete="list"
-            aria-label="Search commands, sessions, and settings"
+            aria-label="Search app destinations, commands, settings, and sessions"
             autoComplete="off"
             spellCheck={false}
             value={query}
@@ -318,7 +326,7 @@ export function CommandPalette({
               setActive(0);
             }}
             onKeyDown={onInputKeyDown}
-            placeholder="Search commands, sessions, and settings…"
+            placeholder="Search app destinations, commands, settings, and sessions…"
             // Not `.kt-input`: the panel already draws the edge, and a second
             // bordered control inside it reads as a box in a box. Type size and
             // colour still come from tokens.
@@ -419,7 +427,7 @@ export function CommandPalette({
           )}
         </div>
 
-        <Footer />
+        <Footer shortcutAvailable={shortcutAvailable} />
 
         {/* Spoken, never shown. `sr-only` and not `hidden`, which would take it
             straight back out of the accessibility tree. */}
@@ -613,7 +621,7 @@ function SessionOption({
  * sibling feature (find inside a transcript) and readers will try it here; say so
  * rather than letting them discover a browser find bar over a dialog.
  */
-function Footer() {
+function Footer({ shortcutAvailable }: { readonly shortcutAvailable: boolean }) {
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-sm border-t border-border-soft px-panel py-row-y text-meta text-muted">
       <span className="inline-flex items-center gap-xs">
@@ -629,7 +637,11 @@ function Footer() {
         <span className="mono">esc</span>
         close
       </span>
-      <span className="ml-auto text-faint">{paletteShortcutLabel()} anywhere · find in transcript comes later</span>
+      <span className="ml-auto text-faint">
+        {shortcutAvailable
+          ? `${paletteShortcutLabel()} outside text fields · reopen finder`
+          : `${paletteShortcutLabel()} searches this session’s files & tasks`}
+      </span>
     </div>
   );
 }

@@ -10,7 +10,7 @@ import {
   SidebarDrawerTrigger,
   UPDATE_CHIP,
 } from '../../src/shell/app-bar.tsx';
-import { PALETTE_KEYSHORTCUTS } from '../../src/shell/palette-shortcut.ts';
+import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../src/shell/palette-shortcut.ts';
 import { interact, mount } from '../support/dom.ts';
 
 const DAEMON = daemonId('workshop');
@@ -196,7 +196,7 @@ describe('AppBar command palette entry', () => {
     const slot = mounted.container.querySelector('[data-app-bar-session-search-slot]') as HTMLElement;
 
     expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
-    expect(finder.getAttribute('aria-label')).toBe('Open command palette');
+    expect(finder.getAttribute('aria-label')).toBe('Find app destinations, settings & sessions');
     expect(slot.contains(finder)).toBe(false);
 
     await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
@@ -218,7 +218,8 @@ describe('AppBar command palette entry', () => {
     const finder = sheet.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
 
     expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
-    expect(finder.textContent).toContain('Search app & sessions');
+    expect(finder.getAttribute('aria-label')).toBe('Search app, settings & sessions');
+    expect(finder.textContent).toContain('Search app, settings & sessions');
 
     await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
 
@@ -251,10 +252,13 @@ describe('AppBar current-session search seam', () => {
     const slot = mounted.container.querySelector('[data-app-bar-session-search-slot]') as HTMLElement;
     const search = byLabel('Current session search') as HTMLInputElement;
     const destinations = linksOf(mounted.container, 'Destinations');
+    const finder = mounted.container.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
 
     expect(slot.contains(search)).toBe(true);
     expect(destinations).toHaveLength(APP_BAR_DESTINATIONS.length);
     expect(destinations.every(link => !slot.contains(link))).toBe(true);
+    expect(finder.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(finder.textContent).not.toContain(paletteShortcutLabel());
 
     await mounted.unmount();
   });

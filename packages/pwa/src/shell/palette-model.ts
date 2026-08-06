@@ -72,8 +72,12 @@ export interface PaletteSettingsEntry {
   readonly id: string;
   readonly label: string;
   readonly description: string;
-  /** The anchor within this daemon's settings page. */
-  readonly settingId: string;
+  /**
+   * The anchor within this daemon's settings page. Null for a row that has no
+   * one control to anchor to — "Open settings" itself, or a link row — which
+   * lands on the unanchored Settings page instead.
+   */
+  readonly settingId: string | null;
   /**
    * Set only for a row that lives on a different page entirely (Warden's
    * failover configuration, say). Such a row navigates on every layout, because
@@ -181,8 +185,8 @@ export const matchesPaletteCommand = (command: PaletteCommand, query: string): b
 };
 
 /** The anchor one settings control lives at, within its own daemon's page. */
-export const paletteSettingHref = (daemon: DaemonId, settingId: string): string =>
-  `${daemonSettingsPath(daemon)}#${settingId}`;
+export const paletteSettingHref = (daemon: DaemonId, settingId: string | null): string =>
+  settingId === null ? daemonSettingsPath(daemon) : `${daemonSettingsPath(daemon)}#${settingId}`;
 
 /**
  * Where the Settings group is already sending people. A section row lands on its
@@ -192,18 +196,14 @@ export const paletteSettingHref = (daemon: DaemonId, settingId: string): string 
 export const settingsDestinationHrefs = (daemon: DaemonId, entries: readonly PaletteSettingsEntry[]): string[] =>
   entries.map(entry => entry.href ?? paletteSettingHref(daemon, entry.settingId));
 
-const matchesSettingsEntry = (entry: PaletteSettingsEntry, query: string): boolean => {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  return [entry.label, entry.description].join(' ').toLowerCase().includes(needle);
-};
-
 export interface PaletteInput {
   readonly query: string;
   readonly daemon: DaemonId;
   readonly sessions: readonly PaletteSession[];
   readonly destinations: readonly AppBarDestinationLike[];
   readonly commands: readonly PaletteCommand[];
+  /** Already matched by the Settings catalog, which owns labels, descriptions,
+   *  anchors, and search terms as one decision. */
   readonly settings: readonly PaletteSettingsEntry[];
   /** Injected so ranking is deterministic under test. */
   readonly now?: number;
@@ -232,7 +232,9 @@ export interface PaletteResults {
  * answer "where can I go" before it answers anything else.
  */
 export const paletteResults = (input: PaletteInput): PaletteResults => {
-  const settings = input.settings.filter(entry => matchesSettingsEntry(entry, input.query));
+  // Taken as given: the Settings catalog already decided which of its controls
+  // this query names, and re-filtering here would answer that twice.
+  const settings = input.settings;
   const destinations = destinationPaletteEntries(input.query, input.destinations, input.daemon, {
     taken: settingsDestinationHrefs(input.daemon, settings),
   });

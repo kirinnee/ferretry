@@ -35,8 +35,10 @@ import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
+import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
+import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
@@ -45,6 +47,7 @@ import { WardenStrip } from './features/warden/warden-strip.tsx';
 import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
 import { useActiveCarrier } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { useInputModality } from './hooks/use-input-modality.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
@@ -88,8 +91,9 @@ import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot } from './lib/store.tsx';
 import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
-import { CommandPalette } from './shell/command-palette.tsx';
+import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { paletteSessionEntries } from './shell/palette-model.ts';
+import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ThemeToggle } from './shell/theme-toggle.tsx';
 
 /**
@@ -1040,6 +1044,26 @@ export function AppShell() {
     [],
   );
   const closePalette = useCallback(() => setPalette(current => ({ ...current, open: false })), []);
+  /*
+   * THE SETTINGS CATALOG ANSWERS THE WHOLE SETTINGS QUESTION.
+   *
+   * The palette takes a query FUNCTION rather than a list, so which controls
+   * match a phrase is decided once, by the surface that owns their labels,
+   * descriptions, anchors and keywords. A list handed over here would have made
+   * the shell the second place that decides what "push to talk" finds, and the
+   * two rules would have drifted the first time a keyword was added.
+   *
+   * The live push-to-talk binding rides along because the catalog cannot read
+   * browser-local dictation storage without owning it, and a reader searching
+   * for their own shortcut should be told which one it currently is.
+   */
+  const dictation = useSttSettings(store.stt);
+  const pushToTalk = dictationShortcutLabel(dictation.settings.shortcut);
+  const paletteSettings = useCallback<PaletteSettingsSource>(
+    (daemon, query) => settingsPaletteEntries(daemon, query, { dictationShortcutLabel: pushToTalk }),
+    [pushToTalk],
+  );
+  const { touchAffected } = useInputModality();
   const currentSessionScope = useMemo(
     () =>
       connection !== undefined && pageRoute.kind === 'session'
@@ -1131,11 +1155,23 @@ export function AppShell() {
             themeToggle={<ThemeToggle />}
             {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl /> })}
           />
-          <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+          {/*
+            The finder's touch affordance wraps the page area rather than one
+            page: a phone has no Cmd/Ctrl+K, and the top bar's own Find button is
+            behind the destination sheet on that width. The region is passive and
+            discovers the touched page scroller, so ordinary scrolling stays
+            browser-owned and a transcript — where the same movement loads history
+            — can explicitly decline it.
+          */}
+          <PullToPaletteRegion
+            className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3"
+            enabled={touchAffected}
+            onOpen={openPalette}
+          >
             <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
               <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
             </ChunkErrorBoundary>
-          </div>
+          </PullToPaletteRegion>
           <CommandPalette
             open={palette.open}
             focusSignal={palette.focusSignal}
@@ -1143,6 +1179,9 @@ export function AppShell() {
             daemon={connection.daemonId}
             sessions={paletteSessionEntries(sessions)}
             onNavigate={navigate}
+            settings={paletteSettings}
+            touchAffected={touchAffected}
+            shortcutAvailable={currentSessionScope === null}
           />
         </div>
       </SessionSearchProvider>
