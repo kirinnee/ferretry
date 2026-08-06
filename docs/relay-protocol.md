@@ -413,26 +413,26 @@ rendezvous per minute, and every limit above.
 
 ### Close codes
 
-| Code   | Meaning                                                                                      |
-| ------ | -------------------------------------------------------------------------------------------- |
-| `4400` | protocol error: unparseable, or right message in the wrong state                             |
-| `4401` | claim rejected: fingerprint mismatch or bad signature                                        |
-| `4402` | claim deadline expired                                                                       |
-| `4403` | the daemon refused the client's credentials inside the encrypted channel                     |
-| `4404` | no daemon holds this rendezvous                                                              |
-| `4408` | heartbeat timeout                                                                            |
-| `4409` | a daemon already holds this rendezvous                                                       |
-| `4413` | frame too large                                                                              |
-| `4420` | sequence broken: a frame was dropped, duplicated or reordered                                |
-| `4421` | a record failed authentication                                                               |
-| `4426` | unsupported version or protocol identifier                                                   |
-| `4429` | rendezvous busy: session, socket or rate limit reached                                       |
-| `4430` | flow violation: the sender exceeded its credit window                                        |
-| `4431` | the hosted relay is disabled by its runtime kill switch                                      |
-| `4432` | a per-daemon or global hosted connection ceiling was reached                                 |
-| `4433` | a per-daemon or global hosted bandwidth ceiling was reached                                  |
-| `4440` | the session concluded; its outcome was stated inside the encrypted channel before this close |
-| `4500` | the rendezvous itself failed                                                                 |
+| Code   | Meaning                                                                                        |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| `4400` | protocol error: unparseable, or right message in the wrong state                               |
+| `4401` | claim rejected: fingerprint mismatch or bad signature                                          |
+| `4402` | claim deadline expired                                                                         |
+| `4403` | the daemon refused the client's credentials inside the encrypted channel                       |
+| `4404` | no daemon holds this rendezvous                                                                |
+| `4408` | heartbeat timeout                                                                              |
+| `4409` | a daemon already holds this rendezvous                                                         |
+| `4413` | frame too large                                                                                |
+| `4420` | sequence broken: a frame was dropped, duplicated or reordered                                  |
+| `4421` | a record failed authentication                                                                 |
+| `4426` | unsupported version or protocol identifier                                                     |
+| `4429` | rendezvous busy: session, socket or rate limit reached                                         |
+| `4430` | flow violation: the sender exceeded its credit window                                          |
+| `4431` | the hosted relay is disabled by its runtime kill switch                                        |
+| `4432` | a per-daemon or global hosted connection ceiling was reached                                   |
+| `4433` | a per-daemon or global hosted bandwidth ceiling was reached                                    |
+| `4440` | the session concluded; code and public reason are constant, while the outcome was sealed first |
+| `4500` | the rendezvous itself failed                                                                   |
 
 ---
 
@@ -909,15 +909,19 @@ and the event payload appear in none of the frames the rendezvous handled.
 `tests/e2e/README.md` records and §12 already draws: real Chrome, real compiled binaries, real
 WebSockets and the **real** rendezvous state machine, with Cloudflare's own runtime substituted —
 hibernation, the auto-responder, durable storage and alarms are ports, not `workerd`. So it proves
-this protocol's behaviour end to end and still proves nothing about Cloudflare. **That tier does not
-run in CI**, so a regression placed there is not yet a guard.
+this protocol's behaviour end to end and still proves nothing about Cloudflare. **That
+compiled-browser tier is local and does not run in CI.** A separate PWA lane is adding a focused CI
+guard for the Vite directory override, and the existing unit and integration tiers guard the protocol
+behaviour; neither turns the full Chrome journey itself into a CI guard.
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
-parses this advertisement from `@ferretry/relay`'s build-time `HOSTED_RELAY_DIRECTORY_ORIGIN`. In the browser that
-read is now **disclosure only** — the routes come from the daemon's published set, and comparing a
-published address against the advertised one is how a surface can say whether a rendezvous is
-Ferretry's or somebody's own. A failed read therefore changes no route, only the sentence a person
-reads.
+parses this advertisement from the directory origin Vite compiles into the bundle, whose default is
+`@ferretry/relay`'s `HOSTED_RELAY_DIRECTORY_ORIGIN`. That browser read does three jobs: it supplies the
+last-resort hosted carrier after the daemon's published set fails, supplies the **only** relayed
+first-pairing candidate after direct fails, and lets a surface disclose whether an address is
+Ferretry's rendezvous or somebody's own. A failed, malformed or switched-off read guesses nothing.
+For first pairing the result is a direct-only walk with no relayed first contact; for an already
+paired device it removes the last-resort hosted carrier but leaves direct and the daemon-published set.
 
 **Both ends discover it now, and that asymmetry was a shipped defect.** A session crosses a relay
 only if BOTH ends are on it, and until `packages/daemon/src/lib/relay/discovery.ts` existed only the
@@ -925,10 +929,20 @@ browser half read this advertisement: `decideRelayCarrier` answered "no relay is
 the daemon document had no `relay` block, and **nothing has ever written one**. So a fresh install
 bound loopback, dialled nowhere, and was reachable from no device but its own host — which is
 indistinguishable, from the owner's side, from pairing being broken. The daemon now reads this same
-document, from the same path, and dials whatever it names. Both ends import the discovery origin
-from `@ferretry/relay`, so Nix, GoReleaser, local Bun builds and forks cannot be pointed at different
-directories. The daemon remains overridable at runtime with `FY_RELAY_DIRECTORY_ORIGIN`. It is an ORIGIN,
-never a carrier: no relay address is compiled into either end.
+document, from the same path, and dials whatever it names. Both ends import the same default origin
+from `@ferretry/relay`, so Nix, GoReleaser, local Bun builds and forks agree unless somebody explicitly
+overrides them. Those escape hatches are independent: `FY_RELAY_DIRECTORY_ORIGIN` is read at runtime
+by the daemon and at build time by the PWA's `vite.config.ts`, so setting only one can point the two
+ends at different directories. It is an ORIGIN, never a carrier: no relay address is compiled into
+either end.
+
+That divergence fails closed. A directory can advertise a rendezvous the daemon does not hold, but
+the resulting client arrival ends at `4404`; §6 pins the daemon identity from the pairing link before
+the device sends the pairing code, device token or any payload, so neither a divergent directory nor
+the wrong rendezvous learns those secrets. The costs are availability and metadata: relayed first
+pairing silently disappears, the directory sees the requesting device's IP and timing, and a
+rendezvous it names sees the device IP, daemon fingerprint and connection timing even when its
+operator is not the one the owner intended.
 
 A rendezvous an operator wrote down **wins and is never overwritten** — the directory is asked only
 for an enabled `source: 'discovery'` entry, so a carrier switched off stays off rather than being
@@ -985,18 +999,18 @@ Five named pieces. PR #202 provides the first two, the third is now built on bot
 session modes with the narrower gaps declared below, the fourth is on screen, and the fifth is
 outstanding:
 
-1. **A build-time discovery origin on BOTH ends** — imported from the one
+1. **One default discovery origin, with an explicit override on EACH end** — imported from the one
    `@ferretry/relay` source constant. The relay lives on its own hostname, so the
    browser cannot resolve the advertisement from its own origin. A **relative `/v1/default-relay` is
    wrong**, and Cloudflare Pages stays a static bundle — no Function, no proxy — so the origin is
-   compiled into both ends as `HOSTED_RELAY_DIRECTORY_ORIGIN`. It is a _service_ address, not a user
+   supplied to both ends by `HOSTED_RELAY_DIRECTORY_ORIGIN`. It is a _service_ address, not a user
    address: it identifies the directory, never a daemon, person, or carrier. This temporary default
    is Ferretry's personal `workers.dev` subdomain and forks use it too; moving to a product domain
-   changes one source constant. The daemon remains overridable at runtime by
-   `FY_RELAY_DIRECTORY_ORIGIN`, while an explicit relay block wins before discovery.
-   `scripts/validate/relay-config.sh` pins the source imports and rejects a return to a release-only
-   define, because two halves pointed at different directories carry nothing and nothing else in CI
-   would notice.
+   changes one source constant. `FY_RELAY_DIRECTORY_ORIGIN` overrides it at daemon runtime and at PWA
+   build time in `vite.config.ts`; an explicit daemon relay block still wins before discovery. Setting
+   only one override can make the two ends disagree, which has the fail-closed and metadata costs
+   stated above. `scripts/validate/relay-config.sh` pins both shared-default imports, while the focused
+   PWA build-contract guard covers the Vite override in CI.
 2. **A fetch-and-parse step on BOTH ends** — the PWA's from #202, the daemon's in
    `packages/daemon/src/lib/relay/discovery.ts` and `src/adapters/relay/hosted-relay-directory.ts` —
    that reads the advertisement through `HostedRelayAdvertisementSchema`, treating `relayUrl: null`
@@ -1004,8 +1018,9 @@ outstanding:
    `source: 'discovery'` entry the carrier list holds, through the same schema an operator's own entry
    uses, so a discovered rendezvous and a configured one cannot acquire different redial cadences; an
    entry that already carries a `url` never reads it, and one boot performs one read no matter how
-   many entries there are. In the browser the same read no longer chooses anything — it labels a
-   published address as Ferretry's hosted rendezvous or somebody's own.
+   many entries there are. In the browser the same read supplies the last-resort hosted carrier and
+   the only relayed first-pairing candidate, as well as labelling a published address as Ferretry's
+   hosted rendezvous or somebody's own.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,
    signs its claim with the identity pairing minted (the same key, deliberately: a second one would
    carry a fingerprint no paired browser has pinned), runs a session per client and dispatches §14
@@ -1066,8 +1081,9 @@ outstanding:
      first published relay was built here, and the reasoning is recorded rather than deleted because
      the conclusion moved while the problem did not. The problem is real: a device that cannot reach
      the daemon's address cannot ask that daemon where else to look. What changed is where it is
-     solved — the scanning device reads the **same hosted directory advertisement the daemon read**, so
-     it finds the rendezvous itself and the QR does not have to carry one. Naming an ARBITRARY
+     solved — under the shared default, or matching explicit overrides, the scanning device reads the
+     **same hosted directory advertisement the daemon read**, so it finds the rendezvous itself and the
+     QR does not have to carry one. Naming an ARBITRARY
      rendezvous in a link is a strictly larger question (which addresses may a QR send a fresh device
      to?) and is deferred with the self-hosted gap above; shipping a fragment format that neither
      works for self-hosting nor stays simple would have been worse than declaring it. So the fragment
@@ -1178,18 +1194,23 @@ frame kinds, which is one of the reasons nothing in this section changes the ren
 machine. What the extra sessions cost is stated under "What a stream session costs", because the
 ceilings are real.
 
-Two bounds apply to every session between its handshake and its credential record, because that
-window is the one an internet stranger can hold open against a public fingerprint. A session whose
-credential record has not arrived within **10 seconds** of its handshake completing is ended
-(`4400`), and at most **2** sessions per link may be awaiting one at a time — one arrival plus one
-overlapping retry — with a further arrival refused (`4429`) until a slot frees. A client that opens
-several sessions at once must therefore treat that refusal as retryable rather than fatal. **That is
-a requirement, and the reference client meets it only by accident**: nothing in it reads `4429`, and
-what recovers does so because it retries every failure that is not a daemon's own final verdict — so
-the pairing walk advances and a terminal reattaches, while the live event subscription swallows the
-refusal and never opens. §13 records that gap; do not read this paragraph as a description of shipped
-behaviour. Both numbers are initial configuration, not protocol constants, in the same spirit as
-§13's ceilings.
+Two bounds apply from the instant every session opens until its first credential record, because that
+whole window is one an internet stranger can hold open against a public fingerprint. A session that
+has not completed its client hello and supplied that credential within **10 seconds of open** is
+ended (`4400`). At most **6** sessions per link may be pre-credential at once, counting both
+`awaiting-hello` and `awaiting-credential`; a further arrival is refused (`4429`) until a slot frees.
+Six admits two ordinary three-session device bursts. Keeping all six slots occupied continuously
+would cost 36 arrivals per minute against the rendezvous's sliding 30-per-minute admission cap, but
+that is a cost rather than a proof against a maximal attacker. The cap is shared by the daemon and
+every client; an attacker spending all 30 arrivals can hold five slots and deny honest arrivals at
+the rendezvous instead of at this link. The pre-credential bound prices a squat and does not prevent
+one. A client that opens several sessions at once must therefore treat `4429` as retryable rather
+than fatal. **That is a requirement, and the reference client meets it only by accident**: nothing
+in it reads `4429`, and what recovers does so because it retries every
+failure that is not a daemon's own final verdict — so the pairing walk advances and a terminal
+reattaches, while the live event subscription swallows the refusal and never opens. §13 records that
+gap; do not read this paragraph as a description of shipped behaviour. Both numbers are initial
+configuration, not protocol constants, in the same spirit as §13's ceilings.
 
 One ordering rule holds across every mode: **nothing follows the credential record until the
 daemon's sealed acceptance has arrived.** The credential record already carries everything its mode
@@ -1402,7 +1423,10 @@ fell behind — a relayed viewer reads the same codes a direct one does, and the
 the channel because it is content: a relay that could read close reasons could read why viewers
 leave. The client latches the sealed close first; the `4440` that follows is expected teardown, and
 a `4440` with **no** sealed close having crossed in either direction is a protocol violation
-reported as one, never reinterpreted as a quiet end.
+reported as one, never reinterpreted as a quiet end. Every conclusion exposes the same unsealed
+pair — code `4440`, reason `the session concluded` — regardless of who ended the stream or why. The
+actual stream code and reason exist only in the sealed `stream-close`; interpolating either into the
+public `closed.reason` would disclose the content the inner record exists to protect.
 
 The client ends a stream the same way: a sealed `stream-close` with the code and reason a direct
 close frame would carry — `1000` for a viewer that is simply done — after which the daemon tears the
@@ -1536,9 +1560,11 @@ fingerprint and code, and **nothing else**. A device that cannot reach that addr
 rendezvous to dial and still cannot ask the daemon it cannot reach — the circularity is real — and it
 is broken on the DEVICE's side rather than in the link: the app's build carries
 `HOSTED_RELAY_DIRECTORY_ORIGIN`, reads that no-store advertisement once per document, and dials the
-address it names. That is the **same advertisement the daemon read** when it chose its own fallback
-carrier, so both ends arrive at one rendezvous without anything travelling out of band beyond the
-fingerprint. The address obeys the ordinary published-relay URL rule — `wss:`/`https:` anywhere,
+address it names. By default that is the **same advertisement the daemon read** when it chose its own
+fallback carrier, so both ends arrive at one rendezvous without anything travelling out of band
+beyond the fingerprint. An operator using the explicit overrides must point the daemon's runtime
+setting and the PWA's build-time setting at the same directory; a mismatch fails closed as described
+above. The address obeys the ordinary published-relay URL rule — `wss:`/`https:` anywhere,
 plaintext only against loopback — and an advertisement that fails it yields no candidate at all. The
 walk for a redemption is the ordinary one, and §1's rule does not bend for pairing: **direct first,
 always**; then that one discovered rendezvous.

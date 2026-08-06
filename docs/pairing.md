@@ -151,23 +151,25 @@ and reads it, so the daemon and the browser cannot hold different opinions about
 readers require `url`/`code`/`fp`, ignore an unrecognised field name — a stray `relay=` included, which
 is therefore never honoured — and refuse a duplicated one.
 
-**A relayed first pairing needs nothing in the link, because both ends discover the same rendezvous.**
-The scanning device's build carries `HOSTED_RELAY_DIRECTORY_ORIGIN`, reads that no-store advertisement
-once per document, and dials the address it names when the daemon's own address fails
-([relay-protocol.md](relay-protocol.md) §14). The daemon reads the same advertisement, which is why it
-can say on its own mint whether a fresh device will find a way in. That address serves **one
+**A relayed first pairing needs nothing in the link when both ends resolve the same directory
+candidate.** The scanning device's build carries `HOSTED_RELAY_DIRECTORY_ORIGIN` by default, reads
+that no-store advertisement once per document, and dials the address it names when the daemon's own
+address fails ([relay-protocol.md](relay-protocol.md) §14). The daemon uses the same default, so stock
+builds meet at one rendezvous. Its runtime override and the PWA's build-time override are independent,
+however; an operator using them must point both ends at the same directory. That address serves **one
 redemption** and is never stored — what a device navigates by afterwards is the redemption response's
 `carriers`, and the browser refuses a relayed pairing whose published set does not name the rendezvous
 the exchange crossed.
 
 `discoveredRelayUrl` on the mint response is **host-facing only**. It exists so `fy pair`, the
 Add-a-device panel and `fyd --check` know a loopback-bound daemon is redeemable anyway, and so they can
-disclose which rendezvous will see the exchange's metadata. It is derived from relay **provenance** at
-the composition root — only an address read from the hosted directory, never an operator's own
-configured block, and never merely the first published relay — so it is true exactly when a fresh
-device will find the same address. **No version escape hatch was spent:** a relay-bearing `v2` form was
-built and withdrawn before any release, so a future second version may still land its pattern and its
-parser together.
+disclose which rendezvous the daemon expects to see the exchange's metadata. It is derived from relay
+**provenance** at the composition root — only an address read from the daemon's directory, never an
+operator's own configured block, and never merely the first published relay. It therefore describes
+the daemon's candidate; it cannot prove that a PWA compiled with an independent override reads the
+same directory. **No version escape hatch was spent:** a relay-bearing `v2` form was built and
+withdrawn before any release, so a future second version may still land its pattern and its parser
+together.
 
 **A remedy that cannot be followed is a dead end with extra steps**, so there is one per reason rather
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
@@ -287,15 +289,19 @@ row states what its revoke will do before the press.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).
-- **A fresh device cannot discover a self-hosted rendezvous.** A pairing fragment carries only the
-  daemon's direct address, code and fingerprint, so the sole relayed first-pairing path a scanning
-  device can find is the hosted rendezvous its own build discovers from
-  `HOSTED_RELAY_DIRECTORY_ORIGIN`; a daemon published only on a self-hosted relay is therefore pairable
-  only from a device that can already reach its direct address, and naming a rendezvous in the link is
-  deferred. `fy pair`, the Add-a-device panel and `fyd --check` all fail closed for that daemon — they
-  draw no QR and print the plain local-only sentence — which is the correct answer for it rather than an
-  under-report, because nothing off its network could reach the address either.
-- **A private directory origin moves the discovered address for one end only.** An operator who points
-  `FY_RELAY_DIRECTORY_ORIGIN` at their own directory makes the daemon's "discovered" rendezvous one the
-  phone's build does not ask for. It is the same failure mode as the gap above and reported the same
-  way: the device finds no route and says so.
+- **A stock fresh device cannot discover an arbitrary self-hosted rendezvous.** A pairing fragment
+  carries only the daemon's direct address, code and fingerprint, so its sole relayed first-pairing
+  candidate is whatever directory its own build reads. A private PWA build can discover a self-hosted
+  address when both ends are pointed at the directory that advertises it, but no existing link tells a
+  stock build where an operator's directory lives. A daemon published only through an explicit
+  self-hosted carrier is therefore pairable only from a device that can already reach its direct
+  address, and naming a rendezvous in the link is deferred. `fy pair`, the Add-a-device panel and
+  `fyd --check` fail closed for that daemon: they draw no QR and print the plain local-only sentence.
+- **A private directory origin must be configured independently on both ends.** Both ends share the
+  default, but `FY_RELAY_DIRECTORY_ORIGIN` is a runtime daemon override and a build-time PWA override.
+  Setting only one sends the scanning device to a rendezvous the daemon does not hold, so direct is
+  still tried first but relayed first contact ends at `4404`; the current pairing surface does not name
+  the configuration mismatch. The fingerprint is pinned before any pairing code, token or payload is
+  sent, so the wrong directory or rendezvous learns none of those secrets. It can still learn metadata
+  the owner did not intend to share: the directory sees the device IP and request timing, and its
+  rendezvous sees the device IP, daemon fingerprint and connection timing.

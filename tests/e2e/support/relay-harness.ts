@@ -33,10 +33,12 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Readable } from 'node:stream';
-// The path the DAEMON's own reader asks for, from the module that owns it — a literal here would be a
-// second spelling, and the failure it produces is a 404 that reads as "discovery is switched off".
-import { RELAY_ADVERTISEMENT_PATH } from '../../../packages/daemon/src/lib/relay/discovery.ts';
+// This stub plays the directory server, so it serves the server-owned public path. A literal here
+// would be a second spelling, and the resulting 404 reads as "discovery is switched off".
+import { HOSTED_RELAY_PUBLIC_PATH } from '@ferretry/relay/adapters';
 import { assertNoLiveStatePath } from '../fixture.ts';
+
+export { HOSTED_RELAY_PUBLIC_PATH };
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 
@@ -315,7 +317,7 @@ export async function startDirectSinkhole(teardown: HarnessTeardown): Promise<Di
 export interface RelayDirectory {
   /** The origin compiled into the bundle and handed to the daemon as `FY_RELAY_DIRECTORY_ORIGIN`. */
   readonly origin: string;
-  /** How many times `/v1/default-relay` has been answered, so "the browser discovered it" is a claim. */
+  /** How many times the hosted advertisement has been answered, so discovery is an asserted claim. */
   reads(): number;
   /** Every path asked for, so a 404 caused by a path change cannot read as "nobody looked". */
   requests(): readonly string[];
@@ -339,9 +341,9 @@ export interface RelayDirectory {
  * ONE PER PROCESS, AND DELIBERATELY NOT ON A JOURNEY'S TEARDOWN. The bundle memo below is keyed on
  * this origin, so a per-journey directory would mean a second full `vite build` for the second
  * journey — and closing it on the first journey's teardown would leave the second serving nothing,
- * which is the same trap the bundle's own comment records. `unref()` is what makes that safe without a
- * suite-level teardown: the listener stops holding the event loop open, so the process exits normally
- * and the socket goes with it.
+ * which is the same trap the bundle's own comment records. `unref()` releases only the listening
+ * handle's claim on event-loop liveness; it is not suite teardown. Accepted keep-alive sockets are
+ * separate handles and may live until their owners close them or the server timeout expires.
  *
  * It counts reads because "the browser discovered the rendezvous" must be ASSERTED. Without the count
  * a journey that crossed the relay for some other reason would look identical to one that read this.
@@ -358,7 +360,7 @@ export async function startRelayDirectory(): Promise<RelayDirectory> {
     const server = createHttpServer((request, response) => {
       const path = (request.url ?? '/').split('?')[0] ?? '/';
       paths.push(path);
-      if (path !== RELAY_ADVERTISEMENT_PATH) {
+      if (path !== HOSTED_RELAY_PUBLIC_PATH) {
         response.writeHead(404).end();
         return;
       }

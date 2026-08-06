@@ -67,6 +67,7 @@ import {
   describeControls,
   deviceTokenForLeakSearchOnly,
   harnessTeardown,
+  HOSTED_RELAY_PUBLIC_PATH,
   launchChrome,
   type LedgerStep,
   plaintextLeaks,
@@ -375,6 +376,8 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const rendezvous = await startRendezvous(environment.paths.root, teardown);
         const directory = await startRelayDirectory();
         directory.publish(rendezvous.relayUrl);
+        const directoryReadsBeforeDaemon = directory.reads();
+        const directoryRequestsBeforeDaemon = directory.requests().length;
         const sinkhole = await startDirectSinkhole(teardown);
         const configPath = join(environment.paths.root, 'daemon.json');
 
@@ -402,7 +405,8 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           env: { FY_RELAY_DIRECTORY_ORIGIN: directory.origin },
         });
         await waitForDaemonAtRendezvous(rendezvous);
-        const directoryReadsByDaemon = directory.reads();
+        const directoryReadsByDaemon = directory.reads() - directoryReadsBeforeDaemon;
+        const directoryRequestsByDaemon = directory.requests().slice(directoryRequestsBeforeDaemon);
 
         const directFailure = await fetch(`${sinkhole.origin}/v1/health`).then(
           () => undefined,
@@ -439,7 +443,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         // harness defects and the count alone cannot tell them apart.
         should(directoryReadsByDaemon).be.greaterThan(
           0,
-          `the daemon read no advertisement at ${directory.origin}; it asked for ${directory.requests().join(', ') || 'nothing'}`,
+          `the daemon read no advertisement at ${directory.origin}; it asked for ${directoryRequestsByDaemon.join(', ') || 'nothing'}`,
         );
         should(directFailure).be.an.Error();
         should(sinkhole.attempts()).be.greaterThan(0);
@@ -654,7 +658,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          *
          * The fragment names none (proved above), the direct address is a sinkhole, and the bundle
          * holds no relay address of its own — only this run's directory ORIGIN, compiled in. So a read
-         * of `/v1/default-relay` from the browser is the whole of how it learned where to dial, and
+         * of the hosted advertisement from the browser is the whole of how it learned where to dial, and
          * counting reads is what turns "it crossed the relay" into "it crossed the relay by the shipped
          * route". Measured against the count taken before Chrome launched, so the daemon's own boot read
          * cannot be mistaken for the browser's.
@@ -663,7 +667,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         if (browserDirectoryReads <= 0) {
           ledger.fail(
             'browser-discovered-the-rendezvous',
-            `Chrome never read ${directory.origin}${'/v1/default-relay'} (${String(directory.reads())} total reads, ` +
+            `Chrome never read ${directory.origin}${HOSTED_RELAY_PUBLIC_PATH} (${String(directory.reads())} total reads, ` +
               `${String(directoryReadsBeforeBrowser)} of them the daemon's). The bundle's directory constant is ` +
               `either unset or pointing elsewhere, so the app has no rendezvous it could dial. It asked for: ` +
               `${directory.requests().join(', ') || 'nothing'}`,
@@ -782,13 +786,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * itself, and that is the stronger direction: a §14 pairing session is one attempt and the
          * daemon closes it immediately, so a later client arrival cannot be the pairing exchange —
          * it is the ordinary authenticated path. Direct is a sinkhole, so there is no other route it
-         * could have taken. The browser's own `data-carrier-kind` is corroboration when it exists;
-         * an attribute that is absent is not the same as one that disagrees, so an absent one is
-         * recorded rather than treated as a contradiction, and a PRESENT one that says anything but
-         * `relay` fails this step.
+         * could have taken. The browser's own `data-carrier-kind` is a required second observation:
+         * an absent attribute means the active-carrier surface never mounted, and anything other than
+         * `relay` contradicts the rendezvous record.
          */
         const pairingArrivals = clientArrivals.length;
-        await browser.page.goto(`${origin.origin}/app/#/settings/daemons`, {
+        await browser.page.goto(`${origin.origin}/d/${fingerprint}/session/${session.sessionId}`, {
           waitUntil: 'networkidle',
           timeout: 30_000,
         });
@@ -803,22 +806,24 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         }
         // `none` is "no walk has measured a carrier yet", deliberately not `direct` — so it is a
         // state to wait out, never an answer to assert against.
-        const carrier = await browser.page
-          .waitForSelector('[data-carrier-kind]:not([data-carrier-kind="none"])', { timeout: 30_000 })
-          .then(async () => attributeNow(browser.page, '[data-carrier-kind]', 'data-carrier-kind'))
-          .catch(async () => attributeNow(browser.page, '[data-carrier-kind]', 'data-carrier-kind'));
-        if (carrier !== null && carrier !== 'relay') {
+        const relayedCarrierMounted = await browser.page
+          .waitForSelector('[data-carrier-kind="relay"]', { timeout: 30_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!relayedCarrierMounted) {
+          const carrier = await attributeNow(browser.page, '[data-carrier-kind]', 'data-carrier-kind');
+          const carrierPage = await browser.page.evaluate<string>('location.href');
           ledger.fail(
             'authenticated-relay-session',
-            `the browser's measured active carrier reads ${carrier}, contradicting the relay's own record of ${String(authArrivals)} client session(s)`,
+            `the browser's measured active carrier ${carrier === null ? 'has no data-carrier-kind attribute' : `reads ${carrier}`}, ` +
+              `contradicting the relay's own record of ${String(authArrivals)} client session(s). ` +
+              `Chrome is at ${carrierPage} and renders: ${await renderedDataAttributes(browser.page)}. ` +
+              `Page errors: ${browser.pageErrors.join(' | ') || 'none'}`,
           );
         }
         ledger.prove(
           'authenticated-relay-session',
-          `the rendezvous carried ${String(authArrivals)} client session(s) for this daemon — a second one after the pairing closed` +
-            (carrier === null
-              ? '; the browser has no data-carrier-kind attribute yet, so this rests on the relay record alone'
-              : '; the browser agrees with data-carrier-kind="relay"'),
+          `the rendezvous carried ${String(authArrivals)} client session(s) for this daemon — a second one after the pairing closed; the browser agrees with data-carrier-kind="relay"`,
         );
 
         /**

@@ -58,8 +58,11 @@ on success or failure; the suite runner also handles interrupts. Never bypass
 these helpers or reuse their resources across journeys.
 
 Run the tier with `task test:e2e`. It typechecks the harness and runs without a
-coverage ledger. The separate CI job is still pending lead-owned wiring, so a
-regression test placed here is not yet a guard.
+coverage ledger. This compiled-browser tier remains local and is not itself run
+in CI. A separate PWA lane is adding a focused CI guard for the Vite directory
+override, while existing unit and integration tiers guard the protocol
+behaviour; a regression that exists only in this full journey is not yet a CI
+guard.
 
 ## Browser journeys
 
@@ -84,9 +87,11 @@ pass, failure and interrupt:
   journey exercises the shipped default rather than a spelling of it. Only the
   ORIGIN has to exist before the build; `publish(relayUrl)` sets the address once
   the rendezvous has a port. It counts reads, so "the browser discovered the
-  rendezvous" is an assertion rather than an inference. One per process and
-  `unref()`ed rather than torn down per journey — the bundle memo is keyed on its
-  origin, so a second directory would mean a second full `vite build`.
+  rendezvous" is an assertion rather than an inference. One per process and not
+  torn down per journey — the bundle memo is keyed on its origin, so a second
+  directory would mean a second full `vite build`. Its listener is `unref()`ed;
+  accepted keep-alive sockets remain owned by their clients/server timeout and
+  may live until those owners close them.
 - `buildPwaBundle(directoryOrigin)` / `startPwaOrigin(dist, teardown)` — the REAL
   `vite build` output on a loopback origin, under the published site's own
   `public/_headers` CSP and `public/_redirects` SPA routes. Built once per suite
@@ -122,9 +127,10 @@ browser's only route to the address is the directory read the journey counts.
 Its first test guards every moving part of the harness itself, so a red journey
 is a statement about the product rather than the scaffolding.
 
-Both write a step ledger to `$FY_E2E_RELAY_REPORT` (default
-`<tmpdir>/fy-e2e-relay-journey.md`) on every run. A failure names the step that
-broke, not the earliest step never reached.
+The relay journey writes a step ledger to `$FY_E2E_RELAY_REPORT` (default
+`<tmpdir>/fy-e2e-relay-journey.md`) on every run. The harness-guard test neither
+writes nor truncates that report. A journey failure names the step that broke,
+not the earliest step never reached.
 
 `support/seeded-session.ts` is the one place in this tier that imports daemon
 internals rather than driving the compiled binary. The daemon has no
