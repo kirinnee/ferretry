@@ -52,14 +52,6 @@
 # THREE REMAIN. Each was re-checked against this head, and each blocker below is a FACT ABOUT THIS
 # REPOSITORY that can be verified with one search rather than a judgement about design:
 #
-#   * `browserTransport` — nothing in production implements `BrowserViewerHost`, so `connectWorker`
-#     has no host to hand a session's browser to, and nothing computes the `workerEntry` it takes.
-#     `packages/daemon/bin/` ships `fyd.ts` and `browser-worker.ts` — dictation's `stt-worker.ts` is
-#     gone with the daemon's hosted recognition — so the missing half is the browser SESSION runtime
-#     that would hold a viewer host. Wiring this means WRITING that, not calling the field.
-#
-#     RE-CHECKED now that PR #15's login window IS mounted, because that unit built the X display this
-#     was said to be waiting behind. The display is no longer the blocker and this line still stands:
 #     the worker program and `BrowserViewerHost` are both absent, and neither is downstream of the
 #     display. `/v1/sessions/:id/browser` is served as a stated 501 naming exactly these two.
 #   * `transcripts` — SPENT. A session now records its transcript provenance at creation
@@ -412,15 +404,6 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9 GAP: kteam's worktrees.ts def
 #     merely an answer, so an Xvfb that died reports its exit status instead of "did not report a
 #     display number" — the diagnostic an operator can act on.
 #
-# WHAT IS STILL NOT MOUNTED, and it is not a module on this list: per-session browser AUTOMATION.
-# `/v1/sessions/:id/browser` is served as a stated 501 rather than a 404, matching `/v1/learning/run`,
-# because `fy browser open` is a shipped command and a 404 is indistinguishable from version skew. What
-# is genuinely absent is not a wiring: nothing in production implements `BrowserViewerHost`, and nothing
-# decides when a session's Chrome starts, which profile it leases, or when it is swept — so no caller
-# can name the `workerEntry` that `packages/daemon/bin/browser-worker.ts` would be. That is the same
-# blocker the header records against `browserTransport`, and it belongs to the unit that ports the
-# browser session runtime.
-
 # PR #19 — port warden supervision: detection, verdicts, failover and provenance
 # BLOCKED ON THE SUPERVISOR ITSELF. All four are policy for a sweep loop that does not exist: they
 # decide which sessions get a warden, which account judges them, when a blessing suppresses an

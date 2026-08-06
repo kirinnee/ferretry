@@ -50,10 +50,10 @@ unserved GET /v1/pwa/config # DEFECT: IFyApiClient.pwaConfig() dials a route not
 unserved PATCH /v1/pwa/config # DEFECT: IFyApiClient.updatePwaConfig() dials a route nothing serves
 unserved POST /v1/sessions/*/notify # DEFECT: mounts/attention.ts says this route is deliberately not there; the CLI gateway dials it anyway
 unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session; mounts/sessions.ts serves only GET on that path
-unserved * /v1/sessions/*/browser/stream # DEFECT: the PWA viewer builds this socket URL; mounts/browser-login.ts serves /browser with no /stream
 unserved GET /v1/sessions/*/runtime-models # DEFECT: the PWA fetches a runtime-model catalog but the daemon serves no such route
 
 # Verb disagreements — finding #5's shape, where the path exists and the method does not.
+verb-unproven GET /v1/sessions/:sessionId/browser/stream # WebSocket() dials use the platform-default GET, which the static transport constructor does not expose as an init method.
 unserved POST /v1/learning/proposals/*/patch # DEFECT: the PWA POSTs; mounts/learning.ts serves GET
 unserved PATCH /v1/sessions/*/terminals/* # DEFECT: the PWA renames a terminal with PATCH; mounts/terminals.ts serves GET, POST and DELETE
 
