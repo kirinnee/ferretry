@@ -44,6 +44,18 @@ const invitation = (overrides: Record<string, unknown> = {}) => ({
 /** A mint with no link, and therefore a reason. */
 const refusal = (overrides: Record<string, unknown> = {}) => ({ ...minted, refusal: 'wildcard-bind', ...overrides });
 
+/**
+ * A mint as a daemon older than the reach answers one: a link, and nothing saying who can use it.
+ *
+ * The address is the whole of the evidence, because the version that wrote this welded "where I
+ * listen" into "where I can be reached" — so each case below is one bind an old daemon really had.
+ */
+const legacyInvitation = (daemonUrl: string) => ({
+  ...minted,
+  daemonUrl,
+  pairUrl: `${PAIR_APP}#v1;url=${encodeURIComponent(daemonUrl)};code=7F3K-Q2ND;fp=${daemonId}`,
+});
+
 describe('pairing protocol', () => {
   it('should publish the security limits consumers must agree on', () => {
     should(PAIRING_CODE_TTL_SECONDS).equal(120);
@@ -113,12 +125,13 @@ describe('pairing protocol', () => {
     ).be.false();
   });
 
-  it('should refuse a link that does not say who can redeem it, in either direction', () => {
+  it('should never yield a link that does not say who can redeem it, in either direction', () => {
     // THE INVARIANT THIS RESPONSE GAINED. A link with no audience is what let a QR of a loopback
     // address reach a phone; an audience with no link would be a claim about nothing. Neither is a
-    // value of this type, so the halves cannot travel apart.
+    // value of this type, so the halves cannot travel apart — a link that arrives without an
+    // audience is answered from its own address rather than passed on unclassified.
     const { reach, ...noReach } = invitation();
-    should(PairingCodeMintResponseSchema.safeParse(noReach).success).be.false();
+    should(PairingCodeMintResponseSchema.parse(noReach).reach).equal('any-device');
     should(PairingCodeMintResponseSchema.safeParse({ ...invitation(), refusal: 'wildcard-bind' }).success).be.false();
     const { pairUrl, ...noLink } = invitation();
     should(PairingCodeMintResponseSchema.safeParse(noLink).success).be.false();
@@ -136,6 +149,58 @@ describe('pairing protocol', () => {
     should(PairingCodeMintResponseSchema.parse({ ...refusal(), refusal: 'loopback-bind' })).containDeep({
       refusal: 'loopback-bind',
     });
+  });
+
+  it('should answer for a daemon older than the reach instead of refusing its whole mint', () => {
+    // THE TWO ENDS UPGRADE ON DIFFERENT DAYS. The hosted browser ships when it is built and the
+    // daemon upgrades when its owner gets round to it, so a response with a link and no `reach`
+    // arrives for as long as one old daemon is running. Rejecting it would take the code away too.
+    should(PairingCodeMintResponseSchema.parse(legacyInvitation(DAEMON_URL))).deepEqual({
+      ...legacyInvitation(DAEMON_URL),
+      reach: 'any-device',
+    });
+    // A loopback link becomes the honest local-only answer rather than the QR this release removed —
+    // every spelling of loopback an old daemon could have bound and then advertised.
+    for (const daemonUrl of ['http://127.0.0.1:7431', 'http://localhost:7431', 'http://[::1]:7431']) {
+      should(PairingCodeMintResponseSchema.parse(legacyInvitation(daemonUrl))).deepEqual({
+        ...legacyInvitation(daemonUrl),
+        reach: 'local-only',
+      });
+    }
+  });
+
+  it('should fail an old wildcard link closed to the refusal the decision would have made', () => {
+    // Nothing dials a wildcard authority, so it is not an address to classify: the link goes, the
+    // code stays, and the reason is the one `decideAdvertisement` gives for the same bind.
+    for (const daemonUrl of ['http://0.0.0.0:7431', 'http://[::]:7431']) {
+      should(PairingCodeMintResponseSchema.parse(legacyInvitation(daemonUrl))).deepEqual(refusal());
+      should(pairingMintOutcome(PairingCodeMintResponseSchema.parse(legacyInvitation(daemonUrl)))).deepEqual({
+        kind: 'refusal',
+        refusal: 'wildcard-bind',
+      });
+    }
+  });
+
+  it('should answer only the old shape, so no other disagreement is papered over', () => {
+    // A link still may not disagree with the daemon it names, before or after the reach is filled in.
+    should(
+      PairingCodeMintResponseSchema.safeParse({
+        ...legacyInvitation(DAEMON_URL),
+        pairUrl: `${PAIR_APP}?code=7F3K-Q2ND`,
+      }).success,
+    ).be.false();
+    // Half a link is not an old daemon's answer: it never sent one without the other.
+    const { pairUrl, ...halfLink } = legacyInvitation(DAEMON_URL);
+    should(PairingCodeMintResponseSchema.safeParse(halfLink).success).be.false();
+    // Neither is a link beside a refusal, nor a mint that says nothing at all.
+    should(
+      PairingCodeMintResponseSchema.safeParse({ ...legacyInvitation(DAEMON_URL), refusal: 'wildcard-bind' }).success,
+    ).be.false();
+    should(PairingCodeMintResponseSchema.safeParse(minted).success).be.false();
+    // Unknown keys are still refused outright, old shape or new.
+    should(
+      PairingCodeMintResponseSchema.safeParse({ ...legacyInvitation(DAEMON_URL), admin: true }).success,
+    ).be.false();
   });
 
   it('should narrow one mint to one outcome, so no surface decides for itself', () => {
