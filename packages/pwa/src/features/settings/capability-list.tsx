@@ -38,8 +38,8 @@ import { useId } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
-  ACCESS_WEIGHT_ORDER,
   type AccessWeight,
+  accessWeightsPresent,
   axisLabel,
   CAPABILITY_LIST_SCOPE_NOTE,
   type ConnectionPosture,
@@ -126,8 +126,15 @@ function WeightMark({ weight }: { readonly weight: AccessWeight }) {
   );
 }
 
-/** The legend. A mark nobody can decode is decoration, so the key travels with the list. */
-function WeightLegend() {
+/**
+ * The legend. A mark nobody can decode is decoration, so the key travels with the list.
+ *
+ * IT KEYS ONLY THE MARKS ON SCREEN. The weights come from the rows being rendered rather than from the
+ * full set of classes, so a class no capability currently carries is not advertised — a "Reads only"
+ * key with no read-only row below it reads as a claim about the machine that nothing supports.
+ */
+function WeightLegend({ weights }: { readonly weights: readonly AccessWeight[] }) {
+  if (weights.length === 0) return null;
   return (
     <section
       className="rounded-control border border-border-soft bg-surface-2 px-3 py-2"
@@ -139,7 +146,7 @@ function WeightLegend() {
         How much each one hands over
       </p>
       <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0 sm:flex-row sm:gap-4">
-        {ACCESS_WEIGHT_ORDER.map(weight => (
+        {weights.map(weight => (
           <li key={weight} className="flex min-w-0 items-center gap-1.5">
             <WeightMark weight={weight} />
             <span className="text-meta text-muted">{weightCopy(weight).detail}</span>
@@ -298,7 +305,7 @@ export function CapabilityList({ connection, capabilities, governed }: Capabilit
         </p>
       </div>
 
-      <WeightLegend />
+      <WeightLegend weights={accessWeightsPresent(entries.map(entry => entry.capability))} />
 
       {entries.length === 0 ? (
         <p className="m-0 text-ui leading-base text-muted" role="status">

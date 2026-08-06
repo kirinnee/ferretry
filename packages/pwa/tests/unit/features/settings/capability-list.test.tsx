@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { type CapabilityGrantView, DAEMON_CAPABILITIES } from '@ferretry/protocol';
+import { type CapabilityGrantView, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { CapabilityList } from '../../../../src/features/settings/capability-list.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -38,6 +38,41 @@ const marked = (renderer: ReactTestRenderer, attribute: string) =>
 
 const attr = (renderer: ReactTestRenderer, attribute: string): unknown =>
   marked(renderer, attribute)[0]?.props[attribute];
+
+/**
+ * The weight marks the CAPABILITY ROWS carry, never the legend's own keys.
+ *
+ * Both render a `data-capability-weight`, so a flat query answers with the legend's marks first and a
+ * count that skipped a fixed number of them silently re-aimed at the legend the moment the legend
+ * stopped carrying one of each. Every mark here is found inside a `data-capability-row`, so these
+ * assertions are about the machine's real answers.
+ */
+const rowWeights = (renderer: ReactTestRenderer): string[] =>
+  marked(renderer, 'data-capability-row').flatMap(row =>
+    row
+      .findAll(node => typeof node.type === 'string' && node.props['data-capability-weight'] !== undefined)
+      .map(node => String(node.props['data-capability-weight'])),
+  );
+
+/** The keys the legend offers, in the order it offers them. */
+const legendWeights = (renderer: ReactTestRenderer): string[] =>
+  marked(renderer, 'data-capability-legend').flatMap(legend =>
+    legend
+      .findAll(node => typeof node.type === 'string' && node.props['data-capability-weight'] !== undefined)
+      .map(node => String(node.props['data-capability-weight'])),
+  );
+
+/** One capability ROW's weight mark, or undefined when that capability rendered no row. */
+const rowWeightMark = (renderer: ReactTestRenderer, capability: DaemonCapability) =>
+  marked(renderer, 'data-capability-row')
+    .find(node => node.props['data-capability-row'] === capability)
+    ?.findAll(node => typeof node.type === 'string' && node.props['data-capability-weight'] !== undefined)[0];
+
+/** Filled pips inside one mark: the shape a reader who cannot use the hue is left with. */
+const filledPips = (mark: ReturnType<typeof rowWeightMark>): number =>
+  mark
+    ?.findAll(node => typeof node.type === 'string' && String(node.props.className ?? '').includes('h-2 w-2'))
+    .filter(node => !String(node.props.className).includes('bg-transparent')).length ?? 0;
 
 describe('the direct-local mark', () => {
   /**
@@ -204,10 +239,7 @@ describe('how much each capability hands over', () => {
     const renderer = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
     );
-    const weights = marked(renderer, 'data-capability-weight')
-      .map(node => String(node.props['data-capability-weight']))
-      // The legend carries one of each; the rows carry the real answers.
-      .slice(3);
+    const weights = rowWeights(renderer);
     expect(new Set(weights).size).toBeGreaterThan(1);
     expect(weights).toContain('broad');
     expect(weights).toContain('moderate');
@@ -224,30 +256,46 @@ describe('how much each capability hands over', () => {
   });
 
   /** Colour alone would make this an accessibility failure exactly where it matters most. */
-  it('encodes the weight in form as well as colour, and carries a legend', () => {
+  it('encodes the weight in form as well as colour on the rows themselves', () => {
     const renderer = render(
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
     );
     expect(marked(renderer, 'data-capability-legend')).toHaveLength(1);
-    const broad = marked(renderer, 'data-capability-weight').find(
-      node => node.props['data-capability-weight'] === 'broad',
-    );
-    // Three pips for broad, one for narrow: a shape, not a hue.
-    const pipsOf = (weight: string): number => {
-      const mark = marked(renderer, 'data-capability-weight').find(
-        node => node.props['data-capability-weight'] === weight,
-      );
-      return (
-        mark
-          ?.findAll(node => typeof node.type === 'string' && String(node.props.className ?? '').includes('h-2 w-2'))
-          .filter(node => !String(node.props.className).includes('bg-transparent')).length ?? 0
-      );
-    };
-    expect(broad).toBeDefined();
-    expect(pipsOf('broad')).toBe(3);
-    expect(pipsOf('narrow')).toBe(1);
+    // A ROW's mark, not the legend's: `fleet` is `broad`, and its pips must say so without the hue.
+    const fleetMark = rowWeightMark(renderer, 'fleet');
+    expect(fleetMark?.props['data-capability-weight']).toBe('broad');
+    expect(filledPips(fleetMark)).toBe(3);
     // The mark is readable by a screen reader too, not only by eye.
-    expect(String(broad?.props['aria-label'])).toContain('Widens access most');
+    expect(String(fleetMark?.props['aria-label'])).toContain('Widens access most');
+    // And a lighter class still renders fewer pips, so the shape carries the difference.
+    const browserMark = rowWeightMark(renderer, 'browser');
+    expect(browserMark?.props['data-capability-weight']).toBe('moderate');
+    expect(filledPips(browserMark)).toBe(2);
+  });
+
+  /**
+   * A key for a class nobody is in sends a reader hunting for the row that must be read-only.
+   *
+   * This is the assertion that would have caught `filesystem` moving to `broad` while the legend went
+   * on advertising "Reads only" against no row at all.
+   */
+  it('keys only the weights the rendered rows actually carry', () => {
+    const renderer = render(
+      <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
+    );
+    expect(new Set(legendWeights(renderer))).toEqual(new Set(rowWeights(renderer)));
+  });
+
+  it('shrinks the legend to the one class a single-row daemon reported', () => {
+    const renderer = render(
+      <CapabilityList
+        connection={localLookingConnection()}
+        capabilities={[entry({ capability: 'warden' })]}
+        governed
+      />,
+    );
+    expect(rowWeights(renderer)).toEqual(['moderate']);
+    expect(legendWeights(renderer)).toEqual(['moderate']);
   });
 });
 

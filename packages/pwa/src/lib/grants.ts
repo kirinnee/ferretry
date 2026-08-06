@@ -340,7 +340,26 @@ export const capabilityWeight = (capability: DaemonCapability): AccessWeight => 
 const WEIGHT_PIPS: Readonly<Record<AccessWeight, number>> = { broad: 3, moderate: 2, narrow: 1 };
 export const weightPips = (weight: AccessWeight): number => WEIGHT_PIPS[weight];
 
-export const ACCESS_WEIGHT_ORDER: readonly AccessWeight[] = ['broad', 'moderate', 'narrow'];
+/** Most access first, so a legend and a sorted list read the same way round. */
+const ACCESS_WEIGHT_ORDER: readonly AccessWeight[] = ['broad', 'moderate', 'narrow'];
+
+/**
+ * The weights a given set of capabilities ACTUALLY carries, most access first.
+ *
+ * THE LEGEND IS DERIVED RATHER THAN LISTED, because the two drift the moment a weight is reassigned.
+ * `filesystem` moving to `broad` emptied the `narrow` class, and a legend built from the fixed triple
+ * went on advertising "Reads only" with no row beneath it — sending a reader hunting for the read-only
+ * capability the screen was promising. A key for a class nobody is in is worse than no key: it is a
+ * claim about the machine that no row supports.
+ *
+ * It takes the capabilities being RENDERED, not the whole enum, so a daemon that reported three rows
+ * gets a legend for those three. `AccessWeight` deliberately keeps all three members — a future
+ * capability may well be `narrow` — and this is what stops an unused member reaching the screen.
+ */
+export function accessWeightsPresent(capabilities: readonly DaemonCapability[]): readonly AccessWeight[] {
+  const present = new Set(capabilities.map(capabilityWeight));
+  return ACCESS_WEIGHT_ORDER.filter(weight => present.has(weight));
+}
 
 /** The legend, because a mark nobody can decode is decoration. */
 const WEIGHT_COPY = {

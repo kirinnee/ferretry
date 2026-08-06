@@ -20,7 +20,9 @@ interface FilesystemGrant {
   readonly configure: boolean;
 }
 
-const FILESYSTEM_GRANTED: FilesystemGrant = { use: true, configure: true };
+/** The PRODUCT's own permissive answer, not a copy of it: a case named after the default must move
+ *  with the default, or it keeps passing under a name that has stopped being true. */
+const FILESYSTEM_GRANTED: FilesystemGrant = DEFAULT_CAPABILITY_GRANTS.filesystem;
 const FILESYSTEM_DISABLED: FilesystemGrant = { use: false, configure: false };
 
 async function dispatcher(
