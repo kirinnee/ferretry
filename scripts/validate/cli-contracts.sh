@@ -4,6 +4,35 @@ set -euo pipefail
 contract="${1:-}"
 [ -z "${contract}" ] && echo "❌ usage: $0 <contract|all>" >&2 && exit 2
 
+# This is the one registry of the contracts this dispatcher owns. `all` executes it,
+# `contract-registry.sh` reads it through `list`, and that gate independently compares it with the
+# case arms below. Neither a case nor a registered name can quietly disappear behind a green run.
+cli_contracts=(
+  arch
+  workspace-package-scopes
+  name-single-source
+  daemon-default-address
+  loopback-single-source
+  state-home-log-directory
+  state-home-layout-claim
+  state-home-default
+  release-backup-order
+  changelog-asset
+  release-artifacts
+  homebrew-cask
+  installer-checksum
+  installer-timeouts
+  installation-parity
+  release-daemon
+  released-version
+  nix-packages
+)
+
+if [ "${contract}" = "list" ]; then
+  printf '%s\n' "${cli_contracts[@]}"
+  exit 0
+fi
+
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
@@ -19,7 +48,7 @@ mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name pa
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch workspace-package-scopes name-single-source daemon-default-address loopback-single-source state-home-log-directory state-home-layout-claim state-home-default release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon released-version nix-packages; do
+  for each in "${cli_contracts[@]}"; do
     "$0" "${each}"
   done
   exit 0
