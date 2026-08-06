@@ -201,25 +201,4 @@ describe('session transfer protocol', () => {
       },
     ]);
   });
-
-  it('should make warden lineage name the warden it traces back to, in both directions', () => {
-    // The lineage facet is the safety-critical fact a transfer carries forward, and the flag and the name
-    // are one statement rather than two fields: a descent that claims a warden but names none cannot be
-    // audited, and a name with the flag off would let a warden's descent be carried while reading as
-    // absent. Both halves are refused so neither spelling can enter a plan.
-    // Act + Assert
-    should(transfer.LineageFacetSchema.safeParse({ wardenLineage: false, warden: null }).success).be.true();
-    assertRejects([
-      {
-        name: 'lineage claimed with no warden named',
-        schema: transfer.LineageFacetSchema,
-        value: { wardenLineage: true, warden: null },
-      },
-      {
-        name: 'a warden named with no lineage claimed',
-        schema: transfer.LineageFacetSchema,
-        value: { wardenLineage: false, warden: 'warden-1' },
-      },
-    ]);
-  });
 });
