@@ -639,6 +639,22 @@ describe('SessionChatPage', () => {
   test('mounts Skills on ONE catalog read and proves that catalog in the transcript', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const asked: string[] = [];
+    const requested: string[] = [];
+    const sharedClient: SessionChatClient = {
+      ...client([], sessionView('shared')),
+      request: async (path, schema) => {
+        requested.push(path);
+        return schema.parse({
+          v: 1,
+          sessionId: 'shared',
+          items: [],
+          resolved: [],
+          count: 0,
+          parseErrors: 0,
+          updatedAt: '2026-08-06T00:00:00.000Z',
+        });
+      },
+    };
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/skills')) {
@@ -653,7 +669,7 @@ describe('SessionChatPage', () => {
     openSidePaneTab(scope, 'skills');
     const page = renderSessionChatPage(
       <SessionChatPage
-        client={client([], sessionView('shared'))}
+        client={sharedClient}
         connection={alpha}
         entries={[]}
         onBack={() => undefined}
@@ -673,6 +689,10 @@ describe('SessionChatPage', () => {
       // ONE read. The pane joins the page's, so the daemon is asked once even
       // though two things in this workspace need the answer.
       expect(asked).toEqual(['https://alpha.example.test/v1/sessions/shared/skills']);
+      // The composer bundle owns only Attention here. Tasks and skills come
+      // from the workspace owners above, so a fully capable client still does
+      // not issue duplicate reads for either family.
+      expect(requested).toEqual(['/v1/sessions/shared/attention']);
       // …and the names it returned are what the transcript proves against, so a
       // `/floop` this pane just inserted is a live reference rather than prose.
       const provider = page.root.findByType(ReferenceSurfaceProvider);

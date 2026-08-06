@@ -356,7 +356,13 @@ export function SessionChatPage({
   // would be two owners that disagree after a refresh. `names` is undefined
   // until a catalog has actually been read — unread, never "no skills".
   const skills = useSessionSkills(connection, scope);
-  const composerCatalogs = useComposerReferenceCatalogs(client, session.config.id);
+  const composerCatalogs = useComposerReferenceCatalogs(client, session.config.id, {
+    tasks: referenceTasks,
+    skills: skills.catalog,
+    waitForTasks: search.waitForTasks,
+    waitForSkills: skills.settled,
+    ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
+  });
   /**
    * Codex's native model picker lives in the Terminal view, and the runtime
    * sheet can only offer it if something actually navigates there.
@@ -390,11 +396,13 @@ export function SessionChatPage({
         scope,
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
-        ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
-        ...(skills.names === undefined ? {} : { skills: skills.names }),
+        ...(composerCatalogs.tasks === undefined ? {} : { tasks: composerCatalogs.tasks }),
         ...(composerCatalogs.attention === undefined
           ? {}
           : { attentionIds: composerCatalogs.attention.map(item => item.id) }),
+        ...(composerCatalogs.skills?.skills === undefined
+          ? {}
+          : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
       }),
     [
@@ -402,9 +410,9 @@ export function SessionChatPage({
       scope,
       session.config.cwd,
       fleetIdentity,
-      referenceTasks,
+      composerCatalogs.tasks,
       composerCatalogs.attention,
-      skills.names,
+      composerCatalogs.skills,
       onNavigate,
     ],
   );
@@ -687,8 +695,8 @@ export function SessionChatPage({
                     {...(composerCatalogs.skills?.skills === undefined
                       ? {}
                       : { autocompleteSkills: composerCatalogs.skills })}
-                    // The one in-flight read: a menu opened before it settles waits for it
-                    // instead of inventing an empty family or fetching the catalog twice.
+                    // The in-flight owner reads: a menu opened before they settle waits
+                    // instead of inventing an empty family or fetching a fact twice.
                     autocompleteReady={composerCatalogs.settled}
                     busy={busy}
                     compact={compact}
