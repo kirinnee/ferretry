@@ -52,7 +52,6 @@ unserved POST /v1/worktrees/remove # DEFECT: packages/daemon serves no worktree 
 unserved GET /v1/worktrees/removal # DEFECT: packages/daemon serves no worktree route at all
 unserved GET /v1/pwa/config # DEFECT: IFyApiClient.pwaConfig() dials a route nothing serves
 unserved PATCH /v1/pwa/config # DEFECT: IFyApiClient.updatePwaConfig() dials a route nothing serves
-unserved POST /v1/sessions/*/notify # DEFECT: mounts/attention.ts says this route is deliberately not there; the CLI gateway dials it anyway
 unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session; mounts/sessions.ts serves only GET on that path
 
 # Verb disagreements — finding #5's shape, where the path exists and the method does not.

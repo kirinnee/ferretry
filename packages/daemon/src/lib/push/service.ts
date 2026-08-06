@@ -61,18 +61,15 @@ export interface PushServiceOptions {
  *
  * ## WHAT THIS DOES NOT DO — DECLARED, NOT DISCOVERED
  *
- * - **Nothing raises a notification yet.** `notify` is the one delivery path and it IS called in
- *   production — by `register`, to confirm an enrolment — but no EVENT reaches it. A durable attention
- *   item, a session that failed and the agent-callable direct notification each need a presenter that
- *   decides WHEN to speak, and that decision is owned by the notification unit rather than smuggled in
- *   here: a status watcher wired up as a substitute would duplicate the harnesses' own notifications.
- *   Until such a presenter exists, `to` is always a single freshly enrolled device.
  * - **The browser has no service worker.** Enrolment, storage, delivery and revocation are all real on
  *   this side; the client cannot yet subscribe or display anything, because no worker is registered.
  *   Nothing here is blocked on that — an endpoint is validated against its push service, not against
  *   whether a tab drew a toast — but push is not end-to-end until that lands.
- * - **`interactive` has no production source.** The preference is stored, honoured and tested, and the
- *   only caller today sends a payload about no session, for which it does not apply.
+ *
+ * The notification domain owns when to speak: a committed Attention creation or an explicit audited
+ * direct request. It supplies `interactive` from the authoritative session mode and calls `notify`
+ * rather than creating a second fan-out here. Session lifecycle changes remain deliberately silent so
+ * native harness notifications are not duplicated.
  */
 export class PushService {
   constructor(private readonly options: PushServiceOptions) {}
@@ -173,6 +170,7 @@ export class PushService {
    *
    * An endpoint a push service reports as gone is forgotten here, which is the only place that
    * discovery can be made: nothing else in this daemon ever learns that a browser is unreachable.
+   * `delivered` means a push endpoint accepted the request; it does not claim a person observed it.
    */
   async notify(dispatch: PushDispatch, to?: readonly string[]): Promise<PushDeliveryResult> {
     const enrolled = await this.enrolments();

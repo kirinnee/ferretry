@@ -17,7 +17,7 @@ import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
-import { attentionRoutes } from './attention.ts';
+import { type DirectNotificationSubsystem, attentionRoutes } from './attention.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
@@ -96,8 +96,8 @@ export interface MountedSubsystems {
   /** The other direction of that relationship: which browsers this daemon may WAKE. It serves the
    *  application-server key a browser subscribes with, the enrolments filed against paired devices,
    *  and the revocation of one. An enrolment cannot outlive the device grant that made it — see
-   *  `src/lib/push` for the two independent reasons that holds, and for the declared GAPs: nothing in
-   *  production raises a notification yet, and the browser has no service worker to receive one. */
+   *  `src/lib/push` for the two independent reasons that holds. The browser still has no service
+   *  worker to receive one. */
   readonly push: PushSubscriptionSubsystem;
   /** Every way this daemon can be reached, as the daemon itself publishes it. NOT A SUBSYSTEM BUT A
    *  VALUE, and the only field here that is one: it is resolved once at boot and it is THE SAME ARRAY
@@ -121,6 +121,8 @@ export interface MountedSubsystems {
   /** Read-only Claude/Codex conversations that existed before Ferretry. */
   readonly foreignHistory: ForeignHistorySubsystem;
   readonly attention: AttentionService;
+  /** Audited direct and committed-Attention presentation through the sole push fan-out. */
+  readonly notifications: DirectNotificationSubsystem;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
@@ -351,7 +353,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Attachment routes are mounted before sends may honour attachment ids. Their
     // deeper unlock path cannot shadow this one-segment upload route.
     ...sessionAttachmentRoutes(subsystems.sessionAttachments),
-    ...attentionRoutes(subsystems.attention),
+    ...attentionRoutes(subsystems.attention, subsystems.notifications),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),
     // The board membership surface registers beside the records it governs. Every path is under

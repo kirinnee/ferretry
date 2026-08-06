@@ -115,6 +115,7 @@ import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
+import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
@@ -313,6 +314,7 @@ import {
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
+  NotificationService,
   type NameClaim,
   type NameSubsystem,
   chooseRelayCarrierSources,
@@ -333,7 +335,6 @@ import {
   PairingService,
   PinService,
   PushService,
-  type PushSubscriptionSubsystem,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   packageRole,
@@ -727,7 +728,7 @@ export interface DaemonWorld {
   ) => Promise<{
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
-    readonly push: PushSubscriptionSubsystem;
+    readonly push: PushService;
   }>;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
@@ -869,7 +870,7 @@ export interface DaemonWorld {
     /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
     pairing: PairingService,
     /** Opened WITH pairing, because an enrolment's lifetime is a device grant's — see `createPairing`. */
-    push: PushSubscriptionSubsystem,
+    push: PushService,
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
     socketTickets: SocketTicketBroker,
@@ -4377,6 +4378,20 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         clock,
       );
       const wardenPaths = createWardenPaths(paths.home);
+      const notifications = new NotificationService({
+        ledger: new FileNotificationDeliveryLedger(paths, stateFiles),
+        sessions: {
+          describe: async id => {
+            const view = await sessions.get(id);
+            return view === undefined
+              ? undefined
+              : { name: view.config.name, interactive: view.config.mode === 'interactive' };
+          },
+        },
+        push,
+        serial: new KeyedSerialExecutor(),
+        clock,
+      });
       // ONE attention service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
       // idea of what a session is waiting for.
@@ -4392,6 +4407,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,
         },
+        notifications,
       );
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
@@ -4510,6 +4526,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // usage feed already own those. One service per opened state home serializes only this
         // daemon's timer ticks, so a slow probe in another daemon can neither join nor delay it.
         fleetRefresh: new FleetRefreshService({ usage, fleet }),
+        notifications,
         attention,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),

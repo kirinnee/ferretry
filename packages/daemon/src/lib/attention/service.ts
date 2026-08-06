@@ -1,5 +1,12 @@
-import type { AttentionId, AttentionResponse, AttentionSnapshot, AttentionSource } from '@ferretry/protocol';
+import type {
+  AttentionId,
+  AttentionItem,
+  AttentionResponse,
+  AttentionSnapshot,
+  AttentionSource,
+} from '@ferretry/protocol';
 import {
+  agentConfinedTo,
   applyAttentionCommandToSession,
   attentionSnapshot,
   emptyAttentionLedger,
@@ -36,6 +43,11 @@ export interface AttentionSessionDirectory {
   has(sessionId: string): Promise<boolean>;
 }
 
+/** Told only after a newly created item has durably committed. Total: implementations never reject. */
+export interface AttentionRaisedObserver {
+  raised(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+}
+
 export type AttentionQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AttentionFailure };
@@ -49,6 +61,7 @@ export class AttentionService {
     private readonly repository: AttentionLedgerRepository,
     private readonly clock: AttentionClock,
     private readonly sessions: AttentionSessionDirectory,
+    private readonly observer: AttentionRaisedObserver,
   ) {}
 
   async list(sessionId: string): Promise<AttentionQueryResult<AttentionSnapshot>> {
@@ -122,13 +135,23 @@ export class AttentionService {
   ): Promise<AttentionMutation> {
     const unauthorized = await this.authorize(sessionId, command.actor);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
-    return this.repository.transact(sessionId, current => applyAttentionCommandToSession(current, sessionId, command));
+    const mutation = await this.repository.transact(sessionId, current =>
+      applyAttentionCommandToSession(current, sessionId, command),
+    );
+    if (mutation.ok && mutation.change === 'created' && mutation.item !== undefined) {
+      try {
+        await this.observer.raised(sessionId, mutation.item, mutation.snapshot);
+      } catch {
+        // Persistence is primary: presentation can neither revise nor fail the committed mutation.
+      }
+    }
+    return mutation;
   }
 
   private async authorize(sessionId: string, actor?: AttentionActor): Promise<AttentionFailure | null> {
     const invalid = invalidSession(sessionId);
     if (invalid !== null) return invalid;
-    if (actor?.kind === 'agent' && actor.sessionId !== sessionId) {
+    if (actor !== undefined && !agentConfinedTo(actor, sessionId)) {
       return { code: 'forbidden', message: 'an agent may change attention only in its own session' };
     }
     return (await this.sessions.has(sessionId)) ? null : { code: 'not-found', message: `no such session ${sessionId}` };
