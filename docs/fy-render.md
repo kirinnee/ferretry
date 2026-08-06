@@ -221,10 +221,13 @@ ever text is a promise the build does not keep.
 ### No browser decoder runs until the reader asks
 
 **No browser decoder mounts automatically.** A payload's size is bounded; the work of drawing it is
-not, and a transcript is written by an assistant rather than by the reader. So the stage says what
-rendering would cost and one control starts it, with an accessible name that carries the type and the
-bounded payload size — _Render illustration (SVG, 4 KB)_ — because a consent nobody can price is not
-one.
+not, and a transcript is written by an assistant rather than by the reader. So the stage states the
+resource risk in one sentence — rendering starts only when the reader chooses, and may use
+substantial browser resources — and one control starts the render. That control's accessible name
+carries the type and the bounded payload size, _Render illustration (SVG, 4 KB)_, while its visible
+label stays the short _Render illustration_ so the control row still fits one line at 390px. Neither
+the note nor the name predicts what drawing will actually cost; that is not knowable before the
+decode, which is the whole reason the decision belongs to the reader.
 
 - **Approval belongs to the exact `block.source`** and is discarded the moment those bytes change, so
   a streamed message cannot inherit consent granted to an earlier draft of itself. That is the whole
