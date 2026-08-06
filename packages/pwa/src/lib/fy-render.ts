@@ -735,8 +735,9 @@ function readPng(b: Uint8Array): RasterHeader | null {
  */
 function readJpeg(b: Uint8Array): RasterHeader | null {
   if (!(b[0] === 0xff && b[1] === 0xd8)) return null;
-  // A complete JPEG ends with EOI. Requiring it is the terminal shape that makes
-  // "this file is whole" defensible rather than assumed from a prefix.
+  // A JPEG's terminal record is EOI. Requiring it is what distinguishes a file
+  // that ended from a prefix that merely stopped — not a claim that what lies
+  // between the markers decodes.
   if (b.length < 4 || b[b.length - 2] !== 0xff || b[b.length - 1] !== 0xd9) return null;
   let at = 2;
   let width = 0;
