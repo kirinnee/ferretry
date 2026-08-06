@@ -168,6 +168,15 @@ describe('choosing the carrier', () => {
     ]);
   });
 
+  it('should publish relays without inventing a direct origin when the bind has no dialable one', () => {
+    const source: RelayCarrierSource = {
+      kind: 'configured',
+      config: DaemonRelayConfigSchema.parse({ url: 'https://relay.example' }),
+    };
+
+    should(publishedDaemonCarriers(undefined, [source])).deepEqual([{ kind: 'relay', url: 'https://relay.example' }]);
+  });
+
   it('should refuse the boot when a written-down relay and the advertised one are the same rendezvous', () => {
     // Arrange — both entries are legal on their own and the document schema cannot see the collision:
     // the second entry has no address in it until the directory answers.

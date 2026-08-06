@@ -117,6 +117,7 @@ async function daemon(label: string) {
     daemonId: state.daemonId,
     daemonName: state.daemonName,
     advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+    carriers: [{ kind: 'direct', url: 'https://workstation.example.test' }],
     clock: { now: () => Date.now() },
     cryptography,
     devices: pairingRepository,

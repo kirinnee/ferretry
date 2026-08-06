@@ -258,13 +258,13 @@ function resolveEachRelayCarrier(
   });
 }
 
-/** The direct address and every relay this boot will actually dial, ready for the device wire. */
+/** The publishable direct address, when there is one, and every relay this boot will actually dial. */
 export function publishedDaemonCarriers(
-  directUrl: string,
+  directUrl: string | undefined,
   sources: readonly RelayCarrierSource[],
 ): ReturnType<typeof PublishedCarriersSchema.parse> {
   return PublishedCarriersSchema.parse([
-    { kind: 'direct', url: directUrl },
+    ...(directUrl === undefined ? [] : [{ kind: 'direct' as const, url: directUrl }]),
     ...sources.flatMap(source => {
       const url = dialledRelayUrl(source);
       return url === undefined ? [] : [{ kind: 'relay' as const, url }];
