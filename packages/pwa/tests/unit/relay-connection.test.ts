@@ -116,7 +116,10 @@ describe('a stored pairing registry', () => {
    * A daemon too old to publish a set cannot say where it can be reached, and the stored record from
    * the previous model names only the direct address the pairing arrived on. Refusing that daemon the
    * hosted address as well would take away the path a phone off its network has always used, with no
-   * connection left that could ever teach it back — the refresh needs one and pairing is direct-only.
+   * connection left that could ever teach it back — the refresh needs one, and re-pairing cannot
+   * supply one either: §14's relayed redemption is answered by a pairing session a daemon this old
+   * does not serve. (This comment used to say "pairing is direct-only", which stopped being true when
+   * §14 shipped; the conclusion for THIS daemon did not move.)
    * So the address is offered per DIAL and never written down: nothing here returns a value a reload
    * could inherit, which is what keeps `relayUrl: null` an immediate kill switch.
    */

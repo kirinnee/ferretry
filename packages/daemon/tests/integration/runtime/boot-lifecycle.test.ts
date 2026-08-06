@@ -3877,6 +3877,15 @@ describe('daemon boot lifecycle', () => {
       should(postures[2]).containEql('off.example');
       should(resolvedLines.join('\n')).not.match(/dials no relay|NO other device|nothing off this host can reach/u);
       should(resolvedLines.join('\n')).match(/reachable off this host/u);
+      // THE PAIRING LINE DOES NOT READ THE CARRIER ABOVE IT, and this asserts the declared gap rather
+      // than a capability. This daemon binds loopback, so its advertisement is `local-only`, and it
+      // dials a rendezvous of its own — which `docs/relay-protocol.md` §14 could carry a redemption
+      // over, except that a fresh device cannot DISCOVER a self-hosted rendezvous: the one a browser
+      // finds on its own is the hosted advertisement. So this line reports the address alone and names
+      // no rendezvous, which is honest about reach and UNDER-reports for this document. §13 records it.
+      const pairing = resolvedLines.filter(line => line.startsWith('pairing'));
+      should(pairing).have.length(1);
+      should(pairing[0]).not.containEql(configuredUrl);
 
       advertised = configuredUrl;
       const refusedLines: string[] = [];
@@ -4167,9 +4176,12 @@ describe('daemon boot lifecycle', () => {
       const notice = said.stated.filter(message => /relay|pair/u.test(message));
       should(notice).have.length(4);
       should(notice[0]).match(/^no relay carrier — no relay could be discovered/u);
-      // A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE, and the notice says the whole of it:
-      // pairing is always direct, so this daemon cannot be paired with from another device at all
-      // — a remedy that named only the relay would leave the reader exactly as stuck.
+      // A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE, and the notice says the whole of it: this
+      // daemon cannot be paired with from another device at all — a remedy that named only the relay
+      // would leave the reader exactly as stuck. The CONCLUSION is unchanged and its reason is not: it
+      // used to be "pairing is always direct", which `docs/relay-protocol.md` §14 retired. What holds
+      // is narrower — a device redeems over a rendezvous only through one THIS daemon holds, and this
+      // one holds none, so there is no room the two could meet in either.
       should(notice[1]).match(/bound to 127\.0\.0\.1 and dials no relay/u);
       should(notice[1]).match(/nothing can pair with it either/u);
       should(notice[2]).match(/^to pair: set "host" in/u);

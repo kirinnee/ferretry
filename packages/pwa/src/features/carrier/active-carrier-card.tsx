@@ -43,13 +43,6 @@ export const CARRIER_NO_FALLBACK =
   'network, a VPN, a tailnet, or a public address.';
 
 /**
- * The one thing a relayed connection cannot do, said where the carrier is named.
- *
- * §14 carries one request and one answer per record, so a stream has no envelope.
- * A reader whose live updates have stopped deserves the reason next to the carrier
- * that caused it rather than a screen that simply stops changing.
- */
-/**
  * WHAT A RELAY OPERATOR OBSERVES ABOUT A LIVE STREAM, which is more than about a request.
  *
  * This slot used to say live updates were unavailable over a relay, and that was true when it was

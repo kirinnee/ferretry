@@ -18,7 +18,7 @@ import {
   describeRelayCarrierPosture,
   dialledRelayUrl,
   NO_RELAY_DIRECTORY,
-  PAIRING_IS_ALWAYS_DIRECT,
+  PAIRING_REACH_NOTICE,
   parseRelayAdvertisement,
   publishableDirectCarrier,
   publishedDaemonCarriers,
@@ -383,11 +383,20 @@ describe('what the daemon says about its carrier', () => {
     should(said[2]).match(/switched off in this daemon’s|switched off in this daemon's/u);
   });
 
-  it('should say that pairing is direct wherever a carrier is reported', () => {
-    // Assert — a relayed session is opened with the grant pairing has not issued yet, so a relay
-    // that is up does NOT mean a phone can pair from anywhere. Somebody told otherwise concludes
-    // the product is broken.
-    should(PAIRING_IS_ALWAYS_DIRECT).match(/straight to the daemon/u);
-    should(PAIRING_IS_ALWAYS_DIRECT).match(/VPN|tailnet/u);
+  it('should say what first contact needs, without claiming pairing is always direct', () => {
+    // This assertion used to demand the opposite sentence — "pairing goes straight to the daemon" —
+    // on the reasoning that a relayed session is opened with a grant pairing has not issued yet.
+    // `docs/relay-protocol.md` §14 built a pairing session, so the notice states the CONDITION that
+    // is left: direct first, the dialled relay for a device that cannot reach the address, and the
+    // address as the only way in when nothing is dialled.
+    should(PAIRING_REACH_NOTICE).match(/tries this machine’s own address first/u);
+    should(PAIRING_REACH_NOTICE).match(/VPN|tailnet/u);
+    should(PAIRING_REACH_NOTICE).match(/through Ferretry’s hosted relay/u);
+    // And it does NOT promise a first pairing over a rendezvous the operator runs: a device that has
+    // never paired can discover the hosted advertisement and nothing else. Overclaiming in that
+    // direction would be the same defect as the retired sentence, pointed the other way.
+    should(PAIRING_REACH_NOTICE).match(/cannot yet be found by a device that has never paired/u);
+    // The retired claim, named so a rewording cannot bring it back.
+    should(PAIRING_REACH_NOTICE).not.match(/always/u);
   });
 });

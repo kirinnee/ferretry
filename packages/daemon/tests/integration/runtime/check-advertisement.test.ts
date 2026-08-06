@@ -49,6 +49,21 @@ describe('the pairing advertisement `--check` reports', () => {
     should(lines).deepEqual([`pairing      ${notice.audience}`, `             ! ${notice.remedy}`]);
   });
 
+  it('should name no rendezvous, which is the declared gap rather than the retired claim', () => {
+    // This command reports the ADDRESS's own audience and nothing about a carrier. That used to be
+    // justified by "pairing cannot be relayed", which `docs/relay-protocol.md` §14 retired — a sealed
+    // redemption may cross a rendezvous, and `localOnlyNotice` takes a candidate for that reason, which
+    // `fy pair` passes and this command deliberately does not: a fresh device cannot DISCOVER a
+    // rendezvous the daemon holds, so naming one here is deferred with that discovery (§13).
+    //
+    // Asserted as a shape rather than as copy: what must not drift is that this answer is derived from
+    // the advertisement alone, so a carrier cannot silently start changing a line nothing passes it.
+    const lines = describePairingAdvertisement({ kind: 'local-only', url: 'http://127.0.0.1:7431' });
+    should(lines).deepEqual(describePairingAdvertisement({ kind: 'local-only', url: 'http://127.0.0.1:7431' }));
+    should(lines[0]).containEql(localOnlyNotice('http://127.0.0.1:7431').audience);
+    should(lines[0]).not.match(/wss?:\/\//u);
+  });
+
   it('should report each refusal with the remedy that is true for it', () => {
     // Act + Assert — a wildcard bind and a missing port need different things done about them, and
     // this command must not flatten them back into one sentence.

@@ -74,9 +74,14 @@ describe('the connection chooser', () => {
     const view = await mount(<OnboardingConnectionChooser onChoose={() => {}} fallback={CHECKING_HOSTED_RELAY} />);
 
     // The reader this matters most to is the one whose daemon is behind NAT, who
-    // would otherwise pick the recommended row and connect to nothing.
+    // would otherwise pick the recommended row and connect to nothing. What that
+    // reader needs told has CHANGED: `docs/relay-protocol.md` §14 carries first
+    // pairing and live streams now, so the warning may no longer say pairing is
+    // always direct. The condition that is left is whether the daemon holds a
+    // rendezvous at all.
     const gap = must(view.container.querySelector('[data-onboarding-transport-gap]'), 'the transport gap');
-    expect(gap.textContent).toContain('Pairing itself always goes straight to the daemon');
+    expect(gap.textContent).toContain('dials a relay of its own');
+    expect(gap.textContent).not.toContain('Pairing itself always goes straight to the daemon');
     expect(gap.className).toContain('text-warn');
     // And the disclosure of what the relay would see, folded away.
     const aside = must(view.container.querySelector<HTMLDetailsElement>('details'), 'the disclosure');

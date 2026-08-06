@@ -32,13 +32,15 @@
  * means local builds and forks discover Ferretry's relay too; it is an accepted
  * trade-off documented beside the constant, not a guessed hostname.
  *
- * WHAT IS STILL HONESTLY MISSING, now that both ends dial: not the transport — `fyd`
- * dials a rendezvous and `packages/pwa/src/lib/relay-carrier.ts` arrives at one — but
- * two things a reader has to be told anyway. PAIRING cannot be relayed, because a
- * relayed session is opened with the device grant the pairing exchange has not issued
- * yet. And a relayed connection has no LIVE UPDATES: §14 carries one request and one
- * answer per record. `TRANSPORT_NOT_WIRED_NOTE` says both, on the glass, rather than
- * implying a fallback that is more seamless than it is.
+ * WHAT IS STILL HONESTLY MISSING, now that both ends dial: neither of the two things
+ * this header used to name. It said PAIRING cannot be relayed and a relayed connection
+ * has no LIVE UPDATES, and `docs/relay-protocol.md` §14 has since built both — a
+ * pairing session for first contact, and one stream session per live feed or terminal.
+ * A note that keeps saying otherwise undersells the fallback exactly as badly as
+ * promising seamlessness would oversell it, so `TRANSPORT_NOT_WIRED_NOTE` names the
+ * constraints that are actually left: the daemon has to have published a rendezvous
+ * for an off-network device to reach it at all, and the feature surfaces §13 piece 3
+ * lists still dial the daemon's own address.
  */
 
 import { SocketEndpointSchema } from '@ferretry/relay';
@@ -204,22 +206,27 @@ export const HOSTED_RELAY_ROW_NOTE =
  * written and IS NO LONGER: `relay-carrier.ts` attempts direct first and falls
  * back to a rendezvous automatically.
  *
- * So what it says now is what onboarding actually knows. PAIRING IS ALWAYS
- * DIRECT — a relayed session is opened with the device grant the pairing exchange
- * has not issued yet, which `docs/relay-protocol.md` §13 records — so at the end
- * of setup the carrier in use genuinely is direct, and the relay is what takes
- * over later if this browser moves somewhere the daemon cannot be reached from.
+ * IT THEN SAID `Direct — pairing is always direct`, WHICH IS THE SAME MISTAKE A
+ * THIRD TIME. That claim came from `docs/relay-protocol.md` §13 when pairing had
+ * no relayed path; §14 has since given first contact a session mode of its own,
+ * and `exchangePairing` in `lib/store.tsx` walks direct, then the link's own
+ * rendezvous candidate, then the advertised hosted one. So a redemption that
+ * completed says nothing about which carrier completed it, and a screen that
+ * prints `Direct` is guessing again — just with a sentence that reads as a
+ * protocol rule rather than as the guess it is.
  *
+ * WHAT ONBOARDING HONESTLY KNOWS IS THE ORDER, NOT THE ANSWER: direct is tried
+ * first, and the fallback the reader picked carries it when direct does not work.
  * THE MEASURED ANSWER LIVES ELSEWHERE, deliberately: `ActiveCarrierCard` renders
  * `chooseConnection().reason` for whichever carrier a live session won on. A
- * setup screen cannot report a measurement that has not been taken yet, and
- * guessing one here is the mistake this function has already made twice.
+ * setup screen cannot report a measurement that has not been taken yet.
  */
 export const activeCarrierStatus = (chosen: 'default-relay' | 'own-relay' | 'direct' | undefined): string => {
   const measured = 'Settings › Daemons names the carrier in use, and why, once this daemon is asked for anything.';
-  if (chosen === 'default-relay') return `Direct — pairing is always direct. ${measured}`;
-  if (chosen === 'own-relay') return `Direct — pairing is always direct, including through your own relay. ${measured}`;
-  return `Direct — pairing is always direct. ${measured}`;
+  const order = 'Not measured yet — the daemon is tried directly first';
+  if (chosen === 'default-relay') return `${order}, then the relay. ${measured}`;
+  if (chosen === 'own-relay') return `${order}, then your own relay. ${measured}`;
+  return `${order}. ${measured}`;
 };
 
 /**
@@ -277,21 +284,27 @@ export const OWN_RELAY_DISCLOSURE = [
  * What the fallback does and does not cover, said on the screen rather than only in
  * a review.
  *
- * This note used to say nothing dialled a relay at all. Both ends do now — `fyd`
- * dials a rendezvous and this browser arrives at one — so the honest version names
- * the two real constraints instead: PAIRING itself is always direct, because a
- * relayed session is opened with the grant pairing has not issued yet; and a relayed
- * connection has no live updates, because §14 carries one request and one answer per
- * record and a stream needs an envelope neither end has built.
+ * THE NAME IS LEGACY AND THE TEXT HAS OUTLIVED TWO VERSIONS OF ITSELF. It first said
+ * nothing dialled a relay at all. It then said the two remaining constraints were
+ * that pairing is always direct and that a relayed connection has no live updates.
+ * `docs/relay-protocol.md` §14 has since built a pairing session and one stream
+ * session per live feed or terminal, so BOTH of those sentences are now false, and a
+ * warning that undersells the fallback sends a reader with a NAT'd daemon to fix a
+ * problem they do not have.
  *
- * A step that promised a seamless fallback would be overselling exactly as badly as
- * the old one undersold it.
+ * SO IT NAMES WHAT IS ACTUALLY LEFT, which is narrower and still worth a warning
+ * colour: a relay only helps if the daemon holds one — a daemon that dials none has
+ * to be reachable from here — and the feature surfaces §13 piece 3 lists still build
+ * their requests against the daemon's own address, so they fail on a relayed
+ * connection rather than travelling it. Overselling a seamless fallback would be as
+ * bad as the underselling this replaces.
  */
 export const TRANSPORT_NOT_WIRED_NOTE =
-  'Pairing itself always goes straight to the daemon, so it has to be reachable from here just once — same ' +
-  'network, a VPN, a tailnet, or a public address. After that the relay carries the connection whenever it is ' +
-  'not, with one exception: live updates need a direct connection, so over a relay screens refresh when you ask ' +
-  'them to rather than on their own.';
+  'Pairing tries the daemon directly first and can finish over the relay instead, so a device that has never ' +
+  'been on its network can still pair — as long as the daemon dials a relay of its own. One that dials none ' +
+  'has to be reachable from here: same network, a VPN, a tailnet, or a public address. Live updates and ' +
+  'terminals travel the relay too, each on its own session. Some panels still go straight to the daemon, so ' +
+  'over a relay files, skills, pins, attention, the remote browser and dictation correction are unavailable.';
 
 /**
  * The hosted carrier's cost, in the terms somebody actually cares about.
@@ -308,12 +321,26 @@ export const HOSTED_RELAY_DISCLOSURE = [
   'The hosted relay is metered and capped per daemon, and its operator can switch it off without an app release.',
 ] as const;
 
-/** Said when the switch is off, because "direct only" is a real constraint on the reader. */
+/**
+ * Said when the switch is off, because "direct only" is a real constraint on the reader.
+ *
+ * It says "unless" rather than "so": a daemon that dials a rendezvous of its OWN is unaffected by
+ * this switch, and telling its owner direct is their only carrier would be false in the one direction
+ * that costs them a working connection.
+ */
 export const HOSTED_RELAY_DISABLED_NOTE =
-  'The hosted relay is switched off right now, so direct is the only carrier: this browser has to be able to ' +
-  'reach the daemon itself — same network, a VPN, a tailnet or a public address.';
+  'The hosted relay is switched off right now, so unless your daemon dials a relay of its own, direct is the only ' +
+  'carrier: this browser has to be able to reach the daemon itself — same network, a VPN, a tailnet or a public ' +
+  'address.';
 
-/** Said when the page does not know, which is neither of the other two. */
+/**
+ * Said when the page does not know, which is neither of the other two.
+ *
+ * PAIRING DOES DEPEND ON THIS ANSWER NOW, and the line that said otherwise was written when it could
+ * not: `exchangePairing` walks direct, then the rendezvous named in the link, then the hosted address
+ * this read supplies — so a link that names no rendezvous of its own has no relayed path to pair over
+ * while the advertisement is unknown. Direct pairing is unaffected, which is the part worth keeping.
+ */
 export const HOSTED_RELAY_UNDETERMINED_NOTE =
   'Treat the fallback as unavailable until this page can confirm it. Direct still works whenever the daemon is ' +
-  'reachable, and pairing does not depend on the answer.';
+  'reachable, and pairing over the hosted relay is the one thing that needs this answer.';

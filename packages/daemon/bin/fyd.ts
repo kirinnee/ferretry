@@ -4712,10 +4712,20 @@ export async function printConfiguration(world: DaemonWorld): Promise<number> {
  * WHO COULD REDEEM A CODE THIS DAEMON MINTS, on the command somebody runs when pairing will not work.
  *
  * IT IS THE QUESTION `--check` WAS MISSING. The carrier posture beside it answers "can anything off
- * this machine reach me", and pairing is the one exchange a relay can never carry — so a daemon can
+ * this machine reach me", and this one answers "could anything off it PAIR with me" — so a daemon can
  * report a healthy carrier, a free address and a ready harness while the only thing the owner is
  * trying to do cannot work, for a reason the binary already holds. An advertisement that cannot be
  * handed to another device says so here, hours before a phone is pointed at it.
+ *
+ * THIS LINE NAMES NO RENDEZVOUS, AND THAT IS A DECLARED GAP RATHER THAN THE OLD CLAIM. It used to be
+ * justified by "pairing is the one exchange a relay can never carry", which `docs/relay-protocol.md`
+ * §14 retired: a redemption may cross a rendezvous as a sealed one-attempt exchange. `localOnlyNotice`
+ * already takes an optional candidate for exactly that reason and `fy pair` passes one. This command
+ * deliberately does not, because a fresh device cannot DISCOVER a rendezvous the daemon holds — the
+ * fallback a browser can find on its own is Ferretry's hosted one — so the consequence is stated
+ * rather than dressed up: for a daemon whose only carrier is a rendezvous of its own, this line
+ * UNDER-reports, and it says "no QR is drawn" about a link the hosted path could still carry. Closing
+ * it is deferred with the naming it depends on; §13 records the gap.
  *
  * THE SENTENCES COME FROM THE PROTOCOL, not from this file. `fy pair`, the browser's Add-a-device
  * panel and this command are three renderings of one fact, and a fourth wording invented here is how
@@ -4827,8 +4837,11 @@ export async function checkConfiguration(
       }
     }
   }
-  // Directly beneath the carrier, because the line above has just said pairing cannot use one: this
-  // is the address that has to work on its own, and whether anybody but this machine can dial it.
+  // Directly beneath the carrier, because this is the address that has to work on its own and whether
+  // anybody but this machine can dial it. It does NOT read the carrier above it, and the comment here
+  // used to explain that by saying pairing cannot use one — which §14 retired. The honest version is
+  // the declared gap on `describePairingAdvertisement`: a fresh device cannot discover a rendezvous
+  // this daemon holds, so this line stays the address's own answer and can under-report.
   for (const line of describePairingAdvertisement(config.advertisement)) say(line);
   /**
    * A REFUSED CARRIER SET HAS NO GRANT POSTURE, AND SAYING SO IS THE WHOLE POINT.

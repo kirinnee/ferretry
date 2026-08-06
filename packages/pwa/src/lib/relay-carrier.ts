@@ -691,12 +691,14 @@ export class DaemonCarrierRouter {
    * A STREAM SESSION IS NEVER SHARED BETWEEN TWO CALLERS, and that is the protocol's rule rather than
    * a convenience. §14: "A stream session carries exactly ONE of them: the socket is the session."
    * Handing one session to two subscribers breaks it on its own terms, and the failure is silent in
-   * all three directions a client would care about. `RelayClientSession` takes ONE `onData` at
-   * construction, so a second caller receives no frames at all. `onStreamClosed` ASSIGNS rather than
-   * appends, so a second subscriber overwrites the first and the first is never told the stream
-   * ended — a terminal pane whose `onClosed` never fires sits on `connecting` forever, and an event
-   * subscription whose promise never settles holds a rendezvous session, and a device grant, open
-   * with nobody watching. And either caller's `closeStream` concludes the session for BOTH.
+   * both directions a client would care about. `RelayClientSession` takes ONE `onData` at
+   * construction, so a second caller receives no frames at all. And either caller's `closeStream`
+   * concludes the session for BOTH, so one consumer finishing ends the other's stream under it.
+   *
+   * `onStreamClosed` IS NOT ONE OF THOSE REASONS ANY MORE. It used to ASSIGN, so a second subscriber
+   * overwrote the first and the first was never told the stream ended; it now keeps every listener,
+   * which is what lets the eviction below coexist with the consumer's own watcher. The two reasons
+   * above are enough on their own, and they are the ones this per-call key exists for.
    *
    * So every call opens its own session and the key carries a per-call ordinal to say so. The REQUEST
    * session is still shared, because it genuinely has no per-caller state: its answers are routed by

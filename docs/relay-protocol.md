@@ -451,12 +451,20 @@ worse than disclosing it.
   keystroke timing, which is a stronger disclosure than the request/response case — an observer who
   cannot read a single keystroke can still watch the rhythm of somebody typing.
 - **How many clients** are connected to a daemon, and when each arrived and left.
-- **That a first pairing happened**, when the exchange crosses a relay (§14): a pre-auth session
-  opened for fingerprint X at time T from IP Y and ended seconds later. The exchange itself is
-  outcome-blind — success and refusal each send exactly one sealed record and then the same close —
-  but an authenticated session appearing immediately afterwards lets an operator usually infer that
-  a device got in. Today that event happens on a LAN and is invisible to everybody; over a relay it
-  is a new metadata class, accepted and stated here rather than discovered.
+- **That a first pairing happened, and — from one record's size — how it ended**, when the exchange
+  crosses a relay (§14): a pre-auth session opened for fingerprint X at time T from IP Y and ended
+  seconds later. Success and refusal each send exactly one sealed record and then the same close, so
+  the exchange is uniform in **frame count** and in close code. It is **not** uniform in **size**,
+  and this document used to claim the outcome could not be inferred at all. It can. There is no
+  padding (above), so a record's length is its plaintext's length: a `paired` record embeds the
+  pairing API's whole redemption response — the minted device token and the published carrier set
+  included — while a `pair-refused` record is one short machine reason. The two differ by hundreds of
+  bytes, which is not a subtle side channel but a shape an operator can read directly, and it is
+  disclosed here rather than left to be discovered. What the size does not give up is any of the
+  content: the code, the token, the device name and every other byte of plaintext stay opaque, and a
+  refusal's own cause stays uniform — "no code is active" and "wrong guess" produce the identical
+  record, so the anti-oracle property §14 argues for is untouched. Today this event happens on a LAN
+  and is invisible to everybody; over a relay it is a new metadata class.
 
 The hosted deployment makes a bounded subset of that metadata durable for its operator: per-daemon
 and global request counts, encoded bytes actually forwarded, accepted/refused connection counts,
@@ -465,9 +473,11 @@ byte windows. It does **not** store source IP addresses in that meter, although 
 request logs can observe them as described above. Metrics are behind the operator bearer; the public
 advertisement exposes only `version` and `relayUrl`.
 
-What the operator cannot see: any frame payload, the device token, the pairing code, a pairing
-exchange's outcome, session content, stream content — events, keystrokes, terminal output — command
-output, daemon or device names, or anything about what the fleet is doing.
+What the operator cannot see: any frame payload, the device token, the pairing code, session content,
+stream content — events, keystrokes, terminal output — command output, daemon or device names, or
+anything about what the fleet is doing. A pairing exchange's **outcome** is deliberately not on this
+list any more: nothing about it is readable, and its record size infers it anyway, per the bullet
+above.
 
 A **direct** carrier removes all of the above except what the networks in between can see anyway.
 That is the main reason to prefer it.
@@ -697,8 +707,9 @@ to deploy.
 Ferretry and Cloudflare can observe the daemon fingerprint, IP addresses, connection timing and
 duration, encoded frame counts and sizes, traffic timing, and concurrent connections. When a first
 pairing crosses this relay, that includes the fact that a pre-auth session opened for a fingerprint
-and when, from which IP — never the code, the token, the device name, or whether the exchange
-succeeded, though a device that got in usually announces itself by authenticating seconds later.
+and when, from which IP — never the code, the token or the device name, and never the outcome as
+anything readable, but the outcome IS inferable from the size of the one sealed answer, because
+`paired` carries a whole redemption response and `pair-refused` carries one word (§10).
 When a terminal stream crosses it, frame timing is keystroke timing. The operator meter persists the
 counts, sizes and timing fields described above. Neither party can observe frame payloads, device
 tokens, pairing codes, session content, stream content, commands, output, daemon names or device
@@ -758,7 +769,9 @@ consequence:
 
 #### What it publishes, and when
 
-The set crosses to the device at the one moment guaranteed to be direct: **redemption**. The pairing
+The set crosses to the device at the one moment every device has: **redemption**. That used to read
+"the one moment guaranteed to be direct", and §14 retired the guarantee without weakening the
+argument — see the rest of this paragraph. The pairing
 response carries `carriers`, at most **eight** entries, each one `{ kind: 'direct' | 'relay', url }`,
 in the daemon's own order. It is on the redemption response rather than the mint response because the
 two are read by different parties — the mint response is read by the **host's** own UI, which has the
@@ -882,8 +895,9 @@ The relay, the control plane, the caps and the disclosure text are implemented a
 three §14 session modes are now built on both ends** — requests, live streams, and first pairing —
 so a phone that can never reach a daemon's address can pair with it and then watch it work. What
 remains is listed exactly below and is narrower than it was: an operator still edits the carrier
-list by hand, several browser call sites still dial direct only, and one onboarding screen has not
-caught up with §1.
+list by hand, a fresh device can discover only the hosted rendezvous, several browser call sites still
+dial direct only, no surface renders the session-ceiling refusal §14 requires it to, and one onboarding
+screen has not caught up with §1.
 
 **What proved it, and what that proof does not cover.** A real Google Chrome, holding the link a
 compiled `fy pair` printed, redeems a first-pairing code across a real rendezvous process against a
@@ -1009,6 +1023,30 @@ outstanding:
      envelope exists" is gone with the gap it described. (This list used to name a third shape, the
      byte-shaped dictation routes. Recognition moved into the browser and those routes were deleted,
      so the exclusion list got **shorter**, not longer.)
+   - **A fresh device cannot DISCOVER a rendezvous an operator runs, and naming one to it is
+     deferred.** What a device that has never paired can find for itself is exactly one address: the
+     hosted advertisement above. So the relayed first contact this branch ships is direct-first plus
+     the hosted fallback, and a daemon whose only carrier is a rendezvous of its own is pairable
+     off-LAN only by a link that names it. Two surfaces state the consequence rather than paper over
+     it: `PAIRING_REACH_NOTICE` names the hosted relay instead of "the relay this daemon dials", and
+     `fyd --check`'s `pairing` line reads the advertised address alone — it passes no candidate to
+     `localOnlyNotice`, so for a self-hosted-only daemon it UNDER-reports and still says "no QR is
+     drawn" about a link the hosted path could carry. Closing that is one change, held back with the
+     naming it depends on rather than shipped half-generalised.
+   - **The session-ceiling refusal is not rendered, and one stream does not even retry it.** §14
+     requires a `4429` to be told to the reader in words — "this daemon already has as many relayed
+     sessions as the rendezvous carries" — because somebody with three tabs open did nothing wrong.
+     No surface says it. `DaemonCarrierRouter.openStream` does its half: a rendezvous refusal is
+     thrown with its close code intact rather than treated as a carrier to replace. Above that,
+     `web-terminals.ts` rethrows anything that is not a daemon `stream-refused`, and the deck's
+     `.catch` sends it to the ordinary backoff — so a relayed TERMINAL retries, correctly, but shows
+     `reconnecting` rather than the sentence. The LIVE EVENT stream is worse and is the actual defect
+     in this pair: `App.tsx` subscribes with `.catch(() => undefined)`, so a `4429` there is
+     swallowed whole — no retry, no reason, a feed that silently never opens. Nothing in either
+     endpoint dispatches on `4429` at all; what retries today retries because it treats every
+     non-final failure alike, which is the right behaviour reached without ever reading the code.
+     Until a surface names the ceiling and the event subscription retries it, §14's two sentences
+     about this refusal state the obligation, not the behaviour, and say so where they are written.
    - **Pairing sessions — built.** This document used to state the opposite: that the pairing
      exchange cannot be relayed, because a relayed session is opened with the device grant
      `POST /v1/pair` has not issued yet, and that closing the gap "needs an out-of-band enrolment
@@ -1040,11 +1078,18 @@ outstanding:
      worked, and a daemon reachable only through the relay was reported down by a probe that never
      tried the relay. The feature modules that default their `fetcher` parameter to `browserFetch`
      — the direct network — (`learning-api.ts`, `attention-client.ts`, `pin-client.ts`,
-     `web-terminals.ts`, `remote-browser.ts`, `skills-api.ts`, `files-api.ts`,
+     `remote-browser.ts`, `skills-api.ts`, `files-api.ts`,
      `attachment-source.ts`, `runtime-models.ts`, `stt/*`) are still
      direct-only. They FAIL rather than mislead — a request to an unreachable daemon address is a
      visible error, not a blank screen — but until the fetcher is threaded to them those surfaces
-     are unavailable over a relay. `stt/*` stays on this list on purpose and for the ordinary reason:
+     are unavailable over a relay. **`web-terminals.ts` is off this list**, and naming it here was
+     the stale item this list carried longest: the terminal deck is handed the carrier-aware fetcher
+     by the composition root and its live half is a §14 stream session, so a relayed terminal opens,
+     paints and takes keystrokes. What is left of it is narrower and belongs beside the modules above
+     rather than as a claim about the file: two OTHER callers of `listSessionTerminals` — the
+     composer's `%terminal:` autocomplete and the session surface-references panel — still pass no
+     fetcher, so those two READ-ONLY lists are direct-only while the deck beside them is not.
+     `stt/*` stays on this list on purpose and for the ordinary reason:
      it is now a single text-only route, `POST /v1/stt/enhance`, and
      `packages/pwa/src/lib/stt/remote-enhancement.ts` still defaults its `fetchImpl` to the global
      `fetch`. Threading the carrier-aware fetcher to it is a small, self-contained change and the only
@@ -1065,8 +1110,9 @@ is where it is corrected.
 **Deploying a relay now gets you the whole journey**: first pairing for a device that has never
 reached the daemon directly, every request/response route afterwards, and the live event and
 terminal streams that make the phone worth opening twice. What it does not get you is the feature
-surfaces listed in piece 3 above, which fail visibly rather than misleading, and a carrier list an
-operator can edit with a command.
+surfaces listed in piece 3 above — which fail visibly rather than misleading, with one stated
+exception: a live event feed refused `4429` is swallowed, and that one fails silently until the gap
+above is closed — and a carrier list an operator can edit with a command.
 The kill switch does not wait on any of it: `relayUrl: null` is enforced by this Worker at admission
 and on the live sweep, so disabling the hosted relay stops traffic regardless of what any client
 believes.
@@ -1122,8 +1168,13 @@ window is the one an internet stranger can hold open against a public fingerprin
 credential record has not arrived within **10 seconds** of its handshake completing is ended
 (`4400`), and at most **2** sessions per link may be awaiting one at a time — one arrival plus one
 overlapping retry — with a further arrival refused (`4429`) until a slot frees. A client that opens
-several sessions at once must therefore treat that refusal as retryable rather than fatal. Both
-numbers are initial configuration, not protocol constants, in the same spirit as §13's ceilings.
+several sessions at once must therefore treat that refusal as retryable rather than fatal. **That is
+a requirement, and the reference client meets it only by accident**: nothing in it reads `4429`, and
+what recovers does so because it retries every failure that is not a daemon's own final verdict — so
+the pairing walk advances and a terminal reattaches, while the live event subscription swallows the
+refusal and never opens. §13 records that gap; do not read this paragraph as a description of shipped
+behaviour. Both numbers are initial configuration, not protocol constants, in the same spirit as
+§13's ceilings.
 
 One ordering rule holds across every mode: **nothing follows the credential record until the
 daemon's sealed acceptance has arrived.** The credential record already carries everything its mode
@@ -1361,7 +1412,11 @@ attaches only the active terminal in a deck — which is **3 of the 8 sessions**
 a third tab on the same daemon exceeds the ceiling and is refused `4429`. That refusal must be
 **rendered with its reason** — "this daemon already has as many relayed sessions as the rendezvous
 carries" — rather than surfacing as a stream that never opens, because a person with three tabs open
-did nothing wrong and can act on the sentence. Every session open is also a socket arrival against
+did nothing wrong and can act on the sentence. **No surface renders it yet**, and this sentence is
+therefore the obligation rather than a report: the client half that exists is `openStream` throwing
+the close code intact instead of demoting the carrier, and §13 carries the rest as an outstanding
+gap, including the live event feed that swallows the refusal entirely. Every session open is also a
+socket arrival against
 §9's 30-per-minute admission (shared with the daemon's own redial), and a hosted daemon holds at
 most 16 concurrent sockets (§13); a reconnect loop backing off to a 15-second cap costs about four
 arrivals a minute per stream, so the budgets hold — but they are budgets, not slack.
@@ -1434,6 +1489,13 @@ device that paired reconnects as an ordinary request session with the token it w
   comparison the direct route runs against a dummy code, and refuses identically. An observer —
   relay operator included — cannot distinguish "no code exists" from "wrong guess", and success and
   refusal have the **same frame count**: one sealed record, then the same close.
+- **Uniform is not indistinguishable, and the difference is stated rather than glossed.** The frame
+  count, the close code and the refusal's own wording are uniform; the record **size** is not, and
+  §3 pads nothing. `paired` embeds a whole redemption response and `pair-refused` embeds one machine
+  reason, so a relay operator reading one length infers the outcome — not the code, not the token,
+  not the device name, and not which refusal it was, but the outcome. §10 owns that disclosure. The
+  uniformity above is what denies the **guesser** an oracle, which is the property this exchange
+  needs; denying the **carrier** the outcome would take padding this version does not have.
 
 **How it stays closed.** Three rules carry the security argument, and they are contract:
 
@@ -1515,8 +1577,9 @@ stopped new codes from existing — with nothing minted there is nothing to rede
 
 **What a relay operator sees of a pairing** is §10's list, with the parts specific to this exchange
 restated once: a pre-auth session for fingerprint X at time T from IP Y, a handshake, one sealed
-record each way, a `4440` close — and never the code, the token, the device name, or the outcome,
-though a success usually announces itself when an authenticated session follows. "Fingerprint X
+record each way, a `4440` close — never the code, the token or the device name, and never the outcome
+as anything it can read, but the sealed answer's SIZE infers the outcome and this document says so
+rather than claiming the exchange is outcome-blind. "Fingerprint X
 gained its first device at T, from Y" is a new operator-visible event that used to happen invisibly
 on a LAN; this design accepts that disclosure as the price of a phone that can pair from anywhere,
 and says so.

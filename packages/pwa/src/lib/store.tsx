@@ -409,10 +409,18 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const fetcher = options.fetcher ?? browserFetch;
   // Every DAEMON-BOUND call goes through the carrier router; the two that are not
   // bound to a paired daemon — the pairing exchange and the relay advertisement —
-  // keep the raw fetcher on purpose. Pairing especially: a relayed session is opened
-  // with the device grant pairing has not issued yet, so it cannot be relayed, and
-  // routing a RE-pair through an existing session would exchange a fresh code under
-  // the credential it is replacing.
+  // keep the raw fetcher on purpose.
+  //
+  // PAIRING KEEPS IT BECAUSE ITS RELAYED PATH IS NOT A ROUTED REQUEST, and this
+  // comment used to say the opposite: that a relayed session is opened with the grant
+  // pairing has not issued yet, "so it cannot be relayed". §14 built a pairing
+  // session and `exchangePairing` below walks one — in the same file that claimed it
+  // could not. What is true is narrower: a redemption cannot travel the ROUTER,
+  // because the router's sessions are opened with a device token this exchange is
+  // what mints. So the direct leg takes the raw fetcher and the relayed leg is
+  // `redeemPairingOverRelay`'s own sealed pre-auth session, dialled without it.
+  // Routing a RE-pair through an existing session would also exchange a fresh code
+  // under the credential it is replacing.
   const readDefaultRelay = async (): Promise<HostedRelayFallback> =>
     // The directory origin is the build constant and nothing else: no literal, no
     // relative path, no guess. Unset ships no directory and answers without
