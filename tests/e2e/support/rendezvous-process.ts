@@ -85,6 +85,28 @@ import {
 /** What the harness control plane may address. Anything else is the relay's own surface. */
 const HARNESS_PREFIX = '/__harness/';
 
+/**
+ * Every arrival this rendezvous has seen, by role and fingerprint, admitted or refused.
+ *
+ * DURABLE on purpose, and both halves of that matter.
+ *
+ * The DAEMON side is how the harness learns which daemon it just booted. Grepping the daemon's boot
+ * trail for its "dialling the relay" line races: the trail is written after the HTTP listener opens,
+ * so a readiness poll can return, and the daemon be stopped, before that line exists. On a loaded
+ * machine that reads as "the daemon minted no relay identity" when it minted one and had not yet
+ * said so.
+ *
+ * The CLIENT side is how the harness proves a pairing crossed this relay. A live-socket census
+ * cannot: a §14 pairing session is one attempt and the daemon closes it with `4440` the instant the
+ * sealed outcome is sent, so by the time anything polls, the socket a successful pairing used is
+ * already gone. Asking "is a client connected" would therefore report the same emptiness for a
+ * pairing that worked and one that never happened.
+ *
+ * A refused arrival counts. An unlisted fingerprint gets a 404 and never becomes a socket, but the
+ * rendezvous still saw who asked — which is exactly the fact needed to then allow it.
+ */
+const arrivals: { readonly role: 'daemon' | 'client'; readonly daemonId: string }[] = [];
+
 interface ObservedFrame {
   readonly at: number;
   readonly direction: 'to-rendezvous' | 'from-rendezvous';
@@ -368,6 +390,7 @@ function harnessResponse(pathname: string, request: Request): Promise<Response> 
       return Response.json({ ok: true, allowed: allowedDaemonIds.split(/[\s,]+/u).filter(Boolean).length });
     });
   }
+  if (pathname === `${HARNESS_PREFIX}arrivals`) return Response.json({ arrivals });
   if (pathname === `${HARNESS_PREFIX}sockets`) {
     const rows = [...rendezvousByName.entries()].map(([name, entry]) => ({
       rendezvous: name,
@@ -388,6 +411,7 @@ const server = Bun.serve({
     if (url.pathname.startsWith(HARNESS_PREFIX)) return harnessResponse(url.pathname, request);
 
     const route = parseRendezvousPath(url.pathname);
+    if (route !== null) arrivals.push({ role: route.role, daemonId: route.daemonId });
     return serialise(async () => {
       upgrading.length = 0;
       const response = await relayFetch(request, environment, runtime);

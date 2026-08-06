@@ -93,6 +93,16 @@ export interface RendezvousProcess {
   allow(daemonId: string): Promise<void>;
   /** What the rendezvous is holding right now, by role. The honest "the daemon has claimed it". */
   sockets(): Promise<readonly { readonly rendezvous: string; readonly roles: readonly string[] }[]>;
+  /**
+   * Every arrival this rendezvous has seen, in order, admitted or refused.
+   *
+   * Durable rather than a live census: a §14 pairing session closes with `4440` the moment its
+   * sealed outcome is sent, so polling for a connected client reports the same emptiness whether
+   * the pairing crossed this relay or never happened.
+   */
+  arrivals(): Promise<readonly { readonly role: 'daemon' | 'client'; readonly daemonId: string }[]>;
+  /** The daemon half of {@link arrivals} — how the harness learns this run's fingerprint. */
+  dialled(): Promise<readonly string[]>;
   /** Every frame this rendezvous handled, in both directions, in order. */
   observations(): Promise<readonly ObservedFrame[]>;
   stop(): Promise<void>;
@@ -165,6 +175,15 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
       };
       return body.rendezvous;
     },
+    arrivals: async () => {
+      const response = await fetch(`${httpOrigin}/__harness/arrivals`);
+      return ((await response.json()) as { arrivals: { role: 'daemon' | 'client'; daemonId: string }[] }).arrivals;
+    },
+    dialled: async () => {
+      const response = await fetch(`${httpOrigin}/__harness/arrivals`);
+      const body = (await response.json()) as { arrivals: { role: 'daemon' | 'client'; daemonId: string }[] };
+      return body.arrivals.filter(entry => entry.role === 'daemon').map(entry => entry.daemonId);
+    },
     observations: async () => {
       const content = await readFile(observationsPath, 'utf8');
       if (content.trim() === '') return [];
@@ -185,6 +204,37 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
  * resolves and would be a false ready. So the honest signal is the rendezvous' own: it is holding a
  * socket in the `daemon` role for this fingerprint.
  */
+/**
+ * Wait for the daemon to say who it is, by dialling.
+ *
+ * The fingerprint has to be known before the rendezvous will admit it, and the daemon is the only
+ * party that has one. Asking the rendezvous who knocked is race-free; reading the daemon's own boot
+ * trail is not, because that line is written after its HTTP listener opens and a readiness poll can
+ * therefore return first.
+ */
+export async function waitForDaemonFingerprint(
+  rendezvous: RendezvousProcess,
+  /**
+   * Fingerprints already seen, which must not be mistaken for this daemon's.
+   *
+   * The journey probes the rendezvous with a SYNTHETIC fingerprint first, to prove an unlisted one
+   * is refused — and that probe is a dial like any other. Taking the first entry returned a
+   * fingerprint no daemon has, which then got allowlisted, and the real daemon was refused for
+   * twenty seconds while the report blamed the daemon.
+   */
+  alreadySeen: readonly string[] = [],
+  timeoutMs = 20_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const seen = await rendezvous.dialled().catch(() => []);
+    const fresh = seen.find(candidate => !alreadySeen.includes(candidate));
+    if (fresh !== undefined) return fresh;
+    await Bun.sleep(100);
+  }
+  throw new Error(`no daemon dialled the rendezvous within ${String(timeoutMs)}ms`);
+}
+
 export async function waitForDaemonAtRendezvous(rendezvous: RendezvousProcess, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let seen = 'nothing';
@@ -604,6 +654,34 @@ export async function removeIfPresent(path: string): Promise<void> {
 export async function attributeNow(page: BrowserPage, selector: string, name: string): Promise<string | null> {
   return page.evaluate<string | null>(
     `document.querySelector(${JSON.stringify(selector)})?.getAttribute(${JSON.stringify(name)}) ?? null`,
+  );
+}
+
+/**
+ * Click the first of several candidate selectors that is actually on the page.
+ *
+ * One hard-coded selector for "the primary button" is a guess about somebody else's markup, and
+ * when the guess is wrong the failure reads as "the app ignored a click" rather than "the harness
+ * clicked nothing". This tries the NAMED contracts first and structural fallbacks after, and
+ * returns which one matched so the evidence line records what was actually pressed.
+ */
+export async function clickFirstPresent(page: BrowserPage, selectors: readonly string[]): Promise<string | null> {
+  for (const selector of selectors) {
+    const present = await page.evaluate<boolean>(`document.querySelector(${JSON.stringify(selector)}) !== null`);
+    if (!present) continue;
+    await page.click(selector, { timeout: 10_000 });
+    return selector;
+  }
+  return null;
+}
+
+/** Every control the page is offering, so "no selector matched" can name what was there instead. */
+export async function describeControls(page: BrowserPage, scope: string): Promise<string> {
+  return page.evaluate<string>(
+    `[...(document.querySelector(${JSON.stringify(scope)}) ?? document).querySelectorAll('button, [role="button"], a[href]')]
+       .map(node => node.tagName.toLowerCase() + '[' + [...node.attributes].map(attribute => attribute.name + (attribute.value === '' ? '' : '=' + attribute.value.slice(0, 24))).join(' ') + ']: ' + (node.textContent ?? '').trim().slice(0, 40))
+       .slice(0, 12)
+       .join(' | ')`,
   );
 }
 

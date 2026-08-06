@@ -56,6 +56,8 @@ import {
   attributeNow,
   buildPwaBundle,
   chromeExecutable,
+  clickFirstPresent,
+  describeControls,
   deviceTokenForLeakSearchOnly,
   harnessTeardown,
   launchChrome,
@@ -64,10 +66,12 @@ import {
   renderedDataAttributes,
   startDirectSinkhole,
   startPwaOrigin,
+  type RendezvousProcess,
   startRendezvous,
   stepLedger,
   type StepLedger,
   waitForDaemonAtRendezvous,
+  waitForDaemonFingerprint,
 } from './support/relay-harness.ts';
 
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../..');
@@ -123,25 +127,57 @@ const FINGERPRINT = /fy_daemon_[A-Za-z0-9_-]{43}/u;
 const PAIRING_LINK = /https?:\/\/\S*#v\d;\S+/u;
 
 /**
+ * How the reader says yes, in order of how much the app has promised about each.
+ *
+ * A pairing arrival is a CONFIRMATION screen, not an automatic redemption — the reader is being
+ * asked which machine they are pairing with, which is deliberate and must not be scaffolded around.
+ * So the harness has to press something, and pressing the wrong thing looks identical to an app
+ * that ignored the click.
+ *
+ * Every candidate here names the PRIMARY action specifically. A bare `button` fallback was tried and
+ * removed: the pairing frame is embedded in the setup shell, so it matched a navigation control, the
+ * flow advanced to the setup summary, and the report said the pairing screen had vanished — a
+ * harness defect wearing a product defect's clothes. Failing loudly with the list of controls the
+ * screen offers is worth more than a click that lands somewhere.
+ */
+const CONFIRM_CONTROLS: readonly string[] = [
+  '[data-pair-confirm]',
+  // "Pair this device" — `pairing-screen.tsx`'s confirm action, which carries the design system's
+  // `primary` variant and no test attribute of its own yet.
+  '[data-pairing-stage="confirm"] button[data-variant="primary"]',
+  '[data-pairing-stage="confirm"] button[type="submit"]',
+];
+
+/**
  * A token this run invented, so an absence assertion has something to be absent.
  *
- * "The device name never reaches the relay" is unfalsifiable against a name like `Chrome` — the
- * string is too common for a search over binary frames to mean anything, and a false negative would
- * read as a passing privacy assertion. A per-run marker makes every hit real and every miss real.
+ * "The event payload never reaches the relay" is unfalsifiable against ordinary words: they are too
+ * common for a search over binary frames to mean anything, and a false negative reads as a passing
+ * privacy assertion. A per-run marker makes every hit real and every miss real. It is used only
+ * where the harness genuinely chooses the value — never to dress up a value the product fixes; see
+ * {@link PAIRED_DEVICE_NAME}.
  */
 function runMarker(kind: string): string {
   return `FyE2e${kind}${Math.trunc(Math.random() * 1e12).toString(36)}`;
 }
 
 /**
- * A user agent whose device-name substring is unique to this run.
+ * What the browser calls itself when it redeems, and why it is a LITERAL here.
  *
- * Shaped like a real Chrome agent because the app reads it to decide whether it is on a phone, and
- * a nonsense agent would silently take a different journey through the setup flow than a person's.
+ * `packages/pwa/src/lib/store.tsx` sends the constant `Ferretry PWA`. It does not derive a name
+ * from the user agent, so making the agent unique and then searching the relay's frames for that
+ * marker would assert the absence of a string nothing ever sent — a privacy check that passes
+ * because it tests nothing. Searching for the real value is the only version of this assertion that
+ * can fail, and the product is deliberately not changed to make it prettier: a test-only seam that
+ * made the device name unique would be a seam shipped for a test.
+ *
+ * Twelve bytes is short, but this is a search over ciphertext for an exact byte run — a false
+ * positive would be a coincidence at roughly one in 2^96, and a real hit would be a real leak.
  */
-function markedUserAgent(marker: string): string {
-  return `Mozilla/5.0 (X11; Linux x86_64; ${marker}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36`;
-}
+const PAIRED_DEVICE_NAME = 'Ferretry PWA';
+
+/** Where the daemon lists the devices it has paired. Names, never tokens, never digests. */
+const PAIRED_DEVICES_PATH = '/v1/pair/devices';
 
 /**
  * The daemon-side command that must produce a live event.
@@ -181,7 +217,10 @@ const STEPS: readonly LedgerStep[] = [
     id: 'browser-paired-over-relay',
     claim: 'the pairing screen reports paired, and the rendezvous carried a client session',
   },
-  { id: 'pairing-persisted', claim: 'the browser recorded a pairing without the harness reading a credential' },
+  {
+    id: 'pairing-persisted',
+    claim: 'both ends recorded the pairing, and the daemon names the device, without reading a credential',
+  },
   { id: 'authenticated-relay-session', claim: 'the session that followed pairing won on the relay carrier' },
   { id: 'live-stream-rendered', claim: 'a real daemon event reached Chrome and changed the product' },
   { id: 'relay-read-nothing', claim: 'no code, token, device name or payload appears in any relay-observable frame' },
@@ -218,18 +257,24 @@ function fragmentField(fragment: string, name: string): string | undefined {
  * self-hosted rendezvous worth running, and a harness that switched it off would not notice it
  * breaking.
  */
-async function bootAndLearnFingerprint(environment: E2eEnvironment, configPath: string): Promise<string> {
-  const daemonBin = compiledDaemon();
+async function bootAndLearnFingerprint(
+  environment: E2eEnvironment,
+  configPath: string,
+  rendezvous: RendezvousProcess,
+): Promise<string> {
+  const before = await rendezvous.dialled();
   await environment.startDaemon({
-    command: [daemonBin, '--config', configPath],
+    command: [compiledDaemon(), '--config', configPath],
     readyUrl: environment.httpUrl('/v1/health'),
     timeoutMs: 30_000,
   });
-  const stopped = await environment.stopDaemon();
-  const trail = `${stopped?.err ?? ''}${stopped?.out ?? ''}`;
-  const found = FINGERPRINT.exec(trail);
-  if (found === null) throw new Error(`the daemon boot trail never named a relay fingerprint:\n${trail}`);
-  return found[0];
+  // Wait for the DIAL, not for the listener. `/v1/health` answering means the HTTP surface is up;
+  // the relay identity is announced afterwards, so stopping at readiness raced the announcement and
+  // reported a daemon with no relay identity on a loaded machine.
+  const fingerprint = await waitForDaemonFingerprint(rendezvous, before);
+  await environment.stopDaemon();
+  if (!FINGERPRINT.test(fingerprint)) throw new Error(`the rendezvous saw a malformed fingerprint: ${fingerprint}`);
+  return fingerprint;
 }
 
 describe('a real browser, a compiled daemon and a real relay', () => {
@@ -257,7 +302,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           }),
           'utf8',
         );
-        const fingerprint = await bootAndLearnFingerprint(environment, configPath);
+        const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous);
         await rendezvous.allow(fingerprint);
         await environment.startDaemon({
           command: [compiledDaemon(), '--config', configPath],
@@ -301,7 +346,6 @@ describe('a real browser, a compiled daemon and a real relay', () => {
     const teardown = harnessTeardown();
     const ledger: StepLedger = stepLedger(STEPS);
     await writeFile(REPORT_PATH, '', 'utf8');
-    const deviceMarker = runMarker('Device');
     const eventMarker = runMarker('Event');
     let journeyError: unknown;
 
@@ -348,7 +392,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           'utf8',
         );
 
-        const fingerprint = await bootAndLearnFingerprint(environment, configPath).catch((error: unknown) =>
+        const fingerprint = await bootAndLearnFingerprint(environment, configPath, rendezvous).catch((error: unknown) =>
           ledger.fail('daemon-fingerprint', String(error)),
         );
         ledger.prove('daemon-fingerprint', `the compiled daemon minted ${fingerprint}`);
@@ -379,17 +423,22 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           `${sinkhole.origin} accepted ${String(sinkhole.attempts())} connection(s) and answered none`,
         );
 
-        // Act — mint a code on the host, then hand its fragment to a real browser.
+        /**
+         * ONE command, and the browser redeems the credential THAT command printed.
+         *
+         * The link is scraped from the compiled CLI's own screen and handed to Chrome unchanged. It
+         * is deliberately not re-minted through the daemon's HTTP pairing-code route: a second mint
+         * is a second code, and the journey would then prove that *a* credential can be redeemed
+         * rather than that the one an operator was actually shown is the one that works. It also
+         * keeps the host-rendered screen on the critical path — which is where a v1-only fragment
+         * reader was caught, in a build where every other half was already correct.
+         */
         const minted = await environment.runFy(['pair', '--no-wait'], { FY_URL: environment.httpUrl() });
         const link = PAIRING_LINK.exec(`${minted.out}\n${minted.err}`)?.[0];
         if (link === undefined) {
-          // A separate step from "the link names the relay", because these fail in different
-          // packages. `fy pair` printing NOTHING is the host's own screen being broken — the
-          // operator gets no QR, no link and no code — and reporting that as a relay-addressing
-          // problem sends the reader to the wrong file.
           ledger.fail(
             'pairing-link-minted',
-            `\`fy pair --no-wait\` printed no link (exit ${String(minted.code)}):\n${minted.err.trim()}`,
+            `\`fy pair --no-wait\` printed no link (exit ${String(minted.code)}): ${minted.err.trim()}`,
           );
         }
         ledger.prove('pairing-link-minted', 'the compiled CLI rendered a pairing link on the host screen');
@@ -406,7 +455,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * carrier the answer will take. Checking the app first means a screen defect and a mint
          * defect cannot hide behind one another, and each unit sees its own gap named.
          */
-        const browser = await launchChrome(teardown, { userAgent: markedUserAgent(deviceMarker) });
+        const browser = await launchChrome(teardown);
         await browser.page.goto(pairUrl, { waitUntil: 'networkidle', timeout: 30_000 });
         const stage = await browser.page
           .waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 })
@@ -455,13 +504,29 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         );
 
         const directBefore = sinkhole.attempts();
-        await browser.page.click('[data-pairing-stage="confirm"] button[type="submit"], [data-pair-confirm]', {
-          timeout: 10_000,
-        });
-        const paired = await browser.page
-          .waitForSelector('[data-pairing-stage="paired"]', { timeout: 45_000 })
-          .then(() => true)
-          .catch(() => false);
+        const pressed = await clickFirstPresent(browser.page, CONFIRM_CONTROLS);
+        if (pressed === null) {
+          ledger.fail(
+            'browser-paired-over-relay',
+            `nothing on the confirm screen matched a primary action. It offers: ${await describeControls(browser.page, '[data-pairing-stage]')}`,
+          );
+        }
+        /**
+         * The screen settles either by SAYING paired or by leaving.
+         *
+         * `data-pairing-stage="paired"` is the standalone screen's resting state, but this arrival
+         * renders EMBEDDED in the setup shell, and a successful pairing lets that shell advance to
+         * its own summary — so the pairing frame unmounts and the attribute disappears. Waiting only
+         * for `paired` therefore times out on the success path. Which of the two happened is settled
+         * below by state the screen does not own: the daemon's device list, the browser's registry
+         * mirror, and the rendezvous' record of who arrived.
+         */
+        const paired = await Promise.race([
+          browser.page.waitForSelector('[data-pairing-stage="paired"]', { timeout: 45_000 }).then(() => 'paired'),
+          browser.page
+            .waitForSelector('[data-pairing-stage]', { state: 'detached', timeout: 45_000 })
+            .then(() => 'unmounted'),
+        ]).catch(() => 'stuck');
 
         if (sinkhole.attempts() <= directBefore) {
           ledger.fail(
@@ -474,23 +539,69 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           `Chrome opened ${String(sinkhole.attempts() - directBefore)} connection(s) to ${sinkhole.origin} and none answered`,
         );
 
-        if (!paired) {
+        if (paired === 'stuck') {
+          // Still on the pairing frame after 45 seconds. `failed` and a frozen `pairing` are
+          // different defects, and the URL plus the surviving attributes separate them at a glance.
           const failure = await attributeNow(browser.page, '[data-pairing-stage]', 'data-pairing-failure');
+          const where = await browser.page.evaluate<string>('location.href');
           ledger.fail(
             'browser-paired-over-relay',
             `the pairing screen reported ${String(await attributeNow(browser.page, '[data-pairing-stage]', 'data-pairing-stage'))}` +
-              ` (failure=${String(failure)}); page errors: ${browser.pageErrors.join(' | ') || 'none'}`,
+              ` (failure=${String(failure)}) after pressing ${String(pressed)}, at ${where}.` +
+              ` The page now renders: ${await renderedDataAttributes(browser.page)}.` +
+              ` Page errors: ${browser.pageErrors.join(' | ') || 'none'}`,
           );
         }
-        const clientSeen = (await rendezvous.sockets()).some(row => row.roles.includes('client'));
+
+        /**
+         * THE CLAIM THIS STEP EXISTS FOR: the pairing crossed THIS relay.
+         *
+         * Asserted, not merely reported. A browser that somehow reached the daemon another way
+         * would satisfy every screen assertion above and none of this one — and since the direct
+         * address is a sinkhole, a client arrival at the rendezvous is the only route left.
+         */
+        const clientArrivals = (await rendezvous.arrivals()).filter(
+          entry => entry.role === 'client' && entry.daemonId === fingerprint,
+        );
+        if (clientArrivals.length === 0) {
+          ledger.fail(
+            'browser-paired-over-relay',
+            `the screen settled (${paired}) but no client ever arrived at the rendezvous for ${fingerprint}, so nothing crossed the relay`,
+          );
+        }
         ledger.prove(
           'browser-paired-over-relay',
-          `data-pairing-stage="paired"; rendezvous carried a client session: ${String(clientSeen)}`,
+          `the pairing screen settled (${paired}) and the rendezvous carried ${String(clientArrivals.length)} client session(s) for ${fingerprint}`,
         );
 
+        /**
+         * Both ends recorded the pairing, and neither assertion reads a credential.
+         *
+         * The browser side is `fy-has-pairings-v1`, a deliberately content-free mirror of "the
+         * registry is non-empty" that exists so a surface can know a pairing happened without
+         * touching a token. The daemon side is its own device list, which returns names and never a
+         * token or a digest — and it is what makes the leak search below meaningful: it establishes
+         * that `Ferretry PWA` is the name that actually crossed, so asserting its absence from the
+         * relay's frames is a claim about a value the exchange really carried.
+         */
         const persisted = await browser.page.evaluate<string | null>("localStorage.getItem('fy-has-pairings-v1')");
         if (persisted !== '1') ledger.fail('pairing-persisted', `fy-has-pairings-v1 is ${String(persisted)}, not "1"`);
-        ledger.prove('pairing-persisted', 'localStorage fy-has-pairings-v1 === "1", with no credential read');
+
+        const token = (await readFile(join(environment.paths.fyHome, 'api-token'), 'utf8')).trim();
+        const listed = await fetch(environment.httpUrl(PAIRED_DEVICES_PATH), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const devices = JSON.stringify(await listed.json());
+        if (!devices.includes(PAIRED_DEVICE_NAME)) {
+          ledger.fail(
+            'pairing-persisted',
+            `the daemon lists no device named ${PAIRED_DEVICE_NAME} after a successful pairing: ${devices.slice(0, 400)}`,
+          );
+        }
+        ledger.prove(
+          'pairing-persisted',
+          `localStorage fy-has-pairings-v1 === "1" and the daemon recorded a device named ${PAIRED_DEVICE_NAME}, with no credential read on either side`,
+        );
 
         await browser.page.goto(`${origin.origin}/app/#/settings/daemons`, {
           waitUntil: 'networkidle',
@@ -543,7 +654,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const leaks = plaintextLeaks(await rendezvous.observations(), {
           'the pairing code': code,
           'the minted device token': deviceToken,
-          'the device name marker': deviceMarker,
+          'the device name the browser sent': PAIRED_DEVICE_NAME,
           'the live event payload marker': eventMarker,
         });
         if (leaks.length !== 0) ledger.fail('relay-read-nothing', leaks.join('; '));
@@ -551,6 +662,13 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           'relay-read-nothing',
           'the pairing code, the minted device token, the device name and the live event payload are all absent from every relay-observable frame',
         );
+
+        // A noted step does not abort, so the journey can reach here with one still unproven. It is
+        // not green until every step is.
+        const outstanding = ledger.firstUnproven();
+        if (outstanding !== undefined) {
+          throw new Error(`UNPROVEN ${outstanding.id} — ${outstanding.claim}`);
+        }
       });
     } catch (error) {
       journeyError = error;
