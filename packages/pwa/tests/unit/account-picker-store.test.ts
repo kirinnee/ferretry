@@ -23,7 +23,7 @@ const laptopOverRelay = daemonConnection({
   daemonId: 'daemon/laptop',
   baseUrl: 'https://laptop.example.test',
   deviceToken: 'token-laptop',
-  relay: HOSTED_RELAY,
+  carriers: [{ kind: 'direct', daemonUrl: 'https://laptop.example.test' }, HOSTED_RELAY],
 });
 
 const catalog = (wrapper: string): AccountPickerCatalog => ({
@@ -178,12 +178,12 @@ describe('DaemonAccountPickerStore', () => {
     const store = new DaemonAccountPickerStore({
       catalog: async daemon => {
         catalogCalls += 1;
-        carriers.push(daemon.relay?.relayUrl);
+        carriers.push(daemon.carriers.find(carrier => carrier.kind === 'relay')?.relayUrl);
         return catalog('claude-auto-laptop');
       },
       health: async daemon => {
         healthCalls += 1;
-        carriers.push(daemon.relay?.relayUrl);
+        carriers.push(daemon.carriers.find(carrier => carrier.kind === 'relay')?.relayUrl);
         return healthy;
       },
     });

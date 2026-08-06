@@ -3797,6 +3797,7 @@ function Shell() {
                 daemonId: 'archive-daemon' as typeof daemon.daemonId,
                 baseUrl: 'https://archive.invalid',
                 deviceToken: 'harness-archive-token',
+                carriers: [{ kind: 'direct', daemonUrl: 'https://archive.invalid' }],
                 label: 'Archive daemon',
                 pairedAt: HARNESS_NOW - 7_200_000,
                 lastSelectedAt: HARNESS_NOW - 1_800_000,

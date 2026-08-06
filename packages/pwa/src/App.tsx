@@ -54,7 +54,7 @@ import {
 import { useServiceWorkerUpdate } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
-import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import type {
   NotificationPermissionState,
@@ -719,7 +719,11 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       }}
       onAddDaemon={() => navigate(connectionPickerPath())}
       carrier={carrier}
-      relayAdvertised={connection.relay !== undefined}
+      // Read through `daemonCarriers`, which is the set the router will actually dial. A pairing
+      // whose fingerprint this protocol cannot address has its relays stripped before a single
+      // attempt, so the cached set alone would advertise a fallback that can never be tried — and
+      // would hide "there is no relay to fall back on" from the one reader it is written for.
+      relayAdvertised={daemonCarriers(connection).some(method => method.kind === 'relay')}
       notifications={
         <NotificationSettingsView
           permission={notifications.permission}

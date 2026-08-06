@@ -38,8 +38,9 @@ import {
   isTextEntryTarget,
   routeAnnouncement,
 } from '../../src/App.tsx';
+import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
-import { type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
@@ -56,6 +57,32 @@ const beta = daemonConnection({
   daemonId: 'beta',
   baseUrl: 'https://beta.example.test',
   deviceToken: 'beta-token',
+});
+const GAMMA_ID = `fy_daemon_${'g'.repeat(43)}`;
+const GAMMA_TOKEN = `fy_device_${'t'.repeat(43)}`;
+const GAMMA_FRAGMENT = `v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=${GAMMA_ID}`;
+
+const HOSTED_RELAY = { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' } as const;
+
+/**
+ * The same published carrier set under two daemon identities.
+ *
+ * `alpha` is not a fingerprint this protocol can address, so `daemonCarriers`
+ * strips its relay and the router never dials one; `gamma` is, so its relay is a
+ * real fallback. Everything else about the two pairings is identical, which is
+ * what makes them a pair of fixtures rather than two unrelated ones.
+ */
+const alphaRelayed = daemonConnection({
+  daemonId: 'alpha',
+  baseUrl: 'https://alpha.example.test',
+  deviceToken: 'alpha-token',
+  carriers: [{ kind: 'direct', daemonUrl: 'https://alpha.example.test' }, HOSTED_RELAY],
+});
+const gammaRelayed = daemonConnection({
+  daemonId: GAMMA_ID,
+  baseUrl: 'https://gamma.example.test',
+  deviceToken: GAMMA_TOKEN,
+  carriers: [{ kind: 'direct', daemonUrl: 'https://gamma.example.test' }, HOSTED_RELAY],
 });
 
 const doctorReport = {
@@ -212,16 +239,34 @@ const appStore = async (
     // other page reads through a store port that answers an empty document.
     fetcher: async input =>
       String(input).endsWith('/v1/pair')
-        ? Response.json({ daemonId: 'gamma', deviceToken: 'gamma-token' })
+        ? Response.json({
+            daemonId: GAMMA_ID,
+            deviceToken: GAMMA_TOKEN,
+            daemonName: 'gamma',
+            capabilities: [],
+            carriers: [{ kind: 'direct', url: 'https://gamma.example.test' }],
+          })
         : Response.json({}),
   });
 
-const renderShell = async (path: string, paired: readonly DaemonId[] = [], options: ShellOptions = {}) => {
+/**
+ * A daemon id names one of the two default fixtures; a whole connection pairs
+ * itself, which is how a test says something about the carrier set a pairing
+ * published without inventing a third id nothing else knows.
+ */
+const renderShell = async (
+  path: string,
+  paired: readonly (DaemonId | DaemonConnection)[] = [],
+  options: ShellOptions = {},
+) => {
   const reads: string[] = [];
   const transcriptReads: string[] = [];
   const healthReads: HealthRead[] = [];
   const store = await appStore(reads, options, transcriptReads, healthReads);
-  for (const daemon of paired) store.connections.add(daemon === alpha.daemonId ? alpha : beta);
+  for (const daemon of paired) {
+    if (typeof daemon !== 'string') store.connections.add(daemon);
+    else store.connections.add(daemon === alpha.daemonId ? alpha : beta);
+  }
   setPath(path);
   const view = await mount(
     <RouterProvider>
@@ -497,9 +542,7 @@ describe('AppShell', () => {
   });
 
   it('takes a scanned pairing link through setup even when daemons already exist', async () => {
-    const { store, view } = await renderShell('/pair#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma', [
-      alpha.daemonId,
-    ]);
+    const { store, view } = await renderShell(`/pair#${GAMMA_FRAGMENT}`, [alpha.daemonId]);
 
     // A camera app opening this link IS the setup journey, arriving on the stage
     // that redeems a code — not a picker with a banner on it. That stage is now
@@ -524,14 +567,14 @@ describe('AppShell', () => {
       'done',
     );
     const snapshot = store.connections.getSnapshot();
-    expect(snapshot.connections.map(one => String(one.daemonId))).toEqual(['gamma', 'alpha']);
-    expect(String(snapshot.selectedDaemonId)).toBe('gamma');
+    expect(snapshot.connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, 'alpha']);
+    expect(String(snapshot.selectedDaemonId)).toBe(GAMMA_ID);
     expect(window.location.pathname).toBe('/pair');
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    expect(window.location.pathname).toBe('/d/gamma');
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
 
@@ -547,7 +590,7 @@ describe('AppShell', () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set,
         'the input value setter',
       );
-      setter.call(field, 'https://pwa.example.test/#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
+      setter.call(field, `https://pwa.example.test/#${GAMMA_FRAGMENT}`);
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await interact(() =>
@@ -566,7 +609,7 @@ describe('AppShell', () => {
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
     await settle();
-    expect(window.location.pathname).toBe('/d/gamma');
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
 
     // Coming back to the root later is ordinary browsing, not a second first run.
     await popTo('/');
@@ -1266,6 +1309,46 @@ describe('browserPushEnrolment', () => {
 /* ---------- the picker, the settings host, and the public root ------------ */
 
 describe('the settings route composition', () => {
+  /**
+   * Opens the Carrier panel with a measured answer already on it.
+   *
+   * The fallback sentence exists only once something has been carried — before the
+   * first request the panel honestly says nothing has — so the router is driven for
+   * real rather than handed a fabricated choice.
+   */
+  const carrierPanelText = async (connection: DaemonConnection): Promise<string> => {
+    const { store, view } = await renderShell(`/d/${String(connection.daemonId)}/settings#daemons`, [connection]);
+    await settle();
+    await interact(async () => {
+      await store.carrier.send(connection, `${connection.baseUrl}/v1/health`);
+    });
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-carrier"]'),
+        'the Carrier panel tab',
+      ).click(),
+    );
+    const rendered = view.container.textContent ?? '';
+    await view.unmount();
+    return rendered;
+  };
+
+  /**
+   * THE CARRIER PANEL PROMISES WHAT THE ROUTER WILL DIAL, not what the cache holds.
+   *
+   * A pairing whose fingerprint this protocol cannot address has its relays stripped
+   * by `daemonCarriers` before a single attempt, so a screen reading the cached set
+   * alone would tell that reader a rendezvous will catch them when nothing ever will
+   * — and would withhold the one line saying the daemon has to be reachable from here.
+   */
+  it('names the missing fallback when the router would strip this pairing’s relay', async () => {
+    expect(await carrierPanelText(alphaRelayed)).toContain(CARRIER_NO_FALLBACK);
+  });
+
+  it('stays silent about a fallback the router would actually dial', async () => {
+    expect(await carrierPanelText(gammaRelayed)).not.toContain(CARRIER_NO_FALLBACK);
+  });
+
   it('binds the Doctor tab to the selected daemon through the typed diagnostic endpoint', async () => {
     const { healthReads, view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId]);
     await settle();
@@ -1400,7 +1483,7 @@ describe('the connection picker slot', () => {
         Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set,
         'the input value setter',
       );
-      setter.call(field, 'https://pwa.example.test/#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
+      setter.call(field, `https://pwa.example.test/#${GAMMA_FRAGMENT}`);
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
@@ -1415,16 +1498,16 @@ describe('the connection picker slot', () => {
 
     // The root must land on the daemon the exchange returned, not on whichever
     // pairing happened to be selected before.
-    expect(window.location.pathname).toBe('/d/gamma');
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     // The new pairing joins the existing one and becomes the selected daemon.
-    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma', 'alpha']);
+    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID, 'alpha']);
     expect(requestedUrls.some(url => url.endsWith('/v1/pair'))).toBe(false);
 
     await view.unmount();
   });
 
   it('confirms a pre-filled arrival and empties the address bar of its one-time code', async () => {
-    const { store, view } = await renderShell('/pair#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
+    const { store, view } = await renderShell(`/pair#${GAMMA_FRAGMENT}`);
 
     // An unpaired browser opened from a QR is in the setup guide — but the
     // arrival puts it straight on the stage that redeems the code, with the
@@ -1447,7 +1530,7 @@ describe('the connection picker slot', () => {
     await interact(() => confirm.click());
     await settle();
 
-    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma']);
+    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID]);
     // Setup finishes on its own last stage rather than teleporting the reader
     // out of the guide the moment the exchange lands.
     expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
@@ -1458,7 +1541,7 @@ describe('the connection picker slot', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    expect(window.location.pathname).toBe('/d/gamma');
+    expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
 
