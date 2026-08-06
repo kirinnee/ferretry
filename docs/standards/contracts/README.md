@@ -29,7 +29,7 @@ laundered a defect into something every gate was right to pass.
 | Script                        | Runs as                                  | Enforces                                                      |
 | ----------------------------- | ---------------------------------------- | ------------------------------------------------------------- |
 | `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                                  |
-| `cli-contracts.sh`            | `a-cli-contracts`                        | the 18 workspace/CLI/release contracts below                  |
+| `cli-contracts.sh`            | `a-cli-contracts`                        | the 19 workspace/CLI/release contracts below                  |
 | `closed-set-agreement.sh`     | `a-closed-set-agreement`                 | copied cross-package closed sets have identical members       |
 | `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                                  |
 | `composition-invocation.sh`   | `a-composition-invocation`               | every constructed composition-root field has a caller         |
@@ -60,6 +60,7 @@ key first, so the checks survive a rename ([Architecture](../architecture/index.
 | `name-single-source`       | the Taskfile and the compile/shim/smoke scripts derive the binary name from `bin`, and every static file that must spell a name out (GoReleaser, cask, `go.mod`, installer) agrees with its source of truth |
 | `daemon-default-address`   | the protocol owns the default daemon address and every production consumer derives it instead of copying the port literal                                                                                   |
 | `loopback-single-source`   | the protocol owns host-spelling and peer-address loopback decisions, and each production consumer uses the decision for its input domain                                                                    |
+| `pairing-fragment-readers` | every pairing fragment version the daemon can mint is accepted by the CLI that renders it, and neither the CLI nor the PWA tests a version prefix of its own                                                |
 | `state-home-log-directory` | the CLI and the daemon name the same `<state home>/logs` directory, and the daemon both requires it and admits it to its bootstrap shape                                                                    |
 | `state-home-layout-claim`  | the layout decision, marker filename, bytes and mode live only in `@ferretry/protocol`; every CLI path that creates state in the home claims it first, and the daemon's refusal names a repair that exists  |
 | `state-home-default`       | the daemon and the CLI's two resolvers all derive the default state home from the product name, so a `rename.sh --product` cannot point them at two different directories                                   |
