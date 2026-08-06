@@ -711,6 +711,73 @@ describe('composer reference families', () => {
     expect(provider.legend?.some(item => /pin|template/iu.test(item.label))).toBe(false);
   });
 
+  it('reports a still-warming ladder family as unknown rather than as an empty fact', async () => {
+    let deliver: () => void = () => undefined;
+    const read = new Promise<void>(resolve => {
+      deliver = resolve;
+    });
+    let liveTasks: readonly ComposerTaskSummary[] = [];
+    const provider = createReferencesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => liveTasks,
+      waitForTasks: () => read,
+    });
+
+    // THE WINDOW. The host's one read is still in flight, so the getter holds
+    // nothing yet. Answering from it would publish "this session has no tasks"
+    // as a ready fact in the first menu of every session; reporting nothing
+    // leaves the engine loading, which is the honest state.
+    expect(provider.initialCandidates?.(referenceContext(3, ''))).toBeUndefined();
+
+    // Tier 2 reads a prop the page already holds and tier 5 is a teaching
+    // notice, so neither waits on anything.
+    expect(provider.initialCandidates?.(referenceContext(2, ''))).toBeDefined();
+    expect(provider.initialCandidates?.(referenceContext(5, ''))?.notice).toContain('one to four @ signs');
+
+    const settled = provider.candidates(referenceContext(3, ''));
+    liveTasks = tasks;
+    deliver();
+    expect((await settled).candidates[0]?.replacement).toBe('&F12');
+
+    // Once the read has settled the host reports nothing in flight, and an
+    // already-proved family answers immediately again — a loaded store must
+    // never show a spinner.
+    const loaded = createReferencesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => tasks,
+      waitForTasks: () => undefined,
+    });
+    expect(loaded.initialCandidates?.(referenceContext(3, ''))?.candidates[0]?.replacement).toBe('&F12');
+  });
+
+  it('shares ONE warm-up between a ladder family’s initial and awaited paths', async () => {
+    let started = 0;
+    let deliver: () => void = () => undefined;
+    const read = new Promise<void>(resolve => {
+      deliver = resolve;
+    });
+    const provider = createReferencesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => tasks,
+      waitForTasks: () => {
+        started += 1;
+        return read;
+      },
+    });
+
+    // The initial path has to ASK whether a read is in flight and the awaited
+    // path then joins that same read. Asking twice would be two waits for one
+    // fact — and two commit waits where only one is owed.
+    provider.initialCandidates?.(referenceContext(3, ''));
+    const settled = provider.candidates(referenceContext(3, ''));
+    deliver();
+    await settled;
+    expect(started).toBe(1);
+  });
+
   it('opens each family from its own sigil, reading the very same host getters', () => {
     const reads: string[] = [];
     const options = {

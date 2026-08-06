@@ -2,10 +2,11 @@
  * One session-scoped catalog feeding both composer autocomplete and Markdown proof.
  *
  * Tasks, Attention and skills are each daemon facts. A standalone reader can
- * hydrate all three once; the session page instead supplies tasks and skills
- * from their existing workspace owners and this module reads only Attention.
- * Either way, preview and autocomplete receive the same arrays. A failed family
- * stays `undefined`: that is "not proved", never an empty daemon fact.
+ * hydrate all three once; the session page — the only production host today —
+ * instead supplies tasks and skills from their existing workspace owners, so
+ * this module reads only Attention for it. Either way, preview and autocomplete
+ * receive the same arrays. A failed family stays `undefined`: that is "not
+ * proved", never an empty daemon fact.
  */
 import {
   type AttentionItem,
@@ -153,7 +154,23 @@ async function readComposerAttentionIncrementally(
   if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 }
 
-/** Read all independently: one refused family must not erase two valid ones. */
+/**
+ * The standalone three-family read: one refused family must not erase two valid
+ * ones.
+ *
+ * NOTHING IN THE APP CALLS THIS TODAY, and that is a stated position rather
+ * than an oversight. The session page is the only production host, and it
+ * always supplies `sources`, so the hook takes its shared-owner path and reads
+ * Attention alone. This entry point is the COMPATIBILITY surface a host with no
+ * existing task or skills owner uses — the shape the module had before the page
+ * began sharing its own — and keeping its behaviour unchanged was an accepted
+ * requirement of that change rather than a consequence of it.
+ *
+ * So its tests exercise a path production does not take, deliberately. What
+ * they hold is the promise made to a caller that has no workspace around it,
+ * and inventing a production caller to justify it would be the wrong repair:
+ * the app would then read three families it already owns two of.
+ */
 export async function readComposerReferenceCatalogs(
   client: ComposerReferenceCatalogReader,
   sessionId: string,

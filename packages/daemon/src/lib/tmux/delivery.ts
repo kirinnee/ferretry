@@ -12,7 +12,8 @@
  */
 
 import type { LandingEvidence } from './composer.ts';
-import { composerHolds, paneShowsModelSelector } from './composer.ts';
+import { paneShowsOpenPicker } from '../session/harness/picker-screen.ts';
+import { composerHolds } from './composer.ts';
 import { paneShowsActiveWork } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
 import { startupDialogAction } from './startup.ts';
@@ -109,10 +110,15 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // A pane that died or started working took the payload with it either way.
   if (!frame.alive || frame.dead || paneShowsActiveWork(frame.visible))
     return { kind: 'delivered', outcome: 'turn-started' };
-  // Exact `/model` opens Codex's native selector. The pane often keeps `› /model` above it, which
-  // `composerHolds` cannot tell from an occupied composer — a selector heading proves the first
-  // Enter was consumed, and a second one would make a choice on the user's behalf.
-  if (text.trim() === '/model' && paneShowsModelSelector(frame.visible))
+  // Exact `/model` opens Codex's native picker. The pane often keeps `› /model` above it, which
+  // `composerHolds` cannot tell from an occupied composer — an OPEN picker proves the first Enter
+  // was consumed, and a second one would make a choice on the user's behalf.
+  //
+  // The question is asked of `picker-screen.ts`, which owns the title table and the classification,
+  // rather than of a local regex holding a partial copy of it. That copy knew two of the five
+  // titles and missed the quick picker's bare `Select Model` entirely, so the commonest `/model`
+  // outcome was reported here as a started turn.
+  if (text.trim() === '/model' && paneShowsOpenPicker(frame.visible))
     return { kind: 'delivered', outcome: 'handled-local' };
   // A ready prompt is positive evidence that the cursor is back at an EMPTY composer. It is checked
   // before the pane-text probe because local output routinely echoes the command into scrollback.

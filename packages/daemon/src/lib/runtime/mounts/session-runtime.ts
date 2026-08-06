@@ -1,15 +1,14 @@
-import {
-  FY_REQUEST_ID_HEADER,
-  RuntimeControlRequestSchema,
-  type RuntimeControlRequest,
-  type RuntimeModelCatalog,
-  type SessionView,
-} from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER, RuntimeControlRequestSchema } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import {
+  type SessionRuntimeFailure,
+  SessionRuntimeError,
+  type SessionRuntimeSubsystem,
+} from '../../session/runtime-control/types.ts';
 
 /**
  * Changing the model and the reasoning level of a session that is already running, and reading what
@@ -38,61 +37,13 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * turn was running by then — is worse than being told to wait.
  */
 
-/** Why a runtime read or control could not be served. */
-export type SessionRuntimeFailure =
-  /** The path or the request names something unusable. */
-  | 'invalid'
-  /** No such session. */
-  | 'not_found'
-  /** The session's own condition refuses it: a terminal status, a busy pane, a picker quarantine. */
-  | 'refused'
-  /** The harness cannot express what was asked — a level it has no command for, a model it does not
-   *  advertise. A different request could succeed, which is what separates it from `refused`. */
-  | 'unsupported'
-  /** The live catalog could not be read, so no targeted switch can be planned against it. */
-  | 'catalog_unavailable'
-  /** The same request id was already spent on a DIFFERENT control. */
-  | 'conflict'
-  /**
-   * The same request id already reached the harness, and how that attempt ended was never recorded.
-   *
-   * DISTINCT FROM `conflict`, because the caller did nothing wrong and there is nothing to correct in
-   * the request. Repeating it is the danger — a second `/compact` discards context nobody asked to
-   * lose — so the honest answer is "it happened; go and look" rather than a replayed success the
-   * daemon cannot vouch for or a retry it must not perform.
-   */
-  | 'unsettled'
-  /** It was attempted, and the attempt failed. */
-  | 'failed';
-
-/** A refusal raised by the composition root's runtime control, in a taxonomy `src/lib` may name. */
-export class SessionRuntimeError extends Error {
-  constructor(
-    readonly failure: SessionRuntimeFailure,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SessionRuntimeError';
-  }
-}
-
-/** Reading and changing one running session's runtime settings. */
-export interface SessionRuntimeSubsystem {
-  /** What this session's account advertises it may be switched to, read live. */
-  models(sessionId: string): Promise<RuntimeModelCatalog>;
-  /**
-   * Apply one control, and answer with the session as it stands afterwards.
-   *
-   * IDEMPOTENT ON `requestId`, which matters more here than on most mutations: a retried picker
-   * drive would open a second modal on a pane the first one may still be inside. The same id
-   * carrying a DIFFERENT control is a `conflict` rather than a replay — answering it with the first
-   * control's session view would tell a caller its model switch succeeded when what actually
-   * happened was somebody else's effort change.
-   */
-  control(sessionId: string, request: RuntimeControlRequest, requestId: string): Promise<SessionView>;
-}
-
-/** The HTTP status and code each refusal answers with. */
+/**
+ * The HTTP status and code each refusal answers with.
+ *
+ * THE ONLY THING THIS FILE OWNS ABOUT REFUSALS. The taxonomy itself lives with the service that
+ * raises it: "the harness cannot express this" is a fact about sessions, true whichever transport
+ * asked, while "that is a 422" is a fact about HTTP and belongs here and nowhere else.
+ */
 const REFUSALS: Readonly<Record<SessionRuntimeFailure, { readonly status: number; readonly code: string }>> = {
   invalid: { status: 400, code: 'invalid_request' },
   not_found: { status: 404, code: 'not-found' },

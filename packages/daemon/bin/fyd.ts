@@ -12,8 +12,6 @@ import {
   type MigrateSessionRequest,
   refusalNotice,
   type RegisterProjectRequest,
-  type RuntimeControlRequest,
-  type RuntimeModelCatalog,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -241,15 +239,11 @@ import {
   type ChildGrantRequester,
   ClaudeTranscriptParser,
   type ClockPort,
-  CodexModelPickerDriver,
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
-  claudeRuntimeCatalog,
-  codexRuntimeCatalog,
-  codexSwitchContext,
   configuredAt,
   contextWindowForSession,
   createFoundationPaths,
@@ -276,11 +270,10 @@ import {
   FleetRefreshService,
   ForeignHistoryImporter,
   type FoundationPaths,
-  failureMessage,
-  findAccountByAgent,
   fleetManifestRefusal,
   FleetManifestUnreadableError,
   foreignAdvertisementNotice,
+  HARNESS_PICKER_COMMAND,
   HarnessQuirkService,
   harnessAbsentWarning,
   harnessMigrationRefusal,
@@ -288,7 +281,6 @@ import {
   harnessPreflightSummary,
   InitialAttachmentError,
   InvalidDeadlineRefused,
-  isPickerQuarantined,
   isTaskBoardError,
   jsonObject,
   type LearningSubsystem,
@@ -331,7 +323,6 @@ import {
   portCandidates,
   publishableDirectCarrier,
   publishedDaemonCarriers,
-  pickerInputRefusal,
   projectObservedRuntime,
   projectStructuredQuestion,
   type QuotaFailoverLoop,
@@ -345,7 +336,6 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   ResumeCancelled,
   type ResumeLauncher,
-  type RuntimeSwitchPlan,
   ResumeRefused,
   ReviveDedupeConflict,
   type RoutingCatalogPort,
@@ -403,8 +393,7 @@ import {
   SessionResumeService,
   type SessionResumeSubsystem,
   type SessionRootPinner,
-  SessionRuntimeError,
-  type SessionRuntimeSubsystem,
+  SessionRuntimeControlService,
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
@@ -423,7 +412,6 @@ import {
   type SttEnhancementSubsystem,
   searchTranscript,
   selectableAutoAccounts,
-  servableModels,
   sessionHealthSettingsAt,
   structuredQuestionStatePatch,
   supersededCarrierKeys,
@@ -438,8 +426,6 @@ import {
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
-  TERMINAL_SEND_STATUSES,
-  type TmuxCommandPort,
   TmuxController,
   type TranscriptEvent,
   type TranscriptFileResolver,
@@ -1869,321 +1855,6 @@ function createSessionSignalSubsystem(
           `session ${id} recorded its ${request.kind} signal but its documents do not satisfy the protocol`,
         );
       return view;
-    },
-  };
-}
-
-/** The collaborators the runtime controls need from the rest of the root. */
-interface SessionRuntimeParts {
-  readonly storage: DaemonStorage;
-  readonly sessions: SessionDirectorySubsystem;
-  /** The per-harness decision and the recovery for a picker drive that failed part-way. */
-  readonly harness: HarnessQuirkService;
-  readonly accounts: AccountInventoryPort;
-  /** One held catalog per account, so opening the model sheet twice does not spawn two probes. */
-  readonly catalog: CodexRuntimeCatalogCache;
-  readonly tmux: TmuxController;
-  /** The raw command port, for the pane-scoped keystrokes a picker drive addresses by pane id. */
-  readonly commands: TmuxCommandPort;
-  readonly delivery: TmuxPaneDelivery;
-  /** Serializes controls per session: two drives into one modal is the failure this prevents. */
-  readonly serial: KeyedSerialExecutor;
-  readonly clock: ClockPort;
-}
-
-/** The command each harness answers with its own native model picker. */
-const HARNESS_PICKER_COMMAND = '/model';
-/** The harness-native context command. It is not a message and never advances the turn. */
-const HARNESS_COMPACT_COMMAND = '/compact';
-
-/**
- * Changing what a RUNNING session is running, and reading what it may be changed to.
- *
- * THE DECISION IS NOT MADE HERE. `HarnessQuirkService.planSwitch` answers "refuse", "type this
- * command" or "drive the picker to this exact target", and this function only performs the answer.
- * That service and its whole decision layer were built, unit tested and then never constructed by
- * anything — this is the caller they were built for.
- *
- * FOUR PRECONDITIONS, IN THIS ORDER, and each one is a different question:
- *
- *   1. The session exists and is not in a terminal status. There is no pane to type into.
- *   2. It is not holding the picker quarantine. That quarantine exists precisely to stop the daemon
- *      typing into a modal it could not identify, and a retry of the control that caused it is the
- *      most likely thing to do so.
- *   3. Its pane is alive. A pane whose harness exited takes keystrokes nowhere.
- *   4. Its harness is at an IDLE PROMPT. This is the one the browser already promises: a control is
- *      refused rather than queued, because `/model` typed behind a running turn either vanishes or
- *      arrives as conversation, and a switch that silently applies three minutes later applies to
- *      whatever turn is running by then.
- *
- * THE ANSWER IS THE SAME SESSION VIEW EVERY OTHER SURFACE READS, re-read after the act rather than
- * projected from it. The daemon must not claim the switch took: for Codex it is `thread_settings`
- * in the harness's own transcript that says so, and the observation projection picks that up on the
- * very next read. A view assembled here from what was REQUESTED would be the configured-model lie
- * this row exists to remove, one layer further in.
- */
-function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRuntimeSubsystem {
-  const { accounts, catalog, clock, commands, delivery, harness, serial, sessions, storage, tmux } = parts;
-  /**
-   * Request ids this daemon has SPENT, so a retry never drives the harness a second time.
-   *
-   * THE ID IS SPENT BEFORE THE HARNESS IS TOUCHED, not after the answer is assembled. Recording only
-   * successes leaves the dangerous window wide open: `/compact` types into the pane, the harness
-   * compacts, and then the journal append or the closing read throws — the caller gets a `500` with
-   * nothing recorded, retries with the same id, and the session is compacted twice. The keystrokes
-   * are the irreversible part, so the reservation goes in front of them and an entry with no `view`
-   * means exactly "this was already performed and how it ended was never recorded".
-   *
-   * THE REQUEST IS KEPT BESIDE THE ANSWER. An id is a claim that two calls are the same call; a
-   * second call under it carrying a different target is not a retry, and handing it the first call's
-   * session view would report a switch that never happened.
-   *
-   * BOUNDED, because it is process-local and a long-lived daemon whose composer chips are used
-   * routinely would otherwise hold one whole session view per control it ever served. Oldest first:
-   * a retry arrives seconds after its original, never thousands of controls later.
-   */
-  const settled = new Map<string, { readonly request: string; readonly view?: SessionView }>();
-  /** How many spent ids are remembered. Far beyond any real retry window, far below a leak. */
-  const SETTLED_LIMIT = 512;
-  const remember = (key: string, entry: { readonly request: string; readonly view?: SessionView }): void => {
-    settled.delete(key);
-    settled.set(key, entry);
-    for (const oldest of settled.keys()) {
-      if (settled.size <= SETTLED_LIMIT) break;
-      settled.delete(oldest);
-    }
-  };
-
-  const require = (reference: string): SessionId => {
-    const id = tryParseSessionId(reference);
-    if (id === undefined)
-      throw new SessionRuntimeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
-    if (storage.findSession(id) === undefined) throw new SessionRuntimeError('not_found', `no session ${reference}`);
-    return id;
-  };
-
-  const view = async (id: SessionId): Promise<SessionView> => {
-    const current = await sessions.get(id).catch(() => undefined);
-    if (current === undefined)
-      throw new SessionRuntimeError('failed', `session ${id} exists but its documents do not satisfy the protocol`);
-    return current;
-  };
-
-  /** The launch document, which is where the pane name and the account's own executable live. */
-  const lifecycle = async (id: SessionId) => {
-    const parsed = SessionLifecycleConfigSchema.safeParse(lifecycleConfigDocument(await storage.readConfig(id)));
-    if (!parsed.success)
-      throw new SessionRuntimeError('failed', `session ${id} has no readable launch record to address its pane with`);
-    return parsed.data;
-  };
-
-  /** The published account this session runs on, by the executable NAME its record carries. */
-  const accountFor = async (agent: string): Promise<CoreAccount> => {
-    const published = await accounts.accounts().catch((error: unknown) => {
-      throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
-    });
-    const account = findAccountByAgent(published, agent);
-    if (account === undefined)
-      throw new SessionRuntimeError(
-        'catalog_unavailable',
-        `no account is published under ${agent}, so this session's model choices cannot be read`,
-      );
-    return account;
-  };
-
-  const models = async (id: SessionId): Promise<RuntimeModelCatalog> => {
-    const current = await view(id);
-    if (current.config.harness !== 'codex') {
-      const account = await accountFor(current.config.agent);
-      const claude = claudeRuntimeCatalog(account);
-      // AN EMPTY CLAUDE CATALOG IS A FAILURE, NOT AN ANSWER. `servableModels` empties for an account
-      // the manifest declared down, and the browser's native-picker escape hatch is Codex-only — so a
-      // `200` with no choices renders a blank sheet with no explanation, which is the plausible-empty
-      // response this row exists to delete. An account that cannot serve a session cannot serve a
-      // switch into one either, and it must say so.
-      if (claude.choices.length === 0)
-        throw new SessionRuntimeError(
-          'catalog_unavailable',
-          account.available
-            ? `account ${account.agent} publishes no available model, so this session cannot be switched`
-            : `account ${account.agent} is unavailable (${account.unavailableReason ?? 'no reason published'}), so this session cannot be switched`,
-        );
-      return claude;
-    }
-    const launch = await lifecycle(id);
-    const choices = await catalog.get(launch.agent, launch.cwd).catch((error: unknown) => {
-      throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
-    });
-    return codexRuntimeCatalog(choices);
-  };
-
-  /** Types one native command, and refuses if the harness read it as a turn instead of a command. */
-  const inject = async (session: string, command: string): Promise<void> => {
-    const outcome = await delivery.deliver(session, command).catch((error: unknown) => {
-      throw new SessionRuntimeError('failed', failureMessage(error));
-    });
-    if (outcome !== 'handled-local')
-      throw new SessionRuntimeError(
-        'failed',
-        `the harness consumed ${command} as a model turn instead of a native runtime control`,
-      );
-  };
-
-  /**
-   * Drive the picker, and if that throws, close whatever it left open BEFORE anything else.
-   *
-   * The quarantine is written durably before the pane is stopped, so a stop that also fails still
-   * leaves the input gates closed — a decision held only in memory is undone by the next restart,
-   * which is exactly when nobody is watching.
-   */
-  const drivePicker = async (
-    id: SessionId,
-    session: string,
-    plan: Extract<RuntimeSwitchPlan, { kind: 'drive_picker' }>,
-  ) => {
-    const driver = new CodexModelPickerDriver(
-      new TmuxCodexPickerDrive(commands, tmux, delivery, session, HARNESS_PICKER_COMMAND),
-      { sleep: milliseconds => Bun.sleep(milliseconds) },
-    );
-    try {
-      const preflighted = plan.needsPreflight ? await driver.preflight(plan.target) : undefined;
-      await driver.drive(plan.target, preflighted);
-    } catch (failure) {
-      const recovery = await harness.recoverFromFailedDrive(session, failure);
-      if (recovery.kind === 'recovered') throw new SessionRuntimeError('failed', failureMessage(failure));
-      await storage.updateState(id, current => ({
-        ...(current as Record<string, unknown>),
-        status: 'failed',
-        health: 'crashed',
-        promptReady: false,
-        finishedAt: clock.now(),
-        reason: recovery.quarantine.reason,
-        needsHuman: recovery.quarantine.needsHuman,
-        needsHumanKind: recovery.quarantine.needsHumanKind,
-      }));
-      await storage.append(id, 'session.codex_picker_quarantined', recovery.quarantine.evidence);
-      const stopFailure = await tmux
-        .stop(session)
-        .then(() => undefined)
-        .catch((error: unknown) => error);
-      throw new SessionRuntimeError('failed', harness.report(recovery.quarantine, stopFailure));
-    }
-  };
-
-  const control = async (
-    id: SessionId,
-    request: RuntimeControlRequest,
-    /** Called the instant before the harness is touched, so a retry can never repeat a keystroke. */
-    spend: () => void,
-  ): Promise<SessionView> => {
-    const current = await view(id);
-    // The SEND domain's set, not a second copy of it. It answers exactly the question asked here —
-    // the statuses from which a pane is not a place to type — and a runtime control is a keystroke
-    // into the same composer a send uses. Two lists would eventually disagree about `interrupted`.
-    if (TERMINAL_SEND_STATUSES.has(current.state.status))
-      throw new SessionRuntimeError('refused', 'a runtime control requires a running session');
-    if (isPickerQuarantined(current.state)) throw new SessionRuntimeError('refused', pickerInputRefusal(CLIENT_NAME));
-
-    const launch = await lifecycle(id);
-    const pane = await tmux.state(launch.tmuxSession);
-    if (!pane.alive || pane.dead)
-      throw new SessionRuntimeError('refused', 'a runtime control requires a live harness pane');
-    if (!pane.promptReady)
-      throw new SessionRuntimeError(
-        'refused',
-        'a runtime control is available only while the harness is waiting at an idle prompt',
-      );
-
-    if (request.action === 'compact') {
-      // Spent BEFORE the keystrokes. `/compact` is the least naturally idempotent arm in the union —
-      // compacting twice discards context nobody asked to lose — and it is the arm whose bookkeeping
-      // can still fail after the harness has already done the work.
-      spend();
-      await inject(launch.tmuxSession, HARNESS_COMPACT_COMMAND);
-      await storage.append(id, 'control.session_command', {
-        harness: current.config.harness,
-        command: 'compact',
-      });
-      return await view(id);
-    }
-
-    const wanted = {
-      harness: current.config.harness,
-      ...(request.action === 'model' && request.model !== undefined ? { model: request.model } : {}),
-      ...(request.effort === undefined ? {} : { effort: request.effort }),
-    };
-    // The live catalog is read ONLY for a targeted Codex switch. A bare picker open needs no catalog,
-    // and probing for one would make the manual escape hatch fail exactly when the catalog is what is
-    // broken — which is the case the escape hatch exists for.
-    const needsCatalog =
-      current.config.harness === 'codex' && wanted.model !== undefined && wanted.effort !== undefined;
-    const plan = harness.planSwitch(wanted, {
-      wrapper: current.config.agent,
-      ...(current.config.harness === 'codex'
-        ? {}
-        : { allowedModels: servableModels(await accountFor(current.config.agent)).map(model => model.id) }),
-      ...(needsCatalog ? { catalog: codexSwitchContext(await models(id)) } : {}),
-    });
-
-    if (plan.kind === 'refused') throw new SessionRuntimeError('unsupported', plan.reason);
-    // Everything above this line is decision and refusal, and none of it has touched the pane. The id
-    // is spent HERE, on the last line before the first keystroke — a refused plan leaves the id unspent
-    // so the caller may fix the request and reuse it, and a driven pane can never be driven again.
-    spend();
-    if (plan.kind === 'inject') await inject(launch.tmuxSession, plan.command);
-    else await drivePicker(id, launch.tmuxSession, plan);
-
-    await storage.append(id, 'control.runtime_model', {
-      harness: current.config.harness,
-      ...(wanted.model === undefined ? {} : { requestedModel: wanted.model }),
-      ...(wanted.effort === undefined ? {} : { requestedEffort: wanted.effort }),
-      // A bare picker open is the one arm where the daemon made no choice, so it claims none.
-      ...(plan.kind === 'inject' && !plan.claimsOutcome ? { picker: true } : {}),
-    });
-    return await view(id);
-  };
-
-  return {
-    models: async (reference: string) => await models(require(reference)),
-    control: async (reference: string, request: RuntimeControlRequest, requestId: string) => {
-      const id = require(reference);
-      const key = `${id}:${requestId}`;
-      // The control itself is the comparison, in its parsed form: two bodies that differ only in
-      // key order or whitespace are the same request, and a retry may well re-serialize them.
-      const fingerprint = JSON.stringify([
-        request.action,
-        request.action === 'compact' ? null : (request.effort ?? null),
-        request.action === 'model' ? (request.model ?? null) : null,
-      ]);
-      const replay = (): SessionView | undefined => {
-        const already = settled.get(key);
-        if (already === undefined) return undefined;
-        if (already.request !== fingerprint)
-          throw new SessionRuntimeError(
-            'conflict',
-            `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
-          );
-        if (already.view !== undefined) return already.view;
-        // Spent, and how it ended was never recorded — the first attempt reached the harness and then
-        // failed on its own bookkeeping. Repeating it is the one thing that must not happen, so the
-        // caller is told plainly to read the session rather than handed a second `/compact`.
-        throw new SessionRuntimeError(
-          'unsettled',
-          `request id ${JSON.stringify(requestId)} was already performed on this session and its outcome was not recorded; read the session rather than retrying`,
-        );
-      };
-      // Checked outside the queue as well as inside it: a replay must not have to wait behind a
-      // picker drive, and two concurrent first attempts must not both get past it — only the queue
-      // can make the second of those true.
-      const answered = replay();
-      if (answered !== undefined) return answered;
-      return await serial.run(id, async () => {
-        const queued = replay();
-        if (queued !== undefined) return queued;
-        const view = await control(id, request, () => remember(key, { request: fingerprint }));
-        remember(key, { request: fingerprint, view });
-        return view;
-      });
     },
   };
 }
@@ -4408,9 +4079,48 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionAnswer: createSessionAnswerSubsystem(storage, sessions, launchTmux),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
-        sessionRuntime: createSessionRuntimeSubsystem({
-          storage,
-          sessions,
+        sessionRuntime: new SessionRuntimeControlService({
+          /**
+           * The durable boundary, as five delegations.
+           *
+           * A reference arrives as three outcomes rather than two: not an id at all, a well-formed id
+           * nobody holds, and a session. The service answers `400` and `404` from that distinction,
+           * so collapsing it here would change what these routes already reply.
+           */
+          repository: {
+            find: reference => {
+              const id = tryParseSessionId(reference);
+              if (id === undefined) return { kind: 'invalid' };
+              return storage.findSession(id) === undefined ? { kind: 'missing' } : { kind: 'session', id };
+            },
+            view: async id => await sessions.get(id).catch(() => undefined),
+            launch: async id => {
+              // PARSED, not asserted: a control types into a real terminal, so a configuration
+              // document that no longer validates must refuse rather than address whatever pane it
+              // names — the same rule the send slice's terminal follows.
+              const parsed = SessionLifecycleConfigSchema.safeParse(
+                lifecycleConfigDocument(await storage.readConfig(id)),
+              );
+              return parsed.success ? parsed.data : undefined;
+            },
+            journal: async (id, event, data) => {
+              await storage.append(id, event, data);
+            },
+            quarantine: async (id, patch) => {
+              await storage.updateState(id, current => ({ ...(current as Record<string, unknown>), ...patch }));
+            },
+          },
+          pane: launchTmux,
+          injector: new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+          // Bound to one session per drive, and addressed by pane id from there on.
+          picker: tmuxSession =>
+            new TmuxCodexPickerDrive(
+              tmux,
+              launchTmux,
+              new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+              tmuxSession,
+              HARNESS_PICKER_COMMAND,
+            ),
           // The world's own harness service, so the decision a control performs and the recovery a
           // failed drive runs are the ones this daemon published rather than a second construction.
           harness: harnessService,
@@ -4418,13 +4128,13 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           // ONE cache for the daemon. Per-subsystem caches would each spawn their own probe, which
           // is the second speaker to a live account this cache exists to prevent.
           catalog: codexRuntimeModels,
-          tmux: launchTmux,
-          commands: tmux,
-          delivery: new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
           // Its own queue: a picker drive holds the session for several seconds of keystrokes, and
           // must not make every unrelated document write wait behind it.
           serial: new KeyedSerialExecutor(),
+          sleeper: { sleep: milliseconds => Bun.sleep(milliseconds) },
           clock,
+          // The instruction a quarantined session shows a human names the CLI they actually type.
+          clientName: CLIENT_NAME,
         }),
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither

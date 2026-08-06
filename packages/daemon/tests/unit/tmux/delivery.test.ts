@@ -8,7 +8,7 @@ import {
   landingEvidence,
   MAX_STARTUP_DIALOG_ATTEMPTS,
   nextReadinessStep,
-  paneShowsModelSelector,
+  paneShowsOpenPicker,
   PASTE_TRANSPORT_CHARS,
   resumeMenuAction,
   startupDialogAction,
@@ -189,16 +189,50 @@ describe('composer evidence', () => {
     should(actual).deepEqual({ short: 'literal', multiline: 'paste', long: 'paste', atTheBound: 'literal' });
   });
 
-  it("should recognise Codex's model selector, including a model name it has never heard of", () => {
+  it('should recognise every Codex picker, including the QUICK one a partial copy of the titles missed', () => {
+    // THE THIRD ENTRY IS THE DEFECT THIS REPLACED. `/model` opens the quick picker, whose title is
+    // exactly `Select Model`, and the local regex here knew only two of the five titles — so the
+    // commonest outcome of the commonest runtime control classified as a started turn and the driver
+    // refused every targeted Codex switch.
     // Act
     const actual = [
-      paneShowsModelSelector('Select Model and Effort'),
-      paneShowsModelSelector('Select Reasoning Level for gpt-9-codex-unreleased'),
-      paneShowsModelSelector('> /model'),
+      paneShowsOpenPicker(['Select Model and Effort', '  1. gpt-5.6-codex'].join('\n')),
+      paneShowsOpenPicker(['Select Reasoning Level for gpt-9-codex-unreleased', '  1. Low'].join('\n')),
+      paneShowsOpenPicker(['Select Model', '  1. gpt-5.6-codex', '  2. All models'].join('\n')),
+      paneShowsOpenPicker('> /model'),
     ];
 
     // Assert
-    should(actual).deepEqual([true, true, false]);
+    should(actual).deepEqual([true, true, true, false]);
+  });
+
+  it('should refuse a picker that has scrolled into history behind a live composer', () => {
+    // A bare title match fires on any frame that MENTIONS a picker, including one already closed —
+    // and `classifySubmit` reads that as "the first Enter was consumed", so a second Enter would be
+    // sent into whatever now has focus. Deriving it from the parser keeps the composer-below-title
+    // rule, which is the only thing that tells an open modal from its own scrollback.
+    // Act
+    const actual = paneShowsOpenPicker(['Select Model', '  1. gpt-5.6-codex', '> '].join('\n'));
+
+    // Assert
+    should(actual).equal(false);
+  });
+
+  it('should call a submitted /model handled-local once the quick picker is up', () => {
+    // The end the defect actually broke: delivery classifying the pane the driver then preflights.
+    // Arrange
+    const picker: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: ['Select Model', '  1. gpt-5.6-codex', '  2. All models'].join('\n'),
+    };
+
+    // Act
+    const actual = classifySubmit(picker, '/model', 'chars');
+
+    // Assert
+    should(actual).deepEqual({ kind: 'delivered', outcome: 'handled-local' });
   });
 });
 

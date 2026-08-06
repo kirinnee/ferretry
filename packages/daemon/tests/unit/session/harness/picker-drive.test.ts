@@ -386,7 +386,8 @@ describe('the Codex model picker drive', () => {
     should(transport.keys.map(sent => sent.expected.row.name)).deepEqual(['gpt-5.6-codex']);
   });
 
-  it('should preflight itself when the caller supplies no screen', async () => {
+  it('should open and read the real screen itself, exactly once, before selecting anything', async () => {
+    // `drive` takes no screen from its caller, so the pane it judges against is always one it read.
     // Arrange
     const transport = new ScriptedPicker([
       { visible: QUICK },
@@ -398,48 +399,31 @@ describe('the Codex model picker drive', () => {
     // Act
     await subject.drive({ model: 'gpt-5.6-codex', effort: 'high' });
 
-    // Assert
+    // Assert: one picker opened, not two, and the first key followed a screen that was parsed.
     should(transport.opens).equal(1);
+    should(transport.keys).not.be.empty();
   });
 
-  it('should start from a preflighted screen without opening a second picker', async () => {
-    // Arrange
-    const transport = new ScriptedPicker([
-      { visible: QUICK },
-      { visible: LEVELS },
-      { visible: IDLE, promptReady: true },
-    ]);
-    const subject = driver(transport);
-    const preflighted = await subject.preflight({ model: 'gpt-5.6-codex', effort: 'high' });
-
-    // Act
-    await subject.drive({ model: 'gpt-5.6-codex', effort: 'high' }, preflighted);
-
-    // Assert
-    should(transport.opens).equal(1);
-  });
-
-  it('should re-assert expressibility even on a screen the caller handed in', async () => {
-    // The invariant must not be bypassable by passing preflight in.
+  it('should refuse an unexpressible target through drive alone, with no key sent', async () => {
+    // There is no caller-supplied screen to bypass the check with any more, so this is the whole
+    // guarantee: a flagged target dies against the pane `drive` itself opened.
     // Arrange
     const transport = new ScriptedPicker([{ visible: QUICK }]);
     const subject = driver(transport);
 
     // Act
     const failure = await subject
-      .drive(
-        {
-          model: 'gpt-5.6-codex',
-          effort: 'high',
-          quickPickerDefaultEffort: 'medium',
-          quickPickerAppliesPreset: true,
-        },
-        parseCodexPickerScreen(QUICK),
-      )
+      .drive({
+        model: 'gpt-5.6-codex',
+        effort: 'high',
+        quickPickerDefaultEffort: 'medium',
+        quickPickerAppliesPreset: true,
+      })
       .catch(error => error);
 
     // Assert
     should(failure).match({ message: /can only apply its default medium reasoning level/u });
+    should(transport.opens).equal(1);
     should(transport.keys).have.length(0);
   });
 
@@ -463,7 +447,7 @@ describe('the Codex model picker drive', () => {
     const failure = plan.kind === 'drive_picker' ? await subject.drive(plan.target).catch(error => error) : plan;
 
     // Assert
-    should(plan).match({ kind: 'drive_picker', needsPreflight: true });
+    should(plan).match({ kind: 'drive_picker', target: { quickPickerAppliesPreset: true } });
     should(failure).match({ message: /a reasoning level this account does not advertise/u });
     should(transport.keys).have.length(0);
   });

@@ -160,15 +160,22 @@ export class CodexModelPickerDriver {
   /**
    * Reach the target, or throw with the stage that was not reached.
    *
+   * IT ALWAYS PREFLIGHTS, and takes no screen from its caller. The composition root used to decide
+   * whether to preflight from a `needsPreflight` flag on the plan and pass the screen back in — but
+   * both arms of that choice ended up here, and this method preflighted itself whenever the caller
+   * did not, so the flag selected between two identical behaviours while reading like a safety
+   * switch. Worse, the parameter was a bypass: a caller could hand in any screen, which is why this
+   * body needed a second expressibility assertion to defend an invariant preflight had already
+   * established. Removing the parameter removes both the false choice and the bypass, and the
+   * guarantee — the target is judged against a screen this driver positively read — becomes
+   * structural instead of conventional.
+   *
    * Success means the picker positively returned to a parsed idle prompt. It does NOT mean Codex has
    * applied the setting: that is proved by the session's own observed runtime, which the caller
    * reads afterwards, and claiming it here would be the daemon asserting an outcome it did not see.
    */
-  async drive(target: CodexPickerTarget, preflighted?: CodexPickerScreen): Promise<void> {
-    let screen = preflighted ?? (await this.preflight(target));
-    // Re-asserted for a caller that supplied its own screen: the invariant must not be bypassable by
-    // passing preflight in.
-    this.#assertExpressible(screen, target);
+  async drive(target: CodexPickerTarget): Promise<void> {
+    let screen = await this.preflight(target);
 
     if (screen.kind === 'quick-models' && rowNamed(screen, target.model) === undefined) {
       await this.#choose(screen, ALL_MODELS_ROW, 'the quick model list');

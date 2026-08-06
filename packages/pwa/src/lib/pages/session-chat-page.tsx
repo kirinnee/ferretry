@@ -158,7 +158,8 @@ function PaneLaunchers() {
  * This is a child component rather than a hook call in the page BECAUSE the page
  * renders `SidePaneWorkspace` — it is the context's parent, so its own body can
  * never read it. A `false` answer is honest: with no pane host mounted the sheet
- * keeps its own explanation on screen instead of closing over nothing.
+ * keeps its own explanation on screen instead of closing over a navigation that
+ * did not happen. `paneHost` below is the ref this capture writes into.
  */
 function SidePaneCapture({ onHost }: { readonly onHost: (host: ReturnType<typeof useSidePane>) => void }) {
   const pane = useSidePane();
@@ -363,16 +364,8 @@ export function SessionChatPage({
     waitForSkills: skills.settled,
     ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
   });
-  /**
-   * Codex's native model picker lives in the Terminal view, and the runtime
-   * sheet can only offer it if something actually navigates there.
-   *
-   * The host is captured from a CHILD because this component renders
-   * `SidePaneWorkspace` — it is the context's parent and can never read it
-   * itself. A `false` answer is honest: with no pane mounted the sheet keeps its
-   * own explanation on screen instead of closing over a navigation that did not
-   * happen.
-   */
+  /** Written by `SidePaneCapture`, which owns the explanation for why the host
+   *  can only be read from a child. */
   const paneHost = useRef<ReturnType<typeof useSidePane>>(null);
   const captureSidePane = useCallback((host: ReturnType<typeof useSidePane>) => {
     paneHost.current = host;
