@@ -45,8 +45,8 @@
  * fleet that is silently short one session's work. The FIRST failure is recorded and no worker
  * claims another session after it, so the walk stops growing the moment it is doomed.
  *
- * The call then returns only once every read it started has settled. That ordering is the whole
- * point and it is the defect this module shipped with: letting `Promise.all` reject on the first
+ * The call then returns only once every session callback it started has settled. That ordering is
+ * the whole point and it is the defect this module shipped with: letting `Promise.all` reject on the first
  * failure handed the caller its error while sixty-three workers carried on claiming sessions behind
  * it, so a rejected fleet walk kept reading — 64 reads started at rejection and 2,496 fifty
  * milliseconds later, on a 10,000-session reproduction. A route that has already answered 503 must
@@ -70,7 +70,7 @@ const FLEET_READ_CONCURRENCY = 64;
  *
  * @param sessionIds every session to read, in the order the answer must come back in
  * @param read the independent per-session read; the first rejection stops the walk and is raised
- *   once every already-started read has settled
+ *   once every already-started session callback has settled
  */
 export async function readTaskBoardFleet<T>(
   sessionIds: readonly string[],

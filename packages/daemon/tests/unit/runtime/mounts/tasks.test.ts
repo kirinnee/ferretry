@@ -399,10 +399,10 @@ describe('the task board mount', () => {
   });
 
   describe('listing the whole fleet', () => {
-    it('should read independent fleet boards in bounded parallel batches', async () => {
+    it('should read independent fleet boards through the bounded parallel pool', async () => {
       // The old route awaited each board in this loop. Each board is an independent atomic
-      // snapshot, so the walk may overlap them, but must not open one descriptor per board without
-      // a bound on a long-lived daemon. `readTaskBoardFleet` owns that rule and its own tests prove
+      // snapshot, so the walk may overlap them, but must not start one callback per board without a
+      // bound on a long-lived daemon. `readTaskBoardFleet` owns that rule and its own tests prove
       // it in isolation; what this case proves is that the ROUTE still asks it rather than
       // reintroducing a loop of its own.
       const sessionIds = Array.from({ length: 96 }, (_unused, index) => `s${index}`);
@@ -431,7 +431,7 @@ describe('the task board mount', () => {
       const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
 
       // Assert — this proves both halves of the port: no serial per-board await, and no unbounded
-      // descriptor fan-out beyond the source implementation's 64-board safety ceiling.
+      // session-callback fan-out beyond the source implementation's 64-session safety ceiling.
       should(response.status).equal(200);
       should(peakInFlight).equal(64);
     });

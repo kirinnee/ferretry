@@ -274,10 +274,11 @@ detail handler re-reads the whole board before answering one task, roughly **2N 
 same snapshot file**. That repeated per-task board-read cost is untouched by anything here. Closing
 #5 means collapsing that N+1 — the list response already carries every summary field the pane
 renders — and then recording a pane-level before/after. Neither is done, so there is deliberately
-**no row-level timing claimed** yet.
+**no row-level timing claimed** yet. That later pane integration and its measurement belong to #6's
+current-session search work; this branch deliberately does not touch them.
 
-**The measurement of the done half is a script, not a number.** It measures the aggregate route
-only; it says nothing about the pane. `scripts/local/bench-fleet-task-reads.ts` runs both
+**The done half has a reproducible measurement, not an unsupported number.** It measures the
+aggregate route only; it says nothing about the pane. `scripts/local/bench-fleet-task-reads.ts` runs both
 access patterns against the same fixture in one interpreter — the pre-`37af20d4` sequential loop,
 reimplemented because the change deleted it, and the shipped route through the real
 `ApiRouter`/`ApiDispatcher`. Probe: 96 sessions, one `FakeTaskBoard` each
@@ -287,11 +288,12 @@ median reported. It is offline and touches no state home; `bun scripts/local/ben
 reproduces it and `--boards/--latency/--samples` vary it. A malformed, zero or fractional
 `--boards`/`--samples` exits 2 rather than reporting a `NaN` median, and the closing line says
 FASTER or SLOWER according to what was actually measured. Each run prints the commit it measured and
-says so when the tree is dirty, so a citation of a specific tree comes from running the script and
-never from this paragraph. A representative run of this branch's code: **1,190.6 ms** before
-(1,172.7–1,213.7) against **31.1 ms** after (26.5–33.2), a **38.3×** reduction; across runs on one
-machine the ratio sits between roughly 38× and 45×. The ratio is a floor — only the AFTER arm pays
-routing, authorization and serialization.
+says so when the tree is dirty. A one-board or zero-latency probe is explicitly **INCONCLUSIVE**:
+there are no overlapping reads whose effect could be separated from timer and scheduling noise. The
+warmed, alternating-pair evidence recorded for this branch used 96 boards, 12 ms injected latency and
+3 samples: **1,253.9 ms** before against **28.9 ms** after, a **43.4×** reduction. Fresh runs remain
+the source of current-tree evidence because wall-clock timings vary; the ratio is a floor because only
+the AFTER arm pays routing, authorization and serialization.
 
 **The bound now has one owner, and its unit is a SESSION.** `readTaskBoardFleet`
 (`packages/daemon/src/lib/task-boards/fleet-read.ts`) is the only way the board domain walks every

@@ -85,8 +85,8 @@ function options(argv: readonly string[]): { boards: number; latency: number; sa
     if (flag !== 'boards' && flag !== 'latency' && flag !== 'samples') refuse(`unknown option ${String(argv[index])}`);
     const raw = argv[index + 1];
     if (raw === undefined) refuse(`--${flag} needs a value`);
-    // `Number('')` is 0 and `Number(' 3 ')` is 3, so an empty or padded argument would slip through
-    // a bare `Number()` check. Requiring the trimmed text to be non-empty closes both.
+    // `Number('')` and `Number('   ')` are both 0, so an empty argument would slip through a bare
+    // `Number()` check. Requiring the trimmed text to be non-empty closes that path.
     const value = raw.trim() === '' ? Number.NaN : Number(raw);
     const rule = OPTIONS[flag];
     if (!Number.isFinite(value) || value < rule.minimum || (rule.integer && !Number.isInteger(value)))

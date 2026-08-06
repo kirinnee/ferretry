@@ -82,8 +82,8 @@ describe('the task board fleet read', () => {
     });
   });
 
-  describe('the descriptor bound', () => {
-    it('should never run more than sixty-four reads at once, however large the fleet', async () => {
+  describe('the session callback bound', () => {
+    it('should never run more than sixty-four session callbacks at once, however large the fleet', async () => {
       // Arrange
       const meter = concurrencyMeter();
       const ids = sessions(300);
