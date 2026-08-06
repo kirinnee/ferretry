@@ -35,6 +35,20 @@ export function dismissPaneIdArguments(paneId: string): readonly string[] {
   return ['send-keys', '-t', paneId, 'Escape'];
 }
 
+/** The only keys a picker drive may send. A single digit selects the row that
+ *  bears it; anything else is either a name tmux would interpret (`Enter`,
+ *  `C-c`) or an arrow, and neither can be checked against a row that was read
+ *  off the screen. */
+export function isAddressablePickerKey(key: string): boolean {
+  return /^[1-9]$/.test(key);
+}
+
+/** One verified single-digit shortcut, addressed to the exact pane it was
+ *  verified on rather than to whichever pane is active when it lands. */
+export function pickerKeyPaneIdArguments(paneId: string, key: string): readonly string[] {
+  return ['send-keys', '-t', paneId, key];
+}
+
 /** Parse `#{cursor_x}|#{cursor_y}`, refusing anything that is not two finite
  *  numbers — a partial read must not be mistaken for column zero. */
 export function parsePaneCursor(value: string): { readonly x: number; readonly y: number } | undefined {
