@@ -1023,8 +1023,8 @@ outstanding:
      naming the first relay in the same frozen published array a redemption answers with, composed
      through the protocol's one fragment writer. Readers accept v1 and v2 from that same codec, and
      `scripts/validate/cli-contracts.sh` pins the version set to the WRITER so a third reader cannot
-     silently fall behind again — which is a gate that exists because exactly that happened: `fy
-pair` refused the daemon's own link for one commit. **The release ordering still holds and is
+     silently fall behind again — a gate that exists because exactly that happened, and for one
+     commit `fy pair` refused the daemon's own link. **The release ordering still holds and is
      not optional**: a daemon build that emits v2 must not ship ahead of a browser build that reads
      it, or a v2 link reads as no link at all. Within this branch the readers land together.
    - **The relayed rate-limit identity — fixed.** A relayed request used to reach the daemon's route
