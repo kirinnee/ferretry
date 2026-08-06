@@ -202,7 +202,7 @@ describe('fy pair', () => {
     should(h.exit.code).be.undefined();
   });
 
-  it('should encode no QR for an address only this machine can dial, and still wait for the scan', async () => {
+  it('should encode no QR for an address only this machine can dial, and still wait for it to be redeemed', async () => {
     // THE BLOCKER, AT THE COMMAND. A loopback advertisement is the DEFAULT, so this is not an error
     // path: the code is live, the link works for a browser here, and the one thing that must not
     // happen is a QR — a phone that reads it dials itself. Nothing here inspects the address: the
@@ -213,8 +213,12 @@ describe('fy pair', () => {
 
     should(h.qr.requests).be.empty();
     should(h.screen.text).containEql('Only a browser on this machine can redeem this link');
-    should(h.screen.text).containEql('set publicUrl to the address other devices reach this machine at');
+    const flattened = h.screen.text.replace(/\s+/gu, ' ');
+    should(flattened).containEql('publicUrl');
+    should(flattened).containEql('to the address other devices reach this machine at');
     should(h.screen.text).containEql(CODE);
+    // There is nothing to scan on this offer, so the live line must not say there is.
+    should(h.progress.events[0]).equal('start:Waiting for the code to be redeemed — 2:00 left');
     // Still the whole command: it waited, and it reported the ending.
     should(h.gateway.polled).eql([PAIRING_ID]);
     should(h.progress.ending).containEql('Pixel is paired with workstation (127.0.0.1:7431)');
@@ -242,6 +246,8 @@ describe('fy pair', () => {
     should(h.screen.text).not.containEql('ferretry.pages.dev');
     should(h.screen.text).containEql(CODE);
     should(h.gateway.polled).eql([PAIRING_ID]);
+    // A refusal has nothing to scan either, so the live line names what is actually happening.
+    should(h.progress.events[0]).equal('start:Waiting for the code to be redeemed — 2:00 left');
     // No address was ever given, so the ending names the daemon and invents nothing.
     should(h.progress.ending).equal('succeed:Pixel is paired with workstation — it holds its own token now.');
   });

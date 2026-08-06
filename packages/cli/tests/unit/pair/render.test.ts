@@ -63,11 +63,17 @@ describe('pairing screen', () => {
     should(actual).containEql('http://127.0.0.1:7431');
     should(actual).containEql('Open this link in a browser on THIS machine');
     should(actual).containEql(LOCAL_LINK);
-    // Never a dead end: the audience comes with the one change that widens it.
-    should(actual).containEql('set publicUrl to the address other devices reach this machine at');
+    // Never a dead end: the audience comes with the change that widens it. Flattened, since the
+    // remedy's own wrapping is not what this test is about.
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('publicUrl');
+    should(flattened).containEql('to the address other devices reach this machine at');
     // Everything the code needs to be used by hand is still on the screen.
     should(actual).containEql(`  ${CODE}`);
     should(actual).containEql('Expires in 2:00; the code works once.');
+    // The remedy and the deadline are separate thoughts, not one run-together block — whatever the
+    // remedy's own word wrap does, a blank line still separates it from the deadline.
+    should(actual).containEql('\n\nExpires in');
   });
 
   it('should offer no link at all when the daemon has no address, and still print the code', () => {
@@ -80,8 +86,13 @@ describe('pairing screen', () => {
     should(actual).not.containEql('#v1;');
     should(actual).not.containEql(QR.split('\n')[0]);
     should(actual.split('\n')[0]).containEql('binds every interface');
-    should(actual).containEql('set publicUrl to the address other devices reach this machine at');
+    const flattened = actual.replace(/\s+/gu, ' ');
+    should(flattened).containEql('publicUrl');
+    should(flattened).containEql('to the address other devices reach this machine at');
     should(actual).containEql(`  ${CODE}`);
+    should(actual).containEql('Expires in 2:00; the code works once.');
+    // Same separation applies with no link on the screen at all.
+    should(actual).containEql('\n\nExpires in');
   });
 
   it('should say so rather than silently doing nothing when --open has no link to open', () => {
@@ -133,7 +144,14 @@ describe('pairing screen', () => {
     should(renderRemaining(1)).equal('0:01');
     should(renderRemaining(0)).equal('0:00');
     should(renderRemaining(-5_000)).equal('0:00');
-    should(renderWaiting(107_400)).equal('Waiting for the scan — 1:48 left');
+    should(renderWaiting(107_400, 'qr')).equal('Waiting for the scan — 1:48 left');
+  });
+
+  it('should never call it a scan when there is nothing to scan', () => {
+    // `local-only` hands the code to a browser; `refusal` hands it to nobody. Neither offer draws a
+    // QR, so the live line must not send the operator looking for a camera prompt that never appears.
+    should(renderWaiting(107_400, 'local-only')).equal('Waiting for the code to be redeemed — 1:48 left');
+    should(renderWaiting(107_400, 'refusal')).equal('Waiting for the code to be redeemed — 1:48 left');
   });
 
   it('should spell every symbol a code can contain and pass through anything else', () => {
