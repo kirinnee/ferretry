@@ -104,25 +104,38 @@ describe('the task board fleet read', () => {
     });
 
     it('should refill a freed slot rather than waiting for a whole batch to finish', async () => {
-      // Arrange — one session far slower than the rest. A batching walk would stall the remaining
-      // 65 behind it; a pool starts them the moment any other slot frees.
+      // Arrange — hold one callback from the first 64 open while every sibling answers. A batching
+      // walk cannot start s64 until that callback is released; a pool starts it as soon as any other
+      // slot frees. This gate distinguishes those shapes without a wall-clock threshold that both
+      // could satisfy.
       const meter = concurrencyMeter();
       const ids = sessions(65);
+      let releaseSlow!: () => void;
+      const slow = new Promise<void>(resolve => {
+        releaseSlow = resolve;
+      });
+      let lastStarted = false;
 
       // Act
-      const started = performance.now();
-      await readTaskBoardFleet(
+      const pending = readTaskBoardFleet(
         ids,
         meter.wrap(async id => {
-          await Bun.sleep(id === 's0' ? 120 : 2);
+          if (id === 's0') await slow;
+          if (id === 's64') lastStarted = true;
           return id;
         }),
       );
-      const elapsed = performance.now() - started;
+      // Let the immediately resolved callbacks drain through their worker continuations. A real pool
+      // has claimed s64 by the next event-loop turn, while a batch still waits on the unresolved s0.
+      await Bun.sleep(0);
+      const refilledWhileSlow = lastStarted;
+      releaseSlow();
+      const read = await pending;
 
-      // Assert — the 65th read overlapped the slow one instead of queueing after it.
+      // Assert — the 65th callback overlapped the slow one instead of queueing after the whole batch.
+      should(read).eql(ids);
       should(meter.peak()).equal(64);
-      should(elapsed).be.below(120 + 60);
+      should(refilledWhileSlow).be.true();
     });
 
     it('should start only as many reads as there are sessions when the fleet is smaller than the bound', async () => {
