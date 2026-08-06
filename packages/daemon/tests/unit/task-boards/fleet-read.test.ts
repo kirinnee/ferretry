@@ -7,25 +7,36 @@ import { readTaskBoardFleet } from '../../../src/lib/task-boards/fleet-read.ts';
  *
  * Both callers — the aggregate `/v1/tasks` route and `StorageTaskBoardSessionDirectory` — depend on
  * three properties this decision owns, and each of them is a defect somewhere else if it is wrong:
- * the ORDER a fleet board renders in, the DESCRIPTOR ceiling a long-lived daemon lives under, and
- * the fail-closed rule that a session nobody can read makes the whole answer unavailable rather than
- * quietly shortening it.
+ * the ORDER a fleet board renders in, the SESSION ceiling that keeps a fleet walk from growing with
+ * the fleet, and the fail-closed rule that a session nobody can read makes the whole answer
+ * unavailable rather than quietly shortening it.
  *
- * The bound itself is deliberately not exported, so these tests measure it — peak simultaneous reads
- * — rather than reading a number back out of the module and comparing it with itself.
+ * The ceiling is counted in SESSION CALLBACKS, never in documents or descriptors — one caller reads
+ * one document per callback and the other reads two, so a document number stated here would be
+ * false for one of them. What the directory's own physical cost is belongs to the directory's
+ * integration test, and is asserted there.
+ *
+ * The bound itself is deliberately not exported, so these tests measure it — peak simultaneous
+ * callbacks — rather than reading a number back out of the module and comparing it with itself.
  */
 
 /** Every read that is currently running, so a case can assert the ceiling instead of assuming it. */
 function concurrencyMeter(): {
   readonly peak: () => number;
+  readonly started: () => number;
+  readonly inFlight: () => number;
   readonly wrap: <T>(read: (id: string) => Promise<T>) => (id: string) => Promise<T>;
 } {
   let inFlight = 0;
   let peak = 0;
+  let started = 0;
   return {
     peak: () => peak,
+    started: () => started,
+    inFlight: () => inFlight,
     wrap: read => async id => {
       inFlight += 1;
+      started += 1;
       peak = Math.max(peak, inFlight);
       try {
         return await read(id);
@@ -86,7 +97,8 @@ describe('the task board fleet read', () => {
         }),
       );
 
-      // Assert — the ported kteam ceiling, measured rather than read back out of the module.
+      // Assert — the ported kteam ceiling in session callbacks, measured rather than read back out
+      // of the module.
       should(read).have.length(300);
       should(meter.peak()).equal(64);
     });
@@ -162,6 +174,61 @@ describe('the task board fleet read', () => {
 
       // Assert — fail-closed: the caller is told, and never handed the nine readable sessions.
       should(outcome).have.property('error', failure);
+    });
+
+    it('should claim no further session once a read has failed, however many are left unread', async () => {
+      // A rejected walk that keeps reading is a daemon still doing work for an answer nobody will
+      // ever receive — and in the session directory each newly claimed session starts TWO more
+      // document reads. The first version of this module let `Promise.all` reject and left every
+      // other worker in its loop: a 10,000-session reproduction stood at 64 started reads when the
+      // caller got its error and 2,496 fifty milliseconds later. 200 sessions against a 64-wide
+      // pool is the smallest fleet that tells the two apart, because a pool that never refills
+      // cannot reach 65.
+      // Arrange — `s0` fails on the very first turn, so the pool has claimed exactly its initial
+      // 64 sessions and no more when the failure is recorded.
+      const meter = concurrencyMeter();
+      const ids = sessions(200);
+
+      // Act
+      const raised = await readTaskBoardFleet(
+        ids,
+        meter.wrap(async id => {
+          if (id === 's0') throw new Error('s0 is damaged');
+          await Bun.sleep(5);
+          return id;
+        }),
+      ).catch((error: unknown) => error);
+      const startedAtRejection = meter.started();
+      await Bun.sleep(50);
+
+      // Assert — the pool's first fill and nothing after it, both at the moment the caller was told
+      // and long enough afterwards that a still-running walk would have shown itself.
+      should(raised).be.an.Error();
+      should(startedAtRejection).equal(64);
+      should(meter.started()).equal(64);
+    });
+
+    it('should settle every read it started before handing the failure back', async () => {
+      // The caller is entitled to "the walk is over", not merely "the walk is doomed". A route that
+      // has already answered 503 must not still be holding reads open behind the response.
+      // Arrange — one session fails at once while its siblings are mid-read, so a walk that threw
+      // eagerly would return with 63 reads still outstanding.
+      const meter = concurrencyMeter();
+
+      // Act
+      const raised = await readTaskBoardFleet(
+        sessions(200),
+        meter.wrap(async id => {
+          if (id === 's0') throw new Error('s0 is damaged');
+          await Bun.sleep(20);
+          return id;
+        }),
+      ).catch((error: unknown) => error);
+
+      // Assert — nothing is in flight at the instant the caller is told.
+      should(raised).be.an.Error();
+      should(meter.peak()).equal(64);
+      should(meter.inFlight()).equal(0);
     });
 
     it('should handle a second failure that arrives after the first has already rejected the walk', async () => {

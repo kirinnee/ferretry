@@ -19,6 +19,6 @@
     "noImplicitOverride": true,
     "types": ["bun"]
   },
-  "include": ["packages/*/bin", "packages/*/src", "packages/*/tests", "scripts/validate"],
+  "include": ["packages/*/bin", "packages/*/src", "packages/*/tests", "scripts/validate", "scripts/local"],
   "exclude": ["packages/pwa"]
 }

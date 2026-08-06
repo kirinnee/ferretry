@@ -54,12 +54,19 @@ export class StorageTaskBoardSessionDirectory implements TaskBoardSessionDirecto
   constructor(private readonly source: TaskBoardSessionSource) {}
 
   /**
-   * WHY THIS WALK IS BOUNDED RATHER THAN A PLAIN `Promise.all`. Every session here costs TWO reads,
-   * and the fleet is however many sessions the daemon holds — so the unbounded form opened two
-   * descriptors per session simultaneously, on a long-lived daemon, while the aggregate task route
-   * next door was carefully staying under a 64-wide limit for reads of the same fleet. One fact,
-   * two answers. {@link readTaskBoardFleet} is now the only answer, and it also keeps this list in
-   * the index's order rather than in whichever order the filesystem replied.
+   * WHY THIS WALK IS BOUNDED RATHER THAN A PLAIN `Promise.all`. The unbounded form started every
+   * session in the daemon at once, so its cost grew with the fleet — a term with no ceiling — while
+   * the aggregate task route next door was staying under a fixed limit for reads of the same fleet.
+   * One fact, two answers. {@link readTaskBoardFleet} is now the only answer, and it also keeps this
+   * list in the index's order rather than in whichever order the filesystem replied.
+   *
+   * WHAT THE BOUND ACTUALLY IS HERE, STATED SO NOBODY QUOTES THE WRONG NUMBER. `readTaskBoardFleet`
+   * limits SESSIONS in flight, and {@link session} starts TWO document reads per session together.
+   * So this walk peaks at **64 sessions and up to 128 open documents**, which is twice the aggregate
+   * route's ceiling for the same limit — the two callers share a session bound, NOT a document
+   * bound. That is still the property worth having, because 128 is a constant and the fleet is not.
+   * `tests/integration/task-boards/storage-task-board-session-directory.test.ts` measures both
+   * numbers rather than trusting this paragraph.
    */
   async snapshot(): Promise<readonly TaskBoardSession[]> {
     const sessions = await readTaskBoardFleet(this.source.sessionIds(), async id => await this.session(id));

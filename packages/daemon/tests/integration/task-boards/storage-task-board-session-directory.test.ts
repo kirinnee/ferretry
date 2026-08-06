@@ -181,41 +181,62 @@ describe('StorageTaskBoardSessionDirectory', () => {
     should(await directory({}).snapshot()).be.empty();
   });
 
-  it('should read a large fleet under the same descriptor bound the aggregate task route uses', async () => {
-    // This walk costs TWO document reads per session and used to run every session at once, so a
-    // daemon holding thousands of boards opened thousands of descriptors here while the aggregate
-    // task route next door stayed under 64 for reads of the same fleet. Both now go through
-    // `readTaskBoardFleet`, so there is one bound rather than two answers — and this case measures
-    // it against real reads rather than trusting the call site to look right.
+  it('should walk a large fleet 64 sessions at a time, which is 128 open documents here', async () => {
+    // The walk used to start every session in the daemon at once, so its cost grew with the fleet.
+    // It now goes through `readTaskBoardFleet` — but that limits SESSIONS, and this adapter reads
+    // TWO documents per session, started together. So the honest statement about this caller is
+    // "64 sessions, 128 documents", NOT the aggregate route's 64 documents for the same limit, and
+    // the point of measuring both numbers here is that a doc comment claiming otherwise would have
+    // read perfectly well. 300 sessions is more than four pool-fulls, so a walk that quietly went
+    // unbounded again could not hide behind a small fixture.
     // Arrange
     const ids = Array.from({ length: 300 }, (_unused, index) => `s${index}`);
-    let inFlight = 0;
-    let peakInFlight = 0;
-    const meter = async <T>(answer: T): Promise<T> => {
-      inFlight += 1;
-      peakInFlight = Math.max(peakInFlight, inFlight);
+    let documentsInFlight = 0;
+    let peakDocuments = 0;
+    let sessionsInFlight = 0;
+    let peakSessions = 0;
+    /** One physical document read, so the ceiling is counted where the descriptors actually are. */
+    const readDocument = async <T>(answer: T): Promise<T> => {
+      documentsInFlight += 1;
+      peakDocuments = Math.max(peakDocuments, documentsInFlight);
       try {
         await Bun.sleep(1);
         return answer;
       } finally {
-        inFlight -= 1;
+        documentsInFlight -= 1;
+      }
+    };
+    /**
+     * A session is in flight from its FIRST document until its LAST, which is what the bound caps.
+     *
+     * The adapter starts both reads together, so counting the config read in and the state read out
+     * brackets exactly one session — `first` opens the bracket, `last` closes it.
+     */
+    const readSessionDocument = async <T>(answer: T, bracket: 'first' | 'last'): Promise<T> => {
+      if (bracket === 'first') {
+        sessionsInFlight += 1;
+        peakSessions = Math.max(peakSessions, sessionsInFlight);
+      }
+      try {
+        return await readDocument(answer);
+      } finally {
+        if (bracket === 'last') sessionsInFlight -= 1;
       }
     };
     const source = new StorageTaskBoardSessionDirectory({
       sessionIds: () => ids,
-      readConfig: async id => await meter(configDocument(id)),
-      readState: async id => await meter({ id, status: 'running', turn: 1, lastActivityAt: AT }),
+      readConfig: async id => await readSessionDocument(configDocument(id), 'first'),
+      readState: async id => await readSessionDocument({ id, status: 'running', turn: 1, lastActivityAt: AT }, 'last'),
     });
 
     // Act
     const sessions = await source.snapshot();
 
-    // Assert — every session is answered, in the index's order, and never more than the bound's
-    // worth of sessions is in flight. Each session issues its config and state reads together, so
-    // the ceiling here is two documents per in-flight session.
+    // Assert — every session answered, in the index's order, 64 sessions at the peak and exactly
+    // twice that many documents, because each in-flight session holds both of its reads open.
     should(sessions.map(session => session.id)).eql(ids);
-    should(peakInFlight).be.above(1);
-    should(peakInFlight).be.belowOrEqual(64 * 2);
+    should(peakSessions).equal(64);
+    should(peakDocuments).equal(128);
   });
 
   it('should raise rather than answer short when one session document cannot be read at all', async () => {

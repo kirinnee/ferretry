@@ -28,6 +28,7 @@
  * socket, reads a real state home, or touches `~/.ferretry`. It can be run on any checkout at any
  * time and answers only from what it just measured.
  */
+import { NO_GOVERNED_ROUTES_GUARD } from '../../packages/daemon/src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../packages/daemon/src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../packages/daemon/src/lib/api/router.ts';
 import { type TaskSubsystem, taskRoutes } from '../../packages/daemon/src/lib/runtime/mounts/tasks.ts';
@@ -45,19 +46,48 @@ const REFERENCE_SUBJECT = 'fix(tasks): parallelize fleet board reads (#282)';
 
 const DEFAULTS = { boards: 96, latency: 12, samples: 3 } as const;
 
+const USAGE = 'usage: bun scripts/local/bench-fleet-task-reads.ts [--boards N] [--latency MS] [--samples N]';
+
+/** Refusing beats reporting. A benchmark that prints a number it cannot stand behind is worse than one
+ *  that will not run, because the number outlives the run and ends up quoted in a document. */
+function refuse(reason: string): never {
+  console.error(`❌ ${reason}`);
+  console.error(`   ${USAGE}`);
+  process.exit(2);
+}
+
+/**
+ * What each option must be, and why the shape rather than merely the sign is checked.
+ *
+ * `--samples 0` used to be accepted, and the median of no samples is `NaN`: the script exited 0 and
+ * printed `median NaN ms` and `ratio NaN× faster`. A fractional `--boards 2.5` is the same class —
+ * `Array.from({ length: 2.5 })` silently gives two boards, so the header would state a fleet size
+ * the run did not use. Both are a successful, invalid claim, which is the one outcome a measurement
+ * script must never produce.
+ */
+const OPTIONS = {
+  // At least one board: a zero-board fleet times nothing and would report an infinite ratio.
+  boards: { integer: true, minimum: 1, unit: 'a whole number of boards, at least 1' },
+  // At least one sample: with none there is no median to report.
+  samples: { integer: true, minimum: 1, unit: 'a whole number of samples, at least 1' },
+  // Zero latency is legitimate — it measures the scheduling overhead alone — and a fraction is a
+  // real sub-millisecond delay, so only finiteness and sign are constrained here.
+  latency: { integer: false, minimum: 0, unit: 'a finite number of milliseconds, 0 or more' },
+} as const;
+
 function options(argv: readonly string[]): { boards: number; latency: number; samples: number } {
   const chosen = { ...DEFAULTS } as { boards: number; latency: number; samples: number };
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index]?.replace(/^--/u, '');
-    const value = Number(argv[index + 1]);
-    if (flag !== 'boards' && flag !== 'latency' && flag !== 'samples') {
-      console.error(`❌ usage: bun scripts/local/bench-fleet-task-reads.ts [--boards N] [--latency MS] [--samples N]`);
-      process.exit(2);
-    }
-    if (!Number.isFinite(value) || value < 0) {
-      console.error(`❌ --${flag} needs a non-negative number, got ${String(argv[index + 1])}`);
-      process.exit(2);
-    }
+    if (flag !== 'boards' && flag !== 'latency' && flag !== 'samples') refuse(`unknown option ${String(argv[index])}`);
+    const raw = argv[index + 1];
+    if (raw === undefined) refuse(`--${flag} needs a value`);
+    // `Number('')` is 0 and `Number(' 3 ')` is 3, so an empty or padded argument would slip through
+    // a bare `Number()` check. Requiring the trimmed text to be non-empty closes both.
+    const value = raw.trim() === '' ? Number.NaN : Number(raw);
+    const rule = OPTIONS[flag];
+    if (!Number.isFinite(value) || value < rule.minimum || (rule.integer && !Number.isInteger(value)))
+      refuse(`--${flag} needs ${rule.unit}, got ${JSON.stringify(raw)}`);
     chosen[flag] = value;
   }
   return chosen;
@@ -111,9 +141,16 @@ async function sequentialFleetRead(subsystem: TaskSubsystem): Promise<number> {
   return rows;
 }
 
-/** The shipped route, through the real router and dispatcher. */
+/**
+ * The shipped route, through the real router and dispatcher.
+ *
+ * `NO_GOVERNED_ROUTES_GUARD` is the same guard the daemon's own route tests construct the dispatcher
+ * with. Passing it is not a formality: the argument was missing here until `scripts/local` was added
+ * to the root TypeScript project, and JavaScript accepted the short call at run time while the arity
+ * error sat unnoticed — the one defect nothing in this repository was checking for.
+ */
 async function routedFleetRead(subsystem: TaskSubsystem): Promise<number> {
-  const dispatch = new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS);
+  const dispatch = new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
   const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
   if (response.status !== 200) throw new Error(`the aggregate route answered ${response.status}, not 200`);
   return response.status;
@@ -175,6 +212,18 @@ console.log('');
 const beforeMedian = report('BEFORE  sequential per-board await', before);
 const afterMedian = report('AFTER   real route, bounded fan-out', after);
 console.log('');
-console.log(`  ratio ${(beforeMedian / afterMedian).toFixed(1)}× faster`);
-console.log(`  the BEFORE arm pays no routing, authorization or serialization cost and the AFTER arm`);
-console.log(`  pays all three, so this ratio is a floor.`);
+// The word is decided by the measurement, never assumed. A run where the bounded path came out
+// slower is a real and interesting outcome — at `--boards 1` the pool is pure overhead — and
+// printing "faster" over it would be the script asserting its own conclusion.
+if (afterMedian < beforeMedian) {
+  console.log(`  ratio ${(beforeMedian / afterMedian).toFixed(1)}× FASTER after`);
+  console.log(`  the BEFORE arm pays no routing, authorization or serialization cost and the AFTER arm`);
+  console.log(`  pays all three, so this ratio is a floor.`);
+} else if (afterMedian > beforeMedian) {
+  console.log(`  ratio ${(afterMedian / beforeMedian).toFixed(1)}× SLOWER after`);
+  console.log(`  the AFTER arm alone pays routing, authorization and serialization, which dominates`);
+  console.log(`  when there is little read latency to overlap. Compare at a realistic --boards/--latency.`);
+} else {
+  console.log(`  ratio 1.0× — the two arms measured the same, which at this size means the fixture is`);
+  console.log(`  too small to separate them. Raise --boards or --latency.`);
+}
