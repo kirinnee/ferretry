@@ -10,7 +10,7 @@ import {
 } from '../lib/composer-keybinding.ts';
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionScope } from '../lib/daemon-scope.ts';
+import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
@@ -300,13 +300,10 @@ export function Composer({
    * unrepresentable — a mismatched tag reads this scope's own stored draft —
    * and the effect below then settles the state for every render after it.
    */
-  const scopeKey = `${scope.daemonId} ${scope.sessionId}`;
+  const scopeKey = daemonSessionKey(scope);
   const [draftState, setDraftState] = useState(() => ({ key: scopeKey, text: draftStore.load(scope) }));
   const draft = draftState.key === scopeKey ? draftState.text : draftStore.load(scope);
-  const setDraft = useCallback(
-    (text: string) => setDraftState({ key: `${scope.daemonId} ${scope.sessionId}`, text }),
-    [scope.daemonId, scope.sessionId],
-  );
+  const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
@@ -546,31 +543,34 @@ export function Composer({
   const syncAutocompleteSelection = useRef(autocomplete.syncSelection);
   syncAutocompleteSelection.current = autocomplete.syncSelection;
 
-  const applyDictation = useCallback((result: { readonly text: string; readonly caret: number }): void => {
-    // BEFORE the text lands, not after: spoken words are inserted at the caret,
-    // and a normal-mode caret sits ON a character rather than between two.
-    setVim(initialVimState);
-    setDraft(result.text);
-    requestAnimationFrame(() => {
-      const input = inputRef.current;
-      if (input === null) return;
-      // DELIBERATELY NOT `focus()`, unlike `insertNewline` and `replaceDraft`
-      // above: dictation is the one path a phone reader takes to AVOID the
-      // on-screen keyboard, and focusing the textarea summons it straight over
-      // the words they just spoke. The caret still moves, so typing after a tap
-      // continues from the transcript rather than from a stale position.
-      try {
-        input.setSelectionRange(result.caret, result.caret);
-      } catch {
-        // The draft still landed; a detached textarea can refuse selection.
-      }
-      // Told separately BECAUSE there is no focus and therefore no `select`
-      // event: without this the controller keeps the caret from before the
-      // transcript, and a reference the dictated text ended on stays unoffered
-      // until the next keystroke.
-      syncAutocompleteSelection.current({ start: result.caret, end: result.caret });
-    });
-  }, [setDraft]);
+  const applyDictation = useCallback(
+    (result: { readonly text: string; readonly caret: number }): void => {
+      // BEFORE the text lands, not after: spoken words are inserted at the caret,
+      // and a normal-mode caret sits ON a character rather than between two.
+      setVim(initialVimState);
+      setDraft(result.text);
+      requestAnimationFrame(() => {
+        const input = inputRef.current;
+        if (input === null) return;
+        // DELIBERATELY NOT `focus()`, unlike `insertNewline` and `replaceDraft`
+        // above: dictation is the one path a phone reader takes to AVOID the
+        // on-screen keyboard, and focusing the textarea summons it straight over
+        // the words they just spoke. The caret still moves, so typing after a tap
+        // continues from the transcript rather than from a stale position.
+        try {
+          input.setSelectionRange(result.caret, result.caret);
+        } catch {
+          // The draft still landed; a detached textarea can refuse selection.
+        }
+        // Told separately BECAUSE there is no focus and therefore no `select`
+        // event: without this the controller keeps the caret from before the
+        // transcript, and a reference the dictated text ended on stays unoffered
+        // until the next keystroke.
+        syncAutocompleteSelection.current({ start: result.caret, end: result.caret });
+      });
+    },
+    [setDraft],
+  );
 
   /** Write a Vim outcome back through the controlled draft, never into the DOM. */
   const applyVim = (outcome: { readonly value: string; readonly selectionStart: number; readonly state: VimState }) => {
@@ -591,7 +591,7 @@ export function Composer({
     setDraft(outcome.value);
   };
 
-  const previewText = useDeferredDraft(draft, PREVIEW_DEBOUNCE_MS, `${scope.daemonId} ${scope.sessionId}`);
+  const previewText = useDeferredDraft(draft, PREVIEW_DEBOUNCE_MS, scopeKey);
   const previewMaxPx = !compact
     ? PREVIEW_MAX_PX
     : keyboardOpen
