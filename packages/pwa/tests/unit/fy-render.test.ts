@@ -28,14 +28,19 @@ const reasonOf = (result: FyRenderParseResult): string => (result.ok ? '<accepte
 const SQUARE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
 
 /**
- * REAL CONTAINERS, built byte by byte.
+ * ADMISSION-SHAPED CONTAINERS, built byte by byte.
  *
- * The grammar now reads a raster's declared dimensions before anything decodes
- * it, so a fixture has to be a structurally complete file rather than four
- * base64 characters. Building them here — rather than pasting opaque base64 —
- * is what lets a test say "this PNG declares 65535×65535" and be read as that.
- * Cross-checked against Chrome's own encoder: for real PNG, JPEG, WebP and GIF
- * samples at 1×1 through 8192×2048, the parser's dimensions matched
+ * The grammar reads a raster's declared dimensions and record structure before
+ * anything decodes it, so a fixture has to carry the records those checks look
+ * at — a signature, ordered records, a terminal shape — rather than four base64
+ * characters. It does NOT have to be a valid image, and these are not: their
+ * CRCs are zeros and their pixel data is meaningless. That is the separation
+ * under test, so the fixtures are named for it.
+ *
+ * Building them here rather than pasting opaque base64 is what lets a test say
+ * "this PNG declares 65535×65535" and be read as saying that. The dimension
+ * reading was cross-checked against Chrome's own encoder: for real PNG, JPEG,
+ * WebP and GIF samples at 1×1 through 8192×2048, the parser matched
  * `naturalWidth`/`naturalHeight` exactly, 18 of 18.
  */
 const bytes = (...values: readonly number[]): Uint8Array => Uint8Array.from(values);
@@ -795,8 +800,10 @@ describe('fy-render raster header bounds', () => {
   });
 
   test('should refuse a container with bytes after its terminal record', () => {
-    // Assert — a walk that does not land exactly on the end of the file has not
-    // understood the file, and the brief locks malformed containers fail-closed.
+    // Assert — a walk that does not land exactly on its terminal record has not
+    // exhausted the container, and an unexhausted walk is refused. That is a
+    // structural check, not a claim about the bytes inside: CRC and content
+    // validity stay the browser decoder's business.
     should(reasonOf(image('image/png', bytes(...png(64, 48), 0, 0, 0)))).equal(
       'Image payload header could not be read',
     );
