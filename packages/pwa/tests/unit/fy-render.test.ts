@@ -68,9 +68,13 @@ const secondIhdr = (width: number, height: number): readonly number[] => [
 ];
 
 /**
- * A complete PNG: signature, a 13-byte IHDR, optional extra chunks, one IDAT,
- * and a zero-length terminal IEND. `data: false` omits the IDAT, which is the
- * header-and-end shell the parser must now refuse.
+ * An ADMISSION-SHAPED PNG container: the signature, a 13-byte IHDR, optional
+ * extra chunks, one IDAT run, and a zero-length terminal IEND at the exact end.
+ * Those are the selected records the parser checks and nothing more — the CRCs
+ * here are zeros and the IDAT holds two meaningless bytes, so calling it
+ * "complete" or "valid" would claim exactly the validation this parser
+ * deliberately leaves to the browser decoder. `data: false` omits the IDAT,
+ * which is the header-and-end shell that must be refused.
  */
 const png = (width: number, height: number, extra: readonly number[] = [], data = true): Uint8Array =>
   bytes(
