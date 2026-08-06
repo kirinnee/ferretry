@@ -451,6 +451,30 @@ export function planWardenEscalations(input: WardenEscalationInput): WardenEscal
     }
   }
 
+  // Clearing is driven by the BOARD rather than by the node list, because the row
+  // that has to go is the one somebody actually wrote, and only the board knows
+  // which those are.
+  //
+  // THE FIRST BRANCH BELOW IS UNREACHABLE FROM THE SWEEP, and is still answered
+  // because this is a total function over two independent inputs.
+  // `reconcileEscalations` appends to its `boards` and its `nodes` in the same
+  // step or to neither, so `boards` is always a subset of `nodes`; and the
+  // composition root closes the other direction, because the reader that lists
+  // the fleet and the directory that authorizes a board read resolve to the same
+  // set of sessions. A session the registry has dropped therefore contributes no
+  // board here at all — and its ledger lives inside its own session directory, so
+  // a directory deleted outside this daemon takes the board and its resolution
+  // audit with it. There is no removal moment at which an orphan board exists to
+  // be read.
+  //
+  // What the branch is for is the caller that does not exist yet. Session removal
+  // is currently an observation rather than an act: there is no delete route, and
+  // the index drops a row only after the directory or its documents are already
+  // gone or refused. A delete route must resolve these rows BEFORE it retires the
+  // session, while the board is still authorized, and would be the one caller able
+  // to hand this planner a board whose node has left. Answering `undefined` here
+  // would silently retain that row forever, which is the outcome this whole
+  // reconciliation exists to prevent.
   const resolve: WardenEscalationResolution[] = [];
   for (const board of input.boards) {
     for (const item of board.items) {

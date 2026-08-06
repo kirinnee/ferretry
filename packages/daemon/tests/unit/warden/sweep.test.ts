@@ -1430,6 +1430,23 @@ describe('escalating to a human, and clearing it again', () => {
     should(journalTypes(subject)).containEql('fleet.warden_escalation_resolved');
   });
 
+  it('should leave the row alone for a node that has left the fleet entirely', async () => {
+    // Arrange — the item is raised while the node is still there.
+    const subject = escalating();
+    await subject.service.run({ force: false });
+
+    // Act — the registry has dropped the session, so the fleet reader no longer returns it.
+    subject.setFleet([]);
+    await subject.service.run({ force: false });
+
+    // Assert — boards are read only for sessions still in the fleet, so this one is never
+    // reached: removal is an observation rather than an act, and nothing claims to clear it.
+    should(subject.raises).have.length(1);
+    should(subject.resolved).be.empty();
+    should(subject.board('s1')).have.length(1);
+    should(journalTypes(subject)).not.containEql('fleet.warden_escalation_resolved');
+  });
+
   it('should keep clearing recovered items even while escalation is switched off', async () => {
     // Arrange
     const subject = escalating();

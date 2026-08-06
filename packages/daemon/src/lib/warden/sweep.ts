@@ -831,6 +831,15 @@ export class WardenSweepService {
    * order the sweep already pays for the done markers. A durable pointer list of
    * "where we raised something" would be cheaper and would be a second account
    * of a fact the board owns — the failure this reconciliation exists to avoid.
+   *
+   * A BOARD AND ITS NODE ARE ADDED TOGETHER OR NOT AT ALL, which is what makes
+   * `planWardenEscalations` safe to hand two independent lists: every board it
+   * receives from here has a node, so its absent-node clearing is unreachable
+   * from this caller. A session the fleet reader no longer returns contributes
+   * neither, so it is not escalated and not cleared — its row, if it still has
+   * one, is simply no longer readable. That is the honest consequence of removal
+   * being an observation rather than an act, and it is why nothing here claims to
+   * clear a session that has left.
    */
   private async reconcileEscalations(
     anomalies: readonly WardenAnomaly[],

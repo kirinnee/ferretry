@@ -675,7 +675,12 @@ describe('clearing an escalation whose reason has gone', () => {
     should(result.resolve[0]?.note).match(/is stopped and is no longer running/u);
   });
 
-  it('should clear it when the node has left the fleet entirely', () => {
+  // A PLANNER CONTRACT, NOT A PRODUCTION JOURNEY. `reconcileEscalations` adds a board and its
+  // node together or neither, so the sweep can never supply this input; `sweep.test.ts` proves a
+  // removed node is simply not read. What is pinned here is that a caller who DOES supply an
+  // orphan board — the delete route that has yet to exist — gets the row cleared rather than
+  // silently retained.
+  it('should clear an orphan board a caller supplies, which the sweep never does', () => {
     // Arrange / Act
     const result = plan({ nodes: [], boards: [live] });
 
