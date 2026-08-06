@@ -37,6 +37,26 @@
   padding: var(--gap-sm);
 }
 
+/* A stage whose content is a NOTE is a paragraph, not a picture, and the two
+   want opposite things. Centring is right for an illustration and wrong for a
+   sentence: it shrinks the note to its text and floats it mid-panel, so its
+   accent rail marks nothing and the sentence lines up with nothing above or
+   below. Stretching turns it back into the full-width banner every other
+   `.kt-fs-note` surface in this app already is. */
+.fy-render-stage[data-fy-render-stage='note'] {
+  align-items: stretch;
+}
+
+/* The stage is a ROW, so `align-items` only stretches the note vertically —
+   measured 493px of note in a 1394px stage, floating mid-panel with its accent
+   rail marking nothing. Filling the main axis is what turns it back into the
+   full-width banner. It reads as correct on a phone either way, which is how
+   this survived the first review: at 390px the note already fills the measure. */
+.fy-render-stage[data-fy-render-stage='note'] > .kt-fs-note {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* A source-only block has no illustration, so the stage must not reserve room
    for one: a 120px band of nothing above a note reads as something still
    loading, which is exactly the wrong thing to say about a declared limitation.
@@ -47,13 +67,31 @@
   background: transparent;
 }
 
-/* Below the image, not beside it: a caption that competes for the eye is a
-   second title. */
+/* THE CAPTION IS THE LAST CHILD IN THE DOM, because HTML's content model for
+   `figure` allows a `figcaption` only first or last, and the actions row sits
+   between the source panel and it. Visually the caption still belongs directly
+   under the plane it describes, so order is restored here rather than by
+   writing invalid markup. */
 .fy-render-caption {
+  order: 1;
   margin: 0;
   color: var(--fg-soft);
   font-size: var(--text-sm);
   line-height: var(--leading-base);
+}
+
+.fy-render-actions {
+  order: 2;
+}
+
+/* INLINE, THE SOURCE PANEL HAS A CEILING. A source-only type opens its panel
+   with no reader action and the preview cap is 32,768 characters, so without one
+   a single block pushes the rest of the message off screen. The panel already
+   scrolls inside itself in fullscreen; this is the same behaviour asked for
+   inline. */
+.fy-render:not([data-fy-render-fullscreen='true']) .kt-fs-code {
+  max-height: 50dvh;
+  overflow-y: auto;
 }
 
 /* ---- fullscreen ------------------------------------------------------------
@@ -68,20 +106,36 @@
    to read it from, and inventing one here would give a scale its first member
    and no owner, so the literal matches its peers instead. The layers ABOVE it
    are deliberate: the bulk-stop confirmation (60), the side pane (70/80) and
-   the portrait gate (200) must all be able to cover an open illustration. */
+   the portrait gate (200) must all be able to cover an open illustration.
+
+   THE VISIBLE BOX, NOT THE LAYOUT VIEWPORT. The element also carries
+   `kt-overlay`, which this app defines for exactly this case — `top: --app-top`,
+   `height: --app-h`, `padding-bottom: env(safe-area-inset-bottom)` — so the
+   overlay follows the same box as the shell. `inset: 0` alone would run the top
+   of an illustration under a notch and put the caption and Exit control (the
+   only dismiss affordance on touch: there is no backdrop click and no swipe)
+   under the home indicator, or behind a software keyboard. Headless Chrome
+   resolves `env()` to zero, so no capture could ever have shown this.
+
+   `inset-inline: 0` STAYS, and is not redundant with `kt-overlay`: that class
+   owns the vertical box and the bottom inset only, so without an explicit
+   horizontal anchor a `position: fixed` element falls back to auto insets and
+   shrink-to-fit width. The vertical box is deliberately left to `kt-overlay`. */
 .fy-render-fullscreen {
   position: fixed;
   z-index: 50;
   display: flex;
   overflow: auto;
   padding: var(--pad-panel);
+  padding-bottom: max(var(--pad-panel), env(safe-area-inset-bottom, 0px));
   background: var(--bg);
-  inset: 0;
+  inset-inline: 0;
   overscroll-behavior: contain;
 }
 
 .fy-render-fullscreen > .fy-render {
   flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -93,9 +147,27 @@
   min-height: 0;
 }
 
-/* The illustration gets the whole plane here; the transcript-width ceiling from
-   `.kt-rich-file-image` is a reading-column constraint, not one that belongs to
-   a reader who has deliberately asked for the biggest possible view. */
+/* A NOTE-BEARING STAGE DOES NOT SHRINK. With `flex: 1 1 auto` a long source
+   panel beside it squeezed the stage to a few pixels, and in the two states
+   whose stage IS the explanation — a declared limitation, and a decode failure —
+   the explanation is precisely what vanished. A 7px gold sliver where "this
+   build does not run Mermaid illustrations" should be leaves a reader looking at
+   raw source with no statement of why; for the failure case it removes the only
+   thing distinguishing a broken image from a deliberate source dump. The source
+   panel already scrolls inside itself here, so nothing else needs to give. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-stage[data-fy-render-stage='note'] {
+  flex: 0 0 auto;
+}
+
+/* FIT THE PLANE, do not escape it. `max-height: none` lifted the reading-column
+   ceiling but the stage still clips and never grows, so a portrait illustration
+   was centred in a viewport-height box with both ends cut off and nothing to
+   scroll — measured at 32% visible on desktop. Fullscreen then showed strictly
+   LESS of the picture than the transcript did, inverting what the control
+   promises. `100%` lets the illustration use the whole plane in both axes, which
+   is what "the biggest possible view" meant. (Panning at natural size would need
+   `overflow: auto` on the stage as well — `auto` alone on a centred flex item
+   clips the top and cannot scroll back to it.) */
 .fy-render[data-fy-render-fullscreen='true'] .fy-render-image {
-  max-height: none;
+  max-height: 100%;
 }

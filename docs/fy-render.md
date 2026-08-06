@@ -46,11 +46,11 @@ alt: A ten by ten square, filled solid
 
 **Header block** — `key: value` lines, one per line, from a closed set:
 
-| Key    | Required                       | Value                                                                     |
-| ------ | ------------------------------ | ------------------------------------------------------------------------- |
-| `type` | yes, **and on the FIRST line** | one of `html`, `svg`, `lottie`, `mermaid`, `image`                        |
-| `alt`  | yes                            | ≤ 200 characters, one line, no control characters                         |
-| `mime` | if and only if `type: image`   | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif` |
+| Key    | Required                       | Value                                                       |
+| ------ | ------------------------------ | ----------------------------------------------------------- |
+| `type` | yes, **and on the FIRST line** | one of `html`, `svg`, `lottie`, `mermaid`, `image`          |
+| `alt`  | yes                            | ≤ 200 characters, one line, no control characters           |
+| `mime` | if and only if `type: image`   | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp` |
 
 `type` is positional, not merely present, so a block is identifiable from its opening line alone — by
 a reader scrolling and by a grep. `alt` is required rather than optional so an author cannot ship an
@@ -76,13 +76,27 @@ also what it is.
 Single-owned constants in `packages/pwa/src/lib/fy-render.ts`; this table and the tests read the same
 numbers.
 
-| Type      | Payload cap                      | Also refused                                                                                                                                  |
-| --------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `html`    | 200 KiB                          | —                                                                                                                                             |
-| `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element open tags; a payload that does not begin with `<svg>` |
-| `mermaid` | 20,000 characters                | —                                                                                                                                             |
-| `lottie`  | 1 MiB                            | invalid JSON; a non-object root; any `"x"` expression key at any depth; more than 500 layers; deeper than 64 levels                           |
-| `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; any MIME outside the raster allowlist                                                                  |
+| Type      | Payload cap                      | Also refused                                                                                                                                                                                                                                                                               |
+| --------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `html`    | 200 KiB                          | —                                                                                                                                                                                                                                                                                          |
+| `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element opening tags; more than 32 filter primitives; a declared canvas over 8192 per axis or 16,777,216 pixels; an unterminated comment, CDATA section or tag; a payload that does not begin with `<svg>` |
+| `mermaid` | 20,000 characters                | —                                                                                                                                                                                                                                                                                          |
+| `lottie`  | 1 MiB                            | invalid JSON; a non-object root; any `"x"` expression key at any depth; more than 500 layers; deeper than 64 levels                                                                                                                                                                        |
+| `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a malformed, truncated or trailing-byte container                                                                                   |
+
+**The element count is a count of element opening tags, and means it.** It uses the full XML 1.0
+`NameStartChar` production, so `<_/>`, `<:a/>` and `<À/>` all count, and it is a small lexical
+scanner rather than a pattern — it advances across comments, CDATA sections, processing instructions,
+declarations, quoted attribute values and closing tags, so tag-like text inside a comment is not an
+element. The root's `width`, `height` and `viewBox` are read the same way: exact, unqualified
+attribute names, so `data-width` and `x:width` are not `width`, and a `>` inside a quoted value does
+not end the tag.
+
+**Declared canvas rules.** Unitless and `px` lengths resolve to themselves; a percentage resolves
+against the `viewBox` and is accepted only above 0% and at most 100%; omitted dimensions are accepted
+only behind a bounded, positive `viewBox`; every other unit — `em`, `rem`, `vh`, `cm`, `calc()` — is
+unresolvable and refused. Each axis is resolved independently before the pair is checked, so a
+percentage on one axis cannot carry an oversized length on the other.
 
 ---
 
@@ -173,29 +187,59 @@ unsafe". Read an acceptance as "this is within the caps", never as "this will re
 
 ## Controls
 
-| Control      | `svg` / `image` | `html` / `mermaid` / `lottie` |
-| ------------ | :-------------: | :---------------------------: |
-| Source       |       yes       |     yes (open by default)     |
-| Fullscreen   |       yes       |              yes              |
-| Alt text     |       yes       |              yes              |
-| Reload       |       yes       |          **hidden**           |
-| Pause / Play |   **absent**    |          **absent**           |
+| Control             |  `svg` / `image`   | `html` / `mermaid` / `lottie` |
+| ------------------- | :----------------: | :---------------------------: |
+| Render illustration |        yes         |          **hidden**           |
+| Source              |        yes         |     yes (open by default)     |
+| Fullscreen          |        yes         |              yes              |
+| Caption             |        yes         |              yes              |
+| Reload              | yes, once rendered |          **hidden**           |
+| Pause / Play        |     **absent**     |          **absent**           |
 
 A control that cannot act is hidden, not shown disabled — a disabled Reload on a block that is only
 ever text is a promise the build does not keep.
 
+### Nothing decodes until the reader asks
+
+**No browser decoder mounts automatically.** A payload's size is bounded; the work of drawing it is
+not, and a transcript is written by an assistant rather than by the reader. So the stage says what
+rendering would cost and one control starts it, with an accessible name that carries the type and the
+bounded payload size — _Render illustration (SVG, 4 KB)_ — because a consent nobody can price is not
+one.
+
+- **Approval belongs to the exact `block.source`** and is discarded the moment those bytes change. A
+  streamed message therefore cannot inherit consent granted to an earlier draft of itself, and no
+  partially-received payload ever reaches a decoder.
+- **There is no always-render setting**, deliberately: it would put the automatic path back.
+- **Render becomes Reload in the same DOM slot**, so the control the reader just pressed is still
+  under the focus ring afterwards.
+- Not rendering costs a screen-reader user nothing: the required description is the visible caption,
+  which is also the figure's accessible name.
+
+### The rest
+
 - **Source** prints the whole fence body as authored, escaped, truncated at 32,768 characters. For a
-  source-only type it starts open, because the source is the only content there is.
+  source-only type it starts open, because the source is the only content there is. Inline it is
+  capped at `50dvh` and scrolls inside itself, so one long block cannot push the rest of the message
+  off screen. Its label is stable and its state is carried by `aria-expanded` plus `aria-controls`,
+  rather than by a label and an attribute that could disagree.
 - **Reload** discards the `<img>` and decodes the payload again. It is the recovery path from a
   decode failure, and it is meaningless for a type that never reaches an `<img>`.
 - **Fullscreen** is an in-app overlay (`role="dialog"`, `aria-modal`), not the Fullscreen API:
   `Element.requestFullscreen` is unavailable on iOS Safari, a first-class target for this PWA, and an
   overlay keeps Escape and the focus trap in the app's single `useDialogFocus` stack rather than
-  split between the app and the browser. Escape closes it, Tab is trapped inside it, and focus stays
-  on — and returns to — the control that opened it.
-- **Alt text** renders both as the image's accessible name and as a visible `<figcaption>`.
-- **Pause** is absent because nothing in this build animates under the app's control. It returns with
-  the runtime types ([gap 2](#declared-gaps)).
+  split between the app and the browser. Escape closes it, Tab is trapped in both directions, and
+  focus stays on — and returns to — the control that opened it. It carries `kt-overlay`, the app's
+  visible-viewport contract, so it follows the shell's box and pays the bottom safe-area inset rather
+  than running under a notch or behind a software keyboard. The illustration fits the plane in both
+  axes; a stage whose content is a note does not shrink, so a long source panel cannot squeeze the
+  sentence explaining the block down to a sliver.
+- **The caption** carries the required description once. The `<img>` is `alt=""` on purpose: the
+  caption already names the figure and the fullscreen dialog, so repeating it would make a screen
+  reader say the same sentence three times, four in fullscreen.
+- **Pause** is absent because nothing in this build animates under the app's control — which is also
+  why an animated PNG, GIF or WebP is refused outright rather than shown as a loop nobody can stop.
+  Both return with the runtime types ([gap 2](#declared-gaps)).
 
 ### Error fallback
 
@@ -214,14 +258,56 @@ quietly. So the failure is ordinary visible text, met when the reader reaches th
 the "this build does not run…" note beside it. The cost is stated rather than hidden: a reader
 already inside a block is not interrupted when its decode fails.
 
-Two related lifecycle rules follow from the same streaming fact:
+### Streaming, which is the ordinary case
 
+A transcript row re-renders while the assistant is still emitting it, so this block sees a
+half-written payload before it sees the whole one. Four rules follow, and they are all one fact —
+**consent and state belong to the exact bytes**:
+
+- **No decoder ever mounts on its own**, and consent applies only to the exact source it was given
+  for; any later growth withdraws it. Be precise about what that does and does not promise: nothing
+  tells this block that a message has stopped growing, so a reader who presses Render while an `svg`
+  is still arriving **will** decode a partial — lexically admitted, within every cap, and their own
+  deliberate choice. A partial **raster** cannot mount at all, but for a different reason: the
+  container checks demand a structurally complete file, so an unfinished one does not parse.
 - **A new payload clears an old failure.** The completed SVG arriving a moment after the partial one
   renders normally, with no Reload press.
+- **A stale error cannot fail a live image.** The `<img>` is keyed by source generation, and the
+  `error` handler carries the generation it was created for, so an event queued for bytes that have
+  already been replaced is ignored rather than applied to their successor.
 - **The source panel remembers who opened it.** A panel a failure opened closes when that failure
   clears; a panel the reader opened stays open. Recovering from a transient decode error must not
   leave an unsolicited wall of markup under a picture that is now fine, and must not close a panel
   the reader asked for.
+
+The two types stream differently, and the difference is visible: an `svg` payload is admitted by
+prefix, so the block persists and updates as it grows, while a base64 `image` payload is only
+canonical on four-character boundaries — so while a raster streams the surface alternates between an
+ordinary escaped fence and the block, and each change discards panel and fullscreen state. In neither
+case does anything decode without a press.
+
+---
+
+## Accepted risk
+
+**This build renders a bounded payload, on a gesture, with no resource isolation.** The caps bound
+what goes in; nothing bounds what rasterising it costs. A 16-megapixel image within every limit, or a
+100 KiB SVG with a handful of filter primitives, can still be expensive to draw, and there is no
+timeout, no watchdog and no memory ceiling anywhere in this build.
+
+That residual is **explicitly accepted** for this independently shippable partial slice, on these
+terms and no others:
+
+1. It is **bounded-input**: magic bytes must match the declared type, declared dimensions are read
+   before any decoder is handed the bytes, animation is refused, and malformed or truncated
+   containers fail closed.
+2. It is **user-triggered**: no decoder mounts without a gesture, and the gesture is priced.
+3. It is **recorded prominently**, here and in the authoring skill, rather than left implicit.
+
+**This is not resource isolation.** It does not satisfy row #65's executable, resource-bounded
+clause, and **row #65 stays open**. Anyone who considers even this residual unacceptable should ship
+the source-only subset, which is a coherent product: set `enableFyRender` nowhere and every block
+renders as an ordinary escaped fence.
 
 ---
 
@@ -250,10 +336,12 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    against untrusted data, which needs the shell of gap 1. Their grammar, caps and the `"x"`
    expression-key rejection ship now so a later build inherits a bounded corpus rather than an
    accepted one.
-3. **No CPU or memory bound on anything, in any form.** The caps bound **input size, and nothing
-   else**. There is no decode timeout, no watchdog and no compute quota anywhere in this build, so a
-   pathological but small SVG that is expensive to rasterise is bounded neither in what the machine
-   spends nor in how long the reader waits. Do not describe the caps as bounding either.
+3. **No CPU or memory bound on anything, in any form.** The caps bound **input size and declared
+   dimensions, and nothing else**. There is no decode timeout, no watchdog and no compute quota
+   anywhere in this build, so a payload that is inside every limit and still expensive to rasterise
+   is bounded neither in what the machine spends nor in how long the reader waits. Do not describe
+   the caps as bounding either, and do not describe the trust gate as isolation — it decides WHO
+   starts the work and WHEN, not how much of it there can be. See [Accepted risk](#accepted-risk).
 4. **Cross-browser coverage is one engine.** The `<img>` result is Chrome 150, headless, on Linux.
    Firefox and WebKit were not installed and are unmeasured; Safari — the more consequential one for
    a PWA — has had no run at all. This is a release-evidence gap, not a known failure.
@@ -269,6 +357,21 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    neutralises `<use>` anyway, so this is authoring policy, not defence.
 7. **The external XML entity vector is unmeasured, not passed.** Chrome did not fetch it even in the
    active positive control, so no conclusion is claimed. It is refused by the grammar regardless.
+8. **`image/avif` is not accepted.** An AVIF carries per-item `ispe` extents, and deciding which one
+   a decoder actually uses means resolving `pitm` into `ipma` property associations. A parser reading
+   the first box lets a small decoy mask a huge primary item — measured: a 64×64 `ispe` declared ahead
+   of a 70000×70000 one was read as 64×64 and accepted. Taking the maximum over every box closes
+   that, but no real AVIF sample and no sequence fixture were available on this machine to verify
+   either the parser or the animation exclusion against a decoder, and an allowlist entry that cannot
+   be demonstrated is a claim that cannot be backed. It returns when a decoder-verified sample and an
+   adversarial primary-item fixture exist.
+9. **Animation is refused rather than supported.** APNG (`acTL`), multi-frame GIF and animated WebP
+   (`VP8X` flag, `ANIM`, `ANMF`) are all rejected, because this build has no Pause control and must
+   not show a loop nobody can stop. That is a real limitation for authors, not a security property.
+10. **The raster readers are this repository's own.** Their dimensions were cross-checked against
+    Chrome's decoder — PNG, JPEG, WebP and GIF at 1×1 through 8192×2048, 18 samples, all matching
+    `naturalWidth`/`naturalHeight` — but a container this parser refuses is refused even if a browser
+    would have decoded it. The bias is deliberate and one-directional: it fails toward not rendering.
 
 ## Evidence
 
@@ -281,3 +384,6 @@ artifacts outside the repository; cite them, do not assume they will outlive the
 | Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                              |
 | Independent review concluding executable HTML is a release blocker              | `sandbox-security-verdict.md`                                                                                       |
 | Slice plan, mechanism survey and cost sheet                                     | `execution-boundary-plan.md`                                                                                        |
+| Static-slice security review that found the unbounded-decode blocker            | `fy-render-static-security-review.md`                                                                               |
+| UI/accessibility review of the fullscreen presentation                          | `fy-render-static-ui-review.md`                                                                                     |
+| Raster header reader agreeing with Chrome's decoder, 18 of 18                   | `prototype/verify.ts` beside its `raster-header.ts`                                                                 |
