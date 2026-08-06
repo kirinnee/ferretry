@@ -142,6 +142,31 @@ describe('FileDaemonConfig', () => {
     );
   });
 
+  it('should record a grant decision without typing a legacy key into the same file', async () => {
+    // THE SETTINGS SURFACE IS THE OTHER DOOR TO THE SAME DEFECT. Persisting the schema's reading of
+    // the document planted every default beside the operator's own keys, so turning one thing off
+    // from the UI was enough to make a `host` line appear in their file — and the next boot read it
+    // back at them as a key they had superseded and should go and delete.
+    // Arrange
+    const documents = documentStore(JSON.stringify({ carriers: [{ kind: 'bind', host: 'box.lan' }] }));
+
+    // Act
+    await documents.store.writeGrants({ ...DEFAULT_CAPABILITY_GRANTS, warden: { use: false, configure: false } });
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    const settled = await documents.store.peek();
+
+    // Assert — one key added, nothing manufactured, the carrier entry exactly as it was written.
+    should(Object.keys(written)).deepEqual(['carriers', 'grants']);
+    should(written).have.property('carriers', [{ kind: 'bind', host: 'box.lan' }]);
+    should((written.grants as Record<string, unknown>).warden).deepEqual({ use: false, configure: false });
+    should(supersededCarrierKeys({ rawDocument: settled.document ?? {}, carriers: settled.config.carriers })).deepEqual(
+      [],
+    );
+    // And the decision still reads back as the operator's own, which is the point of writing it.
+    should((await documents.store.readGrants()).warden).deepEqual({ use: false, configure: false });
+    should(await documents.store.writtenGrants()).containEql('warden');
+  });
+
   it('should answer what is on disk without writing anything', async () => {
     // Arrange
     const fresh = documentStore();

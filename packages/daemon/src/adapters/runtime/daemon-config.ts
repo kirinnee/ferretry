@@ -147,14 +147,19 @@ export class FileDaemonConfig {
   /**
    * Records a change to the grants.
    *
-   * The document is RE-READ and exactly one key rewritten, for the reason `record` does the same: an
-   * operator's own fields must survive a write this daemon makes, and rewriting from a parsed
-   * configuration would persist derived addresses that then stop tracking what they were derived from.
+   * The RAW document is re-read and exactly one key rewritten, for the reason `record` does the same:
+   * an operator's own fields must survive a write this daemon makes, and rewriting from a parsed
+   * configuration would persist derived addresses that then stop tracking what they were derived
+   * from. The schema still runs, as the refusal it has always been — this daemon does not write over
+   * a document it could not act on — and its defaulted output is discarded, because a default on disk
+   * is indistinguishable from a line the operator typed. Turning the settings on from the UI must not
+   * be a way to have a `host` key appear in their file and be reported back at them as superseded.
    */
   async writeGrants(grants: CapabilityGrants): Promise<void> {
     const text = await this.files.readText(this.paths.daemonConfig);
-    const document = this.document(text);
-    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, grants }, null, 2)}\n`);
+    const raw = this.raw(text);
+    this.checked(raw);
+    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...raw, grants }, null, 2)}\n`);
   }
 
   /**
