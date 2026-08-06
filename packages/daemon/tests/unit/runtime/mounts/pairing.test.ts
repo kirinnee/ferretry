@@ -31,7 +31,13 @@ const minted: PairingCodeMintResponse = {
   pairUrl:
     'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 };
-const paired: PairingResponse = { deviceToken, daemonId, daemonName: 'workstation', capabilities: ['daemon-api'] };
+const paired: PairingResponse = {
+  deviceToken,
+  daemonId,
+  daemonName: 'workstation',
+  capabilities: ['daemon-api'],
+  carriers: [],
+};
 
 const device = (id: string, name: string): PairedDevice => ({
   id,
