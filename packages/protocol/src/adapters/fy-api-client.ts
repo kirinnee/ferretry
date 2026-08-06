@@ -19,6 +19,12 @@ import {
   ImportedConversationDetailSchema,
 } from '../lib/foreign-history.ts';
 import {
+  type SessionHandoverReceipt,
+  SessionHandoverReceiptSchema,
+  type SessionHandoverRequestInput,
+  SessionHandoverRequestSchema,
+} from '../lib/handover.ts';
+import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
@@ -547,6 +553,35 @@ export class FyApiClient implements IFyApiClient {
       MigrateSessionRequestSchema,
       { agent, model, allowContextDowngrade },
       SessionViewSchema,
+      NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
+    );
+  }
+
+  handover(id: string, request: SessionHandoverRequestInput, requestId?: string): Promise<SessionHandoverReceipt> {
+    return this.#post(
+      id,
+      'handover',
+      SessionHandoverRequestSchema,
+      request,
+      SessionHandoverReceiptSchema,
+      NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
+    );
+  }
+
+  handoverReceipt(id: string): Promise<SessionHandoverReceipt> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/handover`,
+      SessionHandoverReceiptSchema,
+    );
+  }
+
+  cancelHandover(id: string, requestId?: string): Promise<SessionHandoverReceipt> {
+    return this.#post(
+      id,
+      'handover/cancel',
+      z.strictObject({}),
+      {},
+      SessionHandoverReceiptSchema,
       NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
     );
   }

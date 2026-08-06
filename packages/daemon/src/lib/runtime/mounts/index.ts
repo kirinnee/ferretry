@@ -10,6 +10,7 @@ import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
+import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
@@ -40,6 +41,7 @@ import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-atta
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
+import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
@@ -148,6 +150,20 @@ export interface MountedSubsystems {
   /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
    *  document, and the relaunch that puts a different agent in the same session's chair. */
   readonly sessionMigrate: SessionMigrateSubsystem;
+  /** The operation a migration cannot be: moving a top-level session to a DIFFERENT harness family,
+   *  where the conversation is exactly the thing that cannot come along. It starts a replacement,
+   *  carries every durable coordination fact into it, proves the replacement holds and can use the
+   *  predecessor's board membership, and only then retires the predecessor — so the board and its
+   *  tasks never move. The three routes begin one, read its durable receipt, and cancel one that has
+   *  not passed the point of no return; the proof itself is deliberately not a route. */
+  readonly handover: SessionHandoverSubsystem;
+  /** The other half of that operation, and the reason a handover survives a caller hanging up: the
+   *  tick that drives every receipt which is not yet terminal through the next step of its ladder. It
+   *  serves no route — a handover advances on a timer and on an inbound board verification, not on a
+   *  request — and it is a mounted subsystem for the reason `monitor` and `quotaFailover` are: a
+   *  background loop nothing constructs is the same absent capability as an unserved route, and a
+   *  handover nothing advanced would stop at `requested` forever. */
+  readonly handoverReconcile: HandoverReconcileLoop;
   /** The other half of that operation: NOTICING that an account has measurably run out of tokens and
    *  moving its sessions onto a pooled same-kind account with confirmed headroom — through the same
    *  migration above, preflight included. It serves no route, and it is a mounted subsystem for the
@@ -300,6 +316,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
     // other, and both belong above the deeper per-session subsystems.
     ...sessionMigrateRoutes(subsystems.sessionMigrate),
+    // The handover registers immediately after the migration it is the cross-family counterpart of, so
+    // the two operations a caller chooses between sit together. Its three paths are one and two
+    // segments under `/v1/sessions/:sessionId` ending in the literal `handover` — and `handover/cancel`
+    // beneath it, registered in the same table after its parent — so none can shadow or be shadowed by
+    // the migrate above or the deeper per-session subsystems below.
+    ...sessionHandoverRoutes(subsystems.handover),
     // The signal registers with the rest of the write surface for the same reason the revive and the
     // migration do: it is a one-segment pattern under `/v1/sessions/:sessionId` whose final literal
     // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above

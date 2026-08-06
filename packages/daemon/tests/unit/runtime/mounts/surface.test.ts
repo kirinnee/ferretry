@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -244,6 +245,30 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       skipped: [],
     }),
   },
+  // The cross-family counterpart of the migration above. Its three routes ARE part of the surface, so
+  // the inventory dials them; the state machine behind them has its own coverage.
+  handover: {
+    begin: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    receipt: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    cancel: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
+  // The reconciler serves no route, for the reason the declared-wait and quota-failover loops do not:
+  // a handover advances on a timer and on an inbound board verification, never on a request.
+  handoverReconcile: new HandoverReconcileLoop(
+    {
+      advance: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+    { pendingSourceSessionIds: async () => [] },
+    { every: () => () => {} },
+  ),
   tasks: taskSubsystem(),
   taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),
@@ -317,7 +342,10 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 110, 'admin-token': 1 });
+    // The handover added three: its two writes are `operator` like the migration they sit beside, and
+    // its receipt read is `authenticated`, because reading what happened to a session is a lesser
+    // thing than causing it.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 112, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -406,6 +434,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
       'POST /v1/sessions/:sessionId/migrate',
+      'POST /v1/sessions/:sessionId/handover',
+      'GET /v1/sessions/:sessionId/handover',
+      'POST /v1/sessions/:sessionId/handover/cancel',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',

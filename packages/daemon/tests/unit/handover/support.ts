@@ -1,6 +1,8 @@
 import type { SessionHandoverRequest, SessionTransferPlan } from '@ferretry/protocol';
+import { HandoverError } from '../../../src/lib/handover/types.ts';
 import type {
   HandoverAttentionRequest,
+  HandoverFailure,
   HandoverBoardMembership,
   HandoverBoardObservation,
   HandoverBoardPort,
@@ -24,7 +26,7 @@ export const SOURCE_ID = 'source-1';
 export const BOARD_ID = 'board-1';
 export const REQUEST_ID = 'req-1';
 
-export const CLAUDE_ACCOUNT: HandoverResolvedAccount = {
+const CLAUDE_ACCOUNT: HandoverResolvedAccount = {
   accountId: 'acct-claude',
   agent: 'claude-main',
   harness: 'claude',
@@ -191,7 +193,7 @@ export function receiptAt(phase: HandoverReceipt['phase'], overrides: Partial<Ha
 
 // ─── recording fakes ────────────────────────────────────────────────────────────────────────────
 
-export class FakeReceiptStore {
+class FakeReceiptStore {
   readonly writes: HandoverReceipt[] = [];
   private receipts = new Map<string, HandoverReceipt>();
   /** Set to make the very next write throw, which is how a crash mid-step is simulated. */
@@ -201,6 +203,9 @@ export class FakeReceiptStore {
     return this.receipts.get(sourceSessionId) ?? null;
   }
 
+  /** Fires just after a write lands, so a test can move the world in an exact durable window. */
+  afterWrite: ((receipt: HandoverReceipt) => void) | null = null;
+
   async write(receipt: HandoverReceipt): Promise<void> {
     if (this.failNextWrite !== null) {
       const reason = this.failNextWrite;
@@ -209,6 +214,7 @@ export class FakeReceiptStore {
     }
     this.writes.push(receipt);
     this.receipts.set(receipt.sourceSessionId, receipt);
+    this.afterWrite?.(receipt);
   }
 
   async pendingSourceSessionIds(): Promise<readonly string[]> {
@@ -231,7 +237,7 @@ export class FakeReceiptStore {
   }
 }
 
-export class FakeSessions {
+class FakeSessions {
   readonly created: HandoverCreateCommand[] = [];
   readonly started: string[] = [];
   readonly stopped: { readonly sessionId: string; readonly reason: string }[] = [];
@@ -298,7 +304,7 @@ export class FakeSessions {
   }
 }
 
-export class FakeBoard implements HandoverBoardPort {
+class FakeBoard implements HandoverBoardPort {
   readonly calls: { readonly step: string; readonly requestId: string }[] = [];
   readonly failures = new Set<string>();
 
@@ -347,7 +353,7 @@ export class FakeBoard implements HandoverBoardPort {
   }
 }
 
-export class FakeBoardReader {
+class FakeBoardReader {
   membershipAnswer: HandoverBoardMembership | null = membership();
   observationAnswer: HandoverBoardObservation | null = observation();
   readonly observed: { readonly boardId: string; readonly invitationRequestId: string | undefined }[] = [];
@@ -362,7 +368,7 @@ export class FakeBoardReader {
   }
 }
 
-export class FakeAccounts {
+class FakeAccounts {
   readonly resolved: string[] = [];
   failure: string | null = null;
 
@@ -375,7 +381,7 @@ export class FakeAccounts {
   }
 }
 
-export class FakePreparer {
+class FakePreparer {
   readonly calls: HandoverPrepareCommand[] = [];
   /** Overrides the plan id the seam answers with, which is how plan drift is expressed. */
   planId: string | null = null;
@@ -386,27 +392,37 @@ export class FakePreparer {
   }
 }
 
-export class FakeImporter {
+class FakeImporter {
   readonly imported: { readonly planId: string; readonly sessionId: string }[] = [];
   failure: string | null = null;
+  /** A NAMED, non-retryable condition, which settles the receipt rather than parking it. */
+  named: HandoverFailure | null = null;
 
   async importPlan(plan: SessionTransferPlan, newSessionId: string): Promise<void> {
+    if (this.named !== null) throw new HandoverError(this.named, `the import refused: ${this.named}`);
     if (this.failure !== null) throw new Error(this.failure);
     this.imported.push({ planId: plan.planId, sessionId: newSessionId });
   }
 }
 
-export class FakePreflight {
+class FakePreflight {
   verdict: HandoverPreflightVerdict = { proceed: true, reason: 'no in-flight work', reportPath: null };
   readonly subjects: string[] = [];
+  /** Set to make the gate THROW, which is what a real inspection of a dead pane can do. */
+  failure: string | null = null;
+
+  /** Fires after the verdict is decided, so a test can move the world in that exact window. */
+  afterEvaluate: (() => void) | null = null;
 
   async evaluate(sessionId: string): Promise<HandoverPreflightVerdict> {
     this.subjects.push(sessionId);
+    this.afterEvaluate?.();
+    if (this.failure !== null) throw new Error(this.failure);
     return this.verdict;
   }
 }
 
-export class FakeAttention {
+class FakeAttention {
   readonly raised: HandoverAttentionRequest[] = [];
   failure: string | null = null;
 
@@ -419,7 +435,7 @@ export class FakeAttention {
   }
 }
 
-export class FakeJournal {
+class FakeJournal {
   readonly appends: HandoverJournalAppend[] = [];
   failAfter = Number.POSITIVE_INFINITY;
 
@@ -433,7 +449,7 @@ export class FakeJournal {
   }
 }
 
-export class FakeIdentity {
+class FakeIdentity {
   private next = 0;
   constructor(private readonly ids: readonly string[] = ['replacement-1', 'coordinator-1']) {}
 
@@ -445,7 +461,7 @@ export class FakeIdentity {
   }
 }
 
-export class FakeClock {
+class FakeClock {
   private ticks = 0;
   constructor(private readonly base = Date.parse('2026-02-01T00:00:00.000Z')) {}
 

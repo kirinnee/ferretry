@@ -20,6 +20,7 @@ export * from './cgroups/index.ts';
 export * from './core/index.ts';
 export * from './fleet-refresh/index.ts';
 export * from './grants/index.ts';
+export * from './handover/index.ts';
 export * from './imports/index.ts';
 export * from './instant.ts';
 export * from './journal.ts';

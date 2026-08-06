@@ -23,9 +23,8 @@ import { isTerminalStatus } from '../warden/types.ts';
 import {
   derivedStepId,
   handoverEligibility,
-  handoverCleanupPlan,
+  handoverSettlement,
   handoverFingerprint,
-  HANDOVER_RETIRING_MARKER,
   handoverPlanId,
   type HandoverPlan,
   type HandoverStep,
@@ -34,6 +33,7 @@ import {
   nextPhase,
   receiptIsIrreversible,
 } from './policy.ts';
+import type { SessionHandoverEffectIntent as HandoverEffectIntent } from '@ferretry/protocol';
 import {
   DEFAULT_HANDOVER_SETTINGS,
   type HandoverFailure,
@@ -51,6 +51,24 @@ const HANDOVER_COMPLETED_EVENT = 'session.handover_completed';
 
 function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * What a human can actually do about a handover whose subject died underneath it.
+ *
+ * It never says "still running and still a member", because that is the one thing that is not true
+ * here: the predecessor is gone. Past acceptance the replacement is also unrevokeable, so the honest
+ * advice is about the board it now sits on rather than about a choice between two live sessions.
+ */
+function sourceLostRemedy(receipt: HandoverReceipt): string {
+  const replacement = receipt.replacementSessionId ?? 'the replacement';
+  return (
+    `${receipt.sourceSessionId} stopped outside this handover, so there is no predecessor left to hand ` +
+    `anything over from and the handover is recorded as failed. ${replacement} was already accepted onto ` +
+    `board ${receipt.board?.boardId ?? 'none'} and nothing in this daemon revokes a grant, so it is still ` +
+    `there: decide whether to let it take over — start it and have it run \`fy task-board invite-verify\` ` +
+    `— or to stop it and re-seat the board yourself.`
+  );
 }
 
 export class SessionHandoverService {
@@ -128,7 +146,12 @@ export class SessionHandoverService {
       // that wrote it, so the retry of that call resumes it and a DIFFERENT one must not overwrite the
       // record of who stopped this handover — a second id replacing the first would make the receipt
       // attribute an operator's decision to whoever asked last.
-      if (receipt.refusal?.failure === 'cancelled') {
+      // KEYED ON THE RECORDED ID, NOT ON THE REFUSAL CAUSE. Source loss can supersede a cancellation
+      // mid-flight, leaving a nonterminal receipt whose refusal reads `source_lost` while
+      // `cancelRequestId` — immutable provenance — still names C1. Reading the cause here would drop
+      // both callers through to the checks below, so C1 would lose its resume and C2 its conflict for
+      // exactly the operation that most needs one identity.
+      if (receipt.cancelRequestId !== undefined) {
         if (receipt.cancelRequestId === requestId) return await this.drive(receipt);
         throw new HandoverError(
           'request_conflict',
@@ -136,12 +159,20 @@ export class SessionHandoverService {
             'present that id to follow it rather than starting a second cancellation of one operation',
         );
       }
+      // A DEAD PREDECESSOR IS CLASSIFIED, NOT REFUSED. Source loss outranks cancellation everywhere
+      // else, and this was the one door where it did not: throwing here answered a caller 409 about a
+      // handover whose subject had already gone, and left nothing durable saying so until some later
+      // reconcile tick noticed. Driving instead lets `nextPhase` reach the same conclusion it would
+      // have reached anyway — `failed`/`source_lost`, or the committed retirement tail if the stop was
+      // this handover's own — and the caller is answered with the receipt rather than an error about
+      // the wrong thing. No cancellation intent is written, because none of this was a cancellation.
       const source = await this.ports.sessions.read(sourceSessionId);
-      if (source !== null && isTerminalStatus(source.status)) {
+      if (source === null || isTerminalStatus(source.status)) return await this.drive(receipt);
+      if (receipt.effectIntent !== undefined) {
         throw new HandoverError(
           'cancelled',
-          `this handover cannot be cancelled: ${sourceSessionId} has already been stopped, so the one ` +
-            'destructive act a cancellation exists to prevent has happened; the receipt records where it got to',
+          `this handover cannot be cancelled: it is mid-${receipt.effectIntent} and the side effect that ` +
+            'names may already have committed, so there is nothing a cancellation could take back',
         );
       }
       if (receiptIsIrreversible(receipt)) {
@@ -196,9 +227,29 @@ export class SessionHandoverService {
     for (;;) {
       const world = await this.observe(receipt);
       const advanced = await this.apply(receipt, nextPhase(receipt, world), world);
-      if (advanced === null) return receipt;
+      if (advanced === null) return await this.settled(receipt);
       receipt = advanced;
     }
+  }
+
+  /**
+   * What the pass ANSWERS WITH when it stops without advancing the phase.
+   *
+   * `null` from `apply` means "no further progress", NOT "nothing was written". Several of those paths
+   * write first and stop second: a gate refusal records a changed reason, a transient step error
+   * records why, a named error records its settlement intent, and a failed Attention records that the
+   * ledger could not be reached. Returning the receipt this pass STARTED with would hand a caller a
+   * document that disagrees with the one on disk — worst case the durable refusal already reads
+   * `source_lost` while the answer still says `cancelled`. Both the route and this method promise the
+   * CURRENT durable receipt, so it is re-read.
+   *
+   * A damaged document is deliberately NOT caught here. If the store cannot read what it just wrote,
+   * that is the one thing a caller must be told rather than served a plausible older copy of. A
+   * genuinely absent one — removed underneath us — falls back to what this pass held, which is the
+   * only honest answer left.
+   */
+  private async settled(receipt: HandoverReceipt): Promise<HandoverReceipt> {
+    return (await this.ports.receipts.read(receipt.sourceSessionId)) ?? receipt;
   }
 
   private async apply(
@@ -214,11 +265,13 @@ export class SessionHandoverService {
       case 'refuse':
         return await this.settle(receipt, 'refused', plan.failure, plan.reason);
       case 'abandon':
-        return await this.abandon(receipt, world, plan.failure, plan.reason);
+        return await this.abandon(receipt, plan.failure, plan.reason);
       case 'strand':
         return await this.strand(receipt, plan.failure, plan.reason);
       case 'fail':
-        return await this.settle(receipt, 'failed', plan.failure, plan.reason);
+        return plan.failure === 'source_lost'
+          ? await this.failSourceLost(receipt, plan.reason)
+          : await this.settle(receipt, 'failed', plan.failure, plan.reason);
       default:
         return await this.attempt(receipt, plan.step, world);
     }
@@ -242,9 +295,18 @@ export class SessionHandoverService {
     try {
       return await this.step(receipt, step, world);
     } catch (error) {
-      if (error instanceof HandoverError) return await this.settleNamed(receipt, world, error);
+      // THE DURABLE RECEIPT, NOT THE ONE THIS PASS STARTED WITH. A step may have written before it
+      // failed — `accept` persists its `accepting` intent ahead of the board call, and the board may
+      // then commit while delivery throws — so continuing with the stale in-memory copy would classify
+      // an already-accepted handover as reversible and abandon a replacement the board has admitted.
+      // Re-reading is what makes the error path see everything the step made durable.
+      const durable = (await this.ports.receipts.read(receipt.sourceSessionId)) ?? receipt;
+      if (error instanceof HandoverError) return await this.settleNamed(durable, error);
+      // A TRANSIENT ERROR KEEPS THE EFFECT INTENT. The window it names is still open — the board may
+      // have committed while delivery failed — so the retry must resume inside it rather than start the
+      // step over as though nothing had happened.
       await this.ports.receipts.write(
-        this.stamp(receipt, receipt.phase, this.ports.clock.now(), {
+        this.stamp(durable, durable.phase, this.ports.clock.now(), {
           detail: `${step} did not complete: ${detail(error)}`,
         }),
       );
@@ -260,21 +322,21 @@ export class SessionHandoverService {
    * thing it can have done is stop the predecessor — and past that the honest word is `failed`.
    * Before the point of no return the receipt unwinds like any other cleanup.
    */
-  private async settleNamed(
-    receipt: HandoverReceipt,
-    world: HandoverWorld,
-    error: HandoverError,
-  ): Promise<HandoverReceipt | null> {
-    if (!receiptIsIrreversible(receipt)) {
-      const unwind = handoverCleanupPlan(receipt, world, error.failure, error.message);
-      return unwind.kind === 'refuse'
-        ? await this.settle(receipt, 'refused', unwind.failure, unwind.reason)
-        : await this.abandon(receipt, world, unwind.failure, unwind.reason);
+  private async settleNamed(receipt: HandoverReceipt, error: HandoverError): Promise<HandoverReceipt | null> {
+    // RE-OBSERVED, not decided from the snapshot this pass began with. A create that succeeded between
+    // that read and this failure would otherwise be settled as `refused` — a terminal claim that
+    // nothing was made — and the session it did make would be left running with nothing to stop it.
+    const now = await this.observe(receipt);
+    const settlement = handoverSettlement(receipt, now, error.failure, error.message);
+    if (settlement === null) {
+      await this.ports.receipts.write(
+        this.stamp(receipt, receipt.phase, this.ports.clock.now(), {
+          detail: `${error.failure}: ${error.message}`,
+        }),
+      );
+      return null;
     }
-    if (receipt.board === null || receipt.phase === 'predecessor_stopped') {
-      return await this.settle(receipt, 'failed', error.failure, error.message);
-    }
-    return await this.strand(receipt, error.failure, error.message);
+    return await this.apply(receipt, settlement, now);
   }
 
   private async step(
@@ -311,6 +373,8 @@ export class SessionHandoverService {
         return await this.advanceTo(receipt, 'draining', 'waiting for the predecessor to be safe to stop');
       case 'drain':
         return await this.drain(receipt);
+      case 'retire_without_gate':
+        return await this.retireWithoutGate(receipt);
       case 'stop_predecessor':
         return await this.stopPredecessor(receipt, world);
       default:
@@ -405,13 +469,22 @@ export class SessionHandoverService {
    */
   private async accept_(receipt: HandoverReceipt): Promise<HandoverReceipt> {
     const board = this.requireBoard(receipt);
+    // THE INTENT IS DURABLE BEFORE THE CALL. The reducer may commit the grant and the two-root state
+    // while the delivery or this receipt's own write fails, and a receipt still reading `approved` with
+    // nothing else recorded would let a cancellation try to stop a replacement the board has already
+    // admitted. Written here, that window is classified as irreversible from the first instant.
+    const accepting = this.stamp(receipt, receipt.phase, this.ports.clock.now(), {
+      detail: 'accepting the invitation',
+      effectIntent: 'accepting',
+    });
+    await this.ports.receipts.write(accepting);
     const { grantId } = await this.ports.board.acceptInvitation({
       boardId: board.boardId,
       invitationRequestId: this.requireInvitation(receipt),
       targetSessionId: this.requireReplacementId(receipt),
       requestId: derivedStepId(receipt, 'handover.accept'),
     });
-    const next = { ...receipt, board: { ...board, grantId } };
+    const next = { ...accepting, board: { ...board, grantId } };
     return await this.write(next, 'accepted', `the replacement holds grant ${grantId}; this is the point of no return`);
   }
 
@@ -542,11 +615,26 @@ export class SessionHandoverService {
     const verdict = await this.ports.preflight.evaluate(receipt.sourceSessionId);
     const carried = verdict.reportPath === null ? receipt : { ...receipt, inflightReportPath: verdict.reportPath };
     if (!verdict.proceed) return await this.park(carried, verdict.reason);
+    // RE-OBSERVED BETWEEN THE VERDICT AND THE INTENT, and this is the last place it could be missed.
+    // Stamping `retiring` makes a terminal source EXEMPT from source loss — it becomes the expected
+    // proof of this handover's own committed stop. So a predecessor that died DURING the preflight
+    // would be laundered by the very next line: the death predates the retirement, but the receipt
+    // would claim it as its own, and the boardless path would go on to record a completion for a stop
+    // it never performed. The window is narrow and the misreport is total, so it is closed here.
+    const source = await this.ports.sessions.read(receipt.sourceSessionId);
+    if (source === null || isTerminalStatus(source.status)) {
+      return await this.failSourceLost(
+        carried,
+        `${receipt.sourceSessionId} stopped while the gate was being read, before this handover ` +
+          'recorded any retirement of its own',
+      );
+    }
     // THE INTENT IS WRITTEN BEFORE THE PAIR. It is the last unrecorded window in the ladder: without
     // it, a daemon that died between the relinquish and the phase write would restart with no record
     // that the gate had ever cleared.
     const retiring = this.stamp(carried, 'draining', this.ports.clock.now(), {
-      detail: `${verdict.reason}; ${HANDOVER_RETIRING_MARKER}`,
+      detail: `${verdict.reason}; retiring the predecessor now`,
+      effectIntent: 'retiring',
     });
     await this.ports.receipts.write(retiring);
     const board = receipt.board;
@@ -576,9 +664,82 @@ export class SessionHandoverService {
     return null;
   }
 
+  /**
+   * Records the tail of a retirement whose destructive half already happened.
+   *
+   * Reached only when the receipt says the gate cleared and the source is already stopped, so nothing
+   * here re-runs the gate and the boardless case does not re-issue a stop it can see the result of.
+   * The board case still relinquishes: the marker proves the gate cleared, not that the relinquish
+   * landed, and the derived id makes a second attempt a replay the board's own ledger answers.
+   */
+  private async retireWithoutGate(receipt: HandoverReceipt): Promise<HandoverReceipt> {
+    const board = receipt.board;
+    if (board === null) {
+      // A LIVE source here is a crash between the intent and the stop, not a reason to re-gate: the
+      // gate cleared before the intent was persisted. The stop is idempotent, so replaying it is the
+      // whole recovery; a terminal source is the observed proof that it already happened.
+      const source = await this.ports.sessions.read(receipt.sourceSessionId);
+      if (source !== null && !isTerminalStatus(source.status)) {
+        await this.ports.sessions.stop(receipt.sourceSessionId, this.retirementReason(receipt));
+        return await this.write(receipt, 'predecessor_stopped', 'the retirement resumed and stopped the predecessor');
+      }
+      return await this.write(
+        receipt,
+        'predecessor_stopped',
+        'the predecessor was already stopped when this handover resumed; the stop it recorded is the one that happened',
+      );
+    }
+    // A COMMITTED RELINQUISH IS OBSERVED, NEVER REPLAYED, and this is not an optimisation.
+    // `membership.relinquish` authorizes the caller BEFORE it consults its applied-operation ledger,
+    // and the commit it performs revokes the very binding that authorization reads — so a second call
+    // after a successful one cannot authenticate and would fail permanently rather than replay. The
+    // board's own roster is the durable evidence: a source that is no longer an active root has already
+    // relinquished, and the honest move is to record that and carry on to the stop.
+    const roots = (await this.ports.boardReader.observe(board.boardId, board.invitationRequestId))
+      ?.activeRootSessionIds;
+    if (roots !== undefined && !roots.includes(receipt.sourceSessionId)) {
+      return await this.write(
+        receipt,
+        'relinquished',
+        'the predecessor is no longer an active root, so its relinquish had already committed when this ' +
+          'handover resumed',
+      );
+    }
+    await this.ports.board.relinquish({
+      boardId: board.boardId,
+      memberSessionId: receipt.sourceSessionId,
+      requestId: derivedStepId(receipt, 'handover.relinquish'),
+    });
+    return await this.write(
+      receipt,
+      'relinquished',
+      'the predecessor was already stopped when this handover resumed; its membership is relinquished',
+    );
+  }
+
+  /**
+   * The last destructive act, and it OBSERVES before it performs.
+   *
+   * By this phase the relinquish has committed, so a crash before the phase write leaves a retry here
+   * against a predecessor that may already be stopped — or gone from the registry entirely. A stop is
+   * idempotent against a stopped RECORD, but not against a missing one: the lifecycle needs a record
+   * to stop, so an unconditional call would throw every pass and park the handover forever, one write
+   * short of finishing, with the membership already given up.
+   *
+   * So a source that is terminal or absent is the observed proof that the stop already happened, and
+   * the receipt records it. Only a live one is actually stopped.
+   */
   private async stopPredecessor(receipt: HandoverReceipt, world: HandoverWorld): Promise<HandoverReceipt> {
-    await this.ports.sessions.stop(receipt.sourceSessionId, this.retirementReason(receipt));
     const still = world.replacement === null ? '' : ` in favour of ${world.replacement.sessionId}`;
+    if (world.source === null || isTerminalStatus(world.source.status)) {
+      return await this.write(
+        receipt,
+        'predecessor_stopped',
+        `the predecessor was already ${world.source === null ? 'gone' : world.source.status} when the ` +
+          `retirement resumed${still}`,
+      );
+    }
+    await this.ports.sessions.stop(receipt.sourceSessionId, this.retirementReason(receipt));
     return await this.write(receipt, 'predecessor_stopped', `the predecessor was stopped${still}`);
   }
 
@@ -633,12 +794,26 @@ export class SessionHandoverService {
    */
   private async abandon(
     receipt: HandoverReceipt,
-    world: HandoverWorld,
     failure: HandoverFailure,
     reason: string,
-  ): Promise<HandoverReceipt> {
-    if (world.replacement !== null) await this.ports.sessions.stop(world.replacement.sessionId, reason);
-    return await this.settle(receipt, 'abandoned', failure, reason);
+  ): Promise<HandoverReceipt | null> {
+    // THE INTENT FIRST, THEN THE STOP. A crash between them otherwise restarts into the forward ladder
+    // with the replacement already gone — inviting or starting a session that no longer exists.
+    const intended = await this.intend(receipt, failure, reason);
+    // RE-OBSERVED AFTER THE INTENT, never decided from the snapshot this pass opened with. A create
+    // that landed between that read and this write would otherwise be terminalised as `abandoned`
+    // without ever being stopped — a receipt claiming a tidy undo while the session it made keeps
+    // running. And if the PREDECESSOR died in the same window, source loss outranks this settlement
+    // entirely: `abandoned` would promise an undo of a handover whose subject no longer exists.
+    const now = await this.observe(intended);
+    if (now.source === null || isTerminalStatus(now.source.status)) {
+      return await this.failSourceLost(
+        intended,
+        `${receipt.sourceSessionId} stopped outside this handover while it was being abandoned`,
+      );
+    }
+    if (now.replacement !== null) await this.ports.sessions.stop(now.replacement.sessionId, reason);
+    return await this.settle(intended, 'abandoned', failure, reason);
   }
 
   /**
@@ -654,8 +829,24 @@ export class SessionHandoverService {
     failure: HandoverFailure,
     reason: string,
   ): Promise<HandoverReceipt | null> {
-    if (!(await this.raiseStranded(receipt, reason))) return null;
-    return await this.settle(receipt, 'stranded', failure, reason);
+    // THE INTENT FIRST, THEN THE RAISE. A crash after a successful raise otherwise lets a late
+    // verification resume the forward ladder, retiring a predecessor a human has already been told to
+    // decide about. The retry re-raises under the same source reference, which the ledger refreshes.
+    const intended = await this.intend(receipt, failure, reason);
+    // RE-OBSERVED AFTER THE INTENT, exactly as the abandon path is, and for a sharper reason. Every
+    // word of a stranding is a claim about a LIVE predecessor: still running, still a member, yours to
+    // decide about. If the source died between the intent and this raise, that message is false in
+    // every clause — and `stranded` is terminal, so once written no later pass can let source loss
+    // outrank it. The classification has to happen before the point of no return, not after.
+    const now = await this.observe(intended);
+    if (now.source === null || isTerminalStatus(now.source.status)) {
+      return await this.failSourceLost(
+        intended,
+        `${receipt.sourceSessionId} stopped outside this handover while it was being stranded`,
+      );
+    }
+    if (!(await this.raiseStranded(intended, reason))) return null;
+    return await this.settle(intended, 'stranded', failure, reason);
   }
 
   /**
@@ -667,27 +858,116 @@ export class SessionHandoverService {
    * the ledger's own source-reference deduplication turns the eventual retry into one item, not two.
    */
   private async raiseStranded(receipt: HandoverReceipt, reason: string): Promise<boolean> {
+    return await this.raiseAttention(
+      receipt,
+      `the handover of ${receipt.sourceSessionId} is stranded`,
+      reason,
+      `This handover passed the point of no return, so nothing was undone and nothing was destroyed: ` +
+        `${receipt.sourceSessionId} is still running and still a member of its board. Decide whether to let ` +
+        `${receipt.replacementSessionId ?? 'the replacement'} take over — start it and have it run ` +
+        '`fy task-board invite-verify` — or to stop it and leave the predecessor in place.',
+    );
+  }
+
+  /**
+   * One item, one source reference, and WORDS THAT MATCH WHAT HAPPENED.
+   *
+   * The subject and the remedy are arguments rather than a fixed sentence because the two situations
+   * that raise one are genuinely different, and a shared sentence would be false for one of them: a
+   * stranded handover leaves its predecessor running and still a member, while a source-loss failure
+   * has no predecessor left at all. Telling a human to go and decide about a session that is already
+   * gone is worse than telling them nothing.
+   */
+  private async raiseAttention(
+    receipt: HandoverReceipt,
+    subject: string,
+    reason: string,
+    howToResolve: string,
+  ): Promise<boolean> {
     try {
       await this.ports.attention.raise({
         sessionId: receipt.sourceSessionId,
+        // The SAME reference either way, so a handover that strands and is later superseded refreshes
+        // one item rather than leaving a human two rows about one operation.
         sourceRef: `handover:${receipt.requestId}`,
-        subject: `the handover of ${receipt.sourceSessionId} is stranded`,
+        subject,
         why: reason,
-        howToResolve:
-          `This handover passed the point of no return, so nothing was undone and nothing was destroyed: ` +
-          `${receipt.sourceSessionId} is still running and still a member of its board. Decide whether to let ` +
-          `${receipt.replacementSessionId ?? 'the replacement'} take over — start it and have it run ` +
-          '`fy task-board invite-verify` — or to stop it and leave the predecessor in place.',
+        howToResolve,
       });
     } catch (error) {
       await this.ports.receipts.write(
         this.stamp(receipt, receipt.phase, this.ports.clock.now(), {
-          detail: `this handover is stranded and the attention could not be raised: ${detail(error)}`,
+          detail: `this handover needs a human and the attention could not be raised: ${detail(error)}`,
         }),
       );
       return false;
     }
     return true;
+  }
+
+  /**
+   * Persists the settlement decision on the CURRENT phase, before anything terminal is done about it.
+   *
+   * Idempotent by construction: a receipt already carrying this refusal is returned untouched, so a
+   * replayed pass does not grow the phase history a line at a time.
+   */
+  private async intend(receipt: HandoverReceipt, failure: HandoverFailure, reason: string): Promise<HandoverReceipt> {
+    if (receipt.refusal?.failure === failure) return receipt;
+    const intended = this.stamp(receipt, receipt.phase, this.ports.clock.now(), {
+      detail: `settling: ${failure}`,
+      refusal: { failure, message: reason },
+      effectIntent: null,
+    });
+    await this.ports.receipts.write(intended);
+    return intended;
+  }
+
+  /**
+   * The predecessor died outside this handover's own retirement, and the handover settles honestly.
+   *
+   * `failed` is the only terminal that does not lie here. `refused` would claim nothing was created,
+   * `abandoned` would claim a tidy undo, and `stranded` would claim a predecessor still running and
+   * still a member — of a session that is gone. `source_lost` is the one cause the protocol lets reach
+   * `failed` before a recorded stop, precisely so this case has somewhere true to land.
+   *
+   * WHAT HAPPENS TO THE REPLACEMENT DEPENDS ON WHETHER IT IS STILL DISPOSABLE, re-observed rather than
+   * assumed. Before acceptance it is a session this daemon made and may stop again. At or after it, the
+   * board has admitted a root nothing revokes — so it is left running and a human is told, under the
+   * same deduplicated source reference every other stranding uses.
+   *
+   * A CANCELLATION IN FLIGHT IS SUPERSEDED, NOT ERASED. Source loss wins the race and decides the
+   * terminal, but `cancelRequestId` stays on the receipt: the operator did ask, that ask is what a
+   * retry under the same id resumes, and rewriting history to say they never did would lose the only
+   * record of who tried to stop this.
+   */
+  private async failSourceLost(receipt: HandoverReceipt, reason: string): Promise<HandoverReceipt | null> {
+    // THE INTENT IS PERSISTED FIRST, then the world is re-observed, then the cleanup runs. Source loss
+    // is re-derivable — the predecessor's record is durable, so a later pass would reach the same
+    // conclusion — but the intent still earns its write: it makes the DECISION durable at the same
+    // instant the cause is, so a crash between the cleanup and the terminal resumes as a settlement
+    // rather than as a fresh classification of a world that may have moved on again.
+    //
+    // A superseded cancellation keeps its `cancelRequestId` right through this, from the nonterminal
+    // intent to the terminal `failed`. The operator did ask; source loss decides the OUTCOME, not who
+    // asked, and erasing that would lose the only record of who tried to stop this.
+    const intended = await this.intend(receipt, 'source_lost', reason);
+    const disposable = !receiptIsIrreversible(intended);
+    if (disposable) {
+      // RE-OBSERVED after the intent, because a create that landed between the pass's opening read and
+      // this failure would otherwise be left running with nothing to stop it.
+      const now = await this.observe(intended);
+      if (now.replacement !== null) await this.ports.sessions.stop(now.replacement.sessionId, reason);
+    } else if (
+      !(await this.raiseAttention(
+        intended,
+        `the handover of ${receipt.sourceSessionId} lost its subject`,
+        reason,
+        sourceLostRemedy(intended),
+      ))
+    ) {
+      return null;
+    }
+    return await this.settle(intended, 'failed', 'source_lost', reason);
   }
 
   private async settle(
@@ -857,6 +1137,7 @@ export class SessionHandoverService {
         : await this.ports.boardReader.observe(receipt.board.boardId, receipt.board.invitationRequestId);
     return {
       now: this.ports.clock.now(),
+      source: await this.ports.sessions.read(receipt.sourceSessionId),
       replacement,
       board,
       verificationDeadlineMinutes: this.settings.verificationDeadlineMinutes,
@@ -925,15 +1206,41 @@ export class SessionHandoverService {
     extra: {
       readonly detail?: string;
       readonly refusal?: { readonly failure: HandoverFailure; readonly message: string };
+      /** `null` clears the substep intent; omitted keeps whatever the receipt already carries. */
+      readonly effectIntent?: HandoverEffectIntent | null;
     },
   ): HandoverReceipt {
+    // THE INTENT IS CLEARED BY THE TRANSITION IT AUTHORIZED. An `accepting` receipt that has reached
+    // `accepted`, or a `retiring` one that has left `draining`, is describing a window that has closed
+    // — and the durable schema refuses to hold either intent outside its own phase, so carrying one
+    // forward would make the very next write unreadable.
+    const cleared = phase !== receipt.phase || extra.effectIntent === null;
+    const intent = extra.effectIntent ?? (cleared ? undefined : receipt.effectIntent);
+    const { effectIntent: _dropped, ...rest } = receipt;
     return {
-      ...receipt,
+      ...rest,
+      ...(intent === undefined || intent === null ? {} : { effectIntent: intent }),
       ...(extra.refusal === undefined ? {} : { refusal: extra.refusal }),
       phase,
+      // THE PROVENANCE IS STAMPED IN THE SAME WRITE THAT ACTIVATES THE INTENT, and it is append-only:
+      // the active field is cleared by the transition it authorized, but the EVENT stays. That is what
+      // lets a later reader — and the durable schema — justify a terminal shortcut that would otherwise
+      // look like a skipped ladder: a receipt that went `approved -> stranded` is only legal because
+      // the history proves the acceptance was committed, and the active field is long gone by then.
+      //
+      // IT IS STAMPED FROM THE RESULTING INTENT, NOT ONLY FROM A NEWLY PASSED ONE. The schema demands
+      // that an active intent appear on the receipt's LAST same-phase event, so a same-phase append
+      // that merely records a transient error — an accept whose delivery threw, a stop that failed —
+      // has to carry it forward too. Stamping only on activation made exactly those writes
+      // unreadable, which turned every retryable error inside a window into a permanent one.
       phaseHistory: [
         ...receipt.phaseHistory,
-        { phase, at, ...(extra.detail === undefined ? {} : { detail: extra.detail }) },
+        {
+          phase,
+          at,
+          ...(extra.detail === undefined ? {} : { detail: extra.detail }),
+          ...(intent === undefined || intent === null ? {} : { effectIntent: intent }),
+        },
       ],
       updatedAt: at,
     };

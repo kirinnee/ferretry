@@ -3,7 +3,7 @@ import { SESSION_HANDOVER_PHASES, type SessionHandoverPhase } from '@ferretry/pr
 import should from 'should';
 import {
   derivedStepId,
-  handoverCleanupPlan,
+  handoverSettlement,
   handoverEligibility,
   handoverFingerprint,
   handoverPlanId,
@@ -13,7 +13,7 @@ import {
   isTerminalHandoverPhase,
   nextPhase,
 } from '../../../src/lib/handover/policy.ts';
-import type { HandoverReceipt } from '../../../src/lib/handover/types.ts';
+import type { HandoverReceipt, HandoverSessionView } from '../../../src/lib/handover/types.ts';
 import {
   CODEX_ACCOUNT,
   CODEX_COORDINATOR,
@@ -26,10 +26,13 @@ import {
 } from './support.ts';
 
 const TARGET = { replacement: CODEX_ACCOUNT, coordinator: CODEX_COORDINATOR };
+/** The same ask for a root that belongs to no board: no coordinator, because nothing would seat one. */
+const BOARDLESS_TARGET = { replacement: CODEX_ACCOUNT, coordinator: null };
 
 function world(overrides: Partial<HandoverWorld> = {}): HandoverWorld {
   return {
     now: '2026-02-01T00:00:00.000Z',
+    source: sessionView(),
     replacement: sessionView({ sessionId: 'replacement-1', teammate: null }),
     board: observation(),
     verificationDeadlineMinutes: 30,
@@ -120,10 +123,10 @@ describe('handover eligibility', () => {
     should(decision).match({ ok: true, sourceHarness: 'claude', replacementHarness: 'codex' });
   });
 
-  it('accepts a root with no board at all', () => {
-    should(handoverEligibility({ source: sessionView(), membership: null, target: TARGET, wardenDriven: false })).match(
-      { ok: true },
-    );
+  it('accepts a root with no board at all, asked for without a coordinator', () => {
+    should(
+      handoverEligibility({ source: sessionView(), membership: null, target: BOARDLESS_TARGET, wardenDriven: false }),
+    ).match({ ok: true });
   });
 
   it('refuses a session that is not top level before anything else is considered', () => {
@@ -171,9 +174,9 @@ describe('handover eligibility', () => {
     should(
       handoverEligibility({ source: sessionView(), membership: membership(), target: TARGET, wardenDriven: true }),
     ).match({ ok: false, refusal: { failure: 'board_authority_required' } });
-    should(handoverEligibility({ source: sessionView(), membership: null, target: TARGET, wardenDriven: true })).match({
-      ok: true,
-    });
+    should(
+      handoverEligibility({ source: sessionView(), membership: null, target: BOARDLESS_TARGET, wardenDriven: true }),
+    ).match({ ok: true });
   });
 
   it('answers board_authority_required for a warden even when the target would fail another check', () => {
@@ -198,6 +201,24 @@ describe('handover eligibility', () => {
         wardenDriven: false,
       }),
     ).match({ ok: false, refusal: { failure: 'mode_not_invitable' } });
+  });
+
+  it('refuses a BOARDLESS handover that names a coordinator, which is the same rule inverted', () => {
+    // The durable receipt requires board membership and the coordinator target to agree — board if
+    // and only if coordinator — so this is `coordinator_required` read from the other side rather
+    // than a new cause. Caught HERE and not at the write: left to the store it would surface as a
+    // schema-parse error, which is a stack trace where an actionable refusal belongs.
+    const decision = handoverEligibility({
+      source: sessionView(),
+      membership: null,
+      target: TARGET,
+      wardenDriven: false,
+    });
+    should(decision).match({ ok: false, refusal: { failure: 'coordinator_required' } });
+    if (!decision.ok) {
+      should(decision.refusal.message).match(/belongs to no board/u);
+      should(decision.refusal.message).match(/coordinator: null/u);
+    }
   });
 
   it('refuses a board handover that names no coordinator for the replacement to seat', () => {
@@ -260,10 +281,15 @@ describe('handover eligibility', () => {
   });
 });
 
-describe('handover cleanup plans', () => {
+describe('where a failing handover settles', () => {
+  const world_ = (
+    replacement: HandoverSessionView | null = sessionView({ sessionId: 'replacement-1' }),
+  ): HandoverWorld => world({ replacement });
+
   it('refuses when the identity was written ahead and no session was ever created', () => {
-    const receipt = receiptAt('replacement_creating');
-    should(handoverCleanupPlan(receipt, world({ replacement: null }), 'cancelled', 'why')).match({ kind: 'refuse' });
+    should(handoverSettlement(receiptAt('replacement_creating'), world_(null), 'cancelled', 'why')).match({
+      kind: 'refuse',
+    });
   });
 
   it('refuses when not even an identity exists', () => {
@@ -271,12 +297,13 @@ describe('handover cleanup plans', () => {
       replacementSessionId: undefined,
       phaseHistory: [{ phase: 'requested', at: '2026-02-01T00:00:00.000Z' }],
     });
-    should(handoverCleanupPlan(receipt, world(), 'cancelled', 'why')).match({ kind: 'refuse' });
+    should(handoverSettlement(receipt, world_(), 'cancelled', 'why')).match({ kind: 'refuse' });
   });
 
   it('abandons once a record answers to the written-ahead identity', () => {
-    const receipt = receiptAt('replacement_creating');
-    should(handoverCleanupPlan(receipt, world(), 'cancelled', 'why')).match({ kind: 'abandon' });
+    should(handoverSettlement(receiptAt('replacement_creating'), world_(), 'cancelled', 'why')).match({
+      kind: 'abandon',
+    });
   });
 
   it('abandons a handover that reached replacement_created even if the record has since gone', () => {
@@ -286,9 +313,78 @@ describe('handover cleanup plans', () => {
         { phase: 'replacement_created', at: '2026-02-01T00:00:01.000Z' },
       ],
     });
-    should(handoverCleanupPlan(receipt, world({ replacement: null }), 'board_moved', 'why')).match({
-      kind: 'abandon',
-    });
+    should(handoverSettlement(receipt, world_(null), 'board_moved', 'why')).match({ kind: 'abandon' });
+  });
+
+  /**
+   * The whole table, walked. A rule derived from one member of a set has to be re-tested against every
+   * other member, and this one differs by TRACK as well as by phase — which is exactly the kind of
+   * difference a spot check misses.
+   */
+  it('settles every board progress phase to its one legal terminal edge', () => {
+    const expected: Readonly<Record<string, string>> = {
+      requested: 'abandon',
+      replacement_creating: 'abandon',
+      replacement_created: 'abandon',
+      invited: 'abandon',
+      approved: 'abandon',
+      accepted: 'strand',
+      replacement_started: 'strand',
+      verified: 'strand',
+      coordinator_creating: 'strand',
+      coordinator_created: 'strand',
+      coordinator_granted: 'strand',
+      coordinator_started: 'strand',
+      coordinator_replaced: 'strand',
+      draining: 'strand',
+      predecessor_stopped: 'fail',
+    };
+    for (const [phase, kind] of Object.entries(expected)) {
+      const receipt = receiptAt(phase as SessionHandoverPhase, { coordinatorSessionId: 'coordinator-1' });
+      should(handoverSettlement(receipt, world_(), 'step_failed', 'why')).match({ kind }, phase);
+    }
+  });
+
+  it('does not settle inside the retirement tail on EITHER of its two entrances', () => {
+    // `relinquished` is the phase; `retiring` is the durable intent that the gate cleared and the stop
+    // or relinquish it authorized may already have been applied. Both are the tail, on both tracks.
+    for (const receipt of [
+      receiptAt('relinquished'),
+      receiptAt('relinquished', { board: null }),
+      receiptAt('draining', { effectIntent: 'retiring' }),
+      receiptAt('draining', { board: null, effectIntent: 'retiring' }),
+    ]) {
+      should(handoverSettlement(receipt, world_(), 'step_failed', 'why')).eql(
+        null,
+        `${receipt.phase}/${receipt.board === null ? 'boardless' : 'board'}/${receipt.effectIntent ?? 'no intent'}`,
+      );
+    }
+  });
+
+  it('does not settle inside the retirement tail, because there is no legal edge out of it', () => {
+    // `relinquished -> stranded` is not a legal walk: the membership is already gone and the only work
+    // left is an idempotent, observable stop. A failure there replays rather than terminalising.
+    should(handoverSettlement(receiptAt('relinquished'), world_(), 'step_failed', 'why')).be.null();
+    should(handoverSettlement(receiptAt('relinquished', { board: null }), world_(), 'step_failed', 'why')).be.null();
+  });
+
+  it('never strands a boardless handover, because it has no second root to leave behind', () => {
+    const boardless: readonly SessionHandoverPhase[] = [
+      'requested',
+      'replacement_creating',
+      'replacement_created',
+      'replacement_started',
+      'draining',
+    ];
+    for (const phase of boardless) {
+      should(handoverSettlement(receiptAt(phase, { board: null }), world_(), 'step_failed', 'why')).match(
+        { kind: 'abandon' },
+        phase,
+      );
+    }
+    should(handoverSettlement(receiptAt('predecessor_stopped', { board: null }), world_(), 'step_failed', 'why')).match(
+      { kind: 'fail' },
+    );
   });
 });
 
@@ -504,6 +600,116 @@ describe('the board invariant', () => {
     const gone = world({ board: observation({ activeRootSessionIds: ['replacement-1'] }) });
     should(nextPhase(receiptAt('relinquished'), gone)).deepEqual({ kind: 'step', step: 'stop_predecessor' });
     should(nextPhase(receiptAt('predecessor_stopped'), gone)).deepEqual({ kind: 'step', step: 'complete' });
+  });
+});
+
+describe('draining, which is two situations under one phase name', () => {
+  const retiring = (board: HandoverReceipt['board']): HandoverReceipt =>
+    receiptAt('draining', { board, effectIntent: 'retiring' });
+
+  it('asks the gate while the retirement has not begun', () => {
+    should(nextPhase(receiptAt('draining'), world())).deepEqual({ kind: 'step', step: 'drain' });
+  });
+
+  it('never re-asks the gate once the retirement is durable, even with a live source', () => {
+    // The gate was cleared BEFORE the intent was persisted. Asking again is asking a question that has
+    // been answered, and on a live predecessor it can answer differently the second time and park a
+    // retirement that has already begun.
+    should(nextPhase(retiring(receiptAt('draining').board), world())).deepEqual({
+      kind: 'step',
+      step: 'retire_without_gate',
+    });
+  });
+
+  it('records the tail instead of re-asking a gate a stopped session cannot answer', () => {
+    const board = receiptAt('draining').board;
+    for (const source of [sessionView({ status: 'stopped' }), sessionView({ status: 'completed' }), null]) {
+      should(nextPhase(retiring(board), world({ source }))).deepEqual(
+        { kind: 'step', step: 'retire_without_gate' },
+        JSON.stringify(source?.status ?? null),
+      );
+      should(nextPhase(retiring(null), world({ source, board: null }))).deepEqual({
+        kind: 'step',
+        step: 'retire_without_gate',
+      });
+    }
+  });
+
+  it('does not claim a retirement for a source something else killed mid-gate', () => {
+    // No retiring intent: the gate never cleared, so this is not this handover's doing. It is EXTERNAL
+    // source loss, which settles honestly under its own cause rather than being read as a committed
+    // stop this handover may take credit for.
+    should(nextPhase(receiptAt('draining'), world({ source: sessionView({ status: 'stopped' }) }))).match({
+      kind: 'fail',
+      failure: 'source_lost',
+    });
+  });
+});
+
+describe('committed provenance, once the active intent has been cleared', () => {
+  /** A receipt whose settlement intent cleared the active field but kept the committed EVENT. */
+  const committed = (
+    phase: 'approved' | 'draining',
+    intent: 'accepting' | 'retiring',
+    board: HandoverReceipt['board'],
+  ): HandoverReceipt =>
+    receiptAt(phase, {
+      board,
+      phaseHistory: [
+        { phase: 'requested', at: '2026-02-01T00:00:00.000Z' },
+        { phase, at: '2026-02-01T00:00:01.000Z', effectIntent: intent },
+        { phase, at: '2026-02-01T00:00:02.000Z', detail: 'settling: step_failed' },
+      ],
+      refusal: { failure: 'step_failed', message: 'the step did not complete' },
+    });
+
+  it('never unwinds a committed retirement, on either track', () => {
+    // The durable schema refuses both of these outright — a committed retiring tail may only roll
+    // forward — so a settlement here would write a receipt no reader can parse. The tail replays.
+    const board = receiptAt('draining').board;
+    should(handoverSettlement(committed('draining', 'retiring', board), world(), 'step_failed', 'why')).eql(null);
+    should(handoverSettlement(committed('draining', 'retiring', null), world(), 'step_failed', 'why')).eql(null);
+  });
+
+  it('resumes the retirement tail rather than re-gating it', () => {
+    const board = receiptAt('draining').board;
+    should(nextPhase(committed('draining', 'retiring', board), world())).deepEqual({
+      kind: 'step',
+      step: 'retire_without_gate',
+    });
+    should(nextPhase(committed('draining', 'retiring', null), world({ board: null }))).deepEqual({
+      kind: 'step',
+      step: 'retire_without_gate',
+    });
+  });
+
+  it('ignores a missing or drifted board once the retirement is committed', () => {
+    // The relinquish may already have been applied, so the board is EXPECTED to have changed. A breach
+    // here could only settle, and an irreversible breach maps to stranded — which the protocol refuses
+    // for a committed retiring tail. The tail replays instead, on a live source and a broken board.
+    const board = receiptAt('draining').board;
+    const retiring = receiptAt('draining', { board, effectIntent: 'retiring' });
+    for (const observed of [null, observation({ boardId: 'board-2' }), observation({ activeRootSessionIds: [] })]) {
+      should(nextPhase(retiring, world({ board: observed }))).deepEqual(
+        { kind: 'step', step: 'retire_without_gate' },
+        JSON.stringify(observed?.boardId ?? null),
+      );
+    }
+  });
+
+  it('strands a committed acceptance and never abandons it', () => {
+    // Past acceptance the grant may be unrevokeable, so `abandoned` would falsely promise the
+    // replacement was disposed of — which the schema now rejects as well. `stranded` is the honest
+    // terminal, and it is the one the retained provenance authorizes off `approved`.
+    const board = receiptAt('approved').board;
+    should(handoverSettlement(committed('approved', 'accepting', board), world(), 'step_failed', 'why')).match({
+      kind: 'strand',
+    });
+    // And with no refusal in flight the ladder still replays the accept rather than unwinding.
+    should(nextPhase(receiptAt('approved', { effectIntent: 'accepting' }), world())).deepEqual({
+      kind: 'step',
+      step: 'accept',
+    });
   });
 });
 
