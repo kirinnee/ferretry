@@ -39,6 +39,7 @@ import {
   routeAnnouncement,
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
+import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
@@ -1097,6 +1098,188 @@ describe('the command palette shortcut', () => {
     window.dispatchEvent(afterwards);
 
     expect(afterwards.defaultPrevented).toBe(false);
+  });
+});
+
+/* ---------- F38: the global destination and settings finder --------------- */
+
+/** Types into the mounted palette the way the reader's keyboard does. */
+const searchPalette = async (value: string): Promise<void> => {
+  const field = must(document.getElementById('fy-palette-input') as HTMLInputElement | null, 'the palette input');
+  await interact(() => {
+    // React listens for `input`, and the value has to be set before it fires.
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+/** Activates one palette row the way a pointer does; rows own pointerup, not click. */
+const pressPaletteRow = async (id: string): Promise<void> => {
+  const row = must(document.getElementById(`fy-palette-option-${id}`), `the ${id} palette row`);
+  await interact(() => {
+    for (const type of ['pointerdown', 'pointerup']) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { pointerId: 7 });
+      row.dispatchEvent(event);
+    }
+  });
+};
+
+const paletteOption = (id: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(`#fy-palette-option-${id}`);
+
+/** One touch event with the `touches` list the passive pull handler reads. */
+const touchEvent = (type: string, clientY: number, count = 1): Event => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'touches', { value: Array.from({ length: count }, () => ({ clientY })) });
+  return event;
+};
+
+const finderButton = (container: HTMLElement): HTMLButtonElement =>
+  must(container.querySelector<HTMLButtonElement>('[data-app-bar-destination-search]'), 'the destination finder');
+
+describe('the global destination and settings finder', () => {
+  it('finds an individual setting by a keyword that is in neither its label nor its description', async () => {
+    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    await settle();
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+
+    // "push to talk" appears only in the catalog's keyword list — the row's own
+    // prose spells it "Push-to-talk" — so a match here proves the palette is
+    // asking the catalog rather than filtering label and description itself.
+    await searchPalette('push to talk');
+
+    const row = must(paletteOption('setting-dictation'), 'the dictation settings row');
+    expect(row.textContent).toContain('Dictation');
+    // The live binding rides along from the shell's own dictation settings, so
+    // the row tells the reader which chord it currently is.
+    expect(row.textContent).toContain('Push-to-talk shortcut: Alt (either side)');
+    await view.unmount();
+  });
+
+  it('opens the unanchored Settings page for a row that anchors to no one control', async () => {
+    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    await settle();
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+    await searchPalette('preferences');
+
+    await pressPaletteRow('open-settings');
+
+    expect(window.location.pathname).toBe('/d/alpha/settings');
+    expect(window.location.hash).toBe('');
+    await view.unmount();
+  });
+
+  it('reaches an app destination through the same search', async () => {
+    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    await settle();
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+    await searchPalette('warden');
+
+    await pressPaletteRow('destination-warden');
+
+    expect(window.location.pathname).toBe('/d/alpha/warden');
+    await view.unmount();
+  });
+
+  it('stops promising Cmd/Ctrl+K once a session owns it', async () => {
+    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    await settle();
+
+    // The keystroke belongs to current-session search here, so the bar must not
+    // advertise it for the finder: an announced shortcut that does something
+    // else is worse than no announcement at all.
+    const finder = finderButton(view.container);
+    expect(finder.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(finder.textContent).not.toContain('K');
+
+    // The finder itself still opens, and says who owns the keystroke instead.
+    await interact(() => finder.click());
+    expect(paletteOpen(view.container)).toBe(true);
+    expect(document.getElementById('fy-palette')?.textContent).toContain('searches this session’s files & tasks');
+    await view.unmount();
+  });
+
+  it('still advertises Cmd/Ctrl+K where nothing else claims it', async () => {
+    const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
+    await settle();
+
+    expect(finderButton(view.container).getAttribute('aria-keyshortcuts')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('opens from a pull on a destination that carries no pull marker at all', async () => {
+    // Settings names nothing about this gesture, which is the point: the region
+    // finds the page's scroll port from the touch, so a destination added later
+    // is reachable without being listed anywhere.
+    const { view } = await renderShell('/d/alpha/settings', [alpha.daemonId]);
+    await settle();
+    const region = must(view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'), 'the pull region');
+    const inside = must(region.querySelector<HTMLElement>('h1, h2, p, div'), 'something on the settings page');
+
+    await interact(() => inside.dispatchEvent(touchEvent('touchstart', 100)));
+    await interact(() => inside.dispatchEvent(touchEvent('touchmove', 100 + PALETTE_PULL_THRESHOLD_PX)));
+    await interact(() => inside.dispatchEvent(touchEvent('touchend', 0, 0)));
+
+    expect(paletteOpen(view.container)).toBe(true);
+    await view.unmount();
+  });
+
+  it('never takes the pull that belongs to the transcript', async () => {
+    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    await settle();
+    const transcript = must(view.container.querySelector<HTMLElement>('.fy-transcript'), 'the transcript scroller');
+    Object.defineProperty(transcript, 'scrollTop', { configurable: true, value: 0 });
+
+    // The same movement loads older messages here. A finder that opened over it
+    // would take a reader's history away from them.
+    await interact(() => transcript.dispatchEvent(touchEvent('touchstart', 100)));
+    await interact(() => transcript.dispatchEvent(touchEvent('touchmove', 100 + PALETTE_PULL_THRESHOLD_PX)));
+    await interact(() => transcript.dispatchEvent(touchEvent('touchend', 0, 0)));
+
+    expect(paletteOpen(view.container)).toBe(false);
+    expect(view.container.querySelector('[data-pull-to-palette-indicator]')?.getAttribute('style')).toContain(
+      'opacity: 0',
+    );
+    await view.unmount();
+  });
+
+  it('opens from a pull on an opted-in page scroller, and leaves an ordinary scroll alone', async () => {
+    // The harness reports no fine pointer, so `useInputModality` resolves to the
+    // conservative touch-affected state a phone gets.
+    const { view } = await renderShell('/d/alpha', [alpha.daemonId], { sessions: ['s1'] });
+    await settle();
+    const scroller = must(
+      view.container.querySelector<HTMLElement>(`[${PULL_TO_PALETTE_ATTR}]`),
+      'the opted-in dashboard scroller',
+    );
+
+    // Already scrolled: the same gesture is the reader scrolling back up, and
+    // must stay the browser's.
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 40 });
+    await interact(() => scroller.dispatchEvent(touchEvent('touchstart', 100)));
+    await interact(() => scroller.dispatchEvent(touchEvent('touchmove', 100 + PALETTE_PULL_THRESHOLD_PX)));
+    await interact(() => scroller.dispatchEvent(touchEvent('touchend', 0, 0)));
+    expect(paletteOpen(view.container)).toBe(false);
+
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 0 });
+    await interact(() => scroller.dispatchEvent(touchEvent('touchstart', 100)));
+    await interact(() => scroller.dispatchEvent(touchEvent('touchmove', 140)));
+
+    const indicator = must(
+      view.container.querySelector<HTMLElement>('[data-pull-to-palette-indicator]'),
+      'the pull indicator',
+    );
+    expect(indicator.dataset.pullToPaletteIndicator).toBe('pulling');
+    expect(indicator.textContent).toContain('Pull to find');
+
+    await interact(() => scroller.dispatchEvent(touchEvent('touchmove', 100 + PALETTE_PULL_THRESHOLD_PX)));
+    expect(indicator.dataset.pullToPaletteIndicator).toBe('armed');
+    expect(indicator.textContent).toContain('Release to find');
+
+    await interact(() => scroller.dispatchEvent(touchEvent('touchend', 0, 0)));
+    expect(paletteOpen(view.container)).toBe(true);
+    await view.unmount();
   });
 });
 

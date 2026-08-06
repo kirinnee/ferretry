@@ -162,6 +162,7 @@ describe('paletteSettingHref and settingsDestinationHrefs', () => {
   it('anchors a setting inside its own daemon’s settings page', () => {
     expect(paletteSettingHref(alpha, 'density')).toBe('/d/alpha/settings#density');
     expect(paletteSettingHref(beta, 'density')).toBe('/d/beta/settings#density');
+    expect(paletteSettingHref(alpha, null)).toBe('/d/alpha/settings');
   });
 
   it('prefers a link row’s own href over an anchor it does not have', () => {
@@ -275,7 +276,7 @@ describe('paletteResults', () => {
     expect(groups.settings.map(entry => entry.id)).toEqual(['settings-page']);
   });
 
-  it('filters settings on their own label and description', () => {
+  it('uses the settings owner’s matched set without reinterpreting its search rule', () => {
     const groups = paletteResults({
       query: 'density',
       daemon: alpha,
@@ -285,7 +286,7 @@ describe('paletteResults', () => {
       settings: [setting(), setting({ id: 'setting-theme', label: 'Theme', description: 'Pick a palette' })],
     });
 
-    expect(groups.settings.map(entry => entry.id)).toEqual(['setting-density']);
+    expect(groups.settings.map(entry => entry.id)).toEqual(['setting-density', 'setting-theme']);
   });
 
   it('answers a query nothing matches with an empty list rather than everything', () => {
@@ -295,7 +296,7 @@ describe('paletteResults', () => {
       sessions,
       destinations: APP_BAR_DESTINATIONS,
       commands: [command()],
-      settings: [setting()],
+      settings: [],
     });
 
     expect(groups.results).toEqual([]);

@@ -156,6 +156,7 @@ import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
+import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
 import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
@@ -212,7 +213,7 @@ import { BrandMark } from '../src/shell/brand-mark.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
-import { CommandPalette } from '../src/shell/command-palette.tsx';
+import { CommandPalette, type PaletteSettingsSource } from '../src/shell/command-palette.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
@@ -2301,10 +2302,12 @@ const PALETTE_COMMANDS = [
   },
 ];
 
-const PALETTE_SETTINGS = [
-  { id: 'setting-density', label: 'Density', description: 'How tightly rows pack', settingId: 'density' },
-  { id: 'setting-theme', label: 'Theme', description: 'Pick a colour family and mode', settingId: 'theme' },
-];
+/**
+ * The REAL Settings catalog answers the harness palette, exactly as it answers
+ * the app's. A hand-written settings list here would put a capture of rows the
+ * product does not have beside the ones it does.
+ */
+const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPaletteEntries(daemon, query);
 
 /** Attention fixture puts all four response shapes beside their distinct action
  * controls. The permission background stays deliberately long so the phone
