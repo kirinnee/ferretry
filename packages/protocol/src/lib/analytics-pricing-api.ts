@@ -37,6 +37,26 @@ export const AnalyticsPricingViewSchema = z.strictObject({
 export type AnalyticsPricingView = z.infer<typeof AnalyticsPricingViewSchema>;
 
 /**
+ * A rate a PERSON is submitting, which is the only kind a manual patch may carry.
+ *
+ * A CALLER CANNOT AWARD ITSELF PROVENANCE. `provider_sync` means a daemon fetched these numbers
+ * from a source its operator configured, and the whole point of recording that is to tell a price
+ * somebody typed from a price a provider published. A patch is the typed path, so a submitted
+ * `provider_sync` source would be a client asserting the one claim it is not in a position to make
+ * — along with a `sourceUrl` that passes every bound in the contract and names a feed nobody chose.
+ *
+ * The consequence for the editing journey is deliberate: changing a synced row's numbers converts
+ * that row to manual provenance, because after the edit the numbers ARE a person's, not the feed's.
+ * That conversion belongs to the surface doing the editing; refusing the forgery belongs here,
+ * where both ends read it, rather than in one daemon route a second caller could sidestep.
+ */
+export const ManualAnalyticsPricingRateSchema = AnalyticsPricingRateSchema.refine(
+  rate => rate.source.kind === 'manual',
+  { path: ['source', 'kind'], error: 'a submitted rate is manual; a daemon alone records a sync' },
+);
+export type ManualAnalyticsPricingRate = z.infer<typeof ManualAnalyticsPricingRateSchema>;
+
+/**
  * One deliberate edit, spelled out rather than implied by a diff of the whole table.
  *
  * A structured operation says what the person meant. Submitting a replacement catalog would make
@@ -44,7 +64,7 @@ export type AnalyticsPricingView = z.infer<typeof AnalyticsPricingViewSchema>;
  * rows nobody chose to delete.
  */
 export const AnalyticsPricingPatchOperationSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('upsert'), rate: AnalyticsPricingRateSchema }),
+  z.strictObject({ op: z.literal('upsert'), rate: ManualAnalyticsPricingRateSchema }),
   z.strictObject({ op: z.literal('remove'), pricingKey: NonEmptyStringSchema.max(128) }),
 ]);
 export type AnalyticsPricingPatchOperation = z.infer<typeof AnalyticsPricingPatchOperationSchema>;

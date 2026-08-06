@@ -6,11 +6,13 @@ import {
   AnalyticsPricingPatchOperationSchema,
   AnalyticsPricingPatchSchema,
   AnalyticsPricingPreviewIdSchema,
+  AnalyticsPricingRateSchema,
   AnalyticsPricingSyncApplySchema,
   AnalyticsPricingSyncChangeSchema,
   AnalyticsPricingSyncPreviewRequestSchema,
   AnalyticsPricingSyncPreviewSchema,
   AnalyticsPricingViewSchema,
+  ManualAnalyticsPricingRateSchema,
   type AnalyticsPricingRates,
 } from '../../src/lib/index.ts';
 import { INSTANT } from '../fixtures.ts';
@@ -47,6 +49,13 @@ const rate = {
 } as const;
 
 const dearer = { ...rate, rates: { ...rates, output: 12_000_000 } } as const;
+
+/** The same price as a daemon would have recorded it after a sync — never as a client may submit it. */
+const syncedRate = {
+  ...rate,
+  source: { kind: 'provider_sync', provider: 'openai', sourceUrl: FEED_URL },
+  lastSyncedAt: INSTANT,
+} as const;
 
 const view = {
   catalog: [rate],
@@ -89,6 +98,7 @@ const cases: readonly SchemaCase[] = [
   { name: 'fingerprint', schema: AnalyticsPricingFingerprintSchema, value: BASE },
   { name: 'preview id', schema: AnalyticsPricingPreviewIdSchema, value: 'preview-1' },
   { name: 'view', schema: AnalyticsPricingViewSchema, value: view },
+  { name: 'manual rate', schema: ManualAnalyticsPricingRateSchema, value: rate },
   { name: 'patch operation', schema: AnalyticsPricingPatchOperationSchema, value: { op: 'upsert', rate } },
   { name: 'patch', schema: AnalyticsPricingPatchSchema, value: patch },
   {
@@ -119,6 +129,26 @@ describe('analytics pricing API contract', () => {
     // Assert
     should(actual.operations[0]?.op).equal('upsert');
     should(actual.operations[1]).deepEqual({ op: 'remove', pricingKey: 'operator:model-z:2026-01' });
+  });
+
+  it('should refuse a submitted rate that awards itself provider provenance', () => {
+    // A patch is the typed path. Accepting `provider_sync` here would let a caller claim its numbers
+    // came from a feed — and name an arbitrary allowed https `sourceUrl` while doing it — which is
+    // the one claim only the daemon that performed the fetch is in a position to make.
+    // Act
+    const submitted = ManualAnalyticsPricingRateSchema.safeParse(syncedRate);
+    const patched = AnalyticsPricingPatchSchema.safeParse({
+      expectedCatalogFingerprint: BASE,
+      operations: [{ op: 'upsert', rate: syncedRate }],
+    });
+
+    // Assert: named by path, so this proves the new rule fired rather than some other refusal.
+    should(submitted.success).be.false();
+    should(submitted.error?.issues.map(issue => issue.path)).containDeep([['source', 'kind']]);
+    should(patched.success).be.false();
+    // The same rate with the provenance a person actually has is accepted unchanged.
+    should(ManualAnalyticsPricingRateSchema.parse(rate)).deepEqual(rate);
+    should(AnalyticsPricingRateSchema.parse(syncedRate).source.kind).equal('provider_sync');
   });
 
   it('should refuse a patch that edits one price twice or edits nothing', () => {
