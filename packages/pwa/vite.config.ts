@@ -36,6 +36,7 @@
  */
 
 import autoprefixer from 'autoprefixer';
+import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
@@ -46,23 +47,16 @@ import tailwindConfig from './tailwind.config.ts';
  *
  * The relay is a separate Worker on its own hostname and Pages stays static — no
  * Functions, no proxy — so a relative path could never reach it. One shared,
- * non-user-identifying origin is therefore a build constant, supplied by
- * `FY_RELAY_DIRECTORY_ORIGIN`. `.github/workflows/pwa-pages.yaml` resolves it with
- * `scripts/ci/relay-directory-origin.sh`, which prefers the `HOSTED_RELAY_ORIGIN`
- * repository variable and otherwise DERIVES the same workers.dev origin the
- * relay’s own deploy derives — so the bundle and the Worker cannot name different
- * services, and nobody has to remember to set a variable.
+ * non-user-identifying origin is therefore a build constant. It is imported from
+ * `@ferretry/relay`, the same source the daemon imports, so Nix, GoReleaser, Pages,
+ * local Bun builds and forks cannot disagree about which directory to ask.
  *
- * NO DEFAULT, deliberately. An unset variable ships a bundle with no directory,
- * which `features/onboarding/hosted-relay.ts` reports as “this build has no relay
- * directory to ask” — an honest state a local build or a fork is genuinely in. A
- * literal here would be a hostname nobody verified, and the server-side kill
- * switch behind the real one is what makes shipping an origin safe at all.
+ * The directory remains distinct from the carrier. Its no-store advertisement can
+ * withdraw the carrier without rebuilding either end.
  */
-const relayDirectoryOrigin = process.env.FY_RELAY_DIRECTORY_ORIGIN ?? '';
 export default defineConfig({
   define: {
-    __FY_RELAY_DIRECTORY__: JSON.stringify(relayDirectoryOrigin),
+    __FY_RELAY_DIRECTORY__: JSON.stringify(HOSTED_RELAY_DIRECTORY_ORIGIN),
   },
   // The static landing owns `/` and the PWA document is `/app/`, but their
   // public assets are emitted once at the site root. Keep every generated chunk

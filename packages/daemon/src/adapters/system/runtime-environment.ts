@@ -1,27 +1,21 @@
 import { homedir } from 'node:os';
+import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
 import type { EnvironmentPort, StateHomeInput } from '../../lib/index.ts';
 
 /**
- * The relay directory's origin, baked in at build time, or nothing.
+ * The relay directory's origin, compiled into the shared relay source.
  *
- * `scripts/release/compile.sh` replaces this identifier with a string literal from
- * `FY_RELAY_DIRECTORY_ORIGIN`, resolved by `scripts/ci/relay-directory-origin.sh` — the same script,
- * from the same inputs, that the PWA's Pages build uses, so the two halves of one carrier cannot be
- * pointed at different directories. Read through `typeof` because every other consumer of this
- * module — the test tiers, a plain `bun run` of the daemon — has no such define, and a free
- * identifier would throw rather than degrade.
+ * `HOSTED_RELAY_DIRECTORY_ORIGIN` belongs to `@ferretry/relay`, so the daemon and PWA compile the
+ * same fact on every route — Nix, GoReleaser, local Bun builds, and forks. The temporary owner
+ * decision to use Ferretry's personal workers.dev hostname is documented beside that single
+ * constant, including the planned move to a product domain and the accepted fork trade-off.
  *
  * IT IS AN ORIGIN, NOT A CARRIER. It identifies the directory that serves the advertisement; the
  * relay address and the kill switch both live behind it, at runtime, which is what lets the operator
- * withdraw the carrier without a release. An empty string is the unset case and deliberately not a
- * URL: there is no fallback literal here and nothing invents a hostname.
+ * withdraw the carrier without a release. `FY_RELAY_DIRECTORY_ORIGIN` remains the explicit runtime
+ * override for an operator who needs a different directory.
  */
-declare const __FY_RELAY_DIRECTORY__: string | undefined;
-
-const compiledRelayDirectory = (): string | undefined => {
-  const configured = typeof __FY_RELAY_DIRECTORY__ === 'string' ? __FY_RELAY_DIRECTORY__ : '';
-  return configured === '' ? undefined : configured;
-};
+const compiledRelayDirectory = (): string => HOSTED_RELAY_DIRECTORY_ORIGIN;
 
 export class RuntimeEnvironment implements EnvironmentPort {
   constructor(
@@ -39,10 +33,9 @@ export class RuntimeEnvironment implements EnvironmentPort {
   /**
    * Where this daemon asks which carrier is advertised.
    *
-   * THE ENVIRONMENT WINS OVER THE BUILD, and that is the useful direction: a build carries the
-   * origin the release was cut against, and somebody running from source, running a fork, or
-   * pointing a daemon at their own directory has no build to change. It is the same escape hatch
-   * `FY_HOME` already is, and it names a service rather than a secret.
+   * THE ENVIRONMENT WINS OVER THE BUILD, so somebody running a fork or pointing a daemon at their
+   * own directory has an explicit escape hatch without recompiling. It is a service address, not a
+   * secret, and an explicit daemon configuration still wins before discovery is considered.
    */
   relayDirectoryOrigin(): string | undefined {
     const configured = this.values.FY_RELAY_DIRECTORY_ORIGIN;

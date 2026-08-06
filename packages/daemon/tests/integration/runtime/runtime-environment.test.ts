@@ -8,6 +8,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
 import should from 'should';
 import { RuntimeEnvironment } from '../../../src/adapters/system/runtime-environment.ts';
 
@@ -24,18 +25,18 @@ describe('the daemon runtime environment', () => {
     should(environment({}).stateHomeInput()).deepEqual({ fyHome: undefined, homeDirectory: '/home/someone' });
   });
 
-  it('should let the environment name the relay directory, and never invent one', () => {
-    // Assert — an unset or blank variable is a build with no directory. There is no fallback literal
-    // here: a compiled carrier address is the one thing this whole design exists to avoid.
+  it('should let the environment override the shared compiled relay directory', () => {
     should(environment({ FY_RELAY_DIRECTORY_ORIGIN: 'https://relay.example' }).relayDirectoryOrigin()).equal(
       'https://relay.example',
     );
     should(environment({ FY_RELAY_DIRECTORY_ORIGIN: '  https://relay.example  ' }).relayDirectoryOrigin()).equal(
       'https://relay.example',
     );
-    should(environment({ FY_RELAY_DIRECTORY_ORIGIN: '   ' }).relayDirectoryOrigin()).be.undefined();
-    // No define is applied to a test run, which is the same state a local `bun run` of the daemon
-    // is in, so this is the answer a developer actually gets.
-    should(environment({}).relayDirectoryOrigin()).be.undefined();
+    should(environment({ FY_RELAY_DIRECTORY_ORIGIN: '   ' }).relayDirectoryOrigin()).equal(
+      HOSTED_RELAY_DIRECTORY_ORIGIN,
+    );
+    // Every route imports the one shared source default. A missing directory is now reachable only
+    // in a pre-default binary or a test double that explicitly returns NO_RELAY_DIRECTORY.
+    should(environment({}).relayDirectoryOrigin()).equal(HOSTED_RELAY_DIRECTORY_ORIGIN);
   });
 });

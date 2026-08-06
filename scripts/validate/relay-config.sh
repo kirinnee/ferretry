@@ -141,25 +141,34 @@ for reader in \
     fail "${reader} does not read the advertisement from ${public_path}, the path ${control} serves"
 done
 
-# ─── the daemon half must actually be given a directory to ask ────────────────────────────────
+# ─── every build route must carry the same directory to ask ───────────────────────────────────
 #
-# The daemon binds loopback and is reachable from another device only over a rendezvous it dialled
-# outbound. It has nothing to dial until a directory names one, so a release that ships the binary
-# without the discovery origin ships a daemon nobody can reach — silently, and with every test
-# passing. Three links in that chain, each asserted where it is written.
+# The Nix defect existed because GoReleaser supplied a per-build daemon define while Nix did not.
+# The directory now belongs to @ferretry/relay, imported by both ends and therefore compiled by
+# every route. The runtime variable remains an override; no release-only define may return.
 daemon_environment="packages/daemon/src/adapters/system/runtime-environment.ts"
-compile="scripts/release/compile.sh"
-cd_workflow=".github/workflows/cd.yaml"
-rg -qF -- '__FY_RELAY_DIRECTORY__' "${daemon_environment}" ||
-  fail "${daemon_environment} no longer reads the compiled relay directory origin"
-rg -qF -- '__FY_RELAY_DIRECTORY__' "${compile}" ||
-  fail "${compile} no longer bakes the relay directory origin into the daemon binary"
-rg -qF -- 'relay-directory-origin.sh --require' "${cd_workflow}" ||
-  fail "${cd_workflow} must resolve the relay directory origin, and must fail rather than ship without one"
-# The origin is a SERVICE address resolved at build time; a carrier address compiled into either end
-# would put the half of this contract that must stay runtime into a release.
-if rg -qF -- 'workers.dev' "${daemon_environment}"; then
-  fail "${daemon_environment} names a relay hostname; the build carries a directory origin, never a carrier"
+daemon_default="packages/relay/src/lib/hosted-directory-default.ts"
+daemon_default_export="./hosted-directory-default.ts"
+pwa_build="packages/pwa/vite.config.ts"
+release_compile="scripts/release/compile.sh"
+origin_script="scripts/ci/relay-directory-origin.sh"
+origin='https://ferretry-hosted-relay.kirinnee97.workers.dev'
+
+rg -qF -- "HOSTED_RELAY_DIRECTORY_ORIGIN = '${origin}'" "${daemon_default}" ||
+  fail "${daemon_default} must own the hosted relay discovery origin"
+for reader in "${daemon_environment}" "${pwa_build}"; do
+  rg -qF -- 'HOSTED_RELAY_DIRECTORY_ORIGIN' "${reader}" ||
+    fail "${reader} must import the shared hosted relay directory default"
+done
+rg -qF -- "${daemon_default_export}" "packages/relay/src/lib/index.ts" ||
+  fail "packages/relay/src/lib/index.ts must export the shared hosted relay directory default"
+rg -qF -- 'compiled source default' "${origin_script}" ||
+  fail "${origin_script} must report the source default instead of resolving a per-build value"
+if rg -qF -- '__FY_RELAY_DIRECTORY__' "${release_compile}"; then
+  fail "${release_compile} must not apply a release-only relay directory define"
+fi
+if rg -qF -- 'FY_RELAY_DIRECTORY_ORIGIN' ".github/workflows/cd.yaml"; then
+  fail ".github/workflows/cd.yaml must not export a release-only relay directory origin"
 fi
 
 # ─── the strict configuration document, proved by running the real projections ────────────────

@@ -84,9 +84,10 @@ implemented and tested.
 **The DAEMON end of the transport is wired; the BROWSER end is not.** That is the honest limit today,
 and it is a different limit from the one this section described before.
 
-[PR #202](https://github.com/kirinnee/ferretry/pull/202) supplies discovery — the PWA reads and parses
-`/v1/default-relay` from a build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn the relay's
-address and whether the operator has switched it off — and surfaces that live state in onboarding.
+[PR #202](https://github.com/kirinnee/ferretry/pull/202) supplies discovery — both ends compile
+`HOSTED_RELAY_DIRECTORY_ORIGIN` from this package's one source constant, then read and parse
+`/v1/default-relay` at runtime. The temporary personal `workers.dev` default is shared by forks too;
+the operator can still switch the advertised carrier off without a release.
 
 `packages/daemon` now dials. `src/lib/relay` holds the daemon half of the rendezvous — the claim it
 signs with the key pairing already minted, the per-session handshake, the record layer, the credit

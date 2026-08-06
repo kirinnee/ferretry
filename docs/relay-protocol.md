@@ -858,7 +858,7 @@ narrower and is listed exactly below — three shapes this tunnel does not carry
 has not caught up with §1.
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
-parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`. In the browser that
+parses this advertisement from `@ferretry/relay`'s build-time `HOSTED_RELAY_DIRECTORY_ORIGIN`. In the browser that
 read is now **disclosure only** — the routes come from the daemon's published set, and comparing a
 published address against the advertised one is how a surface can say whether a rendezvous is
 Ferretry's or somebody's own. A failed read therefore changes no route, only the sentence a person
@@ -870,10 +870,9 @@ browser half read this advertisement: `decideRelayCarrier` answered "no relay is
 the daemon document had no `relay` block, and **nothing has ever written one**. So a fresh install
 bound loopback, dialled nowhere, and was reachable from no device but its own host — which is
 indistinguishable, from the owner's side, from pairing being broken. The daemon now reads this same
-document, from the same path, and dials whatever it names. Its discovery origin is compiled in by
-`scripts/release/compile.sh` as `__FY_RELAY_DIRECTORY__`, resolved by the same
-`scripts/ci/relay-directory-origin.sh` the Pages build uses so the two halves cannot be pointed at
-different directories, and overridable at runtime with `FY_RELAY_DIRECTORY_ORIGIN`. It is an ORIGIN,
+document, from the same path, and dials whatever it names. Both ends import the discovery origin
+from `@ferretry/relay`, so Nix, GoReleaser, local Bun builds and forks cannot be pointed at different
+directories. The daemon remains overridable at runtime with `FY_RELAY_DIRECTORY_ORIGIN`. It is an ORIGIN,
 never a carrier: no relay address is compiled into either end.
 
 A rendezvous an operator wrote down **wins and is never overwritten** — the directory is asked only
@@ -930,20 +929,18 @@ Four properties of that client are worth stating here because they are contract,
 Five named pieces. PR #202 provides the first two, the third is now built on both ends with the
 declared gaps below, the fourth is on screen, and the fifth is outstanding:
 
-1. **A build-time discovery origin on BOTH ends** — the PWA's from #202, the daemon's from
-   `scripts/release/compile.sh`. The relay lives on its own
-   hostname, so the
+1. **A build-time discovery origin on BOTH ends** — imported from the one
+   `@ferretry/relay` source constant. The relay lives on its own hostname, so the
    browser cannot resolve the advertisement from its own origin. A **relative `/v1/default-relay` is
    wrong**, and Cloudflare Pages stays a static bundle — no Function, no proxy — so the origin is
-   compiled into the PWA build as `FY_RELAY_DIRECTORY_ORIGIN`, supplied by the Pages workflow from
-   the same repository variable the relay's own deploy uses, and shipping no directory rather than
-   guessing when unset. It is a _service_ address, not a user address: it identifies the relay,
-   never a daemon or a person, and is unrelated to the daemon URLs a pairing hands over. The daemon
-   carries the same value as `__FY_RELAY_DIRECTORY__`, resolved by the same script from the same
-   inputs in `.github/workflows/cd.yaml`, and overridable at runtime by `FY_RELAY_DIRECTORY_ORIGIN`
-   for a build that never had one. `scripts/validate/relay-config.sh` pins the discovery path all
-   three modules spell, and pins that release chain, because two halves pointed at different
-   directories carry nothing and nothing else in CI would notice.
+   compiled into both ends as `HOSTED_RELAY_DIRECTORY_ORIGIN`. It is a _service_ address, not a user
+   address: it identifies the directory, never a daemon, person, or carrier. This temporary default
+   is Ferretry's personal `workers.dev` subdomain and forks use it too; moving to a product domain
+   changes one source constant. The daemon remains overridable at runtime by
+   `FY_RELAY_DIRECTORY_ORIGIN`, while an explicit relay block wins before discovery.
+   `scripts/validate/relay-config.sh` pins the source imports and rejects a return to a release-only
+   define, because two halves pointed at different directories carry nothing and nothing else in CI
+   would notice.
 2. **A fetch-and-parse step on BOTH ends** — the PWA's from #202, the daemon's in
    `packages/daemon/src/lib/relay/discovery.ts` and `src/adapters/relay/hosted-relay-directory.ts` —
    that reads the advertisement through `HostedRelayAdvertisementSchema`, treating `relayUrl: null`
