@@ -157,7 +157,7 @@ export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
 export const DaemonRelayConfigSchema = z
   .object({
     /** The rendezvous origin, as `SocketEndpointSchema` spells one: secure everywhere, insecure
-     *  only against loopback, and no query or fragment. */
+     *  only on localhost or 127.0.0.1, and no query or fragment. */
     url: SocketEndpointSchema,
     /** Whether to dial at all. A configured address the operator has switched off stays readable
      *  rather than having to be deleted and retyped. */

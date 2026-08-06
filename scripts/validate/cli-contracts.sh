@@ -405,10 +405,6 @@ loopback-single-source)
     echo "❌ ${api_server} re-derived a peer address instead of using isLoopbackPeer" >&2
     exit 1
   }
-  rg -qF 'isLoopbackHost' "${relay_connection}" || {
-    echo "❌ ${relay_connection} re-derived a host spelling instead of using isLoopbackHost" >&2
-    exit 1
-  }
   rg -qF 'isLoopbackHost' "${cli_address}" || {
     echo "❌ ${cli_address} re-derived a host spelling instead of using isLoopbackHost" >&2
     exit 1
@@ -422,9 +418,43 @@ loopback-single-source)
     exit 1
   }
 
+  # A SECOND DECLARED EXEMPTION, and the reason `${relay_connection}` is absent from both lists
+  # below. The endpoint schema there is not asking what loopback is; it is asking which insecure
+  # hosts a browser running the PUBLISHED site is permitted to dial at all, and that is settled by a
+  # header file rather than by the machine. Its answer is deliberately NARROWER than the owner's:
+  # `127.0.0.2`, `fy.localhost` and `[::1]` are all loopback and all blocked before a request
+  # exists, so accepting them would have stored carriers that can only fail silently. Widening the
+  # header instead would have handed the shipped app a plaintext reach it does not need.
+  #
+  # The exemption is pinned from both ends AT THE SAME TWO HOSTS: the predicate must still exist and
+  # must still be declared over exactly this set, and the header must still allow exactly these four
+  # origins and no fifth. Either side moving alone fails here, which is the only way a claim that
+  # they agree can be worth anything.
+  csp_headers="packages/pwa/public/_headers"
+  rg -qF 'isLoopbackUnderPublishedCsp' "${relay_connection}" || {
+    echo "❌ ${relay_connection} no longer defines the exempted published-CSP predicate; drop the exemption" >&2
+    exit 1
+  }
+  rg -qF -- "new Set(['localhost', '127.0.0.1'])" "${relay_connection}" || {
+    echo "❌ ${relay_connection} no longer reads exactly the two hosts ${csp_headers} allows insecurely" >&2
+    exit 1
+  }
+  for allowed in 'http://localhost:*' 'http://127.0.0.1:*' 'ws://localhost:*' 'ws://127.0.0.1:*'; do
+    rg -qF -- "${allowed}" "${csp_headers}" || {
+      echo "❌ ${csp_headers} no longer allows ${allowed}, which ${relay_connection} accepts" >&2
+      exit 1
+    }
+  done
+  # And nothing beyond those four, because a fifth would be a host the schema silently refuses.
+  insecure_allowances="$(rg --count-matches --fixed-strings -e 'http://' -e 'ws://' "${csp_headers}" | tr -d '[:space:]')"
+  [ "${insecure_allowances}" != "4" ] && {
+    echo "❌ ${csp_headers} allows ${insecure_allowances} insecure origins; ${relay_connection} accepts 2 hosts" >&2
+    exit 1
+  }
+
   # These are the predicate copies Wave 0 deletes. Quoted literals are forbidden here; tests
   # remain free to spell boundary values, and unrelated loopback services keep their own domains.
-  for consumer in "${api_server}" "${relay_connection}" "${pwa_directory}" "${daemon_config}" "${cli_address}"; do
+  for consumer in "${api_server}" "${pwa_directory}" "${daemon_config}" "${cli_address}"; do
     if rg -n --fixed-strings -- "'127.0.0.1'" "${consumer}"; then
       echo "❌ ${consumer} carries a loopback predicate literal instead of reading ${address_source}" >&2
       exit 1
@@ -438,11 +468,15 @@ loopback-single-source)
   # the pairing advertisement, which handed a phone a QR code for an address that names the phone.
   # A list of known copies cannot catch the copy that is not on the list; a definition can.
   #
-  # ONE DECLARED EXEMPTION, because it is a different question rather than a second answer to this
-  # one: the reader in the app decides whether a hostname names the DEVICE HOLDING THE BROWSER, on
-  # the far side of a tunnel from the daemon, which is why it counts the wildcard as loopback — an
-  # answer that would be wrong everywhere in this domain. It is checked for below so the exemption
-  # cannot outlive the thing it exempts.
+  # TWO DECLARED EXEMPTIONS, each a different QUESTION rather than a second answer to this one, and
+  # each checked above or below so an exemption cannot outlive the thing it exempts.
+  #
+  # The first is the reader in the app, which decides whether a hostname names the DEVICE HOLDING
+  # THE BROWSER, on the far side of a tunnel from the daemon — which is why it counts the wildcard
+  # as loopback, an answer that would be wrong everywhere in this domain.
+  #
+  # The second is `${relay_connection}`, pinned to the published `connect-src` above: what a
+  # deployed browser may dial in plaintext, which is narrower than loopback and set by a header.
   browser_reader="packages/pwa/src/features/browser/in-app-browser-model.ts"
   rg -qF 'isLoopbackHostname' "${browser_reader}" || {
     echo "❌ ${browser_reader} no longer defines the exempted device predicate; drop the exemption" >&2
@@ -452,6 +486,7 @@ loopback-single-source)
   while IFS= read -r -d '' path; do
     [ "${path}" = "${address_source}" ] && continue
     [ "${path}" = "${browser_reader}" ] && continue
+    [ "${path}" = "${relay_connection}" ] && continue
     case "${path}" in
     */src/* | */bin/*) predicate_files+=("${path}") ;;
     esac

@@ -28,16 +28,40 @@
  * must consume.
  */
 
-import { isLoopbackHost } from '@ferretry/protocol';
 import { z } from 'zod';
 import { parseDaemonId } from './identity.ts';
 
 /**
+ * Loopback AS THE PUBLISHED SITE'S CONTENT-SECURITY-POLICY READS IT — a third input domain, not a
+ * third answer to what loopback is.
+ *
+ * `isLoopbackHost` in the protocol owns the spellings an operator may WRITE and `isLoopbackPeer`
+ * owns what a transport REPORTS. Neither answers this question, which is not about the machine at
+ * all: it is what a deployed `connect-src` lets a browser open WITHOUT TLS. That set is fixed by a
+ * header file, so it is decided here, named for the header it mirrors, and deliberately narrower
+ * than either of them — `127.0.0.2`, `fy.localhost` and every spelling of `::1` are all genuinely
+ * loopback and all still blocked in the shipped app.
+ *
+ * The two lists are held together by `scripts/validate/cli-contracts.sh loopback-single-source`,
+ * which fails if this set and the header stop agreeing.
+ */
+const PUBLISHED_CSP_INSECURE_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1']);
+
+/**
+ * Exact match is total here because the caller passes `URL.hostname`, which has already lowercased
+ * an ASCII name and would have carried brackets only for an address this set does not hold.
+ */
+function isLoopbackUnderPublishedCsp(hostname: string): boolean {
+  return PUBLISHED_CSP_INSECURE_HOSTS.has(hostname);
+}
+
+/**
  * A socket address this protocol will dial.
  *
- * Secure schemes anywhere; insecure schemes only against loopback. That is the same line the
- * published site's content-security-policy draws, and drawing it differently here would make one
- * of the two a lie.
+ * Secure schemes anywhere; insecure schemes only against the two hosts the published site's
+ * content-security-policy will actually let a browser dial. Accepting a wider loopback here would
+ * store a carrier the browser then refuses to open, and refuses BEFORE the request exists, so the
+ * person holding the phone gets a dead connection with nothing to read.
  */
 export const SocketEndpointSchema = z
   .string()
@@ -50,11 +74,14 @@ export const SocketEndpointSchema = z
       context.addIssue({ code: 'custom', message: 'endpoint is not a URL' });
       return z.NEVER;
     }
-    const loopback = isLoopbackHost(url.hostname);
+    const dialableInsecure = isLoopbackUnderPublishedCsp(url.hostname);
     const secure = url.protocol === 'https:' || url.protocol === 'wss:';
     const insecure = url.protocol === 'http:' || url.protocol === 'ws:';
-    if (!secure && !(insecure && loopback)) {
-      context.addIssue({ code: 'custom', message: 'endpoint must be wss/https, or ws/http on loopback' });
+    if (!secure && !(insecure && dialableInsecure)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'endpoint must be wss/https, or ws/http on localhost or the loopback address',
+      });
       return z.NEVER;
     }
     if (url.search !== '' || url.hash !== '') {
@@ -148,7 +175,7 @@ export function describeConnectionMethod(method: ConnectionMethod): ConnectionDi
       ],
       requires: [
         'The daemon address has to be reachable from wherever the browser is — same network, a VPN, a tailnet or a public host.',
-        'The address must serve TLS unless it is loopback.',
+        'The address must serve TLS unless it is localhost or 127.0.0.1, the only two hosts the published web app may dial without it.',
       ],
     };
   }
