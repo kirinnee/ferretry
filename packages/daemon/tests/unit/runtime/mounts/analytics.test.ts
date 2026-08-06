@@ -22,7 +22,11 @@ function dispatcher(
   sessions: readonly FinishedAnalyticsSession[] = [],
   pricing: readonly AnalyticsPricingRate[] = [],
 ): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(analyticsRoutes(analyticsSubsystem(sessions, pricing))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  return new ApiDispatcher(
+    new ApiRouter(analyticsRoutes(analyticsSubsystem(sessions, pricing))),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
 }
 
 /** One analytics answer, validated against the wire schema before a case looks at it: an answer the

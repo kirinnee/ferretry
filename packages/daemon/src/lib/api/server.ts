@@ -84,5 +84,9 @@ export function daemonApiRoutes(dependencies: DaemonApiDependencies): readonly A
 
 /** Builds the dispatcher the transport adapter serves. */
 export function createApiDispatcher(dependencies: DaemonApiDependencies): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(daemonApiRoutes(dependencies)), dependencies.credentials, NO_GOVERNED_ROUTES_GUARD);
+  return new ApiDispatcher(
+    new ApiRouter(daemonApiRoutes(dependencies)),
+    dependencies.credentials,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
 }

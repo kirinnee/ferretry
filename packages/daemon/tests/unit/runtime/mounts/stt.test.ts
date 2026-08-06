@@ -116,9 +116,11 @@ describe('the dictation enhancement mount', () => {
     };
 
     // Act
-    const response = await new ApiDispatcher(new ApiRouter(sttEnhancementRoutes(enhancer)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD).dispatch(
-      post(JSON.stringify({ text: 'x', provider: 'groq' })),
-    );
+    const response = await new ApiDispatcher(
+      new ApiRouter(sttEnhancementRoutes(enhancer)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    ).dispatch(post(JSON.stringify({ text: 'x', provider: 'groq' })));
 
     // Assert
     should(response.status).equal(500);

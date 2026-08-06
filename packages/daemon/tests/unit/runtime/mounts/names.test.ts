@@ -18,7 +18,11 @@ import { AT_MS, CREDENTIALS, human, nameClaim, nameSubsystem } from './support.t
  */
 
 function dispatcher(claims: readonly NameClaim[] = [], nowMs: number = AT_MS): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(nameRoutes(nameSubsystem(claims, nowMs))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  return new ApiDispatcher(
+    new ApiRouter(nameRoutes(nameSubsystem(claims, nowMs))),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
 }
 
 async function suggested(claims: readonly NameClaim[] = [], query: readonly (readonly [string, string])[] = []) {

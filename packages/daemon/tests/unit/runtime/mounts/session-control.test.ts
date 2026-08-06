@@ -19,7 +19,11 @@ import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './sup
 const REQUEST_ID = 'req-7f3c';
 
 function dispatcher(subsystem = new FakeSessionControl()): { readonly dispatch: ApiDispatcher['dispatch'] } {
-  const instance = new ApiDispatcher(new ApiRouter(sessionControlRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  const instance = new ApiDispatcher(
+    new ApiRouter(sessionControlRoutes(subsystem)),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
   return { dispatch: async apiRequest => await instance.dispatch(apiRequest) };
 }
 

@@ -68,10 +68,14 @@ describe('health routes', () => {
     // Authenticated, because an unknown route is only reported as one to a caller who has already
     // proved itself — an anonymous probe cannot map the surface by watching 404 turn into 405.
     // Arrange
-    const dispatcher = new ApiDispatcher(new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000)]), {
-      admin: 'admin-secret',
-      warden: 'warden-secret',
-    }, NO_GOVERNED_ROUTES_GUARD);
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000)]),
+      {
+        admin: 'admin-secret',
+        warden: 'warden-secret',
+      },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     const response = await dispatcher.dispatch(
@@ -178,9 +182,13 @@ describe('the usage feed', () => {
   it('should serve /v1/usage to an authenticated caller', async () => {
     // Arrange
     const feed = new StubFeed([account], NOW);
-    const dispatcher = new ApiDispatcher(new ApiRouter([...usageRoutes(feed, fixedClock(NOW))]), {
-      admin: 'admin-secret',
-    }, NO_GOVERNED_ROUTES_GUARD);
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([...usageRoutes(feed, fixedClock(NOW))]),
+      {
+        admin: 'admin-secret',
+      },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     const response = await dispatcher.dispatch(

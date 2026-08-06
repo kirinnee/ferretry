@@ -442,7 +442,11 @@ describe('the session migrate mount, replayed', () => {
     // A caller minting fresh request ids forever meets this wall instead of the daemon's heap.
     // Arrange: a mount that admits exactly two migrations.
     const migrator = new CountingMigrate();
-    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 2)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    const subject = new ApiDispatcher(
+      new ApiRouter(sessionMigrateRoutes(migrator, 2)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-1')));
@@ -465,7 +469,11 @@ describe('the session migrate mount, replayed', () => {
     // re-destruction hazard the limit exists to prevent.
     // Arrange
     const migrator = new CountingMigrate();
-    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 1)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    const subject = new ApiDispatcher(
+      new ApiRouter(sessionMigrateRoutes(migrator, 1)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
     const held = withRequestId(human, 'req-held');
 
     // Act
@@ -485,7 +493,11 @@ describe('the session migrate mount, replayed', () => {
     // A refused preflight destroyed nothing, so it holds no receipt and its slot returns to the pool.
     // Arrange: one admission, and a subsystem that refuses first and then succeeds.
     const migrator = new CountingMigrate([new SessionMigrateError('refused', 'in-flight work refuses this'), 'ok']);
-    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 1)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    const subject = new ApiDispatcher(
+      new ApiRouter(sessionMigrateRoutes(migrator, 1)),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     const refusedPreflight = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-blocked')));

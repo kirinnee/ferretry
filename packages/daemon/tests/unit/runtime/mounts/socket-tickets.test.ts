@@ -22,7 +22,10 @@ const credentials = {
 
 function fixture() {
   const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-  return { tickets, http: new ApiDispatcher(new ApiRouter(socketTicketRoutes(tickets)), credentials, NO_GOVERNED_ROUTES_GUARD) };
+  return {
+    tickets,
+    http: new ApiDispatcher(new ApiRouter(socketTicketRoutes(tickets)), credentials, NO_GOVERNED_ROUTES_GUARD),
+  };
 }
 
 async function sell(headers: Readonly<Record<string, string>>) {

@@ -161,13 +161,28 @@ describe('ApiDispatcher authorization', () => {
       request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer admin-secret' }, loopback: true }),
     );
     const localDevice = await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer device-secret' }, loopback: true }),
+      request({
+        method: 'POST',
+        path: '/v1/local',
+        headers: { authorization: 'Bearer device-secret' },
+        loopback: true,
+      }),
     );
     const remoteAdmin = await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer admin-secret' }, loopback: false }),
+      request({
+        method: 'POST',
+        path: '/v1/local',
+        headers: { authorization: 'Bearer admin-secret' },
+        loopback: false,
+      }),
     );
     const remoteDevice = await dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/local', headers: { authorization: 'Bearer device-secret' }, loopback: false }),
+      request({
+        method: 'POST',
+        path: '/v1/local',
+        headers: { authorization: 'Bearer device-secret' },
+        loopback: false,
+      }),
     );
 
     should(localAdmin.status).equal(200);

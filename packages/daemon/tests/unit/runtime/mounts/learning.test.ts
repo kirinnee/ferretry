@@ -33,7 +33,11 @@ import {
  */
 
 function dispatcher(store: FakeLearningStore): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(learningRoutes(learningSubsystem(store))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  return new ApiDispatcher(
+    new ApiRouter(learningRoutes(learningSubsystem(store))),
+    CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
+  );
 }
 
 async function get(store: FakeLearningStore, path: string, query: readonly (readonly [string, string])[] = []) {

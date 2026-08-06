@@ -25,7 +25,10 @@ import { CREDENTIALS, grantSubsystem, human } from './support.ts';
 async function mount(options: Parameters<typeof grantSubsystem>[0] = {}) {
   const subsystem = grantSubsystem(options);
   await subsystem.refresh();
-  return { subsystem, dispatcher: new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD) };
+  return {
+    subsystem,
+    dispatcher: new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
+  };
 }
 
 /** A request that arrived from somewhere other than this host — the only caller grants govern. */

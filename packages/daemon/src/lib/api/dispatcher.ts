@@ -81,8 +81,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
     };
 
-  if (!meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
-      (lookup.route.privilegedOnly === true && !request.loopback))
+  if (
+    !meetsMinimum(authentication.tokenClass, lookup.route.minimum) ||
+    (lookup.route.privilegedOnly === true && !request.loopback)
+  )
     return {
       kind: 'refused',
       response: errorResponse(
