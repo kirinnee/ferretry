@@ -26,7 +26,7 @@
  * the browser knocked.
  */
 
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -112,7 +112,11 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
   const observationsPath = await assertNoLiveStatePath(join(root, 'rendezvous-frames.jsonl'), 'relay observations');
   await writeFile(observationsPath, '', 'utf8');
 
-  const script = join(REPOSITORY_ROOT, 'tests', 'e2e', 'support', 'rendezvous-process.ts');
+  // `scripts/test/` is where this repository keeps executables that are SPAWNED by path rather than
+  // imported — `fake-harness.ts`, `fake-daemon.ts`, `bootstrap-only-fyd.ts` — and `knip.json` makes
+  // that directory an entry point for exactly that reason. A spawned script under
+  // `tests/e2e/support/` (imported modules) has no importer and is correctly reported as dead.
+  const script = join(REPOSITORY_ROOT, 'scripts', 'test', 'rendezvous-process.ts');
   const child = spawn(process.execPath, [script, '--observations', observationsPath], {
     cwd: REPOSITORY_ROOT,
     // The rendezvous inherits nothing from the isolated home: it is a THIRD PARTY to this journey
@@ -703,10 +707,6 @@ export function plaintextLeaks(
     }
   }
   return leaks;
-}
-
-export async function removeIfPresent(path: string): Promise<void> {
-  await rm(path, { force: true });
 }
 
 /**

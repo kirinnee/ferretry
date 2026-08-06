@@ -37,8 +37,14 @@ import { SessionConfigSchema, SessionStateSchema } from '../../../packages/proto
 import { buildWorld } from '../../../packages/daemon/bin/fyd.ts';
 import { parseSessionId } from '../../../packages/daemon/src/lib/session-id.ts';
 
-/** The callsign and identifiers are fixed: nothing in this journey reads them but the URL. */
-export const SEEDED_SESSION_ID = 'fy_s_e2erelay0000000000001';
+/**
+ * Fixed, and deliberately NOT exported.
+ *
+ * The journey navigates by the `sessionId` this function returns, so an exported constant would be
+ * a second way to say the same thing — and the one a caller could keep using after the seeder
+ * stopped producing it.
+ */
+const SEEDED_SESSION_ID = 'fy_s_e2erelay0000000000001';
 
 export interface SeededSession {
   readonly sessionId: string;

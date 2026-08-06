@@ -70,7 +70,7 @@ pass, failure and interrupt:
 - `startRendezvous(root, teardown)` — `packages/relay`'s own `relayFetch` and
   `RendezvousDurableObject` in their own OS process, over real WebSockets, with
   every frame in both directions appended to a JSONL observation log. See
-  `support/rendezvous-process.ts` for exactly what Bun substitutes for the
+  `scripts/test/rendezvous-process.ts` for exactly what Bun substitutes for the
   Workers runtime and what it therefore cannot prove.
 - `startDirectSinkhole(teardown)` — a loopback address that accepts a TCP
   connection, **counts** it, and destroys it. Advertise it as the daemon's
@@ -89,6 +89,15 @@ pass, failure and interrupt:
 Point the daemon at a document with `--config <path outside FY_HOME>`. A
 `config/daemon.json` written into an empty `FY_HOME` makes that home "non-empty
 with no layout-version marker" and the daemon refuses to open it.
+
+**A script you SPAWN belongs in `scripts/test/`, not in `support/`.** `support/`
+is for modules a test imports; `scripts/test/` is for executables started by
+path — `fake-harness.ts`, `fake-daemon.ts`, `bootstrap-only-fyd.ts`,
+`rendezvous-process.ts`. `knip.json` makes `scripts/test/*.ts` an entry point for
+exactly that reason, so a spawned script placed under `support/` has no importer
+and the dead-code gate reports it as unused. That is the gate being right.
+`tests/e2e/tsconfig.json` already includes `scripts/test/**/*.ts`, so nothing
+there escapes the typecheck.
 
 `relay-browser-pairing.e2e.test.ts` is the journey those pieces exist for, and
 it is green: a real Chrome, holding a link the compiled `fy pair` printed,

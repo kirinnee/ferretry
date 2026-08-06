@@ -57,7 +57,7 @@
  *
  * Usage — this process is spawned by `tests/e2e/support/relay-harness.ts`, never by a person:
  *
- *     bun tests/e2e/support/rendezvous-process.ts --observations <path> [--port <n>]
+ *     bun scripts/test/rendezvous-process.ts --observations <path> [--port <n>]
  *
  * It prints one line of JSON (`{"ready":true,"port":n,"origin":"…"}`) on stdout when listening, and
  * exits on SIGTERM/SIGINT with every socket closed.
@@ -74,13 +74,13 @@ import {
   relayFetch,
   RendezvousDurableObject,
   WebCryptoRelayCrypto,
-} from '../../../packages/relay/src/adapters/index.ts';
+} from '../../packages/relay/src/adapters/index.ts';
 import {
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   parseRendezvousPath,
   RELAY_PROTOCOL_ID,
-} from '../../../packages/relay/src/lib/index.ts';
+} from '../../packages/relay/src/lib/index.ts';
 
 /** What the harness control plane may address. Anything else is the relay's own surface. */
 const HARNESS_PREFIX = '/__harness/';

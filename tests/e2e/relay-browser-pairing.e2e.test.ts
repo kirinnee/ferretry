@@ -17,7 +17,7 @@
  *
  *   REAL compiled `fyd` binary from `task compile`, in an isolated state home
  *   REAL rendezvous — `packages/relay`'s own front door and Durable Object, in its own OS process,
- *        speaking real WebSockets (see `support/rendezvous-process.ts` for what Bun substitutes)
+ *        speaking real WebSockets (see `scripts/test/rendezvous-process.ts` for what Bun substitutes)
  *   REAL PWA bundle from `vite build`, served over HTTP under the published site's own CSP
  *   REAL Google Chrome, driven by `playwright-core`
  *   REAL failure of the direct address, arranged rather than assumed
