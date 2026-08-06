@@ -724,6 +724,20 @@ describe('toApiRequest', () => {
     // Assert
     should(translated.query.get('sessionId')).deepEqual(['a', 'b']);
   });
+
+  it('should preserve the runtime signal that fires when the caller gives up', () => {
+    // Arrange
+    const controller = new AbortController();
+    const source = new Request('http://127.0.0.1/v1/sessions/s1/fs/index', { signal: controller.signal });
+
+    // Act
+    const translated = toApiRequest(source, '127.0.0.1');
+    controller.abort();
+
+    // Assert
+    should(translated.signal).equal(source.signal);
+    should(translated.signal?.aborted).be.true();
+  });
 });
 
 describe('BunApiServer request-body bounds', () => {
