@@ -19,7 +19,7 @@ mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name pa
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch workspace-package-scopes name-single-source daemon-default-address state-home-log-directory state-home-layout-claim state-home-default release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon released-version nix-packages; do
+  for each in arch workspace-package-scopes name-single-source daemon-default-address loopback-single-source state-home-log-directory state-home-layout-claim state-home-default release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon released-version nix-packages; do
     "$0" "${each}"
   done
   exit 0
@@ -377,6 +377,54 @@ daemon-default-address)
     echo "❌ the CLI's address resolution does not read FY_DEFAULT_DAEMON_URL" >&2
     exit 1
   }
+  ;;
+loopback-single-source)
+  # One security fact has TWO legitimate input domains. An operator writes a host spelling, where
+  # `localhost` is meaningful; a transport reports a peer address, where the IPv4-mapped IPv6 form
+  # is meaningful and names never appear. Five anonymous predicates used to disagree across four
+  # packages while each looked locally reasonable. Keep both named functions in the protocol and
+  # make each consumer state which domain it has.
+  address_source="packages/protocol/src/lib/address.ts"
+  test -f "${address_source}"
+  for predicate in isLoopbackHost isLoopbackPeer isWildcardHost; do
+    rg -qF "export function ${predicate}" "${address_source}" || {
+      echo "❌ ${address_source} does not own ${predicate}" >&2
+      exit 1
+    }
+  done
+  # The comments name the domains because merging the two sets would be as wrong as duplicating them.
+  rg -qF 'A host SPELLING, as an operator writes one' "${address_source}"
+  rg -qF "A socket's peer address, as a transport reports one" "${address_source}"
+
+  api_server="packages/daemon/src/adapters/api/bun-api-server.ts"
+  relay_connection="packages/relay/src/lib/connection.ts"
+  pwa_directory="packages/pwa/src/features/onboarding/hosted-relay.ts"
+  daemon_config="packages/daemon/src/lib/runtime/config.ts"
+  rg -qF 'isLoopbackPeer' "${api_server}" || {
+    echo "❌ ${api_server} re-derived a peer address instead of using isLoopbackPeer" >&2
+    exit 1
+  }
+  rg -qF 'isLoopbackHost' "${relay_connection}" || {
+    echo "❌ ${relay_connection} re-derived a host spelling instead of using isLoopbackHost" >&2
+    exit 1
+  }
+  rg -qF 'SocketEndpointSchema' "${pwa_directory}" || {
+    echo "❌ ${pwa_directory} re-derived relay endpoint loopback instead of using the relay schema" >&2
+    exit 1
+  }
+  rg -qF 'LOOPBACK' "${daemon_config}" || {
+    echo "❌ ${daemon_config} does not read the default host from the protocol owner" >&2
+    exit 1
+  }
+
+  # These are the four predicate copies Wave 0 deletes. Quoted literals are forbidden here; tests
+  # remain free to spell boundary values, and unrelated loopback services keep their own domains.
+  for consumer in "${api_server}" "${relay_connection}" "${pwa_directory}" "${daemon_config}"; do
+    if rg -n --fixed-strings -- "'127.0.0.1'" "${consumer}"; then
+      echo "❌ ${consumer} carries a loopback predicate literal instead of reading ${address_source}" >&2
+      exit 1
+    fi
+  done
   ;;
 nix-packages)
   # Nix's default package is the normal profile-install entry point. It must join the independently

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './advertisement.ts';
 import { InstantSchema } from './common.ts';
 
 /** Pairing codes are deliberately short-lived and have a small online-attempt budget. */
@@ -66,22 +67,87 @@ export type PairingResponse = z.infer<typeof PairingResponseSchema>;
 export const PairingCodeMintRequestSchema = z.strictObject({});
 export type PairingCodeMintRequest = z.infer<typeof PairingCodeMintRequestSchema>;
 
+/**
+ * WHO CAN REDEEM A MINTED LINK, on the wire.
+ *
+ * The wire's vocabulary, not the decision's: `decideAdvertisement` answers in three kinds and the
+ * third one has no address at all, which this response expresses by ABSENCE rather than by a third
+ * value. So there are two reaches and a `refusal`, and the presence invariant below keeps them from
+ * ever describing two different states at once.
+ */
+export const PAIRING_REACHES = ['any-device', 'local-only'] as const;
+export type PairingReach = (typeof PAIRING_REACHES)[number];
+
+/**
+ * A minted code, and — SEPARATELY — whether there is an address to hand out with it.
+ *
+ * ## THE CODE IS MINTED EVEN WHEN THE LINK CANNOT BE
+ *
+ * A daemon with no advertisable address is still a working daemon, and its code is still redeemable
+ * by a browser somebody points at it themselves. So a refusal withholds the LINK, never the code:
+ * refusing the mint would break every default single-machine install, and that is the outcome this
+ * response shape exists to avoid.
+ *
+ * ## TWO INVARIANTS, AND THE SECOND ONE IS NEW
+ *
+ * A LINK MAY NOT DISAGREE WITH THE DAEMON IT NAMES: when there is a link, its fragment must carry
+ * exactly the daemon, code and fingerprint it was minted with, and no query string. That is what
+ * stops any layer below the configuration from advertising a different address.
+ *
+ * A LINK MAY NOT ARRIVE WITHOUT SAYING WHO CAN REDEEM IT. `superRefine` enforces all four presence
+ * relationships together: `pairUrl` and `reach` are present exactly when `daemonUrl` is, while
+ * `refusal` is present exactly when it is not. A response with a link and no `reach` is how a QR
+ * nothing off the host could dial reached a phone in the first place.
+ */
+/** What every mint carries, link or no link: the code, its clock, and the daemon that minted it. */
+const mintedCode = {
+  pairingId: PairingIdSchema,
+  code: PairingCodeSchema,
+  ttlSeconds: z.literal(PAIRING_CODE_TTL_SECONDS),
+  expiresAt: InstantSchema,
+  daemonId: DaemonIdSchema,
+  daemonName: DaemonNameSchema,
+} as const;
+
 export const PairingCodeMintResponseSchema = z
   .strictObject({
-    pairingId: PairingIdSchema,
-    code: PairingCodeSchema,
-    ttlSeconds: z.literal(PAIRING_CODE_TTL_SECONDS),
-    expiresAt: InstantSchema,
-    daemonId: DaemonIdSchema,
-    daemonName: DaemonNameSchema,
-    daemonUrl: z.url(),
+    ...mintedCode,
+    daemonUrl: z.url().optional(),
     /** Public-PWA URL with the code in its fragment, where it cannot reach an HTTP access log. */
-    pairUrl: z.url(),
+    pairUrl: z.url().optional(),
+    reach: z.enum(PAIRING_REACHES).optional(),
+    refusal: z.enum(ADVERTISEMENT_REFUSALS).optional(),
   })
   .superRefine((value, context) => {
-    const url = new URL(value.pairUrl);
-    const expectedFragment = `#v1;url=${encodeURIComponent(value.daemonUrl)};code=${value.code};fp=${encodeURIComponent(value.daemonId)}`;
-    if (url.search !== '' || url.hash !== expectedFragment) {
+    const hasDaemonUrl = value.daemonUrl !== undefined;
+    const hasPairUrl = value.pairUrl !== undefined;
+    const hasReach = value.reach !== undefined;
+    const hasRefusal = value.refusal !== undefined;
+    if (hasPairUrl !== hasDaemonUrl) {
+      context.addIssue({
+        code: 'custom',
+        path: ['pairUrl'],
+        message: 'pairing URL must be present exactly when the daemon URL is present',
+      });
+    }
+    if (hasReach !== hasDaemonUrl) {
+      context.addIssue({
+        code: 'custom',
+        path: ['reach'],
+        message: 'pairing reach must be present exactly when the daemon URL is present',
+      });
+    }
+    if (hasRefusal === hasDaemonUrl) {
+      context.addIssue({
+        code: 'custom',
+        path: ['refusal'],
+        message: 'pairing refusal must be present exactly when the daemon URL is absent',
+      });
+    }
+    if (value.daemonUrl !== undefined && value.pairUrl !== undefined) {
+      const url = new URL(value.pairUrl);
+      const expectedFragment = `#v1;url=${encodeURIComponent(value.daemonUrl)};code=${value.code};fp=${encodeURIComponent(value.daemonId)}`;
+      if (url.search === '' && url.hash === expectedFragment) return;
       context.addIssue({
         code: 'custom',
         path: ['pairUrl'],
@@ -90,6 +156,35 @@ export const PairingCodeMintResponseSchema = z
     }
   });
 export type PairingCodeMintResponse = z.infer<typeof PairingCodeMintResponseSchema>;
+
+/**
+ * The mint as a surface must handle it: an invitation with an audience, or a refusal with a reason.
+ *
+ * ONE NARROWING, NOT ONE PER SURFACE. `fy pair` and the browser's Add-a-device panel are the two
+ * readers, and two readers each deciding for themselves whether a link is drawable is how they come to
+ * disagree — which is the shape of the defect that put a QR nothing could scan in front of the owner.
+ * Both read this.
+ */
+export interface PairingInvitationLink {
+  readonly daemonUrl: string;
+  readonly pairUrl: string;
+  readonly reach: PairingReach;
+}
+
+export type PairingMintOutcome =
+  | ({ readonly kind: 'invitation' } & PairingInvitationLink)
+  | { readonly kind: 'refusal'; readonly refusal: AdvertisementRefusal };
+
+export function pairingMintOutcome(mint: PairingCodeMintResponse): PairingMintOutcome {
+  return mint.daemonUrl === undefined
+    ? { kind: 'refusal', refusal: mint.refusal as AdvertisementRefusal }
+    : {
+        kind: 'invitation',
+        daemonUrl: mint.daemonUrl,
+        pairUrl: mint.pairUrl as string,
+        reach: mint.reach as PairingReach,
+      };
+}
 
 export const PairingCodeStatusResponseSchema = z.discriminatedUnion('status', [
   z.strictObject({

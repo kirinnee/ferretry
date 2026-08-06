@@ -1,5 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { DaemonId, DeviceToken, PairingCode, PairingId } from '@ferretry/protocol';
+import {
+  type Advertisement,
+  type DaemonId,
+  decideAdvertisement,
+  type DeviceToken,
+  type PairingCode,
+  type PairingId,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   type PairingCryptography,
@@ -86,6 +93,8 @@ function fixture(
   options: {
     readonly limiter?: PairingRateLimiter;
     readonly compare?: (left: string, right: string) => boolean;
+    /** The decision this daemon was built with. Dialable unless a case is about the other two. */
+    readonly advertisement?: Advertisement;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -95,7 +104,11 @@ function fixture(
   const service = new PairingService({
     daemonId: DAEMON_ID,
     daemonName: 'workstation',
-    daemonUrl: 'https://workstation.example.test',
+    advertisement: options.advertisement ?? {
+      kind: 'address',
+      url: 'https://workstation.example.test',
+      origin: 'operator',
+    },
     clock,
     cryptography,
     devices,
@@ -122,12 +135,73 @@ describe('PairingService minting and status', () => {
       daemonUrl: 'https://workstation.example.test/',
       pairUrl:
         'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      // Who can redeem it travels WITH it. A link and no audience is the shape that put a QR of a
+      // loopback address in front of a phone, and the protocol has no value for it any more.
+      reach: 'any-device',
     });
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
       status: 'pending',
       expiresAt: '2026-08-03T12:02:00.000Z',
     });
+  });
+
+  it('should mint a link for a loopback advertisement and say only this machine can redeem it', () => {
+    // THE DEFAULT INSTALL. A loopback bind is not a misconfiguration and its code is not refused — a
+    // browser on this machine pairs with it perfectly. What the response must carry is the audience,
+    // so the surface drawing it knows not to offer it to a phone.
+    const { service } = fixture({ advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7431' } });
+
+    const minted = service.mint();
+
+    should(minted).containDeep({ reach: 'local-only', daemonUrl: 'http://127.0.0.1:7431/' });
+    should('refusal' in minted).be.false();
+  });
+
+  it('should mint the valid local-only link derived from a raw IPv6 loopback host', () => {
+    // The shared decision accepts operator host spellings, including raw IPv6. This crosses the next
+    // boundary too: the service normalises the URL and the protocol verifies its fragment, so an
+    // unbracketed authority cannot hide behind a kind-only decision test.
+    const advertisement = decideAdvertisement({ host: '::1', port: 7_431 });
+    const { service } = fixture({ advertisement });
+
+    const minted = service.mint();
+
+    should(minted).containDeep({ reach: 'local-only', daemonUrl: 'http://[::1]:7431/' });
+    if (minted.pairUrl === undefined) throw new Error('a local-only advertisement must still mint its link');
+    should(new URL(minted.pairUrl).hash).containEql(encodeURIComponent('http://[::1]:7431/'));
+  });
+
+  it('should mint a code with no link at all when there is no address to hand out', () => {
+    // A wildcard bind serves normally and has nothing to advertise. The CODE is still minted, because
+    // somebody who points a browser at this machine themselves can still redeem it; only the link is
+    // withheld, with the reason attached.
+    const { service } = fixture({ advertisement: { kind: 'none', refusal: 'wildcard-bind' } });
+
+    const minted = service.mint();
+
+    should(minted).containDeep({ code: CODE, refusal: 'wildcard-bind' });
+    should('daemonUrl' in minted).be.false();
+    should('pairUrl' in minted).be.false();
+    should('reach' in minted).be.false();
+    // The code is live: the mint is a real mint, not a refusal dressed as one.
+    should(service.status(PAIRING_ID)).containDeep({ status: 'pending' });
+  });
+
+  it('should answer every caller identically, because the minter is not the redeemer', () => {
+    // THE TRAP. `ApiRequest.loopback` names who is MINTING, and the commonest case there is is
+    // somebody standing at the machine minting a code to scan with their phone — minter local,
+    // redeemer not. A mint that read the requester's carrier would call that address fine and re-ship
+    // the dead QR, passing every test written on one machine. `mint()` takes no argument, and this is
+    // the assertion that keeps it that way: two mints from one configuration agree on the audience.
+    const { service } = fixture({ advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7431' } });
+
+    const first = service.mint();
+    const second = service.mint();
+
+    should('reach' in first && first.reach).equal('local-only');
+    should('reach' in second && second.reach).equal('local-only');
+    should(service.mint.length).equal(0);
   });
 
   it('should expire a superseded or timed-out mint and refuse an unknown status handle', () => {
@@ -243,7 +317,7 @@ describe('PairingService redemption', () => {
     const service = new PairingService({
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
-      daemonUrl: 'https://workstation.example.test',
+      advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
       clock: base.clock,
       cryptography: base.cryptography,
       devices,

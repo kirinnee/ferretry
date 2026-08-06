@@ -30,8 +30,9 @@
  * knows it is unreachable and prints a bare reason is the complaint this product has earned.
  */
 
+import { isLoopbackHost } from '@ferretry/protocol';
 import { HostedRelayAdvertisementSchema, SocketEndpointSchema } from '@ferretry/relay';
-import { type DaemonRelayConfig, DaemonRelayConfigSchema, isLoopbackHost } from '../runtime/config.ts';
+import { type DaemonRelayConfig, DaemonRelayConfigSchema } from '../runtime/config.ts';
 
 /**
  * The public discovery path, from `docs/relay-protocol.md` §13.

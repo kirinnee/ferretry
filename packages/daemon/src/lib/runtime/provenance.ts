@@ -1,9 +1,9 @@
-import { CAPABILITY_AXES, DAEMON_CAPABILITIES } from '@ferretry/protocol';
+import { CAPABILITY_AXES, DAEMON_CAPABILITIES, isLoopbackHost } from '@ferretry/protocol';
 import { NO_PASSWORD_DISCLOSURE } from '../grants/policy.ts';
 import { dialledRelayUrl, type RelayCarrierSource } from '../relay/discovery.ts';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
-import { advertisesForeignAddress, type DaemonConfig, isLoopbackHost } from './config.ts';
+import { advertisesForeignAddress, type DaemonConfig } from './config.ts';
 
 /**
  * Where one effective value came from.

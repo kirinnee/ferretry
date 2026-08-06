@@ -12,9 +12,14 @@ import {
   CODE,
   expired,
   FakeClock,
+  bentMint,
   FixedTerminalSize,
+  LOCAL_ONLY_MINT,
+  LOCAL_PAIR_URL,
   MINT,
   MINTED_AT,
+  NO_LINK_MINT,
+  PAIR_URL,
   PAIRING_ID,
   pending,
   RecordingBrowserOpener,
@@ -84,7 +89,7 @@ describe('fy pair', () => {
     // The code never addresses anything: the poll carries the pairing id and nothing else.
     should(gateway.polled).eql([PAIRING_ID]);
     should(h.screen.text).containEql(CODE);
-    should(h.qr.requests[0]?.value).equal(MINT.pairUrl);
+    should(h.qr.requests[0]?.value).equal(PAIR_URL);
     should(h.qr.requests[0]?.size).equal('compact');
     should(h.progress.ending).equal(
       'succeed:Pixel is paired with workstation (box.tailnet-abc.ts.net) — it holds its own token now.',
@@ -197,6 +202,59 @@ describe('fy pair', () => {
     should(h.exit.code).be.undefined();
   });
 
+  it('should encode no QR for an address only this machine can dial, and still wait for the scan', async () => {
+    // THE BLOCKER, AT THE COMMAND. A loopback advertisement is the DEFAULT, so this is not an error
+    // path: the code is live, the link works for a browser here, and the one thing that must not
+    // happen is a QR — a phone that reads it dials itself. Nothing here inspects the address: the
+    // daemon said `local-only`, because the device that redeems this is not the one running this.
+    const h = harness({}, new ScriptedPairGateway([redeemed()], LOCAL_ONLY_MINT));
+
+    await pair(h);
+
+    should(h.qr.requests).be.empty();
+    should(h.screen.text).containEql('Only a browser on this machine can redeem this link');
+    should(h.screen.text).containEql('set publicUrl to the address other devices reach this machine at');
+    should(h.screen.text).containEql(CODE);
+    // Still the whole command: it waited, and it reported the ending.
+    should(h.gateway.polled).eql([PAIRING_ID]);
+    should(h.progress.ending).containEql('Pixel is paired with workstation (127.0.0.1:7431)');
+    should(h.exit.code).be.undefined();
+  });
+
+  it('should still open a local-only link on this host, which is the one browser it is for', async () => {
+    const h = harness({}, new ScriptedPairGateway([redeemed()], LOCAL_ONLY_MINT));
+
+    await pair(h, { open: true });
+
+    should(h.browser.opened).eql([LOCAL_PAIR_URL]);
+    should(h.screen.text).containEql('Opened the pairing link in this host’s browser');
+  });
+
+  it('should draw nothing to scan when the daemon has no address, and say why without failing', async () => {
+    // A wildcard bind hands out nothing. The mint still happened, so the code is real and the command
+    // still watches it — refusing here would break a daemon that is serving perfectly.
+    const h = harness({}, new ScriptedPairGateway([redeemed()], NO_LINK_MINT));
+
+    await pair(h);
+
+    should(h.qr.requests).be.empty();
+    should(h.screen.text).containEql('binds every interface');
+    should(h.screen.text).not.containEql('ferretry.pages.dev');
+    should(h.screen.text).containEql(CODE);
+    should(h.gateway.polled).eql([PAIRING_ID]);
+    // No address was ever given, so the ending names the daemon and invents nothing.
+    should(h.progress.ending).equal('succeed:Pixel is paired with workstation — it holds its own token now.');
+  });
+
+  it('should tell an operator who asked for --open that there was no link to open', async () => {
+    const h = harness({}, new ScriptedPairGateway([expired], NO_LINK_MINT));
+
+    await pair(h, { open: true });
+
+    should(h.browser.opened).be.empty();
+    should(h.screen.text).containEql('no link to open');
+  });
+
   it('should refuse a mint that is already dead instead of drawing a QR for it', async () => {
     // Arrange — the clock is past the stated expiry.
     const h = harness({ clock: new FakeClock(Date.parse(MINT.expiresAt)) });
@@ -220,7 +278,7 @@ describe('fy pair', () => {
   it('should refuse a link the phone would reject, before it becomes a QR', async () => {
     // Arrange — a daemon whose own address carries a reverse-proxy path; the mint schema allows it,
     // the PWA's reader does not.
-    const h = harness({}, new ScriptedPairGateway([pending], { ...MINT, daemonUrl: 'https://box.ts.net/proxy' }));
+    const h = harness({}, new ScriptedPairGateway([pending], bentMint({ daemonUrl: 'https://box.ts.net/proxy' })));
 
     // Act + Assert
     await should(h.subject.pair({})).be.rejectedWith('daemon URL must be an origin without a path');

@@ -1,6 +1,7 @@
 import {
   type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
+  type PairingInvitationLink,
   type PairingCodeStatusResponse,
   type PairingId,
 } from '@ferretry/protocol';
@@ -17,23 +18,64 @@ import type {
 
 export const DAEMON_ID = `fy_daemon_${'a'.repeat(43)}`;
 export const PAIRING_ID = `fy_pair_${'c'.repeat(22)}` as PairingId;
-const DAEMON_URL = 'https://box.tailnet-abc.ts.net';
+export const DAEMON_URL = 'https://box.tailnet-abc.ts.net';
 export const CODE = '7F3K-Q2ND';
-const PAIR_URL = `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent(DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)}`;
+export const PAIR_URL = `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent(DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)}`;
 
-/**
- * A mint as the daemon really answers it — built through the protocol schema, so a fixture can never
- * drift into a shape the daemon could not produce.
- */
-export const MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({
+const LOCAL_DAEMON_URL = 'http://127.0.0.1:7431';
+export const LOCAL_PAIR_URL = `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent(LOCAL_DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)}`;
+
+const minted = {
   pairingId: PAIRING_ID,
   code: CODE,
   ttlSeconds: 120,
   expiresAt: '2026-08-03T21:02:00.000Z',
   daemonId: DAEMON_ID,
   daemonName: 'workstation',
+} as const;
+
+/**
+ * A mint as the daemon really answers it — built through the protocol schema, so a fixture can never
+ * drift into a shape the daemon could not produce.
+ *
+ * THREE OF THEM, because there are three answers and only one of them draws a QR. The two below are
+ * not error cases: a loopback-bound daemon and a wildcard-bound one are both working daemons, and a
+ * screen tested against the dialable one alone is exactly how a dead QR shipped.
+ */
+export const MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({
+  ...minted,
   daemonUrl: DAEMON_URL,
   pairUrl: PAIR_URL,
+  reach: 'any-device',
+});
+
+/** A daemon whose address is right for a browser on its own machine and dead on a phone. */
+export const LOCAL_ONLY_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({
+  ...minted,
+  daemonUrl: LOCAL_DAEMON_URL,
+  pairUrl: LOCAL_PAIR_URL,
+  reach: 'local-only',
+});
+
+/** A daemon with no address to hand out at all. The code is still live; there is nowhere to point it. */
+export const NO_LINK_MINT: PairingCodeMintResponse = PairingCodeMintResponseSchema.parse({
+  ...minted,
+  refusal: 'wildcard-bind',
+});
+
+/**
+ * A mint with one field of its link bent, BYPASSING the protocol schema the way a rogue daemon would.
+ *
+ * The schema is what the daemon must satisfy; a client that trusts it blindly is a client that hands
+ * the phone whatever a compromised or mis-built daemon says. These fixtures exist to drive the checks
+ * that run anyway.
+ */
+export const bentMint = (overrides: Partial<PairingInvitationLink>): PairingCodeMintResponse => ({
+  ...minted,
+  daemonUrl: DAEMON_URL,
+  pairUrl: PAIR_URL,
+  reach: 'any-device',
+  ...overrides,
 });
 
 /** The instant two minutes before the fixture mint dies. */

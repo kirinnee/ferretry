@@ -1,3 +1,4 @@
+import { isLoopbackPeer } from '@ferretry/protocol';
 import {
   type ApiBindOptions,
   type ApiRequest,
@@ -88,8 +89,6 @@ export interface BoundHttpServer {
   upgrade(request: Request, state: HostSocketState): boolean;
   stop(closeActiveConnections?: boolean): Promise<void> | void;
 }
-
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 /** Bun's `serve`, adapted to `HttpServePort`. */
 export class BunHttpServe implements HttpServePort {
@@ -400,7 +399,7 @@ export function toApiRequest(request: Request, remoteAddress: string | undefined
     query: queryFrom(url.searchParams),
     headers: headersFrom(Object.fromEntries(request.headers)),
     clientAddress: remoteAddress,
-    loopback: remoteAddress !== undefined && LOOPBACK.has(remoteAddress),
+    loopback: remoteAddress !== undefined && isLoopbackPeer(remoteAddress),
     // Both reads stay LAZY — nothing here touches the body until a route asks for it, so a body-less
     // route and a protocol switch each pay nothing. A bounded read goes piece by piece rather than
     // through `request.text()`, because that call is the allocation the bound exists to prevent.

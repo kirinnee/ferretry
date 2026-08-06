@@ -1,23 +1,35 @@
+import type { PairingInvitationLink } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { checkedPairUrl, pairingDaemonHost } from '../../../src/lib/pair/link';
-import { CODE, DAEMON_ID, MINT } from './fixtures';
+import { CODE, DAEMON_ID, DAEMON_URL, PAIR_URL } from './fixtures';
 
-/** A mint with one field bent, bypassing the protocol schema the way a rogue daemon would. */
-const bent = (overrides: Partial<typeof MINT>): typeof MINT => ({ ...MINT, ...overrides });
+/**
+ * A minted link with one field bent, bypassing the protocol schema the way a rogue daemon would.
+ *
+ * It is the LINK rather than the whole mint, because that is what this check now takes: the daemon
+ * either handed out an address or said why it did not, and there is nothing here to check in the
+ * second case.
+ */
+const bent = (overrides: Partial<PairingInvitationLink>): PairingInvitationLink => ({
+  daemonUrl: DAEMON_URL,
+  pairUrl: PAIR_URL,
+  reach: 'any-device',
+  ...overrides,
+});
 
 describe('pairing link check', () => {
   it('should pass through the link the daemon minted, unchanged', () => {
     // The daemon builds this URL and the protocol schema binds it to the daemon, code and
     // fingerprint; rebuilding it here would only be a second opinion about the same contract.
-    should(checkedPairUrl(MINT)).equal(MINT.pairUrl);
-    const parsed = new URL(MINT.pairUrl);
+    should(checkedPairUrl(bent({}))).equal(PAIR_URL);
+    const parsed = new URL(PAIR_URL);
     should(parsed.search).equal('');
     should(parsed.hash).startWith('#v1;');
     should(parsed.hash).containEql(`code=${CODE}`);
     should(parsed.hash).containEql(`fp=${DAEMON_ID}`);
     // Nothing secret may survive outside the fragment — that is the whole security claim.
-    should(MINT.pairUrl.slice(0, MINT.pairUrl.indexOf('#'))).not.containEql(CODE);
+    should(PAIR_URL.slice(0, PAIR_URL.indexOf('#'))).not.containEql(CODE);
   });
 
   it('should refuse a daemon address the PWA reader would reject, on the host rather than on the phone', () => {
@@ -42,7 +54,7 @@ describe('pairing link check', () => {
   });
 
   it('should accept a loopback daemon address, which is the ordinary on-host case', () => {
-    should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7431' }))).equal(MINT.pairUrl);
+    should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7431', reach: 'local-only' }))).equal(PAIR_URL);
   });
 
   it('should refuse a pairing URL that is not a v1 pairing claim at all', () => {
@@ -61,7 +73,7 @@ describe('pairing link check', () => {
   });
 
   it('should name the host, which is the part of an address a human can recognise', () => {
-    should(pairingDaemonHost(MINT.daemonUrl)).equal('box.tailnet-abc.ts.net');
+    should(pairingDaemonHost(DAEMON_URL)).equal('box.tailnet-abc.ts.net');
     should(pairingDaemonHost('http://127.0.0.1:7431')).equal('127.0.0.1:7431');
   });
 });

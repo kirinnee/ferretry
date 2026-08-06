@@ -1,4 +1,11 @@
-import { PAIRING_CODE_TTL_SECONDS, type PairingCodeMintResponse } from '@ferretry/protocol';
+import {
+  localOnlyNotice,
+  PAIRING_CODE_TTL_SECONDS,
+  type PairingCodeMintResponse,
+  type PairingMintOutcome,
+  pairingMintOutcome,
+  refusalNotice,
+} from '@ferretry/protocol';
 import { checkedPairUrl, pairingDaemonHost } from './link.ts';
 import type {
   IBrowserOpener,
@@ -11,9 +18,11 @@ import type {
   ITerminalSize,
 } from './ports.ts';
 import {
+  type PairingOffer,
   renderBrowserRefused,
   renderExpired,
   renderInvitation,
+  renderNoLinkToOpen,
   renderOpenedBrowser,
   renderPaired,
   renderUnconfirmed,
@@ -89,13 +98,12 @@ export class PairController {
   async pair(options: PairOptions): Promise<void> {
     const mint = await this.deps.gateway.mint();
     const remainingMs = this.#lifespan(mint);
-    const link = checkedPairUrl(mint);
-    const qr = await this.deps.qr.encode(link, options.large === true ? 'large' : 'compact');
+    const outcome = pairingMintOutcome(mint);
+    const offer = await this.#offer(outcome, options);
     this.deps.screen.write(
       renderInvitation({
         mint,
-        link,
-        qr,
+        offer,
         columns: this.deps.terminal.columns(),
         remainingMs,
         binaryName: this.deps.binaryName,
@@ -113,13 +121,41 @@ export class PairController {
      * none did would leave the operator staring at a window that never appears.
      */
     if (options.open === true) {
-      this.deps.screen.write(
-        (await this.deps.browser.open(link)) ? renderOpenedBrowser() : renderBrowserRefused(this.deps.binaryName),
-      );
+      this.deps.screen.write(await this.#open(offer));
     }
     // `--no-wait` is for a script that wants the screen and nothing else; there is no one to tell.
     if (options.wait === false) return;
-    await this.#watch(mint);
+    await this.#watch(mint, outcome.kind === 'invitation' ? pairingDaemonHost(outcome.daemonUrl) : undefined);
+  }
+
+  /**
+   * What this screen can offer, decided from the DAEMON'S answer and never from this host.
+   *
+   * A QR IS ENCODED ONLY WHEN A QR IS WANTED. `local-only` means the address is right for a browser on
+   * this machine and dead on any other, so drawing one would be an offer to a phone that cannot take
+   * it — the exact failure this command shipped. Nothing here re-derives that judgement: it arrives on
+   * the wire as `reach`, decided by the daemon's configuration, because the device that will redeem
+   * this code is not the one running this command.
+   */
+  async #offer(outcome: PairingMintOutcome, options: PairOptions): Promise<PairingOffer> {
+    if (outcome.kind === 'refusal') return { kind: 'refusal', notice: refusalNotice(outcome.refusal) };
+    const link = checkedPairUrl(outcome);
+    if (outcome.reach === 'local-only') return { kind: 'local-only', link, notice: localOnlyNotice(outcome.daemonUrl) };
+    return { kind: 'qr', link, qr: await this.deps.qr.encode(link, options.large === true ? 'large' : 'compact') };
+  }
+
+  /**
+   * `--open`, for the case the QR serves worst: the daemon and the browser are the same machine.
+   *
+   * IT IS THE WHOLE ANSWER FOR A LOCAL-ONLY ADDRESS — that browser is precisely the one caller such a
+   * link is for — so it is attempted there exactly as for a dialable one. With no link there is
+   * nothing to attempt, and saying so beats a window that never appears.
+   */
+  async #open(offer: PairingOffer): Promise<string> {
+    if (offer.kind === 'refusal') return renderNoLinkToOpen();
+    return (await this.deps.browser.open(offer.link))
+      ? renderOpenedBrowser()
+      : renderBrowserRefused(this.deps.binaryName);
   }
 
   /**
@@ -142,7 +178,7 @@ export class PairController {
   }
 
   /** Count the code down, and say which of the three endings happened. */
-  async #watch(mint: PairingCodeMintResponse): Promise<void> {
+  async #watch(mint: PairingCodeMintResponse, daemonHost: string | undefined): Promise<void> {
     const deadline = Date.parse(mint.expiresAt);
     let unanswered: string | undefined;
     while (this.deps.clock.now() < deadline) {
@@ -150,9 +186,7 @@ export class PairController {
       try {
         const status = await this.deps.gateway.status(mint.pairingId);
         if (status.status === 'redeemed') {
-          this.deps.progress.succeed(
-            renderPaired(status.deviceName, mint.daemonName, pairingDaemonHost(mint.daemonUrl)),
-          );
+          this.deps.progress.succeed(renderPaired(status.deviceName, mint.daemonName, daemonHost));
           return;
         }
         if (status.status === 'expired') return this.#died();

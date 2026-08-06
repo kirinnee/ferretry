@@ -27,6 +27,7 @@ const minted: PairingCodeMintResponse = {
   daemonId,
   daemonName: 'workstation',
   daemonUrl: 'https://workstation.example.test',
+  reach: 'any-device',
   pairUrl:
     'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 };
