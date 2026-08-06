@@ -74,6 +74,14 @@ const buttonNamed = (root: ReactTestInstance, label: string): ReactTestInstance 
   return button;
 };
 
+const buttonWithLabelSpan = (root: ReactTestInstance, label: string): ReactTestInstance => {
+  const button = root
+    .findAllByType('button')
+    .find(candidate => candidate.findAllByType('span').some(span => span.children.join('') === label));
+  if (button === undefined) throw new Error(`missing ${label} button`);
+  return button;
+};
+
 const client = (calls: string[], next: SessionView): SessionChatClient =>
   ({
     answer: async (_id: string, toolUseId: string) => {
@@ -383,46 +391,49 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('gives the runtime sheets a Terminal opener that actually navigates', () => {
+  test('opens the native Codex picker through the mounted runtime sheet and navigates to Terminal', async () => {
+    const calls: Array<{ id: string; command: unknown; requestId: string | undefined }> = [];
+    const codex = sessionView('shared', {
+      config: { harness: 'codex' },
+      state: { promptReady: true, status: 'awaiting_user' },
+    });
+    const runtimeClient: SessionChatClient = {
+      ...client([], codex),
+      runtime: async (id, command, requestId) => {
+        calls.push({ id, command, requestId });
+        return codex;
+      },
+    };
     const page = renderSessionChatPage(
       <SessionChatPage
         canControl
-        client={
-          { ...client([], sessionView('shared')), runtime: async () => sessionView('shared') } as SessionChatClient
-        }
+        client={runtimeClient}
         connection={alpha}
         entries={[]}
         onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
-        session={sessionView('shared', { config: { harness: 'codex' } })}
+        session={codex}
       />,
     );
     try {
-      // Codex's native picker lives in the Terminal view, so the sheet can only
-      // offer it if the host answers `true` — and the host can only answer that
-      // from INSIDE the pane context, which is why this is asserted through the
-      // rendered page rather than through the controls in isolation.
-      const lifecycle = {
-        open: true,
-        onClose: () => undefined,
-        onClaudeEffortSent: () => undefined,
-        onSwitchFailed: () => undefined,
-        onSwitchSubmitted: () => undefined,
-      };
-      const runtime = page.root.findByType(ComposerRuntime);
-      const model = runtime.props.renderModelControls(lifecycle) as ReactElement<
-        ComponentProps<typeof RuntimeModelControls>
-      >;
-      const effort = runtime.props.renderEffortControls(lifecycle) as ReactElement<
-        ComponentProps<typeof RuntimeModelControls>
-      >;
+      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(0);
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(false);
+      run(() => modelChip.props.onClick());
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
 
-      // `true` is the claim that the host SHOWED it, which is why the sheet is
-      // allowed to close on it; the composer runtime keeps its own explanation
-      // visible whenever this answers `false`.
-      expect(model.props.onOpenTerminal?.()).toBe(true);
-      expect(effort.props.onOpenTerminal?.()).toBe(true);
+      const nativePicker = buttonWithLabelSpan(page.root, 'Use native picker in Terminal');
+      expect(nativePicker.props.disabled).toBe(false);
+      await runAsync(async () => {
+        nativePicker.props.onClick();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ id: 'shared', command: { action: 'model' } });
+      expect(typeof calls[0]?.requestId).toBe('string');
+      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }

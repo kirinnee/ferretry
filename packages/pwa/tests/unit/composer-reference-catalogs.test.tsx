@@ -153,6 +153,37 @@ describe('useComposerReferenceCatalogs', () => {
     run(() => view.unmount());
   });
 
+  test('publishes a fast family before slow siblings without issuing a second read', async () => {
+    const calls: string[] = [];
+    let resolveAttention: ((value: unknown) => void) | undefined;
+    let resolveSkills: ((value: unknown) => void) | undefined;
+    const client = reader(path => {
+      if (path.endsWith('/tasks')) return taskListing();
+      return new Promise(resolve => {
+        if (path.endsWith('/attention')) resolveAttention = resolve;
+        else resolveSkills = resolve;
+      });
+    }, calls);
+    const view = render(<CatalogProbe client={client} sessionId="session-a" />);
+
+    await flushCatalogs();
+    expect(output(view)).toBe('1:-:-');
+    expect(calls.sort()).toEqual([
+      '/v1/sessions/session-a/attention',
+      '/v1/sessions/session-a/skills',
+      '/v1/sessions/session-a/tasks',
+    ]);
+
+    if (resolveAttention === undefined || resolveSkills === undefined)
+      throw new Error('slow catalog reads did not start');
+    resolveAttention(attentionListing());
+    resolveSkills(skillsListing);
+    await flushCatalogs();
+    expect(output(view)).toBe('1:1:1');
+    expect(calls).toHaveLength(3);
+    run(() => view.unmount());
+  });
+
   test('fences a late answer after session navigation', async () => {
     const pending: Array<(value: unknown) => void> = [];
     const slow = reader(path =>
