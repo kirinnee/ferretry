@@ -379,6 +379,37 @@ describe('parseSessionForkReceipt', () => {
     expect(refusal(receipt).detail).toContain('the last one the history recorded');
   });
 
+  it('refuses receipt times that disagree with the durable boundaries they describe', () => {
+    const receipt = at('target_created');
+    const later = '2026-08-06T08:00:00.000Z';
+    const planPreparedLater = { ...receipt.plan, preparedAt: later };
+
+    expect(
+      refusal({
+        ...receipt,
+        phaseHistory: [{ ...receipt.phaseHistory[0], at: later }, ...receipt.phaseHistory.slice(1)],
+      }).detail,
+    ).toBe('createdAt the claim stamp and receipt creation time must agree');
+    expect(
+      refusal({
+        ...receipt,
+        phaseHistory: [...receipt.phaseHistory.slice(0, -1), { ...receipt.phaseHistory.at(-1), at: later }],
+      }).detail,
+    ).toBe('updatedAt the last phase stamp and receipt update time must agree');
+    expect(
+      refusal({
+        ...receipt,
+        plan: planPreparedLater,
+        fingerprint: sessionForkDecisionFingerprint({
+          key: KEY,
+          requestFingerprint: receipt.requestFingerprint,
+          targetSessionId: receipt.targetSessionId,
+          plan: planPreparedLater,
+        }),
+      }).detail,
+    ).toBe('plan.preparedAt the frozen plan and the claim that owns it must share one decision time');
+  });
+
   it('refuses a report recorded before the import ran', () => {
     expect(refusal({ ...claimed(), report: report() }).detail).toContain('once the import has run');
   });

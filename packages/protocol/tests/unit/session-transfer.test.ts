@@ -232,6 +232,24 @@ describe('session transfer protocol', () => {
     ]);
   });
 
+  it('should require warden descent and the named warden to agree in both directions', () => {
+    // Act + Assert
+    should(transfer.LineageFacetSchema.safeParse(lineage).success).be.true();
+    should(transfer.LineageFacetSchema.safeParse({ wardenLineage: false, warden: null }).success).be.true();
+    assertRejects([
+      {
+        name: 'warden descent without the warden it traces to',
+        schema: transfer.LineageFacetSchema,
+        value: { wardenLineage: true, warden: null },
+      },
+      {
+        name: 'a named warden without warden descent',
+        schema: transfer.LineageFacetSchema,
+        value: { wardenLineage: false, warden: 'warden-1' },
+      },
+    ]);
+  });
+
   it('should bind a conversation cut to its source transcript and reject conversation on handover', () => {
     // Arrange
     const handover = {
