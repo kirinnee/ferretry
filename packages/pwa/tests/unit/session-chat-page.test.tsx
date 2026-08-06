@@ -419,6 +419,96 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('rebinds the runtime route to a replaced client, not only to a changed method', async () => {
+    // THE HAZARD A METHOD DEPENDENCY CANNOT SEE. `runtime` lives on the
+    // prototype, so two clients of the same class expose the SAME function
+    // reference. A memo keyed on `client.runtime` therefore never recomputes
+    // across a client swap and keeps sending this session's commands through the
+    // client that has been replaced — a stale credential, or a daemon the reader
+    // has since left. Nothing else in this suite would notice: the identity that
+    // has to change is the receiver, which only a real object carries.
+    // Arrange
+    const next = sessionView('shared');
+    const previous = new ReceiverBoundChatClient(next);
+    const current = new ReceiverBoundChatClient(next);
+    const published: SessionView[] = [];
+    // Stable across both renders, so `publish` — the memo's other dependency —
+    // cannot recompute the binding for us and hide a regression.
+    const onSessionChange = (view: SessionView) => published.push(view);
+    const onBack = () => undefined;
+    const session = sessionView('shared');
+    const pageFor = (chatClient: ReceiverBoundChatClient) => (
+      <SessionChatPage
+        client={chatClient as unknown as SessionChatClient}
+        connection={alpha}
+        entries={[]}
+        onBack={onBack}
+        onSessionChange={onSessionChange}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = render(withSessionSearch(pageFor(previous)));
+
+    try {
+      // The premise, stated rather than assumed: one method, two clients.
+      expect(previous.runtime).toBe(current.runtime);
+
+      // Act — the same mounted page is handed the replacement client.
+      run(() => page.update(withSessionSearch(pageFor(current))));
+      const modelControls = page.root.findByType(ComposerRuntime).props.renderModelControls({
+        open: true,
+        onClose: () => undefined,
+        onClaudeEffortSent: () => undefined,
+        onSwitchFailed: () => undefined,
+        onSwitchSubmitted: () => undefined,
+      }) as ReactElement<ComponentProps<typeof RuntimeModelControls>>;
+      await runAsync(() => modelControls.props.api.runtime(alpha, 'shared', { action: 'model' }, 'r2'));
+
+      // Assert — the live client took it, and the replaced one saw nothing.
+      expect(current.sent).toEqual([{ sessionId: 'shared', command: { action: 'model' }, requestId: 'r2' }]);
+      expect(previous.sent).toEqual([]);
+      expect(published).toEqual([next]);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('withdraws the runtime controls when the replacement client has no such route', async () => {
+    // The feature check is not a mount-time decision. A client swapped in for one
+    // that cannot reach the route must take the chips with it, or the reader is
+    // offered a switch nothing can carry.
+    // Arrange
+    const next = sessionView('shared');
+    const onBack = () => undefined;
+    const onSessionChange = () => undefined;
+    const session = sessionView('shared');
+    const pageFor = (chatClient: SessionChatClient) => (
+      <SessionChatPage
+        client={chatClient}
+        connection={alpha}
+        entries={[]}
+        onBack={onBack}
+        onSessionChange={onSessionChange}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = render(withSessionSearch(pageFor(new ReceiverBoundChatClient(next) as unknown as SessionChatClient)));
+
+    try {
+      expect(page.root.findAllByType(ComposerRuntime)).toHaveLength(1);
+
+      // Act — the replacement omits the optional runtime route entirely.
+      run(() => page.update(withSessionSearch(pageFor(client([], next)))));
+
+      // Assert
+      expect(page.root.findAllByType(ComposerRuntime)).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('fences a composer runtime command to its live daemon and publishes its returned observation', async () => {
     const next = sessionView('shared', { state: { observedModel: 'gpt-5.6-sol' } });
     const calls: Array<{ id: string; command: unknown; requestId: string | undefined }> = [];
