@@ -8,11 +8,14 @@ import { FileInstanceSurface } from '../../src/components/file-instance-surface.
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
+import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
+import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
+import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -501,6 +504,7 @@ describe('SessionChatPage', () => {
       await runAsync(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
+      expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
       const input = page.root.findByType('input');
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       const results = page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
@@ -512,6 +516,60 @@ describe('SessionChatPage', () => {
       expect(page.root.findAllByType(FileInstanceSurface)).toHaveLength(1);
       expect(page.root.findAllByType(FileInstanceSurface)[0]?.props.instance.key).toBe('needle.ts');
       expect(page.root.findAllByType(FilesTab)).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('mounts the real lineage and session-scoped analytics utility bodies', () => {
+    const scope = daemonSessionScope(alpha, 'shared');
+    const current = sessionView('shared');
+    const sessions: readonly SessionView[] = [current, sessionView('child')];
+    openSidePaneTab(scope, 'lineage');
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], current)}
+        connection={alpha}
+        daemonSessions={sessions}
+        entries={[]}
+        onBack={() => undefined}
+        onNavigate={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+    );
+    try {
+      const lineage = page.root.findByType(LineageSurfaceContent);
+      expect(lineage.props.daemonId).toBe('alpha');
+      expect(lineage.props.sessionId).toBe('shared');
+      expect(lineage.props.sessions).toBe(sessions);
+
+      run(() => openSidePaneTab(scope, 'analytics'));
+      const analytics = page.root.findByType(SessionAnalyticsSurface);
+      expect(analytics.props.connection).toBe(alpha);
+      expect(analytics.props.scope).toEqual(scope);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('keeps unread lineage distinct from an empty daemon slice', () => {
+    openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'lineage');
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
+      expect(JSON.stringify(page.toJSON())).toContain('Loading lineage');
     } finally {
       run(() => page.unmount());
     }

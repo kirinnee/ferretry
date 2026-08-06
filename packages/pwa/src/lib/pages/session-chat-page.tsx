@@ -22,6 +22,8 @@ import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
+import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
+import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -164,6 +166,8 @@ function SessionSearchWorkspaceActions({ scope }: { readonly scope: ReturnType<t
 interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
   readonly connection: DaemonConnection;
   readonly session: SessionView;
+  readonly daemonSessions?: readonly SessionView[];
+  readonly onNavigate?: (to: string) => void;
   readonly readSnapshot?: PaneSnapshotReader;
   /** The one reference surface this session reads with, files included. */
   readonly references: ReferenceSurface;
@@ -172,6 +176,8 @@ interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
 function WorkspaceSurface({
   connection,
   session,
+  daemonSessions,
+  onNavigate,
   readSnapshot,
   references,
   scope,
@@ -189,6 +195,22 @@ function WorkspaceSurface({
     body = <FileInstanceSurface daemon={connection} scope={scope} instance={tab.instance} markdown={references} />;
   } else if (tab.id === 'tasks') {
     body = <SessionTasksSearchSurface />;
+  } else if (tab.id === 'lineage') {
+    body =
+      daemonSessions === undefined ? (
+        <p className="m-3 text-ui text-muted" role="status">
+          Loading lineage…
+        </p>
+      ) : (
+        <LineageSurfaceContent
+          daemonId={connection.daemonId}
+          sessionId={session.config.id}
+          sessions={daemonSessions}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
+        />
+      );
+  } else if (tab.id === 'analytics') {
+    body = <SessionAnalyticsSurface connection={connection} scope={scope} />;
   } else if (tab.id === 'files') {
     // The picker: tree, listing, breadcrumbs. Every open it produces becomes a
     // file tab in the pane's own strip, so this surface holds no second strip.
@@ -278,6 +300,13 @@ export function SessionChatPage({
   onNavigate,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
+  const search = useSessionSearch();
+  const referenceTasks =
+    search.scope?.daemonId === scope.daemonId &&
+    search.scope.sessionId === scope.sessionId &&
+    search.taskState === 'ready'
+      ? search.tasks
+      : undefined;
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
   // churn cannot rebuild the surface and re-parse every rendered Markdown block
@@ -292,9 +321,10 @@ export function SessionChatPage({
         scope,
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
+        ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
       }),
-    [connection, scope, session.config.cwd, fleetIdentity, onNavigate],
+    [connection, scope, session.config.cwd, fleetIdentity, referenceTasks, onNavigate],
   );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -455,6 +485,8 @@ export function SessionChatPage({
           connection={connection}
           references={references}
           session={session}
+          {...(daemonSessions === undefined ? {} : { daemonSessions })}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
         />
       )}
