@@ -445,6 +445,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',
       'POST /v1/sessions/:sessionId/handover/cancel',
+      'GET /v1/sessions/:sessionId/runtime-models',
+      'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',

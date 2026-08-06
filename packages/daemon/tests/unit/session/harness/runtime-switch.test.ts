@@ -187,7 +187,13 @@ describe('planRuntimeSwitch on a picker harness', () => {
     // Assert
     should(plan).eql({
       kind: 'drive_picker',
-      target: { model: 'gpt-5-mini', effort: 'high', quickPickerDefaultEffort: 'low' },
+      target: {
+        model: 'gpt-5-mini',
+        effort: 'high',
+        quickPickerDefaultEffort: 'low',
+        // The FLAG is what the driver refuses on; the name above only makes the refusal readable.
+        quickPickerAppliesPreset: true,
+      },
       needsPreflight: true,
     });
   });
@@ -206,7 +212,15 @@ describe('planRuntimeSwitch on a picker harness', () => {
 
     // Assert: an unknown default is not a match. The source compared it as one and
     // selected a quick row that could apply an effort nobody asked for.
-    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-terra', effort: 'high' }, needsPreflight: true });
+    //
+    // The flag travels WITHOUT a name beside it, and that pairing is the whole point: this is the
+    // case with no preset to name, and a driver that decided from the name alone read it as "no
+    // mismatch" and selected the row anyway.
+    should(plan).eql({
+      kind: 'drive_picker',
+      target: { model: 'gpt-5-terra', effort: 'high', quickPickerAppliesPreset: true },
+      needsPreflight: true,
+    });
   });
 
   it('should refuse a model the live catalog does not advertise', () => {
