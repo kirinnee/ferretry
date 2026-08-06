@@ -525,13 +525,24 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const store = useAppStore();
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell.
+  //
+  // THE MEASURED CARRIER IS THE THIRD ARGUMENT, AND IT WAS NOT PASSED. `browserTerminalDeckDependencies`
+  // declares it, `browserTerminalStreamAttach` gates the DIRECT branch on it, and the default is
+  // `() => undefined` — so the composition root left the production deck permanently answering "no
+  // carrier measured", which turns every direct attach into the retryable `TERMINAL_STREAM_NO_CARRIER`
+  // and leaves a direct session's terminals cycling the deck's backoff instead of opening a socket.
+  // It is a GETTER rather than the subscribed `measuredCarrier` below on purpose: a carrier is a
+  // measurement read per attach, and depending on the subscribed value here would give this memo a
+  // new identity the moment a walk decides — remounting the deck and tearing down the live shell the
+  // memo exists to protect.
   const terminalDeck = useMemo(
     () =>
       browserTerminalDeckDependencies(
         store.carrier.fetch,
         async (daemon, request) => await store.carrier.openStream(daemon, request),
+        () => store.carrier.activeMethod(scope.daemonId),
       ),
-    [store.carrier],
+    [scope.daemonId, store.carrier],
   );
   const { navigate } = useRouter();
   const layout = useLayoutMode();
