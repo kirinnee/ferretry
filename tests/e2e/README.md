@@ -91,11 +91,19 @@ Point the daemon at a document with `--config <path outside FY_HOME>`. A
 with no layout-version marker" and the daemon refuses to open it.
 
 `relay-browser-pairing.e2e.test.ts` is the journey those pieces exist for. Its
-second test is RED on purpose while §14 relayed pairing and stream sessions are
-unbuilt: it records a step ledger, fails naming the FIRST unproven step, and
+first test guards every moving part of the harness itself and is green. Its
+second test is the journey: twelve of its thirteen steps pass — including a real
+Chrome redeeming a first pairing over the relay against the compiled daemon —
+and the thirteenth fails because a §14 stream session opens over the rendezvous
+and carries no frames. It records a step ledger, fails naming the step, and
 writes the whole ledger to `$FY_E2E_RELAY_REPORT` (default
-`<tmpdir>/fy-e2e-relay-journey.md`). Its first test guards every moving part of
-the harness itself, so the red one stays a statement about the product.
+`<tmpdir>/fy-e2e-relay-journey.md`).
+
+`support/seeded-session.ts` is the one place in this tier that imports daemon
+internals rather than driving the compiled binary. The daemon has no
+session-create route, so the live-event leg needs a session seeded through the
+daemon's own storage and the protocol's own schemas before boot. Read its header
+before copying the pattern: it states exactly what that substitutes.
 
 Known and deliberately not taken: `wrangler` 4.93 is on the devshell `PATH` and
 its `workerd` starts, but that binary's newest supported compatibility date is

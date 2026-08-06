@@ -22,18 +22,24 @@
  *   REAL Google Chrome, driven by `playwright-core`
  *   REAL failure of the direct address, arranged rather than assumed
  *
- * ── WHY THE SECOND TEST IS RED, AND WHY THAT IS THE POINT ──────────────────────────────────────
+ * ── WHERE THE JOURNEY STANDS, AND WHY THE SECOND TEST IS STILL RED ─────────────────────────────
  *
- * Relay-mediated pairing and §14 stream sessions are SPECIFIED and NOT YET BUILT — the protocol
- * document says so in §13's "What is not built yet", and three implementation units are writing
- * them now. A harness for a journey that cannot complete has exactly two honest shapes: a test that
- * fails naming the first unproven step, or no test at all. A test that passed by asserting
- * something weaker would be the one outcome the owner explicitly ruled out, so this one fails, and
- * its failure message and its written report both name the first unproven step exactly.
+ * Relay-mediated FIRST PAIRING is built and is proved here: a real Chrome, holding a link the
+ * compiled `fy pair` printed, redeems a code over a real rendezvous against the compiled daemon
+ * after demonstrably failing on the advertised direct address, and a second authenticated session
+ * follows across the same rendezvous. Twelve of the thirteen steps below pass.
  *
- * When the implementation lands it goes green with no edit to this file. Until then the first test
- * below guards every moving part of the harness itself, so the red one stays a statement about the
- * product rather than a statement about the scaffolding.
+ * The thirteenth does not. A §14 STREAM session opens over the rendezvous and carries no frames —
+ * the daemon appends the events, the browser dials, and the cursor never moves. That is a product
+ * defect this journey found rather than a step it cannot reach, and the failure message says which
+ * of the two possible shapes happened, because "a stream session was opened and carried no frames"
+ * and "no stream session was ever opened" live in different packages.
+ *
+ * So this test fails, and its failure message and its written report both name the step exactly. A
+ * test that passed by asserting something weaker would be the one outcome the owner ruled out. The
+ * first test below guards every moving part of the harness itself, so the red one stays a statement
+ * about the product rather than about the scaffolding — and this paragraph comes out, along with
+ * the clause in the test's own name, on the day the last step goes green.
  *
  * ── RUNNING IT ─────────────────────────────────────────────────────────────────────────────────
  *
@@ -358,7 +364,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
     }
   }, 240_000);
 
-  it('should carry a first pairing and a live stream over the relay (RED until §14 ships — the failure names the first unproven step)', async () => {
+  it('should carry a first pairing and a live stream over the relay (RED until §14 streams deliver — the failure names the step)', async () => {
     // Arrange
     const teardown = harnessTeardown();
     const ledger: StepLedger = stepLedger(STEPS);
