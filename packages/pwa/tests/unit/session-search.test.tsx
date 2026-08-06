@@ -295,7 +295,12 @@ describe('current-session search model', () => {
   });
 });
 
-describe('Add to chat from the aggregate task board', () => {
+// The CURRENT SESSION's board, and the name matters. A task id is session-local,
+// so a bare `&F12` cannot identify — let alone prove — a task belonging to some
+// other session, and `/v1/tasks` is a fleet union rather than a shared board.
+// Calling this "the aggregate board" would claim a reach these actions do not
+// have; the true shared-board half of #43 is a declared GAP.
+describe('Add to chat from the current-session task board', () => {
   test('delivers the reference into the composer of exactly this daemon session', async () => {
     const mine = composerAt(scope, 'look at');
     // Same session id, different daemon — the one delivery that must never
