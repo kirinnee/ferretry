@@ -7,6 +7,23 @@
  * and no script element anywhere below. Every payload that is not a vector or a
  * raster reaches a `<pre>` as escaped text through React's own escaping.
  *
+ * NO DECODER MOUNTS WITHOUT A GESTURE. A bounded payload is still an unbounded
+ * amount of rasterising, and a transcript is written by an agent rather than by
+ * the reader, so an illustration is offered and not performed: the stage says
+ * what rendering will cost, and one control starts it. The approval belongs to
+ * the EXACT `block.source` and is discarded the moment those bytes change, so a
+ * streamed message cannot inherit consent granted to an earlier draft of itself.
+ * There is deliberately no always-render setting: it would put the automatic
+ * path back.
+ *
+ * Say what that guarantees precisely. Nothing tells this component that a
+ * message has stopped growing, so a reader who presses Render while an `svg` is
+ * still arriving DOES decode a partial one — lexically admitted, inside every
+ * cap, and their own deliberate choice. A partial RASTER cannot mount, but for a
+ * different reason: the grammar's container checks demand a structurally
+ * complete file, so an unfinished one never parses. The gate guarantees no
+ * automatic mount and no inherited consent; it does not guarantee completeness.
+ *
  * THE `<img>` SINK IS A SECURITY INVARIANT, not an implementation detail. An
  * authored SVG reaches this page only as the `src` of an HTML `<img>`, and a
  * real-Chromium probe measured that exact sink: in Chrome 150, script and script
@@ -24,23 +41,26 @@
  * fails to decode. That fires `error`, and the block shows its source with the
  * failure said out loud rather than an empty frame.
  *
- * IT ALSO HOLDS NO CREDENTIAL. Its props are a parsed block and nothing else:
- * no `DaemonConnection`, no session id, no daemon URL, no fetcher. The type
- * proves that no such field is present today (soundness); it cannot prove a
- * careless future prop addition impossible (completeness), which is why this
- * paragraph is here and why a reviewer should read the props before the body —
- * the same stance `rich-file-preview.tsx` takes for file previews.
+ * IT HOLDS NO CREDENTIAL. Its props are a parsed block and nothing else: no
+ * `DaemonConnection`, no session id, no daemon URL, no fetcher. The type proves
+ * that no such field is present today (soundness); it cannot prove a careless
+ * future prop addition impossible (completeness), which is why this paragraph is
+ * here and why a reviewer should read the props before the body — the same
+ * stance `rich-file-preview.tsx` takes for file previews.
  *
  * `html`, `mermaid` and `lottie` render as their own source with the limitation
- * stated on screen. That is this build's declared gap, not a loading state:
- * `docs/fy-render.md` records the evidence for why executable rendering is
- * absent, and the note the reader sees says so in the same words.
+ * stated on screen. That is this build's declared gap, not a loading state.
  */
 
-import { Code2, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { Code2, ImageIcon, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
-import { type FyRenderBlock as ParsedBlock, FY_RENDER_LIMITS, fyRenderPresentation } from '../lib/fy-render.ts';
+import {
+  type FyRenderBlock as ParsedBlock,
+  FY_RENDER_LIMITS,
+  fyRenderPayloadBytes,
+  fyRenderPresentation,
+} from '../lib/fy-render.ts';
 import { Button } from '../shell/primitives.tsx';
 
 export interface FyRenderBlockProps {
@@ -51,7 +71,8 @@ export interface FyRenderBlockProps {
 /**
  * A percent-encoded `data:` URL rather than base64: it is correct for any
  * Unicode payload without a manual byte-to-binary-string dance, and `<img>`
- * treats the two identically.
+ * treats the two identically. The grammar refuses lone surrogates, so
+ * `encodeURIComponent` here cannot throw.
  */
 const svgDataUrl = (payload: string): string => `data:image/svg+xml,${encodeURIComponent(payload)}`;
 
@@ -63,18 +84,25 @@ const humanType: Record<ParsedBlock['type'], string> = {
   lottie: 'Lottie',
 };
 
+/** Rounded to whole units — the reader is sizing a decision, not auditing bytes. */
+const humanBytes = (bytes: number): string =>
+  bytes >= 1024 * 1024
+    ? `${Math.round(bytes / (1024 * 1024))} MB`
+    : bytes >= 1024
+      ? `${Math.round(bytes / 1024)} KB`
+      : `${bytes} bytes`;
+
 export function FyRenderBlock({ block }: FyRenderBlockProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const presentation = fyRenderPresentation(block.type);
+  const sourcePanelId = useId();
+
   /**
-   * WHY the source panel is open, not merely whether — because the two reasons
-   * have different lifetimes. A panel the READER opened is theirs to close. A
-   * panel a decode FAILURE opened is scaffolding for that failure, and has to go
-   * when the failure does, or a streamed illustration finishes correct with an
+   * WHY the source panel is open, not merely whether — the two reasons have
+   * different lifetimes. A panel the READER opened is theirs to close. A panel a
+   * decode FAILURE opened is scaffolding for that failure and goes when the
+   * failure does, or a streamed illustration finishes correct with an
    * unsolicited wall of markup underneath it.
-   *
-   * A source-only type starts `opened` because its source is the only content it
-   * has; it can never reach `failure`, because it never reaches an `<img>`.
    */
   const [sourcePanel, setSourcePanel] = useState<'closed' | 'opened' | 'failure'>(
     presentation === 'source' ? 'opened' : 'closed',
@@ -82,32 +110,30 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
   const showSource = sourcePanel !== 'closed';
   const [fullscreen, setFullscreen] = useState(false);
   const [failed, setFailed] = useState(false);
-  // Remounting the `<img>` is what "reload" means for a static payload: the
-  // element is discarded and the data URL decoded again.
+  const [approved, setApproved] = useState(false);
+  // Remounting the `<img>` is what "reload" means for a static payload.
   const [revision, setRevision] = useState(0);
 
   /**
-   * A NEW PAYLOAD CLEARS AN OLD FAILURE, and this is a streaming bug, not a tidy-up.
+   * THE EXACT BYTES THAT WERE CONSENTED TO, and a counter for the decode they
+   * belong to. A transcript row re-renders as the assistant emits it, so this
+   * component sees a half-written payload before it sees the whole one.
    *
-   * A transcript row re-renders as the assistant emits it, so this component
-   * sees a half-written SVG before it sees the whole one. The grammar admits a
-   * payload by prefix, so the half-written document reaches the `<img>`, fails
-   * to decode, and sets `failed`. Without this, the completed SVG arriving a
-   * moment later would render into a component still showing the error, and the
-   * reader would have to press Reload to see something that was never broken.
-   *
-   * Adjusted during render rather than in an effect — React re-runs this
-   * component before touching the DOM, so no failed frame is painted. It is
-   * deliberately narrow: `showSource` and `fullscreen` belong to the READER, and
-   * a block that grows by one token must not close a panel they opened or throw
-   * them out of fullscreen. Only what the OLD bytes caused is discarded.
+   * The generation is a ref rather than state because a retained `error`
+   * callback closes over the value it was created with; comparing that against a
+   * ref reads the CURRENT generation, which is the only way to tell a live
+   * failure from one belonging to bytes that have already been replaced. Without
+   * it, an error queued for a superseded partial payload lands on the completed
+   * one and fails an image that is perfectly fine.
    */
   const [renderedSource, setRenderedSource] = useState(block.source);
+  const generation = useRef(0);
   if (renderedSource !== block.source) {
     setRenderedSource(block.source);
+    generation.current += 1;
     setFailed(false);
-    // Only the panel the FAILURE opened. A reader who opened it themselves keeps
-    // it, and a source-only type keeps its own.
+    // Consent is to bytes, not to a block. New bytes, new decision.
+    setApproved(false);
     setSourcePanel(panel => (panel === 'failure' ? 'closed' : panel));
   }
 
@@ -119,47 +145,40 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
     setRevision(value => value + 1);
   };
 
-  const onDecodeFailure = (): void => {
+  const onDecodeFailure = (from: number) => (): void => {
+    // A failure from bytes that are no longer on screen is not this image's.
+    if (from !== generation.current) return;
     setFailed(true);
-    // The source is the fallback, so it is opened rather than merely offered —
-    // but a panel the reader already opened stays THEIRS, so its provenance is
-    // not overwritten. Otherwise recovering from the failure would close it.
     setSourcePanel(panel => (panel === 'closed' ? 'failure' : panel));
   };
 
   const preview = block.source.slice(0, FY_RENDER_LIMITS.sourcePreviewCharacters);
   const truncated = block.source.length > preview.length;
+  const rendered = presentation === 'visual' && approved && !failed;
+  const payloadSize = humanBytes(fyRenderPayloadBytes(block));
 
-  /**
-   * NO LIVE REGION ON THE FAILURE, and this is a decision rather than an omission.
-   *
-   * `role="alert"` was the obvious choice and is the wrong one. A transcript row
-   * re-renders as the assistant streams it, and a half-written SVG genuinely
-   * fails to decode, so an assertive live region would interrupt a screen-reader
-   * user — repeatedly — to announce an error that is not one yet and that this
-   * component cannot distinguish from a real one, because nothing tells it the
-   * message has stopped growing. `role="status"` only makes the same false
-   * announcement politely.
-   *
-   * So the failure is ordinary visible text, read when the reader reaches the
-   * block, exactly like the "this build does not run X" note beside it. Nothing
-   * here is time-critical or happening away from where they are reading. The
-   * cost is honest and small: a reader already inside the block is not
-   * interrupted when a decode fails. The alternative was interrupting everyone,
-   * wrongly, several times per streamed message.
-   */
   const stage = failed ? (
     <div className="kt-fs-note" data-fy-render-error="true" data-tone="err">
       This {humanType[block.type]} payload could not be decoded. The authored source is shown below.
     </div>
-  ) : presentation === 'visual' ? (
+  ) : rendered ? (
     <img
-      alt={block.alt}
+      // EMPTY ON PURPOSE. The required description is already the visible
+      // `figcaption`, which also names the figure and the fullscreen dialog;
+      // repeating it here makes a screen reader say the same sentence three
+      // times, four in fullscreen. The caption does the work, and the decode
+      // failure above covers the case a broken `alt` would otherwise serve.
+      alt=""
       className="kt-rich-file-image fy-render-image"
-      key={revision}
-      onError={onDecodeFailure}
+      key={`${generation.current}:${revision}`}
+      onError={onDecodeFailure(generation.current)}
       src={block.type === 'image' ? `data:${block.mime};base64,${block.payload}` : svgDataUrl(block.payload)}
     />
+  ) : presentation === 'visual' ? (
+    <div className="kt-fs-note" data-fy-render-consent="true" data-tone="warn">
+      This {humanType[block.type]} illustration ({payloadSize}) has not been rendered. Its size is bounded, but how much
+      work it takes to draw is not, and it was written by an assistant rather than by you.
+    </div>
   ) : (
     <div className="kt-fs-note" data-tone="warn">
       This build does not run {humanType[block.type]} illustrations. The authored source is shown below.
@@ -171,15 +190,14 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
    *
    * Making the dialog a separate element that only exists while open changes the
    * root of this subtree, so React unmounts the whole figure — including the
-   * Fullscreen button the reader just pressed — before `useDialogFocus` captures
-   * the element to restore focus to. It captures `document.body` instead, and
-   * with nothing auto-focused the reader lands outside the modal they opened. A
-   * stable host keeps the trigger mounted, so focus never leaves the dialog and
-   * the hook's restore is the same button the reader pressed.
+   * control the reader just pressed — before `useDialogFocus` captures the
+   * element to restore focus to. It captures `document.body` instead, and the
+   * reader lands outside the modal they opened.
    *
-   * `role` and `aria-modal` travel as one object because they are one fact: an
-   * `aria-modal` without the role it belongs to is a claim no assistive
-   * technology owes anything.
+   * `role` and `aria-modal` travel as one object because they are one fact, and
+   * `kt-overlay` is the app's own visible-viewport contract: it follows the shell
+   * box rather than the layout viewport, so the overlay does not run under a
+   * notch or behind a software keyboard.
    */
   const modal = fullscreen
     ? {
@@ -191,19 +209,21 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
     : {};
 
   return (
-    <div className={fullscreen ? 'fy-render-fullscreen' : undefined} ref={hostRef} {...modal}>
+    <div className={fullscreen ? 'kt-overlay fy-render-fullscreen' : undefined} ref={hostRef} {...modal}>
       <figure
         className="kt-rich-file fy-render"
         data-fy-render-fullscreen={fullscreen ? 'true' : 'false'}
-        // The stage reserves an illustration's worth of height only when there is
-        // an illustration. Handing CSS the presentation directly beats three type
-        // selectors that would then have to be kept in step with the switch.
         data-fy-render-presentation={presentation}
         data-fy-render-type={block.type}
       >
-        <div className="fy-render-stage">{stage}</div>
+        {/* A stage holding a paragraph must not be squeezed by a long source
+            panel beside it: in two states the paragraph IS the block's whole
+            explanation, so it is the last thing that may shrink. */}
+        <div className="fy-render-stage" data-fy-render-stage={rendered ? 'image' : 'note'}>
+          {stage}
+        </div>
         {showSource ? (
-          <div className="kt-fs-code scroll-thin" data-fy-render-source="true">
+          <div className="kt-fs-code scroll-thin" data-fy-render-source="true" id={sourcePanelId}>
             <pre className="kt-fs-pre">
               <code>{preview}</code>
             </pre>
@@ -214,32 +234,44 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
             ) : null}
           </div>
         ) : null}
-        <figcaption className="fy-render-caption">{block.alt}</figcaption>
         <div className="kt-rich-file-actions fy-render-actions">
-          {/* Opening it from here makes it the READER's panel, whatever opened
-              it before — so recovering from a decode failure cannot take it away. */}
+          {/* A STABLE LABEL with `aria-expanded`, rather than a label that also
+              changes: a toggle that says its state twice invites the reader to
+              wonder which channel is authoritative. `aria-controls` ties the
+              state to the region it actually governs. */}
           <Button
+            aria-controls={sourcePanelId}
             aria-expanded={showSource}
             onClick={() => setSourcePanel(panel => (panel === 'closed' ? 'opened' : 'closed'))}
             size="sm"
             type="button"
           >
-            <Code2 aria-hidden="true" size={14} /> {showSource ? 'Hide source' : 'Source'}
+            <Code2 aria-hidden="true" size={14} /> Source
           </Button>
+          {/* ONE SLOT, TWO JOBS. Render becomes Reload in place, so the control
+              the reader just pressed is still under the focus ring afterwards. */}
           {presentation === 'visual' ? (
-            <Button onClick={reload} size="sm" type="button">
-              <RotateCcw aria-hidden="true" size={14} /> Reload
-            </Button>
+            approved ? (
+              <Button onClick={reload} size="sm" type="button">
+                <RotateCcw aria-hidden="true" size={14} /> Reload
+              </Button>
+            ) : (
+              <Button data-fy-render-consent-action="true" onClick={() => setApproved(true)} size="sm" type="button">
+                <ImageIcon aria-hidden="true" size={14} /> Render illustration ({humanType[block.type]}, {payloadSize})
+              </Button>
+            )
           ) : null}
-          {/* Labelled for what the reader gets, not for how it is implemented:
-            this fills the viewport, so it is "Fullscreen". The mechanism is the
-            in-app overlay explained in `fy-render.css` — the Fullscreen API is
-            not available on a first-class target for this app. */}
-          <Button aria-pressed={fullscreen} onClick={() => setFullscreen(value => !value)} size="sm" type="button">
+          {/* The changing label carries the state, so there is no `aria-pressed`
+              to disagree with it. */}
+          <Button onClick={() => setFullscreen(value => !value)} size="sm" type="button">
             {fullscreen ? <Minimize2 aria-hidden="true" size={14} /> : <Maximize2 aria-hidden="true" size={14} />}
             {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           </Button>
         </div>
+        {/* LAST CHILD, by HTML's content model for `figure` — a `figcaption` must
+            be the first or last child. CSS `order` keeps it above the controls
+            visually, where it reads as a caption rather than as a footnote. */}
+        <figcaption className="fy-render-caption">{block.alt}</figcaption>
       </figure>
     </div>
   );

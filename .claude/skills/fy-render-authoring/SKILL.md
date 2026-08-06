@@ -56,10 +56,25 @@ Four rules, and every one of them is a parse error if you break it:
 4. A line that is exactly `---` separates the headers from the payload.
 
 `mime:` is required for `type: image`, and forbidden everywhere else. Allowed values:
-`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/avif`. The payload is base64; wrapping
-it across lines is fine.
+`image/png`, `image/jpeg`, `image/gif`, `image/webp` — **and the bytes must actually be that type**,
+because the file is checked against its own magic number. AVIF is not accepted. The payload is
+base64; wrapping it across lines is fine.
 
 If any of that is wrong, your block renders as a plain code fence. It will not warn you.
+
+## The reader has to press a button
+
+**Your illustration does not draw itself.** The block shows what it would cost and offers a
+**Render illustration** control; nothing decodes until the reader presses it. That is deliberate: the
+size of a payload is bounded, the work of drawing it is not, and you are not the person whose device
+pays for it.
+
+Two consequences worth designing around:
+
+- Write an `alt:` that stands on its own, because for many readers it is all there will be.
+- Approval is to the exact bytes, so every change while your message streams withdraws it. It does
+  not wait for you to finish, though: a reader who presses Render mid-stream will see whatever your
+  SVG amounted to at that moment. Nothing breaks — they can press Reload once it settles.
 
 ## Limits
 
@@ -71,8 +86,19 @@ If any of that is wrong, your block renders as a plain code fence. It will not w
 | `lottie`  | 1 MiB                             |
 | `image`   | 2 MiB decoded                     |
 
-An SVG is also refused if it declares a `<!DOCTYPE>` or `<!ENTITY>`, or contains `<script>`,
-`<foreignObject>` or `<use>`, or does not begin with an `<svg>` element.
+Anything that reaches a decoder is also capped at **8192 pixels on either axis and 16,777,216 pixels
+in total**. The two limits are independent, so 4096 × 4096 and 8192 × 2048 are both fine and
+8192 × 8192 is not. For a raster that is read from the file's own header; for an SVG it is
+the `width`, `height` and `viewBox` you declare.
+
+**No animation.** An animated PNG, GIF or WebP is refused, because this build has no pause control
+and will not show you a loop nobody can stop. Use a still frame.
+
+An SVG is also refused if it declares a `<!DOCTYPE>` or `<!ENTITY>`, contains `<script>`,
+`<foreignObject>` or `<use>`, uses more than 32 filter primitives, has an unterminated comment or
+tag, or does not begin with an `<svg>` element. Give the root a `width`/`height` in plain numbers or
+`px`, or a `viewBox` — `em`, `vh`, `%` without a `viewBox`, and `calc()` are all refused, because a
+size that cannot be resolved cannot be bounded.
 
 ## Writing an SVG that actually shows up
 
@@ -101,17 +127,20 @@ blank or incomplete, an external reference is the first thing to check.
 
 ## What the reader gets
 
-A caption (your `alt`), a **Source** button that shows exactly what you wrote, a **Fullscreen**
-button, and — for a picture — **Reload**. If the browser cannot decode your payload, the block says
-so and opens the source instead of showing an empty frame.
+A caption (your `alt`), a **Render illustration** control, a **Source** button that shows exactly
+what you wrote, and a **Fullscreen** button; once rendered, **Reload** takes the Render control's
+place. If the browser cannot decode your payload, the block says so and opens the source instead of
+showing an empty frame.
 
 ## Before you paste one
 
 - Is this a conversation? If it is a file, stop.
 - Is `type:` the first line?
-- Does `alt:` describe the picture to someone who cannot see it?
-- For `svg`: does it begin with `<svg`, carry a `viewBox`, and reference nothing external?
-- For `image`: is `mime:` present and raster?
+- Does `alt:` describe the picture to someone who cannot see it — and would it still serve if nobody
+  pressed Render?
+- For `svg`: does it begin with `<svg`, carry a resolvable `width`/`height` or `viewBox`, stay under
+  8192 on each axis and 16,777,216 pixels in total, and reference nothing external?
+- For `image`: is `mime:` present, raster, still, and actually the type the bytes are?
 
 The full contract, the threat model and the declared gaps are in
 [docs/fy-render.md](../../../docs/fy-render.md).
