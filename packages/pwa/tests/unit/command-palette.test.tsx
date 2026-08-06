@@ -4,6 +4,7 @@ import {
   CommandPalette,
   type CommandPaletteProps,
   type PaletteDestinationSource,
+  type PaletteSettingsSource,
 } from '../../src/shell/command-palette.tsx';
 import {
   type PaletteCommand,
@@ -110,8 +111,16 @@ describe('when closed', () => {
 });
 
 describe('the resting palette', () => {
+  it('names every searchable result kind on its field', async () => {
+    await open();
+
+    const input = document.getElementById('fy-palette-input');
+    expect(input?.getAttribute('aria-label')).toBe('Search app destinations, commands, settings, and sessions');
+    expect(input?.getAttribute('placeholder')).toBe('Search app destinations, commands, settings, and sessions…');
+  });
+
   it('names each group by what it offers rather than by what matched', async () => {
-    await open({ commands: [browserLogin()], settings: [density()] });
+    await open({ commands: [browserLogin()], settings: settingSource(density()) });
 
     expect(document.getElementById('fy-palette-group-destinations')?.textContent).toBe('Go to');
     expect(document.getElementById('fy-palette-group-commands')?.textContent).toBe('Actions');
@@ -149,7 +158,7 @@ describe('the resting palette', () => {
 
 describe('searching', () => {
   it('renames each group to what its rows ARE', async () => {
-    await open({ commands: [browserLogin()], settings: [density()] });
+    await open({ commands: [browserLogin()], settings: settingSource(density()) });
     await type('e');
 
     expect(document.getElementById('fy-palette-group-commands')?.textContent).toBe('Commands');
@@ -303,7 +312,7 @@ describe('opening a row', () => {
 
   it('navigates a settings row that lives on another page entirely', async () => {
     const harness = await open({
-      settings: [{ ...density(), href: '/d/alpha/warden#config' }],
+      settings: settingSource({ ...density(), href: '/d/alpha/warden#config' }),
     });
 
     await pressRow('fy-palette-option-setting-density');
@@ -314,7 +323,7 @@ describe('opening a row', () => {
 
   it('navigates to a settings section’s own anchor on a wide layout', async () => {
     await atWidth(1440, async () => {
-      const harness = await open({ settings: [density()] });
+      const harness = await open({ settings: settingSource(density()) });
 
       await pressRow('fy-palette-option-setting-density');
 
@@ -325,7 +334,7 @@ describe('opening a row', () => {
 
   it('opens a settings section in place on a phone, after the focus trap has restored', async () => {
     await atWidth(390, async () => {
-      const harness = await open({ settings: [density()] });
+      const harness = await open({ settings: settingSource(density()) });
 
       // The handoff is deferred to the next frame on purpose, so the palette's
       // focus trap restores before the settings sheet takes focus.
@@ -339,7 +348,7 @@ describe('opening a row', () => {
 
   it('navigates instead when a phone host offers no way to open a section in place', async () => {
     await atWidth(390, async () => {
-      const harness = await open({ settings: [density()], onOpenSetting: undefined });
+      const harness = await open({ settings: settingSource(density()), onOpenSetting: undefined });
 
       await pressRow('fy-palette-option-setting-density');
 
@@ -435,3 +444,8 @@ const density = (): PaletteSettingsEntry => ({
   description: 'How tightly rows pack',
   settingId: 'density',
 });
+
+const settingSource =
+  (...entries: readonly PaletteSettingsEntry[]): PaletteSettingsSource =>
+  () =>
+    entries;

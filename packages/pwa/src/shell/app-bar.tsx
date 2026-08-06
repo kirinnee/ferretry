@@ -213,14 +213,23 @@ function DestinationLink({
   );
 }
 
-function DestinationFinderButton({ onOpen, roomy = false }: { onOpen: () => void; roomy?: boolean }) {
+function DestinationFinderButton({
+  onOpen,
+  roomy = false,
+  shortcutAvailable = true,
+}: {
+  onOpen: () => void;
+  roomy?: boolean;
+  /** False when Cmd/Ctrl+K belongs to the mounted current-session search. */
+  shortcutAvailable?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
-      aria-label="Open command palette"
-      title="Find an app destination or session"
+      aria-keyshortcuts={shortcutAvailable ? PALETTE_KEYSHORTCUTS : undefined}
+      aria-label={roomy ? 'Search app, settings & sessions' : 'Find app destinations, settings & sessions'}
+      title="Find an app destination, setting, or session"
       className={
         roomy
           ? 'kt-btn w-full items-center justify-start gap-sm px-control-x'
@@ -230,15 +239,17 @@ function DestinationFinderButton({ onOpen, roomy = false }: { onOpen: () => void
     >
       <Search size={roomy ? 16 : 14} aria-hidden="true" />
       <span className={roomy ? 'text-ui font-semibold' : 'text-meta font-medium'}>
-        {roomy ? 'Search app & sessions' : 'Find'}
+        {roomy ? 'Search app, settings & sessions' : 'Find'}
       </span>
-      <span
-        className={
-          roomy ? 'mono ml-auto hidden text-meta text-muted min-[440px]:inline' : 'mono ml-auto text-meta text-muted'
-        }
-      >
-        {paletteShortcutLabel()}
-      </span>
+      {shortcutAvailable ? (
+        <span
+          className={
+            roomy ? 'mono ml-auto hidden text-meta text-muted min-[440px]:inline' : 'mono ml-auto text-meta text-muted'
+          }
+        >
+          {paletteShortcutLabel()}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -291,7 +302,7 @@ export interface AppBarProps {
   readonly crumbs: readonly Crumb[];
   /** The daemon whose surfaces this bar navigates to. */
   readonly daemon: DaemonId;
-  /** Opens the Cmd/Ctrl+K palette. */
+  /** Opens the global destination/settings palette. */
   readonly onOpenPalette: () => void;
   /**
    * Opens the fleet sidebar's mobile drawer. Absent on destinations such as
@@ -430,7 +441,7 @@ export function AppBar({
             aria-label="Destinations"
             className="mx-auto flex w-fit max-w-full items-center gap-xs rounded-panel border border-border-soft bg-surface px-sm py-xs"
           >
-            <DestinationFinderButton onOpen={onOpenPalette} />
+            <DestinationFinderButton onOpen={onOpenPalette} shortcutAvailable={currentSessionSearch === undefined} />
             <span aria-hidden="true" className="mx-xs h-control-sm w-px shrink-0 bg-border-soft" />
             {APP_BAR_DESTINATIONS.map(destination => (
               <DestinationLink
@@ -473,7 +484,11 @@ export function AppBar({
             <h2 className="m-0 text-title font-semibold text-fg">Choose destination</h2>
             <p className="m-0 text-ui text-muted">Select a destination, search the app, or dismiss this menu.</p>
           </div>
-          <DestinationFinderButton onOpen={openPaletteFromMobileDestinations} roomy />
+          <DestinationFinderButton
+            onOpen={openPaletteFromMobileDestinations}
+            roomy
+            shortcutAvailable={currentSessionSearch === undefined}
+          />
           <nav aria-label="Destinations" className="grid gap-sm border-t border-border-soft pt-md">
             {APP_BAR_DESTINATIONS.map(destination => (
               <DestinationLink

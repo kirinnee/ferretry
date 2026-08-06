@@ -180,4 +180,83 @@ describe('StorageTaskBoardSessionDirectory', () => {
     // Act & Assert
     should(await directory({}).snapshot()).be.empty();
   });
+
+  it('should walk a large fleet 64 sessions at a time, which is 128 open documents here', async () => {
+    // The walk used to start every session in the daemon at once, so its cost grew with the fleet.
+    // It now goes through `readTaskBoardFleet` — but that limits SESSIONS, and this adapter reads
+    // TWO documents per session, started together. So the honest statement about this caller is
+    // "64 sessions, 128 documents", NOT the aggregate route's 64 documents for the same limit, and
+    // the point of measuring both numbers here is that a doc comment claiming otherwise would have
+    // read perfectly well. 300 sessions is more than four pool-fulls, so a walk that quietly went
+    // unbounded again could not hide behind a small fixture.
+    // Arrange
+    const ids = Array.from({ length: 300 }, (_unused, index) => `s${index}`);
+    let documentsInFlight = 0;
+    let peakDocuments = 0;
+    let sessionsInFlight = 0;
+    let peakSessions = 0;
+    /** One physical document read, so the ceiling is counted where the descriptors actually are. */
+    const readDocument = async <T>(answer: T): Promise<T> => {
+      documentsInFlight += 1;
+      peakDocuments = Math.max(peakDocuments, documentsInFlight);
+      try {
+        await Bun.sleep(1);
+        return answer;
+      } finally {
+        documentsInFlight -= 1;
+      }
+    };
+    /**
+     * A session is in flight from its FIRST document until its LAST, which is what the bound caps.
+     *
+     * The adapter starts both reads together, so counting the config read in and the state read out
+     * brackets exactly one session — `first` opens the bracket, `last` closes it.
+     */
+    const readSessionDocument = async <T>(answer: T, bracket: 'first' | 'last'): Promise<T> => {
+      if (bracket === 'first') {
+        sessionsInFlight += 1;
+        peakSessions = Math.max(peakSessions, sessionsInFlight);
+      }
+      try {
+        return await readDocument(answer);
+      } finally {
+        if (bracket === 'last') sessionsInFlight -= 1;
+      }
+    };
+    const source = new StorageTaskBoardSessionDirectory({
+      sessionIds: () => ids,
+      readConfig: async id => await readSessionDocument(configDocument(id), 'first'),
+      readState: async id => await readSessionDocument({ id, status: 'running', turn: 1, lastActivityAt: AT }, 'last'),
+    });
+
+    // Act
+    const sessions = await source.snapshot();
+
+    // Assert — every session answered, in the index's order, 64 sessions at the peak and exactly
+    // twice that many documents, because each in-flight session holds both of its reads open.
+    should(sessions.map(session => session.id)).eql(ids);
+    should(peakSessions).equal(64);
+    should(peakDocuments).equal(128);
+  });
+
+  it('should raise rather than answer short when one session document cannot be read at all', async () => {
+    // Arrange — a rejected read is not the same as an unparseable document: the cases above omit a
+    // session the schema refuses, but a filesystem that cannot answer at all is damaged state, and
+    // the bounded walk hands that failure straight back to the caller.
+    const failure = new Error('EIO: the session directory is unreadable');
+    const source = new StorageTaskBoardSessionDirectory({
+      sessionIds: () => ['ok', 'broken'],
+      readConfig: async id => {
+        if (id === 'broken') throw failure;
+        return configDocument(id);
+      },
+      readState: async id => ({ id, status: 'running', turn: 1 }),
+    });
+
+    // Act
+    const raised = await source.snapshot().catch((error: unknown) => error);
+
+    // Assert
+    should(raised).equal(failure);
+  });
 });

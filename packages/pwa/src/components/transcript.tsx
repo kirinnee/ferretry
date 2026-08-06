@@ -1,5 +1,6 @@
 import { type MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useInputModality } from '../hooks/use-input-modality.ts';
+import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
@@ -154,6 +155,9 @@ export function Transcript({
     <section aria-label={label} className="fy-transcript-shell" data-daemon-id={daemonId} data-session-id={sessionId}>
       <div
         className="fy-transcript"
+        /* Pulling down here loads older messages. The global finder gesture must
+           not take that away, so this scroller declines it by name. */
+        {...{ [PULL_TO_PALETTE_IGNORE_ATTR]: '' }}
         onContextMenu={onQuoteContextMenu}
         onPointerDownCapture={event => {
           lastPointerType.current = event.pointerType || 'unknown';
