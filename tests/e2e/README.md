@@ -59,8 +59,8 @@ these helpers or reuse their resources across journeys.
 
 Run the tier with `task test:e2e`. It typechecks the harness and runs without a
 coverage ledger. This compiled-browser tier remains local and is not itself run
-in CI. A separate PWA lane is adding a focused CI guard for the Vite directory
-override, while existing unit and integration tiers guard the protocol
+in CI. The focused PWA build-contract unit guard covers the Vite directory
+override in CI, while existing unit and integration tiers guard the protocol
 behaviour; a regression that exists only in this full journey is not yet a CI
 guard.
 

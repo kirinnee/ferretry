@@ -910,9 +910,9 @@ and the event payload appear in none of the frames the rendezvous handled.
 WebSockets and the **real** rendezvous state machine, with Cloudflare's own runtime substituted —
 hibernation, the auto-responder, durable storage and alarms are ports, not `workerd`. So it proves
 this protocol's behaviour end to end and still proves nothing about Cloudflare. **That
-compiled-browser tier is local and does not run in CI.** A separate PWA lane is adding a focused CI
-guard for the Vite directory override, and the existing unit and integration tiers guard the protocol
-behaviour; neither turns the full Chrome journey itself into a CI guard.
+compiled-browser tier is local and does not run in CI.** The focused PWA build-contract unit guard
+covers the Vite directory override in CI, and the existing unit and integration tiers guard the
+protocol behaviour; none turns the full Chrome journey itself into a CI guard.
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
 parses this advertisement from the directory origin Vite compiles into the bundle, whose default is
