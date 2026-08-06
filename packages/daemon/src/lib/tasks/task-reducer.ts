@@ -32,8 +32,7 @@ import {
   taskPhaseMovesBackward,
   taskStatusFromPhase,
 } from './task-policy.ts';
-import type { TaskEntry, TaskSnapshot } from './task-snapshot.ts';
-import { validateTaskEntry } from './task-snapshot.ts';
+import { TASK_SNAPSHOT_SCHEMA_VERSION, validateTaskEntry, type TaskEntry, type TaskSnapshot } from './task-snapshot.ts';
 
 /** Everything a mutation needs that the caller must supply rather than the reducer discover. */
 export interface TaskMutationContext {
@@ -124,7 +123,7 @@ const commit = (snapshot: TaskSnapshot, entry: TaskEntry, replace: boolean): Tas
   const tasks = replace
     ? snapshot.tasks.map(candidate => (candidate.task.id === validated.task.id ? validated : candidate))
     : [...snapshot.tasks, validated];
-  return { snapshot: { v: TASK_SCHEMA_VERSION, tasks }, entry: validated };
+  return { snapshot: { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks }, entry: validated };
 };
 
 /**

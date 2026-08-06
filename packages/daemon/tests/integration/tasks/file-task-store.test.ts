@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { ACTOR_AUTHORITY_SPLIT_SEMANTICS, type TaskActivity } from '@ferretry/protocol';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
@@ -13,7 +14,7 @@ import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { taskRoutes, type TaskSubsystem } from '../../../src/lib/runtime/mounts/tasks.ts';
 import { TASK_UNAVAILABLE_MESSAGE, TaskError, TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
-import type { TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
+import { TASK_SNAPSHOT_SCHEMA_VERSION, type TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
 import { CREDENTIALS, human } from '../../unit/runtime/mounts/support.ts';
 import { createdActivity, INSTANT, shouldReject, task, withTempRoot } from './fixtures.ts';
@@ -23,7 +24,7 @@ const SESSION = 'session-alpha';
 const boardPath = (root: string): string => join(root, 'boards', SESSION, 'tasks.json');
 
 const snapshot = (...ids: readonly string[]): TaskSnapshot => ({
-  v: 1,
+  v: TASK_SNAPSHOT_SCHEMA_VERSION,
   tasks: ids.map(id => ({ task: task({ id: id as never }), activity: [createdActivity()] })),
 });
 
@@ -108,7 +109,7 @@ describe('FileTaskStore', () => {
       const actual = await store.read();
 
       // Assert
-      should(actual).eql({ v: 1, tasks: [] });
+      should(actual).eql({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [] });
     });
   });
 
@@ -124,6 +125,72 @@ describe('FileTaskStore', () => {
       const written = await readFile(boardPath(root), 'utf8');
       should(JSON.parse(written).tasks).have.length(1);
       should(written.endsWith('\n')).be.true();
+    });
+  });
+
+  it('should preserve stamped completion evidence when rewriting v1 and fence out a v1 reader', async () => {
+    await withTempRoot(async root => {
+      // Arrange — v1 was the outer container an older daemon would parse before Zod stripped fields
+      // it did not know. A current daemon must accept that legacy container, preserve the receipt,
+      // and write the outer v2 fence before its next whole-snapshot rewrite.
+      const completion: TaskActivity = {
+        v: 1,
+        seq: 2,
+        time: INSTANT,
+        actor: 'peer:session-alpha',
+        actorName: null,
+        type: 'status',
+        data: {
+          from: 'live',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason: 'verified release',
+          verifiedByTopAgent: true,
+          attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          authorization: {
+            boardId: 'board-1',
+            grantId: 'grant-1',
+            sessionId: 'session-alpha',
+            targetSessionId: 'session-alpha',
+            role: 'top_agent',
+            boardEpoch: 1,
+            coordinatorEpoch: 1,
+            runtimeGeneration: 1,
+            action: 'mark_done',
+            requestId: 'click-1',
+            requestFingerprint: { action: 'phase', phase: 'done', reason: 'verified release' },
+          },
+        },
+      };
+      const legacy = JSON.stringify({
+        v: 1,
+        tasks: [
+          {
+            task: task({ phase: 'done', status: 'done', statusReason: 'verified release' }),
+            activity: [createdActivity(), completion],
+          },
+        ],
+      });
+      const path = await writeBoard(root, legacy);
+      const store = new FileTaskStore(path);
+
+      // Act — the no-op transaction deliberately exercises FileTaskStore's real parse and complete
+      // atomic rewrite, rather than testing a second serialization implementation.
+      const read = await store.read();
+      await store.transact(current => ({ container: current, result: null }));
+      const rewritten = JSON.parse(await readFile(path, 'utf8')) as {
+        readonly v: number;
+        readonly tasks: readonly { readonly activity: readonly TaskActivity[] }[];
+      };
+
+      // Assert — current code retains the entire receipt, then upgrades the outer boundary. The
+      // pre-upgrade decoder's first guard was `value.v !== 1`, before it invoked Zod on activities;
+      // seeing v2 therefore makes an older daemon refuse without a destructive rewrite.
+      should(read.v).equal(TASK_SNAPSHOT_SCHEMA_VERSION);
+      should(rewritten.v).equal(TASK_SNAPSHOT_SCHEMA_VERSION);
+      should(rewritten.v).not.equal(1);
+      should(rewritten.tasks[0]?.activity[1]).deepEqual(completion);
     });
   });
 

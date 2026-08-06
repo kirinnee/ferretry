@@ -3,7 +3,7 @@ import should from 'should';
 import { TaskError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskActor } from '../../../src/lib/tasks/task-policy.ts';
 import type { TaskMutationContext } from '../../../src/lib/tasks/task-reducer.ts';
-import type { TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
+import { TASK_SNAPSHOT_SCHEMA_VERSION, type TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 
 const INSTANT = '2026-07-30T12:00:00Z';
 export const LATER_INSTANT = '2026-07-30T12:05:00Z';
@@ -35,7 +35,7 @@ export const task = (overrides: Partial<Task> = {}): Task => ({
 
 /** A board holding exactly these tasks, each with the minimum history the schema accepts. */
 export const snapshotOf = (...tasks: readonly Task[]): TaskSnapshot => ({
-  v: 1,
+  v: TASK_SNAPSHOT_SCHEMA_VERSION,
   tasks: tasks.map(record => ({
     task: record,
     activity: [

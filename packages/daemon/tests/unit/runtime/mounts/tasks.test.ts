@@ -10,6 +10,7 @@ import {
   TASK_UNAVAILABLE_MESSAGE,
   TaskError,
 } from '../../../../src/lib/tasks/index.ts';
+import { TASK_SNAPSHOT_SCHEMA_VERSION } from '../../../../src/lib/tasks/task-snapshot.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   AT,
@@ -628,7 +629,7 @@ describe('the task board mount', () => {
       // Arrange — a record an UN-UPGRADED host wrote long after this fix was authored. A cutoff
       // date would read it as trustworthy; the missing semantics stamp is what gives it away.
       const board = new FakeTaskBoard('s1', {
-        v: 1,
+        v: TASK_SNAPSHOT_SCHEMA_VERSION,
         tasks: [
           {
             task: legacyTask(),

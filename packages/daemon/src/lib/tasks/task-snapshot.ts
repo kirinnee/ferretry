@@ -1,5 +1,17 @@
-import { TASK_SCHEMA_VERSION, TaskActivitySchema, TaskSchema, type Task, type TaskActivity } from '@ferretry/protocol';
+import { TaskActivitySchema, TaskSchema, type Task, type TaskActivity } from '@ferretry/protocol';
 import { TaskError } from './task-error.ts';
+
+/** The old outer container reused the task-record version, so v1 remains a read-only migration input. */
+const LEGACY_TASK_SNAPSHOT_SCHEMA_VERSION = 1 as const;
+
+/**
+ * The outer task-file container version.
+ *
+ * It is deliberately distinct from the public task-record version. Once a current daemon has
+ * persisted the actor/authority receipt, an older v1 daemon must refuse this container before it
+ * can parse-and-rewrite away fields it does not know.
+ */
+export const TASK_SNAPSHOT_SCHEMA_VERSION = 2 as const;
 
 /** One task snapshot and the complete activity history that belongs to it. */
 export interface TaskEntry {
@@ -9,7 +21,7 @@ export interface TaskEntry {
 
 /** Pure task content embedded in whichever authoritative board container owns it. */
 export interface TaskSnapshot {
-  readonly v: typeof TASK_SCHEMA_VERSION;
+  readonly v: typeof TASK_SNAPSHOT_SCHEMA_VERSION;
   readonly tasks: readonly TaskEntry[];
 }
 
@@ -40,7 +52,7 @@ const hintedTaskId = (value: unknown): string | null => {
   return typeof id === 'string' && id.length > 0 && id.length <= 32 ? id : null;
 };
 
-export const emptyTaskSnapshot = (): TaskSnapshot => ({ v: TASK_SCHEMA_VERSION, tasks: [] });
+export const emptyTaskSnapshot = (): TaskSnapshot => ({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [] });
 
 const fatalSnapshot = (detail: string): DecodedTaskSnapshot => ({
   snapshot: emptyTaskSnapshot(),
@@ -80,7 +92,9 @@ const decodeActivity = (value: unknown, taskId: string, parseErrors: TaskParseIs
 /** Defensively decodes pure task content without knowing where its enclosing board is stored. */
 export const decodeTaskSnapshot = (value: unknown): DecodedTaskSnapshot => {
   if (!isRecord(value)) return fatalSnapshot('task snapshot is not an object');
-  if (value['v'] !== TASK_SCHEMA_VERSION) return fatalSnapshot('task snapshot schema version is unknown');
+  if (value['v'] !== LEGACY_TASK_SNAPSHOT_SCHEMA_VERSION && value['v'] !== TASK_SNAPSHOT_SCHEMA_VERSION) {
+    return fatalSnapshot('task snapshot schema version is unknown');
+  }
   if (!Array.isArray(value['tasks'])) return fatalSnapshot('task snapshot has no task list');
 
   const tasks: TaskEntry[] = [];
@@ -104,7 +118,9 @@ export const decodeTaskSnapshot = (value: unknown): DecodedTaskSnapshot => {
     );
     tasks.push({ task: parsedTask.data, activity });
   }
-  return { snapshot: { v: TASK_SCHEMA_VERSION, tasks }, parseErrors, fatal: false };
+  // Reading v1 is intentionally a one-way migration. The next whole-snapshot write carries v2,
+  // which a rollback to the old reader refuses instead of silently stripping new provenance.
+  return { snapshot: { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks }, parseErrors, fatal: false };
 };
 
 /** Parses JSON only; board placement, path selection, and missing-file policy remain outside core. */
@@ -141,7 +157,9 @@ export const validateTaskEntry = (entry: TaskEntry): TaskEntry => {
 
 /** Validates duplicate IDs and every nested protocol object, returning fresh readonly-compatible values. */
 export const validateTaskSnapshot = (snapshot: TaskSnapshot): TaskSnapshot => {
-  if (snapshot.v !== TASK_SCHEMA_VERSION) throw new TaskError('invalid', 'task snapshot schema version is unknown');
+  if (snapshot.v !== TASK_SNAPSHOT_SCHEMA_VERSION) {
+    throw new TaskError('invalid', 'task snapshot schema version is unknown');
+  }
   const seen = new Set<string>();
   const tasks = snapshot.tasks.map(entry => {
     const validated = validateTaskEntry(entry);
@@ -151,7 +169,7 @@ export const validateTaskSnapshot = (snapshot: TaskSnapshot): TaskSnapshot => {
     seen.add(validated.task.id);
     return validated;
   });
-  return { v: TASK_SCHEMA_VERSION, tasks };
+  return { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks };
 };
 
 export const serializeTaskSnapshot = (snapshot: TaskSnapshot): string =>

@@ -7,6 +7,7 @@ import {
   emptyTaskSnapshot,
   parseTaskSnapshot,
   serializeTaskSnapshot,
+  TASK_SNAPSHOT_SCHEMA_VERSION,
   validateTaskEntry,
   validateTaskSnapshot,
   type TaskEntry,
@@ -63,7 +64,7 @@ describe('task snapshot decoding', () => {
     // Assert
     should(actual.fatal).be.false();
     should(actual.parseErrors).deepEqual([]);
-    should(actual.snapshot).deepEqual(input);
+    should(actual.snapshot).deepEqual({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry()] });
     should(actual.snapshot).not.equal(input);
     should(actual.snapshot.tasks[0]).not.equal(input.tasks[0]);
   });
@@ -155,7 +156,7 @@ describe('task snapshot decoding', () => {
 describe('task snapshot validation and serialization', () => {
   it('should round-trip the pure snapshot without session or board placement fields', () => {
     // Arrange
-    const input: TaskSnapshot = { v: 1, tasks: [entry()] };
+    const input: TaskSnapshot = { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry()] };
 
     // Act
     const serialized = serializeTaskSnapshot(input);
@@ -193,7 +194,7 @@ describe('task snapshot validation and serialization', () => {
 
   it('should reject duplicate task IDs in an outgoing snapshot', () => {
     // Arrange
-    const input: TaskSnapshot = { v: 1, tasks: [entry(), entry()] };
+    const input: TaskSnapshot = { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry(), entry()] };
 
     // Act + Assert
     should(() => validateTaskSnapshot(input)).throw(TaskError);
