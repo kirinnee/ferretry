@@ -579,6 +579,7 @@ pairing-fragment-readers)
 
   # And the behaviour, because a shared constant proves nothing if the reader still refuses the link.
   # Every version the writer can EMIT is built for real and handed to the CLI's own check.
+  # shellcheck disable=SC2016 # The JavaScript template literals must reach Bun without shell expansion.
   bun -e '
     const { formatPairingFragment, pairingLinkUrl, PAIRING_FRAGMENT_PATTERN } = await import(
       "./packages/protocol/src/lib/pairing.ts"
