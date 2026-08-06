@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isLoopbackHost, isWildcardHost } from './address.ts';
 import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './advertisement.ts';
+import { PublishedCarriersSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
 
 /** Pairing codes are deliberately short-lived and have a small online-attempt budget. */
@@ -56,11 +57,27 @@ export const DaemonNameSchema = z
 /** Capability names are opaque and forward-compatible; empty means no remote surface is granted. */
 export const PairingCapabilitySchema = z.string().trim().min(1).max(64);
 
+/**
+ * What a device is handed the one moment it is guaranteed to be talking to the daemon directly.
+ *
+ * THE CARRIER SET IS ON THE REDEMPTION RESPONSE RATHER THAN ON THE MINT, and the two are read by
+ * different parties: the mint response is read by the HOST's own UI, which already has the daemon in
+ * front of it, while this one is read by the DEVICE — the party that has to know where to look next
+ * time. Publishing it here is also the only moment it can be trusted for free: pairing can never be
+ * relayed (`docs/relay-protocol.md` §13), so the connection carrying this answer is direct by
+ * construction and no rendezvous had an opportunity to edit it.
+ *
+ * A KEY ADDED TO A DEVICE-FACING `strictObject` IS A BREAKING CHANGE — see the rule recorded in
+ * `version-skew.ts`. `carriers` defaults to the empty list so a NEWER client reading an OLDER daemon
+ * degrades to direct-only, which is exactly what an older daemon offers; the other direction is the
+ * one the rule governs.
+ */
 export const PairingResponseSchema = z.strictObject({
   deviceToken: DeviceTokenSchema,
   daemonId: DaemonIdSchema,
   daemonName: DaemonNameSchema,
   capabilities: z.array(PairingCapabilitySchema).max(64).readonly(),
+  carriers: PublishedCarriersSchema.default([]),
 });
 export type PairingResponse = z.infer<typeof PairingResponseSchema>;
 

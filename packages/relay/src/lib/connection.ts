@@ -28,6 +28,7 @@
  * must consume.
  */
 
+import { type DaemonCarrier, DaemonOriginSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import { parseDaemonId } from './identity.ts';
 
@@ -102,9 +103,16 @@ export const SocketEndpointSchema = z
  * written before the field existed can only have described a relay its owner deployed, so absent is
  * read as `'self'` rather than as an unknown: an old pairing keeps its exact meaning instead of
  * being re-described as somebody else's service.
+ *
+ * THE TWO ADDRESS RULES ARE THE PROTOCOL'S, ONE PER KIND, and this schema states neither itself. A
+ * relay is {@link SocketEndpointSchema} — a third party is on the path, so plaintext to a stranger's
+ * service is refused. A daemon is `DaemonOriginSchema` — the operator's own machine, so plain HTTP on
+ * a private network is allowed, while credentials, a proxy path, a query or a fragment are not. Held
+ * to the relay rule instead, this branch would reject the most ordinary direct carrier there is and
+ * disagree with `daemonBaseUrl`, the reader every stored direct address actually passes through.
  */
 export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('direct'), daemonUrl: SocketEndpointSchema }),
+  z.strictObject({ kind: z.literal('direct'), daemonUrl: DaemonOriginSchema }),
   z.strictObject({
     kind: z.literal('relay'),
     relayUrl: SocketEndpointSchema,
@@ -247,6 +255,89 @@ export type ConnectionChoice =
  */
 export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readonly ConnectionMethod[] {
   return [...methods.filter(method => method.kind === 'direct'), ...methods.filter(method => method.kind !== 'direct')];
+}
+
+/**
+ * A daemon's PUBLISHED carrier set, as carriers this browser will dial, in the order it will try them.
+ *
+ * The order is `connectionPreferenceOrder`'s and nothing else's — every `direct` entry in the order the
+ * daemon published them, then every `relay` in the order the daemon published them. WITHIN A KIND THE
+ * DAEMON'S ORDER IS THE ANSWER, because it is where the operator wrote their preference down, and a
+ * client that re-sorted it would be substituting its own. There is deliberately no latency race: a race
+ * makes the winner nondeterministic, and a surface that reports which carrier is live has to be able to
+ * say WHY that one won.
+ *
+ * A CARRIER THE PROTOCOL WILL NOT DIAL IS DROPPED RATHER THAN CARRIED FORWARD, AND THAT IS PER ENTRY
+ * FOR BOTH KINDS. The published set already passed the wire schema on the way across, so a failure
+ * here means the two ends disagree about what is dialable, and dialling anyway is how a client ends up
+ * trusting a carrier its own protocol refuses. Dropping ONE entry rather than refusing the set is the
+ * other half of the rule: this runs inside a pairing redemption and inside every carrier refresh, and
+ * a daemon that published one address this build will not dial must still be reachable on the others.
+ * A throw here would turn a single bad member into a device that cannot pair at all.
+ *
+ * `operator` IS DERIVED HERE AND IS DISCLOSURE ONLY. Who runs a rendezvous is not a wire fact and the
+ * published set carries no claim about it — deliberately, because a daemon's self-report is not
+ * something a device can check. What a device CAN check is whether the address equals the hosted one it
+ * discovered for itself, so that comparison is the answer, and an unrecognised address is somebody's
+ * own relay. Nothing about the path changes either way; only the sentence a person reads.
+ */
+export function publishedConnectionMethods(
+  carriers: readonly DaemonCarrier[],
+  hostedRelayUrl?: string,
+): readonly ConnectionMethod[] {
+  const methods: ConnectionMethod[] = [];
+  for (const carrier of carriers) {
+    const parsed = ConnectionMethodSchema.safeParse(
+      carrier.kind === 'direct'
+        ? { kind: 'direct', daemonUrl: carrier.url }
+        : {
+            kind: 'relay',
+            relayUrl: carrier.url,
+            operator: carrier.url === hostedRelayUrl ? 'hosted' : 'self',
+          },
+    );
+    if (parsed.success) methods.push(parsed.data);
+  }
+  return connectionPreferenceOrder(methods);
+}
+
+/**
+ * What happened when one carrier was tried.
+ *
+ * TWO OUTCOMES, AND THE DISTINCTION IS THE WHOLE RULE. `answered` means something served the request —
+ * any status, `503` included. `transport-failure` means nothing did: the socket never opened, the name
+ * did not resolve, the attempt timed out, TLS was refused.
+ */
+export type CarrierAttempt =
+  | { readonly kind: 'answered'; readonly status: number }
+  | { readonly kind: 'transport-failure'; readonly detail: string };
+
+/**
+ * Does a walk over the carrier set advance past this attempt?
+ *
+ * ONLY A TRANSPORT FAILURE ADVANCES. A status code is an ANSWER, and an answer means this carrier
+ * works — so `503` STOPS the walk rather than sending the client to the next address. Advancing on it
+ * would be a client deciding a busy or refusing daemon is an absent one, and the next carrier reaches
+ * the very same daemon: the walk would exhaust every address to arrive at the answer it already had,
+ * and report "nothing was reachable" for a daemon that replied every single time.
+ */
+export function carrierWalkAdvances(
+  attempt: CarrierAttempt,
+): attempt is Extract<CarrierAttempt, { kind: 'transport-failure' }> {
+  return attempt.kind === 'transport-failure';
+}
+
+/**
+ * One attempt, as {@link chooseConnection} reads it.
+ *
+ * The bridge exists so "reachable" has ONE definition. `chooseConnection` picks the first reachable
+ * carrier and records what it passed over; whether an attempt counts as reachable is
+ * {@link carrierWalkAdvances}'s answer, inverted, and no caller gets to decide it separately.
+ */
+export function carrierProbe(method: ConnectionMethod, attempt: CarrierAttempt): ConnectionProbe {
+  return carrierWalkAdvances(attempt)
+    ? { method, reachable: false, detail: attempt.detail }
+    : { method, reachable: true };
 }
 
 /**

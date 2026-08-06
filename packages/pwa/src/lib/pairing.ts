@@ -1,3 +1,5 @@
+import type { DaemonCarrier } from '@ferretry/protocol';
+import { publishedConnectionMethods } from '@ferretry/relay';
 import { daemonBaseUrl, daemonConnection, daemonId, type DaemonConnection } from './daemon-connection.ts';
 
 export interface PairingSeed {
@@ -9,6 +11,7 @@ export interface PairingSeed {
 export interface PairingResult {
   readonly daemonId: string;
   readonly deviceToken: string;
+  readonly carriers: readonly DaemonCarrier[];
 }
 
 const requireNonEmpty = (value: string, name: string): string => {
@@ -102,9 +105,22 @@ export const pairingDaemonHost = (seed: PairingSeed): string => new URL(seed.dae
  * Binds the daemon's pairing response to the fingerprint carried out of band
  * by the pairing link before the PWA stores or uses its device token.
  */
-export const pairedDaemonConnection = (seed: PairingSeed, result: PairingResult): DaemonConnection => {
+export const pairedDaemonConnection = (
+  seed: PairingSeed,
+  result: PairingResult,
+  hostedRelayUrl?: string,
+): DaemonConnection => {
   const expectedDaemonId = daemonId(seed.daemonId);
   const actualDaemonId = daemonId(result.daemonId);
   if (expectedDaemonId !== actualDaemonId) throw new Error('pairing response daemon ID does not match its fingerprint');
-  return daemonConnection({ daemonId: actualDaemonId, baseUrl: seed.daemonUrl, deviceToken: result.deviceToken });
+  const published = publishedConnectionMethods(result.carriers, hostedRelayUrl);
+  return daemonConnection({
+    daemonId: actualDaemonId,
+    baseUrl: seed.daemonUrl,
+    deviceToken: result.deviceToken,
+    // A newer client reading an older daemon receives the schema default `[]`.
+    // The direct exchange just succeeded, so that address is the one carrier it
+    // can prove without inventing a rendezvous.
+    carriers: published.length === 0 ? [{ kind: 'direct', daemonUrl: seed.daemonUrl }] : published,
+  });
 };

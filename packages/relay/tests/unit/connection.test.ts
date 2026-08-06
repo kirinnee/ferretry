@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
+  carrierProbe,
+  carrierWalkAdvances,
   type ConnectionMethod,
   ConnectionMethodSchema,
   chooseConnection,
@@ -7,6 +9,7 @@ import {
   connectionSocketUrl,
   describeConnectionMethod,
   parseRendezvousPath,
+  publishedConnectionMethods,
   SocketEndpointSchema,
 } from '@ferretry/relay';
 import should from 'should';
@@ -15,6 +18,7 @@ const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const direct: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.tailnet.example' };
 const relay: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.example' };
 const hosted: ConnectionMethod = { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' };
+const secureDirect: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.example' };
 
 describe('socket endpoints', () => {
   it('should accept secure schemes anywhere and insecure ones only where the published CSP allows', () => {
@@ -58,6 +62,23 @@ describe('socket endpoints', () => {
         .success,
     ).be.false();
     should(ConnectionMethodSchema.safeParse({ kind: 'hosted', relayUrl: 'https://relay.example' }).success).be.false();
+  });
+
+  it('should hold a direct carrier to the daemon origin rule, not the rendezvous one', () => {
+    // A daemon on a private network address commonly serves plain HTTP, and it is the operator's own
+    // machine — refusing it here would reject the most ordinary direct carrier there is.
+    should(ConnectionMethodSchema.parse({ kind: 'direct', daemonUrl: 'http://box.lan:7431' })).deepEqual({
+      kind: 'direct',
+      daemonUrl: 'http://box.lan:7431',
+    });
+    should(ConnectionMethodSchema.parse({ kind: 'direct', daemonUrl: 'https://box.example/' })).deepEqual(secureDirect);
+    should(
+      ConnectionMethodSchema.safeParse({ kind: 'direct', daemonUrl: 'https://box.example/proxied' }).success,
+    ).be.false();
+    should(
+      ConnectionMethodSchema.safeParse({ kind: 'direct', daemonUrl: 'https://user:pw@box.example' }).success,
+    ).be.false();
+    should(ConnectionMethodSchema.safeParse({ kind: 'direct', daemonUrl: 'ftp://box.example' }).success).be.false();
   });
 });
 
@@ -114,6 +135,63 @@ describe('carrier disclosure and choice', () => {
 
   it('should always try direct first', () => {
     should(connectionPreferenceOrder([relay, direct])).deepEqual([direct, relay]);
+  });
+
+  it('should turn a published set into direct-first methods without reordering within a kind', () => {
+    should(
+      publishedConnectionMethods(
+        [
+          { kind: 'relay', url: 'https://first-relay.example' },
+          { kind: 'direct', url: 'https://first-direct.example' },
+          { kind: 'relay', url: 'https://hosted.example' },
+          { kind: 'direct', url: 'https://second-direct.example' },
+        ],
+        'https://hosted.example',
+      ),
+    ).deepEqual([
+      { kind: 'direct', daemonUrl: 'https://first-direct.example' },
+      { kind: 'direct', daemonUrl: 'https://second-direct.example' },
+      { kind: 'relay', relayUrl: 'https://first-relay.example', operator: 'self' },
+      { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' },
+    ]);
+    should(
+      publishedConnectionMethods([
+        { kind: 'relay', url: 'http://not-loopback.example' } as never,
+        { kind: 'direct', url: 'http://box.lan:7431' },
+      ]),
+    ).deepEqual([{ kind: 'direct', daemonUrl: 'http://box.lan:7431' }]);
+  });
+
+  it('should drop one undialable published carrier of either kind and keep the rest', () => {
+    // Every shape the daemon's own wire schema refuses, arriving anyway — one bad member must not
+    // cost a device the carriers it could have used, on a pairing or on a refresh.
+    should(
+      publishedConnectionMethods(
+        [
+          { kind: 'direct', url: 'https://box.example/behind/a/proxy' } as never,
+          { kind: 'direct', url: 'https://user:pw@box.example' } as never,
+          { kind: 'direct', url: 'ftp://box.example' } as never,
+          { kind: 'direct', url: 'not a url' } as never,
+          { kind: 'direct', url: 'http://box.lan:7431/' },
+          { kind: 'relay', url: 'http://not-loopback.example' } as never,
+          { kind: 'relay', url: 'https://hosted.example' },
+        ],
+        'https://hosted.example',
+      ),
+    ).deepEqual([
+      { kind: 'direct', daemonUrl: 'http://box.lan:7431' },
+      { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' },
+    ]);
+    should(publishedConnectionMethods([{ kind: 'direct', url: 'https://box.example/proxied' } as never])).deepEqual([]);
+  });
+
+  it('should advance only on transport failure, never on an HTTP answer including 503', () => {
+    const failed = { kind: 'transport-failure' as const, detail: 'TLS refused' };
+    const answered = { kind: 'answered' as const, status: 503 };
+    should(carrierWalkAdvances(failed)).be.true();
+    should(carrierWalkAdvances(answered)).be.false();
+    should(carrierProbe(relay, failed)).deepEqual({ method: relay, reachable: false, detail: 'TLS refused' });
+    should(carrierProbe(relay, answered)).deepEqual({ method: relay, reachable: true });
   });
 
   it('should take the first reachable carrier and name it', () => {

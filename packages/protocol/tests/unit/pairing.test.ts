@@ -95,9 +95,33 @@ describe('pairing protocol', () => {
   });
 
   it('should validate the complete successful response and typed credentials', () => {
-    const response = { deviceToken, daemonId, daemonName: 'workstation', capabilities: ['daemon-api'] };
+    const response = {
+      deviceToken,
+      daemonId,
+      daemonName: 'workstation',
+      capabilities: ['daemon-api'],
+      carriers: [
+        { kind: 'direct' as const, url: 'https://daemon.example' },
+        { kind: 'relay' as const, url: 'wss://relay.example' },
+      ],
+    };
 
     should(PairingResponseSchema.parse(response)).deepEqual(response);
+    should(PairingResponseSchema.parse({ ...response, carriers: undefined }).carriers).deepEqual([]);
+    should(
+      PairingResponseSchema.safeParse({
+        ...response,
+        carriers: [{ kind: 'relay', url: 'http://relay.example' }],
+      }).success,
+    ).be.false();
+    // A direct address the reading device would refuse is refused on the wire, not after the QR.
+    should(
+      PairingResponseSchema.safeParse({
+        ...response,
+        carriers: [{ kind: 'direct', url: 'https://daemon.example/behind/a/proxy' }],
+      }).success,
+    ).be.false();
+    should(PairingResponseSchema.safeParse({ ...response, carriers: [], surprise: true }).success).be.false();
     should(DeviceTokenSchema.parse(deviceToken)).equal(deviceToken);
     should(DaemonIdSchema.parse(daemonId)).equal(daemonId);
     should(DeviceTokenSchema.safeParse('device-token').success).be.false();

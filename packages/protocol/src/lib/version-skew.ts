@@ -1,3 +1,31 @@
+/**
+ * WHAT TWO ENDS ON DIFFERENT VERSIONS DO ABOUT IT — and the one rule that decides whether they can.
+ *
+ * ## A KEY ADDED TO A DEVICE-FACING `strictObject` IS A BREAKING CHANGE, NOT AN ADDITIVE ONE
+ *
+ * This is the rule, recorded here because this module is where version disagreement is reasoned about
+ * and because the trap is invisible at the call site that springs it.
+ *
+ * Every device-facing response in this package is a `strictObject`, which REFUSES an unknown key
+ * rather than ignoring it. That is the right default — a client that silently drops a field it does
+ * not understand is a client nobody can reason about — but it has a consequence that reads backwards:
+ * adding a field to such a response breaks every OLDER client parsing a NEWER daemon's answer. The
+ * failure is total for that exchange, not partial, and it looks like the daemon refusing the client.
+ *
+ * So: **a key added to a device-facing `strictObject` ships in the same release as the client that
+ * reads it, or it is a breaking change.** `PairingResponseSchema.carriers` was added under that rule.
+ * The pairing fragment is already versioned (`v1;…`), and a second version of it is the escape hatch
+ * if one is ever genuinely needed — it is not a substitute for shipping the pair together.
+ *
+ * The OTHER direction is safe and needs no ceremony: a newer client reading an older daemon sees the
+ * key absent, which is what a schema default is for, and the default has to mean what the older
+ * daemon actually offers rather than what the newer one would have said.
+ *
+ * The window in which "same release" is achievable is the window in which the paired-device population
+ * is small. That is a fact about calendars rather than code, and it is why a field like this lands
+ * early or does not land at all.
+ */
+
 import { z } from 'zod';
 
 const VERSION_PATTERN =

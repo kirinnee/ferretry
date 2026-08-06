@@ -100,12 +100,70 @@ describe('paired daemon connection', () => {
     );
 
     // Act
-    const actual = pairedDaemonConnection(seed, { daemonId: 'loopback', deviceToken: 'device-token' });
+    const actual = pairedDaemonConnection(seed, {
+      daemonId: 'loopback',
+      deviceToken: 'device-token',
+      carriers: [],
+    });
     const mismatch = (): unknown =>
-      pairedDaemonConnection(seed, { daemonId: 'different', deviceToken: 'device-token' });
+      pairedDaemonConnection(seed, { daemonId: 'different', deviceToken: 'device-token', carriers: [] });
 
     // Assert
-    should(actual).deepEqual({ daemonId: 'loopback', baseUrl: 'http://127.0.0.1:7431', deviceToken: 'device-token' });
+    should(actual).deepEqual({
+      daemonId: 'loopback',
+      baseUrl: 'http://127.0.0.1:7431',
+      deviceToken: 'device-token',
+      carriers: [{ kind: 'direct', daemonUrl: 'http://127.0.0.1:7431' }],
+    });
     should(mismatch).throw('pairing response daemon ID does not match its fingerprint');
+  });
+
+  it('should drop an undialable published carrier rather than fail the whole pairing', () => {
+    // Arrange
+    const seed = pairingSeedFromUrl(
+      'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=a;fp=loopback',
+    );
+
+    // Act
+    const actual = pairedDaemonConnection(
+      seed,
+      {
+        daemonId: 'loopback',
+        deviceToken: 'device-token',
+        carriers: [
+          // A reverse-proxy prefix, credentials and a scheme nobody dials: refused by the daemon's own
+          // wire schema, and refused here too if one arrives from a daemon that never applied it.
+          { kind: 'direct', url: 'https://box.example/behind/a/proxy' },
+          { kind: 'direct', url: 'https://user:pw@box.example' },
+          { kind: 'direct', url: 'ftp://box.example' },
+          { kind: 'direct', url: 'http://127.0.0.1:7431' },
+          { kind: 'relay', url: 'https://relay.example' },
+        ],
+      },
+      'https://relay.example',
+    );
+
+    // Assert
+    should(actual.carriers).deepEqual([
+      { kind: 'direct', daemonUrl: 'http://127.0.0.1:7431' },
+      { kind: 'relay', relayUrl: 'https://relay.example', operator: 'hosted' },
+    ]);
+  });
+
+  it('should fall back to the address the pairing succeeded on when nothing published survives', () => {
+    // Arrange
+    const seed = pairingSeedFromUrl(
+      'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=a;fp=loopback',
+    );
+
+    // Act
+    const actual = pairedDaemonConnection(seed, {
+      daemonId: 'loopback',
+      deviceToken: 'device-token',
+      carriers: [{ kind: 'direct', url: 'https://box.example/behind/a/proxy' }],
+    });
+
+    // Assert
+    should(actual.carriers).deepEqual([{ kind: 'direct', daemonUrl: 'http://127.0.0.1:7431' }]);
   });
 });
