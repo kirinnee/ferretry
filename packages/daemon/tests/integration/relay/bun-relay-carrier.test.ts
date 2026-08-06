@@ -51,6 +51,8 @@ import { NodePairingCryptography } from '../../../src/adapters/pairing/node-pair
 import { BunRelayCarrier, type RelayWebSocket } from '../../../src/adapters/relay/bun-relay-carrier.ts';
 import { WebCryptoRelayIdentityKeys } from '../../../src/adapters/relay/web-crypto-relay-identity.ts';
 import type { ApiResponse } from '../../../src/lib/api/http.ts';
+import type { SocketUpgradeDecision } from '../../../src/lib/api/socket.ts';
+import type { PairingRedemption } from '../../../src/lib/pairing/index.ts';
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
 
 const relayCrypto = new WebCryptoRelayCrypto();
@@ -72,6 +74,11 @@ const ok = (body: unknown): ApiResponse => ({
 });
 
 const devices = { identifyDevice: (token: string) => (token === DEVICE_TOKEN ? DEVICE_ID : undefined) };
+
+/** This tier proves the SOCKET — its order, liveness, patience and teardown — so the two ports the
+ *  link uses for streams and pairing answer nothing here. What they carry is the unit tier's subject. */
+const relayStreams = async (): Promise<SocketUpgradeDecision> => ({ outcome: 'unclaimed' });
+const relayPairing = { redeemOverRelay: async (): Promise<PairingRedemption> => ({ kind: 'refused' }) };
 
 const session = (): SessionId => {
   const id = sessionIdFromBytes(new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6]));
@@ -214,6 +221,8 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
       dispatch: async request =>
         request.path === '/v1/sessions' && request.headers.get('authorization') === `Bearer ${DEVICE_TOKEN}`
           ? ok({ sessions: ['one'] })
@@ -259,6 +268,8 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
       dispatch: async () => ok({}),
       socketFactory: url => {
         dialled.push(url);
@@ -315,6 +326,8 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
       dispatch: async () => ok({}),
       socketFactory: fake.factory,
     });
@@ -350,6 +363,8 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
       dispatch: async () => ok({}),
       socketFactory: fake.factory,
       now: () => clock.value,
@@ -384,6 +399,8 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
       dispatch: async () => {
         throw new Error('the route table exploded');
       },
@@ -427,6 +444,8 @@ describe('what a socket does that a protocol does not', () => {
       crypto: relayCrypto,
       identity,
       devices,
+      sockets: relayStreams,
+      pairing: relayPairing,
       dispatch: async () => ok({}),
       socketFactory: () => broken,
     });
@@ -450,5 +469,107 @@ describe('what a socket does that a protocol does not', () => {
     should(closed.code).equal(4500);
     should(carrier.status().detail).match(/the relay link failed/u);
     carrier.stop();
+  });
+});
+
+describe('what a stopped carrier owes a live stream', () => {
+  it('should release a relayed stream handler before dropping the socket it was armed against', async () => {
+    // THE DEFECT THIS EXISTS TO PREVENT. A stream handler owns a redraw timer and a viewer slot armed
+    // against this link, and the API host's own `closeSockets` reaches only the sockets it accepted —
+    // never a relayed one. A carrier that dropped its socket without telling the link would leave both
+    // firing at a peer that is already gone, which is exactly the failure the transport's own two-step
+    // shutdown exists to prevent, reproduced on the carrier the daemon dialled.
+    //
+    // Arrange — one real session, handshaken with real crypto, carrying one stream.
+    const fake = fakeSockets();
+    const closed: string[] = [];
+    let attached = false;
+    const carrier = new BunRelayCarrier({
+      config: config({ url: 'https://relay.example' }),
+      crypto: relayCrypto,
+      identity,
+      devices,
+      sockets: async () => ({
+        outcome: 'accepted',
+        attach: async () => ({
+          open: async () => {
+            attached = true;
+          },
+          fromClient: () => undefined,
+          close: () => closed.push('released'),
+        }),
+      }),
+      pairing: relayPairing,
+      dispatch: async () => ok({}),
+      socketFactory: fake.factory,
+    });
+    carrier.start();
+    const socket = await until(() => fake.sockets[0], 'the dialled socket');
+    socket.onopen?.(undefined);
+
+    // Arrange — the rendezvous half: challenge, claim, open, and the client's hello.
+    const challenge = relayCrypto.randomBytes(NONCE_BYTES);
+    socket.onmessage?.({
+      data: controlFrame({
+        t: 'challenge',
+        protocol: RELAY_PROTOCOL_ID,
+        nonce: toBase64Url(challenge),
+        host: 'relay.example',
+        deadlineSeconds: 10,
+      }),
+    });
+    await until(() => socket.sent.at(-1), 'the claim');
+    socket.onmessage?.({
+      data: controlFrame({
+        t: 'claimed',
+        protocol: RELAY_PROTOCOL_ID,
+        limits: { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 },
+      }),
+    });
+    const sessionId = session();
+    socket.onmessage?.({ data: controlFrame({ t: 'open' }, sessionId) });
+    const pending = await startClientHandshake(relayCrypto, sessionId, identity.daemonId);
+    socket.onmessage?.({
+      data: encodeFrame({
+        kind: FRAME_KINDS.handshake,
+        sessionId,
+        sequence: HANDSHAKE_FRAME_SEQUENCE,
+        payload: encodeHandshakeMessage(pending.hello),
+      }),
+    });
+    const answered = await until(() => {
+      const frame = socket.sent
+        .map(bytes => decodeFrame(bytes as Uint8Array))
+        .filter(decoded => decoded.ok && decoded.frame.kind === FRAME_KINDS.handshake)
+        .at(-1);
+      return frame?.ok === true ? frame.frame : undefined;
+    }, 'the handshake answer');
+    const hello = decodeDaemonHello(answered.payload);
+    if (hello === null) throw new Error('the daemon hello did not parse');
+    const completed = await completeClientHandshake(relayCrypto, pending, hello);
+    if (!completed.ok) throw new Error(completed.reason);
+
+    // Act — open a stream, then take the daemon away.
+    const sealed = await sealRecord(
+      relayCrypto,
+      openChannel(sessionId, completed.keys, 'client'),
+      utf8Bytes(
+        JSON.stringify({
+          t: 'stream',
+          protocol: RELAY_PROTOCOL_ID,
+          deviceToken: DEVICE_TOKEN,
+          path: '/v1/events',
+        }),
+      ),
+    );
+    if (!sealed.ok) throw new Error(sealed.reason);
+    socket.onmessage?.({ data: encodeFrame(sealed.frame) });
+    await until(() => (attached ? true : undefined), 'the stream to attach');
+    carrier.stop();
+
+    // Assert — the handler was told before the socket went, and the socket went afterwards.
+    should(closed).deepEqual(['released']);
+    should(socket.closes.at(-1)).containDeep({ code: 1000 });
+    should(carrier.status().phase).equal('stopped');
   });
 });

@@ -26,7 +26,14 @@
 
 import type { DaemonIdentity, RelayCrypto } from '@ferretry/relay';
 import { RELAY_CLOSE_CODES } from '@ferretry/relay';
-import type { RelayApiDispatch, RelayDeviceDirectory, RelayLinkSocket } from '../../lib/relay/index.ts';
+import type {
+  RelayApiDispatch,
+  RelayDeviceDirectory,
+  RelayLinkScheduler,
+  RelayLinkSocket,
+  RelayPairingRedeemer,
+  RelayStreamDispatch,
+} from '../../lib/relay/index.ts';
 import {
   decideRelayCarrier,
   RELAY_HEARTBEAT_MS,
@@ -54,8 +61,14 @@ export interface BunRelayCarrierDependencies {
   readonly crypto: RelayCrypto;
   readonly identity: DaemonIdentity;
   readonly dispatch: RelayApiDispatch;
+  /** The daemon's ALREADY MOUNTED socket dispatcher. Handed over rather than rebuilt, so a relayed
+   *  stream passes the same authorization boundary and capability guard a direct upgrade does. */
+  readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
+  readonly pairing: RelayPairingRedeemer;
   readonly socketFactory?: RelayWebSocketFactory;
+  /** A seam, so the pre-credential deadline can be proved without a test that waits ten seconds. */
+  readonly scheduler?: RelayLinkScheduler;
   readonly now?: () => number;
   /** How often this side pings. A seam, so the liveness sweep can be proved without a test that
    *  waits half a minute for one tick — production passes nothing and gets the protocol's cadence. */
@@ -74,6 +87,14 @@ export interface RelayCarrierStatus {
 }
 
 const browserSocket: RelayWebSocketFactory = url => new WebSocket(url) as unknown as RelayWebSocket;
+
+/** The runtime's own timer, as the one thing the domain wants from one: fire later, or do not. */
+const runtimeScheduler: RelayLinkScheduler = {
+  after: (milliseconds, action) => {
+    const handle = setTimeout(action, milliseconds);
+    return { cancel: () => clearTimeout(handle) };
+  },
+};
 
 export class BunRelayCarrier {
   readonly #decision: RelayCarrierDecision;
@@ -122,8 +143,15 @@ export class BunRelayCarrier {
     this.#phase = 'stopped';
     this.#clearTimers();
     const socket = this.#socket;
+    const link = this.#link;
     this.#socket = undefined;
     this.#link = undefined;
+    // THE LINK IS TOLD BEFORE THE SOCKET GOES. A relayed stream's handler owns a redraw timer and a
+    // viewer slot armed against this link, and the API host's own `closeSockets` reaches only the
+    // sockets it accepted — never these. Dropping the socket first would leave both firing at a peer
+    // that is already gone, which is the exact failure the transport's own two-step shutdown exists
+    // to prevent, reproduced on the carrier this daemon dialled.
+    link?.close();
     socket?.close(1000, 'the daemon is shutting down');
   }
 
@@ -140,7 +168,10 @@ export class BunRelayCarrier {
       relayHost: this.#decision.relayHost,
       socket: this.#linkSocket(socket),
       dispatch: this.deps.dispatch,
+      sockets: this.deps.sockets,
       devices: this.deps.devices,
+      pairing: this.deps.pairing,
+      scheduler: this.deps.scheduler ?? runtimeScheduler,
     });
     this.#link = link;
     socket.onopen = () => {
@@ -203,6 +234,10 @@ export class BunRelayCarrier {
     if (this.#phase === 'stopped') return;
     this.#clearTimers();
     this.#socket = undefined;
+    // Every session on that socket died with it — §9 says so, and reconnection is a NEW session
+    // rather than a resumption — so whatever they were driving is released here rather than left
+    // holding timers against a link the redial below is about to replace.
+    this.#link?.close();
     this.#phase = 'dialling';
     if (this.#decision.kind !== 'dial') return;
     this.#redial = setTimeout(() => this.#dial(), this.#decision.reconnectMs);

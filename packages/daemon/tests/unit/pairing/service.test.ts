@@ -171,17 +171,54 @@ describe('PairingService minting and status', () => {
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       daemonUrl: 'https://workstation.example.test/',
+      // A v2 fragment, because this daemon publishes a rendezvous. The candidate is what a device
+      // that CANNOT reach the address beside it has to dial, and it can only travel out of band —
+      // a device that cannot reach the daemon cannot ask the daemon where else to look.
       pairUrl:
-        'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'https://ferretry.pages.dev/pair#v2;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;relay=wss%3A%2F%2Frendezvous.example.test%2Ffy',
       // Who can redeem it travels WITH it. A link and no audience is the shape that put a QR of a
       // loopback address in front of a phone, and the protocol has no value for it any more.
       reach: 'any-device',
+      relayCandidate: 'wss://rendezvous.example.test/fy',
     });
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
       status: 'pending',
       expiresAt: '2026-08-03T12:02:00.000Z',
     });
+  });
+
+  it('should mint the v1 fragment unchanged when this daemon publishes no rendezvous', () => {
+    // A daemon reachable only at its own address has no candidate to name, and the link it mints is
+    // BYTE-IDENTICAL to the one it minted before any of this existed — which is what lets a reader
+    // that predates the second version keep working against a daemon that does not need it.
+    const { service } = fixture({ carriers: [{ kind: 'direct', url: 'https://workstation.example.test' }] });
+
+    const minted = service.mint();
+
+    should(minted.pairUrl).equal(
+      'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test%2F;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    );
+    should(minted.relayCandidate).be.undefined();
+  });
+
+  it('should name the FIRST published rendezvous, from the same array a redemption answers with', async () => {
+    // The candidate and the carrier set a device stores afterwards must be the same fact, or a client
+    // is asked to choose between keeping an address the daemon did not publish and discarding the only
+    // one that works. Taking both from one frozen array is what makes that impossible.
+    const carriers: readonly DaemonCarrier[] = [
+      { kind: 'direct', url: 'https://workstation.example.test' },
+      { kind: 'relay', url: 'wss://first.example.test' },
+      { kind: 'relay', url: 'wss://second.example.test' },
+    ];
+    const { service } = fixture({ carriers });
+
+    const minted = service.mint();
+    const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+
+    should(minted.relayCandidate).equal('wss://first.example.test');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    should(redemption.response.carriers).deepEqual(carriers);
   });
 
   it('should mint a link for a loopback advertisement and say only this machine can redeem it', () => {
@@ -830,5 +867,131 @@ describe('PairingDeviceRegistry refusals', () => {
     comparisons.length = 0;
     should(registry.identify('fy_device_absent')).be.undefined();
     should(comparisons).have.length(3);
+  });
+});
+
+describe('PairingService redemption over a relay', () => {
+  it('should pair through a port that takes no request, and answer with the whole published set', async () => {
+    // Arrange
+    const { devices, service } = fixture();
+    service.mint();
+
+    // Act
+    const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+
+    // Assert — the same grant a direct redemption produces, from the same code, `carriers` included:
+    // that field is what a relay-paired device navigates by afterwards.
+    should(redemption.kind).equal('paired');
+    if (redemption.kind !== 'paired') throw new Error('expected a pairing');
+    should(redemption.response.carriers).deepEqual(CARRIERS);
+    should(redemption.response.daemonId).equal(DAEMON_ID);
+    should(devices.records).have.length(1);
+    should(devices.records[0]?.name).equal('phone');
+    // Assert — single-use, on either carrier.
+    should((await service.redeemOverRelay({ code: CODE, deviceName: 'again' })).kind).equal('refused');
+  });
+
+  it('should spend a relay budget that can never expire a code a LAN device could still redeem', async () => {
+    // Arrange
+    const { devices, service } = fixture();
+    service.mint();
+
+    // Act — five wrong guesses from the internet, which is the direct budget's whole size.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      should((await service.redeemOverRelay({ code: SECOND_CODE, deviceName: 'phone' })).kind).equal('refused');
+    }
+
+    // Assert — the code is ALIVE. This is the entire reason the counters are separate: a fingerprint
+    // is public, so a shared budget would let anybody on earth kill a code sitting on somebody's desk.
+    should(service.status(PAIRING_ID)?.status).equal('pending');
+    const direct = await service.redeem({ code: CODE, deviceName: 'phone' }, 'lan-peer');
+    should(direct.kind).equal('paired');
+    should(devices.records).have.length(1);
+  });
+
+  it('should close only the relay path once its own budget is spent', async () => {
+    // Arrange
+    const { service } = fixture();
+    service.mint();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await service.redeemOverRelay({ code: SECOND_CODE, deviceName: 'phone' });
+    }
+
+    // Act — the RIGHT code, arriving over the carrier whose budget is spent.
+    const relayed = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+
+    // Assert — refused there, and still redeemable here.
+    should(relayed).deepEqual({ kind: 'refused' });
+    should((await service.redeem({ code: CODE, deviceName: 'phone' }, 'lan-peer')).kind).equal('paired');
+  });
+
+  it('should never spend the relay budget from the direct path either', async () => {
+    // Arrange
+    const { service } = fixture();
+    service.mint();
+
+    // Act — the direct budget is exhausted, which expires the code entirely.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, `peer-${attempt}`);
+    }
+
+    // Assert — an expired code is gone for everybody. The asymmetry is deliberate: a relayed guesser
+    // must not reach the LAN's budget, while the owner's own five guesses still end the code.
+    should(service.status(PAIRING_ID)?.status).equal('expired');
+    should((await service.redeemOverRelay({ code: CODE, deviceName: 'phone' })).kind).equal('refused');
+  });
+
+  it('should refuse identically with no code minted, a bad name, and an expired one', async () => {
+    // Arrange — nothing has ever been minted, so there is nothing to guess.
+    const never = fixture();
+    const expired = fixture();
+    expired.service.mint();
+    expired.clock.nowMs += 120_000;
+    const unusable = fixture();
+    unusable.service.mint();
+
+    // Act
+    const refusals = await Promise.all([
+      never.service.redeemOverRelay({ code: CODE, deviceName: 'phone' }),
+      expired.service.redeemOverRelay({ code: CODE, deviceName: 'phone' }),
+      unusable.service.redeemOverRelay({ code: CODE, deviceName: '' }),
+      unusable.service.redeemOverRelay({ code: 'not-a-code', deviceName: 'phone' }),
+    ]);
+
+    // Assert — one answer for every cause. A pre-credential surface the whole internet can reach must
+    // not be an oracle, and "no code is minted" is exactly the fact a faster refusal would leak.
+    should(refusals).deepEqual([{ kind: 'refused' }, { kind: 'refused' }, { kind: 'refused' }, { kind: 'refused' }]);
+  });
+
+  it('should compare in constant time even when there is nothing to compare against', async () => {
+    // Arrange — a comparator that records every pair it was given.
+    const compared: string[] = [];
+    const { service } = fixture({
+      compare: (left, right) => {
+        compared.push(right);
+        return left === right;
+      },
+    });
+
+    // Act — no code has been minted at all.
+    should((await service.redeemOverRelay({ code: CODE, deviceName: 'phone' })).kind).equal('refused');
+
+    // Assert — the work happened anyway, against the dummy.
+    should(compared).have.length(1);
+    should(compared[0]).not.equal(CODE);
+  });
+
+  it('should consume the code and refuse when durable storage fails a relayed redemption', async () => {
+    // Arrange
+    const { devices, service } = fixture();
+    devices.failure = new Error('the state home is read-only');
+    service.mint();
+
+    // Act
+    const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
+
+    // Assert — the same fail-closed answer the direct path gives: the code is spent, nothing paired.
+    should(redemption).deepEqual({ kind: 'refused' });
+    should(service.status(PAIRING_ID)?.status).equal('expired');
   });
 });

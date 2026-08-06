@@ -322,6 +322,8 @@ import {
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
+  type RelayPairingRedeemer,
+  type RelayStreamDispatch,
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
@@ -733,7 +735,9 @@ export interface DaemonWorld {
   readonly createRelayCarriers: (
     sources: readonly RelayCarrierSource[],
     dispatch: RelayApiDispatch,
+    sockets: RelayStreamDispatch,
     devices: RelayDeviceDirectory,
+    pairing: RelayPairingRedeemer,
   ) => Promise<
     | {
         readonly carriers: readonly {
@@ -3698,7 +3702,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
-    createRelayCarriers: async (sources, dispatch, devices) => {
+    createRelayCarriers: async (sources, dispatch, sockets, devices, pairing) => {
       const dialledSources = sources.filter(
         (source): source is Exclude<RelayCarrierSource, { readonly kind: 'direct-only' }> =>
           source.kind !== 'direct-only' && source.config.enabled,
@@ -3721,7 +3725,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
             crypto: new WebCryptoRelayCrypto(),
             identity: identity.identity,
             dispatch,
+            sockets,
             devices,
+            pairing,
           }),
         })),
       };
@@ -4429,6 +4435,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // Hoisted, because the relay carrier below serves this exact dispatcher rather than a second one:
   // every route a browser can reach directly it can reach relayed, on one authorization boundary.
   const dispatcher = createMountedDispatcher(base, subsystems);
+  // Hoisted for the SAME reason `dispatcher` above is: the relay carriers serve this exact socket
+  // table rather than a second one. A stream a browser opens over a rendezvous passes the
+  // authorization boundary, the ticket-free credential rule and the per-capability guard that the
+  // bound address already enforces — one privilege model, not two that drift.
+  const socketDispatcher = createMountedSocketDispatcher(base, subsystems);
   let server: ApiServerHandle;
   try {
     server = await world.boot.binder.bind(
@@ -4436,7 +4447,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
         await world.api.listen(
           {
             http: dispatcher,
-            sockets: createMountedSocketDispatcher(base, subsystems),
+            sockets: socketDispatcher,
             corsOrigins: browserOrigins(config),
           },
           { host: config.host, port: config.port },
@@ -4472,9 +4483,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * this daemon could not dial, and the sentence is what stops "no relay configured" from looking
    * exactly like "the relay is broken" — the two are indistinguishable from outside without it.
    */
-  const relay = await world.createRelayCarriers(relaySources, request => dispatcher.dispatch(request), {
-    identifyDevice: token => pairing.credentials.identify(token),
-  });
+  const relay = await world.createRelayCarriers(
+    relaySources,
+    request => dispatcher.dispatch(request),
+    async request => await socketDispatcher.upgrade(request),
+    { identifyDevice: token => pairing.credentials.identify(token) },
+    // The pairing state machine itself, NOT the route table. A pre-credential session redeems
+    // through this port and constructs no request at all, which is what keeps `POST /v1/pair` —
+    // public on the route table — unreachable over a relay.
+    pairing.subsystem,
+  );
   if ('carriers' in relay) {
     const started = new Map<string, ReturnType<BunRelayCarrier['status']>>();
     for (const { carrier, source } of relay.carriers) {

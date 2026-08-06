@@ -35,6 +35,7 @@ import {
   HANDSHAKE_FRAME_SEQUENCE,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
+  MAX_PLAINTEXT_BYTES,
   NONCE_BYTES,
   openChannel,
   openRecord,
@@ -52,9 +53,18 @@ import {
   utf8Text,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
+import { RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
+import type {
+  SocketDownstream,
+  SocketFrame,
+  SocketHandler,
+  SocketUpgradeDecision,
+} from '../../../src/lib/api/socket.ts';
+import type { PairingRedemption, RelayPairingAttempt } from '../../../src/lib/pairing/index.ts';
 import { RelayLink, type RelayLinkSocket } from '../../../src/lib/relay/link.ts';
+import { MAX_TUNNEL_DATA_BYTES } from '../../../src/lib/relay/tunnel.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
 const HOST = 'relay.example';
@@ -105,18 +115,35 @@ function wire(): Wire {
   };
 }
 
+/** One armed deadline, so the ten-second credential window is provable without waiting ten seconds. */
+interface FakeTimer {
+  readonly milliseconds: number;
+  readonly fire: () => void;
+  cancelled: boolean;
+}
+
 interface Harness {
   readonly link: RelayLink;
   readonly wire: Wire;
   readonly requests: ApiRequest[];
+  /** Every upgrade the link asked the socket route table for. */
+  readonly upgrades: ApiRequest[];
+  /** Every pairing attempt the link handed to the redeemer. */
+  readonly pairings: RelayPairingAttempt[];
+  readonly timers: FakeTimer[];
 }
 
 function harness(
   answer: (request: ApiRequest) => Promise<ApiResponse> = async () => json(200, { ok: true }),
   knownToken = DEVICE_TOKEN,
+  upgrade: (request: ApiRequest) => Promise<SocketUpgradeDecision> = async () => ({ outcome: 'unclaimed' }),
+  redeem: (attempt: RelayPairingAttempt) => Promise<PairingRedemption> = async () => ({ kind: 'refused' }),
 ): Harness {
   const sent = wire();
   const requests: ApiRequest[] = [];
+  const upgrades: ApiRequest[] = [];
+  const pairings: RelayPairingAttempt[] = [];
+  const timers: FakeTimer[] = [];
   const link = new RelayLink({
     crypto: crypto_,
     identity,
@@ -126,10 +153,68 @@ function harness(
       requests.push(request);
       return await answer(request);
     },
+    sockets: async request => {
+      upgrades.push(request);
+      return await upgrade(request);
+    },
     devices: { identifyDevice: token => (token === knownToken ? 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa' : undefined) },
+    pairing: {
+      redeemOverRelay: async attempt => {
+        pairings.push(attempt);
+        return await redeem(attempt);
+      },
+    },
+    scheduler: {
+      after: (milliseconds, action) => {
+        const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
+        timers.push(timer);
+        return {
+          cancel: () => {
+            timer.cancelled = true;
+          },
+        };
+      },
+    },
   });
-  return { link, wire: sent, requests };
+  return { link, wire: sent, requests, upgrades, pairings, timers };
 }
+
+/** A stream handler that records what it was told, so a test can assert the bridge without a pane. */
+interface FakeStream extends SocketHandler {
+  readonly opened: number[];
+  readonly fromClientFrames: SocketFrame[];
+  readonly closed: number[];
+  downstream: SocketDownstream | undefined;
+}
+
+function fakeStream(onOpen: (downstream: SocketDownstream) => void = () => undefined): FakeStream {
+  const stream: FakeStream = {
+    opened: [],
+    fromClientFrames: [],
+    closed: [],
+    downstream: undefined,
+    open: async () => {
+      stream.opened.push(1);
+      if (stream.downstream !== undefined) onOpen(stream.downstream);
+    },
+    fromClient: frame => {
+      stream.fromClientFrames.push(frame);
+    },
+    close: () => {
+      stream.closed.push(1);
+    },
+  };
+  return stream;
+}
+
+/** An upgrade decision that accepts and hands back `stream`, capturing the downstream it is given. */
+const accepts = (stream: FakeStream) => async (): Promise<SocketUpgradeDecision> => ({
+  outcome: 'accepted',
+  attach: async downstream => {
+    stream.downstream = downstream;
+    return stream;
+  },
+});
 
 const json = (status: number, body: unknown): ApiResponse => ({
   status,
@@ -206,6 +291,43 @@ async function clientRead(sent: Wire, channel: ChannelState): Promise<{ state: C
   if (text === null) throw new Error('a record carried invalid UTF-8');
   return { state: opened.state, message: JSON.parse(text) };
 }
+
+/**
+ * Every record the daemon has sent since `from`, opened IN ORDER.
+ *
+ * A stream sends several records in a row, and the channel advances one sequence per record — so
+ * reading only the newest one, as `clientRead` does, is exactly the "sequence is not the next one"
+ * refusal the protocol exists to make. This is how a client actually reads a stream.
+ */
+async function clientReadAll(
+  sent: Wire,
+  channel: ChannelState,
+  from = 0,
+): Promise<{ state: ChannelState; messages: unknown[] }> {
+  let state = channel;
+  const messages: unknown[] = [];
+  for (const frame of sent.frames.filter(candidate => candidate.kind === FRAME_KINDS.data).slice(from)) {
+    const opened = await openRecord(crypto_, state, frame);
+    if (!opened.ok) throw new Error(opened.reason);
+    state = opened.state;
+    const text = utf8Text(opened.plaintext);
+    if (text === null) throw new Error('a record carried invalid UTF-8');
+    messages.push(JSON.parse(text));
+  }
+  return { state, messages };
+}
+
+/**
+ * Let the link finish everything it has queued.
+ *
+ * Sending is asynchronous — records are sealed with real crypto on the link's outbox — and
+ * `receiveBinary` is the only thing that awaits it. A test that pushes frames through a stream's
+ * downstream directly is not going through `receiveBinary`, so it needs one harmless frame to wait
+ * on. A repeated `claimed` is the cheapest: the link records it and does nothing else.
+ */
+const settle = async (link: RelayLink): Promise<void> => {
+  await link.receiveBinary(claimed());
+};
 
 const controlOf = (frame: RelayFrame | undefined): ControlMessage | null =>
   frame === undefined ? null : decodeControlMessage(frame.payload);
@@ -708,5 +830,577 @@ describe('backpressure on a relayed session', () => {
       t: 'closed',
       code: RELAY_CLOSE_CODES.flowViolation,
     });
+  });
+});
+
+/** Bring one session all the way to a keyed channel, ready for its credential record. */
+async function keyedSession(
+  harnessed: Harness,
+  sessionId: SessionId = sessionOne(),
+): Promise<{ channel: ChannelState }> {
+  await harnessed.link.receiveBinary(challenge());
+  await harnessed.link.receiveBinary(claimed());
+  return await openSession(harnessed.link, harnessed.wire, sessionId);
+}
+
+const PAIRED_RESPONSE = {
+  deviceToken: `fy_device_${'a'.repeat(43)}`,
+  daemonId: `fy_daemon_${'b'.repeat(43)}`,
+  daemonName: 'studio',
+  capabilities: ['daemon-api'],
+  carriers: [{ kind: 'relay', url: 'wss://relay.example' }],
+} as const;
+
+describe('one session, one job', () => {
+  it('should refuse a record that is not a credential, and every message a mode does not list', async () => {
+    // Arrange — a session that has keyed a channel and must now present a credential.
+    const first = harness();
+    const opened = await keyedSession(first);
+
+    // Act — a payload record where a credential belongs.
+    await clientSend(first.link, opened.channel, { t: 'data', text: 'hello' });
+
+    // Assert — the fork accepts three records and this is not one of them.
+    should(controlOf(first.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'the first record must be a credential',
+    });
+
+    // Arrange — a request session, authenticated.
+    const second = harness();
+    const request = await keyedSession(second);
+    const authed = await clientSend(second.link, request.channel, {
+      t: 'auth',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act — a stream message on a session that carries requests.
+    await clientSend(second.link, authed, { t: 'data', bytes: '' });
+
+    // Assert — the mode is enforced by the union, not by convention.
+    should(controlOf(second.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'this session does not carry that message',
+    });
+  });
+
+  it('should refuse a third session awaiting a credential, and end one that never sends it', async () => {
+    // Arrange — two sessions keyed and silent, which is the ceiling.
+    const harnessed = harness();
+    await harnessed.link.receiveBinary(challenge());
+    await harnessed.link.receiveBinary(claimed());
+    const second = sessionIdFromBytes(new Uint8Array([2, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
+    const third = sessionIdFromBytes(new Uint8Array([3, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]));
+    if (second === null || third === null) throw new Error('unreachable: 16 bytes');
+    await harnessed.link.receiveBinary(control({ t: 'open' }, sessionOne()));
+    await harnessed.link.receiveBinary(control({ t: 'open' }, second));
+
+    // Act — a third arrival while both are still pre-credential.
+    await harnessed.link.receiveBinary(control({ t: 'open' }, third));
+
+    // Assert — busy rather than an error, because a client opening several did nothing wrong.
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.rendezvousBusy,
+      reason: 'too many sessions are awaiting a credential',
+    });
+    should(harnessed.link.report().sessions).equal(2);
+  });
+
+  it('should end a keyed session whose credential never arrives, and cancel that deadline when it does', async () => {
+    // Arrange
+    const harnessed = harness();
+    const opened = await keyedSession(harnessed);
+
+    // Assert — the deadline is armed by the handshake, not by the open.
+    should(harnessed.timers).have.length(1);
+    should(harnessed.timers[0]?.milliseconds).equal(10_000);
+
+    // Act — nothing arrives and the window closes.
+    harnessed.timers[0]?.fire();
+
+    // Assert
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'no credential arrived before the deadline',
+    });
+
+    // Arrange — a session that answers in time.
+    const answered = harness();
+    const live = await keyedSession(answered);
+    await clientSend(answered.link, live.channel, {
+      t: 'auth',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Assert — the window is closed by the record that answered it.
+    should(answered.timers[0]?.cancelled).be.true();
+    // Act — a deadline that fires anyway finds nothing to end.
+    answered.timers[0]?.fire();
+    should(answered.link.report().sessions).equal(1);
+    should(opened.channel).be.ok();
+  });
+});
+
+describe('a pairing session', () => {
+  it('should redeem through the pairing port, answer with the whole response, and close 4440', async () => {
+    // Arrange
+    const harnessed = harness(undefined, DEVICE_TOKEN, undefined, async () => ({
+      kind: 'paired',
+      response: PAIRED_RESPONSE,
+    }));
+    const opened = await keyedSession(harnessed);
+
+    // Act
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'pair',
+      protocol: RELAY_PROTOCOL_ID,
+      code: 'ABCD-2345',
+      deviceName: 'Ferretry PWA',
+    });
+
+    // Assert — the exchange reached the pairing state machine and NOT the route table.
+    should(harnessed.pairings).deepEqual([{ code: 'ABCD-2345', deviceName: 'Ferretry PWA' }]);
+    should(harnessed.requests).be.empty();
+    should(harnessed.upgrades).be.empty();
+
+    // Assert — the answer carries the pairing API's response whole, `carriers` included. An envelope
+    // that lost them would mint a device that can reach its daemon by nothing at all.
+    const answer = await clientRead(harnessed.wire, after);
+    should(answer.message).deepEqual({
+      t: 'paired',
+      protocol: RELAY_PROTOCOL_ID,
+      response: PAIRED_RESPONSE,
+    });
+
+    // Assert — the sealed outcome crosses BEFORE the close that follows it.
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+    });
+    should(harnessed.link.report().sessions).equal(0);
+  });
+
+  it('should refuse with one generic reason, in the same frame count a success takes', async () => {
+    // Arrange
+    const refusing = harness();
+    const opened = await keyedSession(refusing);
+    const before = refusing.wire.frames.length;
+
+    // Act
+    const after = await clientSend(refusing.link, opened.channel, {
+      t: 'pair',
+      protocol: RELAY_PROTOCOL_ID,
+      code: 'ABCD-2345',
+      deviceName: 'Ferretry PWA',
+    });
+
+    // Assert — every cause collapses into one machine reason: a pre-auth surface the whole internet
+    // can reach must not be an oracle.
+    should((await clientRead(refusing.wire, after)).message).deepEqual({
+      t: 'pair-refused',
+      protocol: RELAY_PROTOCOL_ID,
+      reason: 'pairing_refused',
+    });
+    should(controlOf(refusing.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+    });
+
+    // Arrange — the same exchange, succeeding.
+    const pairing = harness(undefined, DEVICE_TOKEN, undefined, async () => ({
+      kind: 'paired',
+      response: PAIRED_RESPONSE,
+    }));
+    const success = await keyedSession(pairing);
+    const successBefore = pairing.wire.frames.length;
+    await clientSend(pairing.link, success.channel, {
+      t: 'pair',
+      protocol: RELAY_PROTOCOL_ID,
+      code: 'ABCD-2345',
+      deviceName: 'Ferretry PWA',
+    });
+
+    // Assert — a relay operator counting frames cannot tell the two apart.
+    should(pairing.wire.frames.length - successBefore).equal(refusing.wire.frames.length - before);
+  });
+
+  it('should never accept a host token, and never reach a route, whatever it is handed', async () => {
+    // Arrange — a pairing record whose code is a host admin token by any other name.
+    const harnessed = harness();
+    const opened = await keyedSession(harnessed);
+
+    // Act
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'pair',
+      protocol: RELAY_PROTOCOL_ID,
+      code: 'fy_admin_token',
+      deviceName: 'Ferretry PWA',
+    });
+
+    // Assert — the branch reads no credential at all: nothing was dispatched and nothing upgraded.
+    should(harnessed.requests).be.empty();
+    should(harnessed.upgrades).be.empty();
+    should(harnessed.pairings).have.length(1);
+  });
+});
+
+describe('a stream session', () => {
+  it('should open one stream through the daemon socket table and carry both frame shapes', async () => {
+    // Arrange
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+
+    // Act — the credential record opens the stream in the same breath.
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+      query: [['sessionId', 'fy_s']],
+    });
+
+    // Assert — it reached the SAME socket route table a direct upgrade reaches, with the session's
+    // own credential, never as a loopback peer, and with a rate-limit identity it cannot choose.
+    should(harnessed.upgrades).have.length(1);
+    const upgrade = harnessed.upgrades[0];
+    should(upgrade?.method).equal('GET');
+    should(upgrade?.path).equal('/v1/events');
+    should(upgrade?.headers.get('authorization')).equal(`Bearer ${DEVICE_TOKEN}`);
+    should(upgrade?.loopback).be.false();
+    should(upgrade?.clientAddress).startWith('relay-session:');
+    should(stream.opened).have.length(1);
+
+    // Act — the daemon's own handler pushes a text frame and a byte run.
+    stream.downstream?.send('{"kind":"event"}');
+    stream.downstream?.send(new Uint8Array([104, 105]));
+    await settle(harnessed.link);
+
+    // Assert — the acceptance is AHEAD of the first frame the handler produced, and both value
+    // shapes cross intact: text stays one complete message, bytes travel as unpadded base64url.
+    should((await clientReadAll(harnessed.wire, after)).messages).deepEqual([
+      { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID },
+      { t: 'data', text: '{"kind":"event"}' },
+      { t: 'data', bytes: 'aGk' },
+    ]);
+
+    // Act — the client types into it, both shapes.
+    const typed = await clientSend(harnessed.link, after, { t: 'data', bytes: 'aGk' });
+    await clientSend(harnessed.link, typed, { t: 'data', text: '{"cols":80,"rows":24}' });
+
+    // Assert — bytes decode, text stays text, and both reach the handler in order.
+    should(stream.fromClientFrames).have.length(2);
+    should(stream.fromClientFrames[0]).deepEqual(new Uint8Array([104, 105]));
+    should(stream.fromClientFrames[1]).equal('{"cols":80,"rows":24}');
+  });
+
+  it('should refuse a ticket or a token in a stream query, and an unknown credential', async () => {
+    // Arrange
+    const ticketed = harness();
+    const opened = await keyedSession(ticketed);
+
+    // Act — the credential a browser CANNOT carry here, smuggled into the query.
+    await clientSend(ticketed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+      query: [['ticket', 'stolen-from-a-log']],
+    });
+
+    // Assert — refused by the schema, before anything is asked of the route table.
+    should(controlOf(ticketed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'unparseable tunnel record',
+    });
+    should(ticketed.upgrades).be.empty();
+
+    // Arrange — a stream asking with a credential nobody knows.
+    const stranger = harness();
+    const strange = await keyedSession(stranger);
+
+    // Act
+    await clientSend(stranger.link, strange.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: 'fy_device_unknown',
+      path: '/v1/events',
+    });
+
+    // Assert — `4403` before any route is consulted, exactly as a request session is refused.
+    should(controlOf(stranger.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.authRejected,
+    });
+    should(stranger.upgrades).be.empty();
+  });
+
+  it('should say what a status can say BEFORE anything switches, rather than closing a stream', async () => {
+    // Arrange — the guard refuses this upgrade.
+    const refused = harness(undefined, DEVICE_TOKEN, async () => ({
+      outcome: 'refused',
+      response: json(404, { error: 'no terminal' }),
+    }));
+    const opened = await keyedSession(refused);
+
+    // Act
+    const after = await clientSend(refused.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/sessions/s/terminals/t/stream',
+    });
+
+    // Assert — a refusal, not a close: "it is gone" and "the daemon broke" must stay distinguishable.
+    should((await clientRead(refused.wire, after)).message).deepEqual({
+      t: 'stream-refused',
+      protocol: RELAY_PROTOCOL_ID,
+      status: 404,
+      body: JSON.stringify({ error: 'no terminal' }),
+    });
+    should(controlOf(refused.wire.frames.at(-1))).containDeep({ code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
+
+    // Arrange — a path no socket route serves at all.
+    const unclaimed = harness();
+    const none = await keyedSession(unclaimed);
+
+    // Act
+    const later = await clientSend(unclaimed.link, none.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/nothing',
+    });
+
+    // Assert
+    should((await clientRead(unclaimed.wire, later)).message).containDeep({ t: 'stream-refused', status: 404 });
+  });
+
+  it('should refuse a stream it could not attach, and close one whose handler failed to open', async () => {
+    // Arrange — attach throws before the switch, so there is still a status to send.
+    const broken = harness(undefined, DEVICE_TOKEN, async () => ({
+      outcome: 'accepted',
+      attach: async () => {
+        throw new Error('no pane');
+      },
+    }));
+    const opened = await keyedSession(broken);
+
+    // Act
+    const after = await clientSend(broken.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Assert
+    should((await clientRead(broken.wire, after)).message).containDeep({ t: 'stream-refused', status: 500 });
+
+    // Arrange — `open` throws AFTER the acceptance has been sent, so the close taxonomy carries it.
+    const failing = fakeStream(() => {
+      throw new Error('the source is gone');
+    });
+    const late = harness(undefined, DEVICE_TOKEN, accepts(failing));
+    const live = await keyedSession(late);
+
+    // Act
+    const opening = await clientSend(late.link, live.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Assert — `stream-opened` first, then a sealed close naming 1011.
+    should((await clientReadAll(late.wire, opening)).messages).containDeep([
+      { t: 'stream-opened' },
+      { t: 'stream-close', code: 1011 },
+    ]);
+    should(controlOf(late.wire.frames.at(-1))).containDeep({ code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
+  });
+
+  it('should drop an over-budget redraw, close an over-budget event, and report its backlog honestly', async () => {
+    // Arrange
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+
+    // Act + Assert — a redraw one byte over the derived budget is DROPPED and reported as sent: the
+    // next redraw supersedes it, so nothing is lost but latency.
+    const before = harnessed.wire.frames.length;
+    const huge = new Uint8Array(MAX_TUNNEL_DATA_BYTES + 1);
+    should(downstream.send(huge)).equal(huge.byteLength);
+    should(harnessed.wire.frames.length).equal(before);
+    should(harnessed.link.report().sessions).equal(1);
+
+    // Act + Assert — a byte run at exactly the budget still fits one record, which is what makes the
+    // number derived rather than guessed.
+    should(downstream.send(new Uint8Array(MAX_TUNNEL_DATA_BYTES))).equal(MAX_TUNNEL_DATA_BYTES);
+
+    // Act — an EVENT that cannot fit may be neither dropped nor split, so the stream closes.
+    should(downstream.send('x'.repeat(MAX_PLAINTEXT_BYTES))).equal(-1);
+    await settle(harnessed.link);
+
+    // Assert — the handler is released, the taxonomy is sealed, and only then does the session close.
+    should(stream.closed).have.length(1);
+    should((await clientReadAll(harnessed.wire, after)).messages).containDeep([
+      { t: 'stream-opened' },
+      { t: 'data' },
+      { t: 'stream-close', code: 1009 },
+    ]);
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
+    // Assert — a send after the stream is gone is refused rather than queued at a dead peer.
+    should(downstream.send('anything')).equal(-1);
+  });
+
+  it('should report buffered bytes from its own un-credited backlog', async () => {
+    // Arrange — a stream whose peer has granted nothing beyond the opening window.
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+
+    // Assert — a drained queue is zero, which is the honest answer and not a hard-coded one.
+    should(downstream.bufferedBytes()).equal(0);
+
+    // Act — fill past the credit window so records queue rather than leave.
+    for (let index = 0; index < CREDIT_WINDOW_FRAMES + 4; index += 1) downstream.send(`{"n":${index}}`);
+    await settle(harnessed.link);
+
+    // Assert — the backlog is REAL. A stream layer answering `0` here would make every one of this
+    // daemon's buffered-bytes policies vacuous over a relay while looking perfectly wired.
+    should(downstream.bufferedBytes()).be.greaterThan(0);
+    should(harnessed.link.report().sessions).equal(1);
+  });
+
+  it('should release the handler on a client close, a rendezvous close, and the link going away', async () => {
+    // Arrange — the client says it is done.
+    const byClient = fakeStream();
+    const first = harness(undefined, DEVICE_TOKEN, accepts(byClient));
+    const opened = await keyedSession(first);
+    const after = await clientSend(first.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Act
+    await clientSend(first.link, after, {
+      t: 'stream-close',
+      protocol: RELAY_PROTOCOL_ID,
+      code: 1000,
+      reason: 'the viewer left',
+    });
+
+    // Assert — a deliberate leave is not spelled the same as a network failure.
+    should(byClient.closed).have.length(1);
+    should(controlOf(first.wire.frames.at(-1))).containDeep({ code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
+
+    // Arrange — the rendezvous ends the session under a live stream.
+    const byRendezvous = fakeStream();
+    const second = harness(undefined, DEVICE_TOKEN, accepts(byRendezvous));
+    const live = await keyedSession(second);
+    await clientSend(second.link, live.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Act
+    await second.link.receiveBinary(
+      control({ t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'the client left' }, sessionOne()),
+    );
+
+    // Assert — the handler holds a timer armed at a peer the rendezvous says is gone.
+    should(byRendezvous.closed).have.length(1);
+
+    // Arrange — the whole link goes, which is what a carrier stop and a redial both do.
+    const byLink = fakeStream();
+    const third = harness(undefined, DEVICE_TOKEN, accepts(byLink));
+    const ending = await keyedSession(third);
+    await clientSend(third.link, ending.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Act
+    third.link.close();
+
+    // Assert
+    should(byLink.closed).have.length(1);
+    should(third.link.report().sessions).equal(0);
+  });
+
+  it('should end a stream session that sends a request, or bytes that are not base64url', async () => {
+    // Arrange
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Act — a request on a session that carries one stream.
+    await clientSend(harnessed.link, after, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+
+    // Assert — there is no edge from `streaming` back to serving, so this cannot be answered.
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'this session carries one stream only',
+    });
+    should(harnessed.requests).be.empty();
+
+    // Arrange — a payload whose `bytes` are not the spelling this protocol uses.
+    const malformed = fakeStream();
+    const second = harness(undefined, DEVICE_TOKEN, accepts(malformed));
+    const live = await keyedSession(second);
+    const streaming = await clientSend(second.link, live.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+
+    // Act
+    await clientSend(second.link, streaming, { t: 'data', bytes: 'not+base64url/' });
+
+    // Assert
+    should(controlOf(second.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'a stream record carried unusable bytes',
+    });
+    should(malformed.fromClientFrames).be.empty();
   });
 });

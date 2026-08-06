@@ -78,15 +78,25 @@ import {
   sealRecord,
   signRendezvousClaim,
 } from '@ferretry/relay';
+import { RELAY_SESSION_CONCLUDED_CLOSE_CODE } from '@ferretry/protocol';
 import type { ApiRequest, ApiResponse } from '../api/http.ts';
+import { SOCKET_CLOSES, type SocketDownstream, type SocketHandler, type SocketUpgradeDecision } from '../api/socket.ts';
+import type { PairingRedemption, RelayPairingAttempt } from '../pairing/index.ts';
 import {
   decodeTunnelClientMessage,
   encodeTunnelMessage,
+  type RelaySessionCloseCode,
   type RelayTunnelClientMessage,
   type RelayTunnelDaemonMessage,
+  type RelayTunnelData,
+  type RelayTunnelPair,
   type RelayTunnelRequest,
+  type RelayTunnelStream,
   tunnelApiRequest,
+  tunnelDataFrame,
+  tunnelDataMessage,
   tunnelResponseMessage,
+  tunnelStreamRequest,
 } from './tunnel.ts';
 
 /** The socket the link talks through. One method per thing a WebSocket can be asked to do. */
@@ -109,6 +119,76 @@ export interface RelayDeviceDirectory {
   identifyDevice(token: string): string | undefined;
 }
 
+/**
+ * The daemon's own SOCKET route table, as the one function a relayed stream needs from it.
+ *
+ * It is the dispatcher the bound address already serves, handed over rather than rebuilt: the same
+ * routes, the same authorization boundary, the same per-capability guard. A second table here would
+ * be a second privilege model, and the one thing worse than a stream a relay cannot carry is a stream
+ * it carries past a check the direct surface makes.
+ */
+export type RelayStreamDispatch = (request: ApiRequest) => Promise<SocketUpgradeDecision>;
+
+/**
+ * Redeeming a pairing code, and nothing else.
+ *
+ * Deliberately NOT the API dispatch. A pre-credential session must reach the pairing state machine
+ * without constructing a request, because a relayed session that could build one would be an
+ * anonymous caller at a route table — and `POST /v1/pair` is public on that table. This port is how
+ * the exchange happens with no route involved at all.
+ */
+export interface RelayPairingRedeemer {
+  redeemOverRelay(attempt: RelayPairingAttempt): Promise<PairingRedemption>;
+}
+
+/** A cancellable one-shot timer, so the link never holds a runtime timer handle of its own. */
+export interface RelayLinkTimer {
+  cancel(): void;
+}
+
+export interface RelayLinkScheduler {
+  after(milliseconds: number, action: () => void): RelayLinkTimer;
+}
+
+/**
+ * How long a keyed session may sit without presenting a credential.
+ *
+ * That window is the one an internet stranger can hold open against a fingerprint that is public by
+ * design — it is in the pairing QR. A session that keyed a channel and then said nothing is either a
+ * client that failed or somebody occupying a slot, and neither is worth waiting on.
+ */
+export const RELAY_CREDENTIAL_DEADLINE_MS = 10_000;
+
+/** Sessions per link that may be awaiting a credential at once: one honest arrival, one overlapping
+ *  retry. A further arrival is refused `4429`, which a client must treat as retryable. */
+export const MAX_PRE_CREDENTIAL_SESSIONS = 2;
+
+/**
+ * The most un-sent stream backlog one session may hold before its overflow policy decides.
+ *
+ * It sits ABOVE the one-mebibyte policy every mounted stream already applies to its own buffered
+ * bytes, so an honest handler always trips its own rule first and this never fires. It exists for the
+ * handler that has no rule: a bound that only the domain enforces is a bound one new subsystem can
+ * forget, and the failure mode is daemon memory growing with a viewer that stopped reading.
+ */
+export const RELAY_STREAM_MAX_BUFFERED_BYTES = 2 * 1_024 * 1_024;
+
+/**
+ * What this link's own overflow policies close a stream with.
+ *
+ * They are WebSocket close codes from §14's stream taxonomy, not daemon constants, and they are
+ * spelled here rather than borrowed from a mounted subsystem: the relay must not import the event
+ * feed's vocabulary to describe a rule it applies to every stream. A relayed viewer reads the same
+ * codes a direct one does, and the code travels INSIDE the channel because a reason a viewer left is
+ * content — a relay that could read close reasons could read why people stop watching.
+ */
+const RELAY_STREAM_CLOSES = {
+  /** One frame is larger than a record can carry, and its stream may neither drop nor split it. */
+  oversize: { code: 1009, reason: 'a stream frame exceeds one relay record' },
+  /** The viewer stopped keeping up and the stream may not lose what it would have to drop. */
+  slowReader: { code: 1013, reason: 'stream reader fell behind' },
+} as const;
+
 export interface RelayLinkDependencies {
   readonly crypto: RelayCrypto;
   readonly identity: DaemonIdentity;
@@ -116,7 +196,10 @@ export interface RelayLinkDependencies {
   readonly relayHost: string;
   readonly socket: RelayLinkSocket;
   readonly dispatch: RelayApiDispatch;
+  readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
+  readonly pairing: RelayPairingRedeemer;
+  readonly scheduler: RelayLinkScheduler;
 }
 
 /** What the link is doing, for a surface that has to say whether this daemon is reachable at all. */
@@ -127,7 +210,19 @@ export interface RelayLinkReport {
   readonly lastRefusal?: string;
 }
 
-type SessionPhase = 'awaiting-hello' | 'awaiting-auth' | 'serving';
+/**
+ * WHAT A SESSION IS DOING, and the fact that it can only ever be doing one thing.
+ *
+ * `awaiting-credential` is the fork: the record that arrives there decides whether this session
+ * serves requests, carries one stream, or redeems one pairing code — and none of the three terminal
+ * states has an edge to another. "A stream session should not issue requests" is a rule somebody has
+ * to remember; a session that cannot leave `streaming` is a rule nothing can break.
+ *
+ * `concluding` is the moment between an outcome being decided and the close that follows it, and it
+ * exists so a record arriving in that window is refused rather than racing a session that is already
+ * over.
+ */
+type SessionPhase = 'awaiting-hello' | 'awaiting-credential' | 'serving' | 'streaming' | 'concluding';
 
 interface LinkSession {
   readonly sessionId: SessionId;
@@ -140,6 +235,10 @@ interface LinkSession {
   readonly answered: Set<number>;
   /** Answers waiting for the peer to return credit. Bounded by the peer's own send window. */
   readonly waiting: Uint8Array[];
+  /** The one live stream this session carries, once it carries one. */
+  stream: SocketHandler | undefined;
+  /** Armed when the channel is keyed, cancelled by the credential record that beats it. */
+  credentialDeadline: RelayLinkTimer | undefined;
 }
 
 export class RelayLink {
@@ -238,10 +337,16 @@ export class RelayLink {
       case 'open':
         this.#onOpen(frame.sessionId);
         return;
-      case 'closed':
+      case 'closed': {
+        // Whatever this session was carrying goes with it. A stream handler holds a redraw timer and
+        // a viewer slot armed against a peer the rendezvous has just told us is gone, and forgetting
+        // the session without releasing it would leave both firing at nothing.
+        const ended = this.#sessions.get(frame.sessionId.text);
+        if (ended !== undefined) this.#forget(ended);
         this.#sessions.delete(frame.sessionId.text);
         this.#lastRefusal = `the rendezvous ended a session: ${message.code} ${message.reason}`;
         return;
+      }
       case 'error':
         // The rendezvous closes the socket immediately after this, so there is nothing to do but
         // keep the reason. Closing from here as well would race its own close frame.
@@ -296,6 +401,14 @@ export class RelayLink {
       this.#endSession(sessionId, RELAY_CLOSE_CODES.protocolError, 'this session identifier is already live');
       return;
     }
+    // A session that has not presented a credential yet costs this daemon a keyed channel and a slot,
+    // and anybody who saw a QR knows the fingerprint that addresses this rendezvous. Two is one honest
+    // arrival plus one overlapping retry; a third is refused as BUSY rather than as an error, because
+    // a client opening several at once did nothing wrong and should retry.
+    if (this.#preCredentialSessions() >= MAX_PRE_CREDENTIAL_SESSIONS) {
+      this.#endSession(sessionId, RELAY_CLOSE_CODES.rendezvousBusy, 'too many sessions are awaiting a credential');
+      return;
+    }
     this.#sessions.set(sessionId.text, {
       sessionId,
       phase: 'awaiting-hello',
@@ -305,7 +418,16 @@ export class RelayLink {
       receive: newReceiveWindow(),
       answered: new Set(),
       waiting: [],
+      stream: undefined,
+      credentialDeadline: undefined,
     });
+  }
+
+  #preCredentialSessions(): number {
+    let pending = 0;
+    for (const session of this.#sessions.values())
+      if (session.phase === 'awaiting-hello' || session.phase === 'awaiting-credential') pending += 1;
+    return pending;
   }
 
   // ─── one session ────────────────────────────────────────────────────────────────────────────
@@ -345,7 +467,15 @@ export class RelayLink {
     }
     this.#consume(session);
     session.channel = openChannel(session.sessionId, answered.keys, 'daemon');
-    session.phase = 'awaiting-auth';
+    session.phase = 'awaiting-credential';
+    session.credentialDeadline = this.deps.scheduler.after(RELAY_CREDENTIAL_DEADLINE_MS, () => {
+      // Re-read rather than closing over the session: by the time this fires the session may have
+      // presented a credential, been ended by the rendezvous, or been replaced by a new one under the
+      // same identifier, and only the live one is this timer's to end.
+      const live = this.#sessions.get(session.sessionId.text);
+      if (live !== session || live.phase !== 'awaiting-credential') return;
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'no credential arrived before the deadline');
+    });
     // The answer occupies sequence 0 of this direction, which is why it is sent as a frame rather
     // than through the record path: it is the one end-to-end frame that is not a record.
     this.#sendSessionFrame(session, {
@@ -374,15 +504,43 @@ export class RelayLink {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'unparseable tunnel record');
       return;
     }
-    if (session.phase === 'awaiting-auth') {
-      this.#authenticate(session, message);
+    if (session.phase === 'awaiting-credential') {
+      await this.#credential(session, message);
       return;
     }
-    if (message.t !== 'req') {
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session is already authenticated');
+    if (session.phase === 'streaming') {
+      this.#onStreamRecord(session, message);
+      return;
+    }
+    if (session.phase !== 'serving' || message.t !== 'req') {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session does not carry that message');
       return;
     }
     await this.#serve(session, message);
+  }
+
+  /**
+   * The fork: one record, and the session is committed for life.
+   *
+   * Whichever of the three arrives, the deadline that was waiting for it is cancelled first — the
+   * session has answered the only question that window was open for.
+   */
+  async #credential(session: LinkSession, message: RelayTunnelClientMessage): Promise<void> {
+    session.credentialDeadline?.cancel();
+    session.credentialDeadline = undefined;
+    switch (message.t) {
+      case 'auth':
+        this.#authenticate(session, message.deviceToken);
+        return;
+      case 'stream':
+        await this.#openStream(session, message);
+        return;
+      case 'pair':
+        await this.#redeemPairing(session, message);
+        return;
+      default:
+        this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'the first record must be a credential');
+    }
   }
 
   /**
@@ -392,22 +550,28 @@ export class RelayLink {
    * distinguishable on the wire from any other close a relay can see: an operator watching the
    * carrier learns that a session ended, not that a token was wrong.
    */
-  #authenticate(session: LinkSession, message: RelayTunnelClientMessage): void {
-    if (message.t !== 'auth') {
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'the first record must authenticate');
-      return;
-    }
-    const device = this.deps.devices.identifyDevice(message.deviceToken)?.trim();
-    if (device === undefined || device === '') {
-      // An unattributable answer from the directory is a refusal, not a nameless success: a device
-      // nobody can name would be journalled as `device` and authorized as an operator.
-      this.#lastRefusal = 'a relayed client presented a credential this daemon does not know';
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
-      return;
-    }
-    session.deviceToken = message.deviceToken;
+  #authenticate(session: LinkSession, deviceToken: string): void {
+    if (!this.#identify(session, deviceToken)) return;
+    session.deviceToken = deviceToken;
     session.phase = 'serving';
     this.#sendRecord(session, { t: 'authenticated', protocol: RELAY_PROTOCOL_ID });
+  }
+
+  /**
+   * Resolve a device grant, or end the session having said nothing about which one it was.
+   *
+   * Shared by the request and stream modes so a stream cannot acquire a softer answer than a request:
+   * an unknown token is `4403` in both, and a host admin token resolves in neither, because the
+   * directory this asks holds device grants only.
+   */
+  #identify(session: LinkSession, deviceToken: string): boolean {
+    const device = this.deps.devices.identifyDevice(deviceToken)?.trim();
+    if (device !== undefined && device !== '') return true;
+    // An unattributable answer from the directory is a refusal, not a nameless success: a device
+    // nobody can name would be journalled as `device` and authorized as an operator.
+    this.#lastRefusal = 'a relayed client presented a credential this daemon does not know';
+    this.#endSession(session.sessionId, RELAY_CLOSE_CODES.authRejected, 'unknown device credential');
+    return false;
   }
 
   async #serve(session: LinkSession, request: RelayTunnelRequest): Promise<void> {
@@ -423,8 +587,215 @@ export class RelayLink {
       return;
     }
     session.answered.add(request.id);
-    const response = await this.deps.dispatch(tunnelApiRequest(request, deviceToken));
+    const response = await this.deps.dispatch(tunnelApiRequest(request, deviceToken, session.sessionId.text));
     this.#sendRecord(session, tunnelResponseMessage(request.id, response));
+  }
+
+  // ─── one pairing exchange ───────────────────────────────────────────────────────────────────
+
+  /**
+   * First contact, redeemed through a port and never through a route.
+   *
+   * ONE ATTEMPT, ONE SEALED OUTCOME, THEN THE SESSION CLOSES — success and failure alike, and with
+   * the same number of records, so a relay operator counting frames learns nothing the exchange did
+   * not intend to tell them. There is no edge from here to `serving`: a device that paired reconnects
+   * as an ordinary request session with the token it was just issued.
+   *
+   * The session is marked `concluding` BEFORE the redemption is awaited, so a second record arriving
+   * during it is refused rather than racing an exchange that is already spent.
+   */
+  async #redeemPairing(session: LinkSession, request: RelayTunnelPair): Promise<void> {
+    session.phase = 'concluding';
+    const result = await this.deps.pairing.redeemOverRelay({ code: request.code, deviceName: request.deviceName });
+    this.#queue(
+      session,
+      result.kind === 'paired'
+        ? { t: 'paired', protocol: RELAY_PROTOCOL_ID, response: result.response }
+        : { t: 'pair-refused', protocol: RELAY_PROTOCOL_ID, reason: 'pairing_refused' },
+    );
+    this.#conclude(session, 'the pairing exchange is complete');
+  }
+
+  // ─── one stream ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * The credential record opens the stream in the same breath, and this is where it lands.
+   *
+   * It goes through the daemon's OWN socket route table — the dispatcher the bound address serves —
+   * so a stream a direct viewer may not open a relayed viewer may not open either, refused by the
+   * same guard in the same place. Everything a status can say is said here, BEFORE anything switches:
+   * a stream that opened and instantly died could not tell "it is gone" from "the daemon broke".
+   */
+  async #openStream(session: LinkSession, request: RelayTunnelStream): Promise<void> {
+    if (!this.#identify(session, request.deviceToken)) return;
+    session.phase = 'concluding';
+    const decision = await this.deps
+      .sockets(tunnelStreamRequest(request, session.sessionId.text))
+      .catch((): SocketUpgradeDecision => ({ outcome: 'unclaimed' }));
+    if (decision.outcome !== 'accepted') {
+      // `unclaimed` means no socket route serves that path at all, which for a client asking to
+      // stream is the same answer as a route that was never there: a 404 it can act on.
+      const refusal =
+        decision.outcome === 'refused'
+          ? { status: decision.response.status, body: decision.response.body }
+          : { status: 404, body: 'no stream is served at this path' };
+      this.#queue(session, { t: 'stream-refused', protocol: RELAY_PROTOCOL_ID, ...refusal });
+      this.#conclude(session, 'the stream was refused');
+      return;
+    }
+    let handler: SocketHandler;
+    try {
+      handler = await decision.attach(this.#downstream(session));
+    } catch {
+      // The switch has not happened yet, so unlike the direct transport there is still a status to
+      // send. Saying 500 is better than the close code the direct path is reduced to.
+      this.#queue(session, {
+        t: 'stream-refused',
+        protocol: RELAY_PROTOCOL_ID,
+        status: 500,
+        body: 'the daemon failed to attach this stream',
+      });
+      this.#conclude(session, 'the stream could not be attached');
+      return;
+    }
+    session.stream = handler;
+    session.deviceToken = request.deviceToken;
+    session.phase = 'streaming';
+    this.#queue(session, { t: 'stream-opened', protocol: RELAY_PROTOCOL_ID });
+    // Queued before `open` runs, so the acceptance is ahead of the first frame the handler produces
+    // however eagerly it produces one.
+    await handler.open().catch(() => {
+      this.#closeStream(session, SOCKET_CLOSES.unavailable.code, SOCKET_CLOSES.unavailable.reason);
+    });
+  }
+
+  /** Records a stream session accepts once it is open: payload, or the client's own close. */
+  #onStreamRecord(session: LinkSession, message: RelayTunnelClientMessage): void {
+    if (message.t === 'data') {
+      this.#onStreamData(session, message);
+      return;
+    }
+    if (message.t !== 'stream-close') {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session carries one stream only');
+      return;
+    }
+    // A deliberate leave is spelled differently from a network failure ON PURPOSE: the taxonomy
+    // survives in both directions, so a daemon can tell a viewer that closed from one that vanished.
+    this.#releaseStream(session);
+    this.#conclude(session, `the client closed this stream: ${message.code} ${message.reason}`);
+  }
+
+  #onStreamData(session: LinkSession, message: RelayTunnelData): void {
+    const frame = tunnelDataFrame(message);
+    if (frame === null) {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a stream record carried unusable bytes');
+      return;
+    }
+    session.stream?.fromClient(frame);
+  }
+
+  /**
+   * The live socket, as the domain's stream handlers already understand one.
+   *
+   * This is the whole bridge: the mounted event feed and the terminal bridge were written against
+   * `SocketDownstream` and know nothing about transports, so a relay that can answer these three
+   * questions carries them unmodified.
+   */
+  #downstream(session: LinkSession): SocketDownstream {
+    return {
+      send: frame => this.#sendStream(session, frame),
+      close: (code, reason) => this.#closeStream(session, code, reason),
+      // HONESTLY, and this is the load-bearing one. Every stream policy in this daemon reads this
+      // number to decide whether a viewer is behind; a relay that answered `0` would report a viewer
+      // as caught up forever and make every one of those policies vacuous over a carrier.
+      bufferedBytes: () => this.#buffered(session),
+    };
+  }
+
+  #buffered(session: LinkSession): number {
+    let total = 0;
+    for (const record of session.waiting) total += record.byteLength;
+    return total;
+  }
+
+  /**
+   * One frame out, under the policy its own stream deserves.
+   *
+   * THE TWO POLICIES ARE NOT INTERCHANGEABLE and the frame's own shape chooses between them. Terminal
+   * output is bytes and every frame is a complete redraw that the next one supersedes, so an
+   * over-budget or backed-up frame is DROPPED and nothing is lost but latency. An event is text and a
+   * unique journal record, so it may be neither dropped nor split, and the stream closes instead —
+   * `1009` when the single frame is too large for a record, `1013` when the viewer has fallen behind.
+   */
+  #sendStream(session: LinkSession, frame: string | Uint8Array): number | undefined {
+    if (session.phase !== 'streaming') return -1;
+    const droppable = typeof frame !== 'string';
+    const size = droppable ? frame.byteLength : frame.length;
+    if (this.#buffered(session) > RELAY_STREAM_MAX_BUFFERED_BYTES) {
+      if (droppable) return size;
+      this.#closeStream(session, RELAY_STREAM_CLOSES.slowReader.code, RELAY_STREAM_CLOSES.slowReader.reason);
+      return -1;
+    }
+    const message = tunnelDataMessage(frame);
+    if (message === null) {
+      if (droppable) return size;
+      this.#closeStream(session, RELAY_STREAM_CLOSES.oversize.code, RELAY_STREAM_CLOSES.oversize.reason);
+      return -1;
+    }
+    this.#queue(session, message);
+    return size;
+  }
+
+  /** End one stream: release the handler, seal the taxonomy, then conclude the session it owned. */
+  #closeStream(session: LinkSession, code: number, reason: string): void {
+    if (session.phase !== 'streaming') return;
+    // Marked first, so a handler whose own `close` calls back into this returns immediately instead
+    // of sealing a second close for the same stream.
+    session.phase = 'concluding';
+    this.#releaseStream(session);
+    this.#queue(session, { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code, reason });
+    this.#conclude(session, `the stream closed: ${code} ${reason}`);
+  }
+
+  /** Tell whatever this session was driving that it is over. Idempotent by construction: the handler
+   *  is forgotten before it is told, so a re-entrant close finds nothing to release. */
+  #releaseStream(session: LinkSession): void {
+    const stream = session.stream;
+    session.stream = undefined;
+    stream?.close();
+  }
+
+  /** Everything a session holds beyond its own record state: a stream, and a deadline. */
+  #forget(session: LinkSession): void {
+    session.credentialDeadline?.cancel();
+    session.credentialDeadline = undefined;
+    this.#releaseStream(session);
+  }
+
+  /**
+   * The session concluded, and the close says so.
+   *
+   * IT IS QUEUED BEHIND THE OUTBOX, which is the whole point. The sealed outcome — `paired`,
+   * `pair-refused`, `stream-close` — is queued for sealing, and sealing is asynchronous; a `closed`
+   * control sent straight down the socket would overtake it and the peer would see a session end with
+   * no outcome in it. `4440` means "the outcome was stated inside the channel first", and this is
+   * what makes that true rather than merely intended.
+   */
+  #conclude(session: LinkSession, reason: string): void {
+    this.#outbox = this.#outbox.then(() => {
+      this.#forget(session);
+      this.#sessions.delete(session.sessionId.text);
+      this.#sendFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: session.sessionId,
+        sequence: 0,
+        payload: encodeControlMessage({
+          t: 'closed',
+          code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+          reason,
+        }),
+      });
+    });
   }
 
   // ─── sending ────────────────────────────────────────────────────────────────────────────────
@@ -454,6 +825,25 @@ export class RelayLink {
       return;
     }
     session.waiting.push(plaintext);
+    this.#flush(session);
+  }
+
+  /**
+   * Queue a record whose backlog its own caller has already decided about.
+   *
+   * SEPARATE FROM {@link RelayLink.sendRecord} because the depth guard there is a REQUEST rule with a
+   * request's justification — the carrier bounds how many requests can be outstanding, so a queue
+   * deeper than one credit window means the peer is not honouring the protocol. A stream's producer
+   * is this daemon, not the peer, so the same depth carries no such meaning: a busy pane can legally
+   * outrun a viewer's credit, and ending the session for it would kill a stream over a reader that is
+   * merely slow. What bounds a stream is its own overflow policy above, reading honest buffered bytes.
+   *
+   * Oversize is not re-checked here. A plaintext over the cap is refused by `sealRecord` with `4413`
+   * and ends the session in {@link RelayLink.flush} — one owner for that fact, in the layer that
+   * knows it.
+   */
+  #queue(session: LinkSession, message: RelayTunnelDaemonMessage): void {
+    session.waiting.push(encodeTunnelMessage(message));
     this.#flush(session);
   }
 
@@ -505,7 +895,9 @@ export class RelayLink {
   }
 
   /** End one session without dropping the socket. The other sessions on this link are unaffected. */
-  #endSession(sessionId: SessionId, code: RelayCloseCode, reason: string): void {
+  #endSession(sessionId: SessionId, code: RelaySessionCloseCode, reason: string): void {
+    const session = this.#sessions.get(sessionId.text);
+    if (session !== undefined) this.#forget(session);
     this.#sessions.delete(sessionId.text);
     this.#lastRefusal = `session ${code}: ${reason}`;
     this.#sendFrame({
@@ -519,7 +911,22 @@ export class RelayLink {
   /** End the whole link. Every session on it is gone with the socket, which is what §9 says. */
   #refuseSocket(code: RelayCloseCode, reason: string): void {
     this.#lastRefusal = `link ${code}: ${reason}`;
-    this.#sessions.clear();
+    this.close();
     this.deps.socket.close(code, reason);
+  }
+
+  /**
+   * Release everything this link is holding, without saying anything on a socket.
+   *
+   * The carrier calls it when the daemon is going away and when a dropped socket is about to be
+   * redialled, and both matter for the same reason: a stream handler owns a redraw timer and a viewer
+   * slot armed against a peer that no longer exists, and the transport's own `closeSockets` reaches
+   * only the sockets it accepted — never these. Nothing is sent because there is nothing left to send
+   * it on; §9 already says every session dies with its socket, and reconnection is a NEW session
+   * rather than a resumption, so there is nothing here worth carrying across one.
+   */
+  close(): void {
+    for (const session of this.#sessions.values()) this.#forget(session);
+    this.#sessions.clear();
   }
 }
