@@ -10,8 +10,8 @@ import {
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
-  type RegisterProjectRequest,
   refusalNotice,
+  type RegisterProjectRequest,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -3035,10 +3035,16 @@ function directCarrierPublication(
 ): { readonly kind: 'published'; readonly url: string } | { readonly kind: 'omitted'; readonly notice: string } {
   // The advertisement decision owns wildcard-derived omission. In particular, an operator-written
   // wildcard publicUrl is an address here and must not be reinterpreted from its hostname spelling.
+  //
+  // WHICH refusal it was is read off the decision rather than asserted here. There is more than one
+  // way to have no address to hand out, the protocol owns a sentence for each, and `fy pair` already
+  // renders those same two sentences — a third spelling on this seam would be the one that goes
+  // stale, telling an operator a reason that was true of some other document than theirs.
   if (config.advertisement.kind === 'none') {
+    const refusal = refusalNotice(config.advertisement.refusal);
     return {
       kind: 'omitted',
-      notice: `direct carrier omitted — ${config.bindUrl} is a wildcard bind, not an address a device can dial; set publicUrl to publish one`,
+      notice: `direct carrier omitted (${config.bindUrl}) — ${refusal.audience} To publish one: ${refusal.remedy}`,
     };
   }
   const candidate = publishableDirectCarrier(config.publicUrl);
@@ -4472,10 +4478,14 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   if ('carriers' in relay) {
     const started = new Map<string, ReturnType<BunRelayCarrier['status']>>();
     for (const { carrier, source } of relay.carriers) {
+      // REGISTERED BEFORE IT IS STARTED, like every other acquisition this boot makes. A dial opens a
+      // socket partway through `start`, so a carrier that throws on the way up has already taken
+      // something — and registering afterwards is exactly the ordering in which that one is the
+      // carrier nothing ever stops, while every carrier before it is released normally.
+      cleanups.push(() => carrier.stop());
       // Each carrier owns its own accepted connections, and therefore independently marks every
       // relayed arrival unprivileged. No list-wide or peer-address-derived privilege exists here.
       carrier.start();
-      cleanups.push(() => carrier.stop());
       const relayUrl = dialledRelayUrl(source);
       if (relayUrl !== undefined) started.set(relayUrl, carrier.status());
     }
@@ -4774,8 +4784,11 @@ export async function checkConfiguration(
    * An ordinary direct-only or disabled posture does not change the exit code because that daemon
    * starts perfectly. A duplicate discovered rendezvous is a refused configuration and does.
    */
+  // The same sentence the boot states, in this command's column. The TEXT is the boot's, whole and
+  // unaltered — a reader comparing a `--check` against a log must be able to see one fact, not two
+  // renderings of it — and only the label in front of it belongs to this table.
   const directCarrier = directCarrierPublication(config);
-  if (directCarrier.kind === 'omitted') say(directCarrier.notice);
+  if (directCarrier.kind === 'omitted') say(`carrier      ${directCarrier.notice}`);
   const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
   let carrierForGrants: RelayCarrierSource | undefined;
   let carrierExitCode = 0;
@@ -4799,13 +4812,32 @@ export async function checkConfiguration(
   // Directly beneath the carrier, because the line above has just said pairing cannot use one: this
   // is the address that has to work on its own, and whether anybody but this machine can dial it.
   for (const line of describePairingAdvertisement(config.advertisement)) say(line);
-  for (const line of describeGrantPosture({
-    config,
-    passwordSet: await world.operatorPassword.isSet().catch(() => false),
-    clientName: CLIENT_NAME,
-    carrier: carrierForGrants,
-  }))
-    say(line);
+  /**
+   * A REFUSED CARRIER SET HAS NO GRANT POSTURE, AND SAYING SO IS THE WHOLE POINT.
+   *
+   * The posture is derived from the carrier this daemon would dial, and a refused set names no such
+   * carrier — so the derivation falls all the way through to "loopback bind, no relay" and prints
+   * `nothing off this host can reach this daemon`. That sentence is FALSE for the operator it is
+   * shown to: they declared two rendezvous, and the refusal three lines above says so. It also sends
+   * them at the opposite remedy, in the one command a person runs when something is already wrong.
+   *
+   * Undetermined is the honest answer and it fails closed, exactly as an undetermined document does
+   * everywhere else here: nothing is claimed about a configuration this daemon has refused to act on.
+   */
+  if (resolvedRelays.kind === 'refused') {
+    say(
+      'grants       not reported — the carrier configuration above is refused, so what a caller off ' +
+        'this host could do is undetermined until it is corrected',
+    );
+  } else {
+    for (const line of describeGrantPosture({
+      config,
+      passwordSet: await world.operatorPassword.isSet().catch(() => false),
+      clientName: CLIENT_NAME,
+      carrier: carrierForGrants,
+    }))
+      say(line);
+  }
   const checkExitCode = Math.max(doctor.ready ? 0 : 1, carrierExitCode);
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });

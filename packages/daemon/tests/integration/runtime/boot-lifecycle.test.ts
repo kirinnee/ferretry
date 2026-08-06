@@ -19,6 +19,7 @@ import {
   PairingCodeStatusResponseSchema,
   PairingResponseSchema,
   ProposalViewSchema,
+  refusalNotice,
   RunManifestSchema,
   SendResultSchema,
   SessionConfigSchema,
@@ -40,6 +41,7 @@ import {
   type BrowserLoginRuntime,
   BrowserLoginWindowService,
   BrowserProfileStore,
+  type BunRelayCarrier,
 } from '../../../src/adapters/index.ts';
 import {
   type BootNoticePort,
@@ -53,6 +55,7 @@ import {
   type ProcessObservation,
   parseSessionId,
   type RelayAdvertisement,
+  type RelayCarrierSource,
   type ResumeLauncher,
   SESSION_ID_VARIABLE,
   sessionPaneEnvironment,
@@ -3682,6 +3685,67 @@ describe('daemon boot lifecycle', () => {
       }
     });
 
+    it('should retain a carrier that throws on the way up, so nothing it took is left running', async () => {
+      // A DIAL TAKES SOMETHING PARTWAY THROUGH `start`: the socket is opened and held before the link
+      // over it is built, so a carrier that throws after that point is holding a socket. Registered
+      // after starting, THAT is the one carrier nothing ever stops — every carrier before it is
+      // released normally, which is what makes the leak invisible. Registered before, the same throw
+      // releases everything this boot took.
+      const home = await tempDirectory('fyd-relay-start-throws');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const relayUrls = ['https://first.example', 'https://second.example'] as const;
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          carriers: relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
+        }),
+        { mode: 0o600 },
+      );
+      /**
+       * A carrier that records its own lifetime, standing in for one at the world seam.
+       *
+       * The cast is what a class-typed seam costs a double: `BunRelayCarrier` carries `#` fields, so
+       * nothing structural satisfies it. What is under test is the boot's ORDER of two statements, and
+       * a real carrier cannot be made to throw between them without a relay identity fixture that
+       * would prove less than this does.
+       */
+      const carrierDouble = (url: string, throwOnStart: boolean) => {
+        const record = { started: false, stopped: false };
+        const carrier = {
+          start: () => {
+            record.started = true;
+            if (throwOnStart) throw new Error(`the carrier for ${url} failed on the way up`);
+          },
+          stop: () => {
+            record.stopped = true;
+          },
+          status: () => ({ phase: 'dialling' as const, relayUrl: url, sessions: 0 }),
+        };
+        return { record, carrier: carrier as unknown as BunRelayCarrier };
+      };
+      const doubles = relayUrls.map((url, index) => carrierDouble(url, index === 1));
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const world = {
+        ...buildWorld(),
+        notices: recordingNotices().port,
+        untilShutdown: async () => undefined,
+        createRelayCarriers: async (sources: readonly RelayCarrierSource[]) => ({
+          carriers: sources.map((source, index) => ({ source, carrier: doubles[index]?.carrier as BunRelayCarrier })),
+        }),
+      };
+
+      await should(start(world, cleanups)).be.rejectedWith(/failed on the way up/u);
+      await runCleanups(cleanups);
+
+      should(doubles.map(double => double.record.started)).deepEqual([true, true]);
+      // BOTH, including the one that threw. Its own `stop` is the only thing that can release what it
+      // had already taken, and it is registered exactly when it can still be reached.
+      should(doubles.map(double => double.record.stopped)).deepEqual([true, true]);
+    });
+
     it('should read discovery once and retain a configured relay beside the different advertised one', async () => {
       const home = await tempDirectory('fyd-relay-mixed');
       const port = await freeLoopbackPort();
@@ -3821,6 +3885,18 @@ describe('daemon boot lifecycle', () => {
       should(reads).equal(2);
       should(refusedLines.filter(line => line.startsWith('carrier'))).have.length(1);
       should(refusedLines.join('\n')).match(/refused.*two relay carriers resolved to the same rendezvous/u);
+      // A REFUSED SET MUST NOT BE REPORTED AS AN ABSENT ONE. The grant posture is derived from the
+      // carrier this daemon would dial, and a refused set names none — so the derivation used to fall
+      // through to the loopback answer and tell this operator they had NO relay, three lines under a
+      // refusal saying they had declared two. The remedy that sentence points at is the opposite of
+      // the real one, in the command a person runs when something is already wrong.
+      should(refusedLines.join('\n')).not.match(/nothing off this host can reach this daemon/u);
+      should(refusedLines.join('\n')).not.match(/no grant applies today/u);
+      should(refusedLines.filter(line => line.startsWith('grants'))).have.length(1);
+      should(refusedLines.join('\n')).match(/grants {2,}not reported — the carrier configuration above is refused/u);
+      // And the honest posture is still reported for the very same document once it resolves, so the
+      // line above is an undetermined answer rather than a grant surface quietly switched off.
+      should(resolvedLines.join('\n')).match(/grants {2,}reachable off this host/u);
     });
 
     it('should omit a wildcard direct carrier while keeping relays reachable and say why', async () => {
@@ -3866,7 +3942,17 @@ describe('daemon boot lifecycle', () => {
       should(response.status).equal(200);
       should(view.carriers).deepEqual([{ kind: 'relay', url: relayUrl }]);
       should(view.carriers.some(carrier => carrier.kind === 'direct')).be.false();
-      should(said.stated.join('\n')).match(/direct carrier omitted.*wildcard bind/u);
+      // THE REASON IS THE PROTOCOL'S SENTENCE, NOT THIS BOOT'S PARAPHRASE OF IT. `refusalNotice` owns
+      // one audience and one remedy per member of `ADVERTISEMENT_REFUSALS`, and `fy pair` already
+      // renders those exact strings — so this asserts the daemon says the same words rather than a
+      // second spelling that can drift, or that can name the wrong refusal once there is more than
+      // one way to have no address to hand out.
+      const wildcard = refusalNotice('wildcard-bind');
+      const omission = said.stated.filter(message => message.startsWith('direct carrier omitted'));
+      should(omission).have.length(1);
+      should(omission[0]).containEql(wildcard.audience);
+      should(omission[0]).containEql(wildcard.remedy);
+      should(omission[0]).containEql('http://0.0.0.0:');
       // The raw document wrote neither legacy bind key. Schema defaults must never be reported as
       // stale lines the operator should remove from a file where they do not exist.
       should(said.stated.filter(message => message.includes('superseded'))).be.empty();
@@ -3923,7 +4009,15 @@ describe('daemon boot lifecycle', () => {
       should(bootNotice).match(/no direct entry is published.*only over its relays/u);
       should(bootNotice).match(/set "publicUrl" to an http or https origin/u);
       should(checkCode).equal(0);
-      should(checkLines.filter(line => line.startsWith('direct carrier omitted'))).deepEqual([bootNotice]);
+      // ONE FACT, TWO SURFACES, AND `--check` PUTS IT IN ITS OWN TABLE. The label is this command's;
+      // the sentence after it is the boot's, whole and unaltered, so a reader holding a log beside a
+      // `--check` sees one fact rather than two renderings they have to reconcile. Asserting the
+      // exact composition is what keeps a later "tidy-up" from rewording one of the two.
+      const checkOmissions = checkLines.filter(line => line.includes('direct carrier omitted'));
+      should(checkOmissions).deepEqual([`carrier      ${bootNotice}`]);
+      // Every other line of this report is a labelled column; a bare sentence dropped between them
+      // reads as output from something else.
+      for (const line of checkOmissions) should(line).match(/^carrier {2,}\S/u);
     });
 
     it('should publish an operator-written wildcard publicUrl without reinterpreting its hostname', async () => {
