@@ -108,6 +108,46 @@ const client = (calls: string[], next: SessionView): SessionChatClient =>
     },
   }) as unknown as SessionChatClient;
 
+/**
+ * A client whose `runtime` is a REAL prototype method over private state.
+ *
+ * The shipped `DaemonApiClient` is this shape, and the defect it pins cannot be
+ * seen from an arrow-function mock: an arrow ignores its receiver, so an unbound
+ * call still succeeds and every test passes while the built app throws
+ * `Cannot read properties of undefined` and sends nothing. Touching `#sent` is
+ * what makes the receiver load-bearing — call this method detached and it dies
+ * before it records anything, exactly as the minified client did.
+ */
+class ReceiverBoundChatClient {
+  readonly #sent: { sessionId: string; command: unknown; requestId: string | undefined }[] = [];
+
+  constructor(private readonly next: SessionView) {}
+
+  get sent(): readonly { sessionId: string; command: unknown; requestId: string | undefined }[] {
+    return this.#sent;
+  }
+
+  async answer(): Promise<SessionView> {
+    return this.next;
+  }
+  async send(): Promise<{ accepted: boolean }> {
+    return { accepted: true };
+  }
+  async interrupt(): Promise<SessionView> {
+    return this.next;
+  }
+  async resume(): Promise<SessionView> {
+    return this.next;
+  }
+  async stop(): Promise<SessionView> {
+    return this.next;
+  }
+  async runtime(sessionId: string, command: unknown, requestId?: string): Promise<SessionView> {
+    this.#sent.push({ sessionId, command, requestId });
+    return this.next;
+  }
+}
+
 describe('SessionChatPage', () => {
   test('threads the daemon account and cached usage stores into migration', () => {
     const accountPicker = new DaemonAccountPickerStore({
@@ -318,6 +358,62 @@ describe('SessionChatPage', () => {
       expect(modelChip.props.title).toBe('Busy: wait for an idle prompt to switch.');
       // A refused SWITCH is not a refused session: the reader may still type.
       expect(page.root.findByType(Composer).props.disabled).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('calls the runtime route on its client, not as a detached function', async () => {
+    // A REAL CLIENT IS AN OBJECT. The page has to feature-check the optional
+    // route, and reading it into a local to call it lost the receiver: the built
+    // app reached the handler, threw on the first private field, and sent no
+    // POST. Everything else here is unchanged behaviour asserted alongside it.
+    // Arrange
+    const next = sessionView('shared', { state: { observedModel: 'gpt-5.6-sol' } });
+    const receiver = new ReceiverBoundChatClient(next);
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={receiver as unknown as SessionChatClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={view => published.push(view)}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+
+    try {
+      const modelControls = page.root.findByType(ComposerRuntime).props.renderModelControls({
+        open: true,
+        onClose: () => undefined,
+        onClaudeEffortSent: () => undefined,
+        onSwitchFailed: () => undefined,
+        onSwitchSubmitted: () => undefined,
+      }) as ReactElement<ComponentProps<typeof RuntimeModelControls>>;
+
+      // Act — this is the call that threw in production.
+      await runAsync(() =>
+        modelControls.props.api.runtime(alpha, 'shared', { action: 'effort', effort: 'high' }, 'r1'),
+      );
+
+      // Assert — it reached the method WITH its instance, and still publishes.
+      expect(receiver.sent).toEqual([
+        { sessionId: 'shared', command: { action: 'effort', effort: 'high' }, requestId: 'r1' },
+      ]);
+      expect(published).toEqual([next]);
+
+      // The stale-scope guard is unchanged, and still refuses before the client.
+      await expect(
+        modelControls.props.api.runtime(
+          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-token' }),
+          'shared',
+          { action: 'model' },
+          'foreign',
+        ),
+      ).rejects.toThrow('runtime control belongs to a session that is no longer active');
+      expect(receiver.sent).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }
