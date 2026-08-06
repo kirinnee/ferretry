@@ -515,10 +515,18 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
         </p>
       </section>
 
+      {/*
+        `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
+        by identity rather than by position or by a design-system attribute. Both fallbacks are
+        wrong for the same reason in different ways: the first structural button on this screen is a
+        NAVIGATION control, and `data-variant="primary"` is a styling choice a restyle may take away
+        while leaving a journey silently pressing nothing.
+      */}
       <button
         type="button"
         className="kt-btn min-h-[64px] w-full text-title"
         data-variant="primary"
+        data-pair-confirm=""
         onClick={() => onPair(seed)}
         disabled={busy}
       >

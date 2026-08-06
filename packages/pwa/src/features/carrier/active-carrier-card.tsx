@@ -49,21 +49,45 @@ export const CARRIER_NO_FALLBACK =
  * A reader whose live updates have stopped deserves the reason next to the carrier
  * that caused it rather than a screen that simply stops changing.
  */
-export const CARRIER_NO_LIVE_UPDATES =
-  'Live updates are unavailable over a relay: the relay protocol carries one request and one answer at ' +
-  'a time, and a stream needs an envelope neither end has built yet. Everything else works.';
+/**
+ * WHAT A RELAY OPERATOR OBSERVES ABOUT A LIVE STREAM, which is more than about a request.
+ *
+ * This slot used to say live updates were unavailable over a relay, and that was true when it was
+ * written. `docs/relay-protocol.md` §14 now carries them, one session per stream — so the honest
+ * thing to say in its place is not silence but the DISCLOSURE the new capability brings with it.
+ *
+ * A stream's content is sealed exactly as a request's is. Its SHAPE is not: a relay sees a frame
+ * arrive whenever one does, and for a terminal that is keystroke timing, which is a materially
+ * stronger observation than "a request happened" and deserves its own sentence rather than a clause.
+ */
+export const CARRIER_STREAM_DISCLOSURE =
+  'Live updates and terminals travel this relay too, each on its own session. The relay cannot read any ' +
+  'of it — but it sees when each frame arrives and how big it is, and for a terminal that is the rhythm ' +
+  'of your typing.';
 
 export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCardProps) {
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
   const caveat =
     method?.kind === 'relay'
-      ? CARRIER_NO_LIVE_UPDATES
+      ? CARRIER_STREAM_DISCLOSURE
       : choice !== undefined && !relayAdvertised
         ? CARRIER_NO_FALLBACK
         : undefined;
   return (
-    <section className="kt-panel p-panel" aria-labelledby="settings-carrier-heading" data-active-carrier="">
+    <section
+      className="kt-panel p-panel"
+      aria-labelledby="settings-carrier-heading"
+      data-active-carrier=""
+      /*
+       * The MEASURED carrier as one machine-readable word, beside the prose that explains it.
+       * `none` is "nothing has measured a carrier yet" and is deliberately not "direct": a surface
+       * that defaulted to direct would state a fact no walk has established. A harness proving that
+       * the session after a pairing won on the relay reads this rather than matching rendered copy,
+       * which is how a journey starts failing for a rewording.
+       */
+      data-carrier-kind={method?.kind ?? 'none'}
+    >
       <h3 id="settings-carrier-heading" className="m-0 text-title font-semibold text-fg">
         {disclosure?.label ?? 'Carrier'}
       </h3>

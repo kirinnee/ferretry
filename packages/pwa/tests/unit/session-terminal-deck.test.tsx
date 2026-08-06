@@ -327,7 +327,7 @@ describe('SessionTerminalDeck co-control', () => {
   test('retries a stream the ticket exchange refused, because a token survives a network change', async () => {
     let attempts = 0;
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
-      streamUrl: async () => {
+      attach: async () => {
         attempts += 1;
         throw new Error('ticket unavailable');
       },

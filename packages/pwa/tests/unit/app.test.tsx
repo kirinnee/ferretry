@@ -216,6 +216,19 @@ const appStore = async (
         },
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
+        /*
+         * The live event feed the session route subscribes to. It never resolves and never rejects:
+         * a real one runs for the life of the workspace, and a fake that RESOLVED would tell the
+         * route its feed had ended the moment it opened. Aborting is what stops it, as in production.
+         */
+        stream: async (_sessionId: unknown, _after: unknown, _onEvent: unknown, signal?: AbortSignal) =>
+          await new Promise<void>(resolve => {
+            if (signal?.aborted === true) {
+              resolve();
+              return;
+            }
+            signal?.addEventListener('abort', () => resolve(), { once: true });
+          }),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
         wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
         wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,

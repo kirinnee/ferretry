@@ -179,21 +179,32 @@ function InviteOffer({ outcome }: { readonly outcome: PairingMintOutcome }) {
       </div>
     );
   }
-  // The notice takes the candidate too: with one, it says another device CAN redeem through the
-  // rendezvous and discloses what that relay observes, and it stops claiming there is no QR — because
-  // there now is one. Without one it is the sentence it always was.
-  const local = invitationRedeemableByAnotherDevice(outcome)
-    ? null
-    : localOnlyNotice(outcome.daemonUrl, outcome.relayCandidate);
+  /*
+   * THE QR AND THE NOTICE ARE INDEPENDENT ANSWERS, and collapsing them was a real defect for the
+   * exact case this feature adds. They used to move together because they only ever had one cause: a
+   * `local-only` link could not be redeemed elsewhere, so it earned a warning INSTEAD of a QR.
+   *
+   * A loopback-bound daemon on a rendezvous breaks that pairing of facts in half. Another device CAN
+   * redeem the link — so it earns a QR — and the address in it is still local, so the reader is still
+   * owed the sentence saying what that means and what the rendezvous observes about the exchange.
+   * Suppressing the notice because a QR appeared would delete the disclosure precisely when there is
+   * something new to disclose, which is the opposite of what §14 asks for.
+   *
+   * So: the QR is drawn whenever another device can redeem (`redeemable`), the notice is rendered
+   * whenever the ADDRESS is local-only (`reach`), and a relayed loopback mint gets both.
+   */
+  const redeemable = invitationRedeemableByAnotherDevice(outcome);
+  const local = outcome.reach === 'local-only' ? localOnlyNotice(outcome.daemonUrl, outcome.relayCandidate) : null;
   return (
     <div className="flex min-w-0 flex-col gap-2" data-pair-offer={outcome.reach}>
-      {local === null ? (
+      {redeemable && (
         <>
           <InviteSymbol pairUrl={outcome.pairUrl} />
           <p className="m-0 text-meta leading-base text-muted">{PAIRING_SCAN_HINT}</p>
           <p className="m-0 text-meta leading-base text-muted">{PAIRING_TYPE_HINT}</p>
         </>
-      ) : (
+      )}
+      {local !== null && (
         <>
           <p
             role="status"

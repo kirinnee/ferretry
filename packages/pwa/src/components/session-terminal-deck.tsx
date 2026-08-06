@@ -21,10 +21,11 @@
  * one daemon's shell must never appear under another daemon's session
  * (`docs/migration/surveys/pwa-shape.md`).
  *
- * THE SOCKET CARRIES A TICKET, NEVER THE DEVICE TOKEN. A browser WebSocket cannot
- * set a header, so the stream URL carries a short-lived ticket bought over HTTP.
- * The device token stays in that request: a URL outlives the socket in history
- * and logs, and the page origin is never the daemon's.
+ * THE STREAM IS A PORT, NOT A SOCKET. A direct viewer opens a `wss://` socket at the daemon's own
+ * address, carrying a short-lived ticket bought over HTTP so the durable device token never enters a
+ * URL that outlives it in history or logs. A RELAYED viewer has no such address to open — that is the
+ * one the rendezvous exists because this browser cannot reach — so it gets a §14 stream session and no
+ * ticket at all. `lib/web-terminals.ts` owns both adapters; this deck asks for four operations.
  *
  * XTERM IS LOADED LAZILY. It is the largest dependency in this bundle and most
  * readers never open a shell; a static import would put a terminal emulator in
@@ -65,14 +66,18 @@ import {
   terminalResizeFrame,
 } from '../lib/terminal-co-control.ts';
 import {
+  browserTerminalStreamAttach,
   closeSessionTerminal,
   createSessionTerminal,
-  daemonTerminalTicket,
   listSessionTerminals,
   renameSessionTerminal,
   terminalLimitLabel,
-  terminalStreamUrl,
+  type TerminalStream,
+  type TerminalStreamHandlers,
+  type TerminalStreamOpener,
+  TerminalStreamRefused,
 } from '../lib/web-terminals.ts';
+import { browserFetch, type DaemonFetch } from '../lib/runtime-models.ts';
 import { Button } from '../shell/primitives.tsx';
 
 type XtermModules = {
@@ -92,9 +97,20 @@ export interface TerminalDeckDependencies {
   create(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalView>;
   rename(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, title: string): Promise<TerminalView>;
   close(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<unknown>;
-  /** Buys the ticket and builds the one URL this socket may open. */
-  streamUrl(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<string>;
-  openSocket(url: string): WebSocket;
+  /**
+   * Attaches to one terminal's live stream over whichever carrier is live.
+   *
+   * ONE OPERATION RATHER THAN "BUILD A URL, THEN OPEN A SOCKET", because a relayed terminal has no
+   * URL to build: it is a §14 stream session over a rendezvous, and the daemon's own address is the
+   * one the relay exists because this browser cannot reach it. `web-terminals.ts` owns both adapters
+   * and this deck stops knowing which one it got.
+   */
+  attach(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    handlers: TerminalStreamHandlers,
+  ): Promise<TerminalStream>;
   loadXterm(): Promise<XtermModules>;
   /** Subscribes to the document theme attributes and returns its cleanup. */
   watchTheme(repaint: () => void): () => void;
@@ -103,14 +119,24 @@ export interface TerminalDeckDependencies {
   writeClipboard(text: string): Promise<void>;
 }
 
-export const browserTerminalDeckDependencies = (): TerminalDeckDependencies => ({
-  list: listSessionTerminals,
-  create: (daemon, scope) => createSessionTerminal(daemon, scope),
-  rename: renameSessionTerminal,
-  close: closeSessionTerminal,
-  streamUrl: async (daemon, scope, id) =>
-    terminalStreamUrl(daemon, scope, id, await daemonTerminalTicket(daemon, scope, id)),
-  openSocket: url => new WebSocket(url),
+/**
+ * The browser's real dependencies, bound to the carrier this daemon's traffic is on.
+ *
+ * THE FETCHER IS THREADED THROUGH EVERY HTTP CALL, and it did not used to be. `list`, `create`,
+ * `rename`, `close` and the ticket purchase all defaulted to `browserFetch` — the raw network — so on
+ * a relay-only network the deck did not show the honest refusal it was written to give; it showed a
+ * raw `TypeError: Failed to fetch` from a ticket purchase at an address nothing can reach. The
+ * control plane and the stream now travel the same carrier as every other daemon call.
+ */
+export const browserTerminalDeckDependencies = (
+  fetcher: DaemonFetch = browserFetch,
+  openStream: TerminalStreamOpener = async () => null,
+): TerminalDeckDependencies => ({
+  list: (daemon, scope) => listSessionTerminals(daemon, scope, fetcher),
+  create: (daemon, scope) => createSessionTerminal(daemon, scope, {}, fetcher),
+  rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
+  close: (daemon, scope, id) => closeSessionTerminal(daemon, scope, id, fetcher),
+  attach: browserTerminalStreamAttach(openStream, fetcher),
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };
@@ -219,7 +245,7 @@ function TerminalCanvas({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<import('@xterm/xterm').Terminal | null>(null);
   const fitRef = useRef<import('@xterm/addon-fit').FitAddon | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<TerminalStream | null>(null);
   const activeRef = useRef(active);
   activeRef.current = active;
   const onLinkRef = useRef(onLink);
@@ -274,10 +300,11 @@ function TerminalCanvas({
           return true;
         });
         const send = (bytes: Uint8Array<ArrayBuffer>): void => {
-          const socket = socketRef.current;
           // Sent WHOEVER else is attached. There is no turn to wait for: this is
           // the line that makes co-control concurrent rather than a handover.
-          if (socket?.readyState === WebSocket.OPEN) socket.send(bytes);
+          // On a relay the port splits an oversized write into ordered records; on a socket it is
+          // one frame. Neither answer belongs here, which is why this calls a port.
+          streamRef.current?.write(bytes);
         };
         dataDisposable = xterm.onData(value => send(new TextEncoder().encode(value)));
         binaryDisposable = xterm.onBinary(value => send(bytesFromBinaryString(value)));
@@ -290,8 +317,8 @@ function TerminalCanvas({
           } catch {
             return;
           }
-          const socket = socketRef.current;
-          if (socket?.readyState === WebSocket.OPEN) socket.send(terminalResizeFrame(xterm.cols, xterm.rows));
+          // A resize is one complete control frame and is never split: half a message is corruption.
+          streamRef.current?.control(terminalResizeFrame(xterm.cols, xterm.rows));
         };
         if (typeof ResizeObserver !== 'undefined') {
           observer = new ResizeObserver(() => fitAndResize());
@@ -333,74 +360,87 @@ function TerminalCanvas({
       return;
     }
     let disposed = false;
-    let socket: WebSocket | null = null;
+    let stream: TerminalStream | null = null;
     let reopenTimer: ReturnType<typeof setTimeout> | undefined;
     onLinkRef.current('connecting');
 
-    // The ticket is bought before the socket exists, so every teardown path has
-    // to survive the await: a tab switched away from mid-purchase must not open
-    // a socket nobody is watching.
+    const retryLater = (): void => {
+      onLinkRef.current('reconnecting');
+      attemptRef.current += 1;
+      reopenTimer = setTimeout(
+        () => setReopenVersion(version => version + 1),
+        terminalReopenDelayMs(attemptRef.current),
+      );
+    };
+
+    // The attach is asynchronous on both carriers — a ticket purchase, or a rendezvous handshake —
+    // so every teardown path has to survive the await: a tab switched away from mid-attach must not
+    // leave a stream nobody is watching.
     void dependencies
-      .streamUrl(connection, scope, terminal.id)
-      .then(url => {
-        if (disposed) return;
-        socket = dependencies.openSocket(url);
-        socketRef.current = socket;
-        socket.binaryType = 'arraybuffer';
-        socket.addEventListener('open', () => {
+      .attach(connection, scope, terminal.id, {
+        onOpen: () => {
           if (disposed) return;
           attemptRef.current = 0;
           onLinkRef.current('live');
           globalThis.requestAnimationFrame(() => {
-            if (disposed || socket === null) return;
+            if (disposed || stream === null) return;
             try {
               fit.fit();
-              socket.send(terminalResizeFrame(xterm.cols, xterm.rows));
+              stream.control(terminalResizeFrame(xterm.cols, xterm.rows));
             } catch {
               // A zero-sized retained pane is fitted by ResizeObserver later.
             }
           });
-        });
-        socket.addEventListener('message', event => {
-          if (!disposed && event.data instanceof ArrayBuffer) xterm.write(new Uint8Array(event.data));
-        });
-        socket.addEventListener('close', event => {
+        },
+        onBytes: bytes => {
+          if (!disposed) xterm.write(bytes);
+        },
+        onClosed: code => {
           if (disposed) return;
-          if (!shouldReopenTerminalStream(event.code)) {
+          // THE STREAM'S OWN CODE, NEVER THE SESSION'S. On a relay the meaningful code arrives in a
+          // sealed `stream-close` record and a `4440` follows it as expected teardown; handing that
+          // `4440` here would read as "retry" against a stream the daemon deliberately ended, and
+          // the reader would watch a shell reopen and die at the backoff cap forever.
+          if (!shouldReopenTerminalStream(code)) {
             // The daemon has judged this client. Retrying asks it the same
             // question, so the reader is told instead of watching a loop.
             onLinkRef.current('refused');
             return;
           }
-          onLinkRef.current('reconnecting');
-          attemptRef.current += 1;
-          reopenTimer = setTimeout(
-            () => setReopenVersion(version => version + 1),
-            terminalReopenDelayMs(attemptRef.current),
-          );
-        });
-        socket.addEventListener('error', () => {
-          // `error` is always followed by `close`, which owns the retry decision.
-          if (!disposed) onLinkRef.current('reconnecting');
-        });
+          retryLater();
+        },
+        onRefused: () => {
+          // §14 gives `stream-refused` a status so "it is gone" can be told from "the daemon broke".
+          // It is final for this attempt, so it reaches the state that says so rather than the retry
+          // that would ask a permanent 403 the same question at fifteen-second intervals forever.
+          if (!disposed) onLinkRef.current('refused');
+        },
       })
-      .catch(() => {
+      .then(attached => {
+        if (disposed) {
+          attached.close(1000, 'terminal tab detached');
+          return;
+        }
+        stream = attached;
+        streamRef.current = attached;
+      })
+      .catch(reason => {
         if (disposed) return;
-        // The ticket was refused or the daemon is unreachable. Both are worth
-        // retrying: a device token is still valid across a network change.
-        onLinkRef.current('reconnecting');
-        attemptRef.current += 1;
-        reopenTimer = setTimeout(
-          () => setReopenVersion(version => version + 1),
-          terminalReopenDelayMs(attemptRef.current),
-        );
+        // A refusal has already reported itself through `onRefused` and must not be retried.
+        // Everything else — an unreachable daemon, a refused ticket, a rendezvous that did not
+        // answer — is worth retrying: a device token is still valid across a network change.
+        if (reason instanceof TerminalStreamRefused) return;
+        retryLater();
       });
 
     return () => {
       disposed = true;
       if (reopenTimer !== undefined) clearTimeout(reopenTimer);
-      if (socketRef.current === socket) socketRef.current = null;
-      socket?.close(1000, 'terminal tab detached');
+      if (streamRef.current === stream) streamRef.current = null;
+      // §14 makes a client's leave an explicit sealed record rather than a dropped socket, "so that
+      // the taxonomy survives in both directions and a deliberate leave is never spelled the same as
+      // a network failure". The port carries the same code and reason on either carrier.
+      stream?.close(1000, 'terminal tab detached');
       onLinkRef.current('idle');
     };
   }, [active, connection, dependencies, readyVersion, reopenVersion, scope, terminal.id]);
