@@ -3904,7 +3904,15 @@ function Shell() {
               new Map(candidates.filter(path => path === 'src/api.ts').map(path => [path, path]))
             }
             skillReferenceResolver={name => name === 'summary'}
-            taskReferenceResolver={id => id === 'F12'}
+            taskReferenceResolver={lookup =>
+              lookup.id === 'F12' && (lookup.form === 'local' || lookup.sessionId === scope.sessionId)
+                ? {
+                    daemonId: daemon.daemonId,
+                    sessionId: scope.sessionId,
+                    id: lookup.id,
+                  }
+                : null
+            }
             surfaceReferenceResolver={lookup =>
               lookup.key === '0a1b2c3d4e5f'
                 ? {

@@ -8,6 +8,7 @@ import {
   taskBoardLane,
   taskBoardState,
   taskReference,
+  taskReferenceFor,
 } from '../../../src/features/tasks/task-board-model.ts';
 import { taskSummary } from '../../support/tasks.ts';
 
@@ -55,6 +56,23 @@ describe('taskReference', () => {
   it('never doubles a sigil that is already there', () => {
     expect(taskReference('&F12')).toBe('&F12');
     expect(taskReference('#F12')).toBe('&F12');
+  });
+
+  it('keeps damaged historical ids renderable but inert', () => {
+    expect(taskReference('not-an-id')).toBe('not-an-id');
+    expect(taskReference('&Z9')).toBe('Z9');
+  });
+
+  it('formats a current row bare and a foreign row with its exact owner', () => {
+    const viewer = { sessionId: 'session-1' };
+
+    expect(taskReferenceFor(viewer, 'session-1', 'f12')).toBe('&F12');
+    expect(taskReferenceFor(viewer, 'Session_A-1.dev', 'f12')).toBe('&F12@{Session_A-1.dev}');
+  });
+
+  it('never degrades an unsafe foreign owner into a bare reference', () => {
+    expect(taskReferenceFor({ sessionId: 'session-1' }, '..', 'F12')).toBe('F12');
+    expect(taskReferenceFor({ sessionId: 'session-1' }, 'session-2', 'bad-id')).toBe('bad-id');
   });
 });
 

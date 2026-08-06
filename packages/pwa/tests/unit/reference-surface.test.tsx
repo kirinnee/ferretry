@@ -100,7 +100,7 @@ describe('sessionReferenceSurface', () => {
     should(surface.agentReferenceResolver?.({ name: 'ganon' })).be.null();
   });
 
-  test('should prove tasks, attention and skills from the snapshots the host holds', () => {
+  test('should prove local tasks, attention and skills from the snapshots the host holds', () => {
     // Arrange
     const surface = sessionReferenceSurface({
       connection,
@@ -111,12 +111,39 @@ describe('sessionReferenceSurface', () => {
     });
 
     // Assert
-    should(surface.taskReferenceResolver?.('f12')).be.true();
-    should(surface.taskReferenceResolver?.('F99')).be.false();
+    should(surface.taskReferenceResolver?.({ form: 'local', id: 'f12' })).deepEqual({
+      daemonId,
+      sessionId: 'session-1',
+      id: 'F12',
+    });
+    should(surface.taskReferenceResolver?.({ form: 'local', id: 'F99' })).be.null();
     should(surface.attentionReferenceResolver?.('A3' as AttentionId)).be.true();
     should(surface.attentionReferenceResolver?.('A4' as AttentionId)).be.false();
     should(surface.skillReferenceResolver?.('summary')).be.true();
     should(surface.skillReferenceResolver?.('missing')).be.false();
+  });
+
+  test('should use aggregate rows only for exact foreign qualified task proof', () => {
+    // Arrange
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      tasks: [{ id: 'F12' }],
+      boardTasks: [
+        { sessionId: 'session-1', id: 'F99' },
+        { sessionId: 'Session_A', id: 'F12' },
+      ],
+    });
+
+    // Assert
+    should(surface.taskReferenceResolver?.({ form: 'local', id: 'F99' })).be.null();
+    should(surface.taskReferenceResolver?.({ form: 'qualified', id: 'F99', sessionId: 'session-1' })).be.null();
+    should(surface.taskReferenceResolver?.({ form: 'qualified', id: 'F12', sessionId: 'Session_A' })).deepEqual({
+      daemonId,
+      sessionId: 'Session_A',
+      id: 'F12',
+    });
+    should(surface.taskReferenceResolver?.({ form: 'qualified', id: 'F12', sessionId: 'session_a' })).be.null();
   });
 
   test('should not turn a catalog name the grammar refuses into a different name it accepts', () => {
@@ -189,7 +216,13 @@ describe('sessionReferenceSurface', () => {
     const surface = sessionReferenceSurface({ connection, scope });
 
     // Act
-    surface.onTaskOpen?.('F12');
+    surface.onTaskOpen?.({
+      kind: 'task',
+      daemonId,
+      sessionId: scope.sessionId,
+      id: 'F12',
+      form: 'local',
+    });
     const afterTask = readSidePaneTabsState(scope).active;
     surface.onSkillOpen?.('summary');
 

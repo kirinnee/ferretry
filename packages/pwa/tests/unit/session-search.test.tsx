@@ -477,7 +477,7 @@ describe('the published scope and the published evidence never disagree', () => 
       daemonId: search.scope?.daemonId,
       taskState: search.taskState,
       taskIds: search.tasks.map(task => task.id),
-      resolvesF6: surface?.taskReferenceResolver?.('F6') === true,
+      resolvesF6: surface?.taskReferenceResolver?.({ form: 'local', id: 'F6' })?.id === 'F6',
     });
     return null;
   }

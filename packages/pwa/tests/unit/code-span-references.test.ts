@@ -9,7 +9,14 @@ const daemonId = 'daemon-a' as DaemonId;
 const resolvers: ReferenceResolvers = {
   agent: () => ({ daemonId, sessionId: 's1', name: 'zelda' }),
   file: candidate => (candidate === 'src/api.ts' ? 'src/api.ts' : null),
-  task: id => id === 'F12',
+  task: lookup =>
+    lookup.id === 'F12'
+      ? {
+          daemonId,
+          sessionId: lookup.form === 'qualified' ? lookup.sessionId : 's1',
+          id: lookup.id,
+        }
+      : null,
 };
 
 const anything = () => true;
@@ -58,6 +65,26 @@ describe('decoratedCodeNodes', () => {
 
     // Assert
     should(nodes).be.null();
+    should(decoratedCodeNodes({ code: 'see \\&F12@{Session_A-1}', resolvers, isOpenable: anything })).be.null();
+  });
+
+  test('should decorate a qualified task without changing one byte or its session case', () => {
+    // Arrange
+    const code = 'see &f12@{Session_A-1.dev}, then stop';
+
+    // Act
+    const nodes = decoratedCodeNodes({ code, resolvers, isOpenable: anything });
+
+    // Assert
+    should(nodeText(nodes ?? [])).equal(code);
+    const reference = nodes?.find(node => node.kind === 'reference');
+    should(reference?.kind === 'reference' ? reference.reference : null).deepEqual({
+      kind: 'task',
+      daemonId,
+      sessionId: 'Session_A-1.dev',
+      id: 'F12',
+      form: 'qualified',
+    });
   });
 
   test('should refuse a kind this surface cannot open', () => {
@@ -121,6 +148,24 @@ describe('decoratedCodeNodes', () => {
     // Assert — two adjacent references to the same target, no re-nesting.
     should(nodeText(nodes ?? [])).equal(code);
     should(kinds(nodes ?? [])).deepEqual(['reference', 'reference']);
+  });
+
+  test('should decorate one qualified task split across highlighter tokens', () => {
+    // Arrange
+    const code = '&F12@{Session_A-1}';
+    const html = '<span class="hljs-a">&amp;F12@{Session_</span><span class="hljs-b">A-1}</span>';
+
+    // Act
+    const nodes = decoratedCodeNodes({ code, html, resolvers, isOpenable: anything });
+
+    // Assert
+    should(nodeText(nodes ?? [])).equal(code);
+    should(kinds(nodes ?? [])).deepEqual(['reference', 'reference']);
+    const references = (nodes ?? []).flatMap(node =>
+      node.kind === 'span' ? node.children.flatMap(child => (child.kind === 'reference' ? [child.reference] : [])) : [],
+    );
+    should(references).have.length(2);
+    should(references[0]).deepEqual(references[1]);
   });
 
   test('should refuse highlighter markup it cannot read back safely', () => {
