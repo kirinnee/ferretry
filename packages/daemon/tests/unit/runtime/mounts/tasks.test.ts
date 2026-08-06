@@ -900,6 +900,38 @@ describe('the task board mount', () => {
       should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
     });
 
+    it('should refuse malformed board evidence without creating a trusted top-agent attestation', async () => {
+      // Arrange — a mount adapter is still a trust boundary: a broken authorizer must not become a
+      // positively stamped completion merely because it returned an object of the broad grant shape.
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async () => ({ ...RESOLVED_GRANT, role: 'read', allowedActions: ['read'] }),
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const refused = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 'malformed-capability', 'x-fy-request-id': 'click-3' },
+        ),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(refused.status).equal(409);
+      const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
+      should(body.task.phase).equal('live');
+      should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
+    });
+
     it('should keep a shared live completion unavailable when the board authorizer cannot mount', async () => {
       // Arrange — no fallback to the task route is allowed when the permission
       // source is unavailable: that would turn damaged board state into a grant.

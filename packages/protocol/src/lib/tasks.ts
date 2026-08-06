@@ -146,14 +146,43 @@ const refineTaskCoherence = (value: TaskCoherence, context: z.RefinementCtx): vo
 export const TaskSchema = TaskBaseSchema.superRefine(refineTaskCoherence);
 export type Task = z.infer<typeof TaskSchema>;
 
-export const TaskAuthorizationProvenanceSchema = z.object({
+/**
+ * The parsed, semantic shape of the one task action a board grant may authorize today.
+ *
+ * It travels with the authorization receipt so a client retry can prove it is repeating the
+ * same decision, rather than reusing a request id to perform a different completion. Keeping the
+ * parsed fields instead of a hash makes the durable evidence independently inspectable.
+ */
+export const TaskDoneRequestFingerprintSchema = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('phase'),
+    phase: z.literal('done'),
+    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
+  }),
+  z.strictObject({
+    action: z.literal('status'),
+    status: z.literal('done'),
+    reason: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH),
+    note: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
+  }),
+]);
+export type TaskDoneRequestFingerprint = z.infer<typeof TaskDoneRequestFingerprintSchema>;
+
+export const TaskAuthorizationProvenanceSchema = z.strictObject({
   boardId: z.string().optional(),
+  grantId: z.string().min(1).optional(),
+  /** The peer session the board resolved from the presented capability. */
+  sessionId: z.string().min(1).optional(),
+  /** The task-board session this one authorization was spent against. */
+  targetSessionId: z.string().min(1).optional(),
   role: z.enum(['read', 'worker', 'coordinator', 'top_agent', 'human_admin', 'daemon']),
   boardEpoch: NonNegativeIntegerSchema,
   coordinatorEpoch: NonNegativeIntegerSchema,
   runtimeGeneration: PositiveIntegerSchema.nullable(),
   action: z.string().min(1),
   requestId: z.string().min(1),
+  /** Present on the durable receipt for a top-agent completion; generic task authorization may omit it. */
+  requestFingerprint: TaskDoneRequestFingerprintSchema.optional(),
 });
 export type TaskAuthorizationProvenance = z.infer<typeof TaskAuthorizationProvenanceSchema>;
 
@@ -228,28 +257,131 @@ export const LegacyAttestationSchema = z.strictObject({
 });
 export type LegacyAttestation = z.infer<typeof LegacyAttestationSchema>;
 
-const StatusTaskActivitySchema = z.object({
-  ...TaskActivityBaseShape,
-  type: z.literal('status'),
-  data: z.object({
-    from: TaskStatusSchema,
-    to: TaskStatusSchema,
-    phaseFrom: TaskPhaseSchema,
-    phaseTo: TaskPhaseSchema,
-    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
-    note: z.string().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
-    backward: z.literal(true).optional(),
-    reopened: z.literal(true).optional(),
-    approvedByHuman: z.literal(true).optional(),
-    verifiedByHuman: z.literal(true).optional(),
-    verifiedByTopAgent: z.literal(true).optional(),
-    completionClaim: z.literal(true).optional(),
-    /** Optional because pre-split records cannot have it — that absence is exactly the signal. */
-    attestationSemantics: z.literal(ACTOR_AUTHORITY_SPLIT_SEMANTICS).optional(),
-    legacyAttestation: LegacyAttestationSchema.optional(),
-    ...TaskActivityAuthorizationShape,
-  }),
-});
+const StatusTaskActivitySchema = z
+  .object({
+    ...TaskActivityBaseShape,
+    type: z.literal('status'),
+    data: z.object({
+      from: TaskStatusSchema,
+      to: TaskStatusSchema,
+      phaseFrom: TaskPhaseSchema,
+      phaseTo: TaskPhaseSchema,
+      reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
+      note: z.string().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
+      backward: z.literal(true).optional(),
+      reopened: z.literal(true).optional(),
+      approvedByHuman: z.literal(true).optional(),
+      verifiedByHuman: z.literal(true).optional(),
+      verifiedByTopAgent: z.literal(true).optional(),
+      completionClaim: z.literal(true).optional(),
+      /** Optional because pre-split records cannot have it — that absence is exactly the signal. */
+      attestationSemantics: z.literal(ACTOR_AUTHORITY_SPLIT_SEMANTICS).optional(),
+      legacyAttestation: LegacyAttestationSchema.optional(),
+      ...TaskActivityAuthorizationShape,
+    }),
+  })
+  .superRefine((entry, context) => {
+    const { data } = entry;
+    const approval = data.approvedByHuman === true;
+    const humanVerification = data.verifiedByHuman === true;
+    const topAgentVerification = data.verifiedByTopAgent === true;
+    const attestations = Number(approval) + Number(humanVerification) + Number(topAgentVerification);
+    const completion =
+      data.from === 'live' && data.to === 'done' && data.phaseFrom === 'live' && data.phaseTo === 'done';
+
+    if (attestations > 1) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a status entry may carry exactly one attestation kind',
+        path: ['data'],
+      });
+    }
+    if (humanVerification && !completion) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a human verification must attest a live to done completion',
+        path: ['data', 'verifiedByHuman'],
+      });
+    }
+    if (
+      approval &&
+      ((data.phaseFrom !== 'research' && data.phaseFrom !== 'design') || data.phaseFrom === data.phaseTo)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a human approval must advance out of research or design',
+        path: ['data', 'approvedByHuman'],
+      });
+    }
+    if (topAgentVerification) {
+      const authorization = data.authorization;
+      if (!completion) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification must attest a live to done completion',
+          path: ['data', 'verifiedByTopAgent'],
+        });
+      }
+      if (
+        authorization === undefined ||
+        authorization.boardId === undefined ||
+        authorization.boardId.trim() === '' ||
+        authorization.grantId === undefined ||
+        authorization.sessionId === undefined ||
+        authorization.targetSessionId === undefined ||
+        authorization.role !== 'top_agent' ||
+        authorization.action !== 'mark_done' ||
+        authorization.requestFingerprint === undefined
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification needs its exact mark_done board authorization receipt',
+          path: ['data', 'authorization'],
+        });
+      }
+      if (
+        authorization !== undefined &&
+        (!entry.actor.startsWith('peer:') || entry.actor !== `peer:${authorization.sessionId}`)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification actor must match the authorized peer session',
+          path: ['actor'],
+        });
+      }
+      if (data.attestationSemantics !== ACTOR_AUTHORITY_SPLIT_SEMANTICS) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification must declare actor-authority-split semantics',
+          path: ['data', 'attestationSemantics'],
+        });
+      }
+    }
+    if ((approval || humanVerification) && data.authorization !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a human attestation cannot carry board authorization evidence',
+        path: ['data', 'authorization'],
+      });
+    }
+    if (data.attestationSemantics !== undefined && attestations === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'attestation semantics require an attestation claim',
+        path: ['data', 'attestationSemantics'],
+      });
+    }
+    if (
+      data.legacyAttestation !== undefined &&
+      ((!approval && !humanVerification) || data.attestationSemantics !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a legacy marker is only valid for an unstamped human attestation',
+        path: ['data', 'legacyAttestation'],
+      });
+    }
+  });
 
 const NoteTaskActivityDataSchema = z.object({
   text: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),

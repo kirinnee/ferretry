@@ -60,11 +60,6 @@ describe('legacy completion attestations', () => {
     { name: 'an unstamped early approval', input: status(EARLY, { approvedByHuman: true }), marked: true },
     // Nothing else is touched: no human claim, nothing to be unreliable about.
     { name: 'a move claiming no attestation', input: status(EARLY, {}), marked: false },
-    {
-      name: 'an unstamped top-agent completion',
-      input: status(EARLY, { verifiedByTopAgent: true }),
-      marked: false,
-    },
     { name: 'a note of any age', input: note(EARLY), marked: false },
     // An unreadable stamp is not a reason to trust anything, and is not consulted either way.
     {

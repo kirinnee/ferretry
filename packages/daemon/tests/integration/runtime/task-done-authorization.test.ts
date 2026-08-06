@@ -230,11 +230,14 @@ describe('completing shared live work', () => {
       }),
     });
     const taskId = ((await openedTask.json()) as { readonly id: string }).id;
-    const markDone = async (extra: Readonly<Record<string, string>>): Promise<Response> =>
+    const markDone = async (
+      extra: Readonly<Record<string, string>>,
+      reason = 'Marked done from Tasks.',
+    ): Promise<Response> =>
       await fetch(`${tasks}/${encodeURIComponent(taskId)}`, {
         method: 'POST',
         headers: { ...headers, 'content-type': 'application/json', ...extra },
-        body: JSON.stringify({ action: 'phase', phase: 'done', reason: 'Marked done from Tasks.' }),
+        body: JSON.stringify({ action: 'phase', phase: 'done', reason }),
       });
     const peer = { 'x-ferretry-session-id': root.config.id };
 
@@ -249,17 +252,38 @@ describe('completing shared live work', () => {
       'x-fy-request-id': 'mark-done-mismatched-peer',
     });
     const withoutRequestId = await markDone({ ...peer, 'x-fy-board-capability': rootCapability });
-    const withGrant = await markDone({
+    const completionHeaders = {
       ...peer,
       'x-fy-board-capability': rootCapability,
       'x-fy-request-id': REQUEST_ID,
-    });
+    };
+    // Two requests can be in flight when the first response is delayed. The serialized task
+    // reducer must return the one durable completion to both rather than appending two activities.
+    const [withGrant, inFlightRetry] = await Promise.all([markDone(completionHeaders), markDone(completionHeaders)]);
     const completed = (await withGrant.json()) as { readonly phase: string };
+    // And a response lost after either commit is the same logical click, not a done → done conflict.
+    const responseLossRetry = await markDone(completionHeaders);
+    const sameIdDifferentBody = await markDone(completionHeaders, 'Marked done with a changed reason.');
+    const otherActorSameId = await markDone({
+      'x-ferretry-session-id': coordinator.config.id,
+      'x-fy-request-id': REQUEST_ID,
+    });
     // Read back from the store rather than from the response, so the assertion is about what the
     // daemon DURABLY recorded and not about what one handler happened to return.
     const detail = (await (await fetch(`${tasks}/${encodeURIComponent(taskId)}`, { headers })).json()) as {
       readonly activity: readonly unknown[];
     };
+    const reopen = await fetch(`${tasks}/${encodeURIComponent(taskId)}`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'reopen',
+        reason: 'recheck the release',
+        ask: 'recheck it',
+        source: 'integration',
+      }),
+    });
+    const staleReuseAfterReopen = await markDone(completionHeaders);
     release();
     const code = await exit;
     for (const cleanup of cleanups) await cleanup();
@@ -280,8 +304,16 @@ describe('completing shared live work', () => {
     // The grant is served, and the answer already carries the new phase: nothing has to be polled
     // for the client to show the completion.
     should(withGrant.status).equal(200);
+    should(inFlightRetry.status).equal(200);
+    should(responseLossRetry.status).equal(200);
     should(completed.phase).equal('done');
-    const recorded = TaskActivitySchema.parse(lastStatusActivity(detail.activity.map(entry => entry as TaskActivity)));
+    // A same-id body collision remains a refusal, and another peer cannot spend ROOT's receipt.
+    should(sameIdDifferentBody.status).equal(409);
+    should(otherActorSameId.status).equal(403);
+    should(reopen.status).equal(200);
+    should(staleReuseAfterReopen.status).equal(409);
+    const persisted = detail.activity.map(entry => entry as TaskActivity);
+    const recorded = TaskActivitySchema.parse(lastStatusActivity(persisted));
     should(recorded.actor).equal(`peer:${root.config.id}`);
     should(recorded.data).have.property('phaseFrom', 'live');
     should(recorded.data).have.property('phaseTo', 'done');
@@ -291,7 +323,15 @@ describe('completing shared live work', () => {
     should(authorization).have.property('role', 'top_agent');
     should(authorization).have.property('action', 'mark_done');
     should(authorization).have.property('requestId', REQUEST_ID);
+    should(authorization).have.property('requestFingerprint', {
+      action: 'phase',
+      phase: 'done',
+      reason: 'Marked done from Tasks.',
+    });
     should(authorization?.boardId).not.be.empty();
+    should(authorization?.grantId).not.be.empty();
+    should(authorization).have.property('sessionId', root.config.id);
+    should(authorization).have.property('targetSessionId', root.config.id);
     should(authorization).have.property('boardEpoch');
     should(authorization).have.property('coordinatorEpoch');
     // The defect this test exists for: a peer completion recorded as a human verification.
@@ -299,5 +339,6 @@ describe('completing shared live work', () => {
     // A record this daemon wrote is trustworthy on its face, so it carries no legacy marker.
     should(recorded.data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
     should(recorded.data).not.have.property('legacyAttestation');
+    should(persisted.filter(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).have.length(1);
   });
 });

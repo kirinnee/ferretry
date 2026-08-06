@@ -74,19 +74,24 @@ export const human = (): TaskActor => ({ kind: 'human', id: 'operator', name: 'O
 /** The grant a board resolves for a top agent, exactly as the task mount hands it to the reducer. */
 export const MARK_DONE_GRANT: TaskAuthorizationProvenance = {
   boardId: 'board-1',
+  grantId: 'grant-1',
+  sessionId: SESSION_ID,
+  targetSessionId: SESSION_ID,
   role: 'top_agent',
   boardEpoch: 4,
   coordinatorEpoch: 2,
   runtimeGeneration: 7,
   action: 'mark_done',
   requestId: 'click-1',
+  requestFingerprint: { action: 'status', status: 'done', reason: 'shipped it' },
 };
 
 /** An actor as the task mount leaves it once a shared-board `mark_done` grant is resolved. */
 export const topAgent = (sessionId: string = SESSION_ID): TaskActor => ({
-  ...agent({ sessionId }),
+  ...agent({ id: `peer:${sessionId}`, sessionId }),
   boardAuthorizedForSession: sessionId,
-  markDoneAuthorization: MARK_DONE_GRANT,
+  markDoneAuthorization:
+    sessionId === SESSION_ID ? MARK_DONE_GRANT : { ...MARK_DONE_GRANT, sessionId, targetSessionId: sessionId },
 });
 
 export const context = (actor: TaskActor = agent(), at = LATER_INSTANT): TaskMutationContext => ({

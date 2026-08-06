@@ -70,11 +70,18 @@ const actor = (kind: TaskActor['kind'], sessionId: string | null): TaskActor => 
 });
 
 /** An actor as the task mount leaves it after a shared-board `mark_done` authorization. */
-const granted = (base: TaskActor): TaskActor => ({
-  ...base,
-  boardAuthorizedForSession: base.sessionId ?? 'session-a',
-  markDoneAuthorization: MARK_DONE_GRANT,
-});
+const granted = (base: TaskActor): TaskActor => {
+  const targetSessionId = base.boardAuthorizedForSession ?? base.sessionId ?? 'session-a';
+  return {
+    ...base,
+    boardAuthorizedForSession: targetSessionId,
+    markDoneAuthorization: base.markDoneAuthorization ?? {
+      ...MARK_DONE_GRANT,
+      sessionId: base.sessionId ?? targetSessionId,
+      targetSessionId,
+    },
+  };
+};
 
 const thrownTaskError = (operation: () => void): TaskError => {
   try {
@@ -245,6 +252,20 @@ describe('identity versus board authorization', () => {
 
     // Assert
     should(actual.code).equal('approval-required');
+  });
+
+  it('should fail closed for malformed or mismatched completion evidence', () => {
+    // Arrange — direct reducer callers are ordinary objects, so a type-shaped but wrong receipt
+    // must not become the trusted top-agent attestation the mount normally constructs.
+    const malformed = granted({
+      ...actor('agent', 'session-a'),
+      markDoneAuthorization: { ...MARK_DONE_GRANT, role: 'read', action: 'note' },
+    });
+    const valid = granted(actor('agent', 'session-a'));
+
+    // Act + Assert
+    should(canActorVerifyTaskDone(malformed)).be.false();
+    should(canActorVerifyTaskDone(valid, { action: 'status', status: 'done', reason: 'a different click' })).be.false();
   });
 });
 

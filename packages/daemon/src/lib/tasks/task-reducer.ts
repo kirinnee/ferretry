@@ -11,6 +11,7 @@ import {
   type TaskActionRequest,
   type TaskActivity,
   type TaskCreateRequestInput,
+  type TaskDoneRequestFingerprint,
   type TaskId,
   type TaskLinkField,
   type TaskLinks,
@@ -23,7 +24,10 @@ import {
   assertActorCanWriteSession,
   assertTaskPhaseTransition,
   isHumanActor,
-  canActorVerifyTaskDone,
+  markDoneAuthorizationFor,
+  requiresHumanWorkflowApproval,
+  sameTaskDoneRequestFingerprint,
+  taskDoneRequestFingerprint,
   taskPhaseFromStatus,
   taskPhaseMovesBackward,
   taskStatusFromPhase,
@@ -225,11 +229,19 @@ const movePhase = (
   draftTask: Task,
   to: Task['phase'],
   reason: string,
-  options: { readonly note?: string; readonly reopen: boolean },
+  options: {
+    readonly note?: string;
+    readonly reopen: boolean;
+    /** Present only for a parsed `phase/status: done` request, so a grant cannot attest another body. */
+    readonly completionFingerprint?: TaskDoneRequestFingerprint;
+  },
   context: TaskMutationContext,
 ): PhaseMove => {
   const human = isHumanActor(context.actor);
-  const verifiesDone = canActorVerifyTaskDone(context.actor);
+  const grant = human
+    ? undefined
+    : markDoneAuthorizationFor(context.actor, options.completionFingerprint, context.sessionId);
+  const verifiesDone = human || grant !== undefined;
   const clearingManualBlock = current.status === 'blocked' && to === current.phase;
   if (!clearingManualBlock) {
     assertTaskPhaseTransition(current, to, { human, verifiesDone, reopen: options.reopen });
@@ -239,14 +251,13 @@ const movePhase = (
   const reopeningShipped = backward && (current.phase === 'live' || current.phase === 'done');
   const status = taskStatusFromPhase(to);
   const next: Task = { ...draftTask, phase: to, status, statusReason: reason };
-  const approvedByHuman = !backward && (current.phase === 'research' || current.phase === 'design') && human;
+  const approvedByHuman = human && requiresHumanWorkflowApproval(current, to);
   // Completion is recorded as WHO signed it off, positively on both branches. A board grant is what
   // let a non-human reach this move, so the record carries its own flag AND the grant it was made
   // under — never the human flag, and never the mere absence of one, which a reader cannot tell
   // apart from a record written before this distinction existed.
   const completedLive = current.phase === 'live' && to === 'done';
   const verifiedByHuman = completedLive && human;
-  const grant = human ? undefined : context.actor.markDoneAuthorization;
   const verifiedByTopAgent = completedLive && grant !== undefined;
   // Every attestation this code writes says so, POSITIVELY. A reader must not have to decide from a
   // clock whether the writer drew the identity/authority distinction: the instant this reaches any
@@ -326,19 +337,33 @@ const reduceAction = (
           ],
         };
       }
+      const completionFingerprint = taskDoneRequestFingerprint(action);
       const moved = movePhase(
         graph,
         current,
         next,
         taskPhaseFromStatus(action.status),
         action.reason,
-        { ...(action.note !== undefined ? { note: action.note } : {}), reopen: false },
+        {
+          ...(action.note !== undefined ? { note: action.note } : {}),
+          ...(completionFingerprint === undefined ? {} : { completionFingerprint }),
+          reopen: false,
+        },
         context,
       );
       return { next: moved.next, drafts: [moved.draft] };
     }
     case 'phase': {
-      const moved = movePhase(graph, current, next, action.phase, action.reason, { reopen: false }, context);
+      const completionFingerprint = taskDoneRequestFingerprint(action);
+      const moved = movePhase(
+        graph,
+        current,
+        next,
+        action.phase,
+        action.reason,
+        { ...(completionFingerprint === undefined ? {} : { completionFingerprint }), reopen: false },
+        context,
+      );
       return { next: moved.next, drafts: [moved.draft] };
     }
     case 'reopen': {
@@ -422,6 +447,61 @@ const reduceAction = (
   }
 };
 
+type TaskDoneReplay = 'none' | 'exact' | 'reused';
+
+/**
+ * Resolves a peer completion retry while the task store's mutation transaction still owns the board.
+ *
+ * A route-level preflight races a concurrent completion: both callers can read `live`, then one
+ * commits before the other reaches the reducer. The durable activity is the only replay ledger that
+ * is atomically observed with the next mutation, so exact retries return its unchanged entry here and
+ * every collision refuses before another status activity can be appended.
+ */
+const taskDoneReplay = (entry: TaskEntry, action: TaskActionRequest, actor: TaskActor): TaskDoneReplay => {
+  const identity = actor.doneRequestIdentity;
+  if (identity === undefined) return 'none';
+  const fingerprint = taskDoneRequestFingerprint(action);
+  if (
+    actor.kind !== 'agent' ||
+    actor.id.trim() === '' ||
+    identity.requestId.trim() === '' ||
+    fingerprint === undefined ||
+    !sameTaskDoneRequestFingerprint(identity.fingerprint, fingerprint)
+  ) {
+    throw new TaskError('invalid', 'a task completion replay identity must belong to one peer done request');
+  }
+
+  let matching: TaskActivity | undefined;
+  let matchingCount = 0;
+  for (const activity of entry.activity) {
+    if (activity.type !== 'status' || activity.actor !== actor.id || activity.data.verifiedByTopAgent !== true) {
+      continue;
+    }
+    const authorization = activity.data.authorization;
+    if (authorization?.requestId !== identity.requestId) continue;
+    matchingCount += 1;
+    if (
+      authorization.requestFingerprint === undefined ||
+      !sameTaskDoneRequestFingerprint(authorization.requestFingerprint, fingerprint)
+    ) {
+      return 'reused';
+    }
+    matching = activity;
+  }
+  if (matching === undefined) return 'none';
+  const latestCompletion = [...entry.activity]
+    .reverse()
+    .find(
+      activity =>
+        activity.type === 'status' &&
+        activity.data.from === 'live' &&
+        activity.data.to === 'done' &&
+        activity.data.phaseFrom === 'live' &&
+        activity.data.phaseTo === 'done',
+    );
+  return matchingCount === 1 && latestCompletion === matching && entry.task.phase === 'done' ? 'exact' : 'reused';
+};
+
 /**
  * Applies one action to one task and returns the whole next board.
  *
@@ -440,6 +520,11 @@ export const applyTaskAction = (
     throw parseFailure(`refusing an invalid task action: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
   }
   const entry = requireTaskEntry(snapshot, id);
+  const replay = taskDoneReplay(entry, parsed.data, context.actor);
+  if (replay === 'exact') return { snapshot, entry };
+  if (replay === 'reused') {
+    throw new TaskError('transition', `${entry.task.id}'s completion request id was already used for another decision`);
+  }
   const graph = snapshotTasks(snapshot);
   const reduced = reduceAction(graph, entry.task, parsed.data, context);
   const activity = [...entry.activity, ...stampActivity(reduced.drafts, entry.activity, context)];

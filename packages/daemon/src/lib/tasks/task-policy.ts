@@ -1,12 +1,13 @@
-import type {
-  Task,
-  TaskAuthorizationProvenance,
-  TaskId,
-  TaskPhase,
-  TaskStatus,
-  TaskWorkflow,
-} from '@ferretry/protocol';
+import { TaskAuthorizationProvenanceSchema } from '@ferretry/protocol';
+import type { Task, TaskId, TaskPhase, TaskStatus, TaskWorkflow } from '@ferretry/protocol';
+import type { TaskActionRequest, TaskAuthorizationProvenance, TaskDoneRequestFingerprint } from '@ferretry/protocol';
 import { TaskError } from './task-error.ts';
+
+/** The actor-scoped identity a peer presents when retrying one `live → done` decision. */
+export interface TaskDoneRequestIdentity {
+  readonly requestId: string;
+  readonly fingerprint: TaskDoneRequestFingerprint;
+}
 
 export interface TaskActor {
   readonly kind: 'agent' | 'human' | 'daemon';
@@ -15,6 +16,8 @@ export interface TaskActor {
   readonly sessionId: string | null;
   /** Set only after daemon-side task-board authorization for this target. */
   readonly boardAuthorizedForSession?: string;
+  /** Present for a peer completion carrying a nonblank request id, including a retry after it is done. */
+  readonly doneRequestIdentity?: TaskDoneRequestIdentity;
   /**
    * The grant that authorized this actor's `live → done`, as the board resolved it.
    *
@@ -27,6 +30,84 @@ export interface TaskActor {
    */
   readonly markDoneAuthorization?: TaskAuthorizationProvenance;
 }
+
+/** The canonical, parsed shape of a completion request that may be retried under one request id. */
+export const taskDoneRequestFingerprint = (request: TaskActionRequest): TaskDoneRequestFingerprint | undefined => {
+  if (request.action === 'phase' && request.phase === 'done') {
+    return { action: 'phase', phase: 'done', reason: request.reason };
+  }
+  if (request.action === 'status' && request.status === 'done') {
+    return {
+      action: 'status',
+      status: 'done',
+      reason: request.reason,
+      ...(request.note === undefined ? {} : { note: request.note }),
+    };
+  }
+  return undefined;
+};
+
+/** Equal parsed requests are the same logical completion even when their original JSON bytes differed. */
+export const sameTaskDoneRequestFingerprint = (
+  left: TaskDoneRequestFingerprint,
+  right: TaskDoneRequestFingerprint,
+): boolean => {
+  if (left.action !== right.action || left.reason !== right.reason) return false;
+  if (left.action === 'phase' && right.action === 'phase') return left.phase === right.phase;
+  if (left.action === 'status' && right.action === 'status')
+    return left.status === right.status && left.note === right.note;
+  return false;
+};
+
+/**
+ * The one structurally complete authorization receipt a peer may use for `live → done`.
+ *
+ * This is deliberately runtime validation rather than a type-only check: reducer callers receive
+ * ordinary objects, so a malformed direct context must fail closed just like a malformed wire record.
+ */
+export const markDoneAuthorizationFor = (
+  actor: TaskActor,
+  expectedRequest?: TaskDoneRequestFingerprint,
+  expectedTargetSession?: string,
+): TaskAuthorizationProvenance | undefined => {
+  const actorSession = actor.sessionId?.trim();
+  const authorizedSession = actor.boardAuthorizedForSession?.trim();
+  const targetSession = expectedTargetSession?.trim();
+  if (
+    actor.kind !== 'agent' ||
+    actorSession === undefined ||
+    actorSession === '' ||
+    authorizedSession === undefined ||
+    authorizedSession === ''
+  ) {
+    return undefined;
+  }
+  const parsed = TaskAuthorizationProvenanceSchema.safeParse(actor.markDoneAuthorization);
+  if (!parsed.success) return undefined;
+  const authorization = parsed.data;
+  if (
+    authorization.boardId === undefined ||
+    authorization.boardId.trim() === '' ||
+    authorization.grantId === undefined ||
+    authorization.sessionId === undefined ||
+    authorization.targetSessionId === undefined ||
+    authorization.role !== 'top_agent' ||
+    authorization.action !== 'mark_done' ||
+    authorization.requestFingerprint === undefined ||
+    authorization.sessionId !== actorSession ||
+    authorization.targetSessionId !== authorizedSession ||
+    (targetSession !== undefined && authorization.targetSessionId !== targetSession)
+  ) {
+    return undefined;
+  }
+  if (
+    expectedRequest !== undefined &&
+    !sameTaskDoneRequestFingerprint(authorization.requestFingerprint, expectedRequest)
+  ) {
+    return undefined;
+  }
+  return authorization;
+};
 
 const freezePath = (phases: readonly TaskPhase[]): readonly TaskPhase[] => Object.freeze([...phases]);
 
@@ -95,8 +176,8 @@ export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human
  * shipped work and never approve its way past research or design, whatever else has changed about
  * the phase a request finds by the time the board applies it.
  */
-export const canActorVerifyTaskDone = (actor: TaskActor): boolean =>
-  isHumanActor(actor) || actor.markDoneAuthorization !== undefined;
+export const canActorVerifyTaskDone = (actor: TaskActor, expectedRequest?: TaskDoneRequestFingerprint): boolean =>
+  isHumanActor(actor) || markDoneAuthorizationFor(actor, expectedRequest) !== undefined;
 
 /** Claims document coordination intent; another task claiming the same path never locks a write. */
 export const canAddAdvisoryFileClaim = (_graph: readonly Task[], _taskId: TaskId, _path: string): boolean => true;

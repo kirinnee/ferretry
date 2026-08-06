@@ -29,6 +29,7 @@ import {
   TaskError,
   TaskStateUnavailableError,
   taskBlockedBy,
+  taskDoneRequestFingerprint,
 } from '../../tasks/index.ts';
 import { readTaskBoardFleet } from '../../task-boards/fleet-read.ts';
 import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError, type TaskBoardTaskActionAuthorizer } from './task-boards.ts';
@@ -531,9 +532,15 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
   const request = await parseBody(context.request, TaskActionRequestSchema);
   const board = boardFor(subsystem, sessionId);
   let actor = taskActor(context.actor);
-  const requestedDone =
-    request.action === 'phase' ? request.phase === 'done' : request.action === 'status' && request.status === 'done';
-  if (actor.kind === 'agent' && requestedDone) {
+  const completionFingerprint = taskDoneRequestFingerprint(request);
+  if (actor.kind === 'agent' && completionFingerprint !== undefined) {
+    const requestId = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+    if (requestId !== '') {
+      // The reducer reads this identity inside the board transaction. It is deliberately separate
+      // from a fresh board grant: an exact response-loss retry must compare to its durable receipt,
+      // not re-authorize a decision that already committed.
+      actor = { ...actor, doneRequestIdentity: { requestId, fingerprint: completionFingerprint } };
+    }
     const current = await board.detail(taskId).catch(reraise);
     if (current.task.phase === 'live') {
       const capability = headerValue(context.request, BOARD_CAPABILITY_HEADER)?.trim();
@@ -567,12 +574,16 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
         boardAuthorizedForSession: sessionId,
         markDoneAuthorization: {
           boardId: grant.boardId,
+          grantId: grant.grantId,
+          sessionId: grant.sessionId,
+          targetSessionId: sessionId,
           role: grant.role,
           boardEpoch: grant.boardEpoch,
           coordinatorEpoch: grant.coordinatorEpoch,
           runtimeGeneration: grant.runtimeGeneration,
           action: 'mark_done',
           requestId: markDoneRequestId(context),
+          requestFingerprint: completionFingerprint,
         },
       };
     }

@@ -321,7 +321,27 @@ describe('applyTaskAction — status and phase', () => {
     should(recorded.data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
     // The whole defect: a peer completion journalled as a human verification.
     should(recorded.data).not.have.property('verifiedByHuman');
-    should(recorded.actor).equal('wilfredo');
+    should(recorded.actor).equal(`peer:${SESSION_ID}`);
+  });
+
+  it('should refuse malformed or mismatched top-agent evidence without writing a completion', () => {
+    // Arrange — this is the reducer boundary, so a caller can hand it an object that never travelled
+    // through the task-board mount. It must validate the receipt rather than trusting its presence.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+    const malformed = agent({
+      boardAuthorizedForSession: SESSION_ID,
+      markDoneAuthorization: { ...MARK_DONE_GRANT, role: 'read', action: 'note' },
+    });
+
+    // Act + Assert
+    shouldRefuse('approval-required', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, malformed),
+    );
+    shouldRefuse('approval-required', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'a different click' }, topAgent()),
+    );
+    should(snapshot.tasks[0]?.task.phase).equal('live');
+    should(snapshot.tasks[0]?.activity).have.length(1);
   });
 
   it('should refuse live to done to an agent whose grant did not name this session', () => {
@@ -380,6 +400,100 @@ describe('applyTaskAction — status and phase', () => {
     should(lastActivity(outcome.entry).data).have.property('approvedByHuman', true);
     // The other attestation the old predicate could falsify, so it carries the stamp too.
     should(lastActivity(outcome.entry).data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
+  });
+
+  it.each([
+    { workflow: 'research-first' as const, phase: 'research' as const, status: 'researched' as const },
+    { workflow: 'design-first' as const, phase: 'design' as const, status: 'designed' as const },
+  ])(
+    'should not mistake clearing a blocked $phase phase for human workflow approval',
+    ({ workflow, phase, status }) => {
+      // Arrange — a same-phase status action only clears the manual block; it does not move through a
+      // human gate, so it must not mint the durable approval attestation.
+      const snapshot = snapshotOf(task({ workflow, phase, status: 'blocked', statusReason: 'waiting on input' }));
+
+      // Act
+      const outcome = act(snapshot, 'F1', { action: 'status', status, reason: 'input arrived' }, human());
+
+      // Assert
+      const recorded = lastActivity(outcome.entry);
+      should(recorded.data).not.have.property('approvedByHuman');
+      should(recorded.data).not.have.property('attestationSemantics');
+    },
+  );
+
+  it('should replay the exact latest peer completion without another activity', () => {
+    // Arrange
+    const action = { action: 'status', status: 'done', reason: 'shipped it' } as const;
+    const completed = act(snapshotOf(task({ phase: 'live', status: 'live' })), 'F1', action, topAgent());
+    const retryingActor = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' } as const,
+      },
+    };
+
+    // Act
+    const replayed = act(completed.snapshot, 'F1', action, retryingActor);
+
+    // Assert — the exact same snapshot object returns from the reducer transaction; no history is appended.
+    should(replayed.snapshot).equal(completed.snapshot);
+    should(replayed.entry).equal(completed.entry);
+    should(replayed.entry.activity).have.length(completed.entry.activity.length);
+  });
+
+  it('should refuse a reused peer completion id when its body or lifecycle no longer matches', () => {
+    // Arrange
+    const completion = act(
+      snapshotOf(task({ phase: 'live', status: 'live' })),
+      'F1',
+      { action: 'status', status: 'done', reason: 'shipped it' },
+      topAgent(),
+    );
+    const sameIdDifferentBody = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'changed body' } as const,
+      },
+    };
+    const reopened = act(
+      completion.snapshot,
+      'F1',
+      { action: 'reopen', reason: 'regressed', ask: 'fix it', source: 'human:cli' },
+      human(),
+    );
+    const staleRetry = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' } as const,
+      },
+    };
+    const otherActorSameId = {
+      ...topAgent(),
+      id: 'another-peer',
+      sessionId: 'session-beta',
+      boardAuthorizedForSession: SESSION_ID,
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' } as const,
+      },
+    };
+
+    // Act + Assert
+    shouldRefuse('transition', () =>
+      act(completion.snapshot, 'F1', { action: 'status', status: 'done', reason: 'changed body' }, sameIdDifferentBody),
+    );
+    shouldRefuse('transition', () =>
+      act(reopened.snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, staleRetry),
+    );
+    shouldRefuse('transition', () =>
+      act(completion.snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, otherActorSameId),
+    );
+    should(reopened.entry.task.phase).equal('build');
+    should(reopened.entry.activity).have.length(4);
   });
 
   it('should allow a rewind and flag it as backward', () => {
