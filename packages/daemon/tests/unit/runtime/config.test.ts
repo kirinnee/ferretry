@@ -5,7 +5,6 @@ import { DISCOVERED_RELAY_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
   configuredAt,
-  DaemonConfigDocumentSchema,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
   overriddenBy,
@@ -407,34 +406,58 @@ describe('the carriers a document declares', () => {
 
 describe('the document a settled port is written into', () => {
   it('should write the port into the bind carrier that supersedes the legacy key', () => {
-    // Arrange
-    const document = DaemonConfigDocumentSchema.parse({
+    // Arrange — the RAW document, as the operator typed it and as it sits on disk.
+    const document = {
       port: 7_431,
       carriers: [
         { kind: 'bind', host: 'box.lan' },
         { kind: 'relay', source: 'discovery' },
       ],
-    });
+    };
 
     // Act
     const recorded = recordedPortDocument(document, 9_600);
 
     // Assert — recording into the superseded key is the exact defect this module exists to prevent:
     // a field an operator can watch change with no error, no message and no change in behaviour.
-    should(recorded.carriers).deepEqual([{ kind: 'bind', host: 'box.lan', port: 9_600 }, DISCOVERED_RELAY_CARRIER]);
-    should(recorded.port).equal(7_431);
+    // And EXACTLY ONE VALUE MOVES: no default is materialized anywhere, the operator's own relay
+    // entry included, because key presence in this document is what a superseded-key report reads.
+    should(recorded).deepEqual({
+      port: 7_431,
+      carriers: [
+        { kind: 'bind', host: 'box.lan', port: 9_600 },
+        { kind: 'relay', source: 'discovery' },
+      ],
+    });
   });
 
   it('should record the legacy key when no bind carrier was declared', () => {
-    // Arrange
-    const document = DaemonConfigDocumentSchema.parse({ host: 'box.lan' });
+    // Act + Assert — the legacy spelling is still a bind, so it is still where a settled port
+    // belongs, and a relay-only list is not a bind.
+    should(recordedPortDocument({ host: 'box.lan' }, 9_700)).deepEqual({ host: 'box.lan', port: 9_700 });
+    should(recordedPortDocument({ carriers: [{ kind: 'relay', source: 'discovery' }] }, 9_700)).deepEqual({
+      carriers: [{ kind: 'relay', source: 'discovery' }],
+      port: 9_700,
+    });
+    // A port already written is replaced rather than doubled, and nothing beside it is touched.
+    should(recordedPortDocument({ host: 'box.lan', port: 7_431, healthIntervalSeconds: 90 }, 9_700)).deepEqual({
+      host: 'box.lan',
+      port: 9_700,
+      healthIntervalSeconds: 90,
+    });
+  });
 
-    // Act
-    const recorded = recordedPortDocument(document, 9_700);
-
-    // Assert — the legacy spelling is still a bind, so it is still where a settled port belongs.
-    should(recorded.port).equal(9_700);
-    should(recorded.carriers).deepEqual([]);
+  it('should read the document as the operator wrote it rather than as a schema would fill it', () => {
+    // A `carriers` value that is not a list of entries is a document the configuration parse refuses
+    // before a boot can settle anything — this stays total anyway, and invents no shape nobody wrote.
+    should(recordedPortDocument({ carriers: 'nonsense' }, 9_800)).deepEqual({
+      carriers: 'nonsense',
+      port: 9_800,
+    });
+    should(recordedPortDocument({ carriers: [null, 'bind'] }, 9_800)).deepEqual({
+      carriers: [null, 'bind'],
+      port: 9_800,
+    });
   });
 });
 

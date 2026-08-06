@@ -45,12 +45,17 @@ export class ExplicitDaemonConfig implements DaemonConfigStore {
    * Writes down the address this daemon took, into the key that decides it.
    *
    * The same `recordedPortDocument` the state-home adapter records through, so a document that moves
-   * between `--config` and the state home cannot have its port land in a different key on the way.
+   * between `--config` and the state home cannot have its port land in a different key on the way —
+   * and, for the same reason, the same raw-in raw-out rule. The schema parse stays as the REFUSAL it
+   * has always been (this daemon does not write over a document it could not act on) while what
+   * reaches the disk is the operator's own JSON plus the one value this boot decided; writing the
+   * schema's output instead planted defaults that later reads cannot tell from an operator's lines.
    */
   async record(port: number): Promise<void> {
     const text = await this.read();
-    const document = DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text));
-    await this.write(recordedPortDocument(document, port));
+    const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
+    DaemonConfigDocumentSchema.parse(raw);
+    await this.write(recordedPortDocument(raw, port));
   }
 
   /** A document that is not there is not an error: the operator names where it SHOULD live. */

@@ -2,7 +2,12 @@ import { describe, it } from 'bun:test';
 import { FY_DEFAULT_DAEMON_URL } from '@ferretry/protocol';
 import should from 'should';
 import { DaemonConfigDocumentError, FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
-import { DEFAULT_CAPABILITY_GRANTS, type FileSystemPort, type FoundationPaths } from '../../../src/lib/index.ts';
+import {
+  DEFAULT_CAPABILITY_GRANTS,
+  type FileSystemPort,
+  type FoundationPaths,
+  supersededCarrierKeys,
+} from '../../../src/lib/index.ts';
 
 const paths = { daemonConfig: '/state/config/daemon.json' } as FoundationPaths;
 
@@ -81,6 +86,10 @@ describe('FileDaemonConfig', () => {
     should(written).have.property('projectRoots', ['~/Code']);
     // And still nothing derived, so a recorded port cannot freeze an advertisement beside it.
     should(written).not.have.property('publicUrl');
+    // EXACTLY ONE KEY, literally: the document that goes back to disk is the one that came off it,
+    // plus `port`. A write that also planted every schema default would put values into a file the
+    // operator never typed, which is the only evidence anything downstream has of what they chose.
+    should(Object.keys(written)).deepEqual(['host', 'healthIntervalSeconds', 'projectRoots', 'port']);
   });
 
   it('should record a settled port into the bind carrier rather than the key it supersedes', async () => {
@@ -103,12 +112,34 @@ describe('FileDaemonConfig', () => {
     // Assert — writing `port` here would write a key with no effect on where this daemon listens,
     // which is the defect the carrier list exists to remove rather than reproduce.
     should(written).have.property('carriers', [
+      // The operator's own relay entry comes back exactly as they wrote it. A write that filled in
+      // `enabled` and `reconnectSeconds` would be this daemon typing lines into their file and then
+      // reading them back as their decisions.
       { kind: 'bind', host: 'box.lan', port: 7_432 },
-      { kind: 'relay', source: 'discovery', enabled: true, reconnectSeconds: 5 },
+      { kind: 'relay', source: 'discovery' },
     ]);
     should(written).have.property('port', 7_431);
+    should(Object.keys(written)).deepEqual(['port', 'carriers']);
     should(reloaded.bindUrl).equal('http://box.lan:7432');
     should(reloaded.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 7_432 });
+  });
+
+  it('should never accuse an operator of a legacy key that this daemon wrote itself', async () => {
+    // THE ROUND TRIP IS THE TEST. `supersededCarrierKeys` reads key PRESENCE in the raw document, so
+    // a `record()` that wrote schema defaults planted a `host` the operator never typed — and every
+    // boot afterwards told them to go and delete a line that is not in their file.
+    // Arrange
+    const documents = documentStore(JSON.stringify({ carriers: [{ kind: 'bind', host: 'box.lan' }] }));
+
+    // Act
+    await documents.store.record(7_432);
+    const settled = await documents.store.peek();
+
+    // Assert
+    should(settled.document).deepEqual({ carriers: [{ kind: 'bind', host: 'box.lan', port: 7_432 }] });
+    should(supersededCarrierKeys({ rawDocument: settled.document ?? {}, carriers: settled.config.carriers })).deepEqual(
+      [],
+    );
   });
 
   it('should answer what is on disk without writing anything', async () => {

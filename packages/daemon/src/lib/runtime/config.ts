@@ -455,12 +455,26 @@ export function defaultDaemonConfig(): DaemonConfig {
   return parseDaemonConfig({});
 }
 
+/** A raw entry that says it is the listener, read from JSON with no schema anywhere near it. */
+function isWrittenBindCarrier(entry: unknown): entry is Record<string, unknown> {
+  return typeof entry === 'object' && entry !== null && (entry as { readonly kind?: unknown }).kind === 'bind';
+}
+
 /**
  * The document to write when a boot has settled on a port, with that port in the key that DECIDES it.
  *
  * ONE HELPER FOR BOTH ADAPTERS, because the state home's document and the one an operator names with
  * `--config` must answer this identically — a port that landed in a different key depending on which
  * file it was is a difference nobody could see and everybody would hit.
+ *
+ * THE RAW DOCUMENT GOES IN AND THE RAW DOCUMENT COMES OUT, plus one value. Recording used to write
+ * the SCHEMA-PARSED document, which planted every default this file declares into a file only the
+ * operator is supposed to write: a single `record()` against a `carriers`-only document left a
+ * `host: "127.0.0.1"` line behind, and because `supersededCarrierKeys` reads key PRESENCE — the only
+ * thing that can tell "written" from "defaulted" — every boot afterwards accused the operator of a
+ * superseded `host` key that is not in their file and told them to go delete it. It filled in their
+ * carrier entries' `enabled` and `reconnectSeconds` on the same pass. So the writer holds the same
+ * raw-versus-parsed line the reader does, and the document that goes back is the one that came off.
  *
  * WHERE THE PORT GOES FOLLOWS WHERE IT IS READ FROM. A document with an explicit bind carrier reads
  * its address from that entry, so writing the top-level `port` there would write a key with no effect
@@ -470,12 +484,20 @@ export function defaultDaemonConfig(): DaemonConfig {
  *
  * THE SUPERSEDED KEY IS LEFT EXACTLY AS TYPED, never rewritten and never deleted. It is the
  * operator's line to finish migrating, and `supersededCarrierKeys` is what tells them it is there.
+ *
+ * It is TOTAL over any JSON object, because raw means unvalidated. A `carriers` value that is not a
+ * list of entries is a document the configuration parse refuses before a boot could settle anything,
+ * and both callers hold that refusal; this one still declines to invent a shape nobody wrote.
  */
-export function recordedPortDocument(document: DaemonConfigDocument, port: number): DaemonConfigDocument {
-  if (!document.carriers.some(carrier => carrier.kind === 'bind')) return { ...document, port };
+export function recordedPortDocument(
+  rawDocument: Readonly<Record<string, unknown>>,
+  port: number,
+): Record<string, unknown> {
+  const carriers = rawDocument.carriers;
+  if (!Array.isArray(carriers) || !carriers.some(isWrittenBindCarrier)) return { ...rawDocument, port };
   return {
-    ...document,
-    carriers: document.carriers.map(carrier => (carrier.kind === 'bind' ? { ...carrier, port } : carrier)),
+    ...rawDocument,
+    carriers: carriers.map(entry => (isWrittenBindCarrier(entry) ? { ...entry, port } : entry)),
   };
 }
 
