@@ -105,6 +105,7 @@ export * from '../features/secrets/secrets-card.tsx';
 export * from '../features/secrets/secrets-surface.tsx';
 export * from '../features/settings/capability-list.tsx';
 export * from '../features/settings/composer-enter-key-settings.tsx';
+export * from '../features/settings/composer-suggestions-settings.tsx';
 export * from '../features/settings/daemon-settings-frame.tsx';
 export * from '../features/settings/doctor-settings.tsx';
 export * from '../features/settings/grants-api.ts';

@@ -4357,7 +4357,7 @@ function Shell() {
             <Label>Composer settings</Label>
           </PanelHeader>
           <PanelBody>
-            <MarkdownComposerSettings />
+            <MarkdownComposerSettings vimEnabled={false} onChangeVim={() => undefined} />
           </PanelBody>
         </Card>
       ),
