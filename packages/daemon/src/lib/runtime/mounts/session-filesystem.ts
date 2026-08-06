@@ -129,7 +129,9 @@ async function index(
   const id = sessionId(context);
   const cwd = await sessionCwd(sessions, id);
   try {
-    const view = await filesystem.index(cwd);
+    // Bounds are the domain's own; the only thing a route contributes is the caller's cancellation,
+    // because the transport is the only layer that knows the caller stopped waiting.
+    const view = await filesystem.index(cwd, { signal: context.request.signal });
     const response: SessionFileIndexResponse = { v: SESSION_FILE_INDEX_VERSION, sessionId: id, ...view };
     return jsonResponse(response);
   } catch (error) {

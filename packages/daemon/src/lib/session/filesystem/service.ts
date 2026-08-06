@@ -17,6 +17,8 @@ import type {
   SessionChangesView,
   SessionGit,
   SessionRootPinner,
+  SpawnBudget,
+  WorkBudget,
 } from './ports.ts';
 import {
   type FsDiffView,
@@ -30,15 +32,60 @@ import {
   MAX_INDEX_DIRECTORIES,
   MAX_INDEX_FILES,
   MAX_INDEX_LIST_BYTES,
+  MAX_INDEX_WALL_MS,
   MAX_LISTING_ENTRIES,
   type ResolvedTarget,
 } from './types.ts';
 
-/** How much of a tree one index read may look at. Tests narrow these; a route never does. */
+/**
+ * How much of a tree one index read may look at, and for how long.
+ *
+ * Tests narrow these; a route narrows nothing and supplies only the caller's `signal`, so the shipped
+ * surface always runs under the full defaults.
+ */
 export interface IndexBounds {
   readonly maxFiles?: number;
   readonly maxCandidates?: number;
   readonly maxDirectories?: number;
+  /** Wall-clock budget for the WHOLE read. Defaults to {@link MAX_INDEX_WALL_MS}. */
+  readonly budgetMs?: number;
+  /** The caller's cancellation. A client that hung up is work nobody will read. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A deadline and a caller's cancellation, asked as one question.
+ *
+ * Both mean the same thing to every loop below — stop starting things — so they are one predicate
+ * rather than two checks that could disagree about which one fired. The clock is read through the
+ * injected reader so a test can expire a budget deterministically instead of sleeping.
+ */
+class IndexBudget implements SpawnBudget {
+  private readonly deadlineMs: number;
+
+  constructor(
+    private readonly nowMs: () => number,
+    budgetMs: number,
+    private readonly signal: AbortSignal | undefined,
+  ) {
+    this.deadlineMs = nowMs() + budgetMs;
+  }
+
+  expired(): boolean {
+    return this.signal?.aborted === true || this.nowMs() >= this.deadlineMs;
+  }
+
+  /**
+   * What is left for a child this call is about to start — zero exactly when {@link expired} is true.
+   *
+   * A caller who has hung up has no time left, not merely a deadline that has not arrived yet. Saying
+   * otherwise would let an implementation that bounds a spawn by this number alone start one for nobody,
+   * which is the whole failure the checks around it exist to prevent.
+   */
+  remainingMs(): number {
+    if (this.signal?.aborted === true) return 0;
+    return Math.max(0, this.deadlineMs - this.nowMs());
+  }
 }
 
 /**
@@ -167,6 +214,13 @@ export class SessionFilesystem {
   constructor(
     private readonly pinner: SessionRootPinner,
     private readonly git: SessionGit,
+    /**
+     * How this reads the clock, injected so a deadline can be proven without waiting for one.
+     *
+     * Defaulted rather than required because exactly one call in this class is timed, and making every
+     * construction site name a clock to get the same answer would be ceremony that hides which one it is.
+     */
+    private readonly nowMs: () => number = () => Date.now(),
   ) {}
 
   /** The session root, freshly resolved. A since-deleted worktree is a clean `not_found`. */
@@ -222,15 +276,32 @@ export class SessionFilesystem {
     const maxFiles = indexLimit(bounds.maxFiles, MAX_INDEX_FILES, 'index file limit');
     const maxCandidates = indexLimit(bounds.maxCandidates, MAX_INDEX_CANDIDATES, 'index candidate limit');
     const maxDirectories = indexLimit(bounds.maxDirectories, MAX_INDEX_DIRECTORIES, 'index directory limit');
+    const budgetMs = indexLimit(bounds.budgetMs, MAX_INDEX_WALL_MS, 'index time budget');
+    const budget = new IndexBudget(this.nowMs, budgetMs, bounds.signal);
     const pinned = await this.pinner.pin(cwd);
     try {
       const skips: SkipTally = new Map();
+      // A caller who has already gone away gets the shape of an answer and none of the work. The pin is
+      // still taken, because `root` is a fact about the session that only the pin can state, and it is
+      // one open-and-close rather than a tree walk. Nothing beneath it is asked anything.
+      if (budget.expired()) {
+        tally(skips, 'truncated', 1);
+        return { root: pinned.rootReal, files: [], coverage: coverageOf(skips), skipped: skipRecord(skips) };
+      }
       // Deliberately NOT caught: a worktree whose ignore rules cannot be established must not fall back
       // to the walk, because that walk would enumerate exactly the directories the ignore gate closes.
-      const repo = await this.git.repoInfo(pinned.policyCwd);
+      // Given the remaining budget because this asks Git too, and a bound that only covered the reads
+      // AFTER it would be a bound on the cheaper half of the call.
+      const repo = await this.git.repoInfo(pinned.policyCwd, budget);
+      // Asked again before anything else starts. An abort that landed while Git was answering must not
+      // be the reason a NEW child is spawned; what it cannot do is reach into one already running.
+      if (budget.expired()) {
+        tally(skips, 'truncated', 1);
+        return { root: pinned.rootReal, files: [], coverage: coverageOf(skips), skipped: skipRecord(skips) };
+      }
       const files = repo.repo
-        ? await this.indexTracked(pinned, maxFiles, maxCandidates, skips)
-        : await this.indexWalk(pinned, maxFiles, maxCandidates, maxDirectories, skips);
+        ? await this.indexTracked(pinned, maxFiles, maxCandidates, skips, budget)
+        : await this.indexWalk(pinned, maxFiles, maxCandidates, maxDirectories, skips, budget);
       return { root: pinned.rootReal, files, coverage: coverageOf(skips), skipped: skipRecord(skips) };
     } finally {
       await pinned.close();
@@ -249,10 +320,13 @@ export class SessionFilesystem {
     maxFiles: number,
     maxCandidates: number,
     skips: SkipTally,
+    budget: SpawnBudget,
   ): Promise<SessionFileIndexEntry[]> {
     let listed: Awaited<ReturnType<SessionGit['listFiles']>>;
     try {
-      listed = await this.git.listFiles(pinned.policyCwd, MAX_INDEX_LIST_BYTES);
+      // Git gets what is left of the whole call, not a timeout of its own: a child allowed to run for
+      // longer than the answer is worth would spend the budget the walk after it still has to fit in.
+      listed = await this.git.listFiles(pinned.policyCwd, MAX_INDEX_LIST_BYTES, budget);
     } catch {
       tally(skips, 'unreadable', 1);
       return [];
@@ -265,7 +339,16 @@ export class SessionFilesystem {
     let unsupported = 0;
     let overflow = listed.truncated ? 1 : 0;
     if (candidates.length > maxCandidates) overflow += candidates.length - maxCandidates;
-    for (const path of candidates.slice(0, maxCandidates)) {
+    const considered = candidates.slice(0, maxCandidates);
+    for (const [position, path] of considered.entries()) {
+      // Two reasons to stop, counted the same way, because they leave a reader in the same position:
+      // these paths were not looked at. `maxFiles` belongs here rather than only in the response bound —
+      // the candidates are already in the comparator's order, so once that many rows are accepted every
+      // remaining one sorts after all of them and would be sliced off after being opened for nothing.
+      if (files.length >= maxFiles || budget.expired()) {
+        overflow += considered.length - position;
+        break;
+      }
       if (isIndexExcludedPath(path)) {
         excluded += 1;
         continue;
@@ -325,6 +408,7 @@ export class SessionFilesystem {
     maxCandidates: number,
     maxDirectories: number,
     skips: SkipTally,
+    budget: WorkBudget,
   ): Promise<SessionFileIndexEntry[]> {
     const files: SessionFileIndexEntry[] = [];
     const queue: string[] = [''];
@@ -339,9 +423,10 @@ export class SessionFilesystem {
     walk: while (true) {
       const rel = queue.shift();
       if (rel === undefined) break;
-      if (visited >= maxDirectories) {
+      if (visited >= maxDirectories || budget.expired()) {
         // This directory plus everything still queued behind it. A floor, not a total: what those
-        // directories hold is exactly what was not looked at.
+        // directories hold is exactly what was not looked at. A spent budget stops here for the same
+        // reason a spent directory count does, and says so in the same word.
         overflow += 1 + queue.length;
         break;
       }
@@ -355,11 +440,11 @@ export class SessionFilesystem {
         continue;
       }
       try {
-        const listing = await target.list(MAX_LISTING_ENTRIES);
+        const listing = await target.list(MAX_LISTING_ENTRIES, budget);
         if (listing.truncated) overflow += 1;
         const children = [...listing.entries].sort((left, right) => comparePath(left.name, right.name));
         for (const child of children) {
-          if (inspected >= maxCandidates) {
+          if (inspected >= maxCandidates || budget.expired()) {
             // A floor: the current entry exists, and the queue proves more work may remain.
             overflow += 1;
             break walk;
