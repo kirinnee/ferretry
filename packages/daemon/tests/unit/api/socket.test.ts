@@ -13,6 +13,7 @@ import {
   type SocketRoute,
 } from '../../../src/lib/api/socket.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
 import type { CredentialMinimum } from '../../../src/lib/api/route.ts';
 import {
   TERMINAL_MAX_CONTROL_FRAME_BYTES,
@@ -53,7 +54,7 @@ function streamRoute(refusal?: unknown, minimum: CredentialMinimum = 'operator')
 }
 
 function dispatcherFor(...routes: readonly SocketRoute[]): ApiSocketDispatcher {
-  return new ApiSocketDispatcher(new ApiRouter(routes), CREDENTIALS, NO_TICKETS);
+  return new ApiSocketDispatcher(new ApiRouter(routes), CREDENTIALS, NO_TICKETS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 describe('the socket frame cap', () => {

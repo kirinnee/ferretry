@@ -12,6 +12,7 @@ import {
   BodyTooLargeError,
   jsonResponse,
   MAX_REQUEST_BODY_BYTES,
+  NO_GOVERNED_ROUTES_GUARD,
   parseBody,
   SOCKET_MAX_PENDING_FRAMES,
   type SocketDownstream,
@@ -43,8 +44,8 @@ afterEach(async () => {
 
 function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = []) {
   return {
-    http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS),
-    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS, NO_TICKETS),
+    http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
+    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS, NO_TICKETS, NO_GOVERNED_ROUTES_GUARD),
     corsOrigins: ['https://ferretry.pages.dev'],
   };
 }

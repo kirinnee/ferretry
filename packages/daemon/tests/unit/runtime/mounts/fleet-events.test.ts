@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import should from 'should';
 import { ApiRouter } from '../../../../src/lib/api/index.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
@@ -49,6 +50,7 @@ function fixture(events: RecordingFleetEvents = new RecordingFleetEvents()) {
     new ApiRouter([...fleetEventSocketRoutes(events, sessionDirectory([sessionView('s1')]))]),
     CREDENTIALS,
     tickets,
+    NO_GOVERNED_ROUTES_GUARD,
   );
   return { events, dispatcher, tickets };
 }

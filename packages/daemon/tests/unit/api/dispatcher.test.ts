@@ -9,6 +9,7 @@ import {
   CLIENT_HEADER,
   type CredentialMinimum,
   jsonResponse,
+  NO_GOVERNED_ROUTES_GUARD,
   SESSION_ID_HEADER,
 } from '../../../src/lib/api/index.ts';
 import { jsonBody, request } from './support.ts';
@@ -28,7 +29,8 @@ const echo = (path: string, minimum: CredentialMinimum, method = 'GET', privileg
   handle: async context => jsonResponse({ actor: context.actor ?? null, params: [...context.params] }),
 });
 
-const dispatcherFor = (...routes: readonly ApiRoute[]) => new ApiDispatcher(new ApiRouter(routes), credentials);
+const dispatcherFor = (...routes: readonly ApiRoute[]) =>
+  new ApiDispatcher(new ApiRouter(routes), credentials, NO_GOVERNED_ROUTES_GUARD);
 
 describe('ApiDispatcher authorization', () => {
   it('should serve a public route with no token at all', async () => {
@@ -393,23 +395,6 @@ describe('the operator grant layer', () => {
   const guard = (allowed: boolean): CapabilityGuard => ({
     decide: () => ({ allowed, refusal: allowed ? 'granted' : 'not-granted' }),
     explain: () => 'the operator of this machine has not granted the UI the use of the agent fleet',
-  });
-
-  it('should refuse a governed route when no guard was wired at all', async () => {
-    // A route that names a capability and a dispatcher built without a guard is a WIRING MISTAKE, and
-    // the safe reading of "nobody can tell me whether this is allowed" is that it is not. Serving it
-    // would be the damaged-state-as-empty-state defect this product has already been bitten by.
-    // Arrange
-    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials);
-
-    // Act
-    const answered = await dispatcher.dispatch(
-      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }),
-    );
-
-    // Assert
-    should(answered.status).equal(403);
-    should(JSON.parse(answered.body)).have.property('code', 'grant_undetermined');
   });
 
   it('should ask the guard only AFTER authentication and the route scope have both passed', async () => {

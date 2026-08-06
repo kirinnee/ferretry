@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
@@ -45,7 +46,7 @@ const TeamRecommendationSchema = z.object({
 });
 
 function dispatcher(subsystem: RecommendSubsystem): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(recommendRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(recommendRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 async function ask(subsystem: RecommendSubsystem, body: unknown) {

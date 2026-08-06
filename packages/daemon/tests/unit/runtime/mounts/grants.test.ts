@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import {
   DAEMON_CAPABILITIES,
@@ -24,7 +25,7 @@ import { CREDENTIALS, grantSubsystem, human } from './support.ts';
 async function mount(options: Parameters<typeof grantSubsystem>[0] = {}) {
   const subsystem = grantSubsystem(options);
   await subsystem.refresh();
-  return { subsystem, dispatcher: new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS) };
+  return { subsystem, dispatcher: new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD) };
 }
 
 /** A request that arrived from somewhere other than this host — the only caller grants govern. */
@@ -177,7 +178,7 @@ describe('changing the grants over the API', () => {
     // Arrange
     const subsystem = grantSubsystem({ broken: true });
     await subsystem.refresh().catch(() => undefined);
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const answered = await dispatcher.dispatch(
@@ -206,7 +207,7 @@ describe('the operator password route', () => {
       ...CREDENTIALS,
       devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
     };
-    const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials);
+    const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const remoteAdmin = await withDevices.dispatch(
@@ -296,7 +297,7 @@ describe('a failure that is not a grant refusal', () => {
       },
       setPassword: async () => undefined,
     };
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(broken)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(broken)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const unlocked = await dispatcher.dispatch(post('/v1/grants/unlock', { password: 'anything' }));
@@ -329,7 +330,7 @@ describe('the audit read', () => {
     });
     await subsystem.refresh();
     await subsystem.patch({ fleet: { use: true } }, { loopback: true, actor: 'admin-cli' });
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const answered = await dispatcher.dispatch(remote('/v1/grants/audit'));
@@ -346,7 +347,7 @@ describe('the audit read', () => {
     // audit names DEVICES, which is a different disclosure.
     // Arrange
     const { subsystem } = await mount();
-    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const answered = await dispatcher.dispatch(

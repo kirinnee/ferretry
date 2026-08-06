@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { FY_REQUEST_ID_HEADER, SendResultSchema, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -22,7 +23,7 @@ const withRequestId = (headers: Readonly<Record<string, string>>, id = 'req-1') 
 });
 
 function dispatcher(subsystem = new FakeSessionSend()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionSendRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(sessionSendRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 function sendRequest(

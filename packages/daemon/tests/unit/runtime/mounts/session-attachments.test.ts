@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import type { AttachmentView } from '@ferretry/protocol';
 import should from 'should';
@@ -66,7 +67,7 @@ class FakeAttachments implements SessionAttachmentSubsystem {
 }
 
 const dispatcher = (subsystem = new FakeAttachments()): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(sessionAttachmentRoutes(subsystem)), CREDENTIALS);
+  new ApiDispatcher(new ApiRouter(sessionAttachmentRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
 const path = (suffix = ''): string => `/v1/sessions/session-1/attachments${suffix}`;
 const body = (value: unknown): string => JSON.stringify(value);

@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { AnalyticsResponseSchema, type AnalyticsAggregateResult, type AnalyticsResponse } from '@ferretry/protocol';
 import should from 'should';
@@ -21,7 +22,7 @@ function dispatcher(
   sessions: readonly FinishedAnalyticsSession[] = [],
   pricing: readonly AnalyticsPricingRate[] = [],
 ): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(analyticsRoutes(analyticsSubsystem(sessions, pricing))), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(analyticsRoutes(analyticsSubsystem(sessions, pricing))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 /** One analytics answer, validated against the wire schema before a case looks at it: an answer the
@@ -352,6 +353,7 @@ describe('the analytics mount', () => {
           }),
         ),
         CREDENTIALS,
+        NO_GOVERNED_ROUTES_GUARD,
       );
 
       // Act

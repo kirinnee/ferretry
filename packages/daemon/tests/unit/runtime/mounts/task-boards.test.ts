@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import {
   TaskBoardCreateResponseSchema,
@@ -46,7 +47,7 @@ const FLEET = [
 const PREFIX = '/v1/task-boards';
 
 function dispatcher(world: FakeTaskBoards): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(taskBoardRoutes(world)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(taskBoardRoutes(world)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 async function post(

@@ -63,9 +63,9 @@ export interface ScopedRoute extends RoutePattern {
    * What the OPERATOR must additionally have agreed to, when this route is one of the five things
    * they are asked about.
    *
-   * A SECOND, NARROWER QUESTION stacked on `scope`, never a replacement for it. `scope` is the
-   * daemon's own contract about which credential class may reach a route; this is the machine
-   * owner's answer to "and of those, which have I agreed the UI may do?". The scope check runs first
+   * A SECOND, NARROWER QUESTION stacked on the route declaration, never a replacement for it. The
+   * credential minimum and privileged-arrival flag are the daemon's own contract about which caller
+   * may reach a route; this is the machine owner's answer to "and of those, which have I agreed the UI may do?". The route checks run first
    * and a demand is consulted only after it passes, so a grant can only ever remove authority — never
    * hand a credential something its class was refused.
    *

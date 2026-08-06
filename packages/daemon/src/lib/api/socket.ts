@@ -142,7 +142,7 @@ export class ApiSocketDispatcher {
      * check would be a hole straight through the feature: the daemon would refuse to CREATE a
      * terminal an operator had denied and then happily hand a browser the socket that drives one.
      */
-    private readonly guard?: CapabilityGuard,
+    private readonly guard: CapabilityGuard,
   ) {}
 
   /**

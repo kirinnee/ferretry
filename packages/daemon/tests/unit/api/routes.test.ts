@@ -7,6 +7,7 @@ import {
   createApiDispatcher,
   daemonApiRoutes,
   healthRoutes,
+  NO_GOVERNED_ROUTES_GUARD,
   PROMETHEUS_CONTENT_TYPE,
   usageRoutes,
   type UsageFeedDocument,
@@ -44,6 +45,7 @@ const dispatch = (feed: UsageFeedPort, path: string) =>
   new ApiDispatcher(
     new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000), ...usageRoutes(feed, fixedClock(NOW))]),
     { admin: 'admin-secret', warden: 'warden-secret' },
+    NO_GOVERNED_ROUTES_GUARD,
   ).dispatch(request({ path }));
 
 describe('health routes', () => {
@@ -69,7 +71,7 @@ describe('health routes', () => {
     const dispatcher = new ApiDispatcher(new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000)]), {
       admin: 'admin-secret',
       warden: 'warden-secret',
-    });
+    }, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const response = await dispatcher.dispatch(
@@ -178,7 +180,7 @@ describe('the usage feed', () => {
     const feed = new StubFeed([account], NOW);
     const dispatcher = new ApiDispatcher(new ApiRouter([...usageRoutes(feed, fixedClock(NOW))]), {
       admin: 'admin-secret',
-    });
+    }, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
     const response = await dispatcher.dispatch(
@@ -197,6 +199,7 @@ describe('the usage feed', () => {
       {
         admin: 'admin-secret',
       },
+      NO_GOVERNED_ROUTES_GUARD,
     );
 
     // Act

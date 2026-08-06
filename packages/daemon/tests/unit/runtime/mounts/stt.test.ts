@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -22,7 +23,7 @@ import { CREDENTIALS, FakeSttEnhancer, human } from './support.ts';
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
 function dispatcher(enhancer: FakeSttEnhancer): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sttEnhancementRoutes(enhancer)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(sttEnhancementRoutes(enhancer)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 function post(body: string, headers: Readonly<Record<string, string>> = human) {
@@ -115,7 +116,7 @@ describe('the dictation enhancement mount', () => {
     };
 
     // Act
-    const response = await new ApiDispatcher(new ApiRouter(sttEnhancementRoutes(enhancer)), CREDENTIALS).dispatch(
+    const response = await new ApiDispatcher(new ApiRouter(sttEnhancementRoutes(enhancer)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD).dispatch(
       post(JSON.stringify({ text: 'x', provider: 'groq' })),
     );
 

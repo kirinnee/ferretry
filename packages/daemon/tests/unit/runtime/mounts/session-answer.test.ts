@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { FY_REQUEST_ID_HEADER, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -24,7 +25,7 @@ class FakeAnswers implements SessionAnswerSubsystem {
 
 const headers = { ...human, [FY_REQUEST_ID_HEADER]: 'answer-1' };
 const dispatcher = (subsystem = new FakeAnswers()) =>
-  new ApiDispatcher(new ApiRouter(sessionAnswerRoutes(subsystem)), CREDENTIALS);
+  new ApiDispatcher(new ApiRouter(sessionAnswerRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
 describe('the session answer mount', () => {
   it('passes the lossless structured payload and requires an idempotency key', async () => {

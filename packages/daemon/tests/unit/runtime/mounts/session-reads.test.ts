@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import should from 'should';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { sessionReadRoutes } from '../../../../src/lib/runtime/index.ts';
@@ -48,6 +49,7 @@ function fixture(
   const dispatcher = new ApiDispatcher(
     new ApiRouter([...sessionReadRoutes(reads, sessionDirectory([sessionView('s1')]))]),
     CREDENTIALS,
+    NO_GOVERNED_ROUTES_GUARD,
   );
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));

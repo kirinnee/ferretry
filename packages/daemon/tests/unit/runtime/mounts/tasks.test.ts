@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse } from '@ferretry/protocol';
 import should from 'should';
@@ -33,7 +34,7 @@ const CREATE = {
 
 /** The dispatcher a request is driven through, over the routes and the credentials the daemon uses. */
 function dispatcher(world: TaskWorld = {}): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(taskRoutes(taskSubsystem(world))), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(taskRoutes(taskSubsystem(world))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 const post = (path: string, body: unknown, headers: Readonly<Record<string, string>> = human) =>
@@ -488,7 +489,7 @@ describe('the task board mount', () => {
         observe: async () => new Map(),
         now: () => AT,
       };
-      const dispatch = new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS);
+      const dispatch = new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
       // Act
       const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));

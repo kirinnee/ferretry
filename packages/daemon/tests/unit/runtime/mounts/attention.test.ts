@@ -1,3 +1,4 @@
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type ApiResponse } from '../../../../src/lib/api/index.ts';
@@ -23,7 +24,7 @@ class BrokenLedgerRepository implements AttentionLedgerRepository {
 
 function fixture(repository?: AttentionLedgerRepository) {
   const routes = attentionRoutes(attentionService(repository));
-  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS);
+  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
 }

@@ -880,7 +880,7 @@ Afterwards, any number of requests:
   credential for a relayed request is the device token that opened the session and nothing else, so a
   request cannot promote itself past the grant it arrived under.
 - A relayed request is **never a loopback peer**. Everything a daemon grants a loopback caller — a
-  token in a query parameter, a host-scoped route — is unreachable through a relay by construction,
+  token in a query parameter, a `privilegedOnly` route — is unreachable through a relay by construction,
   not by a check somebody has to remember.
 
 ### Daemon → client
