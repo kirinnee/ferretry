@@ -101,6 +101,21 @@ describe('readComposerReferenceCatalogs', () => {
     expect(catalogs.failures).toEqual({ attention: 'attention unavailable' });
   });
 
+  test('keeps task and Attention proof when the skills route fails', async () => {
+    const client = reader(path => {
+      if (path.endsWith('/tasks')) return taskListing();
+      if (path.endsWith('/attention')) return attentionListing();
+      throw new Error('skills unavailable');
+    });
+
+    const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
+
+    expect(catalogs.tasks).toHaveLength(1);
+    expect(catalogs.attention).toHaveLength(1);
+    expect(catalogs.skills).toBeUndefined();
+    expect(catalogs.failures).toEqual({ skills: 'skills unavailable' });
+  });
+
   test('refuses a response about another session without erasing other proof', async () => {
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing('session-b');
