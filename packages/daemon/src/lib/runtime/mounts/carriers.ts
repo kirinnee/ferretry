@@ -59,6 +59,19 @@ import { type ApiRoute, jsonResponse } from '../../api/index.ts';
  * different daemons. `readonly` is the whole guarantee it needs.
  */
 export function carrierRoutes(carriers: readonly DaemonCarrier[]): readonly ApiRoute[] {
+  // PARSED HERE, WHERE THE TABLE IS BUILT, AND NOT INSIDE THE HANDLER.
+  //
+  // The schema is what holds a published direct address to the origin rule its readers apply — the
+  // same projection the pairing response is parsed through — so a daemon cannot publish a carrier its
+  // own device would refuse. WHERE it runs decides what a refused set looks like: inside the handler a
+  // bad set is a generic 500 on every request for the life of the daemon, which reads as a broken
+  // daemon and names no remedy. Here it is a boot failure, once, while somebody is still looking at
+  // the terminal they started it from.
+  //
+  // The view is also the whole answer, computed once: the set is resolved at boot and constant for the
+  // life of this daemon, so there is nothing about a request that could change it. That is why this
+  // route has no per-request work to do at all.
+  const view = DaemonCarriersViewSchema.parse({ carriers });
   return [
     {
       method: 'GET',
@@ -66,11 +79,9 @@ export function carrierRoutes(carriers: readonly DaemonCarrier[]): readonly ApiR
       minimum: 'authenticated',
       // The entire value of this answer is that it is current. A cached copy would re-serve the
       // rendezvous the operator has just switched off, which is the failure the route exists to end.
+      // The daemon holds ONE answer and reserving it is fine; a CLIENT holding a stale one is the bug.
       noStore: true,
-      // PARSED ON THE WAY OUT, not merely typed: the schema is what holds a published direct address
-      // to the origin rule its readers apply, so a daemon cannot publish a carrier its own device
-      // would refuse. It is the same projection the pairing response is parsed through.
-      handle: async () => jsonResponse(DaemonCarriersViewSchema.parse({ carriers })),
+      handle: async () => jsonResponse(view),
     },
   ];
 }

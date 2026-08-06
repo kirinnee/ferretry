@@ -68,8 +68,19 @@ import { type WardenSubsystem, wardenRoutes } from './warden.ts';
  * reachability gate can see the edge.
  */
 
-/** Every already-built subsystem this daemon process serves. One field per subsystem; the field's
- *  presence is the proof that production constructs it. */
+/**
+ * Everything the daemon process must already hold for its mounted surface to be real. One field per
+ * dependency; the field's PRESENCE is the proof that production constructs it, and a required field is
+ * how a capability stops being buildable-but-unreachable.
+ *
+ * MOST FIELDS ARE SUBSYSTEMS — an object with behaviour, which a route calls. A few are plain VALUES,
+ * because what the surface needs is a fact rather than a collaborator: `carriers` is the set of ways
+ * this daemon can be reached, resolved once at boot and constant afterwards. Declaring such a fact as a
+ * subsystem with a getter would be strictly worse than declaring the value: two calls may answer
+ * differently, and the pairing response and the refresh route would stop describing the same daemon.
+ * The rule the list actually enforces is "nothing here may be absent from production", not "everything
+ * here has methods".
+ */
 export interface MountedSubsystems {
   /** The daemon's own health, over the self-check that measures it. */
   readonly health: DaemonHealthSubsystem;

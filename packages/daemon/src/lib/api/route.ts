@@ -9,15 +9,26 @@ import type { AuthenticatedCredential } from './socket-ticket.ts';
  * The source decided this with a 60-line chain of path regexes evaluated before routing
  * (`wardenScopeDenial`), which meant every new subsystem had to remember to add its own denial or
  * silently became warden-readable — and several did. Here the answer travels WITH the route, so a
- * route that says nothing is admin-only by construction and forgetting to think about scope fails
+ * route that says nothing is refused by construction and forgetting to think about reachability fails
  * closed instead of open.
  *
- * - `public` — no token at all. Reserved for machine feeds and one-time-code redemption.
- * - `warden` — any authenticated caller, including the capability-scoped warden.
- * - `admin` — a host admin or paired device acting as the operator.
- * - `host` — the host's admin token only; never a remote device or warden.
+ * THIS IS ONE OF THREE INDEPENDENT QUESTIONS, and they were once a single `scope` value that could only
+ * ever answer whichever one its author had in mind:
+ *
+ * - **`minimum`** — the least CREDENTIAL CLASS that may reach the route. That is this type.
+ * - **`privilegedOnly`** — whether the request must have ARRIVED over a privileged carrier, which is a
+ *   fact about the transport and not about the token. See {@link ScopedRoute}.
+ * - **`capability`** — what the OPERATOR must additionally have agreed the UI may do, consulted only
+ *   after the two above pass, so a grant can never widen. See {@link ScopedRoute.capability}.
+ *
+ * The classes, weakest first:
+ *
+ * - `none` — no token at all. Reserved for machine feeds and one-time-code redemption.
+ * - `authenticated` — any caller this daemon issued a credential to, including a paired device and the
+ *   capability-scoped warden. For reads whose subject is the caller and whose body holds no secret.
+ * - `operator` — an admin token or a paired device acting as the operator; never the warden.
+ * - `admin-token` — the host's own admin token only; never a remote device, never the warden.
  */
-/** The least credential class that may use a route. */
 export type CredentialMinimum = 'none' | 'authenticated' | 'operator' | 'admin-token';
 
 /** Everything a handler is allowed to know about the caller. */

@@ -133,6 +133,40 @@ describe('the carrier refresh mount', () => {
     should(body).not.containEql('fingerprint');
   });
 
+  it('should refuse a carrier set the wire would reject while the table is being built', async () => {
+    // WHERE THE PARSE RUNS DECIDES WHAT A BAD SET LOOKS LIKE. Inside the handler it is a generic 500 on
+    // every request for the life of the daemon — a daemon that reads as broken and names no remedy, and
+    // a failure nobody sees until a phone asks. Here it is a boot failure, once, while somebody is still
+    // looking at the terminal they started it from.
+    // Arrange — addresses the TYPE permits and the schema does not: a credential in one, plaintext to a
+    // rendezvous in the other.
+    const credentialled: readonly DaemonCarrier[] = [
+      { kind: 'direct', url: 'https://operator:hunter2@workstation.example.test' },
+    ];
+    const plaintextRelay: readonly DaemonCarrier[] = [{ kind: 'relay', url: 'ws://rendezvous.example.test/fy' }];
+
+    // Act / Assert — each refusal is matched by its OWN reason. A bare `.throw()` would pass on any
+    // failure at all, including one that had nothing to do with the address it was given.
+    should(() => carrierRoutes(credentialled)).throw(/daemon address may not carry credentials/u);
+    should(() => carrierRoutes(plaintextRelay)).throw(/must be wss\/https, or ws\/http on loopback/u);
+  });
+
+  it('should answer from one projection rather than re-deriving it per request', async () => {
+    // The set is resolved at boot and constant afterwards, so there is nothing about a request that could
+    // change the answer. Two calls agree byte for byte — which is also what makes the failure above a
+    // boot failure rather than a recurring one.
+    // Arrange
+    const subject = dispatcher();
+
+    // Act
+    const first = await subject.dispatch(request({ path: '/v1/carriers', headers: device }));
+    const second = await subject.dispatch(request({ path: '/v1/carriers', headers: device }));
+
+    // Assert
+    should([first.status, second.status]).deepEqual([200, 200]);
+    should(first.body).equal(second.body);
+  });
+
   it('should reach the daemon over one route and no more', async () => {
     // A refresh is a read. A mount that also offered a WRITE would let a paired phone re-point this
     // daemon's carriers at a rendezvous of its own choosing — which is a configuration change, and the

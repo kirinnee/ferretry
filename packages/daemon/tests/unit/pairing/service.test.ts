@@ -317,6 +317,67 @@ describe('PairingService redemption', () => {
     should(JSON.stringify(result.response.carriers)).not.containEql('workstation.example.test');
   });
 
+  it('should refuse a carrier set the wire would reject BEFORE anything can be paired', async () => {
+    // THE HALF-STATE THIS CLOSES. The response is parsed LAST, after the code is burned, the device row
+    // is written and the credential is live — and `PublishedCarriersSchema` throws rather than dropping.
+    // So a set the wire refuses used to turn one redemption into a generic 500 with the code spent, a
+    // device persisted and no token delivered to anybody: nothing the operator or the phone can repair,
+    // reached by a configuration mistake rather than by an attack. Construction is where it belongs.
+    // Arrange — a URL the type permits and `DaemonOriginSchema` does not: a credential in an address.
+    const devices = new RecordingDevices();
+    const credentials = new PairingDeviceRegistry(DAEMON_ID, new FakeCryptography());
+    const build = () =>
+      new PairingService({
+        daemonId: DAEMON_ID,
+        daemonName: 'workstation',
+        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        carriers: [{ kind: 'direct', url: 'https://operator:hunter2@workstation.example.test' }],
+        clock: new FakeClock(),
+        cryptography: new FakeCryptography(),
+        devices,
+        credentials,
+      });
+
+    // Act / Assert — it throws where a boot can report it, not where a request would, and it throws
+    // about the CARRIER: a bare `.throw()` here would pass on any unrelated construction failure.
+    should(build).throw(/daemon address may not carry credentials/u);
+    // And nothing was mutated on the way: no device row, no live credential, no code to spend.
+    should(devices.records).be.empty();
+    should(credentials.identify(DEVICE_TOKEN)).be.undefined();
+  });
+
+  it('should refuse more carriers than the wire will carry, at construction', async () => {
+    // The ceiling is the wire's (`MAX_PUBLISHED_CARRIERS`), and it exists because every entry is an
+    // address some browser dials in turn — an unbounded list is an unbounded walk. A daemon that only
+    // discovered the ceiling while answering a redemption would fail the one request that cannot be
+    // retried.
+    // Arrange
+    const tooMany: readonly DaemonCarrier[] = Array.from({ length: 9 }, (_, index) => ({
+      kind: 'relay' as const,
+      url: `wss://rendezvous-${String(index)}.example.test/fy`,
+    }));
+
+    // Act / Assert
+    should(() => fixture({ carriers: tooMany })).throw(/expected array to have <=8 items/u);
+  });
+
+  it('should keep publishing after construction accepted the set, rather than re-checking per redemption', async () => {
+    // The check is a BOOT check, so it must not have become a per-request one: two redemptions from one
+    // service both publish, and the second does not pay for the first's validation or fail on it.
+    // Arrange
+    const { service } = fixture();
+
+    // Act
+    service.mint();
+    const first = await service.redeem({ code: CODE, deviceName: 'first' }, '198.51.100.3');
+    service.mint();
+    const second = await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, '198.51.100.4');
+
+    // Assert
+    if (first.kind !== 'paired' || second.kind !== 'paired') throw new Error('expected two pairings');
+    should([first.response.carriers, second.response.carriers]).deepEqual([CARRIERS, CARRIERS]);
+  });
+
   it('should give wrong, malformed, expired, and already-consumed codes the same refusal', async () => {
     const wrong = fixture();
     wrong.service.mint();
