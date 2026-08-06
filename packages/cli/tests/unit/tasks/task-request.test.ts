@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { MAX_SESSION_SEARCH_QUERY_LENGTH } from '@ferretry/protocol';
 import should from 'should';
 import {
   buildAssignAction,
@@ -195,6 +196,28 @@ describe('task list filters', () => {
     // Act + Assert
     should(() => buildTaskListFilters({ kind: 'epic' })).throw(/--kind must be one of/u);
     should(() => buildTaskListFilters({ status: ['shipped'] })).throw(/--status must be one of/u);
+  });
+
+  it('should send a free-text search as `q`, beside the exact-match filters rather than instead of them', () => {
+    // The daemon owns the search decision, because matching needs the description, original ask and
+    // clarifications — none of which a list row carries.
+    // Act
+    const actual = buildTaskListFilters({ status: ['todo'], query: '  round trip  ' });
+
+    // Assert
+    should(actual).eql([
+      ['status', 'todo'],
+      ['q', 'round trip'],
+    ]);
+  });
+
+  it('should refuse a blank, control-bearing, or overlong search term', () => {
+    // Act + Assert
+    should(() => buildTaskListFilters({ query: '   ' })).throw(/--query must be between/u);
+    should(() => buildTaskListFilters({ query: 'two\nlines' })).throw(/--query must be between/u);
+    should(() => buildTaskListFilters({ query: 'x'.repeat(MAX_SESSION_SEARCH_QUERY_LENGTH + 1) })).throw(
+      /--query must be between/u,
+    );
   });
 
   it('should default to the plain board and accept the other two views', () => {

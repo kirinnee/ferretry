@@ -197,6 +197,20 @@ export interface RenderedDiff {
 }
 
 /**
+ * Every path under the session cwd that Git does not exclude, in ONE answer.
+ *
+ * The gitignore rule is applied by the tool that owns it — `--exclude-standard` — rather than being
+ * re-derived a directory at a time, which is both the correct owner and the difference between one
+ * question and one per directory. `truncated` means Git's own output hit the caller's byte cap, so the
+ * list is short by an amount nobody can know without asking again for more.
+ */
+export interface SessionFileList {
+  /** Relative to the session cwd, in Git's own order, each name at most once. */
+  readonly paths: readonly string[];
+  readonly truncated: boolean;
+}
+
+/**
  * The Git reads this viewer needs, every one of them taking a PINNED working directory.
  *
  * `ignoredPaths` must THROW when it cannot tell, rather than answering "not ignored": a viewer that
@@ -205,6 +219,16 @@ export interface RenderedDiff {
  */
 export interface SessionGit {
   repoInfo(cwd: GitWorkingDirectory): Promise<SessionRepoInfo>;
+  /**
+   * Every unexcluded path beneath this working directory, bounded by `maxBytes` of Git output.
+   *
+   * Throws when Git could not answer, and the DOMAIN turns that into an index that reports itself
+   * incomplete rather than into a refusal of the whole read: a search surface that answers "no files"
+   * and a search surface that answers "I could not look" must not be the same response, because only one
+   * of them tells a reader to stop trusting the result. What this returns is a candidate list and never
+   * a permission — every gate still runs on the read that follows.
+   */
+  listFiles(cwd: GitWorkingDirectory, maxBytes: number): Promise<SessionFileList>;
   ignoredPaths(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<ReadonlySet<string>>;
   isTracked(cwd: GitWorkingDirectory, rel: string): Promise<boolean>;
   changes(cwd: GitWorkingDirectory): Promise<SessionChangesView>;

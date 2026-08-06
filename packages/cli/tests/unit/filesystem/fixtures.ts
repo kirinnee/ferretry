@@ -1,3 +1,4 @@
+import type { SessionFileIndexResponse } from '@ferretry/protocol';
 import type { z } from 'zod';
 import type { FilesystemApiClient, IFilesystemGateway, IFilesystemOutput } from '../../../src/lib/filesystem/ports.ts';
 import type { FsChanges, FsFileView, FsListing } from '../../../src/lib/filesystem/wire.ts';
@@ -23,12 +24,29 @@ export const changesView: FsChanges = {
   ],
 };
 
+export const fileIndex: SessionFileIndexResponse = {
+  v: 1,
+  sessionId: 's1',
+  root: '/work/repo',
+  files: [
+    { path: 'src/app.ts', name: 'app.ts' },
+    { path: 'src/nested/deep.ts', name: 'deep.ts' },
+    { path: 'README.md', name: 'README.md' },
+  ],
+  coverage: 'partial',
+  skipped: [
+    { reason: 'denied', count: 2 },
+    { reason: 'unreadable', count: 1 },
+  ],
+};
+
 export class RecordingFilesystemGateway implements IFilesystemGateway {
   readonly calls: Array<{ method: string; args: unknown[] }> = [];
 
   constructor(
     private readonly responses: {
       listing?: FsListing;
+      index?: SessionFileIndexResponse;
       file?: FsFileView;
       changes?: FsChanges;
       diff?: string;
@@ -38,6 +56,11 @@ export class RecordingFilesystemGateway implements IFilesystemGateway {
   list(sessionId: string, path?: string): Promise<FsListing> {
     this.calls.push({ method: 'list', args: [sessionId, path] });
     return Promise.resolve(this.responses.listing ?? listing);
+  }
+
+  index(sessionId: string): Promise<SessionFileIndexResponse> {
+    this.calls.push({ method: 'index', args: [sessionId] });
+    return Promise.resolve(this.responses.index ?? fileIndex);
   }
 
   file(sessionId: string, path: string, rev?: 'head'): Promise<FsFileView> {

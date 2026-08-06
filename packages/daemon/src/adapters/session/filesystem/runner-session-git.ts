@@ -10,6 +10,7 @@ import {
   hasDiffableChange,
   parseBatchCheck,
   parseCheckIgnore,
+  parseFileList,
   parseHeadTreeEntry,
   parseNumstat,
   parsePorcelainStatus,
@@ -17,6 +18,7 @@ import {
   type RenderedDiff,
   relabelDiffHeaders,
   type SessionChangesView,
+  type SessionFileList,
   type SessionGit,
   type SessionRepoInfo,
   withLineStats,
@@ -81,6 +83,31 @@ export class RunnerSessionGit implements SessionGit {
       ...(facts.root ? { root: facts.root } : {}),
       prefix: facts.prefix,
       hasHead: head.execution.exitCode === 0,
+    };
+  }
+
+  /**
+   * Every path under this working directory Git does not exclude, in one command.
+   *
+   * `--cached` plus `--others --exclude-standard` is tracked content plus untracked content minus
+   * everything the ignore rules cover — and `--exclude-standard` is the ONLY spelling of that rule this
+   * daemon should ever hold, because it is Git's own. Reimplementing `.gitignore` matching to build a
+   * search index is how a build directory full of credentials ends up in one.
+   *
+   * Paths come back relative to THIS directory and bounded to it, which is what keeps a session started
+   * in a repository subdirectory from indexing its siblings — the same containment `--relative` gives
+   * the changes list, obtained here by Git's own default rather than by a flag.
+   */
+  async listFiles(cwd: GitWorkingDirectory, maxBytes: number): Promise<SessionFileList> {
+    const execution = await this.runner.run({
+      args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      cwd,
+      maxStdoutBytes: maxBytes,
+    });
+    requireGitExit('git ls-files', execution);
+    return {
+      paths: parseFileList(decodeGitOutput(execution), execution.stdoutTruncated),
+      truncated: execution.stdoutTruncated,
     };
   }
 
