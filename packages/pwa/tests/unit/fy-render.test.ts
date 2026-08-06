@@ -510,6 +510,20 @@ describe('fy-render svg structural bounds', () => {
     should(reasonOf(svg('viewBox="0 0 120"'))).containEql('must declare width and height');
   });
 
+  test('should still bound the axis that IS declared when the other is omitted', () => {
+    // Assert — an earlier draft returned as soon as either axis was missing
+    // behind a viewBox, so the declared one was never looked at. Omission may
+    // only mean "inherit the bounded viewBox extent".
+    should(reasonOf(svg('width="999999" viewBox="0 0 10 10"'))).containEql('SVG canvas exceeds');
+    should(reasonOf(svg('height="999999" viewBox="0 0 10 10"'))).containEql('SVG canvas exceeds');
+    should(reasonOf(svg('width="999%" viewBox="0 0 10 10"'))).containEql('at most 100%');
+    should(reasonOf(svg('height="999%" viewBox="0 0 10 10"'))).containEql('at most 100%');
+    should(reasonOf(svg('width="10em" viewBox="0 0 10 10"'))).containEql('unitless, px, or a percentage');
+    should(reasonOf(svg('width="0" viewBox="0 0 10 10"'))).containEql('must be positive');
+    // …and a declared axis inside the bounds still passes with the other omitted.
+    should(svg('width="120" viewBox="0 0 120 60"').ok).be.true();
+  });
+
   test('should accept a percentage only up to 100 and only against a viewBox', () => {
     should(reasonOf(svg('width="101%" height="100%" viewBox="0 0 120 60"'))).containEql('at most 100%');
     should(reasonOf(svg('width="0%" height="100%" viewBox="0 0 120 60"'))).containEql('at most 100%');
@@ -763,8 +777,16 @@ describe('fy-render raster header bounds', () => {
   });
 
   test('should refuse a PNG whose IEND claims a length it cannot have', () => {
+    // Arrange — the tail is length[4] type[4] crc[4], so the length's low byte is
+    // at -12+3 = -9. Mutating -5 would have changed the TYPE and proved nothing
+    // about the length check.
     const wrong = png(64, 48);
-    wrong[wrong.length - 5] = 4;
+    should([...wrong.slice(wrong.length - 8, wrong.length - 4)].map(v => String.fromCharCode(v)).join('')).equal(
+      'IEND',
+    );
+    wrong[wrong.length - 9] = 4;
+
+    // Assert
     should(reasonOf(image('image/png', wrong))).equal('Image payload header could not be read');
   });
 
@@ -865,6 +887,31 @@ describe('fy-render raster header bounds', () => {
     should(reasonOf(image('image/webp', lossless(9000, 9000)))).containEql('exceeds');
     should(image('image/webp', lossy(64, 48)).ok).be.true();
     should(reasonOf(image('image/webp', lossy(9000, 9000)))).containEql('exceeds');
+  });
+
+  test('should fail closed on a recognised WebP record that is too short to read', () => {
+    // Arrange — a valid VP8X, then a truncated one of each kind. Folding the
+    // size test into the recognition arm would let the earlier good record carry
+    // the file while its real dimension record stayed unreadable.
+    const riff = (body_: readonly number[]): Uint8Array =>
+      bytes(...chars('RIFF'), ...leSize(body_.length + 4), ...chars('WEBP'), ...body_);
+    const goodVp8x: readonly number[] = [...chars('VP8X'), 10, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0, 63, 0, 0];
+    const stub = (type: string, payload: readonly number[]): readonly number[] => [
+      ...chars(type),
+      payload.length,
+      0,
+      0,
+      0,
+      ...payload,
+    ];
+
+    // Assert
+    should(image('image/webp', riff([...goodVp8x])).ok).be.true();
+    for (const short of [stub('VP8X', [0, 0]), stub('VP8L', [0x2f, 0]), stub('VP8 ', [0, 0, 0, 0x9d])]) {
+      should(reasonOf(image('image/webp', riff([...goodVp8x, ...short])))).equal(
+        'Image payload header could not be read',
+      );
+    }
   });
 
   test('should never admit a raster over the pixel budget, whatever the type', () => {

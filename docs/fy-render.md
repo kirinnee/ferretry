@@ -207,9 +207,10 @@ rendering would cost and one control starts it, with an accessible name that car
 bounded payload size — _Render illustration (SVG, 4 KB)_ — because a consent nobody can price is not
 one.
 
-- **Approval belongs to the exact `block.source`** and is discarded the moment those bytes change. A
-  streamed message therefore cannot inherit consent granted to an earlier draft of itself, and no
-  partially-received payload ever reaches a decoder.
+- **Approval belongs to the exact `block.source`** and is discarded the moment those bytes change, so
+  a streamed message cannot inherit consent granted to an earlier draft of itself. That is the whole
+  guarantee, and it is narrower than "nothing partial ever decodes" —
+  [Streaming](#streaming-which-is-the-ordinary-case) states the exact truth.
 - **There is no always-render setting**, deliberately: it would put the automatic path back.
 - **Render becomes Reload in the same DOM slot**, so the control the reader just pressed is still
   under the focus ring afterwards.

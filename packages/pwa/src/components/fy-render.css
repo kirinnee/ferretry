@@ -120,8 +120,15 @@
    `inset-inline: 0` STAYS, and is not redundant with `kt-overlay`: that class
    owns the vertical box and the bottom inset only, so without an explicit
    horizontal anchor a `position: fixed` element falls back to auto insets and
-   shrink-to-fit width. The vertical box is deliberately left to `kt-overlay`. */
-.fy-render-fullscreen {
+   shrink-to-fit width. The vertical box is deliberately left to `kt-overlay`.
+
+   THE SELECTOR CARRIES BOTH CLASSES ON PURPOSE. `.kt-overlay` and
+   `.fy-render-fullscreen` are the same specificity, and `.kt-overlay` is defined
+   LATER — `index.css` imports this file at the top and then declares the overlay
+   contract in its own body — so a single-class rule here loses every property
+   they share, including the safe-area padding this block is paying. `.kt-overlay`
+   remains the vertical-box owner; this only wins the properties it restates. */
+.kt-overlay.fy-render-fullscreen {
   position: fixed;
   z-index: 50;
   display: flex;
