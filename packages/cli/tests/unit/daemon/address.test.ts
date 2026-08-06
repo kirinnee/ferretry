@@ -63,6 +63,19 @@ describe('where the client looks for the daemon', () => {
     should(isLocalDaemonUrl('http://[::1]:7431')).be.true();
   });
 
+  it('should ask the protocol what this machine is, so one host is not two answers', () => {
+    // THE DUPLICATE THIS DELETES. A private copy here read the whole of 127/8 and every `.localhost`
+    // name while the protocol read three spellings, so `127.0.0.2` was this machine to the token
+    // spent on it and a stranger to the pairing advertisement — which handed a phone a QR code for an
+    // address that, on that phone, names the phone. The widened cases are asserted from THIS side so
+    // deleting the copy cannot quietly narrow what the client already treated as local.
+    for (const url of ['http://127.0.0.2:7431', 'http://127.255.255.255:7431', 'http://fy.localhost:7431']) {
+      should(isLocalDaemonUrl(url)).be.true();
+    }
+    // And the fully written IPv6 loopback, which a URL authority always presents bracketed.
+    should(isLocalDaemonUrl('http://[0:0:0:0:0:0:0:1]:7431')).be.true();
+  });
+
   it('should never call a remote or unreadable address local', () => {
     // Act + Assert — guessing wrong in this direction sends an admin credential off the machine, so
     // anything that is not provably loopback takes the refusal.

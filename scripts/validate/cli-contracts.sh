@@ -400,12 +400,17 @@ loopback-single-source)
   relay_connection="packages/relay/src/lib/connection.ts"
   pwa_directory="packages/pwa/src/features/onboarding/hosted-relay.ts"
   daemon_config="packages/daemon/src/lib/runtime/config.ts"
+  cli_address="packages/cli/src/lib/daemon/address.ts"
   rg -qF 'isLoopbackPeer' "${api_server}" || {
     echo "❌ ${api_server} re-derived a peer address instead of using isLoopbackPeer" >&2
     exit 1
   }
   rg -qF 'isLoopbackHost' "${relay_connection}" || {
     echo "❌ ${relay_connection} re-derived a host spelling instead of using isLoopbackHost" >&2
+    exit 1
+  }
+  rg -qF 'isLoopbackHost' "${cli_address}" || {
+    echo "❌ ${cli_address} re-derived a host spelling instead of using isLoopbackHost" >&2
     exit 1
   }
   rg -qF 'SocketEndpointSchema' "${pwa_directory}" || {
@@ -417,14 +422,52 @@ loopback-single-source)
     exit 1
   }
 
-  # These are the four predicate copies Wave 0 deletes. Quoted literals are forbidden here; tests
+  # These are the predicate copies Wave 0 deletes. Quoted literals are forbidden here; tests
   # remain free to spell boundary values, and unrelated loopback services keep their own domains.
-  for consumer in "${api_server}" "${relay_connection}" "${pwa_directory}" "${daemon_config}"; do
+  for consumer in "${api_server}" "${relay_connection}" "${pwa_directory}" "${daemon_config}" "${cli_address}"; do
     if rg -n --fixed-strings -- "'127.0.0.1'" "${consumer}"; then
       echo "❌ ${consumer} carries a loopback predicate literal instead of reading ${address_source}" >&2
       exit 1
     fi
   done
+
+  # AND NO PRODUCTION FILE MAY DEFINE ONE AT ALL, which is the check that would have caught the copy
+  # naming the four above did not. `packages/cli` kept a private `isLoopbackHost` through the whole of
+  # Wave 0: it read `127.0.0.0/8` and every `.localhost` name while the owner read three spellings, so
+  # `127.0.0.2` was this machine to the client spending an owner-only token on it and a stranger to
+  # the pairing advertisement, which handed a phone a QR code for an address that names the phone.
+  # A list of known copies cannot catch the copy that is not on the list; a definition can.
+  #
+  # ONE DECLARED EXEMPTION, because it is a different question rather than a second answer to this
+  # one: the reader in the app decides whether a hostname names the DEVICE HOLDING THE BROWSER, on
+  # the far side of a tunnel from the daemon, which is why it counts the wildcard as loopback — an
+  # answer that would be wrong everywhere in this domain. It is checked for below so the exemption
+  # cannot outlive the thing it exempts.
+  browser_reader="packages/pwa/src/features/browser/in-app-browser-model.ts"
+  rg -qF 'isLoopbackHostname' "${browser_reader}" || {
+    echo "❌ ${browser_reader} no longer defines the exempted device predicate; drop the exemption" >&2
+    exit 1
+  }
+  predicate_files=()
+  while IFS= read -r -d '' path; do
+    [ "${path}" = "${address_source}" ] && continue
+    [ "${path}" = "${browser_reader}" ] && continue
+    case "${path}" in
+    */src/* | */bin/*) predicate_files+=("${path}") ;;
+    esac
+  done < <(git ls-files -z -co --exclude-standard -- packages)
+  if [ "${#predicate_files[@]}" -gt 0 ]; then
+    set +e
+    copies="$(rg --line-number -- '(function|const|let|var)[[:space:]]+is(Loopback|Wildcard)[A-Za-z]*' "${predicate_files[@]}")"
+    copy_status=$?
+    set -e
+    if [ "${copy_status}" -eq 0 ]; then
+      echo "❌ a loopback or wildcard predicate is defined outside ${address_source}:" >&2
+      printf '%s\n' "${copies}" >&2
+      exit 1
+    fi
+    [ "${copy_status}" -gt 1 ] && echo "❌ failed to scan package source for loopback predicates" >&2 && exit "${copy_status}"
+  fi
   ;;
 nix-packages)
   # Nix's default package is the normal profile-install entry point. It must join the independently

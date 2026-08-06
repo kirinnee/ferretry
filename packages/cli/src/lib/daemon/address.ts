@@ -1,18 +1,4 @@
-import { FY_DEFAULT_DAEMON_URL, recordedBindAddress } from '@ferretry/protocol';
-
-/**
- * Every host name that names THIS machine.
- *
- * `127.0.0.0/8` in full rather than the one familiar address, because the whole block is loopback and
- * an operator who binds `127.0.0.2` to separate two daemons is doing something supported. `.localhost`
- * is included because RFC 6761 reserves it to resolve to loopback and nothing else.
- */
-function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost')) return true;
-  if (host === '::1' || host === '[::1]') return true;
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(host);
-}
+import { FY_DEFAULT_DAEMON_URL, isLoopbackHost, recordedBindAddress } from '@ferretry/protocol';
 
 /**
  * Whether a daemon URL names this machine, and may therefore use the locally minted credential.
@@ -22,6 +8,12 @@ function isLoopbackHost(hostname: string): boolean {
  * classified as remote and refused for want of `FY_TOKEN` — while the owner-only token file that is
  * exactly the right credential sat unread in the state home. The comment beside it already said
  * "targets a remote daemon"; only the code disagreed.
+ *
+ * WHAT COUNTS AS THIS MACHINE IS NOT DECIDED HERE. It used to be: a private copy of the predicate
+ * read the whole of `127.0.0.0/8` and every `.localhost` name while the protocol's own read three
+ * spellings, so one host was two facts at once — `127.0.0.2` was this machine to the token spent on
+ * it and a stranger to the pairing advertisement, which handed a phone a QR code for an address that
+ * resolves to the phone. The protocol owns the whole domain now and this asks it.
  *
  * A URL THAT WILL NOT PARSE IS NOT LOOPBACK. The consequence of guessing wrong in that direction is
  * an admin credential sent off this machine, so the unparseable case takes the refusal.

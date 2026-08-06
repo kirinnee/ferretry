@@ -4,6 +4,9 @@ import {
   daemonAddress,
   FY_DEFAULT_DAEMON_PORT,
   FY_DEFAULT_DAEMON_URL,
+  isLoopbackHost,
+  isLoopbackPeer,
+  isWildcardHost,
   recordedBindAddress,
 } from '../../src/lib/address.ts';
 
@@ -73,5 +76,98 @@ describe('the well-known daemon address', () => {
     // A usable well-known port: above the privileged range and below every platform's ephemeral one.
     should(FY_DEFAULT_DAEMON_PORT).be.above(1_024);
     should(FY_DEFAULT_DAEMON_PORT).be.below(32_768);
+  });
+});
+
+describe('what an operator’s host spelling means', () => {
+  it('should read the whole of 127/8 and not only the familiar address', () => {
+    // THE SHIPPED DEFECT. The command-line client read the whole block and this owner read one
+    // address, so an operator who bound `127.0.0.2` to keep two daemons apart was on this machine
+    // according to the token spent on them and a stranger according to the advertisement — which
+    // minted a QR code for an address that, on the phone scanning it, names the phone.
+    for (const host of ['127.0.0.1', '127.0.0.2', '127.1.2.3', '127.255.255.255', '127.0.0.0']) {
+      should(isLoopbackHost(host)).be.true();
+    }
+    // The block and nothing beside it, with every octet held to a real one.
+    should(isLoopbackHost('128.0.0.1')).be.false();
+    should(isLoopbackHost('126.255.255.255')).be.false();
+    should(isLoopbackHost('127.0.0.256')).be.false();
+    should(isLoopbackHost('127.0.0')).be.false();
+    should(isLoopbackHost('127.0.0.1.example.test')).be.false();
+  });
+
+  it('should read every name RFC 6761 reserves for loopback, in any case', () => {
+    // `.localhost` resolves to loopback and to nothing else, so a daemon named there is on this
+    // machine; a host name is case-insensitive, so the spelling an operator chose cannot decide it.
+    should(isLoopbackHost('localhost')).be.true();
+    should(isLoopbackHost('LOCALHOST')).be.true();
+    should(isLoopbackHost('fy.localhost')).be.true();
+    should(isLoopbackHost('Deep.Sub.LocalHost')).be.true();
+    should(isLoopbackHost('  localhost  ')).be.true();
+    // A name that merely ENDS in the word is a different name.
+    should(isLoopbackHost('notlocalhost')).be.false();
+    should(isLoopbackHost('localhost.example.test')).be.false();
+  });
+
+  it('should read every spelling of IPv6 loopback, bracketed or not', () => {
+    // A configured host may be written raw and a URL authority carries it bracketed, so both reach
+    // this predicate. `::1` and its fully written form are one address and must answer alike.
+    for (const host of [
+      '::1',
+      '[::1]',
+      '0:0:0:0:0:0:0:1',
+      '[0:0:0:0:0:0:0:1]',
+      '0000:0000:0000:0000:0000:0000:0000:0001',
+    ]) {
+      should(isLoopbackHost(host)).be.true();
+    }
+    should(isLoopbackHost('::2')).be.false();
+    should(isLoopbackHost('2001:db8::1')).be.false();
+    should(isLoopbackHost('1:0:0:0:0:0:0:1')).be.false();
+  });
+
+  it('should refuse a spelling that is not an address at all', () => {
+    // Guessing wrong in this direction spends an owner-only credential off this machine, so anything
+    // that does not read as an address takes the refusal rather than a benefit of the doubt.
+    should(isLoopbackHost('1::2::3')).be.false();
+    should(isLoopbackHost('::zz')).be.false();
+    should(isLoopbackHost('gg::1')).be.false();
+    should(isLoopbackHost('1:2:3')).be.false();
+    should(isLoopbackHost('1:2:3:4:5:6:7:8:9')).be.false();
+    // `::` stands for at least one elided group, so a spelling that already has eight is not one.
+    should(isLoopbackHost('0:0:0:0::0:0:0:1')).be.false();
+    should(isLoopbackHost('')).be.false();
+  });
+
+  it('should read every spelling of the unspecified address as a wildcard bind', () => {
+    // `::`, `::0` and the written-out form are ONE bind. A list holding only the first called the
+    // other two a routable interface, so a daemon bound to everything under either of them had an
+    // advertisement composed out of a bind instruction instead of the refusal that names the remedy.
+    for (const host of [
+      '0.0.0.0',
+      '::',
+      '[::]',
+      '::0',
+      '[::0]',
+      '0:0:0:0:0:0:0:0',
+      '0000:0000:0000:0000:0000:0000:0000:0000',
+    ]) {
+      should(isWildcardHost(host)).be.true();
+    }
+    should(isWildcardHost('127.0.0.1')).be.false();
+    should(isWildcardHost('192.168.1.10')).be.false();
+    should(isWildcardHost('::1')).be.false();
+    should(isWildcardHost('localhost')).be.false();
+    should(isWildcardHost('nonsense')).be.false();
+  });
+
+  it('should keep the two input domains apart in both directions', () => {
+    // ONE FACT, TWO DOMAINS. A name is something an operator writes and a transport never reports;
+    // the IPv4-mapped form is what a dual-stack socket reports and no operator writes. Merging them
+    // would be as wrong as the duplication that made this predicate authoritative.
+    should(isLoopbackPeer('::ffff:127.0.0.1')).be.true();
+    should(isLoopbackHost('::ffff:127.0.0.1')).be.false();
+    should(isLoopbackPeer('localhost')).be.false();
+    should(isLoopbackPeer('10.0.0.4')).be.false();
   });
 });
