@@ -218,12 +218,80 @@ describe('AttentionActionModal', () => {
     await view.unmount();
   });
 
-  it('falls back to the oldest item when the request names nothing on the board', async () => {
-    // A resolved or absent `!A9` must not blank the sheet; it opens the deck.
-    const view = await modal({ snapshot: snapshot(), targetId: 'A9' });
+  it('keeps the explicit reference instead of substituting when no audit trail exists', async () => {
+    // A `!A9` that left neither an active row nor a resolution record must NOT
+    // become A3's decision. The sheet names A9, says it is no longer active
+    // without inventing an outcome, and offers no controls for the survivor.
+    const view = await modal({
+      snapshot: snapshot({ items: [item()], count: 1 }),
+      targetId: 'A9',
+    });
 
+    expect(view.container.querySelector('[data-attention-addressed]')).not.toBeNull();
+    expect(view.container.textContent).toContain('!A9');
+    expect(view.container.textContent).toContain('no longer active');
+    // No outcome is invented for an item with no recorded resolution.
+    expect(view.container.textContent).not.toContain('done by you');
+    expect(view.container.textContent).not.toContain('Approved');
+    // The surviving A3 is not surfaced: its subject and its Approve control are gone.
+    expect(view.container.textContent).not.toContain('Approve the pairing request');
+    expect(
+      Array.from(view.container.querySelectorAll('button')).filter(b => b.textContent?.includes('Approve')),
+    ).toHaveLength(0);
+
+    await view.unmount();
+  });
+
+  it('keeps the exact clicked reference through the resolve race, never the survivor', async () => {
+    // The reader followed !A3 while A3 and A7 were both active. Another actor
+    // resolved A3 before the authoritative snapshot landed; only A7 remains. The
+    // modal must still name A3's addressed state and never render A7's controls.
+    const two = snapshot({
+      items: [item(), item({ id: 'A7', subject: 'Choose a deploy window', ask: { kind: 'open-question' } })],
+      count: 2,
+    });
+    const view = await modal({ snapshot: two, targetId: 'A3' });
     expect(view.container.textContent).toContain('Approve the pairing request');
+
+    await view.render(
+      <AttentionActionModal
+        client={client([])}
+        connection={connection}
+        id="attention-sheet"
+        onClose={() => undefined}
+        open
+        scope={scope}
+        snapshot={{
+          ...two,
+          items: [item({ id: 'A7', subject: 'Choose a deploy window', ask: { kind: 'open-question' } })],
+          count: 1,
+          resolved: [
+            {
+              ...item(),
+              resolvedAt: '2026-07-31T12:01:00.000Z',
+              resolvedBy: 'human',
+              resolvedBySession: null,
+              resolvedByName: null,
+              disposition: 'done',
+              response: { kind: 'permission', decision: 'approve' },
+            },
+          ] as AttentionSnapshot['resolved'],
+        }}
+        status="ready"
+        swipeEnabled={false}
+        targetId="A3"
+      />,
+    );
+
+    // A3's addressed state — its own audit evidence — not A7's open question.
+    expect(view.container.querySelector('[data-attention-addressed]')).not.toBeNull();
     expect(view.container.textContent).toContain('!A3');
+    expect(view.container.textContent).toContain('This attention was addressed.');
+    expect(view.container.textContent).toContain('done by you');
+    expect(view.container.textContent).toContain('Approved');
+    // The survivor A7 is never handed to the reader under A3's navigation.
+    expect(view.container.textContent).not.toContain('Choose a deploy window');
+    expect(view.container.querySelector('[aria-label="Attention items"]')).toBeNull();
 
     await view.unmount();
   });

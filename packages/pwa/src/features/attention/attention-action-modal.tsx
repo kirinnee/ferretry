@@ -21,6 +21,7 @@ import { useEffect, useId, useState } from 'react';
 
 import { Markdown } from '../../components/markdown.tsx';
 import { useReferenceSurface } from '../../components/reference-surface.tsx';
+import { cn } from '../../lib/class-names.ts';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -33,6 +34,8 @@ import {
   attentionKindMeta,
   attentionReference,
   collapsesByDefault,
+  describeResponse,
+  resolutionBadge,
   sourceLabel,
 } from './attention-board.tsx';
 
@@ -135,6 +138,14 @@ export function AttentionActionModal({
   const items = snapshot?.items ?? NO_ITEMS;
   const resolved = snapshot?.resolved ?? NO_RESOLVED;
 
+  // An explicit reference (`!A<n>` from the transcript) is a pointer at ONE
+  // decision. It opens on that item, and if a resolve race clears that row
+  // between the click and the authoritative snapshot, it says so for THAT item —
+  // it never silently hands the reader a different active decision. A null
+  // `targetId` opens the deck oldest-first and keeps the reader's chosen row, as
+  // before.
+  const explicitTarget = targetId ?? null;
+
   useEffect(() => {
     if (!open) {
       // CLOSING DISCARDS THE EPISODE. One component instance serves every
@@ -150,15 +161,24 @@ export function AttentionActionModal({
       return;
     }
     setError(null);
-    const requested = targetId === null ? undefined : items.find(item => item.id === targetId);
-    if (requested !== undefined) {
-      setSelectedId(requested.id);
+    if (explicitTarget === null) {
+      setSelectedId(current => (items.some(item => item.id === current) ? current : (items[0]?.id ?? null)));
       return;
     }
-    setSelectedId(current => (items.some(item => item.id === current) ? current : (items[0]?.id ?? null)));
-  }, [items, open, targetId]);
+    // Preserve the target identity whether or not it survived: the actionable
+    // card renders only for this id, and an absent target renders its own
+    // addressed state below instead of substituting the first surviving row.
+    setSelectedId(explicitTarget);
+  }, [items, open, explicitTarget]);
 
-  const selected = items.find(item => item.id === selectedId) ?? items[0];
+  // True only against an AUTHORITATIVE snapshot — a target that left the active
+  // deck. While the ledger is still unread we cannot know, so this stays false
+  // and the loading/unavailable states keep priority over any "addressed" claim.
+  const targetMissing = snapshot !== null && explicitTarget !== null && !items.some(item => item.id === explicitTarget);
+  // The actionable item, if any. An explicit absent target renders `undefined`
+  // here so the addressed panel takes over; the deck path keeps its fallback.
+  const selected = targetMissing ? undefined : (items.find(item => item.id === selectedId) ?? items[0]);
+  const addressedRecord = targetMissing ? resolved.find(item => item.id === explicitTarget) : undefined;
   const selectedIndex = selected === undefined ? -1 : items.findIndex(item => item.id === selected.id);
 
   const act = async (operation: AttentionOperation): Promise<void> => {
@@ -188,6 +208,14 @@ export function AttentionActionModal({
   const loading = (status === 'idle' || status === 'loading') && snapshot === null;
   const kind = selected === undefined ? null : attentionKindMeta(selected);
   const KindIcon = kind?.icon ?? CircleAlert;
+  // The addressed state names the EXACT reference the reader followed; the deck
+  // path keeps its "kind · reference" eyebrow and the subject as the title.
+  const eyebrow = targetMissing
+    ? `${attentionReference(explicitTarget)} · ${addressedRecord ? 'addressed' : 'no longer active'}`
+    : `${kind?.label ?? 'Attention'} · ${selected === undefined ? scope.sessionId : attentionReference(selected.id)}`;
+  const title = targetMissing
+    ? (addressedRecord?.subject ?? 'This attention is no longer active')
+    : (selected?.subject ?? 'Attention radio');
 
   return (
     <BottomSheet
@@ -205,14 +233,12 @@ export function AttentionActionModal({
           <KindIcon size={17} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="kt-attn-action-modal__eyebrow">
-            {kind?.label ?? 'Attention'} · {selected === undefined ? scope.sessionId : attentionReference(selected.id)}
-          </p>
+          <p className="kt-attn-action-modal__eyebrow">{eyebrow}</p>
           {/* WRAPS, never truncates. The subject IS the ask — "Approve this
               browser pairin…" on a 390px screen hides the one sentence the
               reader is being asked to decide about. */}
           <h2 id={titleId} className="m-0 break-words font-display text-title font-semibold tracking-display text-fg">
-            {selected?.subject ?? 'Attention radio'}
+            {title}
           </h2>
         </div>
         <Button
@@ -263,6 +289,33 @@ export function AttentionActionModal({
             <p className="mx-auto mb-0 mt-xs max-w-md text-cell text-muted">
               Reconnect to this daemon before assuming the session needs nothing from you.
             </p>
+          </div>
+        ) : targetMissing ? (
+          <div className="py-10 text-center" data-attention-addressed="">
+            {/* The reference the reader followed is gone from the active deck.
+                Name THAT item, show its audit evidence when the daemon recorded
+                one, and offer no controls for the item that survived the race. */}
+            <span
+              className={cn(
+                'mx-auto mb-sm inline-flex h-11 w-11 items-center justify-center rounded-full border',
+                addressedRecord ? 'border-ok/40 bg-ok/10 text-ok' : 'border-border-soft bg-surface-2 text-muted',
+              )}
+              aria-hidden="true"
+            >
+              {addressedRecord ? <Check size={20} /> : <CircleAlert size={20} />}
+            </span>
+            <p className="m-0 font-display text-title font-semibold text-fg">
+              {addressedRecord ? 'This attention was addressed.' : 'This attention is no longer active.'}
+            </p>
+            <p className="mx-auto mb-0 mt-xs max-w-md text-cell text-muted">
+              {addressedRecord
+                ? `${attentionReference(explicitTarget)} left the active deck before this view opened. The resolution audit records what happened to it.`
+                : `${attentionReference(explicitTarget)} is not waiting for a decision in this session. It may have been cleared or expired before this view opened — no outcome is recorded, so none is claimed here.`}
+            </p>
+            {addressedRecord ? <AddressedAudit record={addressedRecord} /> : null}
+            <Button type="button" className="mt-md min-h-[44px]" variant="primary" onClick={onClose}>
+              Back to session
+            </Button>
           </div>
         ) : selected === undefined ? (
           <div className="py-10 text-center" data-attention-clear="">
@@ -410,5 +463,39 @@ export function AttentionActionModal({
         </nav>
       ) : null}
     </BottomSheet>
+  );
+}
+
+/**
+ * The audit evidence for a reference that resolved out from under the click — the
+ * SAME badge the resolution ledger uses, so "done by you" reads identically
+ * whether the reader arrives from a `!A<n>` link or browses the audit. Read-only:
+ * an addressed item exposes no controls, only what the daemon recorded about it.
+ */
+function AddressedAudit({ record }: { readonly record: ResolvedAttentionItem }) {
+  const badge = resolutionBadge(record);
+  const BadgeIcon = badge.icon;
+  return (
+    <div className="mx-auto mt-sm max-w-md border-l-2 border-border-soft pl-sm text-left text-meta leading-base">
+      <p className="m-0 font-medium text-muted">{record.subject}</p>
+      <p className="m-0 mt-xs flex flex-wrap items-center gap-x-sm gap-y-xs text-faint">
+        <span
+          className={cn(
+            'inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider',
+            badge.className,
+          )}
+        >
+          <BadgeIcon size={11} aria-hidden="true" />
+          {badge.label}
+        </span>
+        <span>
+          {attentionReference(record.id)} · {new Date(record.resolvedAt).toLocaleString()}
+        </span>
+      </p>
+      {record.response ? <p className="m-0 mt-xs font-medium text-muted">{describeResponse(record.response)}</p> : null}
+      {record.resolutionNote ? (
+        <p className="m-0 mt-xs whitespace-pre-wrap break-words text-faint">{record.resolutionNote}</p>
+      ) : null}
+    </div>
   );
 }
