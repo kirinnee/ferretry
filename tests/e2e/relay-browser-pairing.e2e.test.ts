@@ -195,19 +195,69 @@ const PAIRED_DEVICES_PATH = '/v1/pair/devices';
  * `waiting` carries the run marker so the leak search has a value it can look for that nothing else
  * on this host could have produced.
  */
+interface SignalSessionResult {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly session?: {
+    readonly state: {
+      readonly status: string;
+      readonly reason?: string;
+    };
+  };
+}
+
+/** The subset of the daemon's durable replay envelope this journey attributes to Chrome. */
+interface DurableSessionEvent {
+  readonly sequence: number;
+  readonly sessionId: string;
+  readonly type: string;
+  readonly data: unknown;
+}
+
 async function signalSession(
   environment: E2eEnvironment,
   sessionId: string,
   kind: 'waiting' | 'working',
   marker: string,
-): Promise<number> {
+): Promise<SignalSessionResult> {
   const token = (await readFile(join(environment.paths.fyHome, 'api-token'), 'utf8')).trim();
   const response = await fetch(environment.httpUrl(`/v1/sessions/${sessionId}/signal`), {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(kind === 'waiting' ? { kind, message: marker } : { kind }),
   });
-  return response.status;
+  return {
+    ok: response.ok,
+    status: response.status,
+    ...(response.ok ? { session: (await response.json()) as SignalSessionResult['session'] } : {}),
+  };
+}
+
+/** Read the daemon's own journal projection, not the browser's eventually-consistent live feed. */
+async function sessionEvents(
+  environment: E2eEnvironment,
+  sessionId: string,
+  afterSequence: number,
+): Promise<readonly DurableSessionEvent[]> {
+  const token = (await readFile(join(environment.paths.fyHome, 'api-token'), 'utf8')).trim();
+  const response = await fetch(
+    environment.httpUrl(`/v1/sessions/${sessionId}/events?after=${String(afterSequence)}&limit=1000`),
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok)
+    throw new Error(
+      `the daemon refused its durable event replay after ${String(afterSequence)} with ${String(response.status)}: ` +
+        `${(await response.text()).slice(0, 400)}`,
+    );
+  return (await response.json()) as readonly DurableSessionEvent[];
+}
+
+/** CSS has no numeric attribute comparison; excluding every lower cursor value is an exact ≥ wait. */
+function liveCursorAtLeast(sequence: number): string {
+  return (
+    '[data-live-events]' +
+    Array.from({ length: sequence }, (_, lower) => `:not([data-live-events="${String(lower)}"])`).join('')
+  );
 }
 
 /** Everything the journey claims, in the order it can be claimed. */
@@ -714,10 +764,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * durable journal events and leaves the session where it started; ORDER IS LOAD-BEARING,
          * because `working` on a session that is not parked appends nothing at all.
          *
-         * Both events must be proven to cross, not just one. The wait below therefore targets
-         * `before + 2` — the cursor leaving `before` AND `before + 1` — rather than a bare change
-         * from `before`: that fires on the first event, settles at `before + 1`, and would read a
-         * lone `waiting` as if the whole pair had landed.
+         * The cursor itself has no received-event trace, only its monotonic maximum sequence. The
+         * daemon's durable replay is therefore the authority for WHICH two events the signals
+         * appended; after each successful response, this journey proves the next journal entry's
+         * sequence and kind, then requires Chrome to reach that exact sequence. Waiting for the
+         * first sequence before sending `working` prevents a later cursor jump from standing in for
+         * the marked `waiting` event.
          */
         await browser.page.goto(`${origin.origin}/d/${fingerprint}/session/${session.sessionId}`, {
           waitUntil: 'networkidle',
@@ -736,18 +788,78 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           );
         }
         const before = Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events'));
+        const durableBefore = await sessionEvents(environment, session.sessionId, 0);
+        const beforeSequence = durableBefore.at(-1)?.sequence ?? 0;
         const parked = await signalSession(environment, session.sessionId, 'waiting', eventMarker);
-        const resumed = await signalSession(environment, session.sessionId, 'working', eventMarker);
-        const expected = before + 2;
-        // Wait for the cursor to reach `before + 2` (both events crossed), not merely to leave `before`.
-        const advanced = await browser.page
-          .waitForSelector(
-            `[data-live-events]:not([data-live-events="${String(before)}"]):not([data-live-events="${String(before + 1)}"])`,
-            { timeout: 30_000 },
-          )
+        if (!parked.ok) {
+          ledger.fail(
+            'live-stream-rendered',
+            `the marked waiting signal failed with HTTP ${String(parked.status)}; no event attribution can follow`,
+          );
+        }
+        if (parked.session?.state.status !== 'waiting' || !parked.session.state.reason?.includes(eventMarker)) {
+          ledger.fail(
+            'live-stream-rendered',
+            `the successful waiting signal did not durably report the marker ${eventMarker}: ` +
+              `status=${parked.session?.state.status ?? 'absent'}, reason=${parked.session?.state.reason ?? 'absent'}`,
+          );
+        }
+        const waitingAppends = await sessionEvents(environment, session.sessionId, beforeSequence);
+        const waitingEvent = waitingAppends[0];
+        if (
+          waitingAppends.length !== 1 ||
+          waitingEvent === undefined ||
+          waitingEvent.sequence !== beforeSequence + 1 ||
+          waitingEvent.sessionId !== session.sessionId ||
+          waitingEvent.type !== 'session.waiting'
+        ) {
+          ledger.fail(
+            'live-stream-rendered',
+            `the marked waiting signal did not append exactly session.waiting at sequence ${String(beforeSequence + 1)}: ` +
+              `${JSON.stringify(waitingAppends.map(event => ({ sequence: event.sequence, sessionId: event.sessionId, type: event.type })))}`,
+          );
+        }
+        const reachedWaiting = await browser.page
+          .waitForSelector(liveCursorAtLeast(waitingEvent.sequence), { timeout: 30_000 })
           .then(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')))
           .catch(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')));
-        if (advanced < expected) {
+        if (reachedWaiting < waitingEvent.sequence) {
+          ledger.fail(
+            'live-stream-rendered',
+            `Chrome did not reach the marked waiting event's exact durable sequence ${String(waitingEvent.sequence)}: ` +
+              `data-live-events reached ${String(reachedWaiting)} from ${String(before)}. ` +
+              `The successful waiting response recorded ${eventMarker}, and the daemon replay named session.waiting at that sequence.`,
+          );
+        }
+
+        const resumed = await signalSession(environment, session.sessionId, 'working', eventMarker);
+        if (!resumed.ok) {
+          ledger.fail(
+            'live-stream-rendered',
+            `the working signal matching marked waiting event ${String(waitingEvent.sequence)} failed with HTTP ${String(resumed.status)}`,
+          );
+        }
+        const workingAppends = await sessionEvents(environment, session.sessionId, waitingEvent.sequence);
+        const workingEvent = workingAppends[0];
+        if (
+          workingAppends.length !== 1 ||
+          workingEvent === undefined ||
+          workingEvent.sequence !== waitingEvent.sequence + 1 ||
+          workingEvent.sessionId !== session.sessionId ||
+          workingEvent.type !== 'session.waiting_cleared'
+        ) {
+          ledger.fail(
+            'live-stream-rendered',
+            `the successful working signal did not append exactly session.waiting_cleared after marked waiting sequence ${String(waitingEvent.sequence)}: ` +
+              `${JSON.stringify(workingAppends.map(event => ({ sequence: event.sequence, sessionId: event.sessionId, type: event.type })))}`,
+          );
+        }
+        // Reach the exact latter sequence (or a later one if an unrelated event arrived afterwards), never `before + 2`.
+        const advanced = await browser.page
+          .waitForSelector(liveCursorAtLeast(workingEvent.sequence), { timeout: 30_000 })
+          .then(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')))
+          .catch(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')));
+        if (advanced < workingEvent.sequence) {
           /**
            * The discriminator: did the browser OPEN a stream session at all?
            *
@@ -762,9 +874,10 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           ).length;
           ledger.fail(
             'live-stream-rendered',
-            `the waiting-then-working pair did not both reach the browser: data-live-events reached ${String(advanced)} ` +
-              `(${String(advanced - before)} of the expected 2), starting from ${String(before)}. ` +
-              `The signal pair answered ${String(parked)} then ${String(resumed)}, so the daemon appended two durable events. ` +
+            `the browser did not reach the working event's exact durable sequence ${String(workingEvent.sequence)}: ` +
+              `data-live-events reached ${String(advanced)} (delta ${String(advanced - before)}), starting from ${String(before)}. ` +
+              `The signal pair succeeded with HTTP ${String(parked.status)} then ${String(resumed.status)}; daemon replay established ` +
+              `marked session.waiting at ${String(waitingEvent.sequence)} followed by session.waiting_cleared at ${String(workingEvent.sequence)}. ` +
               `The rendezvous saw ${String(streams)} client session(s) in total (${String(pairingArrivals)} for pairing, ` +
               `${String(authArrivals - pairingArrivals)} for the authenticated request session) — ` +
               `${streams > authArrivals ? 'a stream session WAS opened' : 'NO stream session was ever opened'}. ` +
@@ -777,7 +890,10 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         if (payloadLeaks.length !== 0) ledger.fail('live-stream-rendered', payloadLeaks.join('; '));
         ledger.prove(
           'live-stream-rendered',
-          `data-live-events advanced by 2 in Chrome after the waiting-then-working signal pair (carrying ${eventMarker}), proving both events crossed the relay, and that marker appears in no relay-observable frame`,
+          `the successful marked waiting response recorded ${eventMarker}; daemon replay then established session.waiting ` +
+            `at sequence ${String(waitingEvent.sequence)} followed by session.waiting_cleared at ${String(workingEvent.sequence)}. ` +
+            `Chrome reached those sequences in order, ending at ${String(advanced)} (delta ${String(advanced - before)}; ` +
+            `at least ${String(workingEvent.sequence - before)} needed to reach the latter sequence), and that marker appears in no relay-observable frame`,
         );
 
         // A noted step does not abort, so the journey can reach here with one still unproven. It is
