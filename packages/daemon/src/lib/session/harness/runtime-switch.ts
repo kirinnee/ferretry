@@ -100,16 +100,21 @@ export type RuntimeSwitchPlan =
       readonly requestedEffort?: string;
       readonly claimsOutcome: boolean;
     }
-  /** Drive the modal picker to an exact model and effort, then verify. */
-  | {
-      readonly kind: 'drive_picker';
-      readonly target: CodexPickerTarget;
-      /**
-       * True when the quick picker would apply a preset effort directly, so the
-       * driver must read the real screen before selecting anything.
-       */
-      readonly needsPreflight: boolean;
-    }
+  /**
+   * Drive the modal picker to an exact model and effort, then verify.
+   *
+   * THERE IS NO "SHOULD THE DRIVER PREFLIGHT" FLAG, and its absence is the
+   * decision. This plan used to carry `needsPreflight`, set exactly when the
+   * quick picker would apply a preset effort — but the driver opens and parses
+   * the real screen before selecting anything either way, so the flag chose
+   * between two identical behaviours while reading like a safety switch. The
+   * guarantee now lives where it is enforced: {@link CodexModelPickerDriver.drive}
+   * preflights unconditionally, and a caller cannot opt out. What this plan does
+   * carry is the evidence that preflight JUDGES — `quickPickerAppliesPreset` and
+   * the preset's name — because those are facts about the account, not about
+   * whether to look.
+   */
+  | { readonly kind: 'drive_picker'; readonly target: CodexPickerTarget }
   /** The request cannot be served. */
   | { readonly kind: 'refused'; readonly reason: string };
 
@@ -132,12 +137,13 @@ function opensReasoningMenu(choice: CodexModelChoice): boolean {
 /**
  * Plan a Codex switch, which always means driving the picker.
  *
- * The preflight decision is where the source had a hole: it computed the
- * mismatch as `defaultReasoningEffort !== requestedEffort`, which for a model
- * whose default the account does not advertise yields `undefined`, so no
- * preflight ran and the driver selected a quick row that could apply an unknown
- * effort. An unknown default is not a match — it is the case where reading the
- * real screen matters most — so it now preflights.
+ * The preset verdict is where the source had a hole: it computed the mismatch as
+ * `defaultReasoningEffort !== requestedEffort`, which for a model whose default
+ * the account does not advertise yields `undefined`, so the target was marked
+ * safe and the driver selected a quick row that could apply an unknown effort.
+ * An unknown default is not a match — it is precisely the case nobody can
+ * predict — so it is marked {@link CodexPickerTarget.quickPickerAppliesPreset}
+ * and the driver refuses it against the real screen.
  */
 function planCodexSwitch(model: string, effort: string, catalog: CodexModelCatalog | undefined): RuntimeSwitchPlan {
   if (catalog === undefined) return refused('the live Codex model catalog must be read before a targeted switch');
@@ -159,7 +165,6 @@ function planCodexSwitch(model: string, effort: string, catalog: CodexModelCatal
       ...(presetWouldWin && defaultEffort !== undefined ? { quickPickerDefaultEffort: defaultEffort } : {}),
       ...(presetWouldWin ? { quickPickerAppliesPreset: true as const } : {}),
     },
-    needsPreflight: presetWouldWin,
   };
 }
 

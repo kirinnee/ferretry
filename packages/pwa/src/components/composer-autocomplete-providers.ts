@@ -810,6 +810,64 @@ const snapshotTracker = (scopeKey: string) => {
   };
 };
 
+/**
+ * The rule a host-backed family answers by, shared by the ladder and the direct
+ * sigils so the two cannot drift.
+ *
+ * A FAMILY WHOSE HOST READ IS STILL RUNNING IS UNKNOWN, NOT EMPTY. Returning
+ * the getter's current value from `initialCandidates` published an empty list
+ * as a ready fact in the very window the warm-up exists to cover — the first
+ * menu of every session. Reporting nothing instead leaves the engine in
+ * `loading` until the awaited answer arrives, which is the honest state and the
+ * one a reader can tell apart from "this session has none". A host with nothing
+ * in flight still answers instantly, so a loaded store never shows a spinner.
+ *
+ * ONE WARM-UP PER OPEN. `initialCandidates` has to know whether a read is in
+ * flight and `candidates` then awaits that same read, so asking twice would
+ * start two waits for one fact — and, because the composer's warm-up ends on a
+ * React commit, two commit waits where only one is owed. The pending promise is
+ * therefore held here and both paths read it.
+ */
+const hostWarmupGate = (daemon: DaemonConnection, scope: DaemonSessionScope) => {
+  const inFlight = new Map<ComposerProviderWarmup, Promise<void>>();
+  const begin = (warmup: ComposerProviderWarmup | undefined, signal: AbortSignal): Promise<void> | undefined => {
+    if (warmup === undefined) return undefined;
+    const held = inFlight.get(warmup);
+    if (held !== undefined) return held;
+    const started = warmup(daemon, scope, signal);
+    // `undefined` is the host saying it holds nothing unread, so the store the
+    // getters read is already current and an initial answer is honest.
+    if (!started) return undefined;
+    const shared = started.catch(() => undefined).finally(() => inFlight.delete(warmup));
+    inFlight.set(warmup, shared);
+    return shared;
+  };
+  return {
+    initialUnlessWarming: (
+      warmup: ComposerProviderWarmup | undefined,
+      signal: AbortSignal,
+      result: () => ComposerProviderResult,
+    ): ComposerProviderResult | undefined => {
+      if (warmup === undefined) return result();
+      // The OPEN's own signal, so the read this starts is fenced by the same
+      // abort that fences the async path — and it is the same shared promise
+      // `candidates` then awaits, never a second one behind an unowned
+      // controller nothing would ever abort.
+      return begin(warmup, signal) === undefined ? result() : undefined;
+    },
+    warmed: async (
+      warmup: ComposerProviderWarmup | undefined,
+      signal: AbortSignal,
+      result: () => ComposerProviderResult,
+    ): Promise<ComposerProviderResult> => {
+      const pending = begin(warmup, signal);
+      if (pending) await pending;
+      if (signal.aborted) throw abortReason(signal);
+      return result();
+    },
+  };
+};
+
 export function createReferencesProvider({
   daemon,
   scope,
@@ -824,6 +882,11 @@ export function createReferencesProvider({
   assertProviderScope(daemon, scope);
   const files = createFilesProvider({ daemon, scope, fetcher });
   const track = snapshotTracker(daemonSessionKey(scope));
+  const { initialUnlessWarming, warmed } = hostWarmupGate(daemon, scope);
+  /** Only the two host-backed tiers warm: agents read a prop the page already
+   *  holds, and tier 1 files are the provider's own request. */
+  const tierWarmup = (tier: number): ComposerProviderWarmup | undefined =>
+    tier === 3 ? waitForTasks : tier === 4 ? waitForAttentionItems : undefined;
 
   const tierResult = (tier: number, query: string): ComposerProviderResult => {
     if (tier === 2) return agentsResult(scope, getSessions(scope), query, '@@ fleet agents');
@@ -857,16 +920,19 @@ export function createReferencesProvider({
       ]);
     },
     reset: () => files.reset?.(),
-    initialCandidates: context =>
-      context.match.referenceTier === 1 ? undefined : tierResult(context.match.referenceTier ?? 0, context.query),
+    initialCandidates: context => {
+      const tier = context.match.referenceTier ?? 0;
+      // Tier 1 is the filesystem, which has no host store to be stale about.
+      if (tier === 1) return undefined;
+      // Tiers 3 and 4 read host props, so the same rule the direct `&` and `!`
+      // sigils follow applies here: a family still being read is unknown rather
+      // than empty. Tier 2 and the over-typed tiers answer synchronously.
+      return initialUnlessWarming(tierWarmup(tier), context.signal, () => tierResult(tier, context.query));
+    },
     async candidates(context): Promise<ComposerProviderResult> {
       const tier = context.match.referenceTier ?? 0;
       if (tier === 1) return await files.candidates(context);
-      const warmup = tier === 3 ? waitForTasks : tier === 4 ? waitForAttentionItems : undefined;
-      const pending = warmup?.(daemon, scope, context.signal);
-      if (pending) await pending.catch(() => undefined);
-      if (context.signal.aborted) throw abortReason(context.signal);
-      return tierResult(tier, context.query);
+      return await warmed(tierWarmup(tier), context.signal, () => tierResult(tier, context.query));
     },
   };
 }
@@ -897,16 +963,7 @@ export function createDirectReferenceProviders({
   const trackTasks = snapshotTracker(scopeKey);
   const trackAttention = snapshotTracker(scopeKey);
   const allow = (match: ComposerTriggerMatch): boolean => composerSuggestionsAllow(suggestions, match);
-  const warmed = async (
-    warmup: ComposerProviderWarmup | undefined,
-    signal: AbortSignal,
-    result: () => ComposerProviderResult,
-  ): Promise<ComposerProviderResult> => {
-    const pending = warmup?.(daemon, scope, signal);
-    if (pending) await pending.catch(() => undefined);
-    if (signal.aborted) throw abortReason(signal);
-    return result();
-  };
+  const { initialUnlessWarming, warmed } = hostWarmupGate(daemon, scope);
   return [
     {
       id: scopedId('agents', scope),
@@ -927,7 +984,8 @@ export function createDirectReferenceProviders({
       get snapshotKey() {
         return trackTasks([getTasks(scope)]);
       },
-      initialCandidates: ({ query }) => tasksResult(scope, getTasks(scope), query, '& fleet tasks'),
+      initialCandidates: ({ query, signal }) =>
+        initialUnlessWarming(waitForTasks, signal, () => tasksResult(scope, getTasks(scope), query, '& fleet tasks')),
       candidates: ({ query, signal }) =>
         warmed(waitForTasks, signal, () => tasksResult(scope, getTasks(scope), query, '& fleet tasks')),
     },
@@ -939,8 +997,10 @@ export function createDirectReferenceProviders({
       get snapshotKey() {
         return trackAttention([getAttentionItems(scope)]);
       },
-      initialCandidates: ({ query }) =>
-        attentionResult(scope, getAttentionItems(scope), query, '! unresolved attention'),
+      initialCandidates: ({ query, signal }) =>
+        initialUnlessWarming(waitForAttentionItems, signal, () =>
+          attentionResult(scope, getAttentionItems(scope), query, '! unresolved attention'),
+        ),
       candidates: ({ query, signal }) =>
         warmed(waitForAttentionItems, signal, () =>
           attentionResult(scope, getAttentionItems(scope), query, '! unresolved attention'),

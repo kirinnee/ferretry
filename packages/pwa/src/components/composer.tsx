@@ -11,6 +11,7 @@ import {
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
+import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
@@ -341,10 +342,15 @@ export function Composer({
     skills: autocompleteSkills,
     ready: autocompleteReady,
   };
-  // Stable by construction, so a warmup never rebuilds the providers it belongs
-  // to. A rejected host read resolves rather than propagates: "we could not
-  // read it" leaves the family unproved, and unproved is the honest answer.
-  const hostWarmup = useCallback(() => hostRef.current.ready?.()?.catch(() => undefined), []);
+  /**
+   * THE COMMIT HANDSHAKE, owned by `useComposerHostWarmup`.
+   *
+   * A host answer is only readable one commit after its promise settles, so the
+   * providers below wait for a COMMIT rather than for a microtask. The reason
+   * that matters, and the unmount fence that keeps the wait total, are in that
+   * module.
+   */
+  const { warmup: hostWarmup } = useComposerHostWarmup(() => hostRef.current.ready);
   const autocompleteProviders = useMemo(
     () =>
       createComposerAutocompleteProviders({

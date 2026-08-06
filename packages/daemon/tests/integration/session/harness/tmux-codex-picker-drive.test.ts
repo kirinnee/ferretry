@@ -37,11 +37,32 @@ interface FakeOptions {
   readonly failDigit?: boolean;
   readonly resolveFails?: boolean;
   readonly captureFails?: boolean;
+  /**
+   * Behave like a pane rather than like a tape of frames.
+   *
+   * Three changes, and all of them exist for the end-to-end case that now reaches `openPicker`:
+   *
+   *   * `panes` advances when a key CHOOSES something — Enter, which submits `/model` and opens the
+   *     picker, then each digit. A real screen changes on a keystroke and is read many times between
+   *     keystrokes; a tape indexed by capture runs off its own end as soon as anything else looks.
+   *   * The composer is rendered, and literal keys echo into it, because `TmuxPaneDelivery` refuses
+   *     to submit anything it cannot first SEE there — the whole point of that adapter, and the
+   *     reason a frame-tape cannot exercise it at all.
+   *   * The composer is rendered ONLY on the first frame, before the modal opens. That is not a
+   *     shortcut: `parseCodexPickerScreen` reads a composer prompt below a picker title as proof the
+   *     rows are scrollback and the picker is closed, so a fake that drew both at once would be
+   *     asserting against a pane state Codex never produces.
+   *
+   * Off by default: every other case here asserts the captured frame byte for byte.
+   */
+  readonly livePane?: boolean;
 }
 
 class FakeTmux implements TmuxCommandPort {
   readonly received: string[][] = [];
-  #captures = 0;
+  /** Which entry of `panes` is on screen. Advanced by a capture, or by a digit on a live pane. */
+  #screen = 0;
+  #composer = '';
 
   constructor(private readonly options: FakeOptions) {}
 
@@ -49,8 +70,18 @@ class FakeTmux implements TmuxCommandPort {
     this.received.push([...argv]);
     if (argv[0] === 'has-session') return ok();
     if (argv[0] === 'send-keys') {
-      const digit = argv.at(-1) ?? '';
-      if (this.options.failDigit === true && /^[1-9]$/.test(digit)) return failed('tmux could not send it');
+      const key = argv.at(-1) ?? '';
+      if (this.options.failDigit === true && /^[1-9]$/.test(key)) return failed('tmux could not send it');
+      if (this.options.livePane === true) {
+        const literal = argv.indexOf('-l');
+        if (literal >= 0) this.#composer += String(argv[literal + 1] ?? '');
+        else if (key === 'C-u') this.#composer = '';
+        else if (key === 'Enter') {
+          // Submitting `/model` is what opens the modal, so the composer goes with it.
+          if (this.#composer !== '') this.#screen += 1;
+          this.#composer = '';
+        } else if (/^[1-9]$/.test(key)) this.#screen += 1;
+      }
       return ok();
     }
     if (argv.at(-1) === '#{pane_id}')
@@ -59,9 +90,12 @@ class FakeTmux implements TmuxCommandPort {
     if (argv[0] === 'display-message') return ok(`0|0|${this.options.cursor ?? '0|1'}||\n`);
     if (argv[0] === 'capture-pane') {
       if (this.options.captureFails === true) return failed('tmux could not capture');
-      const pane = this.options.panes[Math.min(this.#captures, this.options.panes.length - 1)] ?? '';
-      this.#captures += 1;
-      return ok(pane);
+      const pane = this.options.panes[Math.min(this.#screen, this.options.panes.length - 1)] ?? '';
+      if (this.options.livePane !== true) {
+        this.#screen += 1;
+        return ok(pane);
+      }
+      return ok(this.#screen === 0 ? `${pane}> ${this.#composer}\n` : pane);
     }
     return ok();
   }
@@ -243,15 +277,21 @@ describe('TmuxCodexPickerDrive', () => {
   it('should drive a whole switch when wired to the real decision layer', async () => {
     // The adapter and the driver together, over one fake pane: this is the only place the argument
     // vectors and the keystroke sequence are proved to agree.
+    //
+    // IT NOW OPENS THE PICKER TOO. This case used to hand `drive` a ready-made screen, which meant it
+    // skipped `openPicker` and therefore skipped the delivery adapter entirely — the one seam its own
+    // name claims it covers. `drive` takes no screen any more, so the composer has to be real.
     // Arrange
-    const { tmux, subject } = subjectOver({ panes: [QUICK, QUICK, LEVELS, LEVELS, IDLE, IDLE] });
+    // The pane starts at an idle composer — `/model` has not been typed yet — and the cursor sits on
+    // its first line, which is what makes the frame prompt-ready before the modal and not during it.
+    // From there it is the ORDINARY path a reader gets: `/model`, the quick list, a level, an idle
+    // prompt. That sequence is exactly what used to be unreachable — delivery called the quick
+    // picker a started turn — so this case is now also the end-to-end proof of that fix.
+    const { tmux, subject } = subjectOver({ cursor: '0|0', livePane: true, panes: ['', QUICK, LEVELS, IDLE] });
     const driver = new CodexModelPickerDriver(subject, { sleep: noSleep }, { settleMs: 0, maxObservations: 12 });
 
-    // Act
-    await driver.drive(
-      { model: 'gpt-5.6-codex', effort: 'high' },
-      { kind: 'quick-models', title: 'Select Model', rows: [{ number: 1, name: 'gpt-5.6-codex' }] },
-    );
+    // Act — the driver opens and reads the picker itself; it takes no screen from its caller.
+    await driver.drive({ model: 'gpt-5.6-codex', effort: 'high' });
 
     // Assert
     const digits = tmux.received.filter(argv => argv[0] === 'send-keys' && /^[1-9]$/.test(argv.at(-1) ?? ''));

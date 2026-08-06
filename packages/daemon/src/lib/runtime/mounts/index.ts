@@ -45,7 +45,8 @@ import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
-import { type SessionRuntimeSubsystem, sessionRuntimeRoutes } from './session-runtime.ts';
+import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
+import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';

@@ -66,6 +66,22 @@ const responder = (replies: readonly string[]) =>
     'done',
   ].join('\n');
 
+/**
+ * A wall-clock bound around a probe that is SUPPOSED to give up on its own.
+ *
+ * Without it, the regression these cases exist to catch — a deadline that bounds nothing — presents
+ * as a hung tier rather than a failed assertion, and the tier's own budget is a `--timeout` flag
+ * this file cannot rely on. Generous against the 200ms deadlines below: the point is to fail, not to
+ * measure.
+ */
+const bounded = async <Value>(work: Promise<Value>): Promise<Value> =>
+  await Promise.race([
+    work,
+    Bun.sleep(4_000).then(() => {
+      throw new Error('the probe never settled — its deadline is not bounding the read');
+    }),
+  ]);
+
 const subject = (timeoutMs = 5_000) =>
   new CodexAppServerCatalog({
     clientName: 'fyd',
@@ -216,6 +232,101 @@ describe('the Codex app-server catalog probe', () => {
 
     // Assert
     should(failure).match({ message: /timed out after/u });
+  });
+
+  it('should time out on a child that ignores SIGTERM, rather than waiting for it to relent', async () => {
+    // THE COOPERATIVE CHILD ABOVE PROVES ALMOST NOTHING. `sleep 30` dies on SIGTERM, so its pipe
+    // EOFs and a probe that only kills the process still appears to honour its deadline. This child
+    // does not die, and the previous implementation never settled at all against it.
+    // Arrange — a bounded sleep, so a regression cannot leave a process behind after the suite.
+    const { binary, cwd } = wrapper('trap "" TERM; cat > /dev/null; sleep 5');
+
+    // Act — raced, so a regression FAILS here instead of hanging the tier. The per-test timeout is a
+    // CLI flag on this tier, not something a file can rely on.
+    const failure = await bounded(
+      subject(200)
+        .models(binary, cwd)
+        .catch(error => error),
+    );
+
+    // Assert
+    should(failure).match({ message: /timed out after 200ms/u });
+  });
+
+  it('should time out when a descendant inherited stdout and the child itself has exited', async () => {
+    // The other shape, and the likelier one for a real app-server: the process the daemon spawned is
+    // long gone, but a grandchild still holds the write end of the pipe open, so the read never
+    // returns and killing the child changes nothing.
+    // Arrange
+    const { binary, cwd } = wrapper('sleep 5 & cat > /dev/null; exec sleep 0.2');
+
+    // Act
+    const failure = await bounded(
+      subject(200)
+        .models(binary, cwd)
+        .catch(error => error),
+    );
+
+    // Assert
+    should(failure).match({ message: /timed out after 200ms/u });
+  });
+
+  it('should keep the timeout and the early ending two different sentences', async () => {
+    // They call for opposite reactions — wait and retry, versus read the child's own complaint — so
+    // a refactor that collapsed them into one message would be a real loss.
+    // Arrange
+    const stubborn = wrapper('trap "" TERM; cat > /dev/null; sleep 5');
+    const quiet = wrapper('exit 3');
+
+    // Act
+    const expired = await bounded(
+      subject(200)
+        .models(stubborn.binary, stubborn.cwd)
+        .catch(error => error),
+    );
+    const ended = await subject()
+      .models(quiet.binary, quiet.cwd)
+      .catch(error => error);
+
+    // Assert
+    should(expired).match({ message: /timed out after/u });
+    should(expired.message).not.match(/ended before the catalog was complete/u);
+    should(ended).match({ message: /ended before the catalog was complete/u });
+    should(ended.message).not.match(/timed out after/u);
+  });
+
+  it('should name the child diagnostics on a timeout too, not only on an early ending', async () => {
+    // Arrange — it complains, then refuses to die.
+    const { binary, cwd } = wrapper('trap "" TERM; echo "no provider configured" >&2; cat > /dev/null; sleep 5');
+
+    // Act
+    const failure = await bounded(
+      subject(200)
+        .models(binary, cwd)
+        .catch(error => error),
+    );
+
+    // Assert
+    should(failure).match({ message: /timed out after 200ms: no provider configured/u });
+  });
+
+  it('should settle and still quote stderr when a descendant holds BOTH pipes open', async () => {
+    // The nastiest shape, and the one that decides whether the daemon keeps a background read alive
+    // for ever: the child complains, leaves a descendant holding stdout AND stderr, and exits. Neither
+    // stream will ever reach EOF, so a probe that waits for stderr to end never answers, and a drain
+    // nobody cancels outlives the probe holding a descriptor.
+    // Arrange
+    const { binary, cwd } = wrapper('echo "no provider configured" >&2; sleep 5 & cat > /dev/null; exec sleep 0.2');
+
+    // Act
+    const failure = await bounded(
+      subject(200)
+        .models(binary, cwd)
+        .catch(error => error),
+    );
+
+    // Assert: bounded AND still carrying the partial diagnostic the child managed to write.
+    should(failure).match({ message: /timed out after 200ms: no provider configured/u });
   });
 
   it('should refuse a child that answers with no selectable model', async () => {

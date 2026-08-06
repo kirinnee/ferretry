@@ -146,10 +146,17 @@ export const DEFAULT_COMPOSER_SUGGESTIONS: ComposerSuggestionSwitches = {
 /**
  * The one place a switch decides anything.
  *
- * Providers answer `shouldOpen` from it and the tier legend is filtered by it,
- * so a chip can never teach a menu that will not open. Enforcing it in the host
- * instead would take `@` and `/` down with it, which is exactly what these
- * switches must not do.
+ * Providers answer `shouldOpen` from it, and that is the whole mechanism —
+ * nothing filters the legend itself. It does not need to: every legend row is
+ * an `@` tier, and a refused `shouldOpen` means the `@` provider never opens,
+ * so the legend has no surface to render on while `mentionSuggestions` is off.
+ * The chip and the menu therefore cannot disagree, because they are suppressed
+ * together rather than separately. Adding a fifth legend row governed by a
+ * DIFFERENT switch would break that, and the filtering this comment used to
+ * claim would then have to be written for real.
+ *
+ * Enforcing it in the host instead would take `@` and `/` down with it, which
+ * is exactly what these switches must not do.
  */
 export function composerSuggestionsAllow(
   suggestions: ComposerSuggestionSwitches,

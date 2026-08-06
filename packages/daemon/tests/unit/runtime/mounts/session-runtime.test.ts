@@ -11,11 +11,11 @@ import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { sessionRuntimeRoutes } from '../../../../src/lib/runtime/mounts/session-runtime.ts';
 import {
   SessionRuntimeError,
   type SessionRuntimeSubsystem,
-  sessionRuntimeRoutes,
-} from '../../../../src/lib/runtime/mounts/session-runtime.ts';
+} from '../../../../src/lib/session/runtime-control/types.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionView } from './support.ts';
 

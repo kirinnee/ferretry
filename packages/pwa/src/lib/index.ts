@@ -222,6 +222,7 @@ export * from './browser-login.ts';
 export * from './callsign.ts';
 export * from './class-names.ts';
 export * from './code-span-references.ts';
+export * from './composer-host-warmup.ts';
 export * from './composer-keybinding.ts';
 export * from './composer-markdown.ts';
 export * from './composer-reference-catalogs.ts';
