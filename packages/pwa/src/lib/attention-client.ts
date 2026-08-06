@@ -111,6 +111,8 @@ interface InFlight<Value> {
 export class DaemonAttentionClient {
   readonly #fullInFlight = new Map<string, InFlight<void>>();
   readonly #countInFlight = new Map<string, InFlight<void>>();
+  /** Settled-only tails: full reads wait for every write already chained here. */
+  readonly #mutationTails = new Map<string, InFlight<void>>();
   readonly #bindings = new Map<DaemonId, ConnectionBinding>();
   readonly #generations = new Map<DaemonId, number>();
   /** Board freshness only: badge reads observe it but may never advance it. */
@@ -138,6 +140,32 @@ export class DaemonAttentionClient {
     if (existing?.generation === generation) return existing.promise;
     if (!revalidate && this.store.status(scope) === 'ready') return Promise.resolve();
 
+    const promise = this.#loadAfterMutations(daemon, scope, generation, key).finally(() => {
+      if (this.#fullInFlight.get(key)?.promise === promise) this.#fullInFlight.delete(key);
+    });
+    this.#fullInFlight.set(key, { generation, promise });
+    return promise;
+  }
+
+  #loadAfterMutations(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    generation: number,
+    key: string,
+  ): Promise<void> {
+    const mutation = this.#mutationTails.get(key);
+    if (mutation?.generation === generation) {
+      // Re-check after this tail: another write may have joined while the read
+      // was queued, and it must settle before the GET is allowed to start too.
+      return mutation.promise.then(() => this.#loadAfterMutations(daemon, scope, generation, key));
+    }
+    return this.#loadNow(daemon, scope, generation, key);
+  }
+
+  #loadNow(daemon: DaemonConnection, scope: DaemonSessionScope, generation: number, key: string): Promise<void> {
+    // A queued read from an unpaired or same-id re-paired connection has no
+    // authority to issue transport after its mutation releases the queue.
+    if (!this.#currentConnection(daemon, generation)) return Promise.resolve();
     const revision = this.#advanceBoardRevision(key);
     // A live refresh must not replace an already usable board with a loading
     // state. Initial hydration and retries still expose that they are loading.
@@ -152,11 +180,7 @@ export class DaemonAttentionClient {
       .catch(error => {
         if (this.#current(daemon, generation, key, revision)) this.store.fail(scope);
         throw error;
-      })
-      .finally(() => {
-        if (this.#fullInFlight.get(key)?.promise === promise) this.#fullInFlight.delete(key);
       });
-    this.#fullInFlight.set(key, { generation, promise });
     return promise;
   }
 
@@ -199,6 +223,7 @@ export class DaemonAttentionClient {
     this.store.clearDaemon(daemonId);
     this.#clearInFlight(this.#fullInFlight, daemonId);
     this.#clearInFlight(this.#countInFlight, daemonId);
+    this.#clearInFlight(this.#mutationTails, daemonId);
     this.#clearBoardRevisions(daemonId);
   }
 
@@ -207,7 +232,7 @@ export class DaemonAttentionClient {
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
-    return applyAttentionAction(daemon, scope, action, this.fetcher)
+    const promise = applyAttentionAction(daemon, scope, action, this.fetcher)
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);
@@ -218,6 +243,22 @@ export class DaemonAttentionClient {
         if (this.#current(daemon, generation, key, revision)) this.store.fail(scope);
         throw error;
       });
+    this.#trackMutation(key, generation, promise);
+    return promise;
+  }
+
+  #trackMutation(key: string, generation: number, operation: Promise<void>): void {
+    const previous = this.#mutationTails.get(key);
+    const settled = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    const tail =
+      previous?.generation === generation ? Promise.all([previous.promise, settled]).then(() => undefined) : settled;
+    this.#mutationTails.set(key, { generation, promise: tail });
+    void tail.then(() => {
+      if (this.#mutationTails.get(key)?.promise === tail) this.#mutationTails.delete(key);
+    });
   }
 
   #bind(daemon: DaemonConnection): number {
@@ -237,13 +278,16 @@ export class DaemonAttentionClient {
   }
 
   #current(daemon: DaemonConnection, generation: number, key: string, revision: number): boolean {
+    return this.#currentConnection(daemon, generation) && (this.#boardRevisions.get(key) ?? 0) === revision;
+  }
+
+  #currentConnection(daemon: DaemonConnection, generation: number): boolean {
     const binding = this.#bindings.get(daemon.daemonId);
     return (
       binding !== undefined &&
       binding.generation === generation &&
       binding.baseUrl === daemon.baseUrl &&
-      binding.deviceToken === daemon.deviceToken &&
-      (this.#boardRevisions.get(key) ?? 0) === revision
+      binding.deviceToken === daemon.deviceToken
     );
   }
 
