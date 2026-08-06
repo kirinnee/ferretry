@@ -252,9 +252,58 @@ status reader independently passes `--untracked-files=all` in
 `packages/daemon/src/adapters/worktrees/git-gateway.ts`, and the daemon-scoped PWA changes request
 in `packages/pwa/src/components/files-api.ts` uses the shared `browserFetch` transport without
 filtering `??` rows; `packages/pwa/tests/unit/files-api.test.ts` keeps that final path covered.
-**#5 measurement (2026-08-05).** The aggregate Tasks route ran through the real dispatcher/router
-over 96 independent daemon-scoped board reads, each delayed by 12 ms; three sequential samples gave
-a 1,183.1 ms median before the change (1,182.4–1,184.8 ms) and a 26.1 ms median after it
-(25.2–29.3 ms): a 45.3× reduction. The old access pattern was one `await
-board(sessionId).list()` per session in `GET /v1/tasks`; a damaged board still makes the whole
-aggregate unavailable rather than looking like an empty or shortened fleet.
+**#5 is PARTIAL and stays open. The half that is done is not the half the row names.** The
+aggregate route is fixed and measured; the PWA Tasks pane this row is about has a different, still
+unfixed problem. Read the next three paragraphs as "backend done, pane outstanding" and do not tick
+this row on the strength of the benchmark below.
+
+**Done: the aggregate fleet walk.** `37af20d4`
+(`fix(tasks): parallelize fleet board reads (#282)`) replaced one awaited
+`board(sessionId).list()` per session in `GET /v1/tasks` with a bounded fan-out ported from kteam's
+`FLEET_READ_CONCURRENCY` / `mapPooled` pair. That route is the capability behind `fy task list` when
+no session is named — a CLI surface. Each board is a single snapshot file
+(`packages/daemon/src/adapters/tasks/file-task-store.ts`), so N sessions really was N serialised
+file reads and nothing below the route can batch further.
+
+**Outstanding: the Tasks pane itself, which was never the beneficiary.** The PWA's current-session
+search calls `/v1/sessions/:sessionId/tasks` — a single board, no fleet walk — and then issues **one
+further `GET /v1/sessions/:sessionId/tasks/:taskId` per task**, all at once through an unbounded
+`Promise.all` (`readTasks` in `packages/pwa/src/features/session-search/session-search.tsx`). A board
+of N tasks therefore costs an **unbounded N + 1 HTTP-request fan-out**, and because the daemon's
+detail handler re-reads the whole board before answering one task, roughly **2N + 1 reads of the
+same snapshot file**. That repeated per-task board-read cost is untouched by anything here. Closing
+#5 means collapsing that N+1 — the list response already carries every summary field the pane
+renders — and then recording a pane-level before/after. Neither is done, so there is deliberately
+**no row-level timing claimed** yet. That later pane integration and its measurement belong to #6's
+current-session search work; this branch deliberately does not touch them.
+
+**The done half has a reproducible measurement, not an unsupported number.** It measures the
+aggregate route only; it says nothing about the pane. `scripts/local/bench-fleet-task-reads.ts` runs both
+access patterns against the same fixture in one interpreter — the pre-`37af20d4` sequential loop,
+reimplemented because the change deleted it, and the shipped route through the real
+`ApiRouter`/`ApiDispatcher`. Probe: 96 sessions, one `FakeTaskBoard` each
+(`packages/daemon/tests/unit/runtime/mounts/support.ts`), 12 ms injected per board read, 3 samples
+per arm, fixture rebuilt between samples, unit wall-clock milliseconds by `performance.now()`,
+median reported. It is offline and touches no state home; `bun scripts/local/bench-fleet-task-reads.ts`
+reproduces it and `--boards/--latency/--samples` vary it. A malformed, zero or fractional
+`--boards`/`--samples` exits 2 rather than reporting a `NaN` median, and the closing line says
+FASTER or SLOWER according to what was actually measured. Each run prints the commit it measured and
+says so when the tree is dirty. A one-board or zero-latency probe is explicitly **INCONCLUSIVE**:
+there are no overlapping reads whose effect could be separated from timer and scheduling noise. The
+warmed, alternating-pair evidence recorded for this branch used 96 boards, 12 ms injected latency and
+3 samples: **1,253.9 ms** before against **28.9 ms** after, a **43.4×** reduction. Fresh runs remain
+the source of current-tree evidence because wall-clock timings vary; the ratio is a floor because only
+the AFTER arm pays routing, authorization and serialization.
+
+**The bound now has one owner, and its unit is a SESSION.** `readTaskBoardFleet`
+(`packages/daemon/src/lib/task-boards/fleet-read.ts`) is the only way the board domain walks every
+session, and the limit is private to it. It closed a second, contradicting answer next door:
+`StorageTaskBoardSessionDirectory.snapshot()` was starting every session in the daemon at once, so
+its cost grew with the fleet while the route beside it stayed under a fixed limit. Quote the bound
+carefully: it caps **64 session callbacks**, not 64 documents. The aggregate route reads one document
+per callback (64 open documents); the session directory reads two, started together (**128** open
+documents). Both tests measure their own number rather than repeating this sentence. Ordering is the
+session index's, not completion order; the first failure stops the walk claiming further sessions and
+is raised only once every started read has settled, so a route that has answered 503 is not still
+reading; and a damaged board still makes the whole aggregate unavailable rather than looking like an
+empty or shortened fleet.
