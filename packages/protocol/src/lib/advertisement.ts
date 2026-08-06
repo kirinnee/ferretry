@@ -169,10 +169,17 @@ function advertiseRemedy(example: string): string {
  * Binding a single routed interface would also let the phone in, and would simultaneously move the
  * daemon off loopback — where this machine's own commands look for it, and the only address an
  * owner-only credential may travel to. Every interface includes loopback, so nothing local changes.
+ *
+ * AND IT SAYS WHAT IT OPENS, IN THE SAME BREATH AS THE INSTRUCTION. "Every interface" means the routed
+ * ones too, so following this remedy lets other devices on the network reach the daemon's port — the
+ * exact change that makes the phone work, and the exact change nobody else was asked about. A remedy
+ * that widens who may dial a daemon without naming the widening collects a decision the reader never
+ * knowingly made, which is the same defect as minting a link without saying who can redeem it.
  */
 function bindAndAdvertiseRemedy(example: string): string {
   return (
-    `bind every interface with "host": "${WILDCARD_BIND_HOST}" and ${advertiseRemedy(example)}. ` +
+    `bind every interface with "host": "${WILDCARD_BIND_HOST}", which accepts connections from other ` +
+    `devices on your network, and ${advertiseRemedy(example)}. ` +
     `Commands on this machine keep reaching it on loopback`
   );
 }

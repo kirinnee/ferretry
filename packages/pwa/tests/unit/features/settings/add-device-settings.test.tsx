@@ -201,6 +201,10 @@ describe('AddDeviceCard', () => {
     should(marked(dead, 'data-pair-qr')).be.empty();
     should(marked(dead, 'data-pair-url')).be.empty();
     expect(text(dead)).toContain('can no longer add a device');
+    // And the headline says the code is gone rather than pointing at a hand-off that no longer exists —
+    // there is nothing left on this screen for anybody to be shown.
+    expect(text(dead)).toContain('This code has run out');
+    expect(text(dead)).not.toContain('Show this to the device you are adding');
   });
 
   it('says what the code gives away while it is on screen', () => {

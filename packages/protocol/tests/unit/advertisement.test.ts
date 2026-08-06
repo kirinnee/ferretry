@@ -111,6 +111,9 @@ describe('the advertised address', () => {
     should(local.remedy).containEql('then restart the daemon');
     // And it promises what makes the fix safe to apply: the machine's own commands do not move.
     should(local.remedy).containEql('Commands on this machine keep reaching it on loopback');
+    // A REMEDY MUST NAME WHAT IT OPENS. The wildcard is what lets the phone in, and the same edit lets
+    // in everything else on that network — a widening the reader agrees to only if they are told.
+    should(local.remedy).containEql('accepts connections from other devices on your network');
   });
 
   it('should carry the daemon’s own port into the example, never the compiled-in default', () => {

@@ -123,6 +123,16 @@ function inviteHeadline(outcome: PairingMintOutcome): string {
 }
 
 /**
+ * The headline over a code that has run out, which is about the code and never about an offer.
+ *
+ * AN EXPIRED CODE HAS NOTHING TO SHOW ANYBODY. The panel below it withholds the QR, the link and the
+ * code itself, so "show this to the device you are adding" printed above that names a hand-off that
+ * no longer exists — and named it even for a `local-only` or `refusal` offer, where no link a device
+ * could take ever existed at all. It says the one thing that is still true instead.
+ */
+const EXPIRED_HEADLINE = 'This code has run out';
+
+/**
  * WHAT THERE IS TO OFFER THE DEVICE BEING ADDED, AND WHO CAN TAKE IT.
  *
  * THE QR IS DRAWN FOR ONE OF THREE ANSWERS. A daemon reachable only on its own machine has a link
@@ -321,9 +331,7 @@ export function AddDeviceCard({
         <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-label="Pairing code" data-pair-invite="">
           <div className="flex flex-wrap items-baseline gap-2">
             <p className="m-0 text-ui font-semibold text-fg">
-              {countdown.expired
-                ? 'Show this to the device you are adding'
-                : inviteHeadline(pairingMintOutcome(invite))}
+              {countdown.expired ? EXPIRED_HEADLINE : inviteHeadline(pairingMintOutcome(invite))}
             </p>
             <span
               role="timer"
