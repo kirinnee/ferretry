@@ -1535,11 +1535,14 @@ is implementation state, and §13 names each remaining piece exactly. None of it
 rendezvous: every message this section added is sealed record plaintext the relay cannot read, and
 the one novelty visible outside the channel — the `4440` close — is an ordinary code inside the
 range §5's `closed` message already carries, which a deployed rendezvous forwards today without
-modification. Where that code LIVES is decided here rather than improvised at a compile error: it is
-an **additive member of the shared close-code constants** (§9's table is the wire vocabulary, and
-the reference tree keeps that vocabulary in one module whose stated job is to be the single source
-of wire constants). A daemon-local literal or a widened type at one endpoint would fork the
-vocabulary three ways across the daemon link, the browser session and the rendezvous — the invisible
-kind of difference §1 calls the expensive kind. So the one change this section makes to
-`packages/relay` is that constant, and it changes no behaviour: nothing dispatches on it, nothing
-iterates the code table exhaustively, and a rendezvous built before it existed carries it unchanged.
+modification. Where that code LIVES is decided here rather than improvised at a compile error:
+`4440` is **application-tunnel vocabulary, not rendezvous vocabulary** — the rendezvous neither
+emits it nor dispatches on it — so it is owned and exported by the endpoint-shared protocol package
+as `RELAY_SESSION_CONCLUDED_CLOSE_CODE`, which the relay package already depends on, and
+`packages/relay` changes **zero** code and zero behaviour for anything in this section. One export,
+consumed by both endpoints, keeps the vocabulary from forking across the daemon link and the browser
+session — the invisible kind of difference §1 calls the expensive kind — without adding a member to
+the rendezvous's own close-code constants for a close the rendezvous never sends. The derived `data`
+byte budget above is owned the same way, as that package's `relayDataByteBudget`: both ends take the
+number from one derivation, each passing in the record ceiling, so a split write and the seal that
+receives it cannot disagree by arithmetic.

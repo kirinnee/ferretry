@@ -13,9 +13,12 @@
  * failure is total for that exchange, not partial, and it looks like the daemon refusing the client.
  *
  * So: **a key added to a device-facing `strictObject` ships in the same release as the client that
- * reads it, or it is a breaking change.** `PairingResponseSchema.carriers` was added under that rule.
- * The pairing fragment is already versioned (`v1;…`), and a second version of it is the escape hatch
- * if one is ever genuinely needed — it is not a substitute for shipping the pair together.
+ * reads it, or it is a breaking change.** `PairingResponseSchema.carriers` was added under that rule,
+ * and so was `PairingCodeMintResponse.relayCandidate`. The pairing fragment is versioned (`v1;…`),
+ * and the relay-bearing `v2` form spent the escape hatch: a `v2` link shown to a reader that only
+ * speaks `v1` fails the WHOLE link, direct pairing included, which is why the tolerant reader ships
+ * before any daemon emits `v2` — the hosted app deploys ahead of the binary release, and that
+ * ordering is contract rather than coincidence (`docs/relay-protocol.md` §14).
  *
  * The OTHER direction is safe and needs no ceremony: a newer client reading an older daemon sees the
  * key absent, which is what a schema default is for, and the default has to mean what the older

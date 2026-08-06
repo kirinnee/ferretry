@@ -84,10 +84,13 @@ to discover fails closed to direct-only with the consequence and the remedy said
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. The PWA's interim three-way carrier chooser
-and self-hosting route are still there and removing them is still an explicit GAP, and **pairing
-itself can never be relayed** — a relayed session is opened with the device grant the pairing
-exchange has not issued yet, so first contact with a daemon is always direct. Protocol
-§13 names each remaining piece and its state.
+and self-hosting route are still there and removing them is still an explicit GAP. **Pairing over a
+relay is now specified** (protocol §14): a sealed one-attempt `pair` record on a pre-auth session,
+sent only after the daemon is proved against the QR-pinned fingerprint — never an anonymous routed
+request — with a separate relay guess budget so an internet stranger cannot expire a code a LAN
+device could still redeem. Live event and terminal streams over a relay are specified in the same
+section, one session per stream. Both are unbuilt on both ends; protocol §13 names each remaining
+piece and its state.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one

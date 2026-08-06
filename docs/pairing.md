@@ -51,6 +51,21 @@ beside it, and off the host that is the operator's to switch off.
 code has no credential yet — the **code is** the credential for that one request. Everything else either
 mints a credential, lists and revokes them, or is read with one.
 
+### Redemption has two carriers, and one of them is not a route
+
+`POST /v1/pair` is the **direct** redemption. A device that cannot reach the daemon's address at all
+redeems through a rendezvous instead: a **sealed `pair` record** on a pre-auth relay session, specified
+exactly in [relay-protocol.md](relay-protocol.md) §14 — the daemon is proved against the QR-pinned
+fingerprint before the code is sent, exactly one attempt per session, one sealed outcome (`paired`
+carrying this same redemption response verbatim, or one generic `pair-refused`), then the session
+closes. The relayed path is deliberately a **record and not a route**: a pre-auth session issues no
+requests, so "`POST /v1/pair` is the only public route on this surface" stays literally true, and no
+credential-less request path exists for the next `minimum: 'none'` route to inherit. Direct is still
+attempted first, like every other exchange in this product; the rendezvous is the fallback, not a
+choice. What a relay operator can and cannot observe about a redemption is §10 and §13 of the same
+document: fingerprint, IPs, timing and frame shape — never the code, the token, the device name, or
+the outcome.
+
 ### What a redemption hands back
 
 `POST /v1/pair` answers with `carriers`: **every way this daemon can be reached**, not merely the address
@@ -87,9 +102,10 @@ answer rather than merging into it — that is what makes both halves of a disag
 relay the daemon dropped disappears instead of being dialled forever, and a relay the daemon added arrives
 without anybody re-pairing. A merge would only ever fix the second.
 
-**Pairing itself is still never relayed.** This route is reached with the token redemption already issued,
-so it cannot be a way in; first contact with a daemon is always direct, over an address reachable on its
-own once.
+**This route is not a way in.** It is reached with the token redemption already issued, on any
+carrier. Pairing itself now has a relayed form too — the sealed record above, not a route — so first
+contact no longer requires an address reachable on its own: a daemon that publishes a rendezvous is
+pairable by a phone that can never dial it directly.
 
 ### Who may mint
 
@@ -106,12 +122,37 @@ and the mint response carries that answer rather than making each renderer infer
 
 - `reach: "any-device"` accompanies an address another device can dial. The command line and browser
   panel show the link and draw its QR.
-- `reach: "local-only"` accompanies a loopback address. The link remains valid for a browser on this
-  machine, but neither surface draws a QR: on a phone, loopback names the phone. Both say who can use
-  the link and name the fix beside it.
+- `reach: "local-only"` accompanies a loopback address, and describes the **direct** address alone.
+  Alone, it means no QR: on a phone, loopback names the phone. Beside a `relayCandidate` it no longer
+  means unredeemable — the QR is drawn, because another device can redeem the link through the named
+  rendezvous — and the notice says what that rendezvous can observe. `localOnlyNotice` owns both
+  sentences; no surface re-derives the answer, and
+  `invitationRedeemableByAnotherDevice` in `@ferretry/protocol` is the one narrowing that decides
+  whether a QR is drawn at all.
 - `refusal` replaces `daemonUrl`, `pairUrl`, and `reach` when a wildcard bind or missing port leaves no
   address to hand out. The daemon still mints the short-lived code; the surfaces show no link and name
-  the fix for **that** reason.
+  the fix for **that** reason. A refusal never carries a `relayCandidate` — the supported invariant,
+  enforced by the schema, is that **a relay candidate only ever rides beside a link**: the redeeming
+  device's connection model has no shape for a daemon with no address at all, and the `v2` fragment
+  requires one.
+
+### The link names its relay candidate, in a versioned fragment
+
+A mint whose daemon publishes at least one rendezvous carries `relayCandidate` — the **first relay in
+the daemon's published order** — and its link uses the **v2** fragment form,
+`#v2;url=…;code=…;fp=…;relay=…`; a mint with no rendezvous keeps the v1 form unchanged. One codec in
+`@ferretry/protocol` (`formatPairingFragment` / `parsePairingFragment`) writes and reads both forms,
+so the daemon and the browser cannot hold different opinions about the same string: readers accept
+both versions, require `url`/`code`/`fp`, ignore an unrecognised field name, refuse a duplicated one,
+honour `relay` only under v2, and **drop** a candidate that fails the published-relay URL rule rather
+than failing a link whose direct half still works. The candidate serves **one redemption** and is
+never stored — what a device navigates by afterwards is the redemption response's `carriers`, and the
+browser refuses a relayed pairing whose published set does not name the rendezvous the exchange
+crossed ([relay-protocol.md](relay-protocol.md) §14).
+
+**Rollout is ordered:** a reader older than v2 fails a v2 link outright, direct pairing included, so
+the reader that accepts both forms deploys — as the hosted app, which ships ahead of the daemon
+binary — **before** any daemon emits v2. The ordering is contract; release notes state it.
 
 **A remedy that cannot be followed is a dead end with extra steps**, so there is one per reason rather
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
@@ -144,7 +185,14 @@ not who will **redeem**; the normal phone journey is minted locally and redeemed
 ### What bounds a guess
 
 - a **two-minute** TTL and a **five-attempt** budget per code, whichever comes first;
-- a fixed-window rate limit per peer, independent of that budget, so broken uploads cannot spend it;
+- a **separate relay budget** per code for attempts arriving through a rendezvous, which can never
+  spend the direct five: without the split, anyone on the internet who knows a public fingerprint
+  could expire a code sitting on somebody's desk. Exhausting the relay budget closes the **relay**
+  path for that code and leaves a device on the LAN able to redeem it —
+  [relay-protocol.md](relay-protocol.md) §14 owns the numbers and the disclosure;
+- a fixed-window rate limit per peer, independent of that budget, so broken uploads cannot spend it —
+  and a relayed caller's rate-limit identity is derived from its rendezvous session, never collapsed
+  into a bucket the whole internet shares;
 - one active code per daemon: minting **replaces** its predecessor, which is why a UI must not offer a
   mint button beside a live code;
 - the comparison is constant-time and runs even when there is no active code, so timing says nothing
@@ -218,3 +266,7 @@ row states what its revoke will do before the press.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).
+- **Relayed redemption is specified and not yet implemented on either end.** The contract — the sealed
+  record, the budgets, the v2 fragment, the ordering — is [relay-protocol.md](relay-protocol.md) §14,
+  and §13 of the same document tracks which pieces exist. Until both ends implement it, a phone that
+  cannot reach a daemon's address still cannot pair with it.

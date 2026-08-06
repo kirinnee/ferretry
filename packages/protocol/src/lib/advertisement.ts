@@ -184,11 +184,32 @@ function bindAndAdvertiseRemedy(example: string): string {
   );
 }
 
-/** What to say beside a link only this machine's own browser can redeem. */
-export function localOnlyNotice(daemonUrl: string): AdvertisementNotice {
+/**
+ * What to say beside a link whose DIRECT address only this machine's own browser can redeem.
+ *
+ * THE RELAY CANDIDATE CHANGES THE AUDIENCE SENTENCE, NOT THE REACH. A daemon that publishes a
+ * rendezvous mints a link another device CAN redeem — the QR is drawn, the phone dials the
+ * rendezvous when the loopback address fails, and pairing completes inside the sealed channel
+ * (`docs/relay-protocol.md` §14). Saying "no QR is drawn" beside that link would be the original
+ * defect inverted: an honest address description turned into a false claim about the journey. The
+ * sentence also names what the rendezvous operator can observe, because the metadata disclosure
+ * belongs beside the offer rather than in a document nobody reads mid-pairing. The remedy keeps
+ * offering the direct bind — a connection with no third party on the path is still the better one —
+ * but as the upgrade it now is, not the unlock it used to be.
+ */
+export function localOnlyNotice(daemonUrl: string, relayCandidate?: string): AdvertisementNotice {
+  if (relayCandidate === undefined) {
+    return {
+      audience: `Only a browser on this machine can redeem this link at ${daemonUrl}; no QR is drawn because another device cannot dial it.`,
+      remedy: bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl)),
+    };
+  }
   return {
-    audience: `Only a browser on this machine can redeem this link at ${daemonUrl}; no QR is drawn because another device cannot dial it.`,
-    remedy: bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl)),
+    audience:
+      `A browser on this machine redeems this link at ${daemonUrl}; another device can redeem it through ` +
+      `the rendezvous at ${relayCandidate}, which observes connection metadata such as timing and sizes ` +
+      `but can never read the code or the exchange.`,
+    remedy: `for a direct connection that no rendezvous carries, ${bindAndAdvertiseRemedy(exampleReachableAddress(daemonUrl))}`,
   };
 }
 

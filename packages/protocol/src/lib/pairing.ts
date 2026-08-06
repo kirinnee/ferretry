@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isLoopbackHost, isWildcardHost } from './address.ts';
 import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './advertisement.ts';
-import { PublishedCarriersSchema } from './carriers.ts';
+import { PublishedCarriersSchema, SocketEndpointSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
 
 /** Pairing codes are deliberately short-lived and have a small online-attempt budget. */
@@ -58,14 +58,135 @@ export const DaemonNameSchema = z
 export const PairingCapabilitySchema = z.string().trim().min(1).max(64);
 
 /**
- * What a device is handed the one moment it is guaranteed to be talking to the daemon directly.
+ * THE PAIRING LINK FRAGMENT, in the one codec both ends read and write.
+ *
+ * The link a mint hands out carries its facts in the URL FRAGMENT — never a query — because a
+ * fragment is not sent in an HTTP request, so the live code cannot reach an access log. Two
+ * explicitly versioned forms exist:
+ *
+ * - `v1;url=…;code=…;fp=…` — the legacy form, and still the form of every link that names no relay
+ *   candidate. Byte-identical to what every daemon has ever written.
+ * - `v2;url=…;code=…;fp=…;relay=…` — the form that names ONE relay candidate: the first rendezvous
+ *   in the daemon's published order, chosen at mint, so a device that cannot reach `url` directly
+ *   has somewhere to dial (`docs/relay-protocol.md` §14). `relay` is meaningful ONLY under `v2`; a
+ *   `v1` link carrying one has it ignored like any other unrecognised field.
+ *
+ * READERS ARE TOLERANT WHERE TOLERANCE IS SAFE AND STRICT WHERE IT IS NOT. A reader accepts both
+ * versions, requires `url`, `code` and `fp`, IGNORES an unrecognised field name — an unknown name is
+ * the next version arriving — and REFUSES a duplicated one, because two values for one name is a
+ * real ambiguity. An invalid `v2` relay candidate is DROPPED rather than failing the link: the
+ * candidate is an optimisation for one redemption, and a link that still pairs directly must not
+ * die over it. The WRITER is the strict end: it refuses to emit a candidate the socket-endpoint
+ * rule would not dial, so a non-conforming address is stopped at mint rather than discovered on a
+ * phone.
+ *
+ * ROLLOUT IS ORDERED, NOT OPTIONAL: a reader older than `v2` refuses the whole link, direct pairing
+ * included, so the reader that accepts both forms ships BEFORE any daemon emits `v2`. The hosted
+ * app deploys ahead of the daemon binary release, which is what makes one change safe to land as
+ * one unit — but the ordering is contract, and release notes state it.
+ */
+export interface PairingLinkSeed {
+  /** The daemon's direct address, verbatim as the mint advertised it. */
+  readonly daemonUrl: string;
+  readonly code: PairingCode;
+  /** The fingerprint the reading device pins before it trusts anything else. */
+  readonly daemonId: DaemonId;
+  /** One rendezvous another device may redeem through, normalised by the socket-endpoint rule. */
+  readonly relayCandidate?: string;
+}
+
+/** Recognises a pairing fragment of either version, for surfaces that gate before parsing. */
+export const PAIRING_FRAGMENT_PATTERN = /^#?v[12](?:;|$)/u;
+
+/**
+ * Writes the fragment for one seed: `v1` with no relay candidate, `v2` with one.
+ *
+ * The code and fingerprint are re-proved against their own schemas and the candidate against the
+ * socket-endpoint rule, because this string becomes a QR of a live credential — a writer that
+ * composed one from an unchecked value would hand a phone a link its reader refuses. Throws on any
+ * value the schemas refuse; the daemon URL travels verbatim, since its one spelling is decided by
+ * the advertisement that produced it.
+ */
+export function formatPairingFragment(seed: PairingLinkSeed): string {
+  const code = PairingCodeSchema.parse(seed.code);
+  const daemonId = DaemonIdSchema.parse(seed.daemonId);
+  const base = `url=${encodeURIComponent(seed.daemonUrl)};code=${code};fp=${encodeURIComponent(daemonId)}`;
+  if (seed.relayCandidate === undefined) return `v1;${base}`;
+  const relay = SocketEndpointSchema.parse(seed.relayCandidate);
+  return `v2;${base};relay=${encodeURIComponent(relay)}`;
+}
+
+/** The full link a mint hands out: the pairing app's URL with the fragment where a code may live. */
+export function pairingLinkUrl(appUrl: string, seed: PairingLinkSeed): string {
+  const url = new URL(appUrl);
+  url.hash = formatPairingFragment(seed);
+  return url.toString();
+}
+
+/** One decoded `name=value` piece, or the reason the whole fragment is unreadable. */
+function fragmentField(piece: string): { readonly name: string; readonly value: string } {
+  const separator = piece.indexOf('=');
+  if (separator <= 0) throw new Error('pairing link field is not name=value');
+  const name = piece.slice(0, separator);
+  try {
+    return { name, value: decodeURIComponent(piece.slice(separator + 1)) };
+  } catch {
+    throw new Error(`pairing link field ${name} is not decodable`);
+  }
+}
+
+/**
+ * Reads a fragment of either version back into a seed, or throws the reason it cannot be one.
+ *
+ * The tolerance rules in the codec comment above are implemented here and nowhere else, so the
+ * daemon that writes a link and the browser that reads one cannot come to hold different opinions
+ * about the same string. A relay candidate the socket-endpoint rule refuses is dropped rather than
+ * dialled — and rather than failing a link whose direct half still works.
+ */
+export function parsePairingFragment(fragment: string): PairingLinkSeed {
+  const pieces = (fragment.startsWith('#') ? fragment.slice(1) : fragment).split(';');
+  const version = pieces.shift();
+  if (version !== 'v1' && version !== 'v2') throw new Error('pairing link version is not recognised');
+  const fields = new Map<string, string>();
+  for (const piece of pieces) {
+    const { name, value } = fragmentField(piece);
+    if (fields.has(name)) throw new Error(`pairing link repeats ${name}`);
+    fields.set(name, value);
+  }
+  const daemonUrl = fields.get('url');
+  const code = fields.get('code');
+  const fingerprint = fields.get('fp');
+  if (daemonUrl === undefined || code === undefined || fingerprint === undefined)
+    throw new Error('pairing link must include url, code, and fp');
+  try {
+    new URL(daemonUrl);
+  } catch {
+    throw new Error('pairing link daemon address is not a URL');
+  }
+  const parsedCode = PairingCodeSchema.safeParse(code);
+  if (!parsedCode.success) throw new Error('pairing link carries an invalid code');
+  const parsedDaemonId = DaemonIdSchema.safeParse(fingerprint);
+  if (!parsedDaemonId.success) throw new Error('pairing link carries an invalid fingerprint');
+  const relay = version === 'v2' ? SocketEndpointSchema.safeParse(fields.get('relay')) : undefined;
+  return {
+    daemonUrl,
+    code: parsedCode.data,
+    daemonId: parsedDaemonId.data,
+    ...(relay?.success === true ? { relayCandidate: relay.data } : {}),
+  };
+}
+
+/**
+ * What a device is handed the one moment it has just proved it may reach this daemon at all.
  *
  * THE CARRIER SET IS ON THE REDEMPTION RESPONSE RATHER THAN ON THE MINT, and the two are read by
  * different parties: the mint response is read by the HOST's own UI, which already has the daemon in
  * front of it, while this one is read by the DEVICE — the party that has to know where to look next
- * time. Publishing it here is also the only moment it can be trusted for free: pairing can never be
- * relayed (`docs/relay-protocol.md` §13), so the connection carrying this answer is direct by
- * construction and no rendezvous had an opportunity to edit it.
+ * time. No rendezvous has an opportunity to edit this answer on any carrier: a direct redemption
+ * never crosses one, and a relayed redemption (`docs/relay-protocol.md` §14) carries this exact
+ * object inside the sealed `paired` record, under a channel keyed to the Ed25519 identity the QR
+ * fingerprint pinned — so what makes it trustworthy is the seal to a pinned identity, not the
+ * absence of a relay.
  *
  * A KEY ADDED TO A DEVICE-FACING `strictObject` IS A BREAKING CHANGE — see the rule recorded in
  * `version-skew.ts`. `carriers` defaults to the empty list so a NEWER client reading an OLDER daemon
@@ -109,12 +230,14 @@ export type PairingReach = (typeof PAIRING_REACHES)[number];
  * ## TWO INVARIANTS, AND THE SECOND ONE IS NEW
  *
  * A LINK MAY NOT DISAGREE WITH THE DAEMON IT NAMES: when there is a link, its fragment must carry
- * exactly the daemon, code and fingerprint it was minted with, and no query string. That is what
- * stops any layer below the configuration from advertising a different address.
+ * exactly the daemon, code, fingerprint and relay candidate it was minted with — spelled by the one
+ * fragment codec above — and no query string. That is what stops any layer below the configuration
+ * from advertising a different address, or a rendezvous the daemon never published.
  *
  * A LINK MAY NOT ARRIVE WITHOUT SAYING WHO CAN REDEEM IT, and after this schema none does.
- * `superRefine` enforces all four presence relationships together: `pairUrl` and `reach` are present
- * exactly when `daemonUrl` is, while `refusal` is present exactly when it is not. A link with no
+ * `superRefine` enforces the presence relationships together: `pairUrl` and `reach` are present
+ * exactly when `daemonUrl` is, `refusal` is present exactly when it is not, and a `relayCandidate`
+ * only ever rides beside a link. A link with no
  * `reach` is how a QR nothing off the host could dial reached a phone in the first place — and the
  * one writer that can still emit one is a daemon older than the question, whose response
  * `withDeclaredReach` answers from its own address BEFORE the invariant is checked. So the invariant
@@ -138,6 +261,17 @@ const mintedFields = z.strictObject({
   pairUrl: z.url().optional(),
   reach: z.enum(PAIRING_REACHES).optional(),
   refusal: z.enum(ADVERTISEMENT_REFUSALS).optional(),
+  /**
+   * The one rendezvous the link's `v2` fragment names, when the daemon publishes any relay at all.
+   *
+   * IT RIDES ONLY BESIDE A LINK — the invariant below refuses one on a refusal — because the `v2`
+   * fragment requires a direct address and the reading device's connection model has no shape for a
+   * daemon with no address at all. So `reach: "local-only"` PLUS a candidate is a link another
+   * device CAN redeem, through the rendezvous, and the surfaces draw its QR; a refusal stays a
+   * refusal. Adding this key is governed by the `version-skew.ts` rule: the hosted app's reader
+   * deploys before any daemon writes it.
+   */
+  relayCandidate: SocketEndpointSchema.optional(),
 });
 type MintedFields = z.infer<typeof mintedFields>;
 
@@ -187,7 +321,10 @@ function withDeclaredReach(mint: MintedFields): MintedFields {
   if (mint.reach !== undefined || mint.refusal !== undefined) return mint;
   const reach = legacyReach(mint.daemonUrl);
   if (reach !== undefined) return { ...mint, reach };
-  const { daemonUrl, pairUrl, ...codeOnly } = mint;
+  // The candidate goes with the link it rode on. No old writer emits one, so this strip is only
+  // ever totality — but a refusal carrying a candidate would claim a redemption path the reading
+  // device cannot represent without an address, and the invariant below is right to refuse it.
+  const { daemonUrl, pairUrl, relayCandidate, ...codeOnly } = mint;
   return { ...codeOnly, refusal: 'wildcard-bind' };
 }
 
@@ -217,14 +354,26 @@ export const PairingCodeMintResponseSchema = mintedFields.transform(withDeclared
       message: 'pairing refusal must be present exactly when the daemon URL is absent',
     });
   }
+  if (value.relayCandidate !== undefined && !hasDaemonUrl) {
+    context.addIssue({
+      code: 'custom',
+      path: ['relayCandidate'],
+      message: 'a relay candidate may only accompany a link',
+    });
+  }
   if (value.daemonUrl !== undefined && value.pairUrl !== undefined) {
     const url = new URL(value.pairUrl);
-    const expectedFragment = `#v1;url=${encodeURIComponent(value.daemonUrl)};code=${value.code};fp=${encodeURIComponent(value.daemonId)}`;
+    const expectedFragment = `#${formatPairingFragment({
+      daemonUrl: value.daemonUrl,
+      code: value.code,
+      daemonId: value.daemonId,
+      ...(value.relayCandidate === undefined ? {} : { relayCandidate: value.relayCandidate }),
+    })}`;
     if (url.search === '' && url.hash === expectedFragment) return;
     context.addIssue({
       code: 'custom',
       path: ['pairUrl'],
-      message: 'pairing URL must carry only the matching daemon, code and fingerprint in its fragment',
+      message: 'pairing URL must carry only the matching daemon, code, fingerprint and relay candidate in its fragment',
     });
   }
 });
@@ -242,6 +391,8 @@ export interface PairingInvitationLink {
   readonly daemonUrl: string;
   readonly pairUrl: string;
   readonly reach: PairingReach;
+  /** The rendezvous the link's fragment names, when the daemon published one. */
+  readonly relayCandidate?: string;
 }
 
 export type PairingMintOutcome =
@@ -256,7 +407,23 @@ export function pairingMintOutcome(mint: PairingCodeMintResponse): PairingMintOu
         daemonUrl: mint.daemonUrl,
         pairUrl: mint.pairUrl as string,
         reach: mint.reach as PairingReach,
+        ...(mint.relayCandidate === undefined ? {} : { relayCandidate: mint.relayCandidate }),
       };
+}
+
+/**
+ * WHETHER A DIFFERENT DEVICE CAN REDEEM THIS LINK — the one question a QR is an answer to.
+ *
+ * `reach` describes the DIRECT address alone, and it used to be the whole answer: `local-only`
+ * meant no QR, because loopback on a phone names the phone. A relay candidate changes that without
+ * changing `reach`'s meaning — the direct address is still local-only, and the link is still
+ * redeemable from another device, through the rendezvous the fragment names. Both renderers read
+ * this narrowing instead of re-deriving it, for the same reason `pairingMintOutcome` exists: two
+ * surfaces deciding drawability for themselves is how a QR nothing could scan reached an owner
+ * once already.
+ */
+export function invitationRedeemableByAnotherDevice(link: PairingInvitationLink): boolean {
+  return link.reach === 'any-device' || link.relayCandidate !== undefined;
 }
 
 export const PairingCodeStatusResponseSchema = z.discriminatedUnion('status', [
