@@ -422,6 +422,36 @@ const carrierRefreshOnly = (left: DaemonConnection, right: DaemonConnection): bo
 const STALE_SESSION_REASON =
   'this daemon was re-paired, unpaired or republished while this rendezvous session was opening';
 
+/**
+ * Said to the CALLER when a walk is refused, which is a different moment and a wider one.
+ *
+ * The check that produces it runs before every attempt, so it fires with no rendezvous session in
+ * sight — a direct attempt that was still pending, or a pairing cleared before the first candidate was
+ * even tried. Naming a session there would describe something that does not exist; what is true in
+ * every case is that the request was in flight and is not being carried any further.
+ */
+const STALE_WALK_REASON =
+  'this daemon was re-paired, unpaired or republished while this request was in flight, so it was not carried to another carrier';
+
+/**
+ * MARKS THE ONE FAILURE THAT ENDS A WALK WITHOUT SAYING ANYTHING ABOUT AN ADDRESS.
+ *
+ * A transport failure is a fact about a carrier and is the reason to try the next one. This is a fact
+ * about the WALK: the pairing it was issued against has been cleared or replaced, so the connection it
+ * is holding — a device token that may already be revoked, a base URL that may have moved, a carrier
+ * set the daemon has since corrected — is not one this browser may dial anything with.
+ *
+ * It is a distinct class rather than a plain `Error` precisely so it cannot be mistaken for one: as a
+ * plain error it was caught as a transport failure, and a replay-safe request went on to dial every
+ * remaining relay, and then the hosted fallback, on behalf of a pairing that no longer existed.
+ */
+class RelayStaleEntryError extends Error {
+  constructor(message = STALE_WALK_REASON) {
+    super(message);
+    this.name = 'RelayStaleEntryError';
+  }
+}
+
 const transportFailure = (reason: unknown): string => {
   if (reason instanceof RelaySessionError) return `${reason.message} (${reason.code})`;
   return reason instanceof Error ? reason.message : String(reason);
@@ -608,6 +638,11 @@ export class DaemonCarrierRouter {
 
     const probes: ConnectionProbe[] = [];
     for await (const method of this.#candidates(daemon)) {
+      // ASKED BEFORE EVERY ATTEMPT, not once at the top: a walk takes as long as its failures do, and
+      // an unpair, a re-pair or a republish can land between any two of them. Every address below
+      // would be dialled with THIS walk's `DaemonConnection` — the old base URL, the old device token,
+      // the withdrawn rendezvous — which is the one thing a cleared pairing must never do again.
+      this.#assertCurrent(entry);
       try {
         const response = await this.#over(entry, method, url, init);
         // WHETHER AN ATTEMPT ADVANCES THE WALK IS THE PROTOCOL'S RULE, not this
@@ -619,6 +654,10 @@ export class DaemonCarrierRouter {
         return response;
       } catch (reason) {
         if (reason instanceof RelayAnswerError) throw reason.cause;
+        // A STALE ENTRY IS NOT A TRANSPORT FAILURE AND MUST NOT ADVANCE THE WALK. It says nothing about
+        // whether this address works; it says this walk no longer describes a pairing that exists, so
+        // every remaining candidate would be dialled with a credential and a set that were replaced.
+        if (reason instanceof RelayStaleEntryError) throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
         // A direct fetch rejection can follow receipt of a POST/PUT/etc. Record its
         // failed probe for the same disclosure a completed walk produces, but do not
@@ -648,6 +687,19 @@ export class DaemonCarrierRouter {
     if (authored.some(method => method.kind === 'relay')) return;
     const hosted = hostedRelayFallbackCarrier(daemon, await this.#hostedRelay());
     if (hosted !== undefined) yield hosted;
+  }
+
+  /**
+   * Is this walk still describing a pairing this router holds?
+   *
+   * The entry is the walk's whole identity: its connection, its remembered choice and its live
+   * sessions. `clearDaemon` replaces it with nothing and `#entry` replaces it on a re-pair or a
+   * republish, and in every one of those cases the object a walk captured is an orphan — carrying a
+   * device token that may have been revoked and a carrier set the daemon has already corrected.
+   */
+  #assertCurrent(entry: CarrierEntry): void {
+    if (this.#entries.get(entry.connection.daemonId) === entry) return;
+    throw new RelayStaleEntryError();
   }
 
   #entry(daemon: DaemonConnection): CarrierEntry {
@@ -807,7 +859,10 @@ export class DaemonCarrierRouter {
     // sentence do not fight; either way it ends, and the caller is told rather than handed a
     // session no unpair could reach.
     session.close(STALE_SESSION_REASON);
-    throw new Error(STALE_SESSION_REASON);
+    // The MARKED error, so the walk stops here instead of reading this as one address that did not
+    // work and dialling the next one with the same replaced pairing. It carries the session sentence
+    // rather than the walk's, because here a session really was opening and really has been ended.
+    throw new RelayStaleEntryError(STALE_SESSION_REASON);
   }
 
   #announce(): void {

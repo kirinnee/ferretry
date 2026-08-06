@@ -986,14 +986,17 @@ describe('the carrier router', () => {
   });
 
   /**
-   * A DIAL OUTLIVES THE ENTRY IT WAS STARTED FOR, and the socket must not.
+   * A WALK OUTLIVES THE PAIRING IT WAS ISSUED AGAINST, and it must not keep dialling on its behalf.
    *
-   * A handshake takes time, and an unpair or a refresh installs a different entry while it runs.
-   * `clearDaemon` and the refresh both walk the CURRENT entry's sessions, so a session recorded
-   * only in the abandoned one would be a live rendezvous holding this device's grant that no
-   * unpair could ever close.
+   * A walk takes as long as its failures do, and an unpair, a re-pair or a republish can land between
+   * any two attempts. Every address after that point would be dialled with the connection this walk
+   * captured — the old base URL, the OLD DEVICE TOKEN, a rendezvous the daemon has since withdrawn —
+   * which is precisely what a cleared pairing exists to stop. So the walk is refused rather than
+   * advanced: a stale entry says nothing about whether an address works, and reading it as a transport
+   * failure is what let a replay-safe request carry a revoked credential to every remaining carrier
+   * and then to the hosted fallback.
    */
-  it('should close a rendezvous session that finished opening after an unpair', async () => {
+  it('should abort the walk rather than reach the first relay when a pending direct attempt is unpaired', async () => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
@@ -1002,9 +1005,68 @@ describe('the carrier router', () => {
       carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
     });
     const auto = autoDial(identity);
+    let releaseDirect = (): void => {};
+    const directPending = new Promise<void>(resolve => {
+      releaseDirect = resolve;
+    });
+    let directStarted = (): void => {};
+    const directAttempted = new Promise<void>(resolve => {
+      directStarted = resolve;
+    });
     const router = new DaemonCarrierRouter({
       crypto: relayCrypto,
       dial: auto.dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        directStarted();
+        await directPending;
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    const inflight = router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    await directAttempted;
+    router.clearDaemon(daemon.daemonId);
+    releaseDirect();
+
+    await should(inflight).be.rejectedWith(/re-paired, unpaired or republished/u);
+    await settle(5);
+    // The direct attempt failed for real, and the relay was still never dialled: advancing is what a
+    // transport failure earns, and this walk had lost the right to it.
+    should(auto.sockets).have.length(0);
+    should(router.choice(daemon.daemonId)).be.undefined();
+  });
+
+  /**
+   * THE SAME INVARIANT ONE LAYER DOWN: the session that was already opening.
+   *
+   * The pre-attempt check cannot see this one — the entry was current when the dial began — so the
+   * fence after the handshake is what closes the socket, and the marked refusal is what stops the walk
+   * from treating a live-but-orphaned session as one address that did not work. With a second relay
+   * published, "does the walk continue" is a question with a visible answer: a second dial.
+   */
+  it('should close a session that opened into a cleared pairing and dial no further relay', async () => {
+    const identity = await newDaemonIdentity();
+    const second: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay-two.example', operator: 'self' };
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY, second],
+    });
+    const auto = autoDial(identity);
+    const dialled: string[] = [];
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      // The unpair lands while the FIRST rendezvous is still shaking hands, which is the window the
+      // pre-attempt check is blind to by construction.
+      dial: url => {
+        dialled.push(url);
+        const socket = auto.dial();
+        if (dialled.length === 1) router.clearDaemon(daemon.daemonId);
+        return socket;
+      },
       heartbeat: () => () => undefined,
       network: async () => {
         throw new TypeError('Failed to fetch');
@@ -1012,18 +1074,20 @@ describe('the carrier router', () => {
     });
     router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
 
-    const inflight = router.send(daemon, `${DAEMON_URL}/v1/projects`);
-    // Synchronous, so the entry is already gone before the direct attempt has even failed.
-    router.clearDaemon(daemon.daemonId);
-
-    await should(inflight).be.rejected();
+    // The caller is told what actually happened — a session was opening and has been ended — rather
+    // than "no carrier worked", which is what an unmarked failure would have degraded into once the
+    // walk had swept the remaining addresses and found nothing to report.
+    await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(/rendezvous session was opening/u);
     await settle(5);
+
+    // One dial, its session closed, and the second published rendezvous never touched.
+    should(dialled).have.length(1);
     should(auto.sockets).have.length(1);
     should(auto.sockets[0]?.closed).be.ok();
-    should(router.choice(daemon.daemonId)).be.undefined();
+    should(dialled).not.containEql(second.relayUrl);
   });
 
-  it('should close a rendezvous session that finished opening after a carrier refresh replaced its entry', async () => {
+  it('should refuse a walk whose entry a carrier refresh replaced, while the refreshed one answers', async () => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({
       daemonId: identity.daemonId,
@@ -1051,17 +1115,17 @@ describe('the carrier router', () => {
     router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
 
     const stale = router.send(daemon, `${DAEMON_URL}/v1/projects`);
-    // The refresh installs a new entry before the first walk has dialled anything, so its session
-    // cannot have been carried across.
+    // The republish installs a new entry, so the walk above is now describing a set the daemon has
+    // already corrected — it stops, and this one carries the traffic.
     const current = router.send(republished, `${DAEMON_URL}/v1/usage`);
 
-    await should(stale).be.rejected();
+    await should(stale).be.rejectedWith(/re-paired, unpaired or republished/u);
     should((await current).status).equal(200);
     await settle(5);
 
-    // Two sockets, exactly one of them closed: the abandoned dial ended and the tracked one lives.
-    should(auto.sockets).have.length(2);
-    should(auto.sockets.filter(socket => socket.closed !== null)).have.length(1);
+    // One socket, the refreshed walk's own, and it is still live.
+    should(auto.sockets).have.length(1);
+    should(auto.sockets[0]?.closed).be.null();
     should(router.choice(daemon.daemonId)?.ok).be.true();
   });
 
