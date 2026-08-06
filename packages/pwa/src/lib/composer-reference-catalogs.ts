@@ -27,6 +27,10 @@ export interface ComposerReferenceCatalogs {
   readonly failures: Readonly<Partial<Record<ComposerReferenceCatalogFamily, string>>>;
 }
 
+type ComposerReferenceCatalogPatch = Partial<Pick<ComposerReferenceCatalogs, 'tasks' | 'attention' | 'skills'>> & {
+  readonly failures: Readonly<Partial<Record<ComposerReferenceCatalogFamily, string>>>;
+};
+
 export type ComposerReferenceCatalogReader = Pick<IFyApiClient, 'request'>;
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
@@ -49,11 +53,16 @@ const sameSession = <Value extends { readonly sessionId: string }>(sessionId: st
   return value;
 };
 
-/** Read all independently: one refused family must not erase two valid ones. */
-export async function readComposerReferenceCatalogs(
+/**
+ * Start all three reads once, then report each family from those same promises.
+ * A slow sibling cannot withhold a proved family from the page, while the final
+ * promise still represents the one complete in-flight host read menus await.
+ */
+async function readComposerReferenceCatalogsIncrementally(
   client: ComposerReferenceCatalogReader,
   sessionId: string,
   signal: AbortSignal,
+  publish: (patch: ComposerReferenceCatalogPatch) => void,
 ): Promise<ComposerReferenceCatalogs> {
   const tasks = client
     .request(sessionTasksPath(sessionId), SessionTaskListResponseSchema, { signal })
@@ -62,7 +71,40 @@ export async function readComposerReferenceCatalogs(
     .request(sessionAttentionPath(sessionId), AttentionSnapshotSchema, { signal })
     .then(value => sameSession(sessionId, value));
   const skills = client.request(sessionSkillsPath(sessionId), SessionSkillsSchema, { signal });
-  const settled = await Promise.allSettled([tasks, attention, skills] as const);
+  const publishIfLive = (patch: ComposerReferenceCatalogPatch): void => {
+    if (!signal.aborted) publish(patch);
+  };
+  const reportedTasks = tasks.then(
+    value => {
+      publishIfLive({ tasks: value.tasks, failures: {} });
+      return value;
+    },
+    reason => {
+      publishIfLive({ failures: { tasks: failureMessage(reason) } });
+      throw reason;
+    },
+  );
+  const reportedAttention = attention.then(
+    value => {
+      publishIfLive({ attention: value.items, failures: {} });
+      return value;
+    },
+    reason => {
+      publishIfLive({ failures: { attention: failureMessage(reason) } });
+      throw reason;
+    },
+  );
+  const reportedSkills = skills.then(
+    value => {
+      publishIfLive({ skills: value, failures: {} });
+      return value;
+    },
+    reason => {
+      publishIfLive({ failures: { skills: failureMessage(reason) } });
+      throw reason;
+    },
+  );
+  const settled = await Promise.allSettled([reportedTasks, reportedAttention, reportedSkills] as const);
   if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 
   const [taskResult, attentionResult, skillResult] = settled;
@@ -78,7 +120,27 @@ export async function readComposerReferenceCatalogs(
   };
 }
 
+/** Read all independently: one refused family must not erase two valid ones. */
+export async function readComposerReferenceCatalogs(
+  client: ComposerReferenceCatalogReader,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<ComposerReferenceCatalogs> {
+  return await readComposerReferenceCatalogsIncrementally(client, sessionId, signal, () => undefined);
+}
+
 const EMPTY_CATALOGS: ComposerReferenceCatalogs = Object.freeze({ failures: Object.freeze({}) });
+
+const mergeCatalogPatch = (
+  current: ComposerReferenceCatalogs,
+  patch: ComposerReferenceCatalogPatch,
+): ComposerReferenceCatalogs => ({
+  ...current,
+  ...(patch.tasks === undefined ? {} : { tasks: patch.tasks }),
+  ...(patch.attention === undefined ? {} : { attention: patch.attention }),
+  ...(patch.skills === undefined ? {} : { skills: patch.skills }),
+  failures: { ...current.failures, ...patch.failures },
+});
 
 /**
  * Hydrate on concrete session identity and fence late answers after navigation.
@@ -113,13 +175,21 @@ export function useComposerReferenceCatalogs(
       pending.current = null;
       return () => controller.abort();
     }
-    const read = readComposerReferenceCatalogs(client as ComposerReferenceCatalogReader, sessionId, controller.signal)
-      .then(catalogs => {
-        if (!controller.signal.aborted) setSnapshot({ sessionId, catalogs });
-      })
+    const read = readComposerReferenceCatalogsIncrementally(
+      client as ComposerReferenceCatalogReader,
+      sessionId,
+      controller.signal,
+      patch => {
+        setSnapshot(current => ({
+          sessionId,
+          catalogs: mergeCatalogPatch(current?.sessionId === sessionId ? current.catalogs : EMPTY_CATALOGS, patch),
+        }));
+      },
+    )
+      .then(() => undefined)
       .catch(() => {
         // Abort is expected on navigation. All non-abort family failures are
-        // already represented inside the fulfilled bundle above.
+        // already published by their own family continuation above.
       })
       .finally(() => {
         if (pending.current === read) pending.current = null;
