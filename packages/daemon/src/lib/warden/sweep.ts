@@ -840,6 +840,15 @@ export class WardenSweepService {
    * one, is simply no longer readable. That is the honest consequence of removal
    * being an observation rather than an act, and it is why nothing here claims to
    * clear a session that has left.
+   *
+   * A DELETE SERVICE MUST RESOLVE OUTSIDE THE STORAGE RECONCILE, and this is the
+   * constraint to meet before writing one. The rows have to be cleared while the
+   * board is still authorized, which means before the index row is dropped — but
+   * NOT from inside `DaemonStorage.reconcile`, which holds the exclusive storage
+   * barrier for its whole body. Authorizing an attention write re-enters storage
+   * to read the session documents, and that keyed read waits on the very barrier
+   * the reconcile is holding, so the home lock would never be released. Resolve
+   * first, outside; retire second.
    */
   private async reconcileEscalations(
     anomalies: readonly WardenAnomaly[],
