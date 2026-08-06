@@ -694,6 +694,41 @@ describe('task schemas', () => {
         },
       },
       {
+        name: 'top-agent attestation with blank durable authorization ids',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'blank evidence is not evidence',
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization: {
+              boardId: 'board-1',
+              grantId: '   ',
+              sessionId: 'session-1',
+              targetSessionId: 'session-1',
+              role: 'top_agent',
+              boardEpoch: 1,
+              coordinatorEpoch: 1,
+              runtimeGeneration: 1,
+              action: 'mark_done',
+              requestId: '   ',
+              requestFingerprint: {
+                action: 'phase',
+                phase: 'done',
+                reason: 'blank evidence is not evidence',
+              },
+            },
+          },
+        },
+      },
+      {
         name: 'unstamped top-agent attestation',
         schema: tasks.TaskActivitySchema,
         value: {

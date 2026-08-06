@@ -261,10 +261,23 @@ describe('identity versus board authorization', () => {
       ...actor('agent', 'session-a'),
       markDoneAuthorization: { ...MARK_DONE_GRANT, role: 'read', action: 'note' },
     });
+    const blankDurableIds = granted({
+      ...actor('agent', 'session-a'),
+      markDoneAuthorization: { ...MARK_DONE_GRANT, grantId: '   ', requestId: '   ' },
+    });
+    const mismatchedRetryId = granted({
+      ...actor('agent', 'session-a'),
+      doneRequestIdentity: {
+        requestId: 'another-click',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' },
+      },
+    });
     const valid = granted(actor('agent', 'session-a'));
 
     // Act + Assert
     should(canActorVerifyTaskDone(malformed)).be.false();
+    should(canActorVerifyTaskDone(blankDurableIds)).be.false();
+    should(canActorVerifyTaskDone(mismatchedRetryId)).be.false();
     should(canActorVerifyTaskDone(valid, { action: 'status', status: 'done', reason: 'a different click' })).be.false();
   });
 });

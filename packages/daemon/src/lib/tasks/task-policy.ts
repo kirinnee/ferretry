@@ -73,6 +73,7 @@ export const markDoneAuthorizationFor = (
   const actorSession = actor.sessionId?.trim();
   const authorizedSession = actor.boardAuthorizedForSession?.trim();
   const targetSession = expectedTargetSession?.trim();
+  const suppliedRequestId = actor.doneRequestIdentity?.requestId;
   if (
     actor.kind !== 'agent' ||
     actorSession === undefined ||
@@ -89,14 +90,26 @@ export const markDoneAuthorizationFor = (
     authorization.boardId === undefined ||
     authorization.boardId.trim() === '' ||
     authorization.grantId === undefined ||
+    authorization.grantId.trim() === '' ||
     authorization.sessionId === undefined ||
+    authorization.sessionId.trim() === '' ||
     authorization.targetSessionId === undefined ||
+    authorization.targetSessionId.trim() === '' ||
     authorization.role !== 'top_agent' ||
     authorization.action !== 'mark_done' ||
+    authorization.requestId.trim() === '' ||
     authorization.requestFingerprint === undefined ||
     authorization.sessionId !== actorSession ||
     authorization.targetSessionId !== authorizedSession ||
     (targetSession !== undefined && authorization.targetSessionId !== targetSession)
+  ) {
+    return undefined;
+  }
+  if (
+    suppliedRequestId !== undefined &&
+    (typeof suppliedRequestId !== 'string' ||
+      suppliedRequestId.trim() === '' ||
+      authorization.requestId !== suppliedRequestId.trim())
   ) {
     return undefined;
   }

@@ -327,10 +327,14 @@ const StatusTaskActivitySchema = z
         authorization.boardId === undefined ||
         authorization.boardId.trim() === '' ||
         authorization.grantId === undefined ||
+        authorization.grantId.trim() === '' ||
         authorization.sessionId === undefined ||
+        authorization.sessionId.trim() === '' ||
         authorization.targetSessionId === undefined ||
+        authorization.targetSessionId.trim() === '' ||
         authorization.role !== 'top_agent' ||
         authorization.action !== 'mark_done' ||
+        authorization.requestId.trim() === '' ||
         authorization.requestFingerprint === undefined
       ) {
         context.addIssue({
