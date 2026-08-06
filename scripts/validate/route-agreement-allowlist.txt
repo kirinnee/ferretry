@@ -53,7 +53,6 @@ unserved PATCH /v1/pwa/config # DEFECT: IFyApiClient.updatePwaConfig() dials a r
 unserved POST /v1/sessions/*/notify # DEFECT: mounts/attention.ts says this route is deliberately not there; the CLI gateway dials it anyway
 unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session; mounts/sessions.ts serves only GET on that path
 unserved * /v1/sessions/*/browser/stream # DEFECT: the PWA viewer builds this socket URL; mounts/browser-login.ts serves /browser with no /stream
-unserved GET /v1/sessions/*/runtime-models # DEFECT: the PWA fetches a runtime-model catalog but the daemon serves no such route
 
 # Verb disagreements — finding #5's shape, where the path exists and the method does not.
 unserved POST /v1/learning/proposals/*/patch # DEFECT: the PWA POSTs; mounts/learning.ts serves GET
@@ -74,7 +73,6 @@ unserved * /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages/da
 # concrete call sites were checked separately; they were not, and it is the sentence that kept
 # `POST …/rename` invisible while the PWA shipped a rename sheet against it.
 unserved POST /v1/sessions/*/rename # DEFECT: IFyApiClient.rename() POSTs it; no daemon route has `rename` in its path
-unserved POST /v1/sessions/*/runtime # DEFECT: IFyApiClient.runtime() POSTs it; no daemon route has `runtime` in its path
 
 # Correct as written: not the daemon.
 unserved GET /v1/default-relay # CORRECT: dialled against the relay DISCOVERY ORIGIN, a Ferretry service, never a daemon
