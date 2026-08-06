@@ -269,12 +269,12 @@ file reads and nothing below the route can batch further.
 search calls `/v1/sessions/:sessionId/tasks` — a single board, no fleet walk — and then issues **one
 further `GET /v1/sessions/:sessionId/tasks/:taskId` per task**, all at once through an unbounded
 `Promise.all` (`readTasks` in `packages/pwa/src/features/session-search/session-search.tsx`). A board
-of N tasks therefore costs **N + 1 HTTP round trips**, and because the daemon's detail handler
-re-reads the whole board before answering one task, roughly **2N + 1 reads of the same snapshot
-file**. That is the sequential-per-task cost the row's title is about, and it is untouched by
-anything here. Closing #5 means collapsing that N+1 — the list response already carries every
-summary field the pane renders — and then recording a pane-level before/after. Neither is done, so
-there is deliberately **no row-level timing claimed** yet.
+of N tasks therefore costs an **unbounded N + 1 HTTP-request fan-out**, and because the daemon's
+detail handler re-reads the whole board before answering one task, roughly **2N + 1 reads of the
+same snapshot file**. That repeated per-task board-read cost is untouched by anything here. Closing
+#5 means collapsing that N+1 — the list response already carries every summary field the pane
+renders — and then recording a pane-level before/after. Neither is done, so there is deliberately
+**no row-level timing claimed** yet.
 
 **The measurement of the done half is a script, not a number.** It measures the aggregate route
 only; it says nothing about the pane. `scripts/local/bench-fleet-task-reads.ts` runs both

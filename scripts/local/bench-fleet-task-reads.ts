@@ -12,7 +12,8 @@
  *
  * WHY BOTH SIDES ARE MEASURED HERE RATHER THAN QUOTED. Row #5 asks for before/after timings, and a
  * number in a document is not a measurement — nobody can tell later whether it still holds. So this
- * script runs BOTH access patterns against the same fixture in the same interpreter, in one go:
+ * script warms BOTH access patterns, then runs them against equivalent fresh fixtures in deterministic
+ * alternating pairs:
  *
  *   BEFORE  the pattern `37af20d4` replaced — one awaited `subsystem.board(id).list()` per session,
  *           in index order, reimplemented below because it no longer exists in the tree to call.
@@ -20,8 +21,10 @@
  *           reaches `readTaskBoardFleet` in `packages/daemon/src/lib/task-boards/fleet-read.ts`.
  *
  * The AFTER path therefore carries routing, authorization and serialization overhead that the
- * BEFORE path does not. That is deliberate and it biases the result AGAINST the change: the ratio
- * printed is a floor, not a best case.
+ * BEFORE path does not. That is deliberate and it biases a meaningful overlapping-read result
+ * AGAINST the change: the ratio printed is a floor, not a best case. One board or zero injected
+ * latency has no overlap to attribute, so those probes report timings but deliberately make no
+ * direction claim.
  *
  * SAFE AND OFFLINE. The fixture is `FakeTaskBoard` from the daemon's own unit-test support — an
  * in-memory board with an injected `Bun.sleep` standing in for the file read. Nothing here opens a
@@ -68,8 +71,8 @@ function refuse(reason: string): never {
 const OPTIONS = {
   // At least one board: a zero-board fleet times nothing and would report an infinite ratio.
   boards: { integer: true, minimum: 1, unit: 'a whole number of boards, at least 1' },
-  // At least one sample: with none there is no median to report.
-  samples: { integer: true, minimum: 1, unit: 'a whole number of samples, at least 1' },
+  // Three alternating pairs keep a single cold run from deciding the claimed direction.
+  samples: { integer: true, minimum: 3, unit: 'a whole number of samples, at least 3' },
   // Zero latency is legitimate — it measures the scheduling overhead alone — and a fraction is a
   // real sub-millisecond delay, so only finiteness and sign are constrained here.
   latency: { integer: false, minimum: 0, unit: 'a finite number of milliseconds, 0 or more' },
@@ -108,7 +111,7 @@ function dirty(): boolean {
 /**
  * A fleet of in-memory boards whose reads cost `latency` milliseconds each.
  *
- * Rebuilt for every sample so no arm can benefit from a warm one.
+ * Rebuilt for every warm-up and measured arm, so one arm cannot reuse another's state.
  */
 function fleet(boards: number, latency: number): { subsystem: TaskSubsystem; sessionIds: string[] } {
   const sessionIds = Array.from({ length: boards }, (_unused, index) => `s${index}`);
@@ -156,20 +159,43 @@ async function routedFleetRead(subsystem: TaskSubsystem): Promise<number> {
   return response.status;
 }
 
-async function samplesOf(
+type FleetReadArm = (subsystem: TaskSubsystem) => Promise<number>;
+
+/** Time one arm on a new fleet: neither side inherits another side's completed reads. */
+async function timeArm(boards: number, latency: number, arm: FleetReadArm): Promise<number> {
+  const { subsystem } = fleet(boards, latency);
+  const started = performance.now();
+  await arm(subsystem);
+  return performance.now() - started;
+}
+
+/**
+ * Warm both paths before collecting data, then alternate their order within each pair.
+ *
+ * Running all BEFORE samples followed by all AFTER samples made process/JIT warm-up look like an
+ * improvement. Alternating is deterministic rather than random, so a cited run can be reproduced,
+ * while both arms receive early and late positions instead of one always receiving the cold path.
+ */
+async function pairedSamples(
   runs: number,
   boards: number,
   latency: number,
-  arm: (subsystem: TaskSubsystem) => Promise<number>,
-): Promise<number[]> {
-  const timings: number[] = [];
+): Promise<{ readonly before: number[]; readonly after: number[] }> {
+  await timeArm(boards, latency, sequentialFleetRead);
+  await timeArm(boards, latency, routedFleetRead);
+
+  const before: number[] = [];
+  const after: number[] = [];
   for (let run = 0; run < runs; run += 1) {
-    const { subsystem } = fleet(boards, latency);
-    const started = performance.now();
-    await arm(subsystem);
-    timings.push(performance.now() - started);
+    if (run % 2 === 0) {
+      before.push(await timeArm(boards, latency, sequentialFleetRead));
+      after.push(await timeArm(boards, latency, routedFleetRead));
+    } else {
+      after.push(await timeArm(boards, latency, routedFleetRead));
+      before.push(await timeArm(boards, latency, sequentialFleetRead));
+    }
   }
-  return timings;
+  return { before, after };
 }
 
 const median = (values: readonly number[]): number => {
@@ -200,22 +226,23 @@ console.log(`│ fixture      FakeTaskBoard (packages/daemon/tests/unit/runtime/
 console.log(`│ unit         wall-clock milliseconds, performance.now(), median of the samples`);
 console.log(`│ boards       ${boards} sessions, one board each`);
 console.log(`│ latency      ${latency} ms injected per board read`);
-console.log(`│ samples      ${samples} per arm, fixture rebuilt before each`);
+console.log(`│ samples      ${samples} warmed, alternating pairs; fresh fixture before each arm`);
 console.log(`│ measured at  ${head()}${dirty() ? ' (WORKING TREE DIRTY — not a citable run)' : ''}`);
 console.log(`│ reference    ${REFERENCE_COMMIT} ${REFERENCE_SUBJECT}`);
 console.log('╰────────────────────────────────────────────────────────────────────────────');
 
-const before = await samplesOf(samples, boards, latency, sequentialFleetRead);
-const after = await samplesOf(samples, boards, latency, routedFleetRead);
+const { before, after } = await pairedSamples(samples, boards, latency);
 
 console.log('');
 const beforeMedian = report('BEFORE  sequential per-board await', before);
 const afterMedian = report('AFTER   real route, bounded fan-out', after);
 console.log('');
-// The word is decided by the measurement, never assumed. A run where the bounded path came out
-// slower is a real and interesting outcome — at `--boards 1` the pool is pure overhead — and
-// printing "faster" over it would be the script asserting its own conclusion.
-if (afterMedian < beforeMedian) {
+// A one-board or zero-latency probe has no read overlap to attribute to the pool. Its figures are
+// useful scheduling diagnostics, but a direction label would turn timer noise into a product claim.
+if (boards === 1 || latency === 0) {
+  console.log('  direction INCONCLUSIVE — this probe has no overlapping reads to attribute to the pool.');
+  console.log('  Use at least two boards and positive injected latency for a before/after direction claim.');
+} else if (afterMedian < beforeMedian) {
   console.log(`  ratio ${(beforeMedian / afterMedian).toFixed(1)}× FASTER after`);
   console.log(`  the BEFORE arm pays no routing, authorization or serialization cost and the AFTER arm`);
   console.log(`  pays all three, so this ratio is a floor.`);
