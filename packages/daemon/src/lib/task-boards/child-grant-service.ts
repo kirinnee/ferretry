@@ -1,5 +1,5 @@
 import type { TaskBoardChildAccess, TaskBoardGrantRequestView, TaskBoardMembership } from '@ferretry/protocol';
-import { TaskBoardAuthorizationService } from './authorization-service.ts';
+import type { TaskBoardAuthorizationService } from './authorization-service.ts';
 import {
   appendTaskBoardAudit,
   bindingForGrant,
@@ -50,8 +50,10 @@ export interface ApproveChildGrantMaterial {
   readonly capability: TaskBoardSecret;
 }
 
+export type ApproveChildGrantMaterialFactory = () => ApproveChildGrantMaterial;
+
 export type ApproveChildGrantResult =
-  | { readonly approved: true; readonly membership: TaskBoardMembership }
+  | { readonly approved: true; readonly durableCapability: string; readonly membership: TaskBoardMembership }
   | { readonly approved: false; readonly request: TaskBoardGrantRequestView };
 
 /** The wire projection of a child-grant intent. Exported so the mount reports the same shape the
@@ -206,7 +208,7 @@ export class TaskBoardChildGrantService {
     state: TaskBoardRepositoryState,
     sessions: readonly TaskBoardSession[],
     command: ApproveChildGrantCommand,
-    material: ApproveChildGrantMaterial,
+    materialForApply: ApproveChildGrantMaterialFactory,
   ): TaskBoardMutation<ApproveChildGrantResult> {
     const requestId = requireTaskBoardRequestId(command.requestId);
     const authorization = this.authorization.authorize(state, sessions, command.coordinator, 'grant_approve');
@@ -278,6 +280,7 @@ export class TaskBoardChildGrantService {
     ) {
       throw new TaskBoardError('forbidden', 'the child-grant authority or captured session lineage changed');
     }
+    const material = materialForApply();
     if (
       board.grants.some(grant => grant.id === material.grantId) ||
       board.grants.some(grant => grant.capabilityHash === material.capability.hash)
@@ -340,7 +343,14 @@ export class TaskBoardChildGrantService {
     const nextState = replaceTaskBoard(state, updated, {
       bindings: [...state.bindings, bindingForGrant(updated, grant, material.capability.value, command.at)],
     });
-    return { state: nextState, result: { approved: true, membership: membershipForGrant(grant) } };
+    return {
+      state: nextState,
+      result: {
+        approved: true,
+        durableCapability: material.capability.value,
+        membership: membershipForGrant(grant),
+      },
+    };
   }
 
   private replayApproval(
@@ -358,6 +368,9 @@ export class TaskBoardChildGrantService {
     if (grant === undefined || binding === undefined || !grant.active) {
       throw new TaskBoardError('unavailable', 'the approved child grant has no durable binding');
     }
-    return { state, result: { approved: true, membership: membershipForGrant(grant) } };
+    return {
+      state,
+      result: { approved: true, durableCapability: binding.capability, membership: membershipForGrant(grant) },
+    };
   }
 }

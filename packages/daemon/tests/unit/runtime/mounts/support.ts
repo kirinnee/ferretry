@@ -128,6 +128,7 @@ import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
 import type { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import {
   EMPTY_TASK_BOARD_REPOSITORY_STATE,
+  type TaskBoardCoordinatorReplacementCapabilityIdentity,
   type TaskBoardCredentialIssuer,
   type TaskBoardRepository,
   type TaskBoardRepositoryState,
@@ -1171,8 +1172,12 @@ export class FakeTaskBoards implements TaskBoardSubsystem {
   readonly delivered: [string, Readonly<Record<string, string>>][] = [];
   /** Ids are sequential so an assertion can name one. */
   private minted = 0;
+  /** Capabilities are counted separately so exact replays can prove they never ask for new authority. */
+  private capabilitiesMinted = 0;
   /** Raised by `deliver` when set, so the failure of a delivery is drivable. */
   deliveryFailure?: Error;
+  /** Raised once after a transaction commits, standing in for a lost HTTP receipt. */
+  transactionFailureAfterCommit?: Error;
 
   constructor(
     private readonly directory: readonly TaskBoardSession[] = [],
@@ -1186,6 +1191,7 @@ export class FakeTaskBoards implements TaskBoardSubsystem {
       return `${kind}-${this.minted}`;
     },
     capability: () => {
+      this.capabilitiesMinted += 1;
       this.minted += 1;
       const value = `capability-${this.minted}`;
       return { value, hash: this.issuer.hash(value) };
@@ -1194,11 +1200,34 @@ export class FakeTaskBoards implements TaskBoardSubsystem {
     hash: value => `hash:${value}`,
   };
 
+  readonly coordinatorReplacementCapabilities = {
+    derive: async (identity: TaskBoardCoordinatorReplacementCapabilityIdentity) => {
+      const value = `recoverable:${this.issuer.hash(
+        JSON.stringify([
+          'fake-coordinator-replacement-seed',
+          identity.requestId.trim(),
+          identity.boardId,
+          identity.memberSessionId,
+          identity.replacementSessionId,
+          identity.replacementRootSessionId,
+          identity.replacementSessionIncarnation,
+          identity.replacementRuntimeGeneration,
+        ]),
+      )}`;
+      return { value, hash: this.issuer.hash(value) };
+    },
+  };
+
   readonly repository: TaskBoardRepository = {
     snapshot: async () => this.state,
     transaction: async operation => {
       const mutation = await operation(this.state);
       this.state = mutation.state;
+      if (this.transactionFailureAfterCommit !== undefined) {
+        const failure = this.transactionFailureAfterCommit;
+        this.transactionFailureAfterCommit = undefined;
+        throw failure;
+      }
       return mutation.result;
     },
   };
@@ -1219,6 +1248,11 @@ export class FakeTaskBoards implements TaskBoardSubsystem {
   async deliver(sessionId: string, variables: Readonly<Record<string, string>>): Promise<void> {
     if (this.deliveryFailure !== undefined) throw this.deliveryFailure;
     this.delivered.push([sessionId, variables]);
+  }
+
+  /** Number of calls to the random capability issuer, excluding id allocation and deterministic derivation. */
+  get capabilityMintCount(): number {
+    return this.capabilitiesMinted;
   }
 
   /** The plaintext capability the board issued to one session, as its binding holds it. */

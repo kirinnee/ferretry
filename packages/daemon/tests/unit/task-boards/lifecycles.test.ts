@@ -6,7 +6,10 @@ import { TaskBoardChildGrantService } from '../../../src/lib/task-boards/child-g
 import { TaskBoardCreationService } from '../../../src/lib/task-boards/creation-service.ts';
 import { isTaskBoardError, TaskBoardError } from '../../../src/lib/task-boards/error.ts';
 import { TaskBoardInvitationService } from '../../../src/lib/task-boards/invitation-service.ts';
-import { TaskBoardMembershipService } from '../../../src/lib/task-boards/membership-service.ts';
+import {
+  CHILD_GRANT_PROMOTION_REVOKE_REASON,
+  TaskBoardMembershipService,
+} from '../../../src/lib/task-boards/membership-service.ts';
 import {
   actionsForTaskBoardRole,
   CURRENT_COORDINATOR_ACTIONS,
@@ -131,7 +134,7 @@ function verifiedHandover(subject: Services): TaskBoardRepositoryState {
       requestId: 'succession-child-approve',
       at,
     },
-    { grantId: 'child-grant', capability: { value: 'child-secret', hash: hash('child-secret') } },
+    () => ({ grantId: 'child-grant', capability: { value: 'child-secret', hash: hash('child-secret') } }),
   );
   const requested = subject.invitations.request(childApproved.state, sessions, {
     source: rootCredential,
@@ -160,7 +163,7 @@ function verifiedHandover(subject: Services): TaskBoardRepositoryState {
       requestId: 'succession-accept',
       at,
     },
-    { grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } },
+    () => ({ grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } }),
   );
   return subject.invitations.verify(accepted.state, sessions, {
     member: externalCredential,
@@ -169,15 +172,44 @@ function verifiedHandover(subject: Services): TaskBoardRepositoryState {
   }).state;
 }
 
+/** The coordinator descendant has its working capability before its first launch. */
+function grantedCoordinator(subject: Services, state = verifiedHandover(subject)): TaskBoardRepositoryState {
+  const requested = subject.children.request(state, sessions, {
+    source: externalCredential,
+    targetSessionId: 'successor',
+    role: 'coordinator',
+    requestId: 'succession-coordinator-child',
+    at,
+  });
+  const approved = subject.children.approve(
+    requested.state,
+    sessions,
+    {
+      coordinator: coordinatorCredential,
+      grantRequestId: 'succession-coordinator-child',
+      requestId: 'succession-coordinator-child-approve',
+      at,
+    },
+    () => ({
+      grantId: 'successor-coordinator-child-grant',
+      capability: { value: 'successor-secret', hash: hash('successor-secret') },
+    }),
+  );
+  if (!approved.result.approved) throw new Error('fixture coordinator child grant did not approve');
+  return approved.state;
+}
+
 /** The verified handover, one step further on: `successor` holds the coordinator key. */
 function succeeded(subject: Services): TaskBoardRepositoryState {
   return subject.membership.replaceCoordinator(
-    verifiedHandover(subject),
+    grantedCoordinator(subject),
     sessions,
     {
       boardId: 'board',
+      memberSessionId: 'root',
       administrator: OPERATOR,
       coordinatorSessionId: 'successor',
+      replacementRootSessionId: 'external',
       requestId: 'succeed',
       at,
     },
@@ -211,12 +243,13 @@ describe('TaskBoardChildGrantService', () => {
       requested.state,
       sessions,
       { coordinator: coordinatorCredential, grantRequestId: 'child-request', requestId: 'child-approve', at },
-      { grantId: 'child-grant', capability: { value: 'child-secret', hash: hash('child-secret') } },
+      () => ({ grantId: 'child-grant', capability: { value: 'child-secret', hash: hash('child-secret') } }),
     );
 
     // Assert
     should(actual.result).deepEqual({
       approved: true,
+      durableCapability: 'child-secret',
       membership: {
         sessionId: 'child',
         role: 'worker',
@@ -249,7 +282,7 @@ describe('TaskBoardChildGrantService', () => {
         requested.state,
         moved,
         { coordinator: coordinatorCredential, grantRequestId: 'changed-request', requestId: 'changed-approve', at },
-        { grantId: 'changed-grant', capability: { value: 'changed-secret', hash: hash('changed-secret') } },
+        () => ({ grantId: 'changed-grant', capability: { value: 'changed-secret', hash: hash('changed-secret') } }),
       ),
     ).throw(TaskBoardError);
   });
@@ -269,15 +302,22 @@ describe('TaskBoardChildGrantService', () => {
       requested.state,
       sessions,
       { coordinator: coordinatorCredential, grantRequestId: 'replay-request', requestId: 'replay-approve', at },
-      material,
+      () => material,
     );
 
     // Act
+    let materialRequested = false;
     const replay = subject.children.approve(
       approved.state,
       sessions,
       { coordinator: coordinatorCredential, grantRequestId: 'replay-request', requestId: 'replay-approve', at },
-      material,
+      () => {
+        materialRequested = true;
+        return {
+          grantId: 'unused-replay-grant',
+          capability: { value: 'unused-replay-secret', hash: hash('unused-replay-secret') },
+        };
+      },
     );
     const expiredRequested = subject.children.request(createState(), sessions, {
       source: rootCredential,
@@ -295,12 +335,13 @@ describe('TaskBoardChildGrantService', () => {
         requestId: 'expired-approve',
         at: '2026-08-01T12:00:00.000Z',
       },
-      { grantId: 'expired-grant', capability: { value: 'expired-secret', hash: hash('expired-secret') } },
+      () => ({ grantId: 'expired-grant', capability: { value: 'expired-secret', hash: hash('expired-secret') } }),
     );
 
     // Assert
     should(replay.state).equal(approved.state);
     should(replay.result).deepEqual(approved.result);
+    should(materialRequested).be.false();
     should(expired.result).deepEqual({
       approved: false,
       request: {
@@ -344,12 +385,14 @@ describe('TaskBoardInvitationService', () => {
         requestId: 'accept',
         at,
       },
-      { grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } },
+      () => ({ grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } }),
     );
 
     // Assert
     should(actual.result).deepEqual({
       accepted: true,
+      durableCapability: 'external-secret',
+      grantId: 'external-grant',
       membership: {
         sessionId: 'external',
         role: 'top_agent',
@@ -383,6 +426,68 @@ describe('TaskBoardInvitationService', () => {
         'read',
       ).role,
     ).equal('top_agent');
+  });
+
+  it('should replay a committed acceptance before requiring a fresh approved invitation', () => {
+    // Arrange
+    const subject = services();
+    const requested = subject.invitations.request(createState(), sessions, {
+      source: rootCredential,
+      targetSessionId: 'external',
+      requestId: 'replay-invite',
+      at,
+    });
+    const approved = subject.invitations.approve(
+      requested.state,
+      sessions,
+      {
+        coordinator: coordinatorCredential,
+        invitationRequestId: 'replay-invite',
+        requestId: 'replay-invite-approve',
+        at,
+      },
+      { acceptanceCapability: { value: 'replay-proof', hash: hash('replay-proof') } },
+    );
+    if (!approved.result.approved) throw new Error('fixture invitation did not approve');
+    const command = {
+      target: { sessionId: 'external', runtimeGeneration: 1, capabilityHash: hash('session:external') },
+      invitationCapability: approved.result.acceptanceCapability,
+      requestId: 'replay-accept',
+      at,
+    };
+    const accepted = subject.invitations.accept(approved.state, sessions, command, () => ({
+      grantId: 'replay-external-grant',
+      capability: { value: 'replay-external-secret', hash: hash('replay-external-secret') },
+    }));
+
+    // Act — a replay returns before asking for fresh material.
+    let materialRequested = false;
+    const replay = subject.invitations.accept(accepted.state, sessions, command, () => {
+      materialRequested = true;
+      return {
+        grantId: 'unused-replay-grant',
+        capability: { value: 'unused-replay-secret', hash: hash('unused-replay-secret') },
+      };
+    });
+
+    // Assert
+    should(replay.state).equal(accepted.state);
+    should(replay.result).deepEqual(accepted.result);
+    should(materialRequested).be.false();
+    should(() =>
+      subject.invitations.accept(
+        accepted.state,
+        sessions.map(candidate => (candidate.id === 'external' ? { ...candidate, runtimeGeneration: 2 } : candidate)),
+        {
+          ...command,
+          target: { ...command.target, runtimeGeneration: 2 },
+        },
+        () => ({
+          grantId: 'changed-generation-grant',
+          capability: { value: 'changed-generation-secret', hash: hash('changed-generation-secret') },
+        }),
+      ),
+    ).throw(/invitation acceptance request id was reused/u);
   });
 
   it('should reject an unaccepted invitation, a descendant invitee, and a stolen acceptance secret', () => {
@@ -430,7 +535,7 @@ describe('TaskBoardInvitationService', () => {
           requestId: 'stolen-accept',
           at,
         },
-        { grantId: 'unused', capability: { value: 'unused', hash: hash('unused') } },
+        () => ({ grantId: 'unused', capability: { value: 'unused', hash: hash('unused') } }),
       ),
     ).throw(TaskBoardError);
   });
@@ -495,7 +600,10 @@ describe('TaskBoardInvitationService', () => {
         requestId: 'expired-accept-request',
         at: '2026-08-01T12:00:00.000Z',
       },
-      { grantId: 'unused-expired-grant', capability: { value: 'unused-expired', hash: hash('unused-expired') } },
+      () => ({
+        grantId: 'unused-expired-grant',
+        capability: { value: 'unused-expired', hash: hash('unused-expired') },
+      }),
     );
 
     // Assert
@@ -505,7 +613,7 @@ describe('TaskBoardInvitationService', () => {
 });
 
 describe('TaskBoardMembershipService', () => {
-  it('should preserve the old root until the accepted replacement proves it can act', () => {
+  it('should preserve the old root until the replacement proves it can act and receives the coordinator', () => {
     // Arrange
     const subject = services();
     const requested = subject.invitations.request(createState(), sessions, {
@@ -535,7 +643,7 @@ describe('TaskBoardMembershipService', () => {
         requestId: 'relinquish-accept',
         at,
       },
-      { grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } },
+      () => ({ grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } }),
     );
 
     // Acceptance writes a grant but does not prove the replacement received its capability. This is
@@ -555,8 +663,33 @@ describe('TaskBoardMembershipService', () => {
       at,
     });
 
+    // Verification alone leaves the coordinator under the retiring root. Because the new root would
+    // survive, relinquish must still refuse until the operator moves the key into that tree.
+    should(() =>
+      subject.membership.relinquish(verified.state, sessions, {
+        member: rootCredential,
+        requestId: 'relinquish-before-coordinator-move',
+        at,
+      }),
+    ).throw(/move the coordinator into a surviving membership tree first/u);
+    const coordinatorGranted = grantedCoordinator(subject, verified.state);
+    const succeeded = subject.membership.replaceCoordinator(
+      coordinatorGranted,
+      sessions,
+      {
+        boardId: 'board',
+        memberSessionId: 'root',
+        administrator: OPERATOR,
+        coordinatorSessionId: 'successor',
+        replacementRootSessionId: 'external',
+        requestId: 'relinquish-coordinator-move',
+        at,
+      },
+      { grantId: 'successor-grant', capability: { value: 'successor-secret', hash: hash('successor-secret') } },
+    );
+
     // Act
-    const actual = subject.membership.relinquish(verified.state, sessions, {
+    const actual = subject.membership.relinquish(succeeded.state, sessions, {
       member: rootCredential,
       requestId: 'relinquish',
       at,
@@ -577,10 +710,45 @@ describe('TaskBoardMembershipService', () => {
     ).have.property('sessionId', 'external');
   });
 
+  it('should replay an exact relinquish after its source binding is gone', () => {
+    // Arrange
+    const subject = services();
+    const command = { member: rootCredential, requestId: 'relinquish-crash-retry', at } as const;
+    const applied = subject.membership.relinquish(succeeded(subject), sessions, command);
+    const corruptedFingerprint = {
+      ...applied.state,
+      boards: applied.state.boards.map(board => ({
+        ...board,
+        appliedOperations: board.appliedOperations.map(operation =>
+          operation.requestId === command.requestId ? { ...operation, fingerprint: 'damaged' } : operation,
+        ),
+      })),
+    };
+
+    // Act
+    const replayed = subject.membership.relinquish(applied.state, sessions, command);
+
+    // Assert — replay returns the original receipt without a second mutation even though live
+    // authorization is now impossible. Its durable fingerprint and capability-derived subject are
+    // both mandatory; neither a damaged ledger nor a different bearer can enter this exception.
+    should(applied.state.bindings.some(binding => binding.sessionId === 'root')).be.false();
+    should(replayed.state).exactly(applied.state);
+    should(replayed.result).deepEqual({ relinquished: true, sessionId: 'root', sessionStopped: false });
+    should(() => subject.membership.relinquish(corruptedFingerprint, sessions, command)).throw(
+      /membership relinquish request id was reused/u,
+    );
+    should(() =>
+      subject.membership.relinquish(applied.state, sessions, {
+        ...command,
+        member: { ...rootCredential, capabilityHash: hash('different-secret') },
+      }),
+    ).throw(TaskBoardError);
+  });
+
   it('should move the coordinator key into the verified replacement root’s own tree', () => {
     // Arrange
     const subject = services();
-    const before = verifiedHandover(subject);
+    const before = grantedCoordinator(subject);
 
     // Act
     const actual = subject.membership.replaceCoordinator(
@@ -588,8 +756,10 @@ describe('TaskBoardMembershipService', () => {
       sessions,
       {
         boardId: 'board',
+        memberSessionId: 'root',
         administrator: OPERATOR,
         coordinatorSessionId: 'successor',
+        replacementRootSessionId: 'external',
         requestId: 'succeed',
         at,
       },
@@ -601,6 +771,16 @@ describe('TaskBoardMembershipService', () => {
     should(actual.result.membership.sessionId).equal('successor');
     should(board?.coordinatorSessionId).equal('successor');
     should(board?.grants.find(grant => grant.id === 'successor-grant')?.membershipRootSessionId).equal('external');
+    should(board?.grants.find(grant => grant.id === 'successor-coordinator-child-grant')).match({
+      active: false,
+      capabilityHash: hash('successor-secret'),
+      revokeReason: CHILD_GRANT_PROMOTION_REVOKE_REASON,
+    });
+    should(board?.grants.find(grant => grant.id === 'successor-grant')?.capabilityHash).equal(hash('successor-secret'));
+    should(actual.state.bindings.find(binding => binding.sessionId === 'successor')).match({
+      grantId: 'successor-grant',
+      capability: 'successor-secret',
+    });
     should(subject.authorization.authorize(actual.state, sessions, successorCredential, 'grant_approve').role).equal(
       'coordinator',
     );
@@ -640,7 +820,13 @@ describe('TaskBoardMembershipService', () => {
     };
     const replace = (
       state: TaskBoardRepositoryState,
-      command: Partial<{ boardId: string; administrator: TaskBoardAuthorization; coordinatorSessionId: string }>,
+      command: Partial<{
+        boardId: string;
+        memberSessionId: string;
+        administrator: TaskBoardAuthorization;
+        coordinatorSessionId: string;
+        replacementRootSessionId: string;
+      }>,
       requestId: string,
     ): void => {
       subject.membership.replaceCoordinator(
@@ -648,8 +834,10 @@ describe('TaskBoardMembershipService', () => {
         sessions,
         {
           boardId: command.boardId ?? 'board',
+          memberSessionId: command.memberSessionId ?? 'root',
           administrator: command.administrator ?? OPERATOR,
           coordinatorSessionId: command.coordinatorSessionId ?? 'successor',
+          replacementRootSessionId: command.replacementRootSessionId ?? 'external',
           requestId,
           at,
         },
@@ -692,8 +880,10 @@ describe('TaskBoardMembershipService', () => {
         sessions.map(candidate => (candidate.id === 'external' ? { ...candidate, active: false } : candidate)),
         {
           boardId: 'board',
+          memberSessionId: 'root',
           administrator: OPERATOR,
           coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'external',
           requestId: 'stopped-root',
           at,
         },
@@ -707,8 +897,10 @@ describe('TaskBoardMembershipService', () => {
         sessions.map(candidate => (candidate.id === 'external' ? { ...candidate, runtimeGeneration: 2 } : candidate)),
         {
           boardId: 'board',
+          memberSessionId: 'root',
           administrator: OPERATOR,
           coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'external',
           requestId: 'revived-root',
           at,
         },
@@ -721,13 +913,119 @@ describe('TaskBoardMembershipService', () => {
     should(() => replace(verified, { coordinatorSessionId: 'coordinator' }, 'already-bound')).throw(TaskBoardError);
   });
 
-  it('should replay one succession and refuse a second payload under the same request id', () => {
+  it('should refuse rather than silently elevate an ordinary bound member', () => {
+    // Arrange — this worker belongs to the expected replacement tree and presents its real capability.
+    const subject = services();
+    const requested = subject.children.request(verifiedHandover(subject), sessions, {
+      source: externalCredential,
+      targetSessionId: 'successor',
+      role: 'worker',
+      requestId: 'ordinary-member-request',
+      at,
+    });
+    const approved = subject.children.approve(
+      requested.state,
+      sessions,
+      {
+        coordinator: coordinatorCredential,
+        grantRequestId: 'ordinary-member-request',
+        requestId: 'ordinary-member-approve',
+        at,
+      },
+      () => ({
+        grantId: 'ordinary-member-grant',
+        capability: { value: 'worker-secret', hash: hash('worker-secret') },
+      }),
+    );
+    if (!approved.result.approved) throw new Error('fixture worker child grant did not approve');
+    const workerCredential = {
+      sessionId: 'successor',
+      runtimeGeneration: 1,
+      capabilityHash: hash('worker-secret'),
+    };
+
+    // Act + Assert — matching material is insufficient: only the exact coordinator child grant promotes.
+    should(() =>
+      subject.membership.replaceCoordinator(
+        approved.state,
+        sessions,
+        {
+          boardId: 'board',
+          memberSessionId: 'root',
+          administrator: OPERATOR,
+          coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'external',
+          requestId: 'ordinary-member-replacement',
+          at,
+        },
+        { grantId: 'ordinary-member-promotion', capability: { value: 'worker-secret', hash: hash('worker-secret') } },
+      ),
+    ).throw(TaskBoardError);
+    should(subject.authorization.authorize(approved.state, sessions, workerCredential, 'read')).match({
+      grantId: 'ordinary-member-grant',
+      role: 'worker',
+    });
+    should(() => subject.authorization.authorize(approved.state, sessions, workerCredential, 'grant_approve')).throw(
+      TaskBoardError,
+    );
+  });
+
+  it('should refuse a replacement whose live binding belongs to another board', () => {
+    // Arrange — every promotion term is valid except the binding's board id. Keep the matching child
+    // grant on this board so removing that one boundary would silently make the replacement succeed.
+    const subject = services();
+    const withOther = new TaskBoardCreationService().create(
+      grantedCoordinator(subject),
+      sessions,
+      { creatorSessionId: 'other-root', coordinatorSessionId: 'other-coordinator', requestId: 'other-create', at },
+      {
+        boardId: 'other-board',
+        creatorGrantId: 'other-root-grant',
+        creatorCapability: { value: 'other-root-secret', hash: hash('other-root-secret') },
+        coordinatorGrantId: 'other-coordinator-grant',
+        coordinatorCapability: { value: 'other-coordinator-secret', hash: hash('other-coordinator-secret') },
+      },
+    ).state;
+    const crossBound: TaskBoardRepositoryState = {
+      ...withOther,
+      bindings: withOther.bindings.map(binding =>
+        binding.sessionId === 'successor' ? { ...binding, boardId: 'other-board' } : binding,
+      ),
+    };
+
+    // Act + Assert — ancestry cannot carry authority across the board boundary.
+    should(() =>
+      subject.membership.replaceCoordinator(
+        crossBound,
+        sessions,
+        {
+          boardId: 'board',
+          memberSessionId: 'root',
+          administrator: OPERATOR,
+          coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'external',
+          requestId: 'cross-board-replacement',
+          at,
+        },
+        {
+          grantId: 'cross-board-promotion',
+          capability: { value: 'successor-secret', hash: hash('successor-secret') },
+        },
+      ),
+    ).throw(TaskBoardError);
+    should(crossBound.bindings.find(binding => binding.sessionId === 'successor')?.boardId).equal('other-board');
+    should(crossBound.boards.find(candidate => candidate.id === 'board')?.coordinatorGrantId).equal(
+      'coordinator-grant',
+    );
+  });
+
+  it('should replay one succession and conflict on every changed payload identity under the same request id', () => {
     // Arrange
     const subject = services();
     const state = succeeded(subject);
     const material = {
       grantId: 'successor-grant-2',
-      capability: { value: 'successor-secret-2', hash: hash('successor-secret-2') },
+      capability: { value: 'successor-secret', hash: hash('successor-secret') },
     };
 
     // Act
@@ -736,8 +1034,10 @@ describe('TaskBoardMembershipService', () => {
       sessions,
       {
         boardId: 'board',
+        memberSessionId: 'root',
         administrator: OPERATOR,
         coordinatorSessionId: 'successor',
+        replacementRootSessionId: 'external',
         requestId: 'succeed',
         at,
       },
@@ -763,14 +1063,244 @@ describe('TaskBoardMembershipService', () => {
         sessions,
         {
           boardId: 'board',
+          memberSessionId: 'root',
+          administrator: OPERATOR,
+          coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'external',
+          requestId: 'succeed',
+          at,
+        },
+        {
+          grantId: 'unused-on-replay',
+          capability: { value: 'lost-seed-secret', hash: hash('lost-seed-secret') },
+        },
+      ),
+    ).throw(/recorded coordinator capability can no longer be recovered/u);
+    should(() =>
+      subject.membership.replaceCoordinator(
+        state,
+        sessions,
+        {
+          boardId: 'board',
+          memberSessionId: 'root',
           administrator: OPERATOR,
           coordinatorSessionId: 'successor-child',
+          replacementRootSessionId: 'external',
           requestId: 'succeed',
           at,
         },
         material,
       ),
-    ).throw(TaskBoardError);
+    ).throw(/coordinator replacement request id was reused/u);
+    should(() =>
+      subject.membership.replaceCoordinator(
+        state,
+        sessions,
+        {
+          boardId: 'board',
+          memberSessionId: 'root',
+          administrator: OPERATOR,
+          coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'root',
+          requestId: 'succeed',
+          at,
+        },
+        material,
+      ),
+    ).throw(/coordinator replacement request id was reused/u);
+    should(() =>
+      subject.membership.replaceCoordinator(
+        state,
+        sessions,
+        {
+          boardId: 'board',
+          memberSessionId: 'external',
+          administrator: OPERATOR,
+          coordinatorSessionId: 'successor',
+          replacementRootSessionId: 'external',
+          requestId: 'succeed',
+          at,
+        },
+        material,
+      ),
+    ).throw(/coordinator replacement request id was reused/u);
+    for (const changedSessions of [
+      sessions.map(candidate =>
+        candidate.id === 'successor' ? { ...candidate, incarnation: 'successor-reincarnated' } : candidate,
+      ),
+      sessions.map(candidate => (candidate.id === 'successor' ? { ...candidate, runtimeGeneration: 2 } : candidate)),
+    ]) {
+      should(() =>
+        subject.membership.replaceCoordinator(
+          state,
+          changedSessions,
+          {
+            boardId: 'board',
+            memberSessionId: 'root',
+            administrator: OPERATOR,
+            coordinatorSessionId: 'successor',
+            replacementRootSessionId: 'external',
+            requestId: 'succeed',
+            at,
+          },
+          material,
+        ),
+      ).throw(/coordinator replacement request id was reused/u);
+    }
+  });
+
+  it('should require zero, one, or multiple live ancestry roots to resolve to exactly one', () => {
+    // Arrange
+    const subject = services();
+    const verified = verifiedHandover(subject);
+    const material = {
+      grantId: 'ancestry-grant',
+      capability: { value: 'ancestry-secret', hash: hash('ancestry-secret') },
+    };
+    const replace = (
+      directory: readonly TaskBoardSession[],
+      target: string,
+      requestId: string,
+      replacementRootSessionId = 'external',
+    ) =>
+      subject.membership.replaceCoordinator(
+        verified,
+        directory,
+        {
+          boardId: 'board',
+          memberSessionId: 'root',
+          administrator: OPERATOR,
+          coordinatorSessionId: target,
+          replacementRootSessionId,
+          requestId,
+          at,
+        },
+        material,
+      );
+    const withoutRoot = sessions.map(candidate =>
+      candidate.id === 'successor' ? { ...candidate, parentSessionId: 'stranger' } : candidate,
+    );
+    const withNestedRoots = sessions.map(candidate =>
+      candidate.id === 'external' ? { ...candidate, parentSessionId: 'root' } : candidate,
+    );
+
+    // Act
+    const one = replace(sessions, 'successor', 'one-root');
+
+    // Assert
+    should(one.state.boards[0]?.grants.find(grant => grant.id === 'ancestry-grant')?.membershipRootSessionId).equal(
+      'external',
+    );
+    should(() => replace(withoutRoot, 'successor', 'zero-roots')).throw(/exactly one expected live membership root/u);
+    should(() => replace(withNestedRoots, 'successor', 'multiple-roots')).throw(
+      /exactly one expected live membership root/u,
+    );
+    should(() => replace(sessions, 'successor', 'wrong-root', 'root')).throw(/expected live membership root/u);
+  });
+
+  it('should allow distinct operation ids to move the coordinator A to B to A to B', () => {
+    // Arrange
+    const subject = services();
+    const replace = (
+      state: TaskBoardRepositoryState,
+      target: 'coordinator' | 'replacement',
+      requestId: string,
+      suffix: string,
+    ) =>
+      subject.membership.replaceCoordinator(
+        state,
+        sessions,
+        {
+          boardId: 'board',
+          memberSessionId: 'root',
+          administrator: OPERATOR,
+          coordinatorSessionId: target,
+          replacementRootSessionId: 'root',
+          requestId,
+          at,
+        },
+        {
+          grantId: `${target}-grant-${suffix}`,
+          capability: { value: `${target}-secret-${suffix}`, hash: hash(`${target}-secret-${suffix}`) },
+        },
+      );
+
+    // Act — A is the creation-time coordinator.
+    const movedToB = replace(createState(), 'replacement', 'move-1', '1');
+    const movedBackToA = replace(movedToB.state, 'coordinator', 'move-2', '2');
+    const movedAgainToB = replace(movedBackToA.state, 'replacement', 'move-3', '3');
+
+    // Assert
+    should(movedAgainToB.result.membership.sessionId).equal('replacement');
+    should(movedAgainToB.state.boards[0]?.coordinatorSessionId).equal('replacement');
+    should(
+      movedAgainToB.state.boards[0]?.appliedOperations
+        .filter(operation => operation.kind === 'coordinator.replace')
+        .map(operation => operation.requestId),
+    ).deepEqual(['move-1', 'move-2', 'move-3']);
+  });
+
+  it('should refuse relinquish when it would revoke the coordinator but a live tree survives', () => {
+    // Arrange — the operator deliberately put the key back under the root that is about to retire.
+    const subject = services();
+    const misplaced = subject.membership.replaceCoordinator(
+      verifiedHandover(subject),
+      sessions,
+      {
+        boardId: 'board',
+        memberSessionId: 'root',
+        administrator: OPERATOR,
+        coordinatorSessionId: 'replacement',
+        replacementRootSessionId: 'root',
+        requestId: 'misplaced-coordinator',
+        at,
+      },
+      { grantId: 'misplaced-grant', capability: { value: 'misplaced-secret', hash: hash('misplaced-secret') } },
+    );
+
+    // Act + Assert — `external` is still a live surviving membership root, so the operator must move
+    // the coordinator into that tree before the old root can leave.
+    should(() =>
+      subject.membership.relinquish(misplaced.state, sessions, {
+        member: rootCredential,
+        requestId: 'unsafe-relinquish',
+        at,
+      }),
+    ).throw(/move the coordinator into a surviving membership tree first/u);
+  });
+
+  it('should preserve last-live-root wind-down when no live membership tree would survive', () => {
+    // Arrange — the accepted replacement root stopped after verification. Its grant is recorded, but
+    // it is not a live tree, so no continuing board is left coordinator-less by this wind-down.
+    const subject = services();
+    const misplaced = subject.membership.replaceCoordinator(
+      verifiedHandover(subject),
+      sessions,
+      {
+        boardId: 'board',
+        memberSessionId: 'root',
+        administrator: OPERATOR,
+        coordinatorSessionId: 'replacement',
+        replacementRootSessionId: 'root',
+        requestId: 'wind-down-coordinator',
+        at,
+      },
+      { grantId: 'wind-down-grant', capability: { value: 'wind-down-secret', hash: hash('wind-down-secret') } },
+    );
+    const noSurvivingTree = sessions.map(candidate =>
+      candidate.id === 'external' ? { ...candidate, active: false } : candidate,
+    );
+
+    // Act
+    const actual = subject.membership.relinquish(misplaced.state, noSurvivingTree, {
+      member: rootCredential,
+      requestId: 'last-root-wind-down',
+      at,
+    });
+
+    // Assert
+    should(actual.result).match({ relinquished: true, sessionId: 'root' });
+    should(actual.state.boards[0]?.grants.find(grant => grant.id === 'wind-down-grant')?.active).be.false();
   });
 
   it('should fence pending grants and invitations when coordinator replacement changes epochs', () => {
@@ -790,8 +1320,10 @@ describe('TaskBoardMembershipService', () => {
       sessions,
       {
         boardId: 'board',
+        memberSessionId: 'root',
         administrator: OPERATOR,
         coordinatorSessionId: 'successor',
+        replacementRootSessionId: 'external',
         requestId: 'fenced-replacement',
         at,
       },
@@ -852,8 +1384,10 @@ describe('TaskBoardMembershipService', () => {
       sessions,
       {
         boardId: 'board',
+        memberSessionId: 'root',
         administrator: OPERATOR,
         coordinatorSessionId: 'successor',
+        replacementRootSessionId: 'external',
         requestId: 'succeed-beside-another-board',
         at,
       },
@@ -902,6 +1436,8 @@ describe('TaskBoardMembershipService', () => {
       'invitation.approved',
       'invitation.accepted',
       'invitation.verified',
+      'grant.requested',
+      'grant.approved',
       'coordinator.replaced',
       'membership.relinquished',
     ]);
@@ -954,7 +1490,7 @@ describe('TaskBoardMembershipService', () => {
     );
   });
 
-  it('should still admit new members after the succession, so the board is not bricked', () => {
+  it('should keep serving after the full invite, verify, replace, relinquish succession ladder', () => {
     // Arrange
     const subject = services();
     const state = relinquished(subject);
@@ -994,7 +1530,10 @@ describe('TaskBoardMembershipService', () => {
         requestId: 'post-succession-child-approve',
         at,
       },
-      { grantId: 'successor-child-grant', capability: { value: 'successor-child', hash: hash('successor-child') } },
+      () => ({
+        grantId: 'successor-child-grant',
+        capability: { value: 'successor-child', hash: hash('successor-child') },
+      }),
     );
 
     // Assert

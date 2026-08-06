@@ -11,13 +11,17 @@ import {
 } from './domain-helpers.ts';
 import { TaskBoardError } from './error.ts';
 import {
+  actionsForTaskBoardRole,
   CURRENT_COORDINATOR_ACTIONS,
   isCurrentCoordinator,
+  isGrantWithinActiveMembershipTree,
   liveMembershipRootGrant,
+  sameTaskBoardActions,
   sessionLineage,
 } from './policy.ts';
 import type {
   TaskBoard,
+  TaskBoardAppliedOperation,
   TaskBoardAuthorization,
   TaskBoardCredential,
   TaskBoardGrant,
@@ -35,14 +39,18 @@ export interface RelinquishMembershipCommand {
 
 export interface ReplaceCoordinatorCommand {
   readonly boardId: string;
+  /** The protocol member locator used to resolve `boardId`; part of the idempotency payload. */
+  readonly memberSessionId: string;
   /**
    * The principal taking the coordinator's authority away. It is a non-session principal by
    * construction: the operator holds the board admin capability, and no member of a board — not even a
    * membership root — may re-appoint the coordinator that governs it.
    */
   readonly administrator: TaskBoardAuthorization;
-  /** The unbound live descendant of a live membership root which becomes the new coordinator. */
+  /** The live descendant which becomes the new coordinator. */
   readonly coordinatorSessionId: string;
+  /** The exact live root whose tree the replacement must belong to. */
+  readonly replacementRootSessionId: string;
   readonly requestId: string;
   readonly at: string;
 }
@@ -53,6 +61,32 @@ export interface ReplaceCoordinatorMaterial {
 }
 
 export type CoordinatorReplacementResult = { readonly replaced: true; readonly membership: TaskBoardMembership };
+
+export const CHILD_GRANT_PROMOTION_REVOKE_REASON = 'child grant promoted to coordinator';
+
+/**
+ * A relinquish replay is trusted only when the durable operation, its retired actor grant, and the
+ * capability-derived subject all describe the same original decision. This check deliberately does
+ * not require a live binding: the successful operation removes that binding before its HTTP receipt
+ * can be delivered.
+ */
+export function isExactRelinquishReplay(
+  operation: TaskBoardAppliedOperation,
+  grant: TaskBoardGrant,
+  member: TaskBoardCredential,
+): boolean {
+  return (
+    operation.kind === 'membership.relinquish' &&
+    operation.actorGrantId === grant.id &&
+    operation.actorSessionId === grant.sessionId &&
+    operation.actorRuntimeGeneration === grant.runtimeGeneration &&
+    operation.resultSessionId === grant.sessionId &&
+    member.sessionId === grant.sessionId &&
+    member.runtimeGeneration === grant.runtimeGeneration &&
+    member.capabilityHash === grant.capabilityHash &&
+    operation.fingerprint === taskBoardFingerprint(['membership.relinquish', grant.id, grant.runtimeGeneration])
+  );
+}
 
 /**
  * Board-owned, append-only and deduplicated: a session retires once and stays retired.
@@ -96,6 +130,33 @@ export class TaskBoardMembershipService {
     command: RelinquishMembershipCommand,
   ): TaskBoardMutation<TaskBoardRelinquishResponse> {
     const requestId = requireTaskBoardRequestId(command.requestId);
+    /**
+     * Resolve an exact committed replay before live authorization. A successful relinquish removes
+     * its source binding, so asking `authorize` first makes a crash after commit but before receipt
+     * permanently unrecoverable. The historical capability is identity only here: it can return a
+     * result solely when the persisted operation and retired actor grant pass every pin below.
+     */
+    const replayCandidates = state.boards.flatMap(board =>
+      board.grants
+        .filter(
+          candidate =>
+            candidate.sessionId === command.member.sessionId &&
+            candidate.runtimeGeneration === command.member.runtimeGeneration &&
+            candidate.capabilityHash === command.member.capabilityHash,
+        )
+        .flatMap(grant =>
+          board.appliedOperations
+            .filter(operation => operation.requestId === requestId)
+            .map(operation => ({ grant, operation })),
+        ),
+    );
+    if (replayCandidates.length > 0) {
+      const replay = replayCandidates.length === 1 ? replayCandidates[0] : undefined;
+      if (replay === undefined || !isExactRelinquishReplay(replay.operation, replay.grant, command.member)) {
+        throw new TaskBoardError('conflict', 'the membership relinquish request id was reused');
+      }
+      return { state, result: { relinquished: true, sessionId: replay.grant.sessionId, sessionStopped: false } };
+    }
     const authorization = this.authorization.authorize(state, sessions, command.member, 'membership_relinquish');
     const board = requireBoard(state, authorization.boardId);
     const grant = board.grants.find(candidate => candidate.id === authorization.grantId);
@@ -106,7 +167,7 @@ export class TaskBoardMembershipService {
     ]);
     const replay = board.appliedOperations.find(operation => operation.requestId === requestId);
     if (replay !== undefined) {
-      if (replay.fingerprint !== fingerprint || replay.resultSessionId !== authorization.sessionId)
+      if (grant === undefined || !isExactRelinquishReplay(replay, grant, command.member))
         throw new TaskBoardError('conflict', 'the membership relinquish request id was reused');
       return { state, result: { relinquished: true, sessionId: authorization.sessionId, sessionStopped: false } };
     }
@@ -143,6 +204,28 @@ export class TaskBoardMembershipService {
         .filter(candidate => candidate.active && candidate.membershipRootSessionId === grant.sessionId)
         .map(candidate => candidate.id),
     );
+    const currentCoordinator = board.grants.find(candidate => candidate.id === board.coordinatorGrantId);
+    const revokesCurrentCoordinator =
+      currentCoordinator !== undefined &&
+      isCurrentCoordinator(board, currentCoordinator) &&
+      revokedIds.has(currentCoordinator.id);
+    const survivingLiveRoot = board.grants.find(candidate => {
+      if (revokedIds.has(candidate.id)) return false;
+      return (
+        liveMembershipRootGrant({
+          board,
+          bindings: state.bindings,
+          sessions,
+          sessionId: candidate.sessionId,
+        })?.id === candidate.id
+      );
+    });
+    if (revokesCurrentCoordinator && survivingLiveRoot !== undefined) {
+      throw new TaskBoardError(
+        'forbidden',
+        'move the coordinator into a surviving membership tree first, before relinquishing this one',
+      );
+    }
     /**
      * Every session this tree ever held, not merely the ones still active. A coordinator replaced one
      * phase earlier is already revoked by the time the old root relinquishes, and it is precisely the
@@ -229,8 +312,10 @@ export class TaskBoardMembershipService {
     const fingerprint = taskBoardFingerprint([
       'coordinator.replace',
       board.id,
+      command.memberSessionId,
       administrator.role,
       replacement.id,
+      command.replacementRootSessionId,
       replacement.incarnation,
       replacement.runtimeGeneration,
     ]);
@@ -241,6 +326,9 @@ export class TaskBoardMembershipService {
       const grant = board.grants.find(candidate => candidate.id === replay.resultGrantId);
       if (grant === undefined || !grant.active)
         throw new TaskBoardError('unavailable', 'the coordinator replacement has no active grant');
+      if (grant.capabilityHash !== material.capability.hash) {
+        throw new TaskBoardError('unavailable', 'the recorded coordinator capability can no longer be recovered');
+      }
       return { state, result: { replaced: true, membership: membershipForGrant(grant) } };
     }
     const lineage = sessionLineage(sessions, replacement.id);
@@ -249,34 +337,80 @@ export class TaskBoardMembershipService {
      * to resolve to a running session at the grant's exact incarnation and runtime generation, and to
      * still hold a current binding. A root grant outlives the pane it was written for, and a
      * coordinator rooted in a tree that has already stopped is a board whose only approval key belongs
-     * to nobody. During a two-root handover this is also what puts the key in the surviving tree: name
-     * a descendant of the retiring root and the relinquish that follows revokes it.
+     * to nobody. Every live root in the ancestry is collected: silently choosing the nearest would make
+     * the stated exactly-one boundary false and make later retirement depend on an implicit tie-break.
      */
-    const root =
+    const roots =
       lineage === null
-        ? null
-        : (lineage
+        ? []
+        : lineage
             .slice(1)
             .map(ancestor =>
               liveMembershipRootGrant({ board, bindings: state.bindings, sessions, sessionId: ancestor }),
             )
-            .find(candidate => candidate !== null) ?? null);
+            .filter((candidate): candidate is TaskBoardGrant => candidate !== null);
+    const root: TaskBoardGrant | null = roots.length === 1 ? (roots[0] ?? null) : null;
+    const replacementBinding = state.bindings.find(binding => binding.sessionId === replacement.id);
+    const replacementGrant =
+      replacementBinding === undefined
+        ? undefined
+        : board.grants.find(candidate => candidate.id === replacementBinding.grantId);
+    /**
+     * A handover grants the coordinator descendant BEFORE its first launch. Replacement promotes that
+     * exact child capability into a fresh coordinator grant: the old grant remains as revoked history,
+     * while the already-running pane keeps one byte-identical secret that gains coordinator authority
+     * atomically. An arbitrary existing membership is never silently elevated.
+     */
+    const promotion =
+      replacementBinding !== undefined &&
+      replacementGrant !== undefined &&
+      replacementBinding.boardId === board.id &&
+      replacementBinding.grantId === replacementGrant.id &&
+      replacementBinding.sessionId === replacement.id &&
+      replacementBinding.sessionIncarnation === replacement.incarnation &&
+      replacementBinding.runtimeGeneration === replacement.runtimeGeneration &&
+      replacementBinding.role === 'coordinator' &&
+      sameTaskBoardActions(replacementBinding.allowedActions, actionsForTaskBoardRole('coordinator')) &&
+      replacementBinding.boardEpoch === board.boardEpoch &&
+      replacementBinding.coordinatorEpoch === board.coordinatorEpoch &&
+      replacementBinding.capability === material.capability.value &&
+      replacementGrant.active &&
+      replacementGrant.sessionId === replacement.id &&
+      replacementGrant.sessionIncarnation === replacement.incarnation &&
+      replacementGrant.runtimeGeneration === replacement.runtimeGeneration &&
+      replacementGrant.parentSessionId === replacement.parentSessionId &&
+      replacementGrant.role === 'coordinator' &&
+      sameTaskBoardActions(replacementGrant.allowedActions, actionsForTaskBoardRole('coordinator')) &&
+      replacementGrant.membershipRootSessionId === command.replacementRootSessionId &&
+      replacementGrant.boardEpoch === board.boardEpoch &&
+      replacementGrant.coordinatorEpoch === board.coordinatorEpoch &&
+      replacementGrant.capabilityHash === material.capability.hash &&
+      isGrantWithinActiveMembershipTree(board, replacementGrant, sessions)
+        ? replacementGrant
+        : null;
     if (
       !replacement.active ||
       replacement.parentSessionId === null ||
       lineage === null ||
       root === null ||
-      state.bindings.some(binding => binding.sessionId === replacement.id)
+      root.sessionId !== command.replacementRootSessionId ||
+      (replacementBinding !== undefined && promotion === null)
     ) {
       throw new TaskBoardError(
         'forbidden',
-        'the replacement coordinator must be an unbound live descendant of exactly one live membership root',
+        'the replacement coordinator must belong to exactly one expected live membership root and be unbound or hold its current coordinator child grant',
       );
     }
     const previous = board.grants.find(candidate => candidate.id === board.coordinatorGrantId);
     if (previous === undefined || !isCurrentCoordinator(board, previous))
       throw new TaskBoardError('unavailable', 'the board has no current coordinator to replace');
-    if (board.grants.some(grant => grant.id === material.grantId || grant.capabilityHash === material.capability.hash))
+    if (
+      board.grants.some(
+        grant =>
+          grant.id === material.grantId ||
+          (grant.capabilityHash === material.capability.hash && grant.id !== promotion?.id),
+      )
+    )
       throw new TaskBoardError('conflict', 'the replacement coordinator material is already in use');
     const boardEpoch = board.boardEpoch + 1;
     const coordinatorEpoch = board.coordinatorEpoch + 1;
@@ -298,13 +432,13 @@ export class TaskBoardMembershipService {
     };
     const grants = [
       ...board.grants.map(candidate =>
-        candidate.id === previous.id
+        candidate.id === previous.id || candidate.id === promotion?.id
           ? {
               ...candidate,
               active: false,
               revokedAt: command.at,
               revokedBySessionId: null,
-              revokeReason: 'coordinator replaced',
+              revokeReason: candidate.id === previous.id ? 'coordinator replaced' : CHILD_GRANT_PROMOTION_REVOKE_REASON,
             }
           : candidate.active
             ? { ...candidate, boardEpoch, coordinatorEpoch }

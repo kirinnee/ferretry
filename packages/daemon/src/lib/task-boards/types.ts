@@ -289,6 +289,28 @@ export interface TaskBoardSecret {
   readonly hash: string;
 }
 
+/** Every fact a recoverable coordinator capability is cryptographically bound to. */
+export interface TaskBoardCoordinatorReplacementCapabilityIdentity {
+  readonly requestId: string;
+  readonly boardId: string;
+  readonly memberSessionId: string;
+  readonly replacementSessionId: string;
+  readonly replacementRootSessionId: string;
+  readonly replacementSessionIncarnation: string;
+  readonly replacementRuntimeGeneration: number;
+}
+
+/**
+ * Re-derives the capability for one coordinator replacement operation.
+ *
+ * Unlike `TaskBoardCredentialIssuer.capability`, this material must survive a commit followed by a
+ * failed delivery and a daemon restart. The implementation therefore owns a daemon-durable secret;
+ * the caller-controlled request id is identity, never key material.
+ */
+export interface TaskBoardCoordinatorReplacementCapabilityDeriver {
+  derive(identity: TaskBoardCoordinatorReplacementCapabilityIdentity): Promise<TaskBoardSecret>;
+}
+
 export interface TaskBoardErrorShape {
   readonly code: TaskBoardErrorCode;
   readonly message: string;

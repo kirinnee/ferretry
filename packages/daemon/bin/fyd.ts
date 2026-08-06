@@ -184,6 +184,7 @@ import {
   FileTaskBoardRepository,
   NodeTaskBoardCredentialIssuer,
   StateBoardAdminCapability,
+  StateTaskBoardCoordinatorReplacementCapability,
   StorageTaskBoardSessionDirectory,
 } from '../src/adapters/task-boards/index.ts';
 import {
@@ -3110,6 +3111,7 @@ function createTaskBoardSubsystem(
       readState: async id => await storage.readState(id as SessionId),
     }),
     issuer: new NodeTaskBoardCredentialIssuer(),
+    coordinatorReplacementCapabilities: new StateTaskBoardCoordinatorReplacementCapability(paths, files),
     now: () => clock.now(),
     operatorCapabilityHash: async () => await operator.hash(),
     deliver: async (sessionId, variables) => {

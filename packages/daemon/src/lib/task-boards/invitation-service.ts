@@ -60,6 +60,8 @@ export interface AcceptExternalInvitationMaterial {
   readonly capability: TaskBoardSecret;
 }
 
+export type AcceptExternalInvitationMaterialFactory = () => AcceptExternalInvitationMaterial;
+
 /** A replacement root records this only after it has used its delivered board capability. */
 export interface VerifyExternalInvitationCommand {
   readonly member: TaskBoardCredential;
@@ -72,7 +74,12 @@ export type ApprovalResult =
   | { readonly approved: false; readonly invitation: TaskBoardInvitationView };
 
 export type AcceptanceResult =
-  | { readonly accepted: true; readonly membership: TaskBoardMembership }
+  | {
+      readonly accepted: true;
+      readonly durableCapability: string;
+      readonly grantId: string;
+      readonly membership: TaskBoardMembership;
+    }
   | { readonly accepted: false; readonly invitation: TaskBoardInvitationView };
 
 export type VerificationResult = { readonly verified: true; readonly membership: TaskBoardMembership };
@@ -334,13 +341,27 @@ export class TaskBoardInvitationService {
     state: TaskBoardRepositoryState,
     sessions: readonly TaskBoardSession[],
     command: AcceptExternalInvitationCommand,
-    material: AcceptExternalInvitationMaterial,
+    materialForApply: AcceptExternalInvitationMaterialFactory,
   ): TaskBoardMutation<AcceptanceResult> {
     const requestId = requireTaskBoardRequestId(command.requestId);
     const target = requireTaskBoardSession(sessions, command.target.sessionId);
-    const invitation = state.boards
+    const invitations = state.boards
       .flatMap(board => board.invitations.map(candidate => ({ board, candidate })))
-      .find(({ candidate }) => candidate.targetSessionId === target.id && candidate.status === 'approved');
+      .filter(
+        ({ candidate }) =>
+          candidate.targetSessionId === target.id &&
+          (candidate.status === 'approved' || candidate.status === 'accepted'),
+      );
+    /**
+     * Replay is resolved BEFORE fresh-apply status. A committed accept changes `approved` to
+     * `accepted` and deletes its one-time proof, so filtering to approved invitations first would make
+     * the exact crash-recovery request impossible to replay. Prefer the candidate whose board already
+     * records this request id; only when there is no such operation may an approved candidate apply.
+     */
+    const replayedInvitation = invitations.find(({ board }) =>
+      board.appliedOperations.some(operation => operation.requestId === requestId),
+    );
+    const invitation = replayedInvitation ?? invitations.find(({ candidate }) => candidate.status === 'approved');
     if (invitation === undefined)
       throw new TaskBoardError('forbidden', 'the session has no approved external invitation');
     const board = invitation.board;
@@ -353,15 +374,32 @@ export class TaskBoardInvitationService {
     const replay = board.appliedOperations.find(operation => operation.requestId === requestId);
     if (replay !== undefined) {
       if (
+        replay.kind !== 'invitation.accept' ||
         replay.fingerprint !== fingerprint ||
         invitation.candidate.status !== 'accepted' ||
-        replay.resultGrantId === undefined
+        replay.resultGrantId === undefined ||
+        invitation.candidate.grantId !== replay.resultGrantId ||
+        replay.resultSessionId !== target.id
       )
         throw new TaskBoardError('conflict', 'the invitation acceptance request id was reused');
       const grant = board.grants.find(candidate => candidate.id === replay.resultGrantId);
-      if (grant === undefined)
-        throw new TaskBoardError('unavailable', 'the accepted invitation has no membership grant');
-      return { state, result: { accepted: true, membership: membershipForGrant(grant) } };
+      const binding = state.bindings.find(
+        candidate =>
+          candidate.boardId === board.id &&
+          candidate.grantId === replay.resultGrantId &&
+          candidate.sessionId === target.id,
+      );
+      if (grant === undefined || !grant.active || grant.sessionId !== target.id || binding === undefined)
+        throw new TaskBoardError('unavailable', 'the accepted invitation has no durable membership binding');
+      return {
+        state,
+        result: {
+          accepted: true,
+          durableCapability: binding.capability,
+          grantId: grant.id,
+          membership: membershipForGrant(grant),
+        },
+      };
     }
     const proof = state.invitationProofs.find(
       candidate => candidate.invitationRequestId === invitation.candidate.requestId,
@@ -411,6 +449,7 @@ export class TaskBoardInvitationService {
         result: { accepted: false, invitation: invitationView(expired) },
       };
     }
+    const material = materialForApply();
     if (board.grants.some(grant => grant.id === material.grantId || grant.capabilityHash === material.capability.hash))
       throw new TaskBoardError('conflict', 'the invitation membership material is already in use');
     const grant: TaskBoardGrant = {
@@ -474,7 +513,12 @@ export class TaskBoardInvitationService {
           candidate => candidate.invitationRequestId !== accepted.requestId,
         ),
       }),
-      result: { accepted: true, membership: membershipForGrant(grant) },
+      result: {
+        accepted: true,
+        durableCapability: material.capability.value,
+        grantId: grant.id,
+        membership: membershipForGrant(grant),
+      },
     };
   }
 

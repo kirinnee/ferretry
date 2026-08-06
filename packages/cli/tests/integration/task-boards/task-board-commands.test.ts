@@ -80,7 +80,15 @@ describe('the board gateway', () => {
       ],
       [{ command: 'mark-done', body: { sessionId: 's-1', enabled: true } }, membership, '/mark-done'],
       [
-        { command: 'coordinator-replace', body: { sessionId: 's-1', replacementSessionId: 's-2' } },
+        {
+          command: 'coordinator-replace',
+          body: {
+            requestId: 'replace-1',
+            sessionId: 's-1',
+            replacementSessionId: 's-2',
+            replacementRootSessionId: 'root-2',
+          },
+        },
         membership,
         '/coordinator/replace',
       ],
@@ -232,14 +240,21 @@ describe('fy task-board', () => {
 
     // Act
     await markDone.run('mark-done', 's-1', '--disable');
-    await replace.run('coordinator-replace', 's-1', 's-2');
+    await replace.run('coordinator-replace', 's-1', 's-2', 'root-2');
     await revoke.run('revoke', 's-1', 's-2', '--reason', 'left the project');
 
     // Assert
     should(markDone.gateway.sent).eql({ command: 'mark-done', body: { sessionId: 's-1', enabled: false } });
-    should(replace.gateway.sent).eql({
+    // The replacement command generates its own nonblank requestId (board-command.ts), so match it
+    // rather than asserting a fixed value; replacementRootSessionId is the fixed root passed in.
+    should(replace.gateway.sent).match({
       command: 'coordinator-replace',
-      body: { sessionId: 's-1', replacementSessionId: 's-2' },
+      body: {
+        requestId: /^[0-9a-f-]+$/,
+        sessionId: 's-1',
+        replacementSessionId: 's-2',
+        replacementRootSessionId: 'root-2',
+      },
     });
     should(revoke.gateway.sent).eql({
       command: 'revoke',

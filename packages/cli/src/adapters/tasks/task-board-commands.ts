@@ -119,8 +119,9 @@ export function registerTaskBoardCommands(program: Command, dependencies: TaskBo
     .description('replace a board member with another session')
     .argument('<member>', 'the current board member')
     .argument('<replacement>', 'the replacement session')
-    .action(async (member: string, replacement: string) => {
-      await controller.run(coordinatorReplaceCommand(member, replacement));
+    .argument('<replacement-root>', 'the live membership root whose tree contains the replacement')
+    .action(async (member: string, replacement: string, replacementRoot: string) => {
+      await controller.run(coordinatorReplaceCommand(member, replacement, replacementRoot));
     });
 
   group

@@ -1,4 +1,3 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import {
   TaskBoardCreateResponseSchema,
@@ -8,6 +7,7 @@ import {
   TaskBoardRelinquishResponseSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -15,8 +15,8 @@ import {
   BOARD_CAPABILITY_VARIABLE,
   BOARD_INVITATION_CAPABILITY_VARIABLE,
   childGrantRequester,
-  taskBoardTaskActionAuthorizer,
   taskBoardRoutes,
+  taskBoardTaskActionAuthorizer,
 } from '../../../../src/lib/runtime/mounts/task-boards.ts';
 import { isTaskBoardError, TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
@@ -42,6 +42,8 @@ const FLEET = [
   boardSession({ id: 'coordinator', parentSessionId: 'root', mode: 'auto' }),
   boardSession({ id: 'grandchild', parentSessionId: 'coordinator', mode: 'auto' }),
   boardSession({ id: 'outsider' }),
+  boardSession({ id: 'successor', parentSessionId: 'outsider', mode: 'auto' }),
+  boardSession({ id: 'successor-child', parentSessionId: 'outsider', mode: 'auto' }),
 ];
 
 const PREFIX = '/v1/task-boards';
@@ -285,19 +287,29 @@ describe('the task board membership mount', () => {
       { grantRequestId: pending.requestId },
       peer(world.capabilityFor('coordinator') ?? ''),
     );
+    const firstCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const replayed = await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: pending.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const replayedCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
 
     // Assert
     should(pending.status).equal('pending');
     should(pending.requestedRole).equal('worker');
     const view = TaskBoardGrantRequestViewSchema.parse(jsonBody(approved));
     should(view.status).equal('approved');
+    should(TaskBoardGrantRequestViewSchema.parse(jsonBody(replayed)).status).equal('approved');
+    should(replayedCapability).equal(firstCapability);
     // The new member holds a working capability, delivered to its own environment.
     should(world.delivered.at(-1)).eql([
       'grandchild',
       { [BOARD_CAPABILITY_VARIABLE]: world.capabilityFor('grandchild') ?? '' },
     ]);
     const membership = TaskBoardMembershipSchema.parse(
-      jsonBody(await get(world, '/membership', peer(world.capabilityFor('grandchild') ?? ''))),
+      jsonBody(await get(world, '/membership', peer(replayedCapability))),
     );
     should(membership.role).equal('worker');
   });
@@ -331,6 +343,60 @@ describe('the task board membership mount', () => {
     // One intent, not two: the second ask replayed the first.
     should(reAsked.requestId).equal(atStart.requestId);
     should(world.state.boards.flatMap(board => board.childGrantIntents)).have.length(1);
+  });
+
+  it('should recover child-grant delivery from its committed binding before the child starts', async () => {
+    // Arrange
+    const world = await withBoard();
+    const pending = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'grandchild', role: 'coordinator' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    world.deliveryFailure = new Error('the first pre-launch environment delivery failed');
+
+    // Act
+    const failed = await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: pending.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const committedCapability = world.capabilityFor('grandchild') ?? '';
+    const mintCountAfterCommit = world.capabilityMintCount;
+    const committedState = world.state;
+    world.deliveryFailure = undefined;
+    world.state = {
+      ...committedState,
+      bindings: committedState.bindings.filter(binding => binding.sessionId !== 'grandchild'),
+    };
+    const missingBinding = await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: pending.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    world.state = committedState;
+    const recovered = await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: pending.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const deliveredCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+
+    // Assert
+    should(failed.status).equal(500);
+    should(missingBinding.status).equal(503);
+    should(recovered.status).equal(200);
+    should(world.capabilityMintCount).equal(mintCountAfterCommit);
+    should(deliveredCapability).equal(committedCapability);
+    should((await get(world, '/membership', peer(deliveredCapability))).status).equal(200);
   });
 
   it('should raise the board’s own refusal when a start presents a capability naming no membership', async () => {
@@ -465,6 +531,59 @@ describe('the task board membership mount', () => {
     const membership = TaskBoardMembershipSchema.parse(jsonBody(accepted));
     should(membership.sessionId).equal('outsider');
     should(membership.role).equal('top_agent');
+  });
+
+  it('should recover invitation-accept delivery from the committed binding after a crash', async () => {
+    // Arrange
+    const world = await withBoard();
+    const invited = TaskBoardInvitationViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/invitations/request',
+          { targetSessionId: 'outsider' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/invitations/approve',
+      { invitationRequestId: invited.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const invitationCapability = world.delivered.at(-1)?.[1][BOARD_INVITATION_CAPABILITY_VARIABLE] ?? '';
+    const headers = {
+      'x-fy-session-board-capability': 'session:outsider',
+      'x-fy-board-invitation-capability': invitationCapability,
+    };
+    world.deliveryFailure = new Error('the first accepted-membership delivery failed after commit');
+
+    // Act — the first route call commits, then crashes; the identical retry has no one-time proof on disk.
+    const failed = await post(world, '/invitations/accept', {}, headers);
+    const committedCapability = world.capabilityFor('outsider') ?? '';
+    const mintCountAfterCommit = world.capabilityMintCount;
+    const committedState = world.state;
+    world.deliveryFailure = undefined;
+    world.state = {
+      ...committedState,
+      bindings: committedState.bindings.filter(binding => binding.sessionId !== 'outsider'),
+    };
+    const missingBinding = await post(world, '/invitations/accept', {}, headers);
+    world.state = committedState;
+    const recovered = await post(world, '/invitations/accept', {}, headers);
+    const deliveredCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const authenticated = await get(world, '/membership', peer(deliveredCapability));
+
+    // Assert — replay re-delivers the exact persisted binding, never the retry's newly minted material.
+    should(failed.status).equal(500);
+    should(missingBinding.status).equal(503);
+    should(recovered.status).equal(201);
+    should(world.capabilityMintCount).equal(mintCountAfterCommit);
+    should(deliveredCapability).equal(committedCapability);
+    should(authenticated.status).equal(200);
+    should(JSON.stringify(jsonBody(recovered))).not.containEql(deliveredCapability);
+    should(world.state.boards[0]?.invitations).match([{ requestId: invited.requestId, status: 'accepted' }]);
   });
 
   it('should refuse an acceptance that presents the wrong session credential', async () => {
@@ -608,7 +727,7 @@ describe('the task board membership mount', () => {
     );
   });
 
-  it('should let a membership root relinquish only after the replacement proves its capability works', async () => {
+  it('should recover a committed relinquish after its response is lost', async () => {
     // Arrange — the invitation flow is what produces a second membership root.
     const world = await withBoard();
     const invited = TaskBoardInvitationViewSchema.parse(
@@ -646,15 +765,87 @@ describe('the task board membership mount', () => {
     const replacementCapability = world.capabilityFor('outsider') ?? '';
     const verified = await post(world, '/invitations/verify', {}, peer(replacementCapability));
     should(verified.status).equal(200);
+    const beforeCoordinatorMove = await post(world, '/membership/relinquish', {}, peer(capability));
+    should(beforeCoordinatorMove.status).equal(403);
+    should(jsonBody(beforeCoordinatorMove).error).match(/move the coordinator into a surviving membership tree first/u);
+    const wrongTree = await post(
+      world,
+      '/coordinator/replace',
+      {
+        requestId: 'route-wrong-coordinator-tree',
+        sessionId: 'root',
+        replacementSessionId: 'grandchild',
+        replacementRootSessionId: 'outsider',
+      },
+      operator(world),
+    );
+    should(wrongTree.status).equal(403);
+    should(jsonBody(wrongTree).error).match(/expected live membership root/u);
+    const coordinatorGrant = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'successor', role: 'coordinator' },
+          peer(replacementCapability),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: coordinatorGrant.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const prelaunchCoordinatorCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    should((await get(world, '/membership', peer(prelaunchCoordinatorCapability))).status).equal(200);
+    const moved = await post(
+      world,
+      '/coordinator/replace',
+      {
+        requestId: 'route-handover-coordinator',
+        sessionId: 'root',
+        replacementSessionId: 'successor',
+        replacementRootSessionId: 'outsider',
+      },
+      operator(world),
+    );
+    should(moved.status).equal(200);
+    should(world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE]).equal(prelaunchCoordinatorCapability);
+    const proofIntent = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'successor-child', role: 'read' },
+          peer(replacementCapability),
+        ),
+      ),
+    );
+    const proved = await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: proofIntent.requestId },
+      peer(prelaunchCoordinatorCapability),
+    );
+    should(proved.status).equal(200);
+    world.transactionFailureAfterCommit = new Error('the relinquish committed before its HTTP receipt was lost');
 
-    // Act
+    // Act — the first attempt commits and removes the source binding, then loses its response. The
+    // identical retry must reach the durable operation through the retired grant rather than through
+    // the live-binding authorization path that can no longer succeed.
+    const failed = await post(world, '/membership/relinquish', {}, peer(capability));
+    const committedGeneration = world.state.boards[0]?.mutationGeneration;
     const response = await post(world, '/membership/relinquish', {}, peer(capability));
 
     // Assert
     const body = TaskBoardRelinquishResponseSchema.parse(jsonBody(response));
+    should(failed.status).equal(500);
+    should(response.status).equal(200);
     should(body.relinquished).be.true();
     should(body.sessionId).equal('root');
     should(body.sessionStopped).be.false();
+    should(world.state.boards[0]?.mutationGeneration).equal(committedGeneration);
     // The capability no longer authorizes anything: the grant behind it is revoked.
     should((await get(world, '/membership', peer(capability))).status).equal(403);
   });
@@ -712,15 +903,18 @@ describe('the task board membership mount', () => {
     ).be.rejectedWith(TaskBoardError);
   });
 
-  it('should refuse a relinquish that presents no capability', async () => {
+  it('should refuse a relinquish with no capability or no exact live-or-replay bearer', async () => {
     // Arrange
     const world = await withBoard();
 
     // Act
-    const response = await post(world, '/membership/relinquish', {});
+    const missing = await post(world, '/membership/relinquish', {});
+    const unknown = await post(world, '/membership/relinquish', {}, peer('not-a-board-capability'));
 
     // Assert
-    should(response.status).equal(401);
+    should(missing.status).equal(401);
+    should(unknown.status).equal(403);
+    should(jsonBody(unknown).error).equal('the presented board capability names no live membership or exact replay');
   });
 
   it('should report a document it refuses to read as unavailable rather than as no membership', async () => {
@@ -843,7 +1037,12 @@ describe('the task board membership mount, at its edges', () => {
     const response = await post(
       world,
       '/coordinator/replace',
-      { sessionId: 'root', replacementSessionId: 'grandchild' },
+      {
+        requestId: 'replace-grandchild',
+        sessionId: 'root',
+        replacementSessionId: 'grandchild',
+        replacementRootSessionId: 'root',
+      },
       operator(world),
     );
 
@@ -854,6 +1053,7 @@ describe('the task board membership mount, at its edges', () => {
     // The secret went to the new coordinator's environment and to nobody else's, and the response
     // carries no capability at all.
     should(world.delivered.at(-1)?.[0]).equal('grandchild');
+    should(JSON.stringify(body)).not.containEql(world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE]);
     should(JSON.stringify(body)).not.match(/[0-9a-f]{32}/u);
     // The old key is fenced: the previous coordinator can no longer approve anything.
     const refused = await post(world, '/child-grants/approve', { grantRequestId: 'anything' }, peer(before ?? ''));
@@ -866,13 +1066,20 @@ describe('the task board membership mount, at its edges', () => {
 
     // Act — a member's own board capability is not the operator's, whatever its role.
     const missing = await post(world, '/coordinator/replace', {
+      requestId: 'replace-grandchild',
       sessionId: 'root',
       replacementSessionId: 'grandchild',
+      replacementRootSessionId: 'root',
     });
     const member = await post(
       world,
       '/coordinator/replace',
-      { sessionId: 'root', replacementSessionId: 'grandchild' },
+      {
+        requestId: 'replace-grandchild',
+        sessionId: 'root',
+        replacementSessionId: 'grandchild',
+        replacementRootSessionId: 'root',
+      },
       { 'x-fy-board-admin-capability': world.capabilityFor('root') ?? '' },
     );
 
@@ -881,20 +1088,101 @@ describe('the task board membership mount, at its edges', () => {
     should(member.status).equal(403);
   });
 
-  it('should report a coordinator replacement naming a session on no board as not found', async () => {
+  it('should report a coordinator replacement naming an unknown member or replacement as not found', async () => {
     // Arrange
     const world = await withBoard();
 
     // Act
-    const response = await post(
+    const member = await post(
       world,
       '/coordinator/replace',
-      { sessionId: 'outsider', replacementSessionId: 'grandchild' },
+      {
+        requestId: 'replace-grandchild',
+        sessionId: 'outsider',
+        replacementSessionId: 'grandchild',
+        replacementRootSessionId: 'root',
+      },
+      operator(world),
+    );
+    const replacement = await post(
+      world,
+      '/coordinator/replace',
+      {
+        requestId: 'replace-ghost',
+        sessionId: 'root',
+        replacementSessionId: 'ghost',
+        replacementRootSessionId: 'root',
+      },
       operator(world),
     );
 
     // Assert
-    should(response.status).equal(404);
+    should(member.status).equal(404);
+    should(replacement.status).equal(404);
+  });
+
+  it('should replay a replacement by delivering byte-identical authenticating capability material', async () => {
+    // Arrange
+    const world = await withBoard();
+    const body = {
+      requestId: 'replace-retry',
+      sessionId: 'root',
+      replacementSessionId: 'grandchild',
+      replacementRootSessionId: 'root',
+    };
+
+    // Act
+    const first = await post(world, '/coordinator/replace', body, operator(world));
+    const firstCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const firstAuthentication = await get(world, '/membership', peer(firstCapability));
+    const replay = await post(world, '/coordinator/replace', body, operator(world));
+    const replayCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const replayAuthentication = await get(world, '/membership', peer(replayCapability));
+
+    // Assert — replay is also the recovery path, so delivery happens twice with the SAME working key.
+    should(first.status).equal(200);
+    should(replay.status).equal(200);
+    should(replayCapability).equal(firstCapability);
+    should(firstAuthentication.status).equal(200);
+    should(replayAuthentication.status).equal(200);
+    should(JSON.stringify(jsonBody(replay))).not.containEql(replayCapability);
+  });
+
+  it('should retry delivery successfully after the first delivery throws post-commit', async () => {
+    // Arrange
+    const world = await withBoard();
+    const body = {
+      requestId: 'replace-after-delivery-failure',
+      sessionId: 'root',
+      replacementSessionId: 'grandchild',
+      replacementRootSessionId: 'root',
+    };
+    world.deliveryFailure = new Error('the environment store was temporarily unavailable');
+
+    // Act — the mutation commits before delivery, then the exact operation is retried after recovery.
+    const failed = await post(world, '/coordinator/replace', body, operator(world));
+    const committedCapability = world.capabilityFor('grandchild');
+    const mintCountAfterCommit = world.capabilityMintCount;
+    const committedState = world.state;
+    world.deliveryFailure = undefined;
+    world.state = {
+      ...committedState,
+      bindings: committedState.bindings.filter(binding => binding.sessionId !== 'grandchild'),
+    };
+    const missingBinding = await post(world, '/coordinator/replace', body, operator(world));
+    world.state = committedState;
+    const retry = await post(world, '/coordinator/replace', body, operator(world));
+    const deliveredCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const authenticated = await get(world, '/membership', peer(deliveredCapability));
+
+    // Assert
+    should(failed.status).equal(500);
+    should(committedCapability).not.be.undefined();
+    should(missingBinding.status).equal(503);
+    should(retry.status).equal(200);
+    should(world.capabilityMintCount).equal(mintCountAfterCommit);
+    should(deliveredCapability).equal(committedCapability);
+    should(authenticated.status).equal(200);
   });
 
   it('should not disguise a defect as a domain refusal', async () => {

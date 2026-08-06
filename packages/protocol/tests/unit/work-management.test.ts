@@ -275,7 +275,12 @@ const boardCases: SchemaCase[] = [
   {
     name: 'replace coordinator',
     schema: boards.TaskBoardCoordinatorReplacementSchema,
-    value: { sessionId: 'session-1', replacementSessionId: 'session-2' },
+    value: {
+      requestId: 'replacement-1',
+      sessionId: 'session-1',
+      replacementSessionId: 'session-2',
+      replacementRootSessionId: 'root-2',
+    },
   },
   {
     name: 'revoke grant',
@@ -1034,6 +1039,26 @@ describe('task-board schemas', () => {
         name: 'nonempty accept body',
         schema: boards.TaskBoardInvitationAcceptRequestSchema,
         value: { capability: 'spoof' },
+      },
+      {
+        name: 'blank coordinator replacement request id',
+        schema: boards.TaskBoardCoordinatorReplacementSchema,
+        value: {
+          requestId: '   ',
+          sessionId: 'session-1',
+          replacementSessionId: 'session-2',
+          replacementRootSessionId: 'root-2',
+        },
+      },
+      {
+        name: 'blank coordinator replacement root',
+        schema: boards.TaskBoardCoordinatorReplacementSchema,
+        value: {
+          requestId: 'replacement-1',
+          sessionId: 'session-1',
+          replacementSessionId: 'session-2',
+          replacementRootSessionId: '',
+        },
       },
     ];
 
