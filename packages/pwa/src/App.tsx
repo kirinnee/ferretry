@@ -148,6 +148,32 @@ export const isTextEntryTarget = (target: EventTarget | null): boolean => {
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
 };
 
+interface ShortcutTargetLike {
+  closest?(selector: string): unknown;
+}
+
+/** A modal owns every chord dispatched from inside it, including from buttons. */
+const isModalShortcutTarget = (target: EventTarget | null): boolean => {
+  if (target === null || typeof target !== 'object') return false;
+  const closest = (target as ShortcutTargetLike).closest;
+  return typeof closest === 'function' && closest.call(target, 'dialog, [role="dialog"], [aria-modal="true"]') !== null;
+};
+
+/**
+ * The two text-entry places where current-session Cmd/Ctrl+K is intentional.
+ *
+ * The composer is where a session reader normally stands, and the search box
+ * itself supports the ordinary re-select gesture. Every other editable field
+ * keeps its native chord even on a session route.
+ */
+const isSessionSearchShortcutTarget = (target: EventTarget | null): boolean => {
+  if (target === null || typeof target !== 'object') return false;
+  const closest = (target as ShortcutTargetLike).closest;
+  return (
+    typeof closest === 'function' && closest.call(target, 'form.fy-composer, [data-current-session-search]') !== null
+  );
+};
+
 const notificationPermission = (): NotificationPermissionState =>
   typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
 
@@ -1099,14 +1125,30 @@ export function AppShell() {
     routeAnnouncer.current?.focus();
   }, [pageKey]);
 
+  /**
+   * THE SHORTCUT YIELDS TO A FIELD ONLY WHERE THERE IS SOMETHING TO YIELD FOR.
+   *
+   * Off a session route the chord opens the global palette, and yielding to a
+   * focused field is deliberate — see the test that presses it inside an input,
+   * a textarea, a select and a contenteditable and requires the keystroke to
+   * survive.
+   *
+   * ON a session route it is item #6's current-session search, and the field the
+   * reader is almost always in is the composer — a `<textarea>`. That one field,
+   * and the search itself, deliberately reach the palette. Other editable and
+   * modal contexts keep the chord: a rename field or an open dialog owns its
+   * keyboard interaction and must not be escaped through by a global listener.
+   */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
-      if (isTextEntryTarget(event.target)) return;
+      const sessionScoped = currentSessionScope !== null;
+      if (isModalShortcutTarget(event.target)) return;
+      if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();
-      if (currentSessionScope !== null) setSessionSearchFocusSignal(current => current + 1);
+      if (sessionScoped) setSessionSearchFocusSignal(current => current + 1);
       else openPalette();
     };
     window.addEventListener('keydown', onKeyDown, true);
@@ -1153,7 +1195,7 @@ export function AppShell() {
             active={appBarDestinationForRoute(pageRoute)}
             onNavigate={navigate}
             themeToggle={<ThemeToggle />}
-            {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl /> })}
+            {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
           {/*
             The finder's touch affordance wraps the page area rather than one
