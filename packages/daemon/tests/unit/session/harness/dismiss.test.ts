@@ -8,7 +8,9 @@ import {
   activePaneIdArguments,
   capturePaneIdArguments,
   dismissPaneIdArguments,
+  isAddressablePickerKey,
   paneIdCursorArguments,
+  pickerKeyPaneIdArguments,
 } from '../../../../src/lib/session/harness/index.ts';
 
 const PICKER = ['Select Model', '  1. gpt-5-codex'].join('\n');
@@ -114,6 +116,26 @@ describe('pane-scoped tmux arguments', () => {
   it('should dismiss with Escape addressed to an exact pane', () => {
     // Arrange / Act / Assert
     should(dismissPaneIdArguments('%3')).eql(['send-keys', '-t', '%3', 'Escape']);
+  });
+
+  it('should send a verified picker digit to an exact pane', () => {
+    // Arrange / Act / Assert: the pane id, not the session name — a session name re-resolves to
+    // whichever pane is active when the command runs.
+    should(pickerKeyPaneIdArguments('%3', '4')).eql(['send-keys', '-t', '%3', '4']);
+  });
+
+  it('should accept only a single digit as a picker key', () => {
+    // Arrange / Act / Assert
+    for (const key of ['1', '5', '9']) should(isAddressablePickerKey(key)).equal(true);
+  });
+
+  it('should refuse anything a row number cannot have produced', () => {
+    // `0` addresses no row, `10` is two keystrokes, and a name like `Enter` or `C-c` is a tmux verb
+    // that cannot be checked against a row read off the screen.
+    // Arrange / Act / Assert
+    for (const key of ['0', '10', '', ' 1', 'Enter', 'C-c', 'Escape', 'a']) {
+      should(isAddressablePickerKey(key)).equal(false);
+    }
   });
 });
 

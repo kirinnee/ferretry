@@ -1925,15 +1925,34 @@ const HARNESS_COMPACT_COMMAND = '/compact';
 function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRuntimeSubsystem {
   const { accounts, catalog, clock, commands, delivery, harness, serial, sessions, storage, tmux } = parts;
   /**
-   * Answers already given, so a retried request id never drives the harness a second time.
+   * Request ids this daemon has SPENT, so a retry never drives the harness a second time.
    *
-   * The REQUEST is kept beside the answer, not just the answer. An id is a claim that two calls are
-   * the same call; a second call under it carrying a different target is not a retry, and handing it
-   * the first call's session view would report a switch that never happened. Process-local, matching
-   * the structured answer this daemon already serves: a retry that survives a daemon restart is a
-   * different problem, and a durable ledger for it belongs beside the send's rather than here.
+   * THE ID IS SPENT BEFORE THE HARNESS IS TOUCHED, not after the answer is assembled. Recording only
+   * successes leaves the dangerous window wide open: `/compact` types into the pane, the harness
+   * compacts, and then the journal append or the closing read throws — the caller gets a `500` with
+   * nothing recorded, retries with the same id, and the session is compacted twice. The keystrokes
+   * are the irreversible part, so the reservation goes in front of them and an entry with no `view`
+   * means exactly "this was already performed and how it ended was never recorded".
+   *
+   * THE REQUEST IS KEPT BESIDE THE ANSWER. An id is a claim that two calls are the same call; a
+   * second call under it carrying a different target is not a retry, and handing it the first call's
+   * session view would report a switch that never happened.
+   *
+   * BOUNDED, because it is process-local and a long-lived daemon whose composer chips are used
+   * routinely would otherwise hold one whole session view per control it ever served. Oldest first:
+   * a retry arrives seconds after its original, never thousands of controls later.
    */
-  const settled = new Map<string, { readonly request: string; readonly view: SessionView }>();
+  const settled = new Map<string, { readonly request: string; readonly view?: SessionView }>();
+  /** How many spent ids are remembered. Far beyond any real retry window, far below a leak. */
+  const SETTLED_LIMIT = 512;
+  const remember = (key: string, entry: { readonly request: string; readonly view?: SessionView }): void => {
+    settled.delete(key);
+    settled.set(key, entry);
+    for (const oldest of settled.keys()) {
+      if (settled.size <= SETTLED_LIMIT) break;
+      settled.delete(oldest);
+    }
+  };
 
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -1974,7 +1993,23 @@ function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRunti
 
   const models = async (id: SessionId): Promise<RuntimeModelCatalog> => {
     const current = await view(id);
-    if (current.config.harness !== 'codex') return claudeRuntimeCatalog(await accountFor(current.config.agent));
+    if (current.config.harness !== 'codex') {
+      const account = await accountFor(current.config.agent);
+      const claude = claudeRuntimeCatalog(account);
+      // AN EMPTY CLAUDE CATALOG IS A FAILURE, NOT AN ANSWER. `servableModels` empties for an account
+      // the manifest declared down, and the browser's native-picker escape hatch is Codex-only — so a
+      // `200` with no choices renders a blank sheet with no explanation, which is the plausible-empty
+      // response this row exists to delete. An account that cannot serve a session cannot serve a
+      // switch into one either, and it must say so.
+      if (claude.choices.length === 0)
+        throw new SessionRuntimeError(
+          'catalog_unavailable',
+          account.available
+            ? `account ${account.agent} publishes no available model, so this session cannot be switched`
+            : `account ${account.agent} is unavailable (${account.unavailableReason ?? 'no reason published'}), so this session cannot be switched`,
+        );
+      return claude;
+    }
     const launch = await lifecycle(id);
     const choices = await catalog.get(launch.agent, launch.cwd).catch((error: unknown) => {
       throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
@@ -2035,7 +2070,12 @@ function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRunti
     }
   };
 
-  const control = async (id: SessionId, request: RuntimeControlRequest): Promise<SessionView> => {
+  const control = async (
+    id: SessionId,
+    request: RuntimeControlRequest,
+    /** Called the instant before the harness is touched, so a retry can never repeat a keystroke. */
+    spend: () => void,
+  ): Promise<SessionView> => {
     const current = await view(id);
     // The SEND domain's set, not a second copy of it. It answers exactly the question asked here —
     // the statuses from which a pane is not a place to type — and a runtime control is a keystroke
@@ -2055,6 +2095,10 @@ function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRunti
       );
 
     if (request.action === 'compact') {
+      // Spent BEFORE the keystrokes. `/compact` is the least naturally idempotent arm in the union —
+      // compacting twice discards context nobody asked to lose — and it is the arm whose bookkeeping
+      // can still fail after the harness has already done the work.
+      spend();
       await inject(launch.tmuxSession, HARNESS_COMPACT_COMMAND);
       await storage.append(id, 'control.session_command', {
         harness: current.config.harness,
@@ -2082,6 +2126,10 @@ function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRunti
     });
 
     if (plan.kind === 'refused') throw new SessionRuntimeError('unsupported', plan.reason);
+    // Everything above this line is decision and refusal, and none of it has touched the pane. The id
+    // is spent HERE, on the last line before the first keystroke — a refused plan leaves the id unspent
+    // so the caller may fix the request and reuse it, and a driven pane can never be driven again.
+    spend();
     if (plan.kind === 'inject') await inject(launch.tmuxSession, plan.command);
     else await drivePicker(id, launch.tmuxSession, plan);
 
@@ -2115,7 +2163,14 @@ function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRunti
             'conflict',
             `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
           );
-        return already.view;
+        if (already.view !== undefined) return already.view;
+        // Spent, and how it ended was never recorded — the first attempt reached the harness and then
+        // failed on its own bookkeeping. Repeating it is the one thing that must not happen, so the
+        // caller is told plainly to read the session rather than handed a second `/compact`.
+        throw new SessionRuntimeError(
+          'unsettled',
+          `request id ${JSON.stringify(requestId)} was already performed on this session and its outcome was not recorded; read the session rather than retrying`,
+        );
       };
       // Checked outside the queue as well as inside it: a replay must not have to wait behind a
       // picker drive, and two concurrent first attempts must not both get past it — only the queue
@@ -2125,8 +2180,8 @@ function createSessionRuntimeSubsystem(parts: SessionRuntimeParts): SessionRunti
       return await serial.run(id, async () => {
         const queued = replay();
         if (queued !== undefined) return queued;
-        const view = await control(id, request);
-        settled.set(key, { request: fingerprint, view });
+        const view = await control(id, request, () => remember(key, { request: fingerprint }));
+        remember(key, { request: fingerprint, view });
         return view;
       });
     },

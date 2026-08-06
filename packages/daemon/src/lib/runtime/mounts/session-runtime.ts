@@ -53,6 +53,15 @@ export type SessionRuntimeFailure =
   | 'catalog_unavailable'
   /** The same request id was already spent on a DIFFERENT control. */
   | 'conflict'
+  /**
+   * The same request id already reached the harness, and how that attempt ended was never recorded.
+   *
+   * DISTINCT FROM `conflict`, because the caller did nothing wrong and there is nothing to correct in
+   * the request. Repeating it is the danger — a second `/compact` discards context nobody asked to
+   * lose — so the honest answer is "it happened; go and look" rather than a replayed success the
+   * daemon cannot vouch for or a retry it must not perform.
+   */
+  | 'unsettled'
   /** It was attempted, and the attempt failed. */
   | 'failed';
 
@@ -96,6 +105,10 @@ const REFUSALS: Readonly<Record<SessionRuntimeFailure, { readonly status: number
   // The same code the start's retry contract answers with, because it is the same mistake: an id
   // that already means one operation cannot be made to mean a second one.
   conflict: { status: 409, code: 'request_id_reused' },
+  // `409` as well: the request cannot be served AS ASKED and no retry of it will help. Its own code,
+  // because "you reused an id" and "your id already happened" call for opposite reactions from the
+  // caller — one is a bug in the client, the other is a session it should re-read.
+  unsettled: { status: 409, code: 'runtime_control_unsettled' },
   failed: { status: 500, code: 'runtime_control_failed' },
 };
 

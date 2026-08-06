@@ -24,7 +24,7 @@
 
 import type { InjectionOutcome } from '../../tmux/delivery.ts';
 import { type CodexPickerRow, type CodexPickerScreen, parseCodexPickerScreen, pickerRowFor } from './picker-screen.ts';
-import type { CodexPickerTarget } from './runtime-switch.ts';
+import { ADVANCED_EFFORTS, type CodexPickerTarget } from './runtime-switch.ts';
 
 /** One frame of the pane the picker is on. */
 export interface CodexPickerFrame {
@@ -94,9 +94,6 @@ export function codexEffortLabel(effort: string): string {
   return EFFORT_LABELS[effort] ?? effort;
 }
 
-/** Levels that live behind the Advanced Reasoning submenu rather than on the level screen itself. */
-const ADVANCED_EFFORTS: readonly string[] = ['max', 'ultra'];
-
 /** The `All models` row, and the submenu row that reaches the advanced levels. */
 const ALL_MODELS_ROW = 'All models';
 const MORE_REASONING_ROW = 'More reasoning…';
@@ -116,12 +113,22 @@ function rowNamed(screen: CodexPickerScreen, name: string): CodexPickerRow | und
  *
  * Only a target that is a VISIBLE quick row is judged here. A model absent from the quick list is
  * reached through `All models`, whose flow shows the ordinary level screen, so it stays eligible.
+ *
+ * THE VERDICT COMES FROM THE PLANNER'S FLAG, NOT FROM THE PRESET'S NAME. Judging by the name read an
+ * account that advertises levels and no default as "no mismatch" — the very case the planner marks
+ * for preflight — so the row was selected, Codex applied whatever preset it liked, the picker
+ * returned to a prompt, and the daemon reported the level the caller asked for on a session that was
+ * not running it. An unknown preset is refused for the same reason a differing one is: neither can
+ * be shown to be the requested effort.
  */
 export function quickPickerRefusal(screen: CodexPickerScreen, target: CodexPickerTarget): string | undefined {
   if (screen.kind !== 'quick-models' || rowNamed(screen, target.model) === undefined) return undefined;
-  if (target.quickPickerDefaultEffort === undefined || target.quickPickerDefaultEffort === target.effort)
-    return undefined;
-  return `Codex quick picker can only select its default ${target.quickPickerDefaultEffort} reasoning level for ${target.model}`;
+  if (target.quickPickerAppliesPreset !== true) return undefined;
+  const preset =
+    target.quickPickerDefaultEffort === undefined
+      ? 'a reasoning level this account does not advertise'
+      : `its default ${target.quickPickerDefaultEffort} reasoning level`;
+  return `Codex quick picker can only apply ${preset} for ${target.model}, not ${target.effort}`;
 }
 
 export class CodexModelPickerDriver {
