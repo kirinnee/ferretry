@@ -90,14 +90,18 @@ Point the daemon at a document with `--config <path outside FY_HOME>`. A
 `config/daemon.json` written into an empty `FY_HOME` makes that home "non-empty
 with no layout-version marker" and the daemon refuses to open it.
 
-`relay-browser-pairing.e2e.test.ts` is the journey those pieces exist for. Its
-first test guards every moving part of the harness itself and is green. Its
-second test is the journey: twelve of its thirteen steps pass — including a real
-Chrome redeeming a first pairing over the relay against the compiled daemon —
-and the thirteenth fails because a §14 stream session opens over the rendezvous
-and carries no frames. It records a step ledger, fails naming the step, and
-writes the whole ledger to `$FY_E2E_RELAY_REPORT` (default
-`<tmpdir>/fy-e2e-relay-journey.md`).
+`relay-browser-pairing.e2e.test.ts` is the journey those pieces exist for, and
+it is green: a real Chrome, holding a link the compiled `fy pair` printed,
+redeems a first pairing over a real rendezvous against the compiled daemon after
+demonstrably failing on the advertised direct address, reconnects on an
+authenticated relay session, and renders a live event — with the pairing code,
+the device token, the device name and the event payload absent from every frame
+the relay handled. Its first test guards every moving part of the harness itself,
+so a red journey is a statement about the product rather than the scaffolding.
+
+Both write a step ledger to `$FY_E2E_RELAY_REPORT` (default
+`<tmpdir>/fy-e2e-relay-journey.md`) on every run. A failure names the step that
+broke, not the earliest step never reached.
 
 `support/seeded-session.ts` is the one place in this tier that imports daemon
 internals rather than driving the compiled binary. The daemon has no

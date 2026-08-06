@@ -22,24 +22,21 @@
  *   REAL Google Chrome, driven by `playwright-core`
  *   REAL failure of the direct address, arranged rather than assumed
  *
- * ── WHERE THE JOURNEY STANDS, AND WHY THE SECOND TEST IS STILL RED ─────────────────────────────
+ * ── THE STEP LEDGER, AND WHY IT IS SHAPED LIKE THIS ────────────────────────────────────────────
  *
- * Relay-mediated FIRST PAIRING is built and is proved here: a real Chrome, holding a link the
- * compiled `fy pair` printed, redeems a code over a real rendezvous against the compiled daemon
- * after demonstrably failing on the advertised direct address, and a second authenticated session
- * follows across the same rendezvous. Twelve of the thirteen steps below pass.
+ * Every claim is named up front, recorded as it passes, and written to `$FY_E2E_RELAY_REPORT` on
+ * every run. A failing run names the step that broke — not the earliest step that was never
+ * reached, which sends the reader to the wrong package.
  *
- * The thirteenth does not. A §14 STREAM session opens over the rendezvous and carries no frames —
- * the daemon appends the events, the browser dials, and the cursor never moves. That is a product
- * defect this journey found rather than a step it cannot reach, and the failure message says which
- * of the two possible shapes happened, because "a stream session was opened and carried no frames"
- * and "no stream session was ever opened" live in different packages.
+ * That shape earned itself several times over while this was being built. It located a
+ * release-blocking CLI regression (`fy pair` refusing the daemon's own `v2` link, so the operator
+ * got no code by any route), and a §14 stream session that opened over the rendezvous and carried
+ * no frames — both in builds where every in-process tier was green. The failure messages carry the
+ * discriminator rather than the symptom: "a stream session WAS opened and carried no frames" and
+ * "NO stream session was ever opened" are defects in different packages.
  *
- * So this test fails, and its failure message and its written report both name the step exactly. A
- * test that passed by asserting something weaker would be the one outcome the owner ruled out. The
- * first test below guards every moving part of the harness itself, so the red one stays a statement
- * about the product rather than about the scaffolding — and this paragraph comes out, along with
- * the clause in the test's own name, on the day the last step goes green.
+ * The first test below guards every moving part of the harness itself, so a red journey stays a
+ * statement about the product rather than about the scaffolding.
  *
  * ── RUNNING IT ─────────────────────────────────────────────────────────────────────────────────
  *
@@ -364,7 +361,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
     }
   }, 240_000);
 
-  it('should carry a first pairing and a live stream over the relay (RED until §14 streams deliver — the failure names the step)', async () => {
+  it('should carry a first pairing and a live stream over the relay', async () => {
     // Arrange
     const teardown = harnessTeardown();
     const ledger: StepLedger = stepLedger(STEPS);
