@@ -30,12 +30,12 @@ const SQUARE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rec
 /**
  * ADMISSION-SHAPED CONTAINERS, built byte by byte.
  *
- * The grammar reads a raster's declared dimensions and record structure before
- * anything decodes it, so a fixture has to carry the records those checks look
- * at — a signature, ordered records, a terminal shape — rather than four base64
- * characters. It does NOT have to be a valid image, and these are not: their
- * CRCs are zeros and their pixel data is meaningless. That is the separation
- * under test, so the fixtures are named for it.
+ * The grammar reads a raster's declared dimensions and record structure before a
+ * browser image decoder mounts, so a fixture has to carry the records those
+ * checks look at — a signature, the selected record ordering, a terminal shape —
+ * rather than four base64 characters. It does NOT have to be a valid image, and
+ * these are not: their CRCs are zeros and their pixel data is meaningless. That
+ * is the separation under test, so the fixtures are named for it.
  *
  * Building them here rather than pasting opaque base64 is what lets a test say
  * "this PNG declares 65535×65535" and be read as saying that. The dimension
