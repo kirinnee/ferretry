@@ -30,7 +30,7 @@
  * knows it is unreachable and prints a bare reason is the complaint this product has earned.
  */
 
-import { isLoopbackHost } from '@ferretry/protocol';
+import { isLoopbackHost, WILDCARD_BIND_HOST } from '@ferretry/protocol';
 import { HostedRelayAdvertisementSchema, SocketEndpointSchema } from '@ferretry/relay';
 import { type DaemonRelayConfig, DaemonRelayConfigSchema } from '../runtime/config.ts';
 
@@ -226,8 +226,9 @@ export function describeAbsentRelayCarrier(input: {
  * A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE AND GETS ITS OWN PATH. Naming only the relay
  * would leave the reader exactly as stuck as before: pairing is ALWAYS direct, so a daemon on
  * `127.0.0.1` that dials nothing cannot be paired with from another device at all, no matter what
- * happens to the relay afterwards. The order is what makes it actionable — reach it once on the
- * local network to pair, and let a carrier keep it reachable after that.
+ * happens to the relay afterwards. The order is what makes it actionable — bind every interface so
+ * the network and loopback both keep working, advertise the one URL another device can dial, then
+ * let a carrier keep it reachable after that device leaves the network.
  */
 export function relayCarrierRemedy(source: RelayCarrierSource, configFile: string, host: string): readonly string[] {
   const relay =
@@ -241,8 +242,8 @@ export function relayCarrierRemedy(source: RelayCarrierSource, configFile: strin
   return [
     `this daemon is bound to ${host} and dials no relay, so NO other device can reach it — and because ` +
       'pairing is always direct, nothing can pair with it either.',
-    `to pair: set "host" in ${configFile} to this machine’s address on the local network, restart, and ` +
-      'pair from a browser on that same network.',
+    `to pair: set "host" in ${configFile} to "${WILDCARD_BIND_HOST}" and set "publicUrl" to this ` +
+      'machine’s URL on the local network, restart, and pair from a browser on that same network.',
     `to stay reachable once that browser leaves the network, a carrier is still needed — ${relay}`,
   ];
 }
