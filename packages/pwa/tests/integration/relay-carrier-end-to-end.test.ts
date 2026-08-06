@@ -26,6 +26,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
 import { type ApiRequest, type ApiResponse, headersFrom } from '../../../daemon/src/lib/api/http.ts';
+import type { SocketDownstream, SocketFrame, SocketUpgradeDecision } from '../../../daemon/src/lib/api/socket.ts';
 import {
   RelayLink,
   type RelayLinkDependencies,
@@ -36,18 +37,22 @@ import {
   RendezvousDurableObject,
   WebCryptoRelayCrypto,
 } from '../../../relay/src/adapters/index.ts';
-import { daemonIdFromPublicKey, RELAY_CLOSE_CODES, utf8Text } from '../../../relay/src/lib/index.ts';
+import { daemonIdFromPublicKey, RELAY_CLOSE_CODES, utf8Bytes, utf8Text } from '../../../relay/src/lib/index.ts';
 import { newDaemonIdentity } from '../../../relay/tests/support/identities.ts';
 import { FakeObjectState, type FakeSocket, testRuntime } from '../../../relay/tests/support/workers-fakes.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
-  type RelayCarrierSocket,
+  DaemonCarrierRouter,
   openRelaySession,
+  type RelayCarrierSocket,
   relayResponse,
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
 import { redeemPairingOverRelay } from '../../src/lib/relay-pairing.ts';
-import { type RelayClientSession, RelaySessionError } from '../../src/lib/relay-session.ts';
+import { RELAY_DATA_BYTE_BUDGET, type RelayClientSession, RelaySessionError } from '../../src/lib/relay-session.ts';
+import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
+import { browserTerminalStreamAttach, type TerminalStream, terminalStreamPath } from '../../src/lib/web-terminals.ts';
 
 const HOST = 'relay.example';
 const RELAY_URL = `https://${HOST}`;
@@ -69,6 +74,18 @@ const buffer = (bytes: Uint8Array): ArrayBuffer =>
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 
 /**
+ * One dialled browser socket, as the two things the pump needs from it.
+ *
+ * The socket is read through a function rather than held, because a dial reaches the rendezvous a
+ * turn after `dial` returns and the endpoint has to be registered before then — otherwise the very
+ * first frame the rendezvous puts in its outbox has nobody to deliver it to.
+ */
+interface ClientEndpoint {
+  socket(): FakeSocket | undefined;
+  receiveBinary(bytes: Uint8Array): Promise<void>;
+}
+
+/**
  * The three real halves, carrying frames between each other.
  *
  * The rendezvous is driven by explicit calls rather than by a socket, so this pumps:
@@ -85,9 +102,17 @@ class RelayBridge {
   #queue: (() => Promise<void>)[] = [];
   #running = false;
   #daemonSocket: FakeSocket | undefined;
-  #clientSocket: FakeSocket | undefined;
   #link: RelayLink | undefined;
-  #session: { receiveBinary(bytes: Uint8Array): Promise<void>; receiveText(text: string): void } | undefined;
+  /**
+   * EVERY CLIENT SOCKET THIS RENDEZVOUS IS HOLDING, not the most recent one.
+   *
+   * §14 has one tab hold a request session and a stream session on the SAME rendezvous at once, and
+   * a single-socket pump cannot carry that: the second dial replaced the first, so the request
+   * session that measured the carrier stopped receiving anything the moment a terminal attached. It
+   * reads as a fixture detail and it is the protocol's own shape, so it is modelled rather than
+   * worked around.
+   */
+  readonly #clients: ClientEndpoint[] = [];
 
   constructor() {
     this.rendezvous = new RendezvousDurableObject(this.objectState, environment, testRuntime());
@@ -142,42 +167,58 @@ class RelayBridge {
 
   /** The dial the browser's carrier uses. It reaches the rendezvous, never the daemon. */
   dial(daemonId: string): RelayCarrierSocket {
+    // CAPTURED PER DIAL rather than read off the bridge: a session sends on the socket IT was given,
+    // and a later dial must not silently redirect an earlier session's frames onto a newer socket.
+    let mine: FakeSocket | undefined;
     const adapted: RelayCarrierSocket = {
       onOpen: null,
       onText: null,
       onBinary: null,
       onClose: null,
       send: bytes => {
-        const socket = this.#clientSocket;
-        if (socket !== undefined) this.#toRendezvous(socket, bytes);
+        if (mine !== undefined) this.#toRendezvous(mine, bytes);
       },
       sendText: () => undefined,
       close: () => undefined,
     };
-    this.#session = {
+    this.#clients.push({
+      socket: () => mine,
       receiveBinary: async bytes => await Promise.resolve(adapted.onBinary?.(bytes)),
-      receiveText: text => adapted.onText?.(text),
-    };
+    });
     this.#enqueue(async () => {
       await this.rendezvous.fetch(
         new Request(`${RELAY_URL}/v1/rendezvous/${daemonId}/client`, { headers: { Upgrade: 'websocket' } }),
       );
-      const socket = this.objectState.sockets.at(-1);
-      this.#clientSocket = socket;
+      mine = this.objectState.sockets.at(-1);
       adapted.onOpen?.();
       this.#drain();
       // A rendezvous no daemon holds closes the client socket during the upgrade
       // (§9, `4404`). Reporting that close is what turns it into a refusal the
       // browser can show rather than a socket that never says anything.
-      if (socket?.closed != null) adapted.onClose?.(socket.closed.code ?? 0, socket.closed.reason ?? '');
+      if (mine?.closed != null) adapted.onClose?.(mine.closed.code ?? 0, mine.closed.reason ?? '');
     });
     return adapted;
   }
 
-  /** Wait until nothing is left to carry. */
+  /**
+   * Wait until nothing is left to carry, AND until the endpoints have stopped reacting to it.
+   *
+   * AN EMPTY QUEUE IS NOT THE SAME AS A DELIVERED FRAME, and the difference is the browser's own
+   * adapter: `driveRelaySession` wires `onBinary` as `bytes => void session.receiveBinary(bytes)`,
+   * discarding the promise, because a `WebSocket` message handler has nowhere to return one to. So a
+   * frame handed to this endpoint is decrypted and applied AFTER the task that delivered it resolved,
+   * and a settle that returned at the first quiet moment read a live stream as one that had carried
+   * nothing at all. Every case that awaited an answer hid this, because the answer was its own
+   * promise; a stream frame has no promise to await, which is exactly what makes it a stream.
+   *
+   * So quiet has to be observed rather than caught once: the counter only reaches its target when
+   * several consecutive turns pass with nothing enqueued, and any work at all resets it.
+   */
   async settle(): Promise<void> {
-    for (let spin = 0; spin < 200; spin += 1) {
-      if (!this.#running && this.#queue.length === 0) return;
+    let quiet = 0;
+    for (let spin = 0; spin < 1_000; spin += 1) {
+      if (this.#running || this.#queue.length > 0) quiet = 0;
+      else if (++quiet >= 8) return;
       await new Promise(resolve => setTimeout(resolve, 0));
     }
     throw new Error('the bridge never went quiet');
@@ -193,10 +234,11 @@ class RelayBridge {
 
   /** Hand each endpoint whatever the rendezvous put in its outbox, in order. */
   #drain(): void {
-    for (const [socket, deliver] of [
-      [this.#clientSocket, (bytes: Uint8Array) => this.#session?.receiveBinary(bytes)],
-      [this.#daemonSocket, (bytes: Uint8Array) => this.#link?.receiveBinary(bytes)],
-    ] as const) {
+    const endpoints: (readonly [FakeSocket | undefined, (bytes: Uint8Array) => Promise<void> | void])[] = [
+      ...this.#clients.map(client => [client.socket(), (bytes: Uint8Array) => client.receiveBinary(bytes)] as const),
+      [this.#daemonSocket, (bytes: Uint8Array) => this.#link?.receiveBinary(bytes)] as const,
+    ];
+    for (const [socket, deliver] of endpoints) {
       if (socket === undefined) continue;
       const outbox = socket.sent.splice(0, socket.sent.length);
       for (const data of outbox) {
@@ -239,7 +281,7 @@ const answered =
 
 /** Everything the rendezvous handled, as one searchable string. */
 const carrierSaw = (bridge: RelayBridge): string =>
-  bridge.observed.map(bytes => utf8Text(bytes) ?? bytes.join(',')).join(' ');
+  bridge.observed.map(bytes => utf8Text(bytes) ?? bytes.join(',')).join('\0');
 
 describe('a relayed session, browser to daemon, through the real rendezvous', () => {
   it('should carry a request and its answer without the carrier reading either', async () => {
@@ -495,5 +537,269 @@ describe('first pairing and live streams, through the real rendezvous', () => {
     });
     should(session.live()).be.true();
     should(carrierSaw(bridge)).not.containEql(paired.deviceToken);
+  });
+});
+
+/* ---------- §14 stream sessions, as the app actually opens one -------------- */
+
+/** A terminal identity `TerminalIdSchema` accepts, because `terminalStreamPath` parses what it is given. */
+const TERMINAL_ID = 'a1b2c3d4e5f6';
+const SESSION_ID = 'fy_studio_one';
+/** The shell's own output: bytes, because §14 gives a terminal's daemon-to-browser direction bytes. */
+const SHELL_OUTPUT = utf8Bytes('\x1b[2Jferretry@studio:~$ ');
+const KEYSTROKES = utf8Bytes('ls -la\r');
+/** The one text frame this route carries, and it goes the other way: the viewer's resize control. */
+const RESIZE_CONTROL = JSON.stringify({ t: 'resize', cols: 120, rows: 40 });
+
+/** One arrived client frame in the two shapes a stream handler actually reads, whatever the transport hands it. */
+const clientFrame = (frame: SocketFrame): string | Uint8Array => {
+  if (typeof frame === 'string') return frame;
+  if (frame instanceof ArrayBuffer) return new Uint8Array(frame);
+  return new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+};
+
+interface RelayedTerminal {
+  readonly bridge: RelayBridge;
+  readonly stream: TerminalStream;
+  readonly streamPath: string;
+  /** The request the DAEMON's own socket route table was asked to decide. */
+  readonly upgrade: () => ApiRequest | undefined;
+  /** The live socket the daemon's handler was attached to, so a test can close from that end. */
+  readonly downstream: () => SocketDownstream | undefined;
+  readonly attached: () => number;
+  readonly released: () => number;
+  /** Everything the daemon's handler was handed by the viewer, in order. */
+  readonly fromClient: readonly (string | Uint8Array)[];
+  readonly opens: () => number;
+  readonly received: readonly Uint8Array[];
+  readonly closed: readonly { readonly code: number; readonly reason: string }[];
+  readonly refused: readonly { readonly status: number; readonly body: string }[];
+  /** Every URL the direct carrier's HTTP fetcher was asked for. A relayed terminal asks for none. */
+  readonly overHttp: readonly string[];
+}
+
+/**
+ * ONE RELAYED TERMINAL, OPENED THE WAY THE APP OPENS ONE.
+ *
+ * Nothing here short-circuits the carrier decision. `DaemonCarrierRouter` walks DIRECT first exactly
+ * as §1 requires, the daemon's own address fails as a transport failure — which is the situation a
+ * relay exists for and the one thing a browser cannot fake — and only then is the rendezvous the
+ * measured carrier. The attach is `browserTerminalStreamAttach`, the same function the composition
+ * root hands the terminal deck, so this rig exercises the production composition rather than a
+ * hand-built stream session that would pass whatever the app did.
+ *
+ * WHICH IS THE POINT: `browserTerminalStreamAttach` falls back to a direct `wss://` when `openStream`
+ * answers `null`, and that fallback first buys a socket ticket over HTTP. `overHttp` below refuses
+ * that purchase and records it, so a composition that stopped putting terminals on the rendezvous
+ * fails these cases loudly instead of quietly opening a socket at an address a relayed browser
+ * cannot reach.
+ */
+const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
+  const identity = await newDaemonIdentity();
+  const daemon = daemonConnection({
+    daemonId: identity.daemonId,
+    baseUrl: DAEMON_URL,
+    deviceToken: DEVICE_TOKEN,
+    carriers: [
+      { kind: 'direct', daemonUrl: DAEMON_URL },
+      { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+    ],
+  });
+  const scope = daemonSessionScope(daemon, SESSION_ID);
+  const streamPath = terminalStreamPath(daemon, scope, TERMINAL_ID);
+
+  const bridge = new RelayBridge();
+  const fromClient: (string | Uint8Array)[] = [];
+  let upgrade: ApiRequest | undefined;
+  let downstream: SocketDownstream | undefined;
+  let attached = 0;
+  let released = 0;
+  await bridge.admitDaemon(identity, answered('{}'), undefined, async request => {
+    upgrade = request;
+    if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
+    return {
+      outcome: 'accepted',
+      attach: async socket => {
+        downstream = socket;
+        return {
+          open: async () => {
+            attached += 1;
+            // Produced by the handler rather than by the case, so what crosses is what a mounted
+            // stream would have written: this bridge is `SocketDownstream` and nothing else.
+            socket.send(SHELL_OUTPUT);
+            await Promise.resolve();
+          },
+          fromClient: frame => fromClient.push(clientFrame(frame)),
+          close: () => {
+            released += 1;
+          },
+        };
+      },
+    } satisfies SocketUpgradeDecision;
+  });
+
+  const overHttp: string[] = [];
+  const ticketFetch: DaemonFetch = async input => {
+    overHttp.push(input.toString());
+    throw new Error('a relayed terminal must not buy a socket ticket');
+  };
+  const router = new DaemonCarrierRouter({
+    crypto,
+    // The daemon's own address is offered and does not answer. §1's probe IS the request, and a
+    // transport failure is what "not reachable" means — an HTTP status would not move the walk on.
+    network: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    dial: () => bridge.dial(identity.daemonId),
+    heartbeat: () => () => undefined,
+  });
+  const measured = await router.send(daemon, `${DAEMON_URL}/v1/carriers`);
+  await bridge.settle();
+  should(measured.status).equal(200);
+  should(router.activeMethod(daemon.daemonId)?.kind).equal('relay');
+
+  const received: Uint8Array[] = [];
+  const closed: { code: number; reason: string }[] = [];
+  const refused: { status: number; body: string }[] = [];
+  let opens = 0;
+  const attach = browserTerminalStreamAttach(
+    async (target, request) => await router.openStream(target, request),
+    ticketFetch,
+    () => router.activeMethod(daemon.daemonId),
+  );
+  const stream = await attach(daemon, scope, TERMINAL_ID, {
+    onOpen: () => {
+      opens += 1;
+    },
+    onBytes: bytes => received.push(bytes),
+    onClosed: (code, reason) => closed.push({ code, reason }),
+    onRefused: (status, body) => refused.push({ status, body }),
+  });
+  await bridge.settle();
+
+  return {
+    bridge,
+    stream,
+    streamPath,
+    upgrade: () => upgrade,
+    downstream: () => downstream,
+    attached: () => attached,
+    released: () => released,
+    fromClient,
+    opens: () => opens,
+    received,
+    closed,
+    refused,
+    overHttp,
+  };
+};
+
+const bytesOf = (frame: string | Uint8Array | undefined): number[] =>
+  typeof frame === 'string' ? [] : [...(frame ?? [])];
+
+describe('a relayed terminal stream, browser to daemon, through the real rendezvous', () => {
+  /**
+   * THE OTHER HALF OF §14, AND THE ONE A REQUEST SESSION CANNOT STAND IN FOR.
+   *
+   * A relayed request is one record and one answer; a stream is a protocol switch that never
+   * happened — "the socket IS the session" — carrying bytes in both directions for as long as the
+   * viewer watches. This is that, end to end: the browser's `DaemonCarrierRouter` opening its own
+   * stream session, the real rendezvous forwarding it, and the daemon's real `RelayLink` handing it
+   * to the daemon's real socket route table.
+   */
+  it('should carry a terminal in both directions over the rendezvous the walk measured', async () => {
+    const terminal = await openRelayedTerminal();
+
+    // The DAEMON's own socket route table decided this, off a request the relay built and nothing
+    // else. `loopback` false and a rate-limit identity minted from the SESSION are the two properties
+    // that stop a relayed viewer being read as somebody standing at the machine.
+    should(terminal.upgrade()?.path).equal(terminal.streamPath);
+    should(terminal.upgrade()?.method).equal('GET');
+    should(terminal.upgrade()?.headers.get('authorization')).equal(`Bearer ${DEVICE_TOKEN}`);
+    should(terminal.upgrade()?.loopback).be.false();
+    should(terminal.upgrade()?.clientAddress).match(/^relay-session:/u);
+    should(terminal.attached()).equal(1);
+    should(terminal.opens()).equal(1);
+    should(terminal.refused).be.empty();
+    // NOT ONE HTTP CALL. A direct fallback buys a ticket before it opens a socket, so an empty list
+    // is what says this terminal is on the rendezvous rather than on a `wss://` at the daemon.
+    should(terminal.overHttp).be.empty();
+
+    // daemon → browser: the handler's own write, arriving as the bytes it wrote.
+    should(terminal.received.length).equal(1);
+    should(bytesOf(terminal.received[0])).eql([...SHELL_OUTPUT]);
+
+    // browser → daemon: a keystroke run and one complete control frame, in that order.
+    terminal.stream.write(KEYSTROKES);
+    terminal.stream.control(RESIZE_CONTROL);
+    await terminal.bridge.settle();
+
+    should(terminal.fromClient.length).equal(2);
+    should(bytesOf(terminal.fromClient[0])).eql([...KEYSTROKES]);
+    should(terminal.fromClient[1]).equal(RESIZE_CONTROL);
+
+    // ── and the assertion this whole file exists for, now for a live stream ──
+    const seen = carrierSaw(terminal.bridge);
+    should(seen).not.containEql(DEVICE_TOKEN);
+    should(seen).not.containEql(terminal.streamPath);
+    should(seen).not.containEql(RESIZE_CONTROL);
+    should(seen).not.containEql('ferretry@studio');
+  });
+
+  /**
+   * §14: "a `bytes` record carries a run of an ordered byte stream … a terminal neither knows nor
+   * cares whether a paste arrived as one write or three."
+   *
+   * A direct socket would put this on the wire as ONE frame, so a split that arrives as several
+   * records and reassembles into the same run is evidence about the carrier and not only about the
+   * terminal. The budget is the protocol package's own derivation on both ends: a client that split
+   * at a number of its own would produce a record the daemon refuses with `4400`.
+   */
+  it('should split a paste larger than one record and deliver it as one byte run', async () => {
+    const terminal = await openRelayedTerminal();
+    const paste = new Uint8Array(RELAY_DATA_BYTE_BUDGET + 1).fill(0x61);
+
+    terminal.stream.write(paste);
+    await terminal.bridge.settle();
+
+    should(terminal.fromClient.length).equal(2);
+    should(bytesOf(terminal.fromClient[0]).length).equal(RELAY_DATA_BYTE_BUDGET);
+    should(bytesOf(terminal.fromClient[1]).length).equal(1);
+    should([...bytesOf(terminal.fromClient[0]), ...bytesOf(terminal.fromClient[1])]).eql([...paste]);
+  });
+
+  /**
+   * The stream's OWN close code reaches the viewer, and the session's does not.
+   *
+   * §14 puts the close taxonomy inside the channel because it is content — a relay that could read
+   * close reasons could read why viewers leave — and the daemon then ends the session with `4440`.
+   * A viewer handed that `4440` would read it as a carrier that dropped and reconnect against a
+   * stream the daemon deliberately ended, so `1013` arriving alone is the whole claim.
+   */
+  it('should end a relayed terminal with the stream code the daemon chose, not the session close', async () => {
+    const terminal = await openRelayedTerminal();
+
+    terminal.downstream()?.close(1013, 'stream reader fell behind');
+    await terminal.bridge.settle();
+
+    should(terminal.closed).eql([{ code: 1013, reason: 'stream reader fell behind' }]);
+    should(terminal.released()).equal(1);
+  });
+
+  /**
+   * And the same taxonomy in the other direction: a deliberate leave is never spelled as a network
+   * failure, and the daemon releases the handler it attached rather than waiting for a socket that
+   * is never going to drop.
+   */
+  it('should tell the daemon when the viewer leaves, and release what it attached', async () => {
+    const terminal = await openRelayedTerminal();
+
+    terminal.stream.close(1000, 'the viewer left this stream');
+    await terminal.bridge.settle();
+
+    should(terminal.released()).equal(1);
+    should(terminal.closed).eql([{ code: 1000, reason: 'the viewer left this stream' }]);
+    // The leave crossed as a sealed record, so the rendezvous learned neither why nor from whom.
+    should(carrierSaw(terminal.bridge)).not.containEql('the viewer left this stream');
   });
 });
