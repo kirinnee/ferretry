@@ -329,6 +329,13 @@ const settle = async (link: RelayLink): Promise<void> => {
   await link.receiveBinary(claimed());
 };
 
+/** Whether this link has yet told the peer that a session ended with its outcome already stated. */
+const concluded = (sent: Wire): boolean =>
+  sent.frames.some(frame => {
+    const message = frame.kind === FRAME_KINDS.control ? decodeControlMessage(frame.payload) : null;
+    return message?.t === 'closed' && message.code === RELAY_SESSION_CONCLUDED_CLOSE_CODE;
+  });
+
 const controlOf = (frame: RelayFrame | undefined): ControlMessage | null =>
   frame === undefined ? null : decodeControlMessage(frame.payload);
 
@@ -1258,10 +1265,11 @@ describe('a stream session', () => {
     await settle(harnessed.link);
 
     // Assert — the handler is released, the taxonomy is sealed, and only then does the session close.
+    // The at-budget frame queued a moment earlier is GONE: the close is what makes its loss explicit,
+    // so payload behind it is discarded rather than made to arrive after the record that supersedes it.
     should(stream.closed).have.length(1);
     should((await clientReadAll(harnessed.wire, after)).messages).containDeep([
       { t: 'stream-opened' },
-      { t: 'data' },
       { t: 'stream-close', code: 1009 },
     ]);
     should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
@@ -1402,5 +1410,95 @@ describe('a stream session', () => {
       reason: 'a stream record carried unusable bytes',
     });
     should(malformed.fromClientFrames).be.empty();
+  });
+});
+
+describe('an outcome that has not crossed yet', () => {
+  it('should hold the concluding close until the sealed one has actually left', async () => {
+    // THE DEFECT THIS PINS. `4440` means "the outcome was stated inside the channel before this
+    // close", and §14 makes a `4440` with no sealed outcome before it a protocol violation. But the
+    // sealed close is QUEUED, and a queue only drains while the peer's credit allows — so on the one
+    // path that reaches this naturally, a viewer that has stopped returning credit, the concluding
+    // control would overtake the very record it promises has already crossed.
+    //
+    // Arrange — a live stream whose peer has spent its whole opening window and granted nothing back.
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+    for (let index = 0; index < CREDIT_WINDOW_FRAMES + 8; index += 1) downstream.send(`{"n":${index}}`);
+    await settle(harnessed.link);
+    should(downstream.bufferedBytes()).be.greaterThan(0);
+
+    // Act — a burst big enough to trip the backlog ceiling, which for an event stream is `1013`.
+    const event = `{"e":"${'x'.repeat(60_000)}"}`;
+    let refused = 0;
+    for (let index = 0; index < 40; index += 1) {
+      if (downstream.send(event) === -1) refused += 1;
+    }
+    await settle(harnessed.link);
+
+    // Assert — the stream closed, and the SESSION HAS NOT, because the record saying so is still
+    // waiting for credit. A `4440` here would be the violation.
+    should(refused).be.greaterThan(0);
+    should(stream.closed).have.length(1);
+    should(harnessed.link.report().sessions).equal(1);
+    should(concluded(harnessed.wire)).be.false();
+
+    // Act — the viewer catches up and returns credit.
+    await harnessed.link.receiveBinary(
+      encodeFrame({
+        kind: FRAME_KINDS.credit,
+        sessionId: sessionOne(),
+        sequence: 0,
+        payload: encodeCreditPayload(CREDIT_WINDOW_FRAMES),
+      }),
+    );
+
+    // Assert — the sealed close has crossed, it is the LAST thing this stream said, and only now does
+    // the session end.
+    const delivered = await clientReadAll(harnessed.wire, after);
+    should(delivered.messages.at(-1)).containDeep({ t: 'stream-close', code: 1013 });
+    should(concluded(harnessed.wire)).be.true();
+    should(harnessed.link.report().sessions).equal(0);
+  });
+
+  it('should conclude a client-initiated close at once, because that outcome already crossed', async () => {
+    // The mirror case, and the reason the rule is about DELIVERY rather than about waiting: when the
+    // peer closed the stream itself there is no sealed record of ours to deliver, so holding the
+    // session for credit a departed viewer will never return would be a session that never ends.
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    const after = await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: RELAY_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+    for (let index = 0; index < CREDIT_WINDOW_FRAMES + 8; index += 1) downstream.send(`{"n":${index}}`);
+    await settle(harnessed.link);
+
+    // Act — the viewer says it is done while payload is still queued behind an exhausted window.
+    await clientSend(harnessed.link, after, {
+      t: 'stream-close',
+      protocol: RELAY_PROTOCOL_ID,
+      code: 1000,
+      reason: 'the viewer left',
+    });
+
+    // Assert — the handler is released and the session ends immediately.
+    should(stream.closed).have.length(1);
+    should(concluded(harnessed.wire)).be.true();
+    should(harnessed.link.report().sessions).equal(0);
   });
 });

@@ -224,6 +224,21 @@ export interface RelayLinkReport {
  */
 type SessionPhase = 'awaiting-hello' | 'awaiting-credential' | 'serving' | 'streaming' | 'concluding';
 
+/**
+ * One record waiting for credit, and whether it is a stream's PAYLOAD.
+ *
+ * The flag exists for one decision and is worth the field. When a stream closes because its viewer
+ * fell behind, whatever payload is still queued is already known-lost — the close is what says so —
+ * and holding it would make the sealed close wait for credit to drain records nobody will ever read.
+ * So payload is discarded there and the close is not. Nothing else in this module may drop a record:
+ * an answer, an acceptance or a sealed outcome that vanished would be a session that ended saying
+ * something different from what happened.
+ */
+interface PendingRecord {
+  readonly plaintext: Uint8Array;
+  readonly payload: boolean;
+}
+
 interface LinkSession {
   readonly sessionId: SessionId;
   phase: SessionPhase;
@@ -234,11 +249,19 @@ interface LinkSession {
   /** Request identifiers already answered or in flight. A repeat ends the session. */
   readonly answered: Set<number>;
   /** Answers waiting for the peer to return credit. Bounded by the peer's own send window. */
-  readonly waiting: Uint8Array[];
+  readonly waiting: PendingRecord[];
   /** The one live stream this session carries, once it carries one. */
   stream: SocketHandler | undefined;
   /** Armed when the channel is keyed, cancelled by the credential record that beats it. */
   credentialDeadline: RelayLinkTimer | undefined;
+  /**
+   * Why this session is ending, held until the sealed outcome has ACTUALLY crossed.
+   *
+   * Set when an outcome is decided and cleared by the close that follows it. It exists because
+   * "decided" and "delivered" are not the same moment: the outcome is a queued record and a queue
+   * only drains while the peer's credit allows.
+   */
+  conclusion: string | undefined;
 }
 
 export class RelayLink {
@@ -420,6 +443,7 @@ export class RelayLink {
       waiting: [],
       stream: undefined,
       credentialDeadline: undefined,
+      conclusion: undefined,
     });
   }
 
@@ -681,7 +705,12 @@ export class RelayLink {
     }
     // A deliberate leave is spelled differently from a network failure ON PURPOSE: the taxonomy
     // survives in both directions, so a daemon can tell a viewer that closed from one that vanished.
+    //
+    // The peer's own outcome has already crossed, so this session owes it no sealed record — and the
+    // payload it has stopped reading goes with the same reasoning as above, which is also what keeps
+    // this close from waiting on credit a departed viewer will never return.
     this.#releaseStream(session);
+    this.#discardStreamPayload(session);
     this.#conclude(session, `the client closed this stream: ${message.code} ${message.reason}`);
   }
 
@@ -714,7 +743,7 @@ export class RelayLink {
 
   #buffered(session: LinkSession): number {
     let total = 0;
-    for (const record of session.waiting) total += record.byteLength;
+    for (const record of session.waiting) total += record.plaintext.byteLength;
     return total;
   }
 
@@ -742,7 +771,7 @@ export class RelayLink {
       this.#closeStream(session, RELAY_STREAM_CLOSES.oversize.code, RELAY_STREAM_CLOSES.oversize.reason);
       return -1;
     }
-    this.#queue(session, message);
+    this.#queue(session, message, true);
     return size;
   }
 
@@ -753,6 +782,9 @@ export class RelayLink {
     // of sealing a second close for the same stream.
     session.phase = 'concluding';
     this.#releaseStream(session);
+    // The close is what makes this loss explicit, so the frames it supersedes go before it is queued
+    // — otherwise the record that says "you missed some" would itself wait behind the ones missed.
+    this.#discardStreamPayload(session);
     this.#queue(session, { t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code, reason });
     this.#conclude(session, `the stream closed: ${code} ${reason}`);
   }
@@ -765,36 +797,52 @@ export class RelayLink {
     stream?.close();
   }
 
-  /** Everything a session holds beyond its own record state: a stream, and a deadline. */
+  /** Everything a session holds beyond its own record state: a stream, a deadline, and a pending
+   *  conclusion nothing will deliver now. */
   #forget(session: LinkSession): void {
     session.credentialDeadline?.cancel();
     session.credentialDeadline = undefined;
+    session.conclusion = undefined;
     this.#releaseStream(session);
   }
 
   /**
-   * The session concluded, and the close says so.
+   * The session has an outcome, and will end as soon as that outcome has been DELIVERED.
    *
-   * IT IS QUEUED BEHIND THE OUTBOX, which is the whole point. The sealed outcome — `paired`,
-   * `pair-refused`, `stream-close` — is queued for sealing, and sealing is asynchronous; a `closed`
-   * control sent straight down the socket would overtake it and the peer would see a session end with
-   * no outcome in it. `4440` means "the outcome was stated inside the channel first", and this is
-   * what makes that true rather than merely intended.
+   * `4440` means "the outcome was stated inside the encrypted channel before this close", and a
+   * `4440` with no sealed outcome before it is a protocol violation rather than a quiet end. Making
+   * that true takes more than ordering the two behind the outbox, and this is the correction: the
+   * sealed record is QUEUED, and a queue only drains while the peer's credit allows. On the one path
+   * that reaches this naturally — an event stream closing `1013` because the viewer stopped reading —
+   * the window is by definition exhausted, so a close sent as soon as the flush returned would
+   * overtake the record it claims has already crossed, and every such close would be the violation.
+   *
+   * So the intent is recorded and {@link RelayLink.settle} performs it, from whichever flush finally
+   * empties the queue. A peer that never returns credit therefore keeps a session that is over but
+   * undelivered — bounded by liveness rather than by this, which is the right owner: a socket with no
+   * evidence of life is dropped and redialled, and `close()` releases everything on it.
    */
   #conclude(session: LinkSession, reason: string): void {
-    this.#outbox = this.#outbox.then(() => {
-      this.#forget(session);
-      this.#sessions.delete(session.sessionId.text);
-      this.#sendFrame({
-        kind: FRAME_KINDS.control,
-        sessionId: session.sessionId,
-        sequence: 0,
-        payload: encodeControlMessage({
-          t: 'closed',
-          code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
-          reason,
-        }),
-      });
+    session.conclusion = reason;
+    this.#outbox = this.#outbox.then(() => this.#settle(session));
+  }
+
+  /** Send the concluding close, but only once nothing is still waiting to be sealed. */
+  #settle(session: LinkSession): void {
+    const reason = session.conclusion;
+    if (reason === undefined || session.waiting.length > 0) return;
+    session.conclusion = undefined;
+    this.#forget(session);
+    this.#sessions.delete(session.sessionId.text);
+    this.#sendFrame({
+      kind: FRAME_KINDS.control,
+      sessionId: session.sessionId,
+      sequence: 0,
+      payload: encodeControlMessage({
+        t: 'closed',
+        code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+        reason,
+      }),
     });
   }
 
@@ -824,7 +872,7 @@ export class RelayLink {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session cannot carry its own answer');
       return;
     }
-    session.waiting.push(plaintext);
+    session.waiting.push({ plaintext, payload: false });
     this.#flush(session);
   }
 
@@ -842,9 +890,25 @@ export class RelayLink {
    * and ends the session in {@link RelayLink.flush} — one owner for that fact, in the layer that
    * knows it.
    */
-  #queue(session: LinkSession, message: RelayTunnelDaemonMessage): void {
-    session.waiting.push(encodeTunnelMessage(message));
+  #queue(session: LinkSession, message: RelayTunnelDaemonMessage, payload = false): void {
+    session.waiting.push({ plaintext: encodeTunnelMessage(message), payload });
     this.#flush(session);
+  }
+
+  /**
+   * Drop the stream payload this session will never deliver, and nothing else.
+   *
+   * Called only where a close has just made that loss EXPLICIT. Every queued frame behind an
+   * exhausted window is already lost to a viewer that stopped reading; keeping them would make the
+   * sealed close wait for credit to drain records nobody will read, which is the same stall as
+   * dropping the close, arrived at politely. The close itself, an acceptance and an answer are never
+   * dropped here: a session that ended saying something other than what happened is the failure this
+   * whole module is written against.
+   */
+  #discardStreamPayload(session: LinkSession): void {
+    for (let index = session.waiting.length - 1; index >= 0; index -= 1) {
+      if (session.waiting[index]?.payload === true) session.waiting.splice(index, 1);
+    }
   }
 
   /**
@@ -858,9 +922,9 @@ export class RelayLink {
     this.#outbox = this.#outbox.then(async () => {
       while (session.waiting.length > 0 && maySend(session.send)) {
         const channel = session.channel;
-        const plaintext = session.waiting[0];
-        if (channel === undefined || plaintext === undefined) return;
-        const sealed = await sealRecord(this.deps.crypto, channel, plaintext);
+        const pending = session.waiting[0];
+        if (channel === undefined || pending === undefined) return;
+        const sealed = await sealRecord(this.deps.crypto, channel, pending.plaintext);
         if (!sealed.ok) {
           this.#endSession(session.sessionId, sealed.code, sealed.reason);
           return;
@@ -870,6 +934,10 @@ export class RelayLink {
         session.send = recordSent(session.send);
         this.deps.socket.send(encodeFrame(sealed.frame));
       }
+      // A session with an outcome ends HERE, from whichever flush finally empties its queue, rather
+      // than at the moment the outcome was decided — see `#conclude`. Reached only on the normal
+      // path: the returns above have already ended the session for a reason of their own.
+      this.#settle(session);
     });
   }
 
