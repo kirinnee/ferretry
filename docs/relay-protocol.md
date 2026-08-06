@@ -18,24 +18,30 @@ deployment is `src/adapters`.
 the browser a daemon address and a **key fingerprint**; what was missing was a way to make that
 address reachable when the daemon has no inbound route.
 
-There are two carriers and one security model across both.
+There are two **kinds** of carrier and one security model across both. A daemon may hold several of
+the second kind, and which ones exist is the daemon's answer rather than the browser's.
 
-| Carrier    | What it is                                                                    | Where it belongs                                                  |
-| ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| **Direct** | The browser opens a WebSocket straight at the daemon.                         | Attempted first, automatically, whenever the daemon is reachable. |
-| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Ferretry operates one. |
+| Carrier    | What it is                                                                    | Where it belongs                                                              |
+| ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Direct** | The browser opens a WebSocket straight at the daemon.                         | Attempted first, automatically, whenever the daemon is reachable.             |
+| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
 
-**Neither is a question a conforming product asks.** The required behaviour is: try direct first
-because it has fewer hops and fewer observers; fall back to the hosted relay when direct does not
-work; and always say which carrier is live and why the other was passed over. No carrier chooser,
-nothing to opt into, and no silent degradation — a surface that shows a connection without naming
-its carrier is not conforming. The current PWA still contains an interim three-way chooser and
-self-hosting setup route; §13 lists their removal as unbuilt work rather than pretending otherwise.
+**Neither is a question a conforming product asks.** The required behaviour is: try every direct
+carrier the daemon published first, because direct has fewer hops and fewer observers; then each
+rendezvous it published, in the daemon's own order; and always say which carrier is live and why the
+others were passed over. No carrier chooser, nothing to opt into, and no silent degradation — a
+surface that shows a connection without naming its carrier is not conforming. The current PWA still
+contains an interim three-way chooser and self-hosting setup route; §13 lists their removal as
+unbuilt work rather than pretending otherwise.
 
 The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
-`packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
-which-carrier-and-why sentence a surface can show verbatim. Discovery — learning the hosted relay's
-address and reading its kill switch — is provided by [PR #202](https://github.com/kirinnee/ferretry/pull/202).
+`packages/relay/src/lib/connection.ts` orders direct before relay, and `chooseConnection` returns the
+which-carrier-and-why sentence a surface can show verbatim. **What the set contains is published by
+the daemon** — handed to a device when it redeems a pairing code, and refreshable afterwards from
+`GET /v1/carriers`; §13 is that contract. Discovery — learning the hosted relay's address and reading
+its kill switch — is provided by [PR #202](https://github.com/kirinnee/ferretry/pull/202); a daemon
+resolves its `{ kind: 'relay', source: 'discovery' }` entry from that advertisement, and a browser now
+reads it only to say whose rendezvous a published address is.
 **The transport now exists on both sides** — `fyd` dials a rendezvous and carries a session, and the
 browser arrives at one, attempting direct first and falling back automatically. What a phone can do
 over a relay is every request/response route and nothing that needs a stream; "What is not built yet"
@@ -43,11 +49,11 @@ in §13 names each remaining shape exactly.
 
 Three addresses are involved and they are deliberately not the same thing:
 
-| Address              | Where it comes from                                                                                                                                | Compiled in? |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| **Discovery origin** | Where the relay advertisement is read from. The relay has its own hostname, and the PWA is a static bundle, so the browser build carries this one. | **Yes**      |
-| **Relay endpoint**   | The carrier actually used, served at runtime by that advertisement as `relayUrl` — or `null`, meaning no hosted carrier.                           | No           |
-| **Daemon URL**       | Where one daemon lives. Handed to the browser by pairing, per user.                                                                                | No           |
+| Address              | Where it comes from                                                                                                                                          | Compiled in? |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| **Discovery origin** | Where the relay advertisement is read from. The relay has its own hostname, and the PWA is a static bundle, so the browser build carries this one.           | **Yes**      |
+| **Relay endpoint**   | A rendezvous a daemon dials: written in its `carriers` list, or served at runtime to a discovery entry as `relayUrl` — or `null`, meaning no hosted carrier. | No           |
+| **Daemon URL**       | Where one daemon lives. Handed to the browser by pairing, per user.                                                                                          | No           |
 
 The discovery origin names a **service**, not a person: it identifies the relay, and it is the same
 string for everybody, so it discloses nothing about who is running a daemon or where. The address
@@ -533,10 +539,11 @@ the stateless Worker reserves a connection with one globally named control Durab
 routes the socket to the Durable Object named by `ferretry-relay/1:<daemonId>`.
 
 **This is the carrier every installation is intended to fall back to** when direct is not reachable,
-configured entirely at runtime. Its address is seeded on the first deploy into an untouched control
-object, from that Worker's own Cloudflare origin — so even the default address is a deployment fact
-rather than a compiled constant. The server half of that is built and tested; the client half is
-not, and "What is not built yet" below says exactly what is missing.
+configured entirely at runtime — an ordinary entry in a daemon's carrier list rather than a branch in
+its code, which is why an operator can hold it _and_ their own. Its address is seeded on the first
+deploy into an untouched control object, from that Worker's own Cloudflare origin — so even the
+default address is a deployment fact rather than a compiled constant. Both halves of that now exist,
+and "What is not built yet" below says exactly what remains.
 
 ### Runtime default and kill switch
 
@@ -676,6 +683,173 @@ payloads, device tokens, session content, commands, output, daemon names or devi
 X25519/Ed25519/AES-256-GCM channel described in §§2, 6 and 7 terminates only at the daemon and browser.
 The relay is incapable of decrypting content, including when a cap is hit.
 
+### The carrier set a daemon publishes
+
+**The daemon is authoritative and a client's carriers are a cache.** A daemon knows every way it can
+be reached; a browser only knows what it was last told. So the daemon publishes the set, in its own
+order, and where the two disagree the daemon is right by definition — including about a rendezvous the
+browser still remembers and the daemon has dropped.
+
+That replaces an arrangement in which each end discovered a rendezvous **independently**, from its own
+build-time discovery origin, and the two met only by coincidence of picking the same service. A daemon
+dialling one rendezvous and a browser holding another never meet, and the failure has the worst shape
+there is: both halves are healthy and the room is simply empty. Publishing the set is what puts an
+answer where the coincidence was.
+
+#### What a daemon may hold
+
+The daemon configuration document carries one `carriers` list. It is a discriminated union rather than
+uniform rows, because the two kinds are not the same kind of thing and the `kind` carries the
+consequence:
+
+```jsonc
+"carriers": [
+  { "kind": "bind",  "host": "127.0.0.1", "port": 7431 },  // LISTENS — inbound surface
+  { "kind": "relay", "source": "discovery" },              // the hosted default, resolved at runtime
+  { "kind": "relay", "url": "wss://my-relay.example" }     // one this operator supplied
+]
+```
+
+- A **bind** listens, and widening it is how a machine gets reached by somebody who was never invited.
+  A **relay** dials out and adds no inbound surface at all, because nothing can connect to a socket a
+  daemon opened from behind its own NAT. That asymmetry is why the bounds differ: **at most one bind,
+  at most four relays.** One bind because a daemon has one listening socket and more is a different
+  feature; four relays because each costs a socket and nothing else — generous on purpose, bounded
+  anyway, so "expose it somewhere else too" is never free.
+- A list that declares five rendezvous, or two binds, or the same rendezvous twice, **refuses the
+  boot**. An operator who wrote a fifth meant something by it, and quietly serving four is a daemon
+  lying about its own reach.
+- `{ "kind": "relay", "source": "discovery" }` makes the hosted carrier an ordinary entry instead of a
+  branch: there is no longer a rule about when the directory is asked, only a member of a list that
+  says to ask it. An operator who wants the hosted rendezvous **and** their own writes both, which a
+  single `relay` block could not express. Saying "no rendezvous, and I mean it" is that entry with
+  `"enabled": false` — a decision, which is the one thing an omission can never be.
+- `host`, `port` and the `relay` block remain readable as the **legacy spelling** of a one-bind,
+  one-relay list, superseded **per kind** rather than wholesale, so a half-finished migration does not
+  silently move where the daemon listens. A legacy key that a `carriers` entry supersedes is **named
+  at boot**: a key an operator edited with no error, no message and no change in behaviour is the
+  defect this whole shape exists to prevent.
+- **Nothing derived is persisted.** The effective list is re-derived on every read from the document
+  plus whatever this boot has since decided — a first boot that had to take a different port, a
+  `--port` claimed for one run — exactly like `bindUrl` and `publicUrl`. A `carriers` array written
+  back to disk with yesterday's port is the same defect as a frozen `publicUrl`.
+
+#### What it publishes, and when
+
+The set crosses to the device at the one moment guaranteed to be direct: **redemption**. The pairing
+response carries `carriers`, at most **eight** entries, each one `{ kind: 'direct' | 'relay', url }`,
+in the daemon's own order. It is on the redemption response rather than the mint response because the
+two are read by different parties — the mint response is read by the **host's** own UI, which has the
+daemon in front of it, and this one is read by the **device**, which is who has to know where to look
+next time. Pairing can never be relayed (below), so the connection carrying this answer is direct by
+construction and no rendezvous had an opportunity to edit it.
+
+The wire ceiling of eight sits above what configuration allows — one bind and four relays — so the set
+can grow a little without a protocol change. A bound exists at all because every entry is an address
+some browser will dial in turn, and an unbounded list is an unbounded walk.
+
+A paired device refreshes without pairing again:
+
+```
+GET /v1/carriers        authenticated with the device token pairing issued, fetched no-store
+
+{ "carriers": [ { "kind": "direct", "url": "https://workstation.example:7431" },
+                { "kind": "relay",  "url": "wss://relay.example" } ] }
+```
+
+It is `authenticated` rather than host-scoped on purpose: a paired device asking where its own daemon
+can be reached is exactly the caller this answer exists for, and it discloses nothing that device was
+not already told at redemption.
+
+A client **replaces** its stored set with that answer after a successful connection. Replace, never
+merge: a merge can learn an address the daemon added and can never forget one the daemon withdrew, so
+it fixes exactly half of a disagreement. The response is an object rather than a bare array because a
+JSON array has nowhere to put the next fact anybody needs.
+
+The two URL rules differ on purpose. A **relay** address must be `wss:`/`https:` anywhere, and may be
+`ws:`/`http:` only against loopback — the same line the published site's content-security-policy
+draws, so drawing it differently here would make one of the two a lie. It carries a third party on the
+path, and a stranger's service carrying a session in plaintext is not a carrier this protocol will
+dial. A **direct** address is the same spelling pairing has always handed over, because a daemon on a
+private network address commonly serves plain HTTP, and refusing that here would publish an empty set
+for the most ordinary deployment there is. A published relay address that does not pass the rule is
+**dropped rather than dialled**: the two ends disagree about what is dialable, and dialling anyway is
+how a client ends up trusting a carrier its own protocol refuses.
+
+**Neither address is a secret**, which is why publishing them discloses nothing: a rendezvous address
+is already known to the rendezvous, and a daemon address is already known to whoever was authorised to
+pair with it. The daemon **fingerprint** is a different matter. It is not on this list and is not
+named in any carrier diagnostic — it addresses the rendezvous, it travels in the pairing fragment, and
+it stays out of anything a reader might paste into an issue.
+
+**No entry says whether it is privileged, and no such field may ever be added.** Privilege is binary
+and carrier-derived: it is answered by the carrier that **accepted** an arrival, per connection, on the
+daemon. A relay arrival answers `false` unconditionally — the rendezvous terminates on the host it
+serves, so a check reading a peer address, a `Host` header or a URL would hand a remote phone full
+control — and a bound socket answers per connection. A field here saying "this one is local" would be
+a client's claim about its own authority, which is the one thing a daemon may never take from a
+client. Multiple relays do not weaken that rule; they instantiate it N times. See
+[`grants.md`](grants.md).
+
+**Adding `carriers` to the redemption response was a breaking change, not an additive one.** Every
+device-facing response in `@ferretry/protocol` is a strict object and refuses an unknown key rather
+than ignoring it, so an older client parsing a newer daemon's answer fails outright — totally, for
+that exchange, and it looks like the daemon refusing the client. The rule, recorded in
+`packages/protocol/src/lib/version-skew.ts`: **a key added to a device-facing strict object ships in
+the same release as the client that reads it.** The other direction needs no ceremony — a newer client
+reading an older daemon sees no `carriers` and degrades to direct-only, which is exactly what an older
+daemon offers.
+
+The wire shape is `packages/protocol/src/lib/carriers.ts` — one owner for both ends, since the
+configuration list and the published set are the same fact seen from two sides. The operator's list is
+`packages/daemon/src/lib/runtime/carriers.ts`, and the browser's cache and walk are
+`packages/pwa/src/lib/connections.ts` and `relay-carrier.ts`.
+
+#### The walk
+
+The existing contract is unchanged, and is now stated for a set rather than a pair: **the carrier is
+chosen by trying it, not by a health check.**
+
+1. every `direct` carrier, in the order the daemon published them;
+2. then every `relay`, in the order the daemon published them;
+3. **only a TRANSPORT failure from a replay-safe `GET` or `HEAD` advances.** Any HTTP response is an
+   answer — `503` included — and stops the walk: the daemon is reachable and saying so. A failed
+   mutation is also reported rather than sent to another carrier, because a lost response does not
+   prove the daemon did not apply it. Advancing on a status would send the client to another address
+   for the same daemon to arrive at the answer it already had, and report "nothing was reachable" about
+   a daemon that replied every time;
+4. the winner is remembered **for the life of that connection**, so a browser on the network a
+   rendezvous exists for does not pay a failed direct attempt per call. **A round in which nothing
+   worked is not remembered** — it served no request, so there is no answer to keep, and a later
+   request re-probes. When a remembered winner's transport later fails, that choice is forgotten and
+   the next request starts the walk again from the top.
+
+Direct before relay is the protocol's rule. **Within a kind, the daemon's order is the operator's
+preference**, which is the right authority, and a client that re-sorted it would be substituting its
+own. There is **no latency race and no scoring**: a race makes the winner nondeterministic, and a
+surface that reports which carrier is live has to be able to say _why_ that one won.
+
+#### When the two disagree
+
+| Disagreement                                      | Behaviour                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the daemon dropped a relay the client still holds | the handshake finds no daemon at that rendezvous. A **replay-safe** request advances, per rule 3 — not an error, a miss. A mutation is **reported instead**, because the walk has no discriminator between a rendezvous that never carried the request and one that carried it and lost the answer. The stale entry is pruned by the refresh after the next successful connection. |
+| the daemon added a relay the client lacks         | the client never tries it, until that same refresh **replaces** the stored set. Nobody has to re-pair.                                                                                                                                                                                                                                                                             |
+| nothing published is reachable                    | every attempt is reported with its cause and the rendezvous origins are named; the daemon fingerprint is not. `0` is never a close code. Existing contract, preserved.                                                                                                                                                                                                             |
+
+A carrier the client discovered **for itself** under the previous model is not promoted into this
+cache. It was a guess about where a daemon might be, not something the daemon said, and the whole
+point of the set is that those are different claims.
+
+#### What several rendezvous buy, honestly
+
+A self-hosted rendezvous for a LAN and the hosted one for everywhere else, at the same time — and
+redundancy, which was never available while each end picked a service independently. The strongest
+reason is quieter: the published set carries a **direct** address alongside the relays, so the one
+carrier pairing can use is a first-class member of the list rather than a special case sitting outside
+it. Pairing can never be relayed, so an address that is reachable directly at least once is what makes
+a daemon pairable at all.
+
 ### What is not built yet
 
 The relay, the control plane, the caps and the disclosure text are implemented and tested. **The
@@ -684,8 +858,11 @@ narrower and is listed exactly below — three shapes this tunnel does not carry
 has not caught up with §1.
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
-parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
-the relay address and whether the operator has switched it off. What that does not do is use it.
+parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`. In the browser that
+read is now **disclosure only** — the routes come from the daemon's published set, and comparing a
+published address against the advertised one is how a surface can say whether a rendezvous is
+Ferretry's or somebody's own. A failed read therefore changes no route, only the sentence a person
+reads.
 
 **Both ends discover it now, and that asymmetry was a shipped defect.** A session crosses a relay
 only if BOTH ends are on it, and until `packages/daemon/src/lib/relay/discovery.ts` existed only the
@@ -699,36 +876,43 @@ document, from the same path, and dials whatever it names. Its discovery origin 
 different directories, and overridable at runtime with `FY_RELAY_DIRECTORY_ORIGIN`. It is an ORIGIN,
 never a carrier: no relay address is compiled into either end.
 
-An explicit `relay` block **wins and is never overwritten** — the directory is not even asked when
-one is present, so `enabled: false` stays off rather than being helpfully re-enabled. Every failure
-to discover narrows to direct-only, and the boot trail plus `fyd --check` state the consequence and
-the remedy rather than one bare clause; `--check` names the posture in one line: direct-only, hosted,
-or self-hosted, and which.
+A rendezvous an operator wrote down **wins and is never overwritten** — the directory is asked only
+for an enabled `source: 'discovery'` entry, so a carrier switched off stays off rather than being
+helpfully re-enabled, and an entry carrying a `url` is already complete. The same holds for the legacy
+`relay` block, which is read as a one-relay list when `carriers` declares no rendezvous of its own.
+Every failure to discover narrows that entry to nothing rather than guessing an address, and the boot
+trail plus `fyd --check` state the consequence and the remedy rather than one bare clause; `--check`
+names the posture in one line: direct-only, hosted, or self-hosted, and which.
 
 **`fyd` now dials and carries a session.** `packages/daemon/src/lib/relay` is the daemon half of this
 protocol — the claim signed with the key pairing already minted, the per-session handshake, the record
 layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`
 the bound address serves. `packages/daemon/src/adapters/relay` is the outbound socket, its liveness,
-and the one HTTP read of the advertisement above; the `relay` block of the daemon configuration
-document is where an operator overrides all of it.
+and the one HTTP read of the advertisement above; the `carriers` list of the daemon configuration
+document — legacy `relay` block included — is where an operator overrides all of it.
 
 **The browser now can.** `packages/pwa/src/lib/relay-session.ts` is the client half of §6, §7, §8 and
 §14 — the handshake against the fingerprint pairing pinned, the record layer, the credit window and the
 tunnel — and `packages/pwa/src/lib/relay-carrier.ts` is what decides and dials.
-`DaemonConnection` carries a relay carrier, `connections.ts` persists one, and every daemon-bound
-request goes through the router, which attempts direct first and falls back automatically.
+`DaemonConnection` carries the daemon's published set, `connections.ts` persists it as a cache, and
+every daemon-bound request goes through the router, which walks that set in the order above.
 `packages/pwa/tests/integration/relay-carrier-end-to-end.test.ts` wires the browser client, the real
 `RendezvousDurableObject` and the daemon's real `RelayLink` together and asserts the rendezvous saw
 neither a payload nor the device token.
 
 Four properties of that client are worth stating here because they are contract, not implementation:
 
-- **The carrier is chosen by trying it, not by a health check.** The first request is attempted over
-  direct, and only a TRANSPORT failure moves on. A daemon that answered `503` is reachable and saying
-  so, and is not demoted to a relay.
-- **Discovery is re-read every load and never restored from storage.** A hosted address kept in
-  browser storage would be a browser `relayUrl: null` does not reach. An address its owner supplied
-  themselves has no runtime source and is persisted; Ferretry's hosted one is not.
+- **The carrier is chosen by trying it, not by a health check.** The walk above is the whole rule:
+  every direct address, then every rendezvous, in the daemon's published order, and only a TRANSPORT
+  failure moves on. A daemon that answered `503` is reachable and saying so, and is not demoted to a
+  relay.
+- **The stored set is a cache of what the daemon said, not a browser's own discovery.** It is seeded
+  by redemption, replaced wholesale after a successful connection, and never merged into. A hosted
+  address the browser discovered for itself is not written into it, and one carried over from the
+  previous single-relay model is dropped rather than promoted. The kill switch does not depend on any
+  of that: `relayUrl: null` is enforced by the Worker at admission and on the live sweep, and a
+  withdrawn address also leaves the daemon's published set at the next refresh, so a remembered
+  address carries nothing.
 - **A refused carrier says why, and `0` is never a close code.** A browser withholds the cause of a
   WebSocket failure, but not whether the HANDSHAKE COMPLETED — and that distinction is the whole
   answer, because this Worker deliberately accepts an upgrade it means to refuse so it can state a
@@ -762,21 +946,23 @@ declared gaps below, the fourth is on screen, and the fifth is outstanding:
    directories carry nothing and nothing else in CI would notice.
 2. **A fetch-and-parse step on BOTH ends** — the PWA's from #202, the daemon's in
    `packages/daemon/src/lib/relay/discovery.ts` and `src/adapters/relay/hosted-relay-directory.ts` —
-   that reads the advertisement through
-   `HostedRelayAdvertisementSchema` and turns it into a carrier with `hostedRelayConnection`,
-   treating `relayUrl: null` and any failure as "no hosted carrier". On the daemon the advertised
-   address becomes a `relay` block through the same schema an operator's document uses, so a
-   discovered carrier and a configured one cannot acquire different redial cadences; a configured
-   block short-circuits the read entirely.
+   that reads the advertisement through `HostedRelayAdvertisementSchema`, treating `relayUrl: null`
+   and any failure as "no hosted carrier". On the daemon the advertised address resolves whichever
+   `source: 'discovery'` entry the carrier list holds, through the same schema an operator's own entry
+   uses, so a discovered rendezvous and a configured one cannot acquire different redial cadences; an
+   entry that already carries a `url` never reads it, and one boot performs one read no matter how
+   many entries there are. In the browser the same read no longer chooses anything — it labels a
+   published address as Ferretry's hosted rendezvous or somebody's own.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,
    signs its claim with the identity pairing minted (the same key, deliberately: a second one would
    carry a fingerprint no paired browser has pinned), runs a session per client and dispatches §14
-   requests into the daemon's own route table; the `relay` block of the daemon configuration document
-   points it at an address. `packages/pwa/src/lib/relay-session.ts` and `relay-carrier.ts` are the
-   browser end. **What is still missing around it:**
-   - A `fy` verb to write the daemon's `relay` block — an operator edits
-     `<state home>/config/daemon.json` today. That block is now an OVERRIDE rather than the only way
-     to get a carrier: without one the daemon takes whichever relay this section advertises.
+   requests into the daemon's own route table; the `carriers` list of the daemon configuration document
+   points it at up to four addresses. `packages/pwa/src/lib/relay-session.ts` and `relay-carrier.ts`
+   are the browser end. **What is still missing around it:**
+   - A `fy` verb to read and write the daemon's `carriers` list — an operator edits
+     `<state home>/config/daemon.json` today. Those entries are an OVERRIDE rather than the only way
+     to get a carrier: a document that declares no rendezvous takes whichever relay this section
+     advertises, as the discovery entry it means.
    - **The two shapes this tunnel does not carry** (see §14): `/v1/events` and terminal streams. The
      browser now REFUSES these on a relay carrier rather than opening a socket at an address the relay
      exists because it cannot reach, so a relayed connection is a working request/response surface

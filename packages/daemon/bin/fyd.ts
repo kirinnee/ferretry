@@ -5,12 +5,13 @@ import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   type Advertisement,
+  type DaemonCarrier,
   FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
-  type RegisterProjectRequest,
   refusalNotice,
+  type RegisterProjectRequest,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -288,12 +289,12 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
-  chooseRelayCarrierSource,
+  chooseRelayCarrierSources,
+  dialledRelayUrl,
   describeAbsentRelayCarrier,
   describeGrantPosture,
   describeRelayCarrierPosture,
   NO_PASSWORD_DISCLOSURE,
-  PAIRING_IS_ALWAYS_DIRECT,
   type OperatorPasswordPort,
   normalizeCallsign,
   type ObservedSession,
@@ -313,6 +314,8 @@ import {
   parseWardenConfigPatch,
   planInitialAttachments,
   portCandidates,
+  publishableDirectCarrier,
+  publishedDaemonCarriers,
   projectStructuredQuestion,
   type QuotaFailoverLoop,
   QuotaFailoverService,
@@ -337,6 +340,7 @@ import {
   refuseOccupiedAddress,
   refuseUnbindableAddress,
   relaunchCommand,
+  relayCarriersNeedDiscovery,
   relayCarrierRemedy,
   renderConfiguration,
   renderDoctorReport,
@@ -401,6 +405,7 @@ import {
   selectableAutoAccounts,
   sessionHealthSettingsAt,
   structuredQuestionStatePatch,
+  supersededCarrierKeys,
   type TaskAssigneeCandidate,
   type TaskBoardSubsystem,
   type TaskBoardTaskActionAuthorizer,
@@ -677,6 +682,7 @@ export interface DaemonWorld {
   readonly createPairing: (
     config: DaemonConfig,
     clock: MillisecondClockPort,
+    carriers: readonly DaemonCarrier[],
   ) => Promise<{
     readonly subsystem: PairingService;
     readonly credentials: PairingDeviceRegistry;
@@ -713,36 +719,36 @@ export interface DaemonWorld {
    * test sleep for the public thirty-second ticket lifetime. */
   readonly createSocketTickets: () => SocketTicketBroker;
   /**
-   * The OTHER carrier this daemon can be reached over: an outbound socket to a rendezvous.
+   * The OTHER carriers this daemon can be reached over: outbound sockets to rendezvous.
    *
    * THE DAEMON DIALS. This is not a second listener — a daemon on `127.0.0.1` has no inbound route,
    * and the only reason a relay makes it reachable is that the connection is opened outbound from
    * behind the NAT. It carries the SAME dispatcher the bound address serves, so a relayed request
    * reaches exactly the routes a direct one reaches and there is no second surface to keep in step.
    *
-   * It answers a refusal rather than throwing, and the refusal is printed. A daemon with no relay and
-   * a daemon whose relay is broken look identical from the outside, and this migration has shipped
-   * that confusion three times: the sentence is the difference.
+   * The factory answers a refusal rather than throwing, and the refusal is printed. A daemon with no
+   * relay and a daemon whose relays are broken look identical from the outside, and this migration
+   * has shipped that confusion three times: the sentence is the difference.
    */
-  readonly createRelayCarrier: (
-    config: DaemonConfig,
+  readonly createRelayCarriers: (
+    sources: readonly RelayCarrierSource[],
     dispatch: RelayApiDispatch,
     devices: RelayDeviceDirectory,
-    /**
-     * The relay directory, passed IN rather than captured, for the same reason the terminal runtime
-     * is: a factory that closed over the world field would keep the production reader no matter what
-     * a test substituted, and the seam would be a lie.
-     */
-    directory: RelayDirectoryPort,
   ) => Promise<
-    { readonly carrier: BunRelayCarrier; readonly source: RelayCarrierSource } | { readonly refusal: string }
+    | {
+        readonly carriers: readonly {
+          readonly carrier: BunRelayCarrier;
+          readonly source: RelayCarrierSource;
+        }[];
+      }
+    | { readonly refusal: string }
   >;
   /**
-   * WHERE THE CARRIER COMES FROM WHEN NOBODY CONFIGURED ONE — one HTTP read, once per boot.
+   * WHERE DISCOVERED CARRIERS COME FROM — one HTTP read, once per boot.
    *
    * A world FIELD rather than a private of the factory above because `--check` asks it too, and
    * because it is the one collaborator in this subsystem that talks to a service off this machine:
-   * a test substitutes it and keeps the choice, the carrier and the notices exactly as production
+   * a test substitutes it and keeps the choices, carriers and notices exactly as production
    * builds them.
    */
   readonly relayDirectory: RelayDirectoryPort;
@@ -821,6 +827,8 @@ export interface DaemonWorld {
     pairing: PairingService,
     /** Opened WITH pairing, because an enrolment's lifetime is a device grant's — see `createPairing`. */
     push: PushSubscriptionSubsystem,
+    /** The exact published set pairing redemption receives and authenticated refresh serves. */
+    carriers: readonly DaemonCarrier[],
     socketTickets: SocketTicketBroker,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
@@ -3021,6 +3029,51 @@ function browserOrigins(config: DaemonConfig): readonly string[] {
   return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin, new URL(config.bindUrl).origin])];
 }
 
+/** The direct carrier this invocation may publish, or the one complete notice explaining why it cannot. */
+function directCarrierPublication(
+  config: DaemonConfig,
+): { readonly kind: 'published'; readonly url: string } | { readonly kind: 'omitted'; readonly notice: string } {
+  // The advertisement decision owns wildcard-derived omission. In particular, an operator-written
+  // wildcard publicUrl is an address here and must not be reinterpreted from its hostname spelling.
+  //
+  // WHICH refusal it was is read off the decision rather than asserted here. There is more than one
+  // way to have no address to hand out, the protocol owns a sentence for each, and `fy pair` already
+  // renders those same two sentences — a third spelling on this seam would be the one that goes
+  // stale, telling an operator a reason that was true of some other document than theirs.
+  if (config.advertisement.kind === 'none') {
+    const refusal = refusalNotice(config.advertisement.refusal);
+    return {
+      kind: 'omitted',
+      notice: `direct carrier omitted (${config.bindUrl}) — ${refusal.audience} To publish one: ${refusal.remedy}`,
+    };
+  }
+  const candidate = publishableDirectCarrier(config.publicUrl);
+  if (candidate.kind === 'ok') return { kind: 'published', url: candidate.url };
+  return {
+    kind: 'omitted',
+    notice:
+      `direct carrier omitted — ${config.publicUrl} cannot be published: ${candidate.reason}; ` +
+      'no direct entry is published, so devices can reach this daemon only over its relays; ' +
+      'set "publicUrl" to an http or https origin without credentials, a path, a query, or a fragment to publish one',
+  };
+}
+
+/**
+ * Resolve every relay entry from one runtime advertisement read, only when an enabled discovery
+ * entry actually needs that fact. Boot and `--check` each call this once for their own invocation;
+ * transport construction receives the resulting sources and therefore cannot ask the directory a
+ * second time behind either caller's back.
+ */
+async function resolveRelayCarrierSources(
+  config: DaemonConfig,
+  directory: RelayDirectoryPort,
+): Promise<ReturnType<typeof chooseRelayCarrierSources>> {
+  const advertisement = relayCarriersNeedDiscovery(config.carrierSet.relays)
+    ? await directory.read()
+    : RELAY_DIRECTORY_NOT_ASKED;
+  return chooseRelayCarrierSources(config.carrierSet.relays, advertisement);
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // Pairing opens before any subsystem. Keep its validated daemon identity in
@@ -3576,7 +3629,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         },
       );
     },
-    createPairing: async (config, pairingClock) => {
+    createPairing: async (config, pairingClock, carriers) => {
       const cryptography = new NodePairingCryptography();
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
@@ -3607,6 +3660,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           // and a bare `publicUrl` cannot — a default install's is loopback, which on the phone
           // reading its QR names the phone.
           advertisement: config.advertisement,
+          carriers,
           clock: pairingClock,
           cryptography,
           devices: repository,
@@ -3644,7 +3698,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
-    createRelayCarrier: async (config, dispatch, devices, directory) => {
+    createRelayCarriers: async (sources, dispatch, devices) => {
+      const dialledSources = sources.filter(
+        (source): source is Exclude<RelayCarrierSource, { readonly kind: 'direct-only' }> =>
+          source.kind !== 'direct-only' && source.config.enabled,
+      );
+      if (dialledSources.length === 0) return { carriers: [] };
       // The key is the one PAIRING minted, read through the path both subsystems now share. A relay
       // identity of its own would carry a different fingerprint from the one in the pairing QR, and
       // every paired browser pins that one — so it would refuse the handshake, correctly, forever.
@@ -3654,27 +3713,17 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         new WebCryptoRelayIdentityKeys(),
       );
       if (!identity.ok) return { refusal: identity.reason };
-      /**
-       * DIRECT FIRST, THEN THE ADVERTISED CARRIER — the fallback the browser half already had.
-       *
-       * The directory is asked ONLY when this daemon has no relay block of its own. An operator who
-       * wrote one chose it, including choosing to switch it off, and a discovery read that could
-       * override that would turn an emergency stop into a suggestion. It is also a network read
-       * nobody asked for.
-       */
-      const source = chooseRelayCarrierSource(
-        config.relay,
-        config.relay === undefined ? await directory.read() : RELAY_DIRECTORY_NOT_ASKED,
-      );
       return {
-        source,
-        carrier: new BunRelayCarrier({
-          config: source.kind === 'direct-only' ? undefined : source.config,
-          crypto: new WebCryptoRelayCrypto(),
-          identity: identity.identity,
-          dispatch,
-          devices,
-        }),
+        carriers: dialledSources.map(source => ({
+          source,
+          carrier: new BunRelayCarrier({
+            config: source.config,
+            crypto: new WebCryptoRelayCrypto(),
+            identity: identity.identity,
+            dispatch,
+            devices,
+          }),
+        })),
       };
     },
     browserLogin: createBrowserLoginWorld(paths),
@@ -3693,6 +3742,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       analyticsStore,
       pairing,
       push,
+      carriers,
       socketTickets,
     ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
@@ -3945,6 +3995,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         },
         pairing,
         push,
+        carriers,
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
         fleet,
@@ -4201,7 +4252,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => opened.storage.close());
   world.notices.step('state home opened', opened.paths.home);
 
-  const loaded = overriddenBy(await world.config.load(), world.overrides);
+  const peeked = await world.config.peek();
+  const loaded = overriddenBy(
+    peeked.document === undefined ? await world.config.load() : peeked.config,
+    world.overrides,
+  );
   world.notices.step('configuration loaded', world.config.path);
   await world.secrets.load(loaded.secretsFile);
   if (loaded.secretsFile !== undefined) world.notices.step('secrets loaded', loaded.secretsFile);
@@ -4214,6 +4269,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     return decided.exitCode;
   }
   const config = decided.config;
+  for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: config.carriers })) {
+    world.notices.state(
+      `the legacy "${key}" key in ${world.config.path} is superseded by its explicit carriers entry and has no effect`,
+    );
+  }
   // Recorded exactly when THIS BOOT chose the address, which is the only case where the document
   // does not already say it: a recorded port is already written, and a port named on the command
   // line was said about this run only and must not be turned into a claim on disk behind the
@@ -4227,6 +4287,27 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // persisted looks like. Either way the operator is the one who can tell which, so say it.
   if (advertisesForeignAddress(config))
     world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
+  /**
+   * The runtime relay advertisement is read ONCE, here, before either consumer receives the set.
+   * Construction below receives these sources rather than the directory, so no second read can hide
+   * inside a carrier factory. A duplicate that only becomes visible after discovery is a boot
+   * refusal: silently dropping one entry would choose between the operator's relay and the hosted
+   * one on their behalf, and that choice would change when the directory changes.
+   */
+  const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
+  if (resolvedRelays.kind === 'refused') {
+    world.notices.state(`relay carrier configuration refused — ${resolvedRelays.reason}`);
+    return 1;
+  }
+  const relaySources = resolvedRelays.sources;
+  // ONE VALUE, in wire order: the externally declared direct origin first, then every enabled relay
+  // in document order. The advertisement decision owns whether this boot has a publishable direct
+  // origin; pairing and refresh receive this exact frozen array reference below.
+  const directCarrier = directCarrierPublication(config);
+  if (directCarrier.kind === 'omitted') world.notices.state(directCarrier.notice);
+  const carriers = Object.freeze(
+    publishedDaemonCarriers(directCarrier.kind === 'published' ? directCarrier.url : undefined, relaySources),
+  );
   /**
    * Whether this host can launch an agent at all.
    *
@@ -4245,7 +4326,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
 
   const usage = await world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
-  const pairing = await world.createPairing(config, world.clock);
+  const pairing = await world.createPairing(config, world.clock, carriers);
   world.notices.step('pairing identity opened');
   const base = {
     credentials: { ...(await world.credentials.load()), devices: pairing.credentials },
@@ -4301,6 +4382,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     analyticsStore,
     pairing.subsystem,
     pairing.push,
+    carriers,
     world.createSocketTickets(),
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
@@ -4380,7 +4462,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => server.stop());
   world.notices.step('listening', config.bindUrl);
   /**
-   * The relay carrier, dialled AFTER the bind and serving the very same dispatcher.
+   * The relay carriers, dialled AFTER the bind and serving the very same dispatcher.
    *
    * AFTER, deliberately: a boot that hands over to an incumbent daemon on this address must not first
    * claim the rendezvous that incumbent is holding — the claim is exclusive, so the loser of a bind
@@ -4390,29 +4472,57 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * this daemon could not dial, and the sentence is what stops "no relay configured" from looking
    * exactly like "the relay is broken" — the two are indistinguishable from outside without it.
    */
-  const relay = await world.createRelayCarrier(
-    config,
-    request => dispatcher.dispatch(request),
-    { identifyDevice: token => pairing.credentials.identify(token) },
-    world.relayDirectory,
-  );
-  if ('carrier' in relay) {
-    relay.carrier.start();
-    cleanups.push(() => relay.carrier.stop());
-    const status = relay.carrier.status();
-    if (status.phase === 'none') {
-      // THREE LINES, NOT ONE. The old notice stated a reason and stopped, which told somebody whose
-      // phone could not reach this daemon nothing they could act on.
-      for (const line of describeAbsentRelayCarrier({
-        source: relay.source,
-        carrierDetail: status.detail,
-        configFile: world.config.path,
-        host: config.host,
-      }))
-        world.notices.state(line);
-    } else world.notices.step('dialling the relay', status.relayUrl);
+  const relay = await world.createRelayCarriers(relaySources, request => dispatcher.dispatch(request), {
+    identifyDevice: token => pairing.credentials.identify(token),
+  });
+  if ('carriers' in relay) {
+    const started = new Map<string, ReturnType<BunRelayCarrier['status']>>();
+    for (const { carrier, source } of relay.carriers) {
+      // REGISTERED BEFORE IT IS STARTED, like every other acquisition this boot makes. A dial opens a
+      // socket partway through `start`, so a carrier that throws on the way up has already taken
+      // something — and registering afterwards is exactly the ordering in which that one is the
+      // carrier nothing ever stops, while every carrier before it is released normally.
+      cleanups.push(() => carrier.stop());
+      // Each carrier owns its own accepted connections, and therefore independently marks every
+      // relayed arrival unprivileged. No list-wide or peer-address-derived privilege exists here.
+      carrier.start();
+      const relayUrl = dialledRelayUrl(source);
+      if (relayUrl !== undefined) started.set(relayUrl, carrier.status());
+    }
+    const activeCount = [...started.values()].filter(status => status.phase !== 'none').length;
+    const inactiveDetail = (source: RelayCarrierSource, detail?: string): string => {
+      if (detail !== undefined) return detail;
+      if (source.kind === 'direct-only') return source.reason;
+      if (!source.config.enabled)
+        return `the configured relay ${source.config.url} is switched off in this daemon's configuration`;
+      return `the relay ${source.config.url} did not produce an active carrier`;
+    };
+    let globalAbsenceReported = false;
+    for (const source of relaySources) {
+      const relayUrl = dialledRelayUrl(source);
+      const status = relayUrl === undefined ? undefined : started.get(relayUrl);
+      if (status === undefined || status.phase === 'none') {
+        const detail = inactiveDetail(source, status?.detail);
+        if (activeCount > 0 || globalAbsenceReported) {
+          world.notices.state(`relay carrier inactive — ${detail}`);
+          continue;
+        }
+        // The consequence and remedy are GLOBAL and therefore emitted once, only when the entire set
+        // dials nothing. An inactive entry beside a working relay receives the specific line above.
+        for (const line of describeAbsentRelayCarrier({
+          source,
+          carrierDetail: detail,
+          configFile: world.config.path,
+          host: config.host,
+        }))
+          world.notices.state(line);
+        globalAbsenceReported = true;
+        continue;
+      }
+      world.notices.step('dialling the relay', status.relayUrl);
+    }
   } else {
-    world.notices.state(`no relay carrier — ${relay.refusal}`);
+    world.notices.state(`no relay carriers — ${relay.refusal}`);
   }
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
@@ -4617,10 +4727,12 @@ export function describePairingAdvertisement(advertisement: Advertisement): read
  * its own and "another daemon is already serving that address" and "something unidentified holds it"
  * need different things done about them.
  */
-export async function checkConfiguration(world: DaemonWorld): Promise<number> {
+export async function checkConfiguration(
+  world: DaemonWorld,
+  say: (text: string) => void = text => void writeSync(1, `${text}\n`),
+): Promise<number> {
   const peeked = await world.config.peek();
   const config = overriddenBy(peeked.config, world.overrides);
-  const say = (text: string): void => void writeSync(1, `${text}\n`);
   say(`state home   ${world.stateHome.path}`);
   say(`config file  ${world.config.path}${peeked.document === undefined ? '  (not written yet)' : ''}`);
   /**
@@ -4669,33 +4781,69 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
    * answer the real one rather than a guess about what a boot might decide; that is one outbound
    * request, which is the same latitude this command already takes when it probes an address.
    *
-   * It does not change the exit code. A direct-only daemon starts perfectly.
+   * An ordinary direct-only or disabled posture does not change the exit code because that daemon
+   * starts perfectly. A duplicate discovered rendezvous is a refused configuration and does.
    */
-  const carrier = chooseRelayCarrierSource(
-    config.relay,
-    config.relay === undefined ? await world.relayDirectory.read() : RELAY_DIRECTORY_NOT_ASKED,
-  );
-  say(describeRelayCarrierPosture(carrier, world.config.path));
-  say(`             ${PAIRING_IS_ALWAYS_DIRECT}`);
-  if (carrier.kind === 'direct-only' || !carrier.config.enabled) {
-    for (const line of relayCarrierRemedy(carrier, world.config.path, config.host)) say(`             ! ${line}`);
+  // The same sentence the boot states, in this command's column. The TEXT is the boot's, whole and
+  // unaltered — a reader comparing a `--check` against a log must be able to see one fact, not two
+  // renderings of it — and only the label in front of it belongs to this table.
+  const directCarrier = directCarrierPublication(config);
+  if (directCarrier.kind === 'omitted') say(`carrier      ${directCarrier.notice}`);
+  const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
+  let carrierForGrants: RelayCarrierSource | undefined;
+  let carrierExitCode = 0;
+  if (resolvedRelays.kind === 'refused') {
+    say(`carrier      refused — ${resolvedRelays.reason}`);
+    carrierExitCode = 1;
+  } else {
+    for (const carrier of resolvedRelays.sources) {
+      say(describeRelayCarrierPosture(carrier, world.config.path));
+    }
+    const dialled = resolvedRelays.sources.find(carrier => dialledRelayUrl(carrier) !== undefined);
+    carrierForGrants = dialled ?? resolvedRelays.sources[0];
+    // The remedy is GLOBAL: it says this daemon dials no relay. An inactive entry beside an active
+    // sibling gets its own posture line above, never a false claim that nothing off-host can connect.
+    if (dialled === undefined && carrierForGrants !== undefined) {
+      for (const line of relayCarrierRemedy(carrierForGrants, world.config.path, config.host)) {
+        say(`             ! ${line}`);
+      }
+    }
   }
   // Directly beneath the carrier, because the line above has just said pairing cannot use one: this
   // is the address that has to work on its own, and whether anybody but this machine can dial it.
   for (const line of describePairingAdvertisement(config.advertisement)) say(line);
-  for (const line of describeGrantPosture({
-    config,
-    passwordSet: await world.operatorPassword.isSet().catch(() => false),
-    clientName: CLIENT_NAME,
-    carrier,
-  }))
-    say(line);
-  const doctorExitCode = doctor.ready ? 0 : 1;
+  /**
+   * A REFUSED CARRIER SET HAS NO GRANT POSTURE, AND SAYING SO IS THE WHOLE POINT.
+   *
+   * The posture is derived from the carrier this daemon would dial, and a refused set names no such
+   * carrier — so the derivation falls all the way through to "loopback bind, no relay" and prints
+   * `nothing off this host can reach this daemon`. That sentence is FALSE for the operator it is
+   * shown to: they declared two rendezvous, and the refusal three lines above says so. It also sends
+   * them at the opposite remedy, in the one command a person runs when something is already wrong.
+   *
+   * Undetermined is the honest answer and it fails closed, exactly as an undetermined document does
+   * everywhere else here: nothing is claimed about a configuration this daemon has refused to act on.
+   */
+  if (resolvedRelays.kind === 'refused') {
+    say(
+      'grants       not reported — the carrier configuration above is refused, so what a caller off ' +
+        'this host could do is undetermined until it is corrected',
+    );
+  } else {
+    for (const line of describeGrantPosture({
+      config,
+      passwordSet: await world.operatorPassword.isSet().catch(() => false),
+      clientName: CLIENT_NAME,
+      carrier: carrierForGrants,
+    }))
+      say(line);
+  }
+  const checkExitCode = Math.max(doctor.ready ? 0 : 1, carrierExitCode);
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });
     if (occupant.kind === 'vacant') {
       say(`address      ${config.bindUrl}  (free — this daemon would bind it)`);
-      return doctorExitCode;
+      return checkExitCode;
     }
     const refusal = refuseOccupiedAddress({
       daemonName: DAEMON_NAME,
@@ -4707,7 +4855,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
     say(`address      ${config.bindUrl}  (taken)`);
     say('');
     say(`! ${refusal.message}`);
-    return Math.max(refusal.exitCode, doctorExitCode);
+    return Math.max(refusal.exitCode, checkExitCode);
   }
   // No port is recorded, so this reports the walk a first boot would take rather than one address.
   const candidates = portCandidates(world.boot.preferredPort);
@@ -4716,7 +4864,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
     const occupant = await world.boot.probe.identify({ url: candidate.bindUrl });
     if (occupant.kind === 'vacant') {
       say(`address      ${candidate.bindUrl}  (free — this daemon would take and record it)`);
-      return doctorExitCode;
+      return checkExitCode;
     }
     say(
       `address      ${candidate.bindUrl}  (taken — ${occupant.kind === 'daemon' ? `another ${DAEMON_NAME}` : occupant.evidence})`,
@@ -4725,7 +4873,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
   const refusal = refuseExhaustedCandidates(DAEMON_NAME, candidates, world.config.path);
   say('');
   say(`! ${refusal.message}`);
-  return Math.max(refusal.exitCode, doctorExitCode);
+  return Math.max(refusal.exitCode, checkExitCode);
 }
 
 async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check' | 'print-config' }): Promise<number> {

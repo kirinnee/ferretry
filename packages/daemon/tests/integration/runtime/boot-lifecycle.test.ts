@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   AnalyticsResponseSchema,
   BrowserLoginStatusSchema,
+  DaemonCarriersViewSchema,
   type FyEventStreamFrame,
   FyEventStreamFrameSchema,
   HealthViewSchema,
@@ -18,6 +19,7 @@ import {
   PairingCodeStatusResponseSchema,
   PairingResponseSchema,
   ProposalViewSchema,
+  refusalNotice,
   RunManifestSchema,
   SendResultSchema,
   SessionConfigSchema,
@@ -33,12 +35,13 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { z } from 'zod';
-import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
+import { buildWorld, checkConfiguration, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import {
   type BrowserLoginChild,
   type BrowserLoginRuntime,
   BrowserLoginWindowService,
   BrowserProfileStore,
+  type BunRelayCarrier,
 } from '../../../src/adapters/index.ts';
 import {
   type BootNoticePort,
@@ -52,6 +55,7 @@ import {
   type ProcessObservation,
   parseSessionId,
   type RelayAdvertisement,
+  type RelayCarrierSource,
   type ResumeLauncher,
   SESSION_ID_VARIABLE,
   sessionPaneEnvironment,
@@ -86,6 +90,35 @@ async function freeLoopbackPort(): Promise<number> {
   const port = boundPort(server);
   await server.stop(true);
   return port;
+}
+
+/** A real WebSocket listener that records the lifetime of every daemon carrier connection. */
+function relaySocketProbe() {
+  let opened = 0;
+  let closed = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: (request, host) => (host.upgrade(request) ? undefined : new Response('upgrade required', { status: 426 })),
+    websocket: {
+      open: () => {
+        opened += 1;
+      },
+      message: () => undefined,
+      close: () => {
+        closed += 1;
+      },
+    },
+  });
+  return { server, opened: () => opened, closed: () => closed };
+}
+
+async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }
 
 /**
@@ -674,6 +707,8 @@ describe('daemon boot lifecycle', () => {
   it('should mint, redeem, persist and authenticate a pairing through the production composition root', async () => {
     const home = await tempDirectory('fyd-pairing');
     const port = await freeLoopbackPort();
+    const relayPort = await freeLoopbackPort();
+    const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const world = await worldAt(home, port, async () => {
@@ -681,6 +716,15 @@ describe('daemon boot lifecycle', () => {
         release = resolve;
       });
     });
+    await writeFile(
+      join(home, 'config', 'daemon.json'),
+      JSON.stringify({
+        host: '127.0.0.1',
+        port,
+        carriers: [{ kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 }],
+      }),
+      { mode: 0o600 },
+    );
     const exit = start(world, cleanups);
     const base = `http://127.0.0.1:${port}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -736,6 +780,10 @@ describe('daemon boot lifecycle', () => {
     const asDevice = await fetch(`${base}/v1/usage`, {
       headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
     });
+    const refreshedResponse = await fetch(`${base}/v1/carriers`, {
+      headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
+    });
+    const refreshed = DaemonCarriersViewSchema.parse(await refreshedResponse.json());
     const deviceDocument = await readFile(join(home, 'state', 'devices.json'), 'utf8');
     release();
     const code = await exit;
@@ -762,6 +810,12 @@ describe('daemon boot lifecycle', () => {
     should(asDevice.status).equal(200);
     should(asDevice.headers.get('access-control-allow-origin')).equal(origin);
     should(asDevice.headers.get('access-control-allow-credentials')).equal('true');
+    should(refreshedResponse.status).equal(200);
+    should(refreshed.carriers).deepEqual(paired.carriers);
+    should(paired.carriers).deepEqual([
+      { kind: 'direct', url: base },
+      { kind: 'relay', url: relayUrl },
+    ]);
     should(deviceDocument).containEql('Browser phone');
     should(deviceDocument).not.containEql(paired.deviceToken);
   });
@@ -3572,7 +3626,472 @@ describe('daemon boot lifecycle', () => {
    * notices. Only the directory read is substituted, at the seam the world exposes for exactly that,
    * because it is the one collaborator that talks to a service off this machine.
    */
-  describe('the relay carrier a boot resolves', () => {
+  describe('the relay carriers a boot resolves', () => {
+    it('should keep two relay WebSockets open together and stop every carrier on shutdown', async () => {
+      const home = await tempDirectory('fyd-relay-plural');
+      const port = await freeLoopbackPort();
+      const relays = [relaySocketProbe(), relaySocketProbe()] as const;
+      const relayUrls = relays.map(relay => `http://127.0.0.1:${String(boundPort(relay.server))}`);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+
+      try {
+        await seedHome(home, port);
+        await writeFile(
+          join(home, 'config', 'daemon.json'),
+          JSON.stringify({
+            carriers: [
+              { kind: 'bind', host: '127.0.0.1', port },
+              ...relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
+              { kind: 'relay', url: 'https://off.example', enabled: false },
+            ],
+          }),
+          { mode: 0o600 },
+        );
+        const world = {
+          ...buildWorld(),
+          notices: said.port,
+          untilShutdown: async () => await stopped,
+          relayDirectory: {
+            read: async (): Promise<RelayAdvertisement> => {
+              throw new Error('two configured relays must not ask the directory');
+            },
+          },
+        };
+
+        const booting = start(world, cleanups);
+        await waitUntil(() => relays.every(relay => relay.opened() === 1), 'both relay WebSockets to open');
+        release();
+        const code = await booting;
+        await runCleanups(cleanups);
+        await waitUntil(() => relays.every(relay => relay.closed() === 1), 'both relay WebSockets to close');
+
+        should(code).equal(0);
+        should(relays.map(relay => relay.opened())).deepEqual([1, 1]);
+        should(relays.map(relay => relay.closed())).deepEqual([1, 1]);
+        const dialled = said.steps.filter(step => step.startsWith('dialling the relay'));
+        should(dialled).have.length(2);
+        for (const relay of relays)
+          should(dialled.join('\n')).containEql(`127.0.0.1:${String(boundPort(relay.server))}`);
+        should(said.stated.join('\n')).match(/relay carrier inactive.*off\.example/u);
+        should(said.stated.join('\n')).not.match(/no relay carrier|dials no relay|reachable only directly/u);
+      } finally {
+        release();
+        for (const relay of relays) await relay.server.stop(true);
+      }
+    });
+
+    it('should retain a carrier that throws on the way up, so nothing it took is left running', async () => {
+      // A DIAL TAKES SOMETHING PARTWAY THROUGH `start`: the socket is opened and held before the link
+      // over it is built, so a carrier that throws after that point is holding a socket. Registered
+      // after starting, THAT is the one carrier nothing ever stops — every carrier before it is
+      // released normally, which is what makes the leak invisible. Registered before, the same throw
+      // releases everything this boot took.
+      const home = await tempDirectory('fyd-relay-start-throws');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const relayUrls = ['https://first.example', 'https://second.example'] as const;
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          carriers: relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
+        }),
+        { mode: 0o600 },
+      );
+      /**
+       * A carrier that records its own lifetime, standing in for one at the world seam.
+       *
+       * The cast is what a class-typed seam costs a double: `BunRelayCarrier` carries `#` fields, so
+       * nothing structural satisfies it. What is under test is the boot's ORDER of two statements, and
+       * a real carrier cannot be made to throw between them without a relay identity fixture that
+       * would prove less than this does.
+       */
+      const carrierDouble = (url: string, throwOnStart: boolean) => {
+        const record = { started: false, stopped: false };
+        const carrier = {
+          start: () => {
+            record.started = true;
+            if (throwOnStart) throw new Error(`the carrier for ${url} failed on the way up`);
+          },
+          stop: () => {
+            record.stopped = true;
+          },
+          status: () => ({ phase: 'dialling' as const, relayUrl: url, sessions: 0 }),
+        };
+        return { record, carrier: carrier as unknown as BunRelayCarrier };
+      };
+      const doubles = relayUrls.map((url, index) => carrierDouble(url, index === 1));
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const world = {
+        ...buildWorld(),
+        notices: recordingNotices().port,
+        untilShutdown: async () => undefined,
+        createRelayCarriers: async (sources: readonly RelayCarrierSource[]) => ({
+          carriers: sources.map((source, index) => ({ source, carrier: doubles[index]?.carrier as BunRelayCarrier })),
+        }),
+      };
+
+      await should(start(world, cleanups)).be.rejectedWith(/failed on the way up/u);
+      await runCleanups(cleanups);
+
+      should(doubles.map(double => double.record.started)).deepEqual([true, true]);
+      // BOTH, including the one that threw. Its own `stop` is the only thing that can release what it
+      // had already taken, and it is registered exactly when it can still be reached.
+      should(doubles.map(double => double.record.stopped)).deepEqual([true, true]);
+    });
+
+    it('should read discovery once and retain a configured relay beside the different advertised one', async () => {
+      const home = await tempDirectory('fyd-relay-mixed');
+      const port = await freeLoopbackPort();
+      const configuredPort = await freeLoopbackPort();
+      const discoveredPort = await freeLoopbackPort();
+      const configuredUrl = `http://127.0.0.1:${String(configuredPort)}`;
+      const discoveredUrl = `http://127.0.0.1:${String(discoveredPort)}`;
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          carriers: [
+            { kind: 'relay', url: configuredUrl, reconnectSeconds: 3_600 },
+            { kind: 'relay', source: 'discovery', reconnectSeconds: 3_600 },
+          ],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let reads = 0;
+      const world = {
+        ...buildWorld(),
+        notices: said.port,
+        untilShutdown: async () => undefined,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            reads += 1;
+            return { kind: 'available', relayUrl: discoveredUrl };
+          },
+        },
+      };
+
+      const code = await start(world, cleanups);
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      should(reads).equal(1);
+      const dialled = said.steps.filter(step => step.startsWith('dialling the relay'));
+      should(dialled).have.length(2);
+      should(dialled.join('\n')).containEql(`127.0.0.1:${String(configuredPort)}`);
+      should(dialled.join('\n')).containEql(`127.0.0.1:${String(discoveredPort)}`);
+    });
+
+    it('should refuse boot clearly when discovery resolves onto a configured rendezvous', async () => {
+      const home = await tempDirectory('fyd-relay-duplicate');
+      const port = await freeLoopbackPort();
+      const relayPort = await freeLoopbackPort();
+      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          carriers: [
+            { kind: 'relay', url: relayUrl },
+            { kind: 'relay', source: 'discovery' },
+          ],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let reads = 0;
+      const world = {
+        ...buildWorld(),
+        notices: said.port,
+        untilShutdown: async () => {
+          throw new Error('a refused boot must not reach its shutdown wait');
+        },
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            reads += 1;
+            return { kind: 'available', relayUrl };
+          },
+        },
+      };
+
+      const code = await start(world, cleanups);
+      await runCleanups(cleanups);
+
+      should(code).equal(1);
+      should(reads).equal(1);
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+      should(said.stated.join('\n')).match(/relay carrier configuration refused/u);
+      should(said.stated.join('\n')).match(/two relay carriers resolved to the same rendezvous/u);
+      should(said.stated.join('\n')).containEql(relayUrl);
+    });
+
+    it('should report every resolved carrier in --check and name a post-discovery refusal', async () => {
+      const home = await tempDirectory('fyd-relay-check');
+      const port = await freeLoopbackPort();
+      const configuredUrl = 'https://mine.example';
+      const discoveredUrl = 'https://hosted.example';
+      await seedHome(home, port);
+      const configFile = join(home, 'config', 'daemon.json');
+      const document = {
+        host: '127.0.0.1',
+        port,
+        carriers: [
+          { kind: 'relay', url: configuredUrl },
+          { kind: 'relay', source: 'discovery' },
+          { kind: 'relay', url: 'https://off.example', enabled: false },
+        ],
+      };
+      await writeFile(configFile, JSON.stringify(document), { mode: 0o600 });
+      let advertised = discoveredUrl;
+      let reads = 0;
+      const world = {
+        ...buildWorld(),
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            reads += 1;
+            return { kind: 'available', relayUrl: advertised };
+          },
+        },
+      };
+      const resolvedLines: string[] = [];
+
+      await checkConfiguration(world, line => resolvedLines.push(line));
+      should(reads).equal(1);
+      const postures = resolvedLines.filter(line => line.startsWith('carrier'));
+      should(postures).have.length(3);
+      should(postures[0]).containEql(configuredUrl);
+      should(postures[1]).containEql(discoveredUrl);
+      should(postures[2]).containEql('off.example');
+      should(resolvedLines.join('\n')).not.match(/dials no relay|NO other device|nothing off this host can reach/u);
+      should(resolvedLines.join('\n')).match(/reachable off this host/u);
+
+      advertised = configuredUrl;
+      const refusedLines: string[] = [];
+      const refusedCode = await checkConfiguration(world, line => refusedLines.push(line));
+      should(refusedCode).equal(1);
+      should(reads).equal(2);
+      should(refusedLines.filter(line => line.startsWith('carrier'))).have.length(1);
+      should(refusedLines.join('\n')).match(/refused.*two relay carriers resolved to the same rendezvous/u);
+      // A REFUSED SET MUST NOT BE REPORTED AS AN ABSENT ONE. The grant posture is derived from the
+      // carrier this daemon would dial, and a refused set names none — so the derivation used to fall
+      // through to the loopback answer and tell this operator they had NO relay, three lines under a
+      // refusal saying they had declared two. The remedy that sentence points at is the opposite of
+      // the real one, in the command a person runs when something is already wrong.
+      should(refusedLines.join('\n')).not.match(/nothing off this host can reach this daemon/u);
+      should(refusedLines.join('\n')).not.match(/no grant applies today/u);
+      should(refusedLines.filter(line => line.startsWith('grants'))).have.length(1);
+      should(refusedLines.join('\n')).match(/grants {2,}not reported — the carrier configuration above is refused/u);
+      // And the honest posture is still reported for the very same document once it resolves, so the
+      // line above is an undetermined answer rather than a grant surface quietly switched off.
+      should(resolvedLines.join('\n')).match(/grants {2,}reachable off this host/u);
+    });
+
+    it('should omit a wildcard direct carrier while keeping relays reachable and say why', async () => {
+      const home = await tempDirectory('fyd-carrier-wildcard');
+      const port = await freeLoopbackPort();
+      const relayPort = await freeLoopbackPort();
+      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          carriers: [
+            { kind: 'bind', host: '0.0.0.0', port },
+            { kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 },
+          ],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+      const booting = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      await waitUntil(
+        () => said.steps.some(step => step.startsWith('ready')),
+        'the wildcard-bound daemon to become ready',
+      );
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const response = await fetch(`${base}/v1/carriers`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const view = DaemonCarriersViewSchema.parse(await response.json());
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      should(response.status).equal(200);
+      should(view.carriers).deepEqual([{ kind: 'relay', url: relayUrl }]);
+      should(view.carriers.some(carrier => carrier.kind === 'direct')).be.false();
+      // THE REASON IS THE PROTOCOL'S SENTENCE, NOT THIS BOOT'S PARAPHRASE OF IT. `refusalNotice` owns
+      // one audience and one remedy per member of `ADVERTISEMENT_REFUSALS`, and `fy pair` already
+      // renders those exact strings — so this asserts the daemon says the same words rather than a
+      // second spelling that can drift, or that can name the wrong refusal once there is more than
+      // one way to have no address to hand out.
+      const wildcard = refusalNotice('wildcard-bind');
+      const omission = said.stated.filter(message => message.startsWith('direct carrier omitted'));
+      should(omission).have.length(1);
+      should(omission[0]).containEql(wildcard.audience);
+      should(omission[0]).containEql(wildcard.remedy);
+      should(omission[0]).containEql('http://0.0.0.0:');
+      // The raw document wrote neither legacy bind key. Schema defaults must never be reported as
+      // stale lines the operator should remove from a file where they do not exist.
+      should(said.stated.filter(message => message.includes('superseded'))).be.empty();
+    });
+
+    it('should omit a reverse-proxy path from the carrier wire while boot and --check stay healthy', async () => {
+      const home = await tempDirectory('fyd-carrier-proxy-path');
+      const port = await freeLoopbackPort();
+      const relayPort = await freeLoopbackPort();
+      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      const publicUrl = 'https://box.example/ferretry';
+      await seedHome(home, port);
+      await seedFleet(home);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          publicUrl,
+          carriers: [{ kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 }],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+      const booting = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      await waitUntil(() => said.steps.some(step => step.startsWith('ready')), 'the proxy-path daemon to become ready');
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const response = await fetch(`${base}/v1/carriers`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const view = DaemonCarriersViewSchema.parse(await response.json());
+      release();
+      const bootCode = await booting;
+      await runCleanups(cleanups);
+      const bootNotice = said.stated.find(message => message.startsWith('direct carrier omitted'));
+      if (bootNotice === undefined) throw new Error('the boot did not explain why its direct carrier was omitted');
+
+      const checkLines: string[] = [];
+      const checkCode = await checkConfiguration(buildWorld(), line => checkLines.push(line));
+
+      should(bootCode).equal(0);
+      should(response.status).equal(200);
+      should(view.carriers).deepEqual([{ kind: 'relay', url: relayUrl }]);
+      should(bootNotice).containEql(publicUrl);
+      should(bootNotice).match(/origin without a path/u);
+      should(bootNotice).match(/no direct entry is published.*only over its relays/u);
+      should(bootNotice).match(/set "publicUrl" to an http or https origin/u);
+      should(checkCode).equal(0);
+      // ONE FACT, TWO SURFACES, AND `--check` PUTS IT IN ITS OWN TABLE. The label is this command's;
+      // the sentence after it is the boot's, whole and unaltered, so a reader holding a log beside a
+      // `--check` sees one fact rather than two renderings they have to reconcile. Asserting the
+      // exact composition is what keeps a later "tidy-up" from rewording one of the two.
+      const checkOmissions = checkLines.filter(line => line.includes('direct carrier omitted'));
+      should(checkOmissions).deepEqual([`carrier      ${bootNotice}`]);
+      // Every other line of this report is a labelled column; a bare sentence dropped between them
+      // reads as output from something else.
+      for (const line of checkOmissions) should(line).match(/^carrier {2,}\S/u);
+    });
+
+    it('should publish an operator-written wildcard publicUrl without reinterpreting its hostname', async () => {
+      const home = await tempDirectory('fyd-carrier-operator-wildcard');
+      const port = await freeLoopbackPort();
+      const publicUrl = `http://0.0.0.0:${String(port)}`;
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: '127.0.0.1',
+          port,
+          publicUrl,
+          carriers: [{ kind: 'relay', source: 'discovery', enabled: false }],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+      const booting = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      await waitUntil(
+        () => said.steps.some(step => step.startsWith('ready')),
+        'the operator-wildcard daemon to become ready',
+      );
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const response = await fetch(`${base}/v1/carriers`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const view = DaemonCarriersViewSchema.parse(await response.json());
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      should(response.status).equal(200);
+      should(view.carriers).deepEqual([{ kind: 'direct', url: publicUrl }]);
+      should(said.stated.filter(message => message.startsWith('direct carrier omitted'))).be.empty();
+    });
+
+    it('should report only superseded legacy keys the raw document actually contains', async () => {
+      const home = await tempDirectory('fyd-carrier-superseded');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({
+          host: 'box.invalid',
+          carriers: [
+            { kind: 'bind', host: '127.0.0.1', port },
+            { kind: 'relay', source: 'discovery', enabled: false },
+          ],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+
+      const code = await start({ ...buildWorld(), notices: said.port, untilShutdown: async () => undefined }, cleanups);
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      const superseded = said.stated.filter(message => message.startsWith('the legacy'));
+      should(superseded).have.length(1);
+      should(superseded[0]).match(/legacy "host" key/u);
+      should(superseded[0]).not.match(/"port"|"relay"/u);
+    });
+
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {
       // Arrange: a home with no `relay` block — which is every home, since nothing writes one — and
       // a directory advertising a rendezvous. The address is a port nothing is listening on: the

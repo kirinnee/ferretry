@@ -12,6 +12,7 @@ import { describe, it } from 'bun:test';
 import { WILDCARD_BIND_HOST } from '@ferretry/protocol';
 import should from 'should';
 import {
+  chooseRelayCarrierSources,
   chooseRelayCarrierSource,
   describeAbsentRelayCarrier,
   describeRelayCarrierPosture,
@@ -19,20 +20,32 @@ import {
   NO_RELAY_DIRECTORY,
   PAIRING_IS_ALWAYS_DIRECT,
   parseRelayAdvertisement,
+  publishableDirectCarrier,
+  publishedDaemonCarriers,
   RELAY_ADVERTISEMENT_PATH,
   RELAY_DIRECTORY_NOT_ASKED,
   RELAY_DISCOVERY_TIMEOUT_MS,
   type RelayAdvertisement,
   relayAdvertisementAddress,
+  type RelayCarrierSource,
+  relayCarriersNeedDiscovery,
   relayCarrierRemedy,
+  type ResolvedRelayCarriers,
 } from '../../../src/lib/relay/discovery.ts';
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
+import { ConfiguredRelayCarrierSchema, DiscoveredRelayCarrierSchema } from '../../../src/lib/runtime/carriers.ts';
 
 const CONFIG_FILE = '/tmp/state/config/daemon.json';
 const HOSTED = 'https://relay.example';
 
 const available = (relayUrl: string): RelayAdvertisement => ({ kind: 'available', relayUrl });
 const configured = (patch: Record<string, unknown> = {}) => DaemonRelayConfigSchema.parse({ url: HOSTED, ...patch });
+
+/** The resolved list, insisting on the resolution: a refusal reaching an assertion is the failure. */
+const resolvedSources = (resolved: ResolvedRelayCarriers): readonly RelayCarrierSource[] => {
+  if (resolved.kind === 'refused') throw new Error(`expected resolved carriers, got a refusal: ${resolved.reason}`);
+  return resolved.sources;
+};
 
 describe('the relay advertisement', () => {
   it('should ask the protocol’s own discovery path, on an endpoint the daemon may dial', () => {
@@ -115,6 +128,132 @@ describe('choosing the carrier', () => {
     // it carries. Asking anyway would be a request nobody needed and an answer nobody may use.
     should(RELAY_DIRECTORY_NOT_ASKED).match({ kind: 'undetermined', reason: /own relay configured/u });
     should(chooseRelayCarrierSource(configured(), RELAY_DIRECTORY_NOT_ASKED).kind).equal('configured');
+  });
+
+  it('should resolve every ordinary relay entry in operator order and publish every dialled address', () => {
+    const own = ConfiguredRelayCarrierSchema.parse({ kind: 'relay', url: 'https://mine.example' });
+    const discovered = DiscoveredRelayCarrierSchema.parse({
+      kind: 'relay',
+      source: 'discovery',
+      reconnectSeconds: 17,
+    });
+    const off = ConfiguredRelayCarrierSchema.parse({
+      kind: 'relay',
+      url: 'https://off.example',
+      enabled: false,
+    });
+
+    should(relayCarriersNeedDiscovery([own, discovered, off])).be.true();
+    const resolved = chooseRelayCarrierSources([own, discovered, off], available(HOSTED));
+    should(resolved.kind).equal('resolved');
+    const sources = resolvedSources(resolved);
+    should(sources).match([
+      { kind: 'configured', config: { url: 'https://mine.example' } },
+      { kind: 'discovered', config: { url: HOSTED, reconnectSeconds: 17 } },
+      { kind: 'configured', config: { url: 'https://off.example', enabled: false } },
+    ]);
+    should(publishedDaemonCarriers('http://box.lan:7431', sources)).deepEqual([
+      { kind: 'direct', url: 'http://box.lan:7431' },
+      { kind: 'relay', url: 'https://mine.example' },
+      { kind: 'relay', url: HOSTED },
+    ]);
+  });
+
+  it('should not read discovery for a switched-off discovery entry', () => {
+    const off = DiscoveredRelayCarrierSchema.parse({ kind: 'relay', source: 'discovery', enabled: false });
+    should(relayCarriersNeedDiscovery([off])).be.false();
+    const sources = resolvedSources(chooseRelayCarrierSources([off], RELAY_DIRECTORY_NOT_ASKED));
+    should(sources).match([{ kind: 'direct-only', reason: /switched off/u }]);
+    should(publishedDaemonCarriers('https://box.example', sources)).deepEqual([
+      { kind: 'direct', url: 'https://box.example' },
+    ]);
+  });
+
+  it('should publish relays without inventing a direct origin when the bind has no dialable one', () => {
+    const source: RelayCarrierSource = {
+      kind: 'configured',
+      config: DaemonRelayConfigSchema.parse({ url: 'https://relay.example' }),
+    };
+
+    should(publishedDaemonCarriers(undefined, [source])).deepEqual([{ kind: 'relay', url: 'https://relay.example' }]);
+  });
+
+  it('should accept a daemon origin and explain every wider URL shape the carrier wire refuses', () => {
+    should(publishableDirectCarrier('https://box.example')).deepEqual({
+      kind: 'ok',
+      url: 'https://box.example',
+    });
+    for (const [url, reason] of [
+      ['https://box.example/ferretry', /origin without a path/u],
+      ['ftp://box.example', /must use http or https/u],
+      ['https://user:password@box.example', /may not carry credentials/u],
+      ['https://box.example?token=one', /may not carry a query or a fragment/u],
+    ] as const) {
+      should(publishableDirectCarrier(url)).match({ kind: 'refused', reason });
+    }
+  });
+
+  it('should refuse the boot when a written-down relay and the advertised one are the same rendezvous', () => {
+    // Arrange — both entries are legal on their own and the document schema cannot see the collision:
+    // the second entry has no address in it until the directory answers.
+    const own = ConfiguredRelayCarrierSchema.parse({ kind: 'relay', url: HOSTED });
+    const discovered = DiscoveredRelayCarrierSchema.parse({ kind: 'relay', source: 'discovery' });
+
+    // Act
+    const resolved = chooseRelayCarrierSources([own, discovered], available(HOSTED));
+
+    // Assert — a refusal instead of a list, so nothing downstream can open the second socket or
+    // publish the address twice. Both ways out are named, because a reader told only "duplicate"
+    // has to guess which of their two entries the daemon meant.
+    should(resolved).match({
+      kind: 'refused',
+      url: HOSTED,
+      reason: /same rendezvous https:\/\/relay\.example/u,
+    });
+    should(resolved).match({ reason: /Remove the configured entry/u });
+    should(resolved).match({ reason: /switch the .* entry off/u });
+    // The trailing slash is the same rendezvous, not a second one, and order does not rescue it.
+    should(chooseRelayCarrierSources([discovered, own], available(`${HOSTED}/`)).kind).equal('refused');
+  });
+
+  it('should not call an address a duplicate when only one of the two is dialled', () => {
+    // Arrange — the remedy the refusal above asks for: the same address, one of them switched off.
+    const off = ConfiguredRelayCarrierSchema.parse({ kind: 'relay', url: HOSTED, enabled: false });
+    const discovered = DiscoveredRelayCarrierSchema.parse({ kind: 'relay', source: 'discovery' });
+
+    // Act
+    const resolved = chooseRelayCarrierSources([off, discovered], available(HOSTED));
+
+    // Assert — one socket and one published entry, so there is nothing to refuse. Refusing here would
+    // refuse the boot of somebody who had already done what they were asked.
+    should(resolved.kind).equal('resolved');
+    should(publishedDaemonCarriers('http://box.lan:7431', resolvedSources(resolved))).deepEqual([
+      { kind: 'direct', url: 'http://box.lan:7431' },
+      { kind: 'relay', url: HOSTED },
+    ]);
+    // Two entries that dial nothing at all cannot collide either.
+    should(
+      chooseRelayCarrierSources(
+        [off, DiscoveredRelayCarrierSchema.parse({ kind: 'relay', source: 'discovery', enabled: false })],
+        available(HOSTED),
+      ).kind,
+    ).equal('resolved');
+  });
+
+  it('should keep distinct rendezvous even when one of them is the advertised address', () => {
+    // Assert — the refusal is about ONE address reached twice, never about having several relays.
+    const own = ConfiguredRelayCarrierSchema.parse({ kind: 'relay', url: 'https://mine.example' });
+    const discovered = DiscoveredRelayCarrierSchema.parse({ kind: 'relay', source: 'discovery' });
+    should(
+      publishedDaemonCarriers(
+        'https://box.example',
+        resolvedSources(chooseRelayCarrierSources([own, discovered], available(HOSTED))),
+      ),
+    ).deepEqual([
+      { kind: 'direct', url: 'https://box.example' },
+      { kind: 'relay', url: 'https://mine.example' },
+      { kind: 'relay', url: HOSTED },
+    ]);
   });
 });
 

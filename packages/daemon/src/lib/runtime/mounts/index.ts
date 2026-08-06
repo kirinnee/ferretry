@@ -1,3 +1,4 @@
+import type { DaemonCarrier } from '@ferretry/protocol';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
@@ -17,6 +18,7 @@ import type { OperatorReadService } from '../../session/reads/index.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
+import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
@@ -66,8 +68,19 @@ import { type WardenSubsystem, wardenRoutes } from './warden.ts';
  * reachability gate can see the edge.
  */
 
-/** Every already-built subsystem this daemon process serves. One field per subsystem; the field's
- *  presence is the proof that production constructs it. */
+/**
+ * Everything the daemon process must already hold for its mounted surface to be real. One field per
+ * dependency; the field's PRESENCE is the proof that production constructs it, and a required field is
+ * how a capability stops being buildable-but-unreachable.
+ *
+ * MOST FIELDS ARE SUBSYSTEMS — an object with behaviour, which a route calls. A few are plain VALUES,
+ * because what the surface needs is a fact rather than a collaborator: `carriers` is the set of ways
+ * this daemon can be reached, resolved once at boot and constant afterwards. Declaring such a fact as a
+ * subsystem with a getter would be strictly worse than declaring the value: two calls may answer
+ * differently, and the pairing response and the refresh route would stop describing the same daemon.
+ * The rule the list actually enforces is "nothing here may be absent from production", not "everything
+ * here has methods".
+ */
 export interface MountedSubsystems {
   /** The daemon's own health, over the self-check that measures it. */
   readonly health: DaemonHealthSubsystem;
@@ -81,6 +94,12 @@ export interface MountedSubsystems {
    *  `src/lib/push` for the two independent reasons that holds, and for the declared GAPs: nothing in
    *  production raises a notification yet, and the browser has no service worker to receive one. */
   readonly push: PushSubscriptionSubsystem;
+  /** Every way this daemon can be reached, as the daemon itself publishes it. NOT A SUBSYSTEM BUT A
+   *  VALUE, and the only field here that is one: it is resolved once at boot and it is THE SAME ARRAY
+   *  the pairing service hands out on redemption, so the set a device is given and the set it later
+   *  refreshes cannot be two answers. A daemon that published its carriers only at pairing time had no
+   *  way to tell an already-paired phone that its rendezvous had changed. */
+  readonly carriers: readonly DaemonCarrier[];
   /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
   readonly fleet: FleetSubsystem;
   /** The daemon-scoped timer target that refreshes the mounted fleet's quota and health evidence.
@@ -225,6 +244,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // restricted — a grant report a restricted caller could not fetch would be the greyed control
     // with no explanation this whole feature exists to remove.
     ...grantRoutes(subsystems.grants),
+    // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
+    // hands a device the set of ways to reach this daemon, and this is where that device asks again
+    // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can
+    // neither shadow nor be shadowed. It is authenticated rather than operator-scoped — the remote
+    // device is the reader, and nothing here is a secret. See the mount's own header.
+    ...carrierRoutes(subsystems.carriers),
     // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
     // liveness answer, and this is the scoped report the protocol declares under the same subject.
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.

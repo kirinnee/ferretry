@@ -2,7 +2,12 @@ import { describe, it } from 'bun:test';
 import { FY_DEFAULT_DAEMON_URL } from '@ferretry/protocol';
 import should from 'should';
 import { DaemonConfigDocumentError, FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
-import { DEFAULT_CAPABILITY_GRANTS, type FileSystemPort, type FoundationPaths } from '../../../src/lib/index.ts';
+import {
+  DEFAULT_CAPABILITY_GRANTS,
+  type FileSystemPort,
+  type FoundationPaths,
+  supersededCarrierKeys,
+} from '../../../src/lib/index.ts';
 
 const paths = { daemonConfig: '/state/config/daemon.json' } as FoundationPaths;
 
@@ -81,6 +86,85 @@ describe('FileDaemonConfig', () => {
     should(written).have.property('projectRoots', ['~/Code']);
     // And still nothing derived, so a recorded port cannot freeze an advertisement beside it.
     should(written).not.have.property('publicUrl');
+    // EXACTLY ONE KEY, literally: the document that goes back to disk is the one that came off it,
+    // plus `port`. A write that also planted every schema default would put values into a file the
+    // operator never typed, which is the only evidence anything downstream has of what they chose.
+    should(Object.keys(written)).deepEqual(['host', 'healthIntervalSeconds', 'projectRoots', 'port']);
+  });
+
+  it('should record a settled port into the bind carrier rather than the key it supersedes', async () => {
+    // Arrange: an operator who has moved their bind into `carriers` and left the old key in place.
+    const documents = documentStore(
+      JSON.stringify({
+        port: 7_431,
+        carriers: [
+          { kind: 'bind', host: 'box.lan' },
+          { kind: 'relay', source: 'discovery' },
+        ],
+      }),
+    );
+
+    // Act
+    await documents.store.record(7_432);
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    const reloaded = await documents.store.load();
+
+    // Assert — writing `port` here would write a key with no effect on where this daemon listens,
+    // which is the defect the carrier list exists to remove rather than reproduce.
+    should(written).have.property('carriers', [
+      // The operator's own relay entry comes back exactly as they wrote it. A write that filled in
+      // `enabled` and `reconnectSeconds` would be this daemon typing lines into their file and then
+      // reading them back as their decisions.
+      { kind: 'bind', host: 'box.lan', port: 7_432 },
+      { kind: 'relay', source: 'discovery' },
+    ]);
+    should(written).have.property('port', 7_431);
+    should(Object.keys(written)).deepEqual(['port', 'carriers']);
+    should(reloaded.bindUrl).equal('http://box.lan:7432');
+    should(reloaded.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 7_432 });
+  });
+
+  it('should never accuse an operator of a legacy key that this daemon wrote itself', async () => {
+    // THE ROUND TRIP IS THE TEST. `supersededCarrierKeys` reads key PRESENCE in the raw document, so
+    // a `record()` that wrote schema defaults planted a `host` the operator never typed — and every
+    // boot afterwards told them to go and delete a line that is not in their file.
+    // Arrange
+    const documents = documentStore(JSON.stringify({ carriers: [{ kind: 'bind', host: 'box.lan' }] }));
+
+    // Act
+    await documents.store.record(7_432);
+    const settled = await documents.store.peek();
+
+    // Assert
+    should(settled.document).deepEqual({ carriers: [{ kind: 'bind', host: 'box.lan', port: 7_432 }] });
+    should(supersededCarrierKeys({ rawDocument: settled.document ?? {}, carriers: settled.config.carriers })).deepEqual(
+      [],
+    );
+  });
+
+  it('should record a grant decision without typing a legacy key into the same file', async () => {
+    // THE SETTINGS SURFACE IS THE OTHER DOOR TO THE SAME DEFECT. Persisting the schema's reading of
+    // the document planted every default beside the operator's own keys, so turning one thing off
+    // from the UI was enough to make a `host` line appear in their file — and the next boot read it
+    // back at them as a key they had superseded and should go and delete.
+    // Arrange
+    const documents = documentStore(JSON.stringify({ carriers: [{ kind: 'bind', host: 'box.lan' }] }));
+
+    // Act
+    await documents.store.writeGrants({ ...DEFAULT_CAPABILITY_GRANTS, warden: { use: false, configure: false } });
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    const settled = await documents.store.peek();
+
+    // Assert — one key added, nothing manufactured, the carrier entry exactly as it was written.
+    should(Object.keys(written)).deepEqual(['carriers', 'grants']);
+    should(written).have.property('carriers', [{ kind: 'bind', host: 'box.lan' }]);
+    should((written.grants as Record<string, unknown>).warden).deepEqual({ use: false, configure: false });
+    should(supersededCarrierKeys({ rawDocument: settled.document ?? {}, carriers: settled.config.carriers })).deepEqual(
+      [],
+    );
+    // And the decision still reads back as the operator's own, which is the point of writing it.
+    should((await documents.store.readGrants()).warden).deepEqual({ use: false, configure: false });
+    should(await documents.store.writtenGrants()).containEql('warden');
   });
 
   it('should answer what is on disk without writing anything', async () => {

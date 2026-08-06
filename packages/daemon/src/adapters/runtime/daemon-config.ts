@@ -6,6 +6,7 @@ import {
   type FileSystemPort,
   type FoundationPaths,
   parseDaemonConfig,
+  recordedPortDocument,
 } from '../../lib/index.ts';
 
 /**
@@ -92,11 +93,25 @@ export class FileDaemonConfig {
    * form carries derived addresses and persisting one of those is the defect this whole file was
    * corrected for. Re-reading also means an operator's own fields survive untouched — this writes
    * exactly one key.
+   *
+   * WHICH key is `recordedPortDocument`'s decision, not this adapter's: a document with an explicit
+   * bind carrier reads its address from that entry, and the top-level `port` is superseded there.
+   *
+   * WHAT IS WRITTEN IS THE RAW DOCUMENT, not the schema's reading of it. The schema still runs — a
+   * document this daemon would refuse to boot on is not one it may write over — but its OUTPUT is
+   * deliberately discarded, because it carries every default this deployment filled in, and a default
+   * on disk is indistinguishable from a line the operator typed. That is not a cosmetic difference:
+   * `supersededCarrierKeys` reports a legacy key by its PRESENCE, so a materialized `host` turned
+   * every later boot into an accusation about a key that is not in their file.
    */
   async record(port: number): Promise<void> {
     const text = await this.files.readText(this.paths.daemonConfig);
-    const document = this.document(text);
-    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, port }, null, 2)}\n`);
+    const raw = this.raw(text);
+    this.checked(raw);
+    await this.files.writeTextAtomic(
+      this.paths.daemonConfig,
+      `${JSON.stringify(recordedPortDocument(raw, port), null, 2)}\n`,
+    );
   }
 
   /**
@@ -132,14 +147,19 @@ export class FileDaemonConfig {
   /**
    * Records a change to the grants.
    *
-   * The document is RE-READ and exactly one key rewritten, for the reason `record` does the same: an
-   * operator's own fields must survive a write this daemon makes, and rewriting from a parsed
-   * configuration would persist derived addresses that then stop tracking what they were derived from.
+   * The RAW document is re-read and exactly one key rewritten, for the reason `record` does the same:
+   * an operator's own fields must survive a write this daemon makes, and rewriting from a parsed
+   * configuration would persist derived addresses that then stop tracking what they were derived
+   * from. The schema still runs, as the refusal it has always been — this daemon does not write over
+   * a document it could not act on — and its defaulted output is discarded, because a default on disk
+   * is indistinguishable from a line the operator typed. Turning the settings on from the UI must not
+   * be a way to have a `host` key appear in their file and be reported back at them as superseded.
    */
   async writeGrants(grants: CapabilityGrants): Promise<void> {
     const text = await this.files.readText(this.paths.daemonConfig);
-    const document = this.document(text);
-    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, grants }, null, 2)}\n`);
+    const raw = this.raw(text);
+    this.checked(raw);
+    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...raw, grants }, null, 2)}\n`);
   }
 
   /**
@@ -159,7 +179,18 @@ export class FileDaemonConfig {
   }
 
   private document(text: string | undefined): ReturnType<typeof DaemonConfigDocumentSchema.parse> {
-    const raw = text === undefined ? {} : this.parsed(text);
+    return this.checked(this.raw(text));
+  }
+
+  /** The file as JSON and nothing more: no schema, no defaults, no coercions. A state home that has
+   *  no document yet reads as the empty one, which is what every caller here already meant by it. */
+  private raw(text: string | undefined): Record<string, unknown> {
+    return text === undefined ? {} : (this.parsed(text) as Record<string, unknown>);
+  }
+
+  /** The refusal, separated from the reading, so `record` can hold a document to this bar without
+   *  writing the defaulted result of it back over the operator's own file. */
+  private checked(raw: unknown): ReturnType<typeof DaemonConfigDocumentSchema.parse> {
     const parsed = DaemonConfigDocumentSchema.safeParse(raw);
     if (!parsed.success) throw new DaemonConfigDocumentError(this.paths.daemonConfig, parsed.error);
     return parsed.data;

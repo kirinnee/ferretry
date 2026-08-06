@@ -1077,8 +1077,8 @@ describe('an equivalent connection object', () => {
   });
 });
 
-describe('a relay-only connection change', () => {
-  it('is a new connection: same id, address and token, different carrier', async () => {
+describe('a carrier-set-only connection change', () => {
+  it('is a new connection: same id, address and token, different carrier set', async () => {
     const direct = fakeDaemon({ accounts: () => manifest([account({ wrapper: 'claude-direct' })]) });
     const relayed = fakeDaemon({
       accounts: () => manifest([account({ id: accountId(9), wrapper: 'claude-relayed' })]),
@@ -1097,13 +1097,17 @@ describe('a relay-only connection change', () => {
       return relayed.client;
     };
 
-    // Everything a credential-shaped key would compare is IDENTICAL; only the carrier moved. The bytes
-    // physically go somewhere else, so an answer that arrived over the old one is not this one's.
+    // Everything a credential-shaped key would compare is IDENTICAL; only the published carrier SET
+    // moved — the same direct address, now with a rendezvous behind it. The bytes can physically go
+    // somewhere else, so an answer that arrived over the old set is not this one's.
     const viaRelay = daemonConnection({
       daemonId: 'daemon/laptop',
       baseUrl: 'https://laptop.example.test',
       deviceToken: 'token-laptop',
-      relay: { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' },
+      carriers: [
+        { kind: 'direct', daemonUrl: 'https://laptop.example.test' },
+        { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' },
+      ],
     });
 
     const mounted = await mount(<FleetConfigurationSurface connection={laptop} createClient={clientFor} />);

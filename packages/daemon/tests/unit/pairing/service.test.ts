@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type Advertisement,
+  type DaemonCarrier,
   type DaemonId,
   decideAdvertisement,
   type DeviceToken,
@@ -26,6 +27,19 @@ const CODE = '7F3K-Q2ND' as PairingCode;
 const SECOND_CODE = '6E2J-P3MC' as PairingCode;
 const FIRST_DEVICE_ID = `fy_device_id_${'1'.padStart(22, 'a')}`;
 const SECOND_DEVICE_ID = `fy_device_id_${'2'.padStart(22, 'a')}`;
+
+/**
+ * A REAL published set, and non-empty on purpose.
+ *
+ * `PairingResponse.carriers` defaults to `[]`, so a fixture that handed the service an empty set would
+ * assert nothing: "the daemon's carriers reached the device" and "the field was dropped and the schema
+ * re-defaulted it" produce byte-identical responses. Two entries of both kinds is the smallest set that
+ * cannot be produced by accident.
+ */
+const CARRIERS: readonly DaemonCarrier[] = [
+  { kind: 'direct', url: 'https://workstation.example.test' },
+  { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
+];
 
 class FakeClock {
   nowMs = Date.parse('2026-08-03T12:00:00.000Z');
@@ -115,6 +129,8 @@ function fixture(
     /** The decision this daemon was built with. Dialable unless a case is about the other two. */
     readonly advertisement?: Advertisement;
     readonly deviceState?: readonly RecordingDeviceState[];
+    /** What this daemon resolved at boot, for a case about what a redemption hands out. */
+    readonly carriers?: readonly DaemonCarrier[];
   } = {},
 ) {
   const clock = new FakeClock();
@@ -129,6 +145,7 @@ function fixture(
       url: 'https://workstation.example.test',
       origin: 'operator',
     },
+    carriers: options.carriers ?? CARRIERS,
     clock,
     cryptography,
     devices,
@@ -251,6 +268,11 @@ describe('PairingService redemption', () => {
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       capabilities: ['daemon-api'],
+      // EVERY WAY TO REACH THIS DAEMON, not just the one this device happened to pair over. A phone
+      // that learned only the direct address has nothing to fall back to when it leaves the house, and
+      // it cannot discover the rendezvous by itself — each end used to read its own build-time
+      // directory and the two met by coincidence.
+      carriers: CARRIERS,
     });
     should(devices.records).deepEqual([
       {
@@ -272,6 +294,88 @@ describe('PairingService redemption', () => {
       redeemedAt: '2026-08-03T12:00:00.000Z',
       deviceName: 'Ernest phone',
     });
+  });
+
+  it('should publish the carrier set it was given rather than deriving one from its advertisement', async () => {
+    // THE SHORTCUT THIS FORBIDS. The service already holds a dialable address, so "publish a direct
+    // carrier for it" looks free — and it is wrong twice over: the advertisement is one address while
+    // the carrier set is every address, and the rendezvous half cannot be derived from an
+    // advertisement at all. The set is resolved once, at boot, by the owner of that question; this
+    // service is a courier. So the two facts are deliberately in disagreement here, and the response
+    // must carry the set.
+    // Arrange
+    const resolved: readonly DaemonCarrier[] = [{ kind: 'relay', url: 'wss://elsewhere.example.test/fy' }];
+    const { service } = fixture({ carriers: resolved });
+    service.mint();
+
+    // Act
+    const result = await service.redeem({ code: CODE, deviceName: 'phone' }, '198.51.100.9');
+
+    // Assert
+    if (result.kind !== 'paired') throw new Error('expected successful pairing');
+    should(result.response.carriers).deepEqual(resolved);
+    should(JSON.stringify(result.response.carriers)).not.containEql('workstation.example.test');
+  });
+
+  it('should refuse a carrier set the wire would reject BEFORE anything can be paired', async () => {
+    // THE HALF-STATE THIS CLOSES. The response is parsed LAST, after the code is burned, the device row
+    // is written and the credential is live — and `PublishedCarriersSchema` throws rather than dropping.
+    // So a set the wire refuses used to turn one redemption into a generic 500 with the code spent, a
+    // device persisted and no token delivered to anybody: nothing the operator or the phone can repair,
+    // reached by a configuration mistake rather than by an attack. Construction is where it belongs.
+    // Arrange — a URL the type permits and `DaemonOriginSchema` does not: a credential in an address.
+    const devices = new RecordingDevices();
+    const credentials = new PairingDeviceRegistry(DAEMON_ID, new FakeCryptography());
+    const build = () =>
+      new PairingService({
+        daemonId: DAEMON_ID,
+        daemonName: 'workstation',
+        advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+        carriers: [{ kind: 'direct', url: 'https://operator:hunter2@workstation.example.test' }],
+        clock: new FakeClock(),
+        cryptography: new FakeCryptography(),
+        devices,
+        credentials,
+      });
+
+    // Act / Assert — it throws where a boot can report it, not where a request would, and it throws
+    // about the CARRIER: a bare `.throw()` here would pass on any unrelated construction failure.
+    should(build).throw(/daemon address may not carry credentials/u);
+    // And nothing was mutated on the way: no device row, no live credential, no code to spend.
+    should(devices.records).be.empty();
+    should(credentials.identify(DEVICE_TOKEN)).be.undefined();
+  });
+
+  it('should refuse more carriers than the wire will carry, at construction', async () => {
+    // The ceiling is the wire's (`MAX_PUBLISHED_CARRIERS`), and it exists because every entry is an
+    // address some browser dials in turn — an unbounded list is an unbounded walk. A daemon that only
+    // discovered the ceiling while answering a redemption would fail the one request that cannot be
+    // retried.
+    // Arrange
+    const tooMany: readonly DaemonCarrier[] = Array.from({ length: 9 }, (_, index) => ({
+      kind: 'relay' as const,
+      url: `wss://rendezvous-${String(index)}.example.test/fy`,
+    }));
+
+    // Act / Assert
+    should(() => fixture({ carriers: tooMany })).throw(/expected array to have <=8 items/u);
+  });
+
+  it('should keep publishing after construction accepted the set, rather than re-checking per redemption', async () => {
+    // The check is a BOOT check, so it must not have become a per-request one: two redemptions from one
+    // service both publish, and the second does not pay for the first's validation or fail on it.
+    // Arrange
+    const { service } = fixture();
+
+    // Act
+    service.mint();
+    const first = await service.redeem({ code: CODE, deviceName: 'first' }, '198.51.100.3');
+    service.mint();
+    const second = await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, '198.51.100.4');
+
+    // Assert
+    if (first.kind !== 'paired' || second.kind !== 'paired') throw new Error('expected two pairings');
+    should([first.response.carriers, second.response.carriers]).deepEqual([CARRIERS, CARRIERS]);
   });
 
   it('should give wrong, malformed, expired, and already-consumed codes the same refusal', async () => {
@@ -339,6 +443,7 @@ describe('PairingService redemption', () => {
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+      carriers: CARRIERS,
       clock: base.clock,
       cryptography: base.cryptography,
       devices,

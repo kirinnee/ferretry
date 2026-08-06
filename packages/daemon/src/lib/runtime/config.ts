@@ -13,9 +13,14 @@ import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts'
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import type { RunOverrides } from './arguments.ts';
+import {
+  type DaemonCarrierSet,
+  DaemonCarriersDocumentSchema,
+  HostSchema,
+  PortSchema,
+  resolveDaemonCarriers,
+} from './carriers.ts';
 
-const HostSchema = z.string().trim().min(1).max(255);
-const PortSchema = z.number().int().min(1).max(65_535);
 const CorsOriginSchema = z
   .url()
   .refine(value => {
@@ -247,6 +252,15 @@ export const DaemonConfigDocumentSchema = z
     /** The rendezvous carrier, if this host has one. Absent means direct-only. */
     relay: DaemonRelayConfigSchema.optional(),
     /**
+     * EVERY WAY THIS DAEMON MAY BE REACHED, as one list, beside the legacy spelling of the same fact.
+     *
+     * `host`, `port` and `relay` above remain readable as a one-bind, one-relay list, and a kind this
+     * array names WINS over its legacy spelling — per kind, so a half-finished migration keeps
+     * listening where it always did. Nothing here is derived and nothing derived is written back:
+     * see `runtime/carriers.ts`, which owns the shape, the bounds and the precedence rule.
+     */
+    carriers: DaemonCarriersDocumentSchema,
+    /**
      * Prices the operator has personally supplied for this daemon's usage.
      * These are API-equivalent rates, not a statement of subscription spend.
      */
@@ -318,6 +332,19 @@ function derivedAddresses(input: {
   };
 }
 
+/**
+ * The resolved carrier set with the bind this boot is ACTUALLY on.
+ *
+ * A declared bind may name no port at all, and a settled port or a `--port` may move the one it does
+ * name — so the set every later stage reads carries the effective address rather than the written
+ * one. It is derived on every read, exactly like `bindUrl`, and for the same reason: a carrier set
+ * that stayed behind while the socket moved would put the two facts back into the disagreement this
+ * whole shape exists to make unrepresentable. Nothing here is ever written back to the document.
+ */
+function boundAt(carriers: DaemonCarrierSet, bind: { readonly host: string; readonly port: number }): DaemonCarrierSet {
+  return { bind: { kind: 'bind', host: bind.host, port: bind.port }, relays: carriers.relays };
+}
+
 /** The recorded advertisement as `decideAdvertisement` wants it: absent rather than empty. */
 function operatorPublicUrl(publicUrl: string | undefined): { readonly operatorPublicUrl?: string } {
   return publicUrl === undefined ? {} : { operatorPublicUrl: publicUrl };
@@ -356,14 +383,30 @@ function recordedAdvertisement(config: DaemonConfig): { readonly operatorPublicU
  * once derivation happens on every read there is otherwise no way to tell a default from a choice.
  * A recorded port is claimed; an unrecorded one is a preference this boot may move off. A recorded
  * public URL survives a moved port; an unrecorded one follows it.
+ *
+ * `carrierSet` is every way this daemon may be reached, resolved ONCE. Host and port are read off its
+ * bind rather than off the document, which is what makes an explicit bind carrier a decision rather
+ * than a decoration: the two spellings would otherwise agree everywhere except at the socket.
  */
 export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(value => {
-  const port = value.port ?? FY_DEFAULT_DAEMON_PORT;
+  const declared = resolveDaemonCarriers({
+    host: value.host,
+    port: value.port,
+    relay: value.relay,
+    carriers: value.carriers,
+  });
+  const host = declared.bind.host;
+  const port = declared.bind.port ?? FY_DEFAULT_DAEMON_PORT;
   return {
     ...value,
+    host,
     port,
-    portIsRecorded: value.port !== undefined,
-    ...derivedAddresses({ host: value.host, port, ...operatorPublicUrl(value.publicUrl) }),
+    // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind
+    // carrier is not a claim on anything, and treating it as one would refuse a boot over a line the
+    // operator has already migrated away from.
+    portIsRecorded: declared.bind.port !== undefined,
+    carrierSet: boundAt(declared, { host, port }),
+    ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
   };
 });
 
@@ -387,6 +430,7 @@ export function configuredAt(config: DaemonConfig, port: number): DaemonConfig {
     ...config,
     port,
     portIsRecorded: true,
+    carrierSet: boundAt(config.carrierSet, { host: config.host, port }),
     ...derivedAddresses({ host: config.host, port, ...recordedAdvertisement(config) }),
   };
 }
@@ -409,6 +453,52 @@ export function defaultDaemonConfigDocument(): DaemonConfigDocument {
 
 export function defaultDaemonConfig(): DaemonConfig {
   return parseDaemonConfig({});
+}
+
+/** A raw entry that says it is the listener, read from JSON with no schema anywhere near it. */
+function isWrittenBindCarrier(entry: unknown): entry is Record<string, unknown> {
+  return typeof entry === 'object' && entry !== null && (entry as { readonly kind?: unknown }).kind === 'bind';
+}
+
+/**
+ * The document to write when a boot has settled on a port, with that port in the key that DECIDES it.
+ *
+ * ONE HELPER FOR BOTH ADAPTERS, because the state home's document and the one an operator names with
+ * `--config` must answer this identically — a port that landed in a different key depending on which
+ * file it was is a difference nobody could see and everybody would hit.
+ *
+ * THE RAW DOCUMENT GOES IN AND THE RAW DOCUMENT COMES OUT, plus one value. Recording used to write
+ * the SCHEMA-PARSED document, which planted every default this file declares into a file only the
+ * operator is supposed to write: a single `record()` against a `carriers`-only document left a
+ * `host: "127.0.0.1"` line behind, and because `supersededCarrierKeys` reads key PRESENCE — the only
+ * thing that can tell "written" from "defaulted" — every boot afterwards accused the operator of a
+ * superseded `host` key that is not in their file and told them to go delete it. It filled in their
+ * carrier entries' `enabled` and `reconnectSeconds` on the same pass. So the writer holds the same
+ * raw-versus-parsed line the reader does, and the document that goes back is the one that came off.
+ *
+ * WHERE THE PORT GOES FOLLOWS WHERE IT IS READ FROM. A document with an explicit bind carrier reads
+ * its address from that entry, so writing the top-level `port` there would write a key with no effect
+ * on where this daemon listens: the operator watches the number change, watches the daemon come up
+ * somewhere else, and has nothing to go on. Without a bind carrier the legacy key IS the bind, so it
+ * is where the port belongs and it keeps getting written.
+ *
+ * THE SUPERSEDED KEY IS LEFT EXACTLY AS TYPED, never rewritten and never deleted. It is the
+ * operator's line to finish migrating, and `supersededCarrierKeys` is what tells them it is there.
+ *
+ * It is TOTAL over any JSON object, because raw means unvalidated. A `carriers` value that is not a
+ * list of entries is a document the configuration parse refuses before a boot could settle anything,
+ * and both callers hold that refusal; this one still declines to invent a shape nobody wrote.
+ */
+export function recordedPortDocument(
+  rawDocument: Readonly<Record<string, unknown>>,
+  port: number,
+): Record<string, unknown> {
+  const carriers = rawDocument.carriers;
+  if (!Array.isArray(carriers) || !carriers.some(isWrittenBindCarrier)) return { ...rawDocument, port };
+  return {
+    ...rawDocument,
+    carriers: carriers.map(entry => (isWrittenBindCarrier(entry) ? { ...entry, port } : entry)),
+  };
 }
 
 /**
@@ -447,6 +537,7 @@ export function overriddenBy(config: DaemonConfig, overrides: RunOverrides): Dae
     host,
     port,
     portIsRecorded: overrides.port !== undefined || config.portIsRecorded,
+    carrierSet: boundAt(config.carrierSet, { host, port }),
     ...derivedAddresses({ host, port, ...recordedAdvertisement(config) }),
   };
 }

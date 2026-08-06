@@ -35,9 +35,10 @@ Two properties hold by construction rather than by discipline:
 POST /v1/pair/code            (operator minimum, `pairing.use`)   → { pairingId, code, expiresAt, link+reach | refusal }
 GET  /v1/pair/code/:pairingId (operator minimum, `pairing.use`)   → pending | redeemed | expired
 DELETE /v1/pair/code/:pairingId (operator minimum, `pairing.use`) → the code's fate, never the code
-POST /v1/pair                 (public)                            → { deviceToken, daemonId, … }
+POST /v1/pair                 (none minimum — the code is the credential) → { deviceToken, daemonId, capabilities, carriers }
 GET  /v1/pair/devices         (operator minimum, `pairing.use`)   → who may reach this machine
 DELETE /v1/pair/devices/:id   (operator minimum, `pairing.use`)   → the remaining list
+GET  /v1/carriers             (authenticated minimum, no-store)    → { carriers } — the set, asked again later
 ```
 
 **`operator` is the route's credential minimum, not an admin token.** Any credential but a warden's
@@ -48,7 +49,47 @@ beside it, and off the host that is the operator's to switch off.
 
 `POST /v1/pair` is the only public route on this surface, and it is public because a device redeeming a
 code has no credential yet — the **code is** the credential for that one request. Everything else either
-mints a credential or lists and revokes them.
+mints a credential, lists and revokes them, or is read with one.
+
+### What a redemption hands back
+
+`POST /v1/pair` answers with `carriers`: **every way this daemon can be reached**, not merely the address
+this device happened to pair over. A phone that learned only the direct address has nothing to fall back
+on when it leaves the house, and it cannot discover a rendezvous by itself — each end used to read its own
+build-time directory, so the two met only by coincidence of picking the same service.
+
+The daemon resolves that set **once, at boot**, and hands the same value to this response and to the
+refresh route below. Neither entry is a secret: a rendezvous address is already known to the rendezvous,
+and a daemon address is already known to whoever was authorised to pair. The daemon **fingerprint** is the
+secret in this subject and it is not on the list — the wire schema has no field for one. The full carrier
+contract is [relay-protocol.md](relay-protocol.md) §13.
+
+### Asking again — `GET /v1/carriers`
+
+A set published only at pairing time goes stale while both halves stay healthy: an operator changes or
+switches off a rendezvous, and the only repair a device has is to pair again. This route is the second
+moment.
+
+- **`authenticated`**, so any caller this daemon issued a credential to may refresh its own copy —
+  including a paired device and the capability-scoped warden. One class higher would refuse the reader
+  that needs it and protect nothing.
+- **`no-store`**, because the entire value of the answer is that it is current. A cached copy re-serves
+  the rendezvous the operator just switched off.
+- **Not `privilegedOnly`, and no capability demand.** A caller on the host already has the machine and
+  needs no list; the remote phone is the reader. And an operator who switches `pairing` off to stop **new**
+  devices being added must not thereby strand the devices already paired on a rendezvous this daemon no
+  longer dials.
+- **Read-only.** There is no `POST`, `PUT` or `DELETE` here. A device may learn where this daemon can be
+  reached and can never re-point it: that is a change to the operator's own document.
+
+**The daemon is authoritative and a client's copy is a cache.** A client REPLACES its stored set with this
+answer rather than merging into it — that is what makes both halves of a disagreement resolve, because a
+relay the daemon dropped disappears instead of being dialled forever, and a relay the daemon added arrives
+without anybody re-pairing. A merge would only ever fix the second.
+
+**Pairing itself is still never relayed.** This route is reached with the token redemption already issued,
+so it cannot be a way in; first contact with a daemon is always direct, over an address reachable on its
+own once.
 
 ### Who may mint
 
@@ -150,6 +191,7 @@ row states what its revoke will do before the press.
 | --------------------------- | ------------------------------------------------------------------ |
 | the state machine           | `packages/daemon/src/lib/pairing/service.ts`                       |
 | the routes and their minima | `packages/daemon/src/lib/runtime/mounts/pairing.ts`                |
+| the carrier refresh         | `packages/daemon/src/lib/runtime/mounts/carriers.ts`               |
 | durable identity and grants | `packages/daemon/src/adapters/pairing/state-pairing-repository.ts` |
 | the wire contract           | `packages/protocol/src/lib/pairing.ts`                             |
 | the command line            | `packages/cli/src/lib/pair/`                                       |

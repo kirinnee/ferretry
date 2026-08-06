@@ -1,6 +1,7 @@
 import {
   type Advertisement,
   type AdvertisementRefusal,
+  type DaemonCarrier,
   type DaemonId,
   DaemonIdSchema,
   DaemonNameSchema,
@@ -20,6 +21,7 @@ import {
   PairingRequestSchema,
   type PairingResponse,
   PairingResponseSchema,
+  PublishedCarriersSchema,
 } from '@ferretry/protocol';
 import { type DeviceCredentialVerifier, secretsMatch } from '../api/authentication.ts';
 
@@ -191,6 +193,25 @@ interface PairingServiceOptions {
    * has nothing to derive and no way to derive it differently.
    */
   readonly advertisement: Advertisement;
+  /**
+   * EVERY WAY THIS DAEMON CAN BE REACHED, handed to the device that just earned the right to reach it.
+   *
+   * A redemption is the one moment a device is guaranteed to be listening, so it is where the set
+   * belongs — a phone that learned only the direct address it paired over has no way to find the
+   * rendezvous that would still work when it leaves the house.
+   *
+   * IT IS THE VALUE, NOT A WAY TO ASK FOR ONE. The composition root resolves the set once, before this
+   * service exists, and gives the SAME ARRAY to `GET /v1/carriers`. A getter would have been the
+   * flexible choice and it would also have been the bug: two calls may answer differently, so the set
+   * a device is handed at pairing could stop matching the set it refreshes, which is precisely the
+   * disagreement the published set was introduced to end.
+   *
+   * THIS SERVICE DECIDES NOTHING ABOUT IT. Nothing here filters, re-orders or adds to it, and it is
+   * never held as anything but `readonly`. It is CHECKED at construction — see the constructor — so a
+   * carrier this daemon's own device would refuse cannot leave through here, and cannot be discovered
+   * halfway through a redemption either.
+   */
+  readonly carriers: readonly DaemonCarrier[];
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -230,6 +251,21 @@ export class PairingService {
   constructor(private readonly options: PairingServiceOptions) {
     this.daemonId = DaemonIdSchema.parse(options.daemonId);
     this.daemonName = DaemonNameSchema.parse(options.daemonName);
+    // THE CARRIER SET IS CHECKED BEFORE THIS DAEMON CAN PAIR ANYBODY, and the parsed copy is thrown
+    // away on purpose.
+    //
+    // WHY IT CANNOT WAIT FOR THE RESPONSE. `redeem()` parses the whole response LAST — after the code
+    // is burned, the device row is written and the credential is live. `PublishedCarriersSchema` throws
+    // rather than dropping, so a set it refuses would turn one redemption into a generic 500 with the
+    // code spent, a device persisted and no token delivered to anybody: an un-repairable half-state,
+    // reached by a configuration mistake rather than by an attack. Here the same bad set refuses at
+    // boot instead, before there is a code to spend, and the operator gets a failure they can act on.
+    //
+    // WHY THE COPY IS DISCARDED. `parse` returns a NEW array, and adopting it would make this service a
+    // second authority on a fact the composition root owns — the refresh route would then answer from
+    // one array and a redemption from another, which is the disagreement this whole feature exists to
+    // end. What is wanted is the CHECK, not the result: `this.options.carriers` stays the one reference.
+    PublishedCarriersSchema.parse(options.carriers);
     this.advertisement = normalizedAdvertisement(options.advertisement);
     this.pairingAppUrl = new URL(options.pairingAppUrl ?? FERRETRY_PAIRING_APP_URL).toString();
     this.capabilities = [...(options.capabilities ?? ['daemon-api'])];
@@ -430,6 +466,11 @@ export class PairingService {
         daemonId: this.daemonId,
         daemonName: this.daemonName,
         capabilities: this.capabilities,
+        // The one set this daemon resolved at boot, projected for the wire — the same reference the
+        // refresh route holds, so a device's first answer and its next one cannot disagree. It cannot
+        // fail this parse: the constructor already refused a set this schema would reject, which is
+        // what keeps a bad carrier from being discovered after the code has been spent.
+        carriers: this.options.carriers,
       }),
     };
   }

@@ -7,7 +7,8 @@
  *
  * WHAT IS CACHED IS EVIDENCE, NOT A TRANSPORT. The cache authority is the daemon
  * and the credential that proved the rows; the carrier the bytes travelled on is
- * not part of it, so attaching or withdrawing a relay keeps the slice whole.
+ * not part of it, so republishing the carrier set — a relay added, reordered or
+ * withdrawn — keeps the slice whole.
  *
  * Automatic hydration reads only the manifest. Quota comes from the existing
  * cached usage store, and health is checked only after a deliberate action.
@@ -63,15 +64,15 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
  * question — is this the same LIVE carrier — and it must keep answering it for
  * anything holding an open socket or an in-flight byte. What this store holds is
  * neither: it is authenticated evidence a daemon already proved, keyed by WHO
- * proved it. A hosted relay advertisement arriving late is a carrier-only change
- * — `DaemonConnectionStore.attachRelay` preserves its caches for exactly this
+ * proved it. A daemon republishing its carrier set is a carrier-only change —
+ * `DaemonConnectionStore.replaceCarriers` preserves its caches for exactly this
  * reason — and routing bytes down a different path does not unprove a roster or
  * expire a health result the reader explicitly paid for.
  *
  * THE CREDENTIAL AND DAEMON FENCE IS UNCHANGED. A rotated `deviceToken` or a
  * moved `baseUrl` IS a re-pair: it mints a new generation, drops the caches, and
- * fences every late read. Only `relay` is excluded, and only because it is an
- * address rather than an authority.
+ * fences every late read. Only `carriers` is excluded, and only because it is a
+ * set of addresses rather than an authority.
  */
 const sameAccountPickerAuthority = (left: DaemonConnection, right: DaemonConnection): boolean =>
   left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
