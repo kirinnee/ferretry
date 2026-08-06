@@ -5,8 +5,11 @@ import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-seria
 import {
   type AnswerLedger,
   type AnswerOperationRecord,
+  AnswerReleased,
   AnswerRequestConflict,
   type AnswerRequestPayload,
+  AnswerTerminalFailure,
+  AnswerToolAlreadyHandled,
   AnswerUnconfirmed,
   answerFingerprint,
 } from '../../../../src/lib/session/question/answer-ledger.ts';
@@ -14,7 +17,11 @@ import {
   StructuredAnswerCoordinator,
   type StructuredAnswerPerformer,
 } from '../../../../src/lib/session/question/coordinator.ts';
-import { StructuredQuestionRefused } from '../../../../src/lib/session/question/service.ts';
+import {
+  StructuredQuestionAttemptFailed,
+  StructuredQuestionDriveFailure,
+  StructuredQuestionRefused,
+} from '../../../../src/lib/session/question/service.ts';
 import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
 
 const ID = parseSessionId('session-1');
@@ -32,6 +39,12 @@ class MemoryLedger implements AnswerLedger {
 
   async read(id: SessionId, requestId: string): Promise<AnswerOperationRecord | undefined> {
     return this.records.get(`${id}\n${requestId}`);
+  }
+
+  async all(id: SessionId): Promise<ReadonlyMap<string, AnswerOperationRecord>> {
+    const records = new Map<string, AnswerOperationRecord>();
+    for (const [key, record] of this.records) if (key.startsWith(`${id}\n`)) records.set(record.requestId, record);
+    return records;
   }
 
   async append(id: SessionId, record: AnswerOperationRecord): Promise<void> {
@@ -99,7 +112,9 @@ function harness(
   options: {
     readonly ledger?: MemoryLedger;
     readonly performer?: Performer;
+    readonly serial?: KeyedSerialExecutor;
     readonly state?: SessionState | undefined;
+    readonly view?: (id: SessionId) => Promise<SessionView>;
   } = {},
 ): Harness {
   const ledger = options.ledger ?? new MemoryLedger();
@@ -109,14 +124,16 @@ function harness(
   const subject = new StructuredAnswerCoordinator({
     service: performer,
     ledger,
-    serial: new KeyedSerialExecutor(),
+    serial: options.serial ?? new KeyedSerialExecutor(),
     clock: { now: () => '2026-08-06T00:00:00.000Z' },
     state: async () => options.state,
     // A DIFFERENT view every call, so a test can tell a re-read from a cached one.
-    view: async id => {
-      reads += 1;
-      return { directory: `/sessions/${id}`, state: { read: reads } } as unknown as SessionView;
-    },
+    view:
+      options.view ??
+      (async id => {
+        reads += 1;
+        return { directory: `/sessions/${id}`, state: { read: reads } } as unknown as SessionView;
+      }),
     quarantine: async (id, record) => {
       quarantined.push([id, record]);
     },
@@ -273,7 +290,8 @@ describe('the structured answer coordinator', () => {
     // Act + Assert
     await should(answer(subject.subject)).be.rejectedWith(AnswerUnconfirmed);
     should(subject.performer.calls).deepEqual([]);
-    should(subject.quarantined).deepEqual([[ID, stranded]]);
+    should(subject.quarantined).match([[ID, { ...stranded, outcome: 'quarantined', reason: /could not prove/u }]]);
+    should(subject.ledger.appended.map(([, record]) => record.outcome)).deepEqual(['quarantined']);
   });
 
   it('tombstones a refusal raised before any key, so the same id may honestly start over', async () => {
@@ -312,6 +330,81 @@ describe('the structured answer coordinator', () => {
     should(retry.performer.calls).deepEqual([]);
   });
 
+  it.each([
+    ['failed', 'none'],
+    ['quarantined', 'ambiguous'],
+  ] as const)('settles a recovered %s attempt and never re-drives it after restart', async (receipt, acceptance) => {
+    const ledger = new MemoryLedger();
+    const recovered = new StructuredQuestionAttemptFailed(
+      'the form was released; reply in prose',
+      receipt,
+      new StructuredQuestionDriveFailure('drive failed', acceptance),
+    );
+    const failing = harness({ ledger, performer: new Performer(recovered) });
+
+    await should(answer(failing.subject)).be.rejectedWith(StructuredQuestionAttemptFailed);
+    const retry = harness({ ledger, state: {} as SessionState });
+
+    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual(['accepted', receipt]);
+    should(failing.quarantined).have.length(receipt === 'quarantined' ? 1 : 0);
+    await should(answer(retry.subject)).be.rejectedWith(receipt === 'failed' ? AnswerTerminalFailure : AnswerReleased);
+    should(retry.performer.calls).deepEqual([]);
+  });
+
+  it('keeps an unreleased recovery failure accepted and quarantines it after restart', async () => {
+    const ledger = new MemoryLedger();
+    const failure = new StructuredQuestionAttemptFailed(
+      'the form could not be released',
+      'accepted',
+      new StructuredQuestionDriveFailure('drive failed', 'ambiguous'),
+    );
+    const first = harness({ ledger, performer: new Performer(failure) });
+
+    await should(answer(first.subject)).be.rejectedWith(StructuredQuestionAttemptFailed);
+    const retry = harness({ ledger, state: {} as SessionState });
+    await should(answer(retry.subject)).be.rejectedWith(AnswerUnconfirmed);
+
+    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual(['accepted', 'quarantined']);
+    should(retry.quarantined).have.length(1);
+    should(retry.performer.calls).deepEqual([]);
+  });
+
+  it('refuses a fresh request id for a tool a settled request already owns', async () => {
+    const ledger = new MemoryLedger([
+      [
+        ID,
+        {
+          requestId: 'request-1',
+          toolUseId: 'tool-1',
+          fingerprint: answerFingerprint(REQUEST),
+          acceptedAt: '2026-08-06T00:00:00.000Z',
+          outcome: 'confirmed',
+        },
+      ],
+    ]);
+    const retry = harness({ ledger });
+
+    await should(answer(retry.subject, 'request-2')).be.rejectedWith(AnswerToolAlreadyHandled);
+    should(retry.performer.calls).deepEqual([]);
+  });
+
+  it('reconciles another request id that accepted this tool before refusing a fresh id', async () => {
+    const accepted: AnswerOperationRecord = {
+      requestId: 'request-1',
+      toolUseId: 'tool-1',
+      fingerprint: answerFingerprint(REQUEST),
+      acceptedAt: '2026-08-06T00:00:00.000Z',
+      outcome: 'accepted',
+    };
+    const ledger = new MemoryLedger([[ID, accepted]]);
+    const retry = harness({ ledger, state: { lastAnsweredQuestionToolUseId: 'tool-1' } as SessionState });
+
+    await should(answer(retry.subject, 'request-2')).be.rejectedWith(AnswerToolAlreadyHandled);
+
+    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual(['confirmed']);
+    should(retry.performer.calls).deepEqual([]);
+  });
+
   it('serializes two different request ids on one session', async () => {
     // Arrange
     const { subject, performer } = harness();
@@ -319,7 +412,7 @@ describe('the structured answer coordinator', () => {
 
     // Act
     const first = answer(subject, 'request-1');
-    const second = answer(subject, 'request-2', { toolUseId: 'tool-1', labels: ['No'] });
+    const second = answer(subject, 'request-2', { toolUseId: 'tool-2', labels: ['No'] });
     await performer.whenCalls(1);
     await drain();
     const duringFirst = performer.calls.length;
@@ -329,6 +422,39 @@ describe('the structured answer coordinator', () => {
     // Assert
     should(duringFirst).equal(1);
     should(performer.calls).have.length(2);
+  });
+
+  it('makes monitor projection wait for the live drive on the shared per-session queue', async () => {
+    const serial = new KeyedSerialExecutor();
+    const { subject, performer } = harness({ serial });
+    performer.hold();
+    const running = answer(subject);
+    await performer.whenCalls(1);
+    let projected = false;
+
+    const projection = serial.run(ID, async () => {
+      projected = true;
+    });
+    await drain();
+    should(projected).be.false();
+    performer.release();
+    await Promise.all([running, projection]);
+
+    should(projected).be.true();
+  });
+
+  it('releases the answer queue before reading a view that projects under the same queue', async () => {
+    const serial = new KeyedSerialExecutor();
+    const view = async (id: SessionId): Promise<SessionView> =>
+      await serial.run(
+        id,
+        async () => ({ directory: `/sessions/${id}`, state: { status: 'running' } }) as unknown as SessionView,
+      );
+    const { subject } = harness({ serial, view });
+
+    const settled = await answer(subject);
+
+    should(settled).match({ directory: '/sessions/session-1' });
   });
 
   it('keeps unrelated sessions concurrent', async () => {

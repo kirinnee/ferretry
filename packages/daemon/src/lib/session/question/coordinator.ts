@@ -4,14 +4,18 @@ import type { SessionId } from '../../session-id.ts';
 import {
   type AnswerLedger,
   type AnswerOperationRecord,
+  AnswerReleased,
   AnswerRequestConflict,
   type AnswerRequestPayload,
+  AnswerTerminalFailure,
+  AnswerToolAlreadyHandled,
   AnswerUnconfirmed,
+  answerEvidenceForQuestion,
   answerFingerprint,
   decideAnswerAdmission,
   reconcileUnconfirmedAnswer,
 } from './answer-ledger.ts';
-import { StructuredQuestionRefused } from './service.ts';
+import { StructuredQuestionAttemptFailed, StructuredQuestionRefused } from './service.ts';
 
 /**
  * The narrow verb this coordinator needs from the answer domain: validate, drive, clear.
@@ -150,37 +154,60 @@ export class StructuredAnswerCoordinator {
     fingerprint: string,
     request: AnswerRequestPayload,
   ): Promise<SessionView> {
-    return await this.ports.serial.run(id, async () => {
-      const admission = decideAnswerAdmission({ existing: await this.ports.ledger.read(id, requestId), fingerprint });
+    await this.ports.serial.run(id, async () => {
+      const records = await this.ports.ledger.all(id);
+      const admission = decideAnswerAdmission({ existing: records.get(requestId), fingerprint });
       if (admission.kind === 'conflict') throw new AnswerRequestConflict(requestId);
-      if (admission.kind === 'replay') return await this.ports.view(id);
-      if (admission.kind === 'reconcile') return await this.#reconcile(id, requestId, admission.record);
-      return await this.#drive(id, requestId, fingerprint, request);
+      if (admission.kind === 'replay') return;
+      if (admission.kind === 'failed') throw new AnswerTerminalFailure(admission.record);
+      if (admission.kind === 'quarantined') throw new AnswerReleased(admission.record);
+      if (admission.kind === 'reconcile') {
+        await this.#reconcile(id, requestId, admission.record);
+        return;
+      }
+
+      // Request identity does not supersede tool identity. A caller can mint a fresh id, but it
+      // cannot thereby authorize a second drive of the same rendered form.
+      const prior = answerEvidenceForQuestion(
+        [...records.values()].filter(record => record.requestId !== requestId),
+        request.toolUseId,
+      );
+      if (prior.kind === 'unconfirmed') {
+        await this.#reconcile(id, prior.record.requestId, prior.record);
+        throw new AnswerToolAlreadyHandled(request.toolUseId, prior.record.requestId, 'confirmed');
+      }
+      if (prior.kind !== 'none')
+        throw new AnswerToolAlreadyHandled(request.toolUseId, prior.record.requestId, prior.record.outcome);
+      await this.#drive(id, requestId, fingerprint, request);
     });
+    // The session reader proactively projects transcript/ledger evidence under this SAME serial
+    // queue. Reading the view while holding it would re-enter the key and deadlock; the operation is
+    // already settled here, so release first and then derive the current view.
+    return await this.ports.view(id);
   }
 
   /** Settles a receipt an earlier attempt left open, from the state document and nothing else. */
-  async #reconcile(id: SessionId, requestId: string, record: AnswerOperationRecord): Promise<SessionView> {
+  async #reconcile(id: SessionId, requestId: string, record: AnswerOperationRecord): Promise<void> {
     const verdict = reconcileUnconfirmedAnswer({ record, state: await this.ports.state(id) });
     if (verdict === 'quarantine') {
-      await this.ports.quarantine(id, record);
-      throw new AnswerUnconfirmed(requestId, record.toolUseId);
+      const quarantined: AnswerOperationRecord = {
+        ...record,
+        outcome: 'quarantined',
+        reason: record.reason ?? 'the durable session state could not prove whether the accepted answer landed',
+      };
+      await this.ports.quarantine(id, quarantined);
+      await this.ports.ledger.append(id, quarantined);
+      throw new AnswerUnconfirmed(requestId, record.toolUseId, quarantined.reason);
     }
     await this.ports.ledger.append(id, {
       ...record,
       outcome: 'confirmed',
       reason: 'the answered form was already stamped durably; the receipt was behind',
     });
-    return await this.ports.view(id);
   }
 
   /** The only path that reaches a terminal, and the only one that writes an `accepted` receipt. */
-  async #drive(
-    id: SessionId,
-    requestId: string,
-    fingerprint: string,
-    request: AnswerRequestPayload,
-  ): Promise<SessionView> {
+  async #drive(id: SessionId, requestId: string, fingerprint: string, request: AnswerRequestPayload): Promise<void> {
     const accepted: AnswerOperationRecord = {
       requestId,
       toolUseId: request.toolUseId,
@@ -199,18 +226,25 @@ export class StructuredAnswerCoordinator {
         ...(request.answers === undefined ? {} : { answers: request.answers }),
       });
     } catch (error) {
-      // Only a refusal raised while binding and validating proves nothing was typed. Everything
-      // else — a form that would not advance, a state document that would not clear — leaves the
-      // receipt exactly as ambiguous as the situation is.
+      // Binding refusals are retryable. A recovered attempt carries the exact terminal receipt it
+      // earned; an unrecovered failure deliberately leaves `accepted` as the crash-safe ambiguity.
       if (error instanceof StructuredQuestionRefused)
         await this.ports.ledger.append(id, {
           ...accepted,
           outcome: 'withdrawn',
           reason: `refused before any key was sent: ${error.message}`,
         });
+      if (error instanceof StructuredQuestionAttemptFailed && error.receipt !== 'accepted') {
+        const settlement: AnswerOperationRecord = {
+          ...accepted,
+          outcome: error.receipt,
+          reason: error.message,
+        };
+        if (settlement.outcome === 'quarantined') await this.ports.quarantine(id, settlement);
+        await this.ports.ledger.append(id, settlement);
+      }
       throw error;
     }
     await this.ports.ledger.append(id, { ...accepted, outcome: 'confirmed' });
-    return await this.ports.view(id);
   }
 }

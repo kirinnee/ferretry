@@ -2,7 +2,13 @@ import { describe, it } from 'bun:test';
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import should from 'should';
 import {
+  StructuredQuestionAttemptFailed,
+  type StructuredQuestionCancellation,
+  type StructuredQuestionDiagnosticPane,
+  StructuredQuestionDriveFailure,
   type StructuredQuestionDriver,
+  type StructuredQuestionFailureContext,
+  type StructuredQuestionFailureRecovery,
   StructuredQuestionRefused,
   type StructuredQuestionRepository,
   StructuredQuestionService,
@@ -18,14 +24,29 @@ const pending: PendingQuestion = {
   ],
 };
 
+const diagnosticPane: StructuredQuestionDiagnosticPane = {
+  alive: true,
+  dead: false,
+  promptReady: true,
+  visible: '> ',
+  history: 'Deploy?\n> Yes\n  No',
+};
+
 class Answers implements StructuredQuestionRepository {
   readonly delivered: Array<
     readonly [string, string, readonly StructuredQuestionAnswer[], { readonly confirmedBy: string }]
   > = [];
+  readonly failures: Array<
+    readonly [string, PendingQuestion, readonly StructuredQuestionAnswer[], StructuredQuestionFailureContext]
+  > = [];
+  pendingError: unknown;
+  answeredError: unknown;
+  failureError: unknown;
 
   constructor(private readonly question: PendingQuestion | undefined = pending) {}
 
   async pending(): Promise<PendingQuestion | undefined> {
+    if (this.pendingError !== undefined) throw this.pendingError;
     return this.question;
   }
 
@@ -35,7 +56,18 @@ class Answers implements StructuredQuestionRepository {
     answers: readonly StructuredQuestionAnswer[],
     confirmation: { readonly confirmedBy: string },
   ): Promise<void> {
+    if (this.answeredError !== undefined) throw this.answeredError;
     this.delivered.push([id, toolUseId, answers, confirmation]);
+  }
+
+  async failed(
+    id: string,
+    question: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    context: StructuredQuestionFailureContext,
+  ): Promise<void> {
+    this.failures.push([id, question, answers, context]);
+    if (this.failureError !== undefined) throw this.failureError;
   }
 }
 
@@ -58,14 +90,34 @@ class Driver implements StructuredQuestionDriver {
   }
 }
 
+class Recovery implements StructuredQuestionFailureRecovery {
+  readonly snapshots: string[] = [];
+  readonly cancellations: Array<readonly [string, PendingQuestion]> = [];
+  snapshotError: unknown;
+  cancellationError: unknown;
+
+  async snapshot(id: string): Promise<StructuredQuestionDiagnosticPane> {
+    this.snapshots.push(id);
+    if (this.snapshotError !== undefined) throw this.snapshotError;
+    return diagnosticPane;
+  }
+
+  async cancel(id: string, question: PendingQuestion): Promise<StructuredQuestionCancellation> {
+    this.cancellations.push([id, question]);
+    if (this.cancellationError !== undefined) throw this.cancellationError;
+    return { confirmedBy: 'prompt-ready', pane: diagnosticPane };
+  }
+}
+
 function subject(question: PendingQuestion | undefined = pending, driver = new Driver()) {
   const repository = new Answers(question);
-  return { repository, driver, service: new StructuredQuestionService(repository, driver) };
+  const recovery = new Recovery();
+  return { repository, driver, recovery, service: new StructuredQuestionService(repository, driver, recovery) };
 }
 
 describe('structured question service', () => {
   it('validates all answers, visibly drives them, then clears the exact durable question', async () => {
-    const { service, repository, driver } = subject();
+    const { service, repository, driver, recovery } = subject();
 
     await service.answer({
       id: ID,
@@ -94,16 +146,18 @@ describe('structured question service', () => {
         { confirmedBy: 'prompt-ready' },
       ],
     ]);
+    should(recovery.snapshots).deepEqual([]);
+    should(recovery.cancellations).deepEqual([]);
   });
 
-  it('does not clear the stored question when the pane cannot confirm the answer', async () => {
+  it('quarantines an ambiguous drive, snapshots it, cancels once, and releases the durable question', async () => {
     const confirmationFailure = Promise.reject(
       new Error('the answer keys were sent, but the rendered form did not visibly advance'),
     );
-    const { service, repository } = subject(pending, new Driver(confirmationFailure));
+    const { service, repository, recovery } = subject(pending, new Driver(confirmationFailure));
 
-    await should(
-      service.answer({
+    const failure = await service
+      .answer({
         id: ID,
         toolUseId: 'question-1',
         labels: [],
@@ -111,9 +165,129 @@ describe('structured question service', () => {
           { kind: 'selection', labels: ['Yes'] },
           { kind: 'selection', labels: ['Web'] },
         ],
-      }),
-    ).be.rejectedWith(/did not visibly advance/u);
+      })
+      .catch((error: unknown) => error);
     should(repository.delivered).deepEqual([]);
+    should(repository.failures).have.length(1);
+    should(repository.failures[0]?.[3].failure.acceptance).equal('ambiguous');
+    should(recovery.snapshots).deepEqual([ID]);
+    should(recovery.cancellations).deepEqual([[ID, pending]]);
+    should(failure).be.instanceOf(StructuredQuestionAttemptFailed);
+    should(failure).match({ receipt: 'quarantined' });
+  });
+
+  it('records a proven pre-key failure as terminal and still performs one bounded cancellation attempt', async () => {
+    const driveFailure = Promise.reject(
+      new StructuredQuestionDriveFailure('the pane was dead before input', 'none', { phase: 'preflight' }),
+    );
+    const { service, repository, recovery } = subject(pending, new Driver(driveFailure));
+
+    const failure = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).match({ receipt: 'failed' });
+    should(repository.failures[0]?.[3]).match({ failure: { acceptance: 'none' } });
+    should(recovery.snapshots).deepEqual([ID]);
+    should(recovery.cancellations).have.length(1);
+  });
+
+  it('releases durable state even when snapshot and cancellation both fail', async () => {
+    const { service, repository, recovery } = subject(
+      pending,
+      new Driver(Promise.reject(new StructuredQuestionDriveFailure('input may have landed', 'ambiguous'))),
+    );
+    recovery.snapshotError = new Error('capture failed');
+    recovery.cancellationError = new Error('Escape could not be confirmed');
+
+    const failure = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).match({ receipt: 'quarantined' });
+    should(repository.failures[0]?.[3]).match({
+      snapshotError: 'capture failed',
+      cancellationError: 'Escape could not be confirmed',
+    });
+    should(recovery.cancellations).have.length(1);
+    should((failure as Error).message).match(/Automatic native cancellation was not confirmed/u);
+    should((failure as Error).message).match(/Inspect the terminal before replying in prose/u);
+  });
+
+  it('leaves the accepted receipt unresolved when the durable release itself fails', async () => {
+    const { service, repository } = subject(pending, new Driver(Promise.reject(new Error('drive failed'))));
+    repository.failureError = new Error('state document is unreadable');
+
+    const failure = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).match({ receipt: 'accepted' });
+    should((failure as Error).message).match(/failed to release/u);
+  });
+
+  it('treats a pending-state read failure as pre-admission and never touches recovery', async () => {
+    const harness = subject();
+    harness.repository.pendingError = new Error('state read failed');
+
+    const failure = await harness.service
+      .answer({ id: ID, toolUseId: 'question-1', labels: [] })
+      .catch((error: unknown) => error);
+
+    should(failure).match({ receipt: 'withdrawn', failure: { acceptance: 'none' } });
+    should(harness.driver.calls).deepEqual([]);
+    should(harness.recovery.snapshots).deepEqual([]);
+    should(harness.repository.failures).deepEqual([]);
+  });
+
+  it('leaves an atomic-confirmation failure unconfirmed after the pane visibly advanced, without Escape', async () => {
+    const harness = subject();
+    harness.repository.answeredError = new Error('state write failed');
+
+    const failure = await harness.service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((error: unknown) => error);
+
+    should(failure).match({
+      receipt: 'accepted',
+      failure: { diagnostics: { phase: 'state-confirm', confirmedBy: 'prompt-ready' } },
+    });
+    should((failure as Error).message).match(/not driven or cancelled again/u);
+    should(harness.repository.failures).deepEqual([]);
+    should(harness.recovery.snapshots).deepEqual([ID]);
+    should(harness.recovery.cancellations).deepEqual([]);
   });
 
   it('supports the legacy one-question and multi-question payloads without weakening validation', async () => {

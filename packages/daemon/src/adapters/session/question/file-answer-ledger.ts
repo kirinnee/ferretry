@@ -38,14 +38,28 @@ export class FileAnswerLedger implements AnswerLedger {
   async append(id: SessionId, record: AnswerOperationRecord): Promise<void> {
     const file = this.file(id);
     await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-    await appendFile(file, `${JSON.stringify({ ...record, at: this.clock.now() })}\n`, { mode: 0o600 });
+    // New terminal outcomes remain `accepted` to an older daemon, which is the rollback-safe
+    // direction: old code quarantines an unresolved receipt instead of treating an unknown outcome
+    // as no receipt and re-driving its keys. Current code restores the richer outcome from
+    // `resolution` on read.
+    const durable =
+      record.outcome === 'failed' || record.outcome === 'quarantined'
+        ? { ...record, outcome: 'accepted', resolution: record.outcome }
+        : record;
+    await appendFile(file, `${JSON.stringify({ ...durable, at: this.clock.now() })}\n`, { mode: 0o600 });
   }
 
   /** Every answer this session has a receipt for, keyed by request id, latest line winning. */
   async all(id: SessionId): Promise<Map<string, AnswerOperationRecord>> {
     const records = new Map<string, AnswerOperationRecord>();
-    const contents = await readFile(this.file(id), 'utf8').catch(() => undefined);
-    if (contents === undefined) return records;
+    let contents: string;
+    try {
+      contents = await readFile(this.file(id), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return records;
+      // An unreadable receipt is missing idempotency evidence, never evidence that no answer ran.
+      throw error;
+    }
     for (const line of contents.split('\n')) {
       const record = parseRecord(line);
       if (record !== undefined) records.set(record.requestId, record);
@@ -73,8 +87,40 @@ function parseRecord(line: string): AnswerOperationRecord | undefined {
     typeof record.requestId !== 'string' ||
     typeof record.toolUseId !== 'string' ||
     typeof record.fingerprint !== 'string' ||
-    (record.outcome !== 'accepted' && record.outcome !== 'confirmed' && record.outcome !== 'withdrawn')
+    typeof record.acceptedAt !== 'string' ||
+    typeof record.outcome !== 'string'
   )
     return undefined;
-  return record as unknown as AnswerOperationRecord;
+  const knownOutcome: AnswerOperationRecord['outcome'] | undefined = isAnswerOutcome(record.outcome)
+    ? record.outcome
+    : undefined;
+  const resolution =
+    record.outcome === 'accepted' && (record.resolution === 'failed' || record.resolution === 'quarantined')
+      ? record.resolution
+      : undefined;
+  const outcome: AnswerOperationRecord['outcome'] = resolution ?? knownOutcome ?? 'accepted';
+  const reason =
+    typeof record.reason === 'string'
+      ? record.reason
+      : knownOutcome !== undefined
+        ? undefined
+        : `the answer ledger contains the unrecognized outcome ${JSON.stringify(record.outcome)}; it was quarantined rather than treated as permission to drive`;
+  return {
+    requestId: record.requestId,
+    toolUseId: record.toolUseId,
+    fingerprint: record.fingerprint,
+    acceptedAt: record.acceptedAt,
+    outcome,
+    ...(reason === undefined ? {} : { reason }),
+  };
+}
+
+function isAnswerOutcome(value: string): value is AnswerOperationRecord['outcome'] {
+  return (
+    value === 'accepted' ||
+    value === 'confirmed' ||
+    value === 'withdrawn' ||
+    value === 'failed' ||
+    value === 'quarantined'
+  );
 }

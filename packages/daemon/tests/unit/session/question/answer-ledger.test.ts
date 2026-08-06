@@ -3,11 +3,16 @@ import type { SessionState } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AnswerOperationRecord,
+  AnswerReleased,
   AnswerRequestConflict,
   type AnswerRequestPayload,
+  AnswerTerminalFailure,
+  AnswerToolAlreadyHandled,
   AnswerUnconfirmed,
+  answerEvidenceForQuestion,
   answerFingerprint,
   decideAnswerAdmission,
+  reconcileAnswerEvidence,
   reconcileUnconfirmedAnswer,
 } from '../../../../src/lib/session/question/answer-ledger.ts';
 
@@ -101,7 +106,7 @@ describe('answer admission', () => {
     should(actual).deepEqual({ kind: 'replay' });
   });
 
-  it.each([['accepted'], ['confirmed'], ['withdrawn']] as const)(
+  it.each([['accepted'], ['confirmed'], ['withdrawn'], ['failed'], ['quarantined']] as const)(
     'refuses a reused id carrying a different answer, whatever the earlier outcome was (%s)',
     outcome => {
       // Act
@@ -121,6 +126,103 @@ describe('answer admission', () => {
 
     // Assert
     should(actual).deepEqual({ kind: 'reconcile', record: existing });
+  });
+
+  it.each([
+    ['failed', 'failed'],
+    ['quarantined', 'quarantined'],
+  ] as const)('repeats the terminal %s result without admitting another drive', (outcome, kind) => {
+    const existing = record({ outcome });
+
+    const actual = decideAnswerAdmission({ existing, fingerprint: 'print-1' });
+
+    should(actual).deepEqual({ kind, record: existing });
+  });
+});
+
+describe('tool-level answer evidence', () => {
+  it('ignores withdrawn rows and distinguishes confirmed, failed, and quarantined outcomes', () => {
+    should(answerEvidenceForQuestion([record({ outcome: 'withdrawn' })], 'tool-1')).deepEqual({ kind: 'none' });
+    should(answerEvidenceForQuestion([record({ outcome: 'confirmed' })], 'tool-1')).match({ kind: 'confirmed' });
+    should(answerEvidenceForQuestion([record({ outcome: 'failed' })], 'tool-1')).match({ kind: 'released' });
+    should(answerEvidenceForQuestion([record({ outcome: 'quarantined' })], 'tool-1')).match({
+      kind: 'quarantined',
+    });
+    should(answerEvidenceForQuestion([record()], 'another-tool')).deepEqual({ kind: 'none' });
+  });
+
+  it('fails closed to an unresolved accepted row when duplicate request ids disagree', () => {
+    const evidence = answerEvidenceForQuestion(
+      [
+        record({ requestId: 'confirmed', outcome: 'confirmed' }),
+        record({ requestId: 'released', outcome: 'quarantined' }),
+        record({ requestId: 'accepted', outcome: 'accepted' }),
+      ],
+      'tool-1',
+    );
+
+    should(evidence).match({ kind: 'unconfirmed', record: { requestId: 'accepted' } });
+  });
+
+  it('prefers a quarantine over a settled row when no accepted ambiguity remains', () => {
+    const evidence = answerEvidenceForQuestion(
+      [
+        record({ requestId: 'confirmed', outcome: 'confirmed' }),
+        record({ requestId: 'released', outcome: 'quarantined' }),
+      ],
+      'tool-1',
+    );
+
+    should(evidence).match({ kind: 'quarantined', record: { requestId: 'released' } });
+  });
+});
+
+describe('monitor reconciliation of accepted receipts', () => {
+  it('settles exactly the accepted rows the state stamp proves and leaves ambiguity untouched', () => {
+    const records = new Map([
+      ['proved', record({ requestId: 'proved', toolUseId: 'tool-1' })],
+      ['ambiguous', record({ requestId: 'ambiguous', toolUseId: 'tool-2' })],
+      ['settled', record({ requestId: 'settled', toolUseId: 'tool-1', outcome: 'confirmed' })],
+    ]);
+
+    const actual = reconcileAnswerEvidence(records, state({ lastAnsweredQuestionToolUseId: 'tool-1' }));
+
+    should(actual.settlements.map(settlement => settlement.requestId)).deepEqual(['proved']);
+    should(actual.records.get('proved')).match({ outcome: 'confirmed' });
+    should(actual.records.get('ambiguous')).match({ outcome: 'accepted' });
+    should(actual.records.get('settled')).match({ outcome: 'confirmed' });
+  });
+
+  it.each([
+    ['the exact tool resolved', { resolvedToolUseId: 'tool-1' }],
+    ['a newer tool became active', { activeToolUseId: 'tool-2' }],
+  ] as const)(
+    'quarantines an unstamped accepted row when monitor evidence shows it advanced (%s)',
+    (_name, observation) => {
+      const records = new Map([['request-1', record()]]);
+
+      const actual = reconcileAnswerEvidence(records, state(), observation);
+
+      should(actual.settlements).match([
+        { requestId: 'request-1', outcome: 'quarantined', reason: /advanced without proving/u },
+      ]);
+      should(actual.records.get('request-1')).match({ outcome: 'quarantined' });
+    },
+  );
+
+  it('does not settle the accepted row while its exact tool is still the active form', () => {
+    const actual = reconcileAnswerEvidence(new Map([['request-1', record()]]), state(), { activeToolUseId: 'tool-1' });
+
+    should(actual.settlements).be.empty();
+    should(actual.records.get('request-1')).match({ outcome: 'accepted' });
+  });
+
+  it('does not mutate the caller map while deriving repaired evidence', () => {
+    const records = new Map([['request-1', record()]]);
+
+    reconcileAnswerEvidence(records, state({ lastAnsweredQuestionToolUseId: 'tool-1' }));
+
+    should(records.get('request-1')).match({ outcome: 'accepted' });
   });
 });
 
@@ -165,6 +267,9 @@ describe('the answer refusals', () => {
     // Act
     const conflict = new AnswerRequestConflict('request-1');
     const unconfirmed = new AnswerUnconfirmed('request-1', 'tool-1');
+    const terminal = new AnswerTerminalFailure(record({ outcome: 'failed', reason: 'reply in prose' }));
+    const released = new AnswerReleased(record({ outcome: 'quarantined', reason: 'inspect the terminal' }));
+    const handled = new AnswerToolAlreadyHandled('tool-1', 'request-1', 'confirmed');
 
     // Assert
     should(conflict.name).equal('AnswerRequestConflict');
@@ -172,5 +277,16 @@ describe('the answer refusals', () => {
     should(unconfirmed.name).equal('AnswerUnconfirmed');
     should(unconfirmed.message).match(/"tool-1"/u);
     should(unconfirmed.message).match(/will not be sent again/u);
+    should(terminal.message).equal('reply in prose');
+    should(released.message).equal('inspect the terminal');
+    should(handled.message).match(/already owned/u);
+  });
+
+  it('retains the reconciliation reason as an Error cause when one exists', () => {
+    const unconfirmed = new AnswerUnconfirmed('request-1', 'tool-1', 'the state file was unreadable');
+
+    should(unconfirmed.cause).match({ message: 'the state file was unreadable' });
+    should(new AnswerTerminalFailure(record({ outcome: 'failed', reason: undefined })).message).match(/released/u);
+    should(new AnswerReleased(record({ outcome: 'quarantined', reason: undefined })).message).match(/inspect/u);
   });
 });

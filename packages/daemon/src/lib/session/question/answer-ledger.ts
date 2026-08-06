@@ -53,7 +53,11 @@ export type AnswerOutcome =
   /** The form was driven AND the state document stamped the answered tool id. Settled. */
   | 'confirmed'
   /** Refused before any key reached the terminal, so the same id may honestly start over. */
-  | 'withdrawn';
+  | 'withdrawn'
+  /** No answer key landed, and failure recovery deliberately released this form to prose. */
+  | 'failed'
+  /** Answer keys may have landed, so recovery released the form but this operation stays closed. */
+  | 'quarantined';
 
 /** One answer operation, durably, from the instant it was admitted. */
 export interface AnswerOperationRecord {
@@ -79,6 +83,8 @@ export interface AnswerOperationRecord {
 export interface AnswerLedger {
   /** The latest record for one request id on this session, or nothing at all. */
   read(id: SessionId, requestId: string): Promise<AnswerOperationRecord | undefined>;
+  /** Every latest request record for this session, so one tool call cannot be driven under two ids. */
+  all(id: SessionId): Promise<ReadonlyMap<string, AnswerOperationRecord>>;
   /** Appends one record. The last line written for a request id is the one that counts. */
   append(id: SessionId, record: AnswerOperationRecord): Promise<void>;
 }
@@ -95,11 +101,44 @@ export class AnswerRequestConflict extends Error {
 
 /** An earlier attempt under this id may have reached the form, and nothing can prove whether it did. */
 export class AnswerUnconfirmed extends Error {
-  constructor(requestId: string, toolUseId: string) {
+  constructor(requestId: string, toolUseId: string, reason?: string) {
     super(
-      `an earlier answer under request id ${JSON.stringify(requestId)} reached the rendered form for ${JSON.stringify(toolUseId)} and was never confirmed; it will not be sent again, because repeating those keys would answer whatever the selector has since moved to. Look at the session and answer it there`,
+      `an earlier answer under request id ${JSON.stringify(requestId)} reached the rendered form for ${JSON.stringify(toolUseId)} and was never confirmed; it will not be sent again, because repeating those keys would answer whatever the selector has since moved to. Look at the session and answer it there${reason === undefined ? '' : `. Evidence: ${reason}`}`,
+      ...(reason === undefined ? [] : [{ cause: new Error(reason) }]),
     );
     this.name = 'AnswerUnconfirmed';
+  }
+}
+
+/** A drive proved that it sent no answer and then released the form; retries repeat its failure. */
+export class AnswerTerminalFailure extends Error {
+  constructor(readonly record: AnswerOperationRecord) {
+    super(
+      record.reason ??
+        `answer request ${JSON.stringify(record.requestId)} failed without submitting an answer and released ${JSON.stringify(record.toolUseId)} to prose`,
+    );
+    this.name = 'AnswerTerminalFailure';
+  }
+}
+
+/** A settled recovery released structured-question state, so repeating its keys is never valid. */
+export class AnswerReleased extends Error {
+  constructor(readonly record: AnswerOperationRecord) {
+    super(
+      record.reason ??
+        `answer request ${JSON.stringify(record.requestId)} released ${JSON.stringify(record.toolUseId)} after an unconfirmed attempt; inspect the terminal before replying in prose`,
+    );
+    this.name = 'AnswerReleased';
+  }
+}
+
+/** A different request already owns this exact rendered form, so a new id cannot authorize keys. */
+export class AnswerToolAlreadyHandled extends Error {
+  constructor(toolUseId: string, requestId: string, outcome: AnswerOutcome) {
+    super(
+      `structured question ${JSON.stringify(toolUseId)} is already owned by answer request ${JSON.stringify(requestId)} (${outcome}); a new request id cannot drive the same rendered form`,
+    );
+    this.name = 'AnswerToolAlreadyHandled';
   }
 }
 
@@ -141,7 +180,11 @@ export type AnswerAdmission =
   /** This id names a different answer. Refuse, and perform neither. */
   | { readonly kind: 'conflict' }
   /** This id was admitted and never settled. Only the state document can say what happened. */
-  | { readonly kind: 'reconcile'; readonly record: AnswerOperationRecord };
+  | { readonly kind: 'reconcile'; readonly record: AnswerOperationRecord }
+  /** This id failed without answering and its form was released; repeat the terminal failure. */
+  | { readonly kind: 'failed'; readonly record: AnswerOperationRecord }
+  /** This id may have answered and was released safely; never drive it again. */
+  | { readonly kind: 'quarantined'; readonly record: AnswerOperationRecord };
 
 /**
  * Whether this request may be performed, replayed, or refused.
@@ -162,7 +205,81 @@ export function decideAnswerAdmission(input: {
   if (existing.outcome === 'confirmed') return { kind: 'replay' };
   // Withdrawn means the refusal happened before a keystroke, so starting over is not a second answer.
   if (existing.outcome === 'withdrawn') return { kind: 'admit' };
+  if (existing.outcome === 'failed') return { kind: 'failed', record: existing };
+  if (existing.outcome === 'quarantined') return { kind: 'quarantined', record: existing };
   return { kind: 'reconcile', record: existing };
+}
+
+/** What the answer ledger already knows about one transcript-projected form. */
+export type AnswerQuestionEvidence =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'confirmed'; readonly record: AnswerOperationRecord }
+  | { readonly kind: 'quarantined'; readonly record: AnswerOperationRecord }
+  | { readonly kind: 'released'; readonly record: AnswerOperationRecord }
+  | { readonly kind: 'unconfirmed'; readonly record: AnswerOperationRecord };
+
+/**
+ * Reconcile one TOOL identity across every request identity that ever named it.
+ *
+ * An unresolved accepted operation wins over every apparently settled row: two request ids may have
+ * raced on an older daemon, and one tool-level state stamp cannot prove which one typed. A quarantine
+ * that still requires human attention comes next, then a confirmed answer, then a proven non-answer release. Withdrawn rows
+ * carry no terminal evidence and deliberately do not hide a still-open question.
+ */
+export function answerEvidenceForQuestion(
+  records: Iterable<AnswerOperationRecord>,
+  toolUseId: string,
+): AnswerQuestionEvidence {
+  const matching = [...records].filter(record => record.toolUseId === toolUseId);
+  const accepted = matching.find(record => record.outcome === 'accepted');
+  if (accepted !== undefined) return { kind: 'unconfirmed', record: accepted };
+  const quarantined = matching.find(record => record.outcome === 'quarantined');
+  if (quarantined !== undefined) return { kind: 'quarantined', record: quarantined };
+  const confirmed = matching.find(record => record.outcome === 'confirmed');
+  if (confirmed !== undefined) return { kind: 'confirmed', record: confirmed };
+  const failed = matching.find(record => record.outcome === 'failed');
+  return failed === undefined ? { kind: 'none' } : { kind: 'released', record: failed };
+}
+
+/**
+ * Promote only the accepted receipts whose authoritative state stamp proves completion.
+ *
+ * The monitor may observe this crash boundary before any caller retries the request. Returning the
+ * promoted rows lets its adapter append them durably. Transcript evidence may prove that a modal
+ * advanced, but never which answer landed; those accepted rows become explicit quarantines while
+ * an unchanged active form stays accepted and therefore remains a hard quarantine.
+ */
+export function reconcileAnswerEvidence(
+  records: ReadonlyMap<string, AnswerOperationRecord>,
+  state: SessionState,
+  observation: {
+    readonly activeToolUseId?: string | undefined;
+    readonly resolvedToolUseId?: string | undefined;
+  } = {},
+): {
+  readonly records: ReadonlyMap<string, AnswerOperationRecord>;
+  readonly settlements: readonly AnswerOperationRecord[];
+} {
+  const reconciled = new Map(records);
+  const settlements: AnswerOperationRecord[] = [];
+  for (const record of records.values()) {
+    if (record.outcome !== 'accepted') continue;
+    const confirmed = reconcileUnconfirmedAnswer({ record, state }) === 'confirmed';
+    const observedAdvance =
+      observation.resolvedToolUseId === record.toolUseId ||
+      (observation.activeToolUseId !== undefined && observation.activeToolUseId !== record.toolUseId);
+    if (!confirmed && !observedAdvance) continue;
+    const settlement: AnswerOperationRecord = {
+      ...record,
+      outcome: confirmed ? 'confirmed' : 'quarantined',
+      reason: confirmed
+        ? 'the answered form was already stamped durably; monitor reconciliation repaired the receipt'
+        : `monitor evidence showed ${record.toolUseId} advanced without proving which answer landed; it was quarantined and was not sent again`,
+    };
+    reconciled.set(record.requestId, settlement);
+    settlements.push(settlement);
+  }
+  return { records: reconciled, settlements };
 }
 
 /**

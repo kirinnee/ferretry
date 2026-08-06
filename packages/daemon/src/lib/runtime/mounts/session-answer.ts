@@ -14,7 +14,14 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * the last attempt reached it. A caller that saw one code would otherwise be told to retry in the
  * one case where retrying is the thing that must not happen.
  */
-export type SessionAnswerFailure = 'invalid' | 'not_found' | 'refused' | 'conflict' | 'unconfirmed' | 'failed';
+export type SessionAnswerFailure =
+  | 'invalid'
+  | 'not_found'
+  | 'refused'
+  | 'conflict'
+  | 'unconfirmed'
+  | 'released'
+  | 'failed';
 
 export class SessionAnswerError extends Error {
   constructor(
@@ -68,6 +75,10 @@ function refuse(error: unknown): never {
     // The one refusal that must never be read as "try again": a retry is exactly what it forbids.
     case 'unconfirmed':
       throw new ApiError(409, error.message, 'answer_unconfirmed');
+    // Recovery deliberately removed structured-question state. The next action is inspect the
+    // terminal and use prose when safe, not retry a destructive selector drive.
+    case 'released':
+      throw new ApiError(409, error.message, 'answer_released');
     case 'failed':
       throw new ApiError(500, error.message, 'session_answer_failed');
   }

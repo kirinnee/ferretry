@@ -98,8 +98,8 @@ import {
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoRelayIdentityKeys,
-  WebPushFetchTransport,
   WebCryptoSecretCipher,
+  WebPushFetchTransport,
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
@@ -219,7 +219,10 @@ import {
   type AnalyticsPricingRate,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
+  AnswerReleased,
   AnswerRequestConflict,
+  AnswerTerminalFailure,
+  AnswerToolAlreadyHandled,
   AnswerUnconfirmed,
   type ApiServerHandle,
   type ApiServerPort,
@@ -246,6 +249,7 @@ import {
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
+  chooseRelayCarrierSources,
   configuredAt,
   contextWindowForSession,
   createFoundationPaths,
@@ -264,22 +268,26 @@ import {
   defaultSessionResumeSettings,
   defaultSessionSendSettings,
   defaultStartWaitPolicy,
+  describeAbsentRelayCarrier,
   describeConfiguration,
+  describeGrantPosture,
+  describeRelayCarrierPosture,
+  dialledRelayUrl,
   doneMarkerCertifiesTurn,
   type ExecutableResolverPort,
   exactWorkerAssignee,
   FleetEventStreamService,
+  FleetManifestUnreadableError,
   FleetRefreshService,
   ForeignHistoryImporter,
   type FoundationPaths,
   fleetManifestRefusal,
-  FleetManifestUnreadableError,
   foreignAdvertisementNotice,
   HARNESS_PICKER_COMMAND,
+  type HarnessPreflight,
   HarnessQuirkService,
   harnessAbsentWarning,
   harnessMigrationRefusal,
-  type HarnessPreflight,
   harnessPreflightSummary,
   InitialAttachmentError,
   InvalidDeadlineRefused,
@@ -297,38 +305,35 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
-  chooseRelayCarrierSources,
-  dialledRelayUrl,
-  describeAbsentRelayCarrier,
-  describeGrantPosture,
-  describeRelayCarrierPosture,
   NO_PASSWORD_DISCLOSURE,
-  type OperatorPasswordPort,
   normalizeCallsign,
   type ObservedSession,
-  observedRuntimeStatePatch,
   type OpenedAnalyticsIndexStore,
+  type OperatorPasswordPort,
   OperatorReadService,
+  observedRuntimeStatePatch,
   overriddenBy,
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
   PinService,
-  PushService,
-  type PushSubscriptionSubsystem,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  PushService,
+  type PushSubscriptionSubsystem,
   packageRole,
+  paneShowsActiveWork,
   parseSessionId,
   parseWardenConfigPatch,
   planInitialAttachments,
   portCandidates,
-  publishableDirectCarrier,
-  publishedDaemonCarriers,
   projectObservedRuntime,
   projectStructuredQuestion,
+  publishableDirectCarrier,
+  publishedDaemonCarriers,
   type QuotaFailoverLoop,
   QuotaFailoverService,
+  RELAY_DIRECTORY_NOT_ASKED,
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
@@ -337,7 +342,6 @@ import {
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
-  RELAY_DIRECTORY_NOT_ASKED,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
@@ -347,17 +351,17 @@ import {
   readDaemonRelayIdentity,
   readDoctorReport,
   readHarnessPreflight,
+  reconcileAnswerEvidence,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
   refuseUnbindableAddress,
   relaunchCommand,
-  relayCarriersNeedDiscovery,
   relayCarrierRemedy,
+  relayCarriersNeedDiscovery,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
-  unreadableManifestPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
   type ScratchReclamation,
@@ -411,6 +415,7 @@ import {
   type SocketTicketBroker,
   SocketTicketRegistry,
   StructuredAnswerCoordinator,
+  StructuredQuestionAttemptFailed,
   StructuredQuestionRefused,
   StructuredQuestionService,
   SttEnhancementService,
@@ -442,6 +447,7 @@ import {
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
+  unreadableManifestPreflight,
   usageProbeCommand,
   usageRefreshMs,
   WARDEN_LABEL,
@@ -1718,11 +1724,13 @@ function createSessionSendSubsystem(
  * an absent question or a blind keystroke.
  */
 function createSessionAnswerSubsystem(
-  paths: FoundationPaths,
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   tmux: TmuxController,
   clock: ClockPort,
+  ledger: FileAnswerLedger,
+  serial: KeyedSerialExecutor,
+  lastSnapshots: FileLastSnapshotStore,
 ): SessionAnswerSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -1731,6 +1739,9 @@ function createSessionAnswerSubsystem(
     if (storage.findSession(id) === undefined) throw new SessionAnswerError('not_found', `no session ${reference}`);
     return id;
   };
+  const tmuxSession = async (id: SessionId): Promise<string> =>
+    SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession;
+  const driver = new TmuxStructuredQuestionDriver(tmux, tmuxSession, milliseconds => Bun.sleep(milliseconds));
   const service = new StructuredQuestionService(
     {
       pending: async id => {
@@ -1757,27 +1768,119 @@ function createSessionAnswerSubsystem(
           delete next.pendingQuestion;
           return next as typeof current;
         });
-        await storage.append(id, 'interaction.answer', {
-          toolUseId,
-          confirmation: confirmation.confirmedBy,
-          answerCount: answers.length,
+        // The state stamp is the answer commit point. A best-effort audit line must never turn its
+        // successful atomic clear into a failure that recovery would misread as an open form.
+        await storage
+          .append(id, 'interaction.answer', {
+            toolUseId,
+            confirmation: confirmation.confirmedBy,
+            answerCount: answers.length,
+          })
+          .catch(() => undefined);
+      },
+      failed: async (id, question, answers, context) => {
+        const questionText = question.questions.map(item => item.question).join('\n\n');
+        const pane = context.cancellation?.pane ?? context.snapshot;
+        const active = pane?.alive === true && !pane.dead && paneShowsActiveWork(pane.visible);
+        const cancelledPane = context.cancellation?.pane;
+        const running =
+          cancelledPane?.alive === true &&
+          !cancelledPane.dead &&
+          !cancelledPane.promptReady &&
+          paneShowsActiveWork(cancelledPane.visible);
+        const promptReady = cancelledPane?.alive === true && !cancelledPane.dead && cancelledPane.promptReady;
+        const reason =
+          context.cancellation === undefined
+            ? `structured answer failed; automatic native cancellation was not confirmed${context.cancellationError === undefined ? '' : `: ${context.cancellationError}`}; inspect the terminal before replying in prose to: ${questionText.replaceAll('\n', ' / ')}`
+            : `structured answer failed; structured form released; reply in prose to: ${questionText.replaceAll('\n', ' / ')}`;
+        await storage.updateState(id, current => {
+          const parsed = SessionStateSchema.safeParse(current);
+          if (!parsed.success)
+            throw new SessionAnswerError('failed', `session ${id} state became unreadable while releasing the form`);
+          // A newer question owns itself. Failure recovery may release only the exact tool id whose
+          // drive failed; observing that it already vanished is also a successful release.
+          if (
+            parsed.data.pendingQuestion !== undefined &&
+            parsed.data.pendingQuestion !== null &&
+            parsed.data.pendingQuestion.toolUseId !== question.toolUseId
+          )
+            return current;
+          const next: Record<string, unknown> = { ...(current as Record<string, unknown>) };
+          if (parsed.data.pendingQuestion?.toolUseId === question.toolUseId) {
+            next.status = running ? 'running' : 'awaiting_user';
+            next.health = running ? 'healthy' : 'idle';
+            next.promptReady = promptReady;
+            next.reason = reason;
+            next.lastActivityAt = clock.now();
+            next.openTools = (parsed.data.openTools ?? []).filter(tool => tool !== question.toolUseId);
+            delete next.pendingQuestion;
+          }
+          if (
+            parsed.data.needsHumanKind === 'structured-answer-unconfirmed' &&
+            parsed.data.needsHuman?.includes(question.toolUseId) === true
+          ) {
+            delete next.needsHuman;
+            delete next.needsHumanKind;
+          }
+          return next as typeof current;
         });
+        // Both audit lines are downstream of the atomic state release and best-effort. Losing an
+        // append cannot make a successfully released question look like a failed recovery.
+        await storage
+          .append(id, 'interaction.question_failed', {
+            action: 'answer',
+            toolUseId: question.toolUseId,
+            error: context.failure.message,
+            acceptance: context.failure.acceptance,
+            matcher: context.failure.diagnostics,
+            answerCount: answers.length,
+            questionText,
+            questions: question.questions.map(item => item.question),
+            ...(context.snapshot === undefined ? {} : { snapshot: 'last-snapshot.txt' }),
+            ...(context.snapshotError === undefined ? {} : { snapshotError: context.snapshotError }),
+            ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
+            ...(pane === undefined
+              ? {}
+              : {
+                  pane: {
+                    alive: pane.alive,
+                    dead: pane.dead,
+                    promptReady: pane.promptReady,
+                    activeWork: active,
+                    excerpt: pane.visible.split('\n').slice(-40).join('\n').slice(-6_000),
+                  },
+                }),
+          })
+          .catch(() => undefined);
+        await storage
+          .append(id, 'interaction.question_cancelled', {
+            toolUseId: question.toolUseId,
+            reason: 'answer failed; structured form released for prose reply',
+            confirmedBy: context.cancellation?.confirmedBy ?? 'state-release',
+            ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
+            questionText,
+            pendingQuestion: null,
+          })
+          .catch(() => undefined);
       },
     },
-    new TmuxStructuredQuestionDriver(
-      tmux,
-      async id => SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
-      milliseconds => Bun.sleep(milliseconds),
-    ),
+    driver,
+    {
+      snapshot: async id => {
+        const pane = await tmux.state(await tmuxSession(id));
+        const text = pane.history.trim() === '' ? pane.visible : pane.history;
+        if (text.trim() !== '') await lastSnapshots.write(id, text);
+        return pane;
+      },
+      cancel: async (id, question) => await driver.cancel(id, question),
+    },
   );
   const coordinator = new StructuredAnswerCoordinator({
     service,
-    ledger: new FileAnswerLedger(id => createSessionPaths(paths, id).directory, clock),
-    // Its own queue: an answer holds its lock across proving a live form advanced, and must not make
-    // every unrelated document write in this daemon wait behind a terminal. It must also not be
-    // STORAGE's queue — clearing the answered form re-enters that one under the same session key, so
-    // holding it across the drive would make the clear wait for the drive that waits for the clear.
-    serial: new KeyedSerialExecutor(),
+    ledger,
+    // The answer/monitor queue supplied by the composition root. It is not STORAGE's queue: clearing
+    // the form re-enters storage, while transcript reprojection must wait out this live drive.
+    serial,
     clock,
     // Reconciliation reads the state document and nothing else, so an unreadable one is missing
     // evidence rather than evidence of absence: it quarantines instead of re-driving.
@@ -1803,11 +1906,17 @@ function createSessionAnswerSubsystem(
         .updateState(id, current => {
           const parsed = SessionStateSchema.safeParse(current);
           if (!parsed.success) return current;
-          return {
+          const next: Record<string, unknown> = {
             ...(current as Record<string, unknown>),
+            status:
+              parsed.data.status === 'completed' || parsed.data.status === 'stopped' || parsed.data.status === 'failed'
+                ? parsed.data.status
+                : 'awaiting_user',
             needsHumanKind: 'structured-answer-unconfirmed',
-            needsHuman: `an answer to ${record.toolUseId} was sent and never confirmed; answer it at the session`,
-          } as typeof current;
+            needsHuman: `an answer to ${record.toolUseId} may have reached the form and was never confirmed; inspect the session before continuing`,
+          };
+          if (parsed.data.pendingQuestion?.toolUseId === record.toolUseId) delete next.pendingQuestion;
+          return next as typeof current;
         })
         .catch(() => undefined);
       await storage
@@ -1840,7 +1949,16 @@ function createSessionAnswerSubsystem(
           // one case where retrying is the thing that must not happen.
           if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
           if (error instanceof AnswerRequestConflict) throw new SessionAnswerError('conflict', error.message);
+          if (error instanceof AnswerToolAlreadyHandled) throw new SessionAnswerError('refused', error.message);
           if (error instanceof AnswerUnconfirmed) throw new SessionAnswerError('unconfirmed', error.message);
+          if (error instanceof AnswerReleased || error instanceof AnswerTerminalFailure)
+            throw new SessionAnswerError('released', error.message);
+          if (error instanceof StructuredQuestionAttemptFailed) {
+            if (error.receipt === 'accepted') throw new SessionAnswerError('unconfirmed', error.message);
+            if (error.receipt === 'failed' || error.receipt === 'quarantined')
+              throw new SessionAnswerError('released', error.message);
+            throw new SessionAnswerError('failed', error.message);
+          }
           if (error instanceof SessionAnswerError) throw error;
           throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));
         });
@@ -3841,6 +3959,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       carriers,
       socketTickets,
     ) => {
+      // ONE durable ledger and ONE per-session queue for BOTH answer execution and monitor
+      // reprojection. Observation never waits behind a live drive: that drive owns the freshest
+      // state, and a later read/tick will project it after the key becomes idle. After a restart
+      // there is no holder, so stranded evidence honestly becomes quarantine.
+      const answerLedger = new FileAnswerLedger(id => createSessionPaths(paths, id).directory, clock);
+      const answerSerial = new KeyedSerialExecutor();
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       //
@@ -3849,39 +3973,51 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // folding them into one patch is what keeps a session read at one transcript pass. Both are
       // additive over whatever the document already holds, so neither can erase the other's fields.
       const projectSessionEvidence = async (id: SessionId): Promise<void> => {
-        const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
-        // A transcript that cannot be proved belongs to this session is not a
-        // benign empty transcript.  Leave the durable state untouched: its own
-        // parser will make a damaged session read fail rather than inventing an
-        // answerable absence from missing evidence.
-        if (transcript.kind !== 'read') return;
-        const current = SessionStateSchema.safeParse(await storage.readState(id));
-        if (!current.success) return;
-        const question = structuredQuestionStatePatch(current.data, projectStructuredQuestion(transcript.events));
-        // The model the harness SAID it was using, never the one the session was launched with.
-        // Nothing else in the daemon writes these three fields, so every surface that shows a
-        // running model — the composer chips, the context window, `fy ls` — is reading this.
-        const patch = {
-          ...question,
-          ...observedRuntimeStatePatch(current.data, projectObservedRuntime(transcript.events)),
-        };
-        if (Object.keys(patch).length === 0) return;
-        await storage.updateState(id, raw => {
-          const verified = SessionStateSchema.safeParse(raw);
-          if (!verified.success) return raw;
-          const next = { ...(raw as Record<string, unknown>), ...patch };
-          // The two removals belong to the QUESTION projection alone, and are applied only when that
-          // projection had something to say. An observation says nothing about whether a question is
-          // still open — so letting a moved model erase `needsHumanKind` would clear the very
-          // quarantine a failed picker drive writes.
-          if (Object.keys(question).length > 0) {
-            if (question.pendingQuestion === undefined) delete next.pendingQuestion;
-            if (question.needsHumanKind === undefined) delete next.needsHumanKind;
-          }
-          return next as typeof raw;
+        await answerSerial.runIfIdle(id, async () => {
+          const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
+          // A transcript that cannot be proved belongs to this session is not a
+          // benign empty transcript.  Leave the durable state untouched: its own
+          // parser will make a damaged session read fail rather than inventing an
+          // answerable absence from missing evidence.
+          if (transcript.kind !== 'read') return;
+          const current = SessionStateSchema.safeParse(await storage.readState(id));
+          if (!current.success) return;
+          const projection = projectStructuredQuestion(transcript.events);
+          const answerEvidence = reconcileAnswerEvidence(await answerLedger.all(id), current.data, {
+            ...(projection.kind === 'pending' ? { activeToolUseId: projection.question.toolUseId } : {}),
+            ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
+          });
+          for (const settlement of answerEvidence.settlements) await answerLedger.append(id, settlement);
+          const question = structuredQuestionStatePatch(current.data, projection, answerEvidence.records.values());
+          // The model the harness SAID it was using, never the one the session was launched with.
+          // Nothing else in the daemon writes these three fields, so every surface that shows a
+          // running model — the composer chips, the context window, `fy ls` — is reading this.
+          const patch = {
+            ...question,
+            ...observedRuntimeStatePatch(current.data, projectObservedRuntime(transcript.events)),
+          };
+          if (Object.keys(patch).length === 0) return;
+          await storage.updateState(id, raw => {
+            const verified = SessionStateSchema.safeParse(raw);
+            if (!verified.success) return raw;
+            const next = { ...(raw as Record<string, unknown>), ...patch };
+            // Removals belong to the QUESTION projection alone and only when it explicitly names
+            // the field. A model observation must never erase a picker or answer quarantine.
+            if (Object.hasOwn(question, 'pendingQuestion') && question.pendingQuestion === undefined)
+              delete next.pendingQuestion;
+            if (Object.hasOwn(question, 'needsHumanKind') && question.needsHumanKind === undefined)
+              delete next.needsHumanKind;
+            if (Object.hasOwn(question, 'needsHuman') && question.needsHuman === undefined) delete next.needsHuman;
+            return next as typeof raw;
+          });
         });
       };
-      const sessions = createSessionDirectorySubsystem(paths, storage, projectSessionEvidence);
+      // Ordinary reads contain projection damage per session: a broken answer ledger must not take
+      // the whole roster down. The monitor calls the raw projector below so it can report the exact
+      // failing session instead of silently flattening missing evidence.
+      const sessions = createSessionDirectorySubsystem(paths, storage, id =>
+        projectSessionEvidence(id).catch(() => undefined),
+      );
       // Originals are keyed by this daemon's durable pairing identity even
       // inside its private state home. A plaintext unlock is deliberately not a
       // storage operation: it remains in the store's process-local cache only.
@@ -3988,6 +4124,26 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
           nudge: new SendMonitorNudge(sends),
+          questions: {
+            reconcile: async () => {
+              const outcomes = await Promise.all(
+                storage.listSessions().map(async session => {
+                  let failure: string | undefined;
+                  try {
+                    await projectSessionEvidence(session.id);
+                  } catch (error) {
+                    failure = error instanceof Error ? error.message : String(error);
+                  }
+                  return [session.id, failure] as const;
+                }),
+              );
+              const failures = new Map<string, string>();
+              for (const [id, failure] of outcomes) {
+                if (failure !== undefined) failures.set(id, failure);
+              }
+              return failures;
+            },
+          },
           clock,
           wallClock: { nowMs: () => Date.now() },
           // A duration, so it is read off a clock that cannot step: a wall-clock jump would otherwise
@@ -4145,7 +4301,15 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
-        sessionAnswer: createSessionAnswerSubsystem(paths, storage, sessions, launchTmux, clock),
+        sessionAnswer: createSessionAnswerSubsystem(
+          storage,
+          sessions,
+          launchTmux,
+          clock,
+          answerLedger,
+          answerSerial,
+          lastSnapshots,
+        ),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRuntime: new SessionRuntimeControlService({

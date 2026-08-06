@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionConfigSchema, SessionStateSchema, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -61,6 +61,22 @@ while read -r _; do printf 'submit\\n' >> "$log"; done
 sleep 300
 `;
 
+/** Accept Enter without advancing, then advance only when recovery sends its one bounded Escape. */
+const FAILURE_SCRIPT = `#!/usr/bin/env bash
+log="$1"
+printf '  ${QUESTION}\\n\\n❯ Yes\\n  No\\n'
+while IFS= read -r -s -n 1 key; do
+  if [[ "$key" == $'\\e' ]]; then
+    printf 'escape\\n' >> "$log"
+    printf '\\033[2J\\033[H'
+    printf '> '
+    break
+  fi
+  if [[ -z "$key" ]]; then printf 'enter\\n' >> "$log"; fi
+done
+sleep 300
+`;
+
 const TRANSCRIPT = `${JSON.stringify({
   type: 'assistant',
   message: {
@@ -73,6 +89,14 @@ const TRANSCRIPT = `${JSON.stringify({
         input: { questions: [{ question: QUESTION, options: [{ label: 'Yes' }, { label: 'No' }] }] },
       },
     ],
+  },
+})}\n`;
+
+const RESOLVED_TRANSCRIPT = `${TRANSCRIPT}${JSON.stringify({
+  type: 'user',
+  message: {
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: TOOL_USE_ID, content: 'Yes', is_error: false }],
   },
 })}\n`;
 
@@ -124,6 +148,30 @@ async function livePane(home: string, scratch: string): Promise<string> {
   should(created).equal(0);
   // The pane must be RENDERING before the daemon is asked about it; a capture of a pane that has not
   // drawn yet is an empty screen, which the driver would correctly refuse as an unbound form.
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    if (text.includes(QUESTION) && text.includes('❯ Yes')) break;
+    await Bun.sleep(25);
+  }
+  return log;
+}
+
+/** A real form that visibly refuses the answer but responds to recovery's single Escape. */
+async function failingPane(home: string, scratch: string): Promise<string> {
+  const socket = join(home, 'tmux.sock');
+  sockets.add(socket);
+  const script = join(scratch, 'failing-form.sh');
+  const log = join(scratch, 'failure-input.log');
+  await writeFile(script, FAILURE_SCRIPT, { mode: 0o700 });
+  await chmod(script, 0o700);
+  await writeFile(log, '');
+  const created = await tmuxCommand(socket, 'new-session', '-d', '-s', TMUX_SESSION, `bash ${script} ${log}`);
+  should(created).equal(0);
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
       stdin: 'ignore',
@@ -215,14 +263,10 @@ interface Daemon {
 /** Boots the production world against the seeded home and waits for it to answer. */
 async function boot(home: string, port: number): Promise<Daemon> {
   process.env.FY_HOME = home;
-  let release = (): void => {};
+  const shutdownSignal = Promise.withResolvers<void>();
   const world: DaemonWorld = {
     ...buildWorld(),
-    untilShutdown: async () => {
-      await new Promise<void>(resolve => {
-        release = resolve;
-      });
-    },
+    untilShutdown: async () => await shutdownSignal.promise,
   };
   const cleanups: Array<() => void | Promise<void>> = [];
   const exit = start(world, cleanups);
@@ -234,7 +278,7 @@ async function boot(home: string, port: number): Promise<Daemon> {
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   return {
     exit,
-    release: () => release(),
+    release: () => shutdownSignal.resolve(),
     cleanups,
     headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli', 'content-type': 'application/json' },
   };
@@ -256,6 +300,19 @@ const answerRequest = (port: number, daemon: Daemon, requestId: string, labels: 
       answers: [{ kind: 'selection', labels: [...labels] }],
     }),
   });
+
+/** A busy answer/monitor key makes a read return its current view rather than wait; the next poll projects it. */
+async function waitForPendingQuestion(port: number, daemon: Daemon) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+      headers: daemon.headers,
+    });
+    const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
+    if (view.state.pendingQuestion?.toolUseId === TOOL_USE_ID) return view;
+    await Bun.sleep(25);
+  }
+  throw new Error(`structured question ${TOOL_USE_ID} did not materialize`);
+}
 
 describe('the structured answer journey', () => {
   const previousHome = process.env.FY_HOME;
@@ -280,8 +337,7 @@ describe('the structured answer journey', () => {
     const daemon = await boot(home, port);
 
     // Act + Assert — the read is what materializes the question from the transcript.
-    const read = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, { headers: daemon.headers });
-    const pending = SessionViewSchema.parse(JSON.parse(await statusOf(read, 200)));
+    const pending = await waitForPendingQuestion(port, daemon);
     should(pending.state.pendingQuestion).match({ toolUseId: TOOL_USE_ID });
     should(await submits(log)).deepEqual([]);
 
@@ -325,5 +381,166 @@ describe('the structured answer journey', () => {
     ).deepEqual(['accepted', 'confirmed']);
 
     await shutdown(restarted);
+  }, 120_000);
+
+  it('snapshots a real failed drive, cancels once, releases state, and replays the release after restart', async () => {
+    const home = await tempDirectory('fyd-answer-failure-home');
+    const scratch = await tempDirectory('fyd-answer-failure-scratch');
+    const transcript = join(scratch, 'session.jsonl');
+    await writeFile(transcript, TRANSCRIPT);
+    const port = await freeLoopbackPort();
+    const sessionDirectory = await seed(home, port, transcript);
+    const log = await failingPane(home, scratch);
+    const daemon = await boot(home, port);
+
+    should((await waitForPendingQuestion(port, daemon)).state.pendingQuestion).match({
+      toolUseId: TOOL_USE_ID,
+    });
+
+    const failed = await answerRequest(port, daemon, `${REQUEST_ID}:failure`, ['Yes']);
+    const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
+
+    should(failureBody.code).equal('answer_released');
+    should(failureBody.error).match(/structured form was released/u);
+    should(await submits(log)).deepEqual(['enter', 'escape']);
+    should(await readFile(join(sessionDirectory, 'last-snapshot.txt'), 'utf8')).match(new RegExp(QUESTION, 'u'));
+    const stateResponse = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+      headers: daemon.headers,
+    });
+    const released = SessionViewSchema.parse(JSON.parse(await statusOf(stateResponse, 200)));
+    should(released.state).match({
+      status: 'awaiting_user',
+      promptReady: true,
+      needsHumanKind: 'structured-answer-unconfirmed',
+      needsHuman: new RegExp(TOOL_USE_ID, 'u'),
+    });
+    should(released.state.pendingQuestion ?? undefined).be.undefined();
+
+    const receipts = (await readFile(join(sessionDirectory, 'channel', 'answers.jsonl'), 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as { readonly outcome: string; readonly resolution?: string });
+    should(receipts).match([{ outcome: 'accepted' }, { outcome: 'accepted', resolution: 'quarantined' }]);
+
+    await shutdown(daemon);
+    const restarted = await boot(home, port);
+    const replay = await answerRequest(port, restarted, `${REQUEST_ID}:failure`, ['Yes']);
+    should((JSON.parse(await statusOf(replay, 409)) as { readonly code: string }).code).equal('answer_released');
+    const freshId = await answerRequest(port, restarted, `${REQUEST_ID}:fresh`, ['Yes']);
+
+    should((JSON.parse(await statusOf(freshId, 409)) as { readonly code: string }).code).equal('answer_refused');
+    should(await submits(log)).deepEqual(['enter', 'escape']);
+    // Repeated production projections must not make an ambiguous answer's attention transient.
+    for (let read = 0; read < 2; read += 1) {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+        headers: restarted.headers,
+      });
+      const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
+      should(view.state).match({
+        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHuman: new RegExp(TOOL_USE_ID, 'u'),
+      });
+    }
+
+    await shutdown(restarted);
+  }, 120_000);
+
+  it('releases durable question state fail-closed when the real pane has terminated', async () => {
+    const home = await tempDirectory('fyd-answer-dead-home');
+    const scratch = await tempDirectory('fyd-answer-dead-scratch');
+    const transcript = join(scratch, 'session.jsonl');
+    await writeFile(transcript, TRANSCRIPT);
+    const port = await freeLoopbackPort();
+    await seed(home, port, transcript);
+    const daemon = await boot(home, port);
+
+    should((await waitForPendingQuestion(port, daemon)).state.pendingQuestion).match({
+      toolUseId: TOOL_USE_ID,
+    });
+
+    const failed = await answerRequest(port, daemon, `${REQUEST_ID}:dead`, ['Yes']);
+    const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
+
+    should(failureBody.code).equal('answer_released');
+    should(failureBody.error).match(/Automatic native cancellation was not confirmed/u);
+    should(failureBody.error).match(/Inspect the terminal before replying in prose/u);
+    const stateResponse = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+      headers: daemon.headers,
+    });
+    const released = SessionViewSchema.parse(JSON.parse(await statusOf(stateResponse, 200)));
+    should(released.state).match({
+      status: 'awaiting_user',
+      promptReady: false,
+      reason: /automatic native cancellation was not confirmed/u,
+    });
+    should(released.state.pendingQuestion ?? undefined).be.undefined();
+
+    await shutdown(daemon);
+    const restarted = await boot(home, port);
+    const replay = await answerRequest(port, restarted, `${REQUEST_ID}:dead`, ['Yes']);
+    should((JSON.parse(await statusOf(replay, 409)) as { readonly code: string }).code).equal('answer_released');
+
+    await shutdown(restarted);
+  }, 120_000);
+
+  it('quarantines a monitor-observed advance and keeps its human attention durable', async () => {
+    const home = await tempDirectory('fyd-answer-monitor-quarantine-home');
+    const scratch = await tempDirectory('fyd-answer-monitor-quarantine-scratch');
+    const transcript = join(scratch, 'session.jsonl');
+    await writeFile(transcript, RESOLVED_TRANSCRIPT);
+    const port = await freeLoopbackPort();
+    const sessionDirectory = await seed(home, port, transcript);
+    const ledger = join(sessionDirectory, 'channel', 'answers.jsonl');
+    await mkdir(join(sessionDirectory, 'channel'), { recursive: true });
+    await writeFile(
+      ledger,
+      `${JSON.stringify({
+        requestId: `${REQUEST_ID}:monitor`,
+        toolUseId: TOOL_USE_ID,
+        fingerprint: 'monitor-crash-boundary',
+        acceptedAt: '2026-08-06T09:00:01.000Z',
+        outcome: 'accepted',
+      })}\n`,
+    );
+    const daemon = await boot(home, port);
+
+    // The production projector, not a coordinator retry, observes that the exact form advanced.
+    // Repeated reads prove its quarantine banner is durable rather than one poll of transient state.
+    for (let read = 0; read < 2; read += 1) {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+        headers: daemon.headers,
+      });
+      const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
+      should(view.state).match({
+        status: 'awaiting_user',
+        needsHumanKind: 'structured-answer-unconfirmed',
+        needsHuman: new RegExp(TOOL_USE_ID, 'u'),
+      });
+      should(view.state.pendingQuestion ?? undefined).be.undefined();
+    }
+    const receipts = (await readFile(ledger, 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as { readonly outcome: string; readonly resolution?: string });
+    should(receipts).match([{ outcome: 'accepted' }, { outcome: 'accepted', resolution: 'quarantined' }]);
+
+    await shutdown(daemon);
+  }, 120_000);
+
+  it('contains a damaged answer ledger while serving the ordinary session roster', async () => {
+    const home = await tempDirectory('fyd-answer-damaged-ledger-home');
+    const scratch = await tempDirectory('fyd-answer-damaged-ledger-scratch');
+    const transcript = join(scratch, 'session.jsonl');
+    await writeFile(transcript, TRANSCRIPT);
+    const port = await freeLoopbackPort();
+    const sessionDirectory = await seed(home, port, transcript);
+    await mkdir(join(sessionDirectory, 'channel', 'answers.jsonl'), { recursive: true });
+    const daemon = await boot(home, port);
+
+    const roster = await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: daemon.headers });
+    const rosterBody = await statusOf(roster, 200);
+
+    should(rosterBody).match(new RegExp(SESSION_ID, 'u'));
+    await shutdown(daemon);
   }, 120_000);
 });

@@ -1,7 +1,7 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { FY_REQUEST_ID_HEADER, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
@@ -21,6 +21,7 @@ class FakeAnswers implements SessionAnswerSubsystem {
     if (id === 'refused') throw new SessionAnswerError('refused', 'form changed');
     if (id === 'reused') throw new SessionAnswerError('conflict', 'that id already named another answer');
     if (id === 'unconfirmed') throw new SessionAnswerError('unconfirmed', 'an earlier attempt may have landed');
+    if (id === 'released') throw new SessionAnswerError('released', 'the form was released; inspect the terminal');
     return sessionView(id);
   }
 }
@@ -88,6 +89,7 @@ describe('the session answer mount', () => {
   it.each([
     ['reused', 'answer_request_id_reused'],
     ['unconfirmed', 'answer_unconfirmed'],
+    ['released', 'answer_released'],
   ])('keeps each 409 distinct, because each names a different next action (%s)', async (session, expected) => {
     // Arrange
     const subject = dispatcher();

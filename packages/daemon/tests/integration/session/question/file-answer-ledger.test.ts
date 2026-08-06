@@ -117,7 +117,10 @@ describe('the durable answer ledger', () => {
     ['no request id', '{"toolUseId":"tool-1","fingerprint":"print-1","outcome":"accepted"}'],
     ['no tool id', '{"requestId":"request-1","fingerprint":"print-1","outcome":"accepted"}'],
     ['no fingerprint', '{"requestId":"request-1","toolUseId":"tool-1","outcome":"accepted"}'],
-    ['an outcome nothing wrote', '{"requestId":"request-1","toolUseId":"t","fingerprint":"p","outcome":"maybe"}'],
+    [
+      'no acceptance timestamp',
+      '{"requestId":"request-1","toolUseId":"tool-1","fingerprint":"print-1","outcome":"accepted"}',
+    ],
   ])('refuses to read a fabricated receipt (%s)', async (_name, line) => {
     // Arrange
     const { ledger } = await subject();
@@ -129,6 +132,25 @@ describe('the durable answer ledger', () => {
 
     // Assert
     should(actual).be.undefined();
+  });
+
+  it('fails closed when a future daemon wrote an outcome this version does not know', async () => {
+    const { ledger } = await subject();
+    await mkdir(join(ledger.file(ID), '..'), { recursive: true });
+    await appendFile(
+      ledger.file(ID),
+      `${JSON.stringify({
+        requestId: 'request-1',
+        toolUseId: 'tool-1',
+        fingerprint: 'print-1',
+        acceptedAt: NOW,
+        outcome: 'future-release',
+      })}\n`,
+    );
+
+    const actual = await ledger.read(ID, 'request-1');
+
+    should(actual).match({ outcome: 'accepted', reason: /unrecognized outcome/u });
   });
 
   it('stamps each line with the time it was written, so the history stays legible', async () => {
@@ -168,5 +190,20 @@ describe('the durable answer ledger', () => {
 
     // Assert
     should([...actual.keys()].sort()).deepEqual(['request-1', 'request-2']);
+  });
+
+  it.each([['failed'], ['quarantined']] as const)('round-trips the recovery outcome %s', async outcome => {
+    const { ledger } = await subject();
+
+    await ledger.append(ID, record({ outcome }));
+
+    should(await ledger.read(ID, 'request-1')).match({ outcome });
+  });
+
+  it('fails closed when the ledger exists but cannot be read as a file', async () => {
+    const { ledger } = await subject();
+    await mkdir(ledger.file(ID), { recursive: true });
+
+    await should(ledger.all(ID)).be.rejected();
   });
 });

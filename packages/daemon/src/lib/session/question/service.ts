@@ -1,6 +1,57 @@
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import type { SessionId } from '../../session-id.ts';
 
+export type StructuredQuestionAcceptance = 'none' | 'ambiguous';
+
+/** A drive refusal that states whether any answer input may already have reached the harness. */
+export class StructuredQuestionDriveFailure extends Error {
+  constructor(
+    message: string,
+    readonly acceptance: StructuredQuestionAcceptance,
+    readonly diagnostics: Readonly<Record<string, unknown>> = {},
+  ) {
+    super(message);
+    this.name = 'StructuredQuestionDriveFailure';
+  }
+}
+
+/** The receipt transition a failed attempt is allowed to make after recovery. */
+export type StructuredQuestionFailureReceipt = 'accepted' | 'withdrawn' | 'failed' | 'quarantined';
+
+/** A failed answer attempt, including whether its durable receipt may be settled. */
+export class StructuredQuestionAttemptFailed extends Error {
+  constructor(
+    message: string,
+    readonly receipt: StructuredQuestionFailureReceipt,
+    readonly failure: StructuredQuestionDriveFailure,
+  ) {
+    super(message, { cause: failure });
+    this.name = 'StructuredQuestionAttemptFailed';
+  }
+}
+
+/** The pane evidence retained with a failed answer. */
+export interface StructuredQuestionDiagnosticPane {
+  readonly alive: boolean;
+  readonly dead: boolean;
+  readonly promptReady: boolean;
+  readonly visible: string;
+  readonly history: string;
+}
+
+export interface StructuredQuestionCancellation {
+  readonly confirmedBy: 'already-advanced' | 'prompt-ready' | 'turn-started' | 'pane-advanced';
+  readonly pane: StructuredQuestionDiagnosticPane;
+}
+
+export interface StructuredQuestionFailureContext {
+  readonly failure: StructuredQuestionDriveFailure;
+  readonly snapshot?: StructuredQuestionDiagnosticPane | undefined;
+  readonly snapshotError?: string | undefined;
+  readonly cancellation?: StructuredQuestionCancellation | undefined;
+  readonly cancellationError?: string | undefined;
+}
+
 /** A question answer must be driven into the rendered harness form, not sent as prose. */
 export interface StructuredQuestionDriver {
   drive(
@@ -19,6 +70,19 @@ export interface StructuredQuestionRepository {
     answers: readonly StructuredQuestionAnswer[],
     confirmation: { readonly confirmedBy: string },
   ): Promise<void>;
+  /** Releases the exact failed form from durable question state and records why. */
+  failed(
+    id: SessionId,
+    question: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    context: StructuredQuestionFailureContext,
+  ): Promise<void>;
+}
+
+/** Live recovery actions, kept outside the repository because they address a terminal pane. */
+export interface StructuredQuestionFailureRecovery {
+  snapshot(id: SessionId): Promise<StructuredQuestionDiagnosticPane>;
+  cancel(id: SessionId, question: PendingQuestion): Promise<StructuredQuestionCancellation>;
 }
 
 export class StructuredQuestionRefused extends Error {
@@ -84,6 +148,7 @@ export class StructuredQuestionService {
   constructor(
     private readonly repository: StructuredQuestionRepository,
     private readonly driver: StructuredQuestionDriver,
+    private readonly recovery: StructuredQuestionFailureRecovery,
   ) {}
 
   async answer(input: {
@@ -94,7 +159,17 @@ export class StructuredQuestionService {
     readonly responses?: readonly string[] | undefined;
     readonly answers?: readonly StructuredQuestionAnswer[] | undefined;
   }): Promise<void> {
-    const pending = await this.repository.pending(input.id);
+    let pending: PendingQuestion | undefined;
+    try {
+      pending = await this.repository.pending(input.id);
+    } catch (error) {
+      const failure = new StructuredQuestionDriveFailure(
+        error instanceof Error ? error.message : String(error),
+        'none',
+        { phase: 'state-read' },
+      );
+      throw new StructuredQuestionAttemptFailed(failure.message, 'withdrawn', failure);
+    }
     if (pending === undefined)
       throw new StructuredQuestionRefused(`session ${input.id} has no pending structured question`);
     if (pending.toolUseId !== input.toolUseId)
@@ -105,7 +180,87 @@ export class StructuredQuestionService {
       pending,
       input.answers === undefined ? legacyAnswers(pending, input.labels, input.other, input.responses) : input.answers,
     );
-    const confirmation = await this.driver.drive(input.id, pending, answers);
-    await this.repository.answered(input.id, pending.toolUseId, answers, confirmation);
+    let confirmation: Awaited<ReturnType<StructuredQuestionDriver['drive']>>;
+    try {
+      confirmation = await this.driver.drive(input.id, pending, answers);
+    } catch (error) {
+      const failure =
+        error instanceof StructuredQuestionDriveFailure
+          ? error
+          : new StructuredQuestionDriveFailure(error instanceof Error ? error.message : String(error), 'ambiguous', {
+              phase: 'drive',
+            });
+      const snapshot = await this.recovery.snapshot(input.id).then(
+        pane => ({ pane }),
+        snapshotError => ({ error: snapshotError instanceof Error ? snapshotError.message : String(snapshotError) }),
+      );
+      // Validation and caller typos were refused before the driver. A real driver preflight failure
+      // means the durable question and native pane have drifted (dead/scrolled/re-rendered), so even
+      // proven non-acceptance gets one bounded, positively-bound Escape and a durable release rather
+      // than leaving the session wedged or inviting an unbounded retry loop.
+      // Exactly one bounded cancellation attempt. Its adapter sends at most one Escape and refuses
+      // before doing so unless this exact form is still positively bound.
+      const cancellation = await this.recovery.cancel(input.id, pending).then(
+        result => ({ result }),
+        cancellationError => ({
+          error: cancellationError instanceof Error ? cancellationError.message : String(cancellationError),
+        }),
+      );
+      const context: StructuredQuestionFailureContext = {
+        failure,
+        ...('pane' in snapshot ? { snapshot: snapshot.pane } : { snapshotError: snapshot.error }),
+        ...('result' in cancellation
+          ? { cancellation: cancellation.result }
+          : { cancellationError: cancellation.error }),
+      };
+      let releaseError: unknown;
+      try {
+        await this.repository.failed(input.id, pending, answers, context);
+      } catch (error) {
+        releaseError = error;
+      }
+      const questionText = pending.questions.map(question => question.question).join('\n\n');
+      if (releaseError !== undefined)
+        throw new StructuredQuestionAttemptFailed(
+          `${failure.message}; failed to release the structured form: ${releaseError instanceof Error ? releaseError.message : String(releaseError)}`,
+          // The accepted row remains deliberately unsettled. A retry or monitor tick must hard-
+          // quarantine it because neither the answer nor the state release reached a commit point.
+          'accepted',
+          failure,
+        );
+      const cancellationFailure =
+        context.cancellationError === undefined
+          ? undefined
+          : `Automatic native cancellation was not confirmed: ${context.cancellationError}. Inspect the terminal before replying in prose.`;
+      throw new StructuredQuestionAttemptFailed(
+        `${failure.message}\n\n${cancellationFailure ?? 'The structured form was released.'}\nReply in prose to:\n${questionText}`,
+        failure.acceptance === 'none' ? 'failed' : 'quarantined',
+        failure,
+      );
+    }
+
+    try {
+      await this.repository.answered(input.id, pending.toolUseId, answers, confirmation);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const snapshot = await this.recovery.snapshot(input.id).then(
+        () => undefined,
+        snapshotError => (snapshotError instanceof Error ? snapshotError.message : String(snapshotError)),
+      );
+      const failure = new StructuredQuestionDriveFailure(
+        `the rendered form visibly advanced, but its durable answer state could not be confirmed: ${message}`,
+        'ambiguous',
+        {
+          phase: 'state-confirm',
+          confirmedBy: confirmation.confirmedBy,
+          ...(snapshot === undefined ? {} : { snapshotError: snapshot }),
+        },
+      );
+      throw new StructuredQuestionAttemptFailed(
+        `${failure.message}. It was not driven or cancelled again. Inspect the terminal; do not retry this answer blindly.`,
+        'accepted',
+        failure,
+      );
+    }
   }
 }
