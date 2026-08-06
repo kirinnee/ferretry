@@ -17,6 +17,7 @@ import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -549,6 +550,53 @@ describe('SessionChatPage', () => {
       const analytics = page.root.findByType(SessionAnalyticsSurface);
       expect(analytics.props.connection).toBe(alpha);
       expect(analytics.props.scope).toEqual(scope);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('mounts Skills on ONE catalog read and proves that catalog in the transcript', async () => {
+    const scope = daemonSessionScope(alpha, 'shared');
+    const asked: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/skills')) {
+        asked.push(url);
+        return Response.json({
+          harness: 'claude',
+          skills: [{ name: 'floop', description: 'Review until satisfied.', scope: 'global', origin: 'both' }],
+        });
+      }
+      return route(input);
+    }) as typeof fetch;
+    openSidePaneTab(scope, 'skills');
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      await runAsync(async () => {
+        for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+      });
+
+      const surface = page.root.findByType(SessionSkillsSurface);
+      expect(surface.props.connection).toBe(alpha);
+      expect(surface.props.scope).toEqual(scope);
+      // ONE read. The pane joins the page's, so the daemon is asked once even
+      // though two things in this workspace need the answer.
+      expect(asked).toEqual(['https://alpha.example.test/v1/sessions/shared/skills']);
+      // …and the names it returned are what the transcript proves against, so a
+      // `/floop` this pane just inserted is a live reference rather than prose.
+      const provider = page.root.findByType(ReferenceSurfaceProvider);
+      expect(provider.props.surface.skillReferenceResolver?.('floop')).toBe(true);
+      expect(provider.props.surface.skillReferenceResolver?.('absent')).toBe(false);
     } finally {
       run(() => page.unmount());
     }

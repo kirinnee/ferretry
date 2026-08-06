@@ -25,6 +25,9 @@ import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
+import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
+import { SessionSkillsSurface } from '../../features/skills/session-skills-surface.tsx';
+import type { SkillsCatalogLoader } from '../../features/skills/skills-api.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, sessionActionSpecs } from '../../shell/session-actions.ts';
@@ -171,6 +174,12 @@ interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
   readonly readSnapshot?: PaneSnapshotReader;
   /** The one reference surface this session reads with, files included. */
   readonly references: ReferenceSurface;
+  /**
+   * The session's ONE skills catalog read, threaded down rather than started
+   * here: the page already holds it, because the reference surface proves an
+   * inserted `/floop` from the same names this pane lists.
+   */
+  readonly skills: SkillsCatalogLoader;
 }
 
 function WorkspaceSurface({
@@ -180,6 +189,7 @@ function WorkspaceSurface({
   onNavigate,
   readSnapshot,
   references,
+  skills,
   scope,
   tab,
   presentation,
@@ -195,6 +205,10 @@ function WorkspaceSurface({
     body = <FileInstanceSurface daemon={connection} scope={scope} instance={tab.instance} markdown={references} />;
   } else if (tab.id === 'tasks') {
     body = <SessionTasksSearchSurface />;
+  } else if (tab.id === 'skills') {
+    // #43. The loader comes from the page's own read, so opening this pane
+    // JOINS that read instead of asking the daemon a second time.
+    body = <SessionSkillsSurface connection={connection} loadCatalog={skills} scope={scope} />;
   } else if (tab.id === 'lineage') {
     body =
       daemonSessions === undefined ? (
@@ -307,6 +321,11 @@ export function SessionChatPage({
     search.taskState === 'ready'
       ? search.tasks
       : undefined;
+  // #43. The session's ONE skills read, owned here for the same reason the task
+  // snapshot is: both the pane and the reference surface need it, and two reads
+  // would be two owners that disagree after a refresh. `names` is undefined
+  // until a catalog has actually been read — unread, never "no skills".
+  const skills = useSessionSkills(connection, scope);
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
   // churn cannot rebuild the surface and re-parse every rendered Markdown block
@@ -322,9 +341,10 @@ export function SessionChatPage({
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
         ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
+        ...(skills.names === undefined ? {} : { skills: skills.names }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
       }),
-    [connection, scope, session.config.cwd, fleetIdentity, referenceTasks, onNavigate],
+    [connection, scope, session.config.cwd, fleetIdentity, referenceTasks, skills.names, onNavigate],
   );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -485,6 +505,7 @@ export function SessionChatPage({
           connection={connection}
           references={references}
           session={session}
+          skills={skills.load}
           {...(daemonSessions === undefined ? {} : { daemonSessions })}
           {...(onNavigate === undefined ? {} : { onNavigate })}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
