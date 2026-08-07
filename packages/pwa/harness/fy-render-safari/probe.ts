@@ -46,12 +46,15 @@ import {
   type FyRenderJourneyStep,
 } from '../../tests/fixtures/fy-render-journey.ts';
 import {
+  assertReplicaFetchMatchesProduction,
   buildProbeDocument,
   neverReadyDocument,
-  readDeployedShellHeaders,
-  readGeneratedShell,
   PRODUCTION_FRAME_COMPONENT,
+  readDeployedShellHeaders,
+  readFetchOptionKeys,
+  readGeneratedShell,
   readProductionFrameContract,
+  REPLICA_PARENT_SOURCE,
   substitutePolicy,
   verifyGeneratorAgreement,
   withConnectSource,
@@ -164,6 +167,8 @@ const main = async (): Promise<number> => {
     probeScriptHash: '',
     scriptHashes: [],
   };
+  let libraryFetchOptions: readonly string[] = [];
+  let libraryFetchAborted = false;
   let driverPath = option('driver', '/usr/bin/safaridriver');
   let driverVersion = 'not started';
   let browserName = option('browser', 'safari');
@@ -195,9 +200,18 @@ const main = async (): Promise<number> => {
      */
     const mutatedMermaid = `${mermaidBundle};`;
 
-    const { shellUrl, sandboxAttribute } = readProductionFrameContract(
-      await readFile(resolve(packageRoot, PRODUCTION_FRAME_COMPONENT), 'utf8'),
-      PRODUCTION_FRAME_COMPONENT,
+    const componentSource = await readFile(resolve(packageRoot, PRODUCTION_FRAME_COMPONENT), 'utf8');
+    const { shellUrl, sandboxAttribute } = readProductionFrameContract(componentSource, PRODUCTION_FRAME_COMPONENT);
+    /**
+     * The replica's library fetch must pass what production's passes. Read from both
+     * sources so neither side is retyped, and checked BEFORE a browser is started:
+     * a replica whose options have drifted measures a request the product does not
+     * make, which is a green nobody should be given.
+     */
+    libraryFetchOptions = readFetchOptionKeys(componentSource, PRODUCTION_FRAME_COMPONENT);
+    assertReplicaFetchMatchesProduction(
+      libraryFetchOptions,
+      readFetchOptionKeys(await readFile(resolve(packageRoot, REPLICA_PARENT_SOURCE), 'utf8'), REPLICA_PARENT_SOURCE),
     );
     const deployed = readDeployedShellHeaders(
       await readFile(resolve(packageRoot, 'public/_headers'), 'utf8'),
@@ -367,6 +381,11 @@ const main = async (): Promise<number> => {
       }
     }
 
+    // The abort capability the production component holds, exercised at the end of
+    // the run. Every library fetch has resolved by now, so this demonstrates the call
+    // and not the behaviour — `NOT_PROVEN` says exactly that.
+    libraryFetchAborted = await session.execute<boolean>('return window.__fyRenderJourney.abortLibraryFetches();');
+
     const entries = live.entries();
     const leaks = entries.filter(entry => entry.classification === 'leak');
     const unexpected = entries.filter(entry => entry.classification === 'unexpected');
@@ -532,6 +551,7 @@ const main = async (): Promise<number> => {
     score('frame-issues-no-library-request', assetCounts.every(([, count]) => count === 1) && unexpected.length === 0, [
       ...assetCounts.map(([path, count]) => `\`${path}\` was requested ${count} time(s) in the whole run`),
       'the parent fetches each fixed asset exactly once and reuses the bytes, so a second request could only be a frame',
+      `the fetch passed production's own option set, read out of the component's source: {${libraryFetchOptions.join(', ')}} — \`redirect: 'error'\` included, so a redirected fixed path would be refused rather than followed`,
       `requests to undeclared paths: ${unexpected.length}`,
       `\`Sec-Fetch-*\` values seen: ${JSON.stringify(entries.flatMap(entry => Object.keys(entry.provenance)).filter((key, index, all) => all.indexOf(key) === index))} — recorded, never asserted`,
     ]);
@@ -645,6 +665,8 @@ const main = async (): Promise<number> => {
       harnessOrigin: live.origin,
       ledger: entries,
       ledgerTruncated: false,
+      libraryFetchAborted,
+      libraryFetchOptions,
       notProven: NOT_PROVEN,
       ok: failures.length === 0,
       platform: `${process.platform} ${process.arch}`,
@@ -675,6 +697,8 @@ const main = async (): Promise<number> => {
         harnessOrigin: ledger?.origin ?? 'never started',
         ledger: partialLedger,
         ledgerTruncated: false,
+        libraryFetchAborted,
+        libraryFetchOptions,
         notProven: NOT_PROVEN,
         ok: false,
         platform: `${process.platform} ${process.arch}`,
@@ -713,6 +737,7 @@ const NOT_PROVEN: readonly string[] = [
   'Nothing about the Slice C channels. Self-navigation, prerender and WebRTC are deliberately outside this journey. No AUTHOR code runs in the frame, so no author reaches them — but a compromised trusted library would be code inside the frame and could, which is the residual the documentation already declares. A green here must not be read as "Slice C is safe in Safari" or as a bound on a compromised library.',
   'Nothing about element fullscreen, which is a Slice A control with its own policy layer and is a manual check on real hardware.',
   'Not the React parent component. The frame ran the deployed bytes and the message parser and SVG gate are the shipped functions, but the parent bridge is a faithful replica of `FyRenderSandbox` rather than the component itself.',
+  "Not the component's per-mount fetch lifecycle. The replica passes production's exact option set — `redirect: 'error'` included, enforced by a source-to-source drift gate — and holds an `AbortController`, but it fetches once per RUN so the ledger can attribute a second library request to a frame. No redirect was served and no fetch was in flight when the abort ran, so neither the redirect refusal nor the abort-on-unmount behaviour is measured here; only the option set is.",
   'No CSP directive name is asserted anywhere. Safari offers no console access from outside the page, so `securitypolicyviolation` records are corroboration for a human and never a check.',
 ];
 

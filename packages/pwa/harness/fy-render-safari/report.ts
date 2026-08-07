@@ -52,6 +52,14 @@ export interface ProofReport {
     readonly deployedHeaders: readonly (readonly [string, string])[];
     readonly detachedHeaders: readonly string[];
   };
+  /**
+   * The option KEYS the production component passes to its library fetch, read out
+   * of its source. The harness replica must pass the same set or the run refuses to
+   * start, so this is the record of WHICH request was measured.
+   */
+  readonly libraryFetchOptions: readonly string[];
+  /** Whether the replica's abort capability was exercised at the end of the run. */
+  readonly libraryFetchAborted: boolean;
   readonly steps: readonly { readonly step: string; readonly ok: boolean; readonly observations: unknown }[];
   readonly ledger: readonly LedgerEntry[];
   readonly ledgerTruncated: boolean;
@@ -125,6 +133,12 @@ const markdown = (report: ProofReport): string =>
     ...report.shell.deployedHeaders.map(([name, value]) => `- \`${name}: ${value}\``),
     '',
     `Detached by the rule: ${report.shell.detachedHeaders.map(name => `\`${name}\``).join(', ')}`,
+    '',
+    '### The library fetch that was measured',
+    '',
+    `Options the production component passes, read out of its source: \`{${report.libraryFetchOptions.join(', ')}}\`.`,
+    'The harness replica must pass the same set or the run refuses to start.',
+    `Abort capability exercised at the end of the run: ${report.libraryFetchAborted}.`,
     '',
     '## Properties',
     '',

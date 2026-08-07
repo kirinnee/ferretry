@@ -23,14 +23,17 @@ import { parseFyRenderSandboxMessage } from '../../src/lib/fy-render.ts';
 import { FY_RENDER_LEAK_PROBES } from '../../tests/fixtures/fy-render-journey.ts';
 import {
   assertOnlyScriptSourcesChanged,
+  assertReplicaFetchMatchesProduction,
   buildProbeDocument,
   cspHash,
   escapeForInlineScript,
   neverReadyDocument,
   PRODUCTION_FRAME_COMPONENT,
   readDeployedShellHeaders,
+  readFetchOptionKeys,
   readGeneratedShell,
   readProductionFrameContract,
+  REPLICA_PARENT_SOURCE,
   substitutePolicy,
   verifyGeneratorAgreement,
   withConnectSource,
@@ -233,9 +236,56 @@ const contractChecks = async (): Promise<{ readonly shellUrl: string; readonly c
           'synthetic',
         ),
       ),
+      ...(await fetchOptionChecks(source)),
     ],
     shellUrl: contract.shellUrl,
   };
+};
+
+/**
+ * The drift gate, and the reason it exists: production gained `redirect: 'error'`
+ * while the replica still passed two options, and nothing failed. Now something does.
+ */
+const fetchOptionChecks = async (componentSource: string): Promise<readonly Check[]> => {
+  const production = readFetchOptionKeys(componentSource, PRODUCTION_FRAME_COMPONENT);
+  const replicaSource = await readFile(resolve(packageRoot, REPLICA_PARENT_SOURCE), 'utf8');
+  const replica = readFetchOptionKeys(replicaSource, REPLICA_PARENT_SOURCE);
+  return [
+    {
+      detail: `production passes {${production.join(', ')}}; the replica passes {${replica.join(', ')}}`,
+      name: "the replica library fetch passes production's exact option set",
+      ok: production.join(' ') === replica.join(' ') && production.includes('redirect'),
+    },
+    accepts(
+      'the matching sets are accepted',
+      () => assertReplicaFetchMatchesProduction(production, replica),
+      'and the comparison names both sides when they differ',
+    ),
+    refuses('a replica missing an option is refused', () =>
+      assertReplicaFetchMatchesProduction(
+        production,
+        production.filter(key => key !== 'redirect'),
+      ),
+    ),
+    refuses('a replica with an option production does not pass is refused', () =>
+      assertReplicaFetchMatchesProduction(production, [...production, 'keepalive'].sort()),
+    ),
+    refuses('a source with no `await fetch(` fails closed', () =>
+      readFetchOptionKeys(componentSource.replace('await fetch(', 'awaitFetch('), 'synthetic'),
+    ),
+    {
+      // The component's own header quotes `redirect: 'error'` in prose one paragraph
+      // above the call, so a scanner that read comments would find the shape it was
+      // looking for whether or not the code passed it.
+      detail: `read {${readFetchOptionKeys(`/** await fetch(x, { pretend: 1, aComment: 2 }) */\nconst r = await fetch(u, { real: 1 });`, 'synthetic').join(', ')}} from a source whose comment quotes a different option set`,
+      name: 'comments are stripped before the fetch options are read',
+      ok:
+        readFetchOptionKeys(
+          `/** await fetch(x, { pretend: 1, aComment: 2 }) */\nconst r = await fetch(u, { real: 1 });`,
+          'synthetic',
+        ).join(' ') === 'real',
+    },
+  ];
 };
 
 const headerChecks = async (shellUrl: string): Promise<readonly Check[]> => {

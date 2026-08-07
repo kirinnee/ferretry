@@ -27,7 +27,10 @@
  *
  * EVERY FIXED ASSET IS FETCHED ONCE FOR THE WHOLE RUN. Production fetches per
  * mount; fetching once here makes the request ledger unambiguous, because any
- * second request for a library path could then only have come from a frame.
+ * second request for a library path could then only have come from a frame. The
+ * fetch OPTIONS are production's exactly — `cache`, `credentials`, `redirect` and
+ * `signal` — and a gate in `documents.ts` reads both files and refuses to run when
+ * the two key sets differ.
  */
 import {
   FY_RENDER_LIMITS,
@@ -73,15 +76,34 @@ const isRecord = (value: unknown): value is Record<string, Json> =>
 const asJson = (value: unknown): Record<string, Json> => JSON.parse(JSON.stringify(value)) as Record<string, Json>;
 
 /**
+ * THE CONTROLLER THAT MAKES THE FETCH OUTLIVE NOTHING, and the one place this
+ * replica's LIFETIME differs from production's on purpose.
+ *
+ * The component arms one `AbortController` per MOUNT, because it fetches per mount.
+ * This arms one per RUN, because it fetches once per run — and it fetches once per
+ * run so the request ledger can attribute any second request for a library path to
+ * a frame rather than to the parent. The driver aborts it after the last step. The
+ * option set is identical either way; the component's abort-on-unmount behaviour is
+ * therefore NOT something this harness measures, and the artifact says so.
+ */
+const inflight = new AbortController();
+
+/**
  * One fetch per fixed asset for the whole run — see the header note.
  *
- * THE OPTIONS AND THE READER ARE THE PRODUCTION ONES. `cache: 'no-cache'` and
- * `credentials: 'omit'` are what the component passes, and the body is read through
- * the shipped `fyRenderReadBoundedText` against the shipped per-library cap, so a
- * truncated deploy or a captive-portal login page fails before the allocation rather
- * than after it. Production passes no `redirect` option, so neither does this — a
- * replica that hardened one call would stop being a replica, and nothing here claims
- * anything about redirects.
+ * THE OPTIONS AND THE READER ARE THE PRODUCTION ONES, all four of them.
+ * `credentials: 'omit'` so no cookie or token rides along; `redirect: 'error'`
+ * because the descriptor names a FIXED local path, so a redirect means the
+ * deployment is misconfigured and following one silently would let a same-origin
+ * request end up fetching bytes from somewhere else; `cache: 'no-cache'` to
+ * revalidate, so a stale bundle cannot be pinned behind a hash change; and the abort
+ * signal above. The body is read through the shipped `fyRenderReadBoundedText`
+ * against the shipped per-library cap, so a truncated deploy or a captive-portal
+ * login page fails before the allocation rather than after it.
+ *
+ * `documents.ts` reads the option KEYS out of this file and out of the component and
+ * refuses to run when the two sets differ, so this list cannot silently fall behind
+ * production again.
  */
 const fetchOnce = (() => {
   const cache = new Map<string, Promise<string>>();
@@ -89,7 +111,12 @@ const fetchOnce = (() => {
     const held = cache.get(url);
     if (held !== undefined) return held;
     const started = (async () => {
-      const response = await fetch(url, { cache: 'no-cache', credentials: 'omit' });
+      const response = await fetch(url, {
+        cache: 'no-cache',
+        credentials: 'omit',
+        redirect: 'error',
+        signal: inflight.signal,
+      });
       if (!response.ok) throw new Error(`${url} answered ${response.status}`);
       const read = await fyRenderReadBoundedText(response, maxBytes);
       if (!read.ok) throw new Error(`${url} was refused by the production bounded reader: ${read.reason}`);
@@ -466,6 +493,16 @@ const steps: Readonly<Record<string, () => Promise<Record<string, Json>>>> = {
 };
 
 (window as unknown as { __fyRenderJourney: unknown }).__fyRenderJourney = {
+  /**
+   * Called by the driver after the last step. It exercises the abort capability the
+   * production component holds; by then every library fetch has resolved, so it
+   * demonstrates the call and NOT the behaviour — which is why the artifact lists the
+   * component's per-mount fetch lifecycle as something this harness does not measure.
+   */
+  abortLibraryFetches: (): boolean => {
+    inflight.abort();
+    return inflight.signal.aborted;
+  },
   run: async (step: string): Promise<Record<string, Json>> => {
     const runner = steps[step];
     if (runner === undefined) throw new Error(`unknown journey step: ${step}`);
