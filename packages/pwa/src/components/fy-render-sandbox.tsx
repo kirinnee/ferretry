@@ -66,6 +66,7 @@ import { useEffect, useRef } from 'react';
 import {
   FY_RENDER_SANDBOX_LIBRARIES,
   FY_RENDER_SANDBOX_LIMITS,
+  type FyRenderSandboxTheme,
   fyRenderReadBoundedText,
   type FyRenderBlock as ParsedBlock,
   parseFyRenderSandboxMessage,
@@ -122,8 +123,16 @@ export interface FyRenderSandboxProps {
   /** Lottie only. Mermaid is static and ignores it. */
   readonly playing: boolean;
   readonly theme: 'dark' | 'light';
-  /** Mermaid handed back a compiled diagram. The caller owns validating it. */
-  readonly onCompiled: (svg: string) => void;
+  /**
+   * Mermaid handed back a compiled diagram. The caller owns validating it.
+   *
+   * `theme` is the direction the SHELL actually compiled with, echoed on the reply
+   * and parsed as a closed set. The caller must record this rather than re-reading
+   * the document, because a theme switch during the compile would otherwise be
+   * recorded as the theme the diagram was drawn for — and the staleness check would
+   * then agree with the page forever.
+   */
+  readonly onCompiled: (svg: string, theme: FyRenderSandboxTheme) => void;
   /**
    * THE FIRST SUCCESS ACKNOWLEDGEMENT, and it exists so the reader is told.
    *
@@ -275,18 +284,26 @@ export function FyRenderSandbox({
       if (message === null) return;
       if (message.kind === 'error') {
         /**
-         * `render` because the library, or the parent's re-admission gate, was
-         * handed data it refused. The shell's own wording travels as `detail`
-         * and is never the reader's sentence: a Mermaid parse error is a
-         * multi-line jison dump containing a slice of the author's own source.
+         * THE CLASS COMES FROM THE SHELL, never from the sentence.
+         *
+         * `library` is a refused install — the split deploy — and must not tell the
+         * reader their illustration is broken. `render` is what the author's data can
+         * cause. The shell's own wording travels as `detail` and is never the
+         * reader's sentence: a Mermaid parse error is a multi-line jison dump
+         * containing a slice of the author's own source. Matching on that string to
+         * work out which failure it was would make a copy edit change behaviour,
+         * which is the whole reason this arrives typed.
          */
-        fail('render', message.message);
+        fail(message.class, message.message);
         return;
       }
       if (message.kind === 'mermaid-svg') {
         if (done) return;
         done = true;
-        latest.current.onCompiled(message.svg);
+        // The theme the SHELL compiled with, not whatever the document says now. A
+        // reader who switched themes mid-compile would otherwise have the diagram
+        // recorded against a theme it was never drawn for.
+        latest.current.onCompiled(message.svg, message.theme);
         return;
       }
       if (message.kind === 'rendered') {

@@ -58,11 +58,10 @@ import { afterAll, afterEach, beforeAll, describe, test } from 'bun:test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { chromium } from 'playwright-core';
 import should from 'should';
-import { buildFyRenderShell, FY_RENDER_SHELL_ARTIFACTS } from '../../scripts/build-fy-render-libs.ts';
-
-const pkgRoot = resolve(import.meta.dir, '../..');
+import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
+import { sharedChromium } from './support/chromium.ts';
+import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
 /** Set to capture PNGs. Never inside the repository — the artifacts are not source. */
 const evidenceDir = process.env.FY_RENDER_EVIDENCE_DIR ?? null;
@@ -74,72 +73,17 @@ const VIEWPORTS = [
 ] as const;
 
 /**
- * A real animation with a real eased keyframe, because that is what Slice A's
- * grammar used to refuse: it rejected any `"x"` key, and Lottie overloads that key
- * onto bezier easing handles. A fixture without one would pass a grammar that
- * cannot render most real Lottie.
+ * THE FIXTURES LIVE APART FROM THIS FILE, in `fixtures/fy-render-visual-cases.ts`,
+ * because the browser scene needs the same strings and a fixture that differs
+ * between the driver and the page is evidence of nothing. That module imports no
+ * React and no DOM, so reading it here pulls no component graph into the test
+ * runner — which is exactly what the fixture boundary below exists to prevent.
+ *
+ * Reading them here is not decoration: `openScene` checks the name it is given
+ * against this map, so a renamed or mistyped fixture fails in the driver with a
+ * sentence rather than as a blank page whose `throw` happened inside the scene.
  */
-const LOTTIE = JSON.stringify({
-  assets: [],
-  ddd: 0,
-  fr: 30,
-  h: 240,
-  ip: 0,
-  layers: [
-    {
-      ao: 0,
-      bm: 0,
-      ddd: 0,
-      ind: 1,
-      ip: 0,
-      ks: {
-        a: { a: 0, k: [0, 0, 0] },
-        o: { a: 0, k: 100 },
-        p: {
-          a: 1,
-          k: [
-            { i: { x: [0.833], y: [0.833] }, o: { x: [0.167], y: [0.167] }, s: [70, 120, 0], t: 0 },
-            { s: [250, 120, 0], t: 45 },
-          ],
-        },
-        r: {
-          a: 1,
-          k: [
-            { i: { x: [0.5], y: [0.5] }, o: { x: [0.5], y: [0.5] }, s: [0], t: 0 },
-            { s: [360], t: 45 },
-          ],
-        },
-        s: { a: 0, k: [100, 100, 100] },
-      },
-      nm: 'dot',
-      op: 45,
-      shapes: [
-        {
-          it: [
-            { p: { a: 0, k: [0, 0] }, s: { a: 0, k: [90, 90] }, ty: 'el' },
-            { c: { a: 0, k: [0.36, 0.72, 0.94, 1] }, o: { a: 0, k: 100 }, ty: 'fl' },
-            {
-              a: { a: 0, k: [0, 0] },
-              o: { a: 0, k: 100 },
-              p: { a: 0, k: [0, 0] },
-              r: { a: 0, k: 0 },
-              s: { a: 0, k: [100, 100] },
-              ty: 'tr',
-            },
-          ],
-          ty: 'gr',
-        },
-      ],
-      sr: 1,
-      st: 0,
-      ty: 4,
-    },
-  ],
-  nm: 'eased',
-  op: 45,
-  v: '5.7.4',
-  w: 320,
-});
+const caseNames = new Set(Object.keys(FY_RENDER_VISUAL_CASES));
 
 /**
  * WHETHER THE LOTTIE BUNDLE IS SERVABLE, flipped per test.
@@ -173,94 +117,55 @@ let lottieLibraryServable = true;
  */
 let libraryStallMs = 0;
 
-const MERMAID = [
-  'graph TD',
-  '  A[Reader opens a message] --> B{Is there an fy-render block?}',
-  '  B -->|no| C[Ordinary markdown]',
-  '  B -->|yes| D[Offer, do not render]',
-  '  D --> E[Reader presses Render]',
-  '  E --> F[Sandbox frame compiles]',
-  '  F --> G[SVG re-admitted, shown as an image]',
-].join('\n');
-
-/** A jison parse error: the reachable Mermaid failure, and the ugliest wording. */
-const MERMAID_BROKEN = 'graph TD\n  A[Unclosed --> B{{{';
-
-/** On paper this asks for HTML labels. Measured, it compiles like any other. */
-const MERMAID_INIT_DIRECTIVE = `%%{init: {"flowchart": {"htmlLabels": true}}}%%\n${MERMAID}`;
-
-const fence = (type: string, alt: string, payload: string): string => `type: ${type}\nalt: ${alt}\n---\n${payload}`;
-
-const CASES: Record<string, string> = {
-  'init-directive': fence('mermaid', 'A diagram whose author asked for HTML labels', MERMAID_INIT_DIRECTIVE),
-  lottie: fence('lottie', 'A blue dot travelling across the frame', LOTTIE),
-  mermaid: fence('mermaid', 'How an fy-render block reaches the reader', MERMAID),
-  'mermaid-failure': fence('mermaid', 'A diagram that cannot be drawn', MERMAID_BROKEN),
-};
-
-/**
- * The page. It mounts the production component and nothing else, and the module
- * graph is bundled by Bun from the real sources at run time — so a change to
- * `fy-render-block.tsx` is in the next run with no build step to remember.
- */
-const scene = `
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { FyRenderBlock } from ${JSON.stringify(resolve(pkgRoot, 'src/components/fy-render-block.tsx'))};
-import { parseFyRender } from ${JSON.stringify(resolve(pkgRoot, 'src/lib/fy-render.ts'))};
-
-const CASES = ${JSON.stringify(CASES)};
-const which = new URLSearchParams(location.search).get('case') ?? 'mermaid';
-const parsed = parseFyRender(CASES[which]);
-if (!parsed.ok) throw new Error('fixture did not parse: ' + parsed.reason);
-
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <div className="scene-pad">
-      <FyRenderBlock block={parsed.block} />
-    </div>
-  </StrictMode>,
-);
-`;
-
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
+/**
+ * Every path this server was asked for.
+ *
+ * It exists for one claim that cannot be made any other way: that a theme change
+ * requests NOTHING. Counting frames proves no new document was created; only the
+ * server can say no renderer bytes were fetched.
+ */
+const requests: string[] = [];
 /** Every scene's recorded facts, written next to the PNGs. */
 const manifest: Record<string, unknown>[] = [];
-
-const bundle = async (entry: string): Promise<string> => {
-  const built = await Bun.build({ entrypoints: [entry], minify: false, target: 'browser', throw: false });
-  if (!built.success) throw new Error(`${entry} did not build:\n${built.logs.join('\n')}`);
-  const output = built.outputs[0];
-  if (output === undefined) throw new Error(`${entry} produced no output`);
-  return await output.text();
-};
 
 let appCss = '';
 
 beforeAll(async () => {
-  // The artifacts under test are BUILT, never read from a checkout: `public/` is
-  // generated and gitignored, and a stale shell would let this pass against a CSP
-  // nobody deploys.
-  await buildFyRenderShell();
-  const shell = await Bun.file(FY_RENDER_SHELL_ARTIFACTS.shell).text();
-  const mermaidBundle = await Bun.file(FY_RENDER_SHELL_ARTIFACTS.mermaid).text();
-  const lottieBundle = await Bun.file(FY_RENDER_SHELL_ARTIFACTS.lottie).text();
+  /**
+   * EVERY INPUT COMES FROM A CHILD PROCESS, and this file compiles nothing.
+   *
+   * It used to call `Bun.build` three times here — the shell generator, the app
+   * stylesheet, and a scene entry it first WROTE into `.artifacts/`. That last one
+   * traverses the real component graph, and two reviewers independently pinned it
+   * as the operation that never returned when this file runs together with
+   * `fy-render-sandbox.security.test.ts` — which is how `scripts/ci/test.sh int`
+   * runs them, one Bun process for every integration file. It did not fail; it
+   * wedged, asleep with no Chromium alive, consuming the job timeout.
+   *
+   * The loader spawns the builder instead. Everything below is read from a private
+   * `mkdtemp` directory that was freshly built for this run: no `public/`, no
+   * `dist/`, no repository scratch write, and nothing in this process that a
+   * compiler can hang.
+   */
+  // THE BROWSER FIRST — see `support/chromium.ts` and the sibling file's identical
+  // ordering. One memoised launch, reached the same way from both files.
+  browser = await sharedChromium();
 
-  appCss = await bundle(resolve(pkgRoot, 'src/styles/index.css'));
-
-  // Written to the scratch dir Bun.build can read, then bundled from there. The
-  // SCENE is the string above, which is tracked; this file is its build input.
-  const sceneDir = resolve(pkgRoot, '.artifacts/fy-render-visual');
-  await mkdir(sceneDir, { recursive: true });
-  await writeFile(resolve(sceneDir, 'scene.tsx'), scene, 'utf8');
-  const app = await bundle(resolve(sceneDir, 'scene.tsx'));
+  const fixture = await fyRenderIntegrationFixture();
+  const shell = fixture.shell;
+  const mermaidBundle = fixture.mermaid;
+  const lottieBundle = fixture.lottie;
+  appCss = fixture.appCss;
+  const app = fixture.appJs;
 
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
+      requests.push(path);
       const js = { 'content-type': 'text/javascript; charset=utf-8' };
       if (path === '/fy-render-sandbox.html')
         return new Response(shell, {
@@ -300,10 +205,6 @@ body { margin: 0; background: var(--surface-1, #0f1115); color: var(--fg); font-
       );
     },
   });
-
-  const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-  if (chrome === null) throw new Error('❌ no Chromium binary found; this tier is real-browser evidence or nothing');
-  browser = await chromium.launch({ executablePath: chrome, headless: true });
 });
 
 /**
@@ -324,17 +225,16 @@ afterEach(() => {
 });
 
 /**
- * PER FILE, NOT PER RUN — measured with both fy-render integration files in one
- * Bun process, which is how `scripts/ci/test.sh int` runs them: this hook finishes
- * before the sibling file's `beforeAll` starts, so exactly one browser and one
- * server of this file's are ever alive.
+ * THIS FILE'S SERVER GOES; THE BROWSER DOES NOT — see `support/chromium.ts`. It
+ * belongs to the process, and closing it here would restore the relaunch that
+ * wedges the combined run. Every scene closes its own context, which is where
+ * isolation lives.
  */
 afterAll(async () => {
   if (evidenceDir !== null) {
     await mkdir(evidenceDir, { recursive: true });
     await writeFile(resolve(evidenceDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   }
-  await browser?.close();
   await server?.stop(true);
 });
 
@@ -348,16 +248,37 @@ interface Scene {
 const openScene = async (
   which: string,
   viewport: (typeof VIEWPORTS)[number],
-  options: { reducedMotion?: 'reduce' } = {},
+  options: { reducedMotion?: 'reduce'; count?: number } = {},
 ): Promise<Scene> => {
+  if (!caseNames.has(which)) throw new Error(`no such fy-render fixture: ${which}`);
   const context = await browser.newContext({
     colorScheme: 'dark',
     deviceScaleFactor: 2,
     reducedMotion: options.reducedMotion ?? 'no-preference',
+    /**
+     * A REAL PHONE CONTEXT AT THE PHONE VIEWPORT, which the first version of this
+     * file did not have. Without `isMobile`/`hasTouch`, `(pointer: coarse)` is
+     * false, `--target-floor` stays `0px`, and every action button measured 24px
+     * high — so a test titled "thumb-sized at 390x844" asserted only that the
+     * height was above zero. `harness/screenshot.ts` already defines this shape for
+     * the same reason. At 1440x900 the fine-pointer context is the correct one.
+     *
+     * The user agent travels WITH `isMobile`, matching `harness/screenshot.ts`
+     * exactly: `isMobile` alone leaves a desktop UA in place, and this repository
+     * has already been bitten by phone captures that rendered the desktop journey.
+     */
+    ...(viewport.width <= 480
+      ? {
+          hasTouch: true,
+          isMobile: true,
+          userAgent:
+            'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+        }
+      : {}),
     viewport: { height: viewport.height, width: viewport.width },
   });
   const page = await context.newPage();
-  await page.goto(`${server.url.origin}/?case=${which}`);
+  await page.goto(`${server.url.origin}/?case=${which}&count=${options.count ?? 1}`);
   await page.waitForSelector('[data-fy-render-type]');
   return {
     close: async () => await context.close(),
@@ -402,9 +323,24 @@ describe('fy-render component evidence — the served stylesheet', () => {
     should(appCss).not.containEql('max-height:60vh');
     should(appCss).not.containEql('max-height: 60vh');
 
-    // Assert — the frame is refused the pointer. This is the half of the
-    // Escape repair that no object-tree test can see.
-    should(appCss.replaceAll(' ', '')).containEql('pointer-events:none');
+    /**
+     * SCOPED TO THE RULE, because the unscoped version was vacuous.
+     * `pointer-events:none` occurs six times across this app's stylesheets, so a bare
+     * substring test passed with the `.fy-render-frame` declaration deleted. This
+     * matches the declaration inside that rule's own block.
+     *
+     * It is a cheap regression lock, NOT the proof: the property is proven
+     * behaviourally further down, by clicking the frame's centre and asserting
+     * `activeElement` is not the IFRAME — which discriminates, because `tabIndex={-1}`
+     * alone does not stop click-focus on an iframe.
+     */
+    const frameRule = /\.fy-render-frame\s*\{[^}]*\}/u.exec(appCss)?.[0] ?? '';
+    should(frameRule).not.be.empty();
+    should(frameRule.replaceAll(' ', '')).containEql('pointer-events:none');
+    // And the folded diagnostic is monospaced, so a caret rule lines up with the
+    // column it marks.
+    const whyRule = /\.fy-render-why-body\s*\{[^}]*\}/u.exec(appCss)?.[0] ?? '';
+    should(whyRule).containEql('--font-mono');
   });
 });
 
@@ -534,6 +470,26 @@ describe('fy-render component evidence — Mermaid', () => {
         await page.waitForTimeout(150);
         const detail = await page.locator('.fy-render-why-body').innerText();
         should(detail).containEql('Parse error');
+
+        /**
+         * THE FOLD IS MONOSPACED, asserted as a COMPUTED STYLE rather than from the
+         * capture. A jison dump's caret rule only points at the right column in a
+         * fixed-pitch font, and preserving the line breaks in a proportional one fixed
+         * only half the defect.
+         *
+         * The pixels cannot show it HERE: this environment has no monospace font
+         * installed, so the stack falls back to a proportional default and the capture
+         * looks unchanged. That is an environment fact, not a component one — the
+         * computed value is what the rule delivers on a machine with fonts, and it is
+         * the only honest thing to measure in this one.
+         */
+        const detailFont = await page.evaluate(() => {
+          const body = document.querySelector('.fy-render-why-body');
+          return body === null ? '' : getComputedStyle(body).fontFamily;
+        });
+        should(detailFont).match(/mono/iu);
+        // And it keeps its own line breaks, which IS visible in the capture.
+        should(detail).containEql('\n');
         await shot('mermaid-08-failure-unfolded', { detailFirstLine: detail.split('\n')[0] });
         // Opening a wall of machine text must not push the page sideways.
         should(await overflow(page)).equal(0);
@@ -751,10 +707,19 @@ describe('fy-render component evidence — layout and focus', () => {
         await page.waitForSelector('[data-fy-render-sandbox-status="ready"]', { timeout: 40_000 });
         await page.waitForTimeout(400);
 
-        // Assert — four controls, none overflowing, none under the touch floor on
-        // a coarse pointer. This context is a fine pointer, so the floor here is
-        // the desktop one; the coarse-pointer floor is a media query the same
-        // stylesheet carries.
+        /**
+         * Assert — four controls, none overflowing, and at the PHONE viewport none
+         * under the 44px touch floor.
+         *
+         * That floor is only real in a coarse-pointer context. `openScene` gives the
+         * 390×844 scene `isMobile`/`hasTouch` and a phone user agent, so
+         * `(pointer: coarse)` matches and `--target-floor` resolves to 44px. Before
+         * that, every action button measured 24px high and this test — titled
+         * "thumb-sized" — asserted only that the height was above zero.
+         */
+        const coarse = viewport.width <= 480;
+        should(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).equal(coarse);
+
         const buttons = page.locator('.fy-render-actions button');
         should(await buttons.count()).equal(4);
         const row = await page.locator('.fy-render-actions').boundingBox();
@@ -762,12 +727,18 @@ describe('fy-render component evidence — layout and focus', () => {
         for (let index = 0; index < 4; index += 1) {
           const box = await buttons.nth(index).boundingBox();
           boxes.push(box);
-          should(box?.height ?? 0).be.above(0);
+          if (coarse) should(box?.height ?? 0).be.aboveOrEqual(44);
+          else should(box?.height ?? 0).be.above(0);
           // Inside the row's own box in both axes: a control that has escaped the
           // row is what "wraps rather than overflows" is meant to prevent.
           should((box?.x ?? 0) + (box?.width ?? 0)).be.belowOrEqual((row?.x ?? 0) + (row?.width ?? 0) + 1);
         }
-        await shot('layout-01-actions', { actionBoxes: boxes, overflow: await overflow(page), rowBox: row });
+        await shot('layout-01-actions', {
+          actionBoxes: boxes,
+          coarsePointer: coarse,
+          overflow: await overflow(page),
+          rowBox: row,
+        });
         should(await overflow(page)).equal(0);
       } finally {
         await scene.close();
@@ -837,6 +808,155 @@ describe('fy-render component evidence — layout and focus', () => {
       await scene.close();
     }
   }, 120_000);
+
+  test('should include the fold and the source scrollport in the fullscreen tab order', async () => {
+    /**
+     * Arrange — the only state where the fold exists: a real sandbox failure, in
+     * fullscreen. Before the repair the trap's list was [Source, Reload, Exit]; the
+     * summary and the source scrollport both preceded them in DOM order, so the wrap
+     * from Exit landed on Source and BOTH were unreachable in both directions — while
+     * the container claimed `aria-modal="true"`.
+     */
+    const scene = await openScene('mermaid-failure', VIEWPORTS[1]);
+    const { page, shot } = scene;
+
+    try {
+      await press(page, /Render illustration/);
+      await page.waitForSelector('[data-fy-render-sandbox-status="failed"]', { timeout: 40_000 });
+      await press(page, /Fullscreen/);
+      await page.waitForSelector('[role="dialog"]');
+
+      // A stable description of whatever holds focus, so the sequence is readable.
+      const focused = async (): Promise<string> =>
+        await page.evaluate(() => {
+          const element = document.activeElement;
+          if (element === null) return 'none';
+          if (element.tagName === 'SUMMARY') return 'summary';
+          if (element.getAttribute('data-fy-render-source') === 'true') return 'scrollport';
+          if (element.tagName === 'BUTTON') return `button:${(element.textContent ?? '').trim()}`;
+          if (element.getAttribute('role') === 'dialog') return 'dialog';
+          return element.tagName.toLowerCase();
+        });
+
+      // Act — from Exit, which is the last control, so this is the forward wrap.
+      await page.getByRole('button', { name: /Exit fullscreen/ }).focus();
+      should(await focused()).match(/^button:Exit/u);
+      await page.keyboard.press('Tab');
+
+      // Assert — THE WRAP LANDS ON THE FIRST IN-DIALOG FOCUSABLE ITEM, which is the
+      // fold's summary. Landing on Source would mean the summary is still skipped.
+      should(await focused()).equal('summary');
+
+      // Act / Assert — and walking forward reaches the scrollport before the controls.
+      const order = [await focused()];
+      for (let step = 0; step < 4; step += 1) {
+        await page.keyboard.press('Tab');
+        order.push(await focused());
+      }
+      await shot('focus-04-fullscreen-tab-order', { order });
+      /**
+       * THE WHOLE SEQUENCE, EXACTLY. The requirement names all five stops and their
+       * order, so a missing, extra or reordered control has to fail — a loose
+       * "contains a button" check would pass with the scrollport back to being
+       * skipped, or with Reload gone.
+       */
+      should(order).eql(['summary', 'scrollport', 'button:Source', 'button:Reload', 'button:Exit fullscreen']);
+      // Escape still closes from wherever the walk ended.
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(150);
+      should(await page.locator('[role="dialog"]').count()).equal(0);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  test('should create no frame and no request when the theme changes under three blocks', async () => {
+    /**
+     * Arrange — the unbounded-N defect, measured where the fetches are real. The old
+     * behaviour remounted every compiled block's frame on one theme toggle, each
+     * refetching a multi-megabyte renderer. Three blocks is enough to tell a bounded
+     * outcome from an unbounded one.
+     */
+    const rendererRequests = (): number => requests.filter(path => path === '/fy-render-mermaid.js').length;
+    // Captured BEFORE the scene exists, so the three-block delta is attributable.
+    const beforeScene = rendererRequests();
+    const scene = await openScene('mermaid', VIEWPORTS[1], { count: 3 });
+    const { page, shot } = scene;
+
+    try {
+      // `.first()` each time, never `.all()`: pressing a gate turns it into Reload, so
+      // the matching set shrinks and locators bound to nth-indexes stop resolving.
+      for (let block = 0; block < 3; block += 1) await press(page, /Render illustration/);
+      await page.waitForFunction(() => document.querySelectorAll('img[data-fy-render-diagram="true"]').length === 3, {
+        timeout: 60_000,
+      });
+      should(await page.locator('iframe').count()).equal(0);
+
+      /**
+       * THE BASELINE IS NON-ZERO, WHICH IS ALL IT CAN HONESTLY BE.
+       *
+       * A per-block quantum was tried and abandoned on measurement: three identical
+       * blocks produced EIGHT renderer requests, not a multiple of three. The scene
+       * mounts under `StrictMode`, which replays mount effects, and the parent fetches
+       * with `cache: 'no-cache'`, so the browser coalesces some revalidations and
+       * per-block cost is genuinely not uniform. Dividing by three would have asserted
+       * a number the environment does not produce.
+       *
+       * What the requirement actually needs is the CONTRAST, and both halves are exact
+       * where it matters: a theme change under three diagrams costs EXACTLY ZERO
+       * further requests, and a reader's Reload costs more than zero while leaving the
+       * other two blocks untouched. Unbounded fan-out would fail the first assertion
+       * outright.
+       */
+      should(rendererRequests() - beforeScene).be.above(0);
+      const requestsBefore = rendererRequests();
+
+      // Act — one global theme mutation, exactly what the app's theme toggle does.
+      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'mission-light'));
+      await page.waitForTimeout(1_200);
+
+      // Assert — all three diagrams remain, NO frame was created, and NOT ONE further
+      // renderer byte was requested. Each block says the theme changed and names Reload.
+      should(await page.locator('img[data-fy-render-diagram="true"]').count()).equal(3);
+      should(await page.locator('iframe').count()).equal(0);
+      should(rendererRequests()).equal(requestsBefore);
+      should(await page.locator('[data-fy-render-sandbox-status="stale"]').count()).equal(3);
+      should((await page.locator('[data-fy-render-sandbox-status="stale"]').first().innerText()).trim()).equal(
+        'The theme changed. Reload to redraw this diagram.',
+      );
+      await shot('theme-01-three-blocks-stale', {
+        diagrams: 3,
+        frames: 0,
+        rendererRequests: requestsBefore,
+      });
+
+      // Act — ONE reader gesture redraws ONE block, which is the whole point.
+      await press(page, /Reload/);
+      // Wait for the OUTCOME rather than a fixed delay: a warm bundle compiles in well
+      // under a second, so asserting "a frame exists" here is a race the frame usually
+      // loses — it is destroyed the moment it yields a diagram.
+      // Both conditions, because they settle at different moments: Reload clears the
+      // old compile immediately (stale drops to two) and the redraw lands later (the
+      // third diagram returns). Waiting on only the first samples a block mid-compile.
+      await page.waitForFunction(
+        () =>
+          document.querySelectorAll('[data-fy-render-sandbox-status="stale"]').length === 2 &&
+          document.querySelectorAll('img[data-fy-render-diagram="true"]').length === 3,
+        { timeout: 60_000 },
+      );
+
+      // Assert — ONE block left the stale state and the renderer was fetched again,
+      // while the other two stayed exactly as they were. Work follows gestures, not
+      // the number of diagrams on screen.
+      should(await page.locator('[data-fy-render-sandbox-status="stale"]').count()).equal(2);
+      should(rendererRequests()).be.above(requestsBefore);
+      // The reloaded block came back as a diagram, and the other two never lost theirs.
+      should(await page.locator('img[data-fy-render-diagram="true"]').count()).equal(3);
+      should(await page.locator('[data-fy-render-sandbox-status="ready"]').count()).equal(1);
+    } finally {
+      await scene.close();
+    }
+  }, 180_000);
 
   test('should return focus to the control that opened the overlay', async () => {
     // Arrange — the other half of the contract: a dialog you can open from the

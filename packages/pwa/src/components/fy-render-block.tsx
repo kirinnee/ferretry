@@ -90,6 +90,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import {
   FY_RENDER_LIMITS,
+  type FyRenderSandboxTheme,
   fyRenderMermaidSvg,
   fyRenderPayloadBytes,
   fyRenderPresentation,
@@ -405,21 +406,27 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
    * somebody with the words "The compiled diagram contains a <foreignObject>
    * element", which is developer wording in a transcript.
    *
-   * Say honestly how reachable that is: measured in real Chromium against the
-   * shipped config, an in-diagram `%%{init}%%` directive asking for HTML labels
-   * compiles to byte-identical SVG with no `<foreignObject>`, so this refusal is
-   * currently untriggered — a guard against a future Mermaid release rather than a
-   * path a reader walks. The reachable `mermaid` failure is a parse error, whose
-   * wording is worse: a multi-line jison dump quoting the author's own source.
+   * HOW REACHABLE IS IT, exactly: not, today. Measured in real Chromium against the
+   * shipped `securityLevel: 'strict'` config, both spellings of an in-diagram
+   * `%%{init}%%` directive asking for HTML labels compile to SVG byte-identical to
+   * the plain diagram, carrying no `<foreignObject>`. So this refusal is a
+   * FAIL-CLOSED GUARD against a future Mermaid release changing that — not a fallback
+   * path any reader walks, and it must not be described as one. The reachable
+   * `mermaid` author failure is a parse error, whose wording is the worse of the two:
+   * a multi-line jison dump quoting a slice of the author's own source.
    */
   const onCompiled = useCallback(
-    (svg: string): void => {
+    (svg: string, theme: FyRenderSandboxTheme): void => {
       const admitted = fyRenderMermaidSvg(svg);
       if (!admitted.ok) {
         failSandbox({ detail: admitted.reason, kind: 'render' });
         return;
       }
-      setCompiled({ svg: admitted.svg, theme: documentTheme() });
+      // THE SHELL'S OWN THEME, never `documentTheme()` read here. A reader who
+      // switched during the compile would otherwise have the diagram recorded
+      // against a theme it was never drawn for, and the staleness check below would
+      // then agree with the document forever.
+      setCompiled({ svg: admitted.svg, theme });
       setSandboxReady(true);
     },
     [failSandbox],
@@ -429,35 +436,50 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
   const onRendered = useCallback((): void => setSandboxReady(true), []);
 
   /**
-   * A COMPILED DIAGRAM BELONGS TO THE THEME THAT COMPILED IT, so a theme switch
-   * invalidates it and the frame draws it again.
+   * A THEME SWITCH MARKS A DIAGRAM STALE. It does not redraw it.
    *
-   * Consent is NOT withdrawn: the reader approved these exact bytes and that
-   * decision is untouched by a repaint. Dropping `compiled` alone puts the block
-   * back into its `framed` state, which remounts the frame and recompiles against
-   * the theme now on the document — the same route Reload takes, without asking
-   * the reader to know that Reload was the remedy.
+   * The first repair dropped `compiled` when the theme changed, which put the block
+   * back into its `framed` state and recompiled. That was right about the problem —
+   * Mermaid bakes the painting direction into the SVG, and this app ships 22 themes,
+   * so a dark diagram stranded on a light surface is unreadable — and wrong about the
+   * remedy in two ways.
    *
-   * WHY AN OBSERVER RATHER THAN A RENDER-TIME READ. `documentTheme()` is external
-   * mutable state that React does not subscribe to, so comparing it during render
-   * would only notice a switch that happened to coincide with a re-render of this
-   * row. The attribute filter is the same idiom `session-terminal-deck.tsx` uses
-   * to repaint xterm, and the guard makes this cost nothing for the blocks that
-   * hold no diagram — which is every block in a transcript except the compiled
-   * ones.
+   * It was UNBOUNDED IN N. The observer is per block, so a reader who had consented
+   * to ten diagrams and then toggled the theme caused ten simultaneous frame
+   * remounts, each fetching a multi-megabyte renderer and running a fresh compile.
+   * This component's own doctrine is that a decoder mounts only on a gesture aimed at
+   * rendering, and a theme toggle is not that gesture.
+   *
+   * It also RACED. Recording `documentTheme()` when the diagram arrived meant a
+   * switch DURING the compile was recorded as the theme the diagram was drawn for, so
+   * the check then agreed with the document and the mismatched diagram survived until
+   * a manual Reload. The shell now echoes the theme it actually used, which closes
+   * that from the other end.
+   *
+   * So staleness is DERIVED and the reader is told. The diagram stays on screen,
+   * consent is untouched, no frame is created and nothing is fetched; the status
+   * region says the theme changed and names Reload as the remedy — the one thing the
+   * original defect never did. Switching back before reloading clears the note by
+   * itself, because a derived comparison has nothing to undo.
+   *
+   * `session-terminal-deck.tsx` uses the same attribute-filtered observer idiom to
+   * repaint xterm; the difference is that this one only records a fact.
    */
+  const [liveTheme, setLiveTheme] = useState<FyRenderSandboxTheme>(documentTheme);
   useEffect(() => {
+    // Only a compiled diagram can go stale, so no observer exists for the blocks that
+    // hold none — which is every block in a transcript except the compiled ones.
     if (compiled === null || typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(() => {
-      if (compiled.theme === documentTheme()) return;
-      setCompiled(null);
-      // The frame is about to start over, so the wait is visible again rather
-      // than a stale "ready" over a blank plane.
-      setSandboxReady(false);
-    });
+    // Sync on attach: the document may have been repainted while this block held no
+    // diagram, and the state above would still carry the theme read at mount.
+    setLiveTheme(documentTheme());
+    const observer = new MutationObserver(() => setLiveTheme(documentTheme()));
     observer.observe(document.documentElement, { attributeFilter: ['data-theme'], attributes: true });
     return () => observer.disconnect();
   }, [compiled]);
+
+  /** True only while a diagram drawn for one mode is sitting on the other. */
+  const themeStale = compiled !== null && compiled.theme !== liveTheme;
 
   const preview = block.source.slice(0, FY_RENDER_LIMITS.sourcePreviewCharacters);
   const truncated = block.source.length > preview.length;
@@ -518,8 +540,16 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
    * changes is the reliable shape, and there is no gesture before consent for it
    * to describe anyway.
    */
-  const sandboxPhase: 'idle' | 'preparing' | 'ready' | 'failed' =
-    sandboxError !== null ? 'failed' : diagram || (framed && sandboxReady) ? 'ready' : framed ? 'preparing' : 'idle';
+  const sandboxPhase: 'idle' | 'preparing' | 'ready' | 'stale' | 'failed' =
+    sandboxError !== null
+      ? 'failed'
+      : themeStale
+        ? 'stale'
+        : diagram || (framed && sandboxReady)
+          ? 'ready'
+          : framed
+            ? 'preparing'
+            : 'idle';
 
   /** Absent for `lifetime`, which is the whole point of `sandboxTone`. */
   const sandboxToneAttribute = sandboxError === null ? undefined : sandboxTone(sandboxError.kind);
@@ -527,11 +557,16 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
   const sandboxStatus =
     sandboxError !== null
       ? sandboxFailureSentence(block.type, sandboxError.kind)
-      : sandboxPhase === 'ready'
-        ? `The ${humanType[block.type]} illustration is ready.`
-        : sandboxPhase === 'preparing'
-          ? `Preparing the ${humanType[block.type]} renderer…`
-          : '';
+      : sandboxPhase === 'stale'
+        ? // NAMES THE REMEDY, because the reader cannot be expected to know that
+          // Reload is what redraws a diagram. The old behaviour redrew silently and
+          // the behaviour before that left an unreadable diagram with nothing said.
+          'The theme changed. Reload to redraw this diagram.'
+        : sandboxPhase === 'ready'
+          ? `The ${humanType[block.type]} illustration is ready.`
+          : sandboxPhase === 'preparing'
+            ? `Preparing the ${humanType[block.type]} renderer…`
+            : '';
 
   /**
    * THE STREAMED DECODE FAILURE STAYS IN THE STAGE, AND STAYS SILENT.
@@ -727,7 +762,32 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
             </div>
           ) : null}
           {showSource ? (
-            <div className="kt-fs-code scroll-thin" data-fy-render-source="true" id={sourcePanelId}>
+            /**
+             * A KEYBOARD-REACHABLE SCROLLPORT, and it needs saying explicitly.
+             *
+             * This panel is `overflow-x: auto` and an authored payload is routinely
+             * one enormous line — a Lottie source measured 5194px wide inside a
+             * 336px box. Chromium 127+ focuses such a scroller natively, so a
+             * pointer reader could always pan it; a keyboard reader could not,
+             * because `useDialogFocus`'s selector matches no attribute this element
+             * carried, and inline there was no way to give it the keyboard at all.
+             * `tabIndex={0}` fixes both at once: it enters the app's shared
+             * focusable list AND becomes a tab stop outside fullscreen.
+             *
+             * A NAMED `<section>` is what stops that stop being a mystery. A focusable
+             * box with no accessible name announces as nothing; a named `<section>`
+             * carries the region role implicitly, so it says what it holds without an
+             * explicit `role`. `aria-label` rather than a visible heading, because the
+             * control that opened it is already labelled Source.
+             */
+            <section
+              aria-label={`Authored ${humanType[block.type]} source`}
+              className="kt-fs-code scroll-thin"
+              data-fy-render-source="true"
+              id={sourcePanelId}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollport must be a tab stop, see above
+              tabIndex={0}
+            >
               <pre className="kt-fs-pre">
                 <code>{preview}</code>
               </pre>
@@ -736,7 +796,7 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
                   Source preview truncated at {FY_RENDER_LIMITS.sourcePreviewCharacters} characters.
                 </div>
               ) : null}
-            </div>
+            </section>
           ) : null}
           <figcaption className="fy-render-caption">{block.alt}</figcaption>
         </figure>

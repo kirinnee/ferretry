@@ -37,6 +37,8 @@
         "harness/fy-render-safari/parent.ts",
         "harness/fy-render-safari/probe-shell.ts",
         "scripts/build-fy-render-libs.ts",
+        "scripts/build-fy-render-integration-fixture.ts",
+        "tests/integration/fixtures/fy-render-visual-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
         "scripts/fy-render-shell/lottie-entry.ts"

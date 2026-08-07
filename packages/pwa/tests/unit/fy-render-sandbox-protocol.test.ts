@@ -32,9 +32,10 @@ describe('fy-render sandbox message parsing', () => {
     // Assert — the closed set, spelled out. A sixth shape has to be added here
     // before it can reach the renderer.
     should(parseFyRenderSandboxMessage({ kind: 'shell-ready' })).eql({ kind: 'shell-ready' });
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>' })).eql({
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 'light' })).eql({
       kind: 'mermaid-svg',
       svg: '<svg/>',
+      theme: 'light',
     });
     should(parseFyRenderSandboxMessage({ height: 200, kind: 'rendered', width: 320 })).eql({
       height: 200,
@@ -45,10 +46,44 @@ describe('fy-render sandbox message parsing', () => {
       kind: 'playing',
       playing: false,
     });
-    should(parseFyRenderSandboxMessage({ kind: 'error', message: 'nope' })).eql({
+    should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: 'nope' })).eql({
+      class: 'render',
       kind: 'error',
       message: 'nope',
     });
+    should(parseFyRenderSandboxMessage({ class: 'library', kind: 'error', message: 'nope' })).eql({
+      class: 'library',
+      kind: 'error',
+      message: 'nope',
+    });
+  });
+
+  test('should refuse a forged or absent machine class rather than defaulting it', () => {
+    /**
+     * Assert — the class decides whether the reader is told their ILLUSTRATION could
+     * not be rendered or that the RENDERER could not be loaded, and a split deploy is
+     * the second. Defaulting an unrecognised value would put the parent back to
+     * guessing, and its only available guess is the one that blames the author.
+     */
+    should(parseFyRenderSandboxMessage({ kind: 'error', message: 'nope' })).be.null();
+    should(parseFyRenderSandboxMessage({ class: 'deadline', kind: 'error', message: 'nope' })).be.null();
+    should(parseFyRenderSandboxMessage({ class: '', kind: 'error', message: 'nope' })).be.null();
+    should(parseFyRenderSandboxMessage({ class: 1, kind: 'error', message: 'nope' })).be.null();
+    should(parseFyRenderSandboxMessage({ class: null, kind: 'error', message: 'nope' })).be.null();
+  });
+
+  test('should refuse a forged or absent compile theme rather than defaulting it', () => {
+    /**
+     * Assert — the echoed theme is what the staleness check compares against, so a
+     * forged or missing value would let a diagram be recorded against a theme it was
+     * never drawn for. That is the exact race the echo exists to close, and a default
+     * would reintroduce it.
+     */
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>' })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 'studio-dark' })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 'DARK' })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 1 })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: null })).be.null();
   });
 
   test('should refuse a message carrying a key its shape does not name', () => {
@@ -57,10 +92,10 @@ describe('fy-render sandbox message parsing', () => {
     // be answering whoever that is. Without this, a `shell-ready` could smuggle
     // arbitrary payload past the handshake.
     should(parseFyRenderSandboxMessage({ kind: 'shell-ready', source: 'x' })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', library: 'x', svg: '<svg/>' })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', library: 'x', svg: '<svg/>', theme: 'dark' })).be.null();
     should(parseFyRenderSandboxMessage({ extra: 1, height: 2, kind: 'rendered', width: 2 })).be.null();
     should(parseFyRenderSandboxMessage({ kind: 'playing', playing: true, speed: 2 })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'error', message: 'a', stack: 'b' })).be.null();
+    should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: 'a', stack: 'b' })).be.null();
   });
 
   test('should refuse a message missing a key its shape requires', () => {
@@ -73,9 +108,9 @@ describe('fy-render sandbox message parsing', () => {
 
   test('should refuse a field of the wrong type', () => {
     // Assert
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: 42 })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: 42, theme: 'dark' })).be.null();
     should(parseFyRenderSandboxMessage({ kind: 'playing', playing: 'yes' })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'error', message: { toString: () => 'x' } })).be.null();
+    should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: { toString: () => 'x' } })).be.null();
   });
 
   test('should REFUSE an over-cap error string rather than truncate it', () => {
@@ -87,8 +122,9 @@ describe('fy-render sandbox message parsing', () => {
     // message the shell could not have built into one that passes, so the bound
     // stops being evidence of anything. The shell clips its own strings, so an
     // over-cap arrival means the sender is not the shell.
-    should(parseFyRenderSandboxMessage({ kind: 'error', message: overCap })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'error', message: atCap })).eql({
+    should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: overCap })).be.null();
+    should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: atCap })).eql({
+      class: 'render',
       kind: 'error',
       message: atCap,
     });
@@ -100,7 +136,7 @@ describe('fy-render sandbox message parsing', () => {
 
     // Assert — the shell caps this before it leaves the port, so reaching here
     // over-cap means the cap on the far side did not run.
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: oversized })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: oversized, theme: 'dark' })).be.null();
   });
 
   test('should refuse dimensions that are not whole numbers inside the canvas bound', () => {
