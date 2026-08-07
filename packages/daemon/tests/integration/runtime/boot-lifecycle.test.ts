@@ -7,6 +7,7 @@ import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
   BrowserLoginStatusSchema,
+  ConversationMessagePointSchema,
   DaemonCarriersViewSchema,
   type FyEventStreamFrame,
   FyEventStreamFrameSchema,
@@ -26,12 +27,14 @@ import {
   SessionConfigSchema,
   SessionListSchema,
   SessionStateSchema,
+  SessionTranscriptPageSchema,
   type SessionView,
   SessionViewSchema,
   SocketTicketResponseSchema,
   type SttEnhancementResult,
   TerminalListViewSchema,
   TerminalViewSchema,
+  TranscriptProvenanceSchema,
   WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -45,8 +48,15 @@ import {
   type BunRelayCarrier,
 } from '../../../src/adapters/index.ts';
 import {
+  FileSessionTranscriptMessageTokenCodec,
+  sessionMessageTokenKeyFile,
+} from '../../../src/adapters/session/transcript/file-message-token-codec.ts';
+import { NodeTranscriptSource } from '../../../src/adapters/transcript/index.ts';
+import {
   type BootNoticePort,
   DEFAULT_CALLSIGN_POOL,
+  CodexTranscriptParser,
+  digestConversation,
   EXIT_ADDRESS_CONFLICT,
   EXIT_ALREADY_RUNNING,
   MigrationPreflight,
@@ -59,12 +69,14 @@ import {
   type RelayCarrierSource,
   type ResumeLauncher,
   SESSION_ID_VARIABLE,
+  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   SocketTicketRegistry,
   sessionPaneEnvironment,
   type TerminalRecord,
   type TerminalRuntimePort,
+  verifySessionTranscriptMessageToken,
 } from '../../../src/lib/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
@@ -308,7 +320,16 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
     this.live.add(record.config.tmuxSession);
   }
 
-  async deliver(_record: SessionLifecycleRecord, instruction: string): Promise<void> {
+  async ready(_record: SessionLifecycleRecord): Promise<void> {
+    // The fake has no terminal prompt to poll; a completed launch is immediately ready.
+  }
+
+  async deliver(
+    _record: SessionLifecycleRecord,
+    instruction: string,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<void> {
+    await beforeWrite?.();
     this.delivered.push(instruction);
   }
 
@@ -721,6 +742,128 @@ describe('daemon boot lifecycle', () => {
     should(afterStop).be.undefined();
     // The API tokens were minted into the home, which only a boot that reached the server does.
     should(await readdir(home)).containEql('api-token');
+  });
+
+  it('should resolve Codex provenance before one message read and issue against the persisted context', async () => {
+    // Arrange: a real Codex home whose one rollout did not exist at session creation. The opening
+    // row carries this session's private correlation token, which is the resolver's ownership proof.
+    const home = await tempDirectory('fyd-message-discovery');
+    const codexHome = await tempDirectory('fyd-message-discovery-codex');
+    const port = await freeLoopbackPort();
+    const at = '2026-08-06T12:00:00.000Z';
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, at);
+    const correlationToken = join(home, 'state', 'sessions', SESSION_ID);
+    const rolloutId = '11111111-2222-4333-8444-555555555555';
+    const rolloutDirectory = join(codexHome, 'sessions', '2026', '08', '06');
+    const rolloutFile = join(rolloutDirectory, `rollout-2026-08-06-${rolloutId}.jsonl`);
+    const selectedText = `Read ${correlationToken}/turns/turn-001.md now, then fork this row.`;
+    await mkdir(rolloutDirectory, { recursive: true });
+    await writeFile(
+      rolloutFile,
+      `${[
+        JSON.stringify({ type: 'session_meta', payload: { id: rolloutId, cwd: home } }),
+        JSON.stringify({
+          type: 'response_item',
+          payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: selectedText }] },
+        }),
+      ].join('\n')}\n`,
+    );
+    process.env.FY_HOME = home;
+    const seeded = await buildWorld().storage.open();
+    const id = parseSessionId(SESSION_ID);
+    const config = SessionConfigSchema.parse(await seeded.storage.readConfig(id));
+    await seeded.storage.writeConfig(id, {
+      ...config,
+      agent: 'codex-auto',
+      harness: 'codex',
+      modelHint: 'terra',
+      model: 'gpt-5.6-terra',
+      transcript: {
+        v: 1,
+        home: codexHome,
+        identity: 'undiscovered',
+        baseline: [],
+        correlationToken,
+      },
+    });
+    await seeded.storage.append(id, 'session.created', { agent: 'codex-auto' });
+    await seeded.storage.close();
+
+    // Act: the first GET itself performs discovery. Production must persist it, re-read that
+    // completed record, and only then perform the transcript-byte read that produces this token.
+    const exit = start(world, cleanups);
+    const base = `http://127.0.0.1:${String(port)}`;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const response = await fetch(`${base}/v1/sessions/${SESSION_ID}/messages?limit=1`, {
+      headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+    });
+    const page = SessionTranscriptPageSchema.parse(await response.json());
+    const completed = SessionConfigSchema.parse(
+      JSON.parse(await readFile(join(home, 'state', 'sessions', SESSION_ID, 'config.json'), 'utf8')),
+    );
+    const message = page.messages[0];
+    if (message === undefined || completed.transcript === undefined)
+      throw new Error('the first message read did not return one row under completed provenance');
+    const batch = await new NodeTranscriptSource(new CodexTranscriptParser()).read(rolloutFile, {
+      sessionId: SESSION_ID,
+    });
+    const digest = digestConversation(SESSION_ID, batch, message.point);
+    const evidence = digest.selectionEvidence;
+    if (evidence === undefined) throw new Error('the production parser read carried no row commitment');
+    const keyFile = sessionMessageTokenKeyFile(join(home, 'state'));
+    const verifier = new FileSessionTranscriptMessageTokenCodec(keyFile, () => {
+      throw new Error('the GET must already have durably published its token key');
+    });
+    should(evidence.rawPrefix.byteLength).equal(32);
+    should(ConversationMessagePointSchema.safeParse(message.point).success).equal(true);
+    should(TranscriptProvenanceSchema.safeParse(completed.transcript).success).equal(true);
+    const context = {
+      sessionId: SESSION_ID,
+      incarnation: completed.incarnation,
+      provenance: completed.transcript,
+    };
+    const wrongIncarnationVerdict = await verifySessionTranscriptMessageToken(
+      verifier,
+      SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+      { ...context, incarnation: `${completed.incarnation}-wrong` },
+      message.point,
+      evidence.rawPrefix,
+      message.selectionBinding,
+    );
+    const verdict = await verifySessionTranscriptMessageToken(
+      verifier,
+      SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+      context,
+      message.point,
+      evidence.rawPrefix,
+      message.selectionBinding,
+    );
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert: issuing against the pre-resolution `undiscovered` snapshot would make this exact
+    // verification stale. Acceptance proves the GET used the persisted correlated record instead.
+    should(code).equal(0);
+    should(response.status).equal(200);
+    should(page.sessionId).equal(SESSION_ID);
+    should(page.messages.map(row => row.text)).eql([selectedText]);
+    should(completed.transcript.identity).equal('correlated');
+    should(completed.transcript.harnessSessionId).equal(rolloutId);
+    should(completed.transcript.file).equal(rolloutFile);
+    should(wrongIncarnationVerdict).equal('stale');
+    should(verdict).equal('accepted');
   });
 
   it('should mint, redeem, persist and authenticate a pairing through the production composition root', async () => {
@@ -1248,6 +1391,127 @@ describe('daemon boot lifecycle', () => {
     should((await wrongDigest.json()) as { code: string }).have.property('code', 'request_id_reused');
     // A request id no start ever carried is the honest miss: that start never reached the daemon.
     should(neverSent.status).equal(404);
+  });
+
+  /**
+   * Spawn ancestry cannot come from the mounted fleet list, even though both project the same four
+   * configuration fields. That list deliberately omits an unusable session so one damaged record
+   * does not take `fy ps` down; lineage needs the opposite answer, because omitting a damaged parent
+   * turns "the parent cannot be read" into the false fact that no parent exists and writes an
+   * unshielded stamp onto its child.
+   *
+   * Both production callers are pinned here. An ordinary start must refuse before launch, while a
+   * relaunch that already replaced its pane remains successful but leaves its legacy missing stamp
+   * untouched. Writing `wardenLineage: false` in the latter case would make the swallowed recorder
+   * failure indistinguishable from a proved negative on the next read.
+   */
+  it('should refuse a damaged indexed parent instead of excluding it from spawn ancestry', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-spawn-ancestry-damaged');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    const at = '2026-08-06T10:00:00.000Z';
+    const parentId = 'wire-warden-parent';
+    const legacyChildId = 'wire-legacy-child';
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: () => reviver,
+    };
+    await seedFleet(home);
+    await seedSession(home, at, parentId);
+    await seedSession(home, at, legacyChildId, { status: 'stopped' });
+    // These two records predate spawn stamping: the parent is recognisable as a warden by its label,
+    // and the child still needs its first relaunch stamp. Written through storage so both ids are in
+    // the authoritative index before the daemon opens it.
+    process.env.FY_HOME = home;
+    const seeded = await buildWorld().storage.open();
+    const parentConfig = SessionConfigSchema.parse(await seeded.storage.readConfig(parseSessionId(parentId)));
+    const childConfig = SessionConfigSchema.parse(await seeded.storage.readConfig(parseSessionId(legacyChildId)));
+    await seeded.storage.writeConfig(parseSessionId(parentId), { ...parentConfig, label: 'fleet-warden' });
+    await seeded.storage.writeConfig(parseSessionId(legacyChildId), { ...childConfig, parent: parentId });
+    await seeded.storage.close();
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-ferretry-client': 'cli',
+    };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const parentFile = join(home, 'state', 'sessions', parentId, 'config.json');
+    const readableParent = SessionConfigSchema.parse(JSON.parse(await readFile(parentFile, 'utf8')));
+    // Corrupt the record AFTER boot, so the index still authoritatively names it while the public
+    // list's intentional safeParse filtering omits it.
+    await writeFile(
+      parentFile,
+      JSON.stringify({
+        ...readableParent,
+        provenance: {
+          v: 1,
+          at,
+          origin: 'warden',
+          wardenLineage: true,
+          lineageSource: 'none',
+        },
+      }),
+      { mode: 0o600 },
+    );
+
+    // Act
+    const listedBefore = SessionListSchema.parse(await (await fetch(sessions, { headers })).json());
+    const refused = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...headers, 'x-fy-request-id': 'req-damaged-ancestry-1' },
+      body: JSON.stringify({
+        agent: WRAPPER,
+        mode: 'auto',
+        prompt: 'must not launch without ancestry',
+        parent: parentId,
+        cwd: home,
+      }),
+    });
+    const refusedBody = (await refused.json()) as { code: string };
+    const relaunched = await fetch(`${sessions}/${legacyChildId}/resume`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ message: 'resume without weakening the shield' }),
+    });
+    const relaunchedBody = SessionViewSchema.parse(await relaunched.json());
+    const listedAfter = SessionListSchema.parse(await (await fetch(sessions, { headers })).json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // This omission is the mounted list's documented availability policy and the reason ancestry
+    // must enumerate the index separately. The valid legacy child remains visible beside the hole.
+    should(listedBefore.map(session => session.config.id)).deepEqual([legacyChildId]);
+    // The ordinary start read every indexed ancestor and failed before it claimed a pane. Under the
+    // old list-based snapshot this returned 201 with `wardenLineage: false`.
+    should(refused.status).equal(500);
+    should(refusedBody.code).equal('internal_error');
+    should(launcher.launched).have.length(0);
+    // The relaunch itself already happened and therefore remains successful. Its recorder hit the
+    // same strict snapshot, was swallowed at the documented recovery boundary, and wrote no false
+    // negative over the legacy absence.
+    should(relaunched.status).equal(200);
+    should(reviver.relaunched).deepEqual([legacyChildId]);
+    should(relaunchedBody.config.provenance).be.undefined();
+    should(listedAfter.map(session => session.config.id)).deepEqual([legacyChildId]);
+    should(listedAfter[0]?.config.provenance).be.undefined();
   });
 
   /**

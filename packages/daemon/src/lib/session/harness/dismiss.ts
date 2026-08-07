@@ -41,10 +41,10 @@ export type PickerDismissStep =
   /** Stop. The pane cannot be confirmed idle, so the session must be quarantined. */
   | { readonly kind: 'unconfirmed'; readonly reason: string };
 
-/** tmux pane ids are `%<digits>`; anything else is not an address cleanup may act
- *  on, and resolving one is the only thing that pins cleanup to a single pane. */
+/** tmux pane ids are `%0` or `%<nonzero digit><digits>`; leading-zero aliases and anything else are
+ *  not addresses cleanup may act on, and resolving one is what pins cleanup to a single pane. */
 export function isAddressablePaneId(paneId: string): boolean {
-  return /^%\d+$/.test(paneId);
+  return /^%(?:0|[1-9][0-9]*)$/u.test(paneId);
 }
 
 /** What the pane is showing, for a message a human has to act on. */

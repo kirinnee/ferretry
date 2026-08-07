@@ -9,7 +9,7 @@
 import type { RuntimeControlRequest, SessionView } from '@ferretry/protocol';
 import { isPickerQuarantined, pickerInputRefusal } from '../harness/quarantine.ts';
 import type { HarnessRuntimeSwitchRequest } from '../harness/runtime-switch.ts';
-import { TERMINAL_SEND_STATUSES } from '../send/types.ts';
+import type { LifecycleSessionStatus } from '../lifecycle/types.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
 
 /**
@@ -19,12 +19,21 @@ import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
  * session document alone. The pane checks need an observation the caller has to go and take, and
  * taking it before the document has refused would touch tmux for a session that was never eligible.
  */
-export function documentRefusal(view: SessionView, clientName: string): SessionRuntimeError | undefined {
-  // The SEND domain's set, not a second copy of it. It answers exactly the question asked here — the
-  // statuses from which a pane is not a place to type — and a runtime control is a keystroke into the
-  // same composer a send uses. Two lists would eventually disagree about `interrupted`.
-  if (TERMINAL_SEND_STATUSES.has(view.state.status))
-    return new SessionRuntimeError('refused', 'a runtime control requires a running session');
+export function documentRefusal(
+  view: SessionView,
+  clientName: string,
+  admits: LifecycleSessionStatus,
+): SessionRuntimeError | undefined {
+  // EXACTLY ONE STATUS PER CALLER. Public controls may drive only a running session; fork startup
+  // may drive only a starting one. A broader "non-terminal" gate lets the mounted route enter a
+  // fork's startup window and race the picker from a different caller.
+  if (view.state.status !== admits)
+    return new SessionRuntimeError(
+      'refused',
+      admits === 'running'
+        ? `a runtime control requires a running session, and this one is ${view.state.status}`
+        : `a startup runtime control requires a session that is still starting, and this one is ${view.state.status}`,
+    );
   // That quarantine exists precisely to stop the daemon typing into a modal it could not identify,
   // and a retry of the control that caused it is the most likely thing to do so.
   if (isPickerQuarantined(view.state)) return new SessionRuntimeError('refused', pickerInputRefusal(clientName));

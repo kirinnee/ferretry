@@ -22,6 +22,21 @@ export interface ClockPort {
 export interface DirectoryEntry {
   readonly name: string;
   readonly directory: boolean;
+  /**
+   * True only for an ordinary file — never a symlink, socket, device or FIFO.
+   *
+   * `!directory` is NOT the same question. A decision that admits a named file by name, as the state
+   * home's marker-absent recovery does, would otherwise admit a SYMLINK wearing that name, and the
+   * bytes it resolves to belong to whoever planted it. So the classification is carried from the
+   * directory read itself, where the kind is already known, rather than re-derived by a caller that
+   * would have to open the path to ask — and opening is exactly what must not happen, because a
+   * FIFO left at that name would block the daemon's bootstrap instead of failing it.
+   *
+   * Optional so a narrower stand-in need not classify what it does not model. Production always
+   * answers it, and every caller that depends on the distinction demands `=== true`, so an absent
+   * bit refuses rather than passes.
+   */
+  readonly regularFile?: boolean;
 }
 
 export interface FileInformation extends JournalFingerprint {

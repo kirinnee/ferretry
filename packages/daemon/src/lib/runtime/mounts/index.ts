@@ -42,6 +42,7 @@ import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-atta
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
+import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { sessionReadRoutes } from './session-reads.ts';
@@ -181,6 +182,8 @@ export interface MountedSubsystems {
    *  background loop nothing constructs is the same absent capability as an unserved route, and a
    *  handover nothing advanced would stop at `requested` forever. */
   readonly handoverReconcile: HandoverReconcileLoop;
+  /** A durable conversation fork creates a separate session without changing its source. */
+  readonly sessionFork: SessionForkSubsystem;
   /** The other half of that operation: NOTICING that an account has measurably run out of tokens and
    *  moving its sessions onto a pooled same-kind account with confirmed headroom — through the same
    *  migration above, preflight included. It serves no route, and it is a mounted subsystem for the
@@ -346,6 +349,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // beneath it, registered in the same table after its parent — so none can shadow or be shadowed by
     // the migrate above or the deeper per-session subsystems below.
     ...sessionHandoverRoutes(subsystems.handover),
+    ...sessionForkRoutes(subsystems.sessionFork),
     // The runtime controls register beside the migration, and for the same reason: both change what
     // is running in a session that already exists. Both paths are one-segment patterns under
     // `/v1/sessions/:sessionId` whose final literals (`runtime`, `runtime-models`) no other route

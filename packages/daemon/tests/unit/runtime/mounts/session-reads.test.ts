@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import should from 'should';
@@ -9,6 +10,13 @@ import {
   type StoredSessionEvent,
   type TranscriptTailResult,
 } from '../../../../src/lib/session/reads/index.ts';
+import type { PortableConversationRow } from '../../../../src/lib/session/transcript/digest.ts';
+import {
+  issueSessionTranscriptMessageToken,
+  SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN,
+  type SessionTranscriptMessageTokenCodec,
+  type SessionTranscriptMessageTokenContext,
+} from '../../../../src/lib/session/transcript/message-token.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 
@@ -25,6 +33,34 @@ const INSTANT = '2026-02-01T09:08:07.000Z';
 /** The warden-scoped token, which must never reach this surface. */
 const wardenToken = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
+/** A stand-in for the daemon-private key. The read's own tests own what a token means. */
+const CODEC: SessionTranscriptMessageTokenCodec = {
+  tag: async input => new Uint8Array(createHmac('sha256', 'mount-fixture-key').update(input).digest()),
+  matches: async (input, tag) =>
+    Buffer.from(createHmac('sha256', 'mount-fixture-key').update(input).digest()).equals(Buffer.from(tag)),
+};
+
+const CONTEXT: SessionTranscriptMessageTokenContext = {
+  sessionId: 's1',
+  incarnation: 'inc-one',
+  provenance: {
+    v: 1,
+    home: '/harness/home',
+    identity: 'minted',
+    harnessSessionId: 'harness-one',
+    file: '/harness/home/one.jsonl',
+    resolvedAt: INSTANT,
+  },
+};
+
+const addressable = (byteOffset: number, prefix = byteOffset): PortableConversationRow => ({
+  point: { v: 1, byteOffset, blockIndex: 0 },
+  role: 'assistant',
+  text: `said at ${byteOffset}`,
+  timestamp: INSTANT,
+  rawPrefix: new Uint8Array(32).fill(prefix),
+});
+
 function fixture(
   options: {
     readonly events?: readonly StoredSessionEvent[];
@@ -35,6 +71,8 @@ function fixture(
     readonly storedSnapshot?:
       | { readonly kind: 'absent' | 'unreadable' }
       | { readonly kind: 'read'; readonly text: string };
+    readonly rows?: readonly PortableConversationRow[];
+    readonly noTranscript?: true;
   } = {},
 ) {
   const reads = new OperatorReadService(
@@ -44,6 +82,13 @@ function fixture(
         options.noTerminal === true ? undefined : (options.capture ?? { alive: true, dead: false, text: 'screen' }),
     },
     { tail: async () => options.tail ?? { kind: 'read', events: [] } },
+    {
+      read: async () =>
+        options.noTranscript === true
+          ? { kind: 'unresolved' }
+          : { kind: 'read', context: CONTEXT, rows: options.rows ?? [addressable(10), addressable(20)] },
+    },
+    CODEC,
     { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
   );
   const dispatcher = new ApiDispatcher(
@@ -54,6 +99,16 @@ function fixture(
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
 }
+
+/** A cursor this daemon really issued, for a row that may or may not still be there. */
+const cursorFor = async (row: PortableConversationRow): Promise<string> =>
+  await issueSessionTranscriptMessageToken(
+    CODEC,
+    SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN,
+    CONTEXT,
+    row.point,
+    row.rawPrefix,
+  );
 
 const event = (sequence: number): StoredSessionEvent => ({
   sequence,
@@ -330,5 +385,168 @@ describe('the session transcript route', () => {
     // Assert
     should(response.status).equal(400);
     should(jsonBody(response)).have.property('code', 'invalid_query');
+  });
+});
+
+describe('the session addressable-message route', () => {
+  it('should serve the page in the protocol envelope and never cache it', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10)] });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/messages', headers: human });
+
+    // Assert — the rows carry evidence that is only true of the conversation as it read just now, so a
+    // cached page is a page whose bindings may already have been refused.
+    should(response.status).equal(200);
+    should(jsonBody(response)).have.property('v', 1);
+    should(jsonBody(response)).have.property('sessionId', 's1');
+    should(jsonBody(response)).have.property('nextCursor', null);
+    should(response.headers.get('cache-control')).eql('no-store');
+  });
+
+  it('should page over the cursor it handed back', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10), addressable(20)] });
+
+    // Act
+    const first = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', '1']], headers: human });
+    const cursor = jsonBody(first).nextCursor;
+    should(cursor).be.a.String();
+    const second = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['cursor', String(cursor)],
+        ['limit', '1'],
+      ],
+      headers: human,
+    });
+
+    // Assert — the token survives the query string verbatim; nothing on this route re-spells its bytes.
+    should(second.status).equal(200);
+    should(second.body).containEql('"byteOffset":20');
+  });
+
+  it('should answer 404 for a session the daemon does not hold', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/other/messages', headers: human });
+
+    // Assert — existence is decided before any transcript evidence is gathered.
+    should(response.status).equal(404);
+  });
+
+  it('should not serve the warden', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/messages', headers: wardenToken });
+
+    // Assert — an addressable transcript is everything the agent has said, plus a handle to act on it.
+    should(response.status).equal(403);
+  });
+
+  it('should refuse a blank or malformed cursor as a bad request', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act — an empty value is NOT treated as absent here, unlike the numeric parameters.
+    const blank = await dispatch({ path: '/v1/sessions/s1/messages', query: [['cursor', '']], headers: human });
+    const malformed = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [['cursor', 'page-2']],
+      headers: human,
+    });
+
+    // Assert
+    should([blank.status, malformed.status]).eql([400, 400]);
+    should(jsonBody(blank)).have.property('code', 'invalid_query');
+    should(jsonBody(malformed)).have.property('code', 'invalid_query');
+  });
+
+  it('should answer a well-formed cursor the conversation has moved past with a conflict', async () => {
+    // Arrange — the anchor row is gone, which is a statement about the session rather than the request.
+    const stale = await cursorFor(addressable(20));
+    const dispatch = fixture({ rows: [addressable(10)] });
+
+    // Act
+    const response = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [['cursor', stale]],
+      headers: human,
+    });
+
+    // Assert — 409 and not 400: the client corrects this by re-reading, not by fixing its query.
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'message_cursor_stale');
+  });
+
+  it('should answer a well-formed cursor whose anchor content changed with the same conflict', async () => {
+    // Arrange — the point still resolves; only the raw prefix beneath it moved.
+    const stale = await cursorFor(addressable(20));
+    const dispatch = fixture({ rows: [addressable(10), addressable(20, 99)] });
+
+    // Act
+    const response = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [['cursor', stale]],
+      headers: human,
+    });
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'message_cursor_stale');
+  });
+
+  it('should refuse a limit this route does not offer', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const zero = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', '0']], headers: human });
+    const huge = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', '1001']], headers: human });
+    const words = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', 'all']], headers: human });
+
+    // Assert
+    should([zero.status, huge.status, words.status]).eql([400, 400, 400]);
+    for (const response of [zero, huge, words]) should(jsonBody(response)).have.property('code', 'invalid_query');
+  });
+
+  it('should treat an absent limit as the default rather than an error', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10)] });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', '']], headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should refuse a session whose transcript file cannot be proved', async () => {
+    // Arrange
+    const dispatch = fixture({ noTranscript: true });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/messages', headers: human });
+
+    // Assert — an empty page here would read as "there is nothing to fork from".
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'no_transcript');
+  });
+
+  it('should refuse a path parameter that is not usable as an id', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/%2f/messages', headers: human });
+
+    // Assert
+    should(response.status).equal(400);
+    should(jsonBody(response)).have.property('code', 'invalid_session_id');
   });
 });

@@ -3,6 +3,8 @@ import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
+import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
+import type { SessionTranscriptPage } from './session-transcript.ts';
 import type {
   AttachmentView,
   CgroupConfigPatch,
@@ -132,12 +134,16 @@ export interface IFyApiClient {
   handoverReceipt(id: string): Promise<SessionHandoverReceipt>;
   /** Cancel an in-flight handover; returns the receipt in its resulting terminal phase. */
   cancelHandover(id: string, requestId?: string): Promise<SessionHandoverReceipt>;
+  /** Fork an exact durable conversation point into an independent session. */
+  fork(id: string, input: ForkSessionRequest, requestId?: string): Promise<ForkSessionOutcome>;
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;
   attachTarget(id: string): Promise<SessionAttachTarget>;
   snapshot(id: string): Promise<string>;
   logs(id: string, turn?: number): Promise<string>;
+  /** Read one session's durable conversation as rows a caller can fork through. */
+  messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage>;
   events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]>;
   history(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
   upload(id: string, file: string | Blob, filename?: string): Promise<AttachmentView>;

@@ -13,11 +13,13 @@ const transcript = {
   file: '/home/agent/.claude/projects/repo/11111111-2222-3333-4444-555555555555.jsonl',
   resolvedAt: AT,
 };
-const conversation = {
-  messages: [
-    { point, role: 'assistant' as const, text: 'Keep :agent and @src/index.ts byte-for-byte.', timestamp: AT },
-  ],
+const transferMessage = {
+  point,
+  role: 'assistant' as const,
+  text: 'Keep :agent and @src/index.ts byte-for-byte.',
+  timestamp: AT,
 };
+const conversation = { messages: [transferMessage] };
 const attachments = {
   attachments: [
     {
@@ -113,6 +115,10 @@ const plan = {
 
 const cases: SchemaCase[] = [
   { name: 'message point', schema: transfer.ConversationMessagePointSchema, value: point },
+  // A case of its OWN, never folded into the conversation facet that contains it. The read row
+  // extends this base, so two exported schemas describe a message now and one case cannot stand for
+  // both: the facet's case would keep passing while this base drifted underneath it.
+  { name: 'transfer message', schema: transfer.ConversationTransferMessageSchema, value: transferMessage },
   { name: 'conversation facet', schema: transfer.ConversationFacetSchema, value: conversation },
   { name: 'attachment facet', schema: transfer.AttachmentFacetSchema, value: attachments },
   { name: 'reference facet', schema: transfer.ReferenceFacetSchema, value: references },
@@ -131,23 +137,76 @@ describe('session transfer protocol', () => {
     assertCoversEverySchema(transfer, cases);
   });
 
-  it('should keep blockIndex optional without accepting another point spelling', () => {
+  it('should require an exact block index without accepting another point spelling', () => {
     // Act
-    const actual = transfer.ConversationMessagePointSchema.parse({ v: 1, byteOffset: 0 });
+    const actual = transfer.ConversationMessagePointSchema.parse({ v: 1, byteOffset: 0, blockIndex: 0 });
 
     // Assert
-    should(actual).deepEqual({ v: 1, byteOffset: 0 });
+    should(actual).deepEqual({ v: 1, byteOffset: 0, blockIndex: 0 });
     assertRejects([
-      { name: 'missing version', schema: transfer.ConversationMessagePointSchema, value: { byteOffset: 0 } },
+      {
+        name: 'missing version',
+        schema: transfer.ConversationMessagePointSchema,
+        value: { byteOffset: 0, blockIndex: 0 },
+      },
+      {
+        name: 'missing block index',
+        schema: transfer.ConversationMessagePointSchema,
+        value: { v: 1, byteOffset: 0 },
+      },
       {
         name: 'string coordinate',
         schema: transfer.ConversationMessagePointSchema,
-        value: { v: 1, byteOffset: '0:1' },
+        value: { v: 1, byteOffset: '0:1', blockIndex: 0 },
       },
       {
         name: 'UI identity',
         schema: transfer.ConversationMessagePointSchema,
-        value: { v: 1, byteOffset: 0, blockId: 'record|message|uuid|0' },
+        value: { v: 1, byteOffset: 0, blockIndex: 0, blockId: 'record|message|uuid|0' },
+      },
+    ]);
+  });
+
+  it('should keep the durable message row binding-free so a plan stored before bindings still reads', () => {
+    // The read row extends THIS base with a required `selectionBinding`. That evidence is about a
+    // request being made now — it is verified once, before anything is claimed — so a copy frozen
+    // inside a plan that replays after a restart would be evidence of nothing. A plan written before
+    // the binding existed must therefore still parse, and the base must refuse to carry one.
+    // Arrange — a plan exactly as it was persisted before any binding was on the wire.
+    const stored = JSON.parse(JSON.stringify(plan)) as unknown;
+
+    // Act
+    const parsed = transfer.SessionTransferPlanSchema.parse(stored);
+
+    // Assert
+    should(parsed.facets.conversation?.messages).have.length(1);
+    should(JSON.stringify(parsed).includes('"selectionBinding"')).be.false();
+    assertRejects([
+      {
+        name: 'the durable row does not carry request evidence',
+        schema: transfer.ConversationTransferMessageSchema,
+        value: { ...transferMessage, selectionBinding: 'selection-binding-1' },
+      },
+      {
+        name: 'and neither does the plan that stores it',
+        schema: transfer.SessionTransferPlanSchema,
+        value: {
+          ...plan,
+          facets: {
+            ...plan.facets,
+            conversation: { messages: [{ ...transferMessage, selectionBinding: 'selection-binding-1' }] },
+          },
+        },
+      },
+      {
+        name: 'an unversioned point is not a durable row coordinate',
+        schema: transfer.ConversationTransferMessageSchema,
+        value: { ...transferMessage, point: { byteOffset: 128, blockIndex: 1 } },
+      },
+      {
+        name: 'an offset without its block index is ambiguous here too',
+        schema: transfer.ConversationTransferMessageSchema,
+        value: { ...transferMessage, point: { v: 1, byteOffset: 128 } },
       },
     ]);
   });
@@ -193,6 +252,11 @@ describe('session transfer protocol', () => {
         name: 'conversation without cut',
         schema: transfer.SessionTransferPlanSchema,
         value: { ...handover, facets: plan.facets },
+      },
+      {
+        name: 'empty conversation for an exact cut',
+        schema: transfer.SessionTransferPlanSchema,
+        value: { ...plan, facets: { ...plan.facets, conversation: { messages: [] } } },
       },
       {
         name: 'handover edge with cut',

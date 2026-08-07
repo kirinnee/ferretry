@@ -19,14 +19,13 @@ import { CLAUDE_VIEW, CODEX_VIEW } from './support.ts';
 describe('what a session document alone refuses', () => {
   it('should let a running session through', () => {
     // Act / Assert
-    should(documentRefusal(CLAUDE_VIEW(), 'fy')).be.undefined();
+    should(documentRefusal(CLAUDE_VIEW(), 'fy', 'running')).be.undefined();
   });
 
-  it('should refuse every status a send would refuse, and no second list of them', () => {
-    // Two lists would eventually disagree about `interrupted`.
+  it('should refuse terminal statuses from the public running window', () => {
     // Act
     const refusals = (['failed', 'stopped', 'completed'] as const).map(status =>
-      documentRefusal(CLAUDE_VIEW({ status }), 'fy'),
+      documentRefusal(CLAUDE_VIEW({ status }), 'fy', 'running'),
     );
 
     // Assert
@@ -39,6 +38,7 @@ describe('what a session document alone refuses', () => {
     const refusal = documentRefusal(
       CLAUDE_VIEW({ needsHumanKind: CODEX_PICKER_QUARANTINE_KIND, needsHuman: 'resume it' }),
       'fy',
+      'running',
     );
 
     // Assert
@@ -47,7 +47,21 @@ describe('what a session document alone refuses', () => {
 
   it('should not read an UNRELATED needs-human as a picker quarantine', () => {
     // Act / Assert
-    should(documentRefusal(CLAUDE_VIEW({ needsHumanKind: 'question', needsHuman: 'answer it' }), 'fy')).be.undefined();
+    should(
+      documentRefusal(CLAUDE_VIEW({ needsHumanKind: 'question', needsHuman: 'answer it' }), 'fy', 'running'),
+    ).be.undefined();
+  });
+
+  it('should keep the public running window and private startup window disjoint', () => {
+    // Act
+    const publicOnStarting = documentRefusal(CLAUDE_VIEW({ status: 'starting' }), 'fy', 'running');
+    const startupOnRunning = documentRefusal(CLAUDE_VIEW(), 'fy', 'starting');
+    const startupOnStarting = documentRefusal(CLAUDE_VIEW({ status: 'starting' }), 'fy', 'starting');
+
+    // Assert
+    should(publicOnStarting).match({ failure: 'refused', message: /requires a running session/u });
+    should(startupOnRunning).match({ failure: 'refused', message: /still starting/u });
+    should(startupOnStarting).be.undefined();
   });
 });
 

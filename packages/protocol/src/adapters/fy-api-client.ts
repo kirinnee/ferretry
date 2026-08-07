@@ -25,6 +25,13 @@ import {
   SessionHandoverRequestSchema,
 } from '../lib/handover.ts';
 import {
+  type ForkSessionOutcome,
+  ForkSessionOutcomeSchema,
+  type ForkSessionRequest,
+  ForkSessionRequestSchema,
+} from '../lib/session-fork.ts';
+import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
+import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
@@ -586,6 +593,17 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
+  fork(id: string, input: ForkSessionRequest, requestId?: string): Promise<ForkSessionOutcome> {
+    return this.#post(
+      id,
+      'fork',
+      ForkSessionRequestSchema,
+      input,
+      ForkSessionOutcomeSchema,
+      NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
+    );
+  }
+
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView> {
     return this.#post(id, 'rename', RenameSessionRequestSchema, { name, teammate, clearParent }, SessionViewSchema);
   }
@@ -620,6 +638,22 @@ export class FyApiClient implements IFyApiClient {
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/logs${suffix}`,
       TextResponseSchema,
+    );
+  }
+
+  messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage> {
+    const sessionId = encodeURIComponent(NonEmptyValueSchema.parse(id));
+    const search = new URLSearchParams();
+    if (cursor !== undefined) {
+      NonEmptyValueSchema.parse(cursor);
+      search.set('cursor', cursor);
+    }
+    if (limit !== undefined) search.set('limit', String(PositiveIntegerSchema.max(1_000).parse(limit)));
+    const suffix = search.size === 0 ? '' : `?${search.toString()}`;
+    return this.request(
+      `/v1/sessions/${sessionId}/messages${suffix}`,
+      SessionTranscriptPageSchema,
+      signal === undefined ? {} : { signal },
     );
   }
 

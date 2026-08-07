@@ -98,10 +98,16 @@ export class SessionProvenanceStamper {
     }
     return {
       provenance: {
-        ...fresh.provenance,
+        v: 1,
         at: existing.at,
         origin: fresh.provenance.wardenLineage ? fresh.provenance.origin : existing.origin,
+        // Parent identity is creation history, including the fact that a root had no parent. Do not
+        // spread `fresh.provenance` here: a relaunch request may resolve a current parent even when
+        // the durable creation stamp was a root, and an omitted restoration cannot delete that key.
         ...(existing.parent === undefined ? {} : { parent: existing.parent }),
+        ...(fresh.provenance.warden === undefined ? {} : { warden: fresh.provenance.warden }),
+        wardenLineage: fresh.provenance.wardenLineage,
+        lineageSource: fresh.provenance.lineageSource,
       },
       label: fresh.label,
     };

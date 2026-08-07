@@ -70,6 +70,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     await this.registrar?.register(record);
   }
 
+  /** The startup-only wait; interactive runtime controls keep refusing a pane that is not idle. */
+  async ready(record: SessionLifecycleRecord): Promise<void> {
+    await this.delivery.waitReady(record.config.tmuxSession);
+  }
+
   /**
    * Hands the pane its first turn, once the harness is provably able to take it.
    *
@@ -78,8 +83,8 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
    * before submitting — belongs to the delivery adapter, so the launch path and the revive path
    * cannot drift apart on any of it.
    */
-  async deliver(record: SessionLifecycleRecord, instruction: string): Promise<void> {
-    await this.delivery.deliver(record.config.tmuxSession, instruction);
+  async deliver(record: SessionLifecycleRecord, instruction: string, beforeWrite?: () => Promise<void>): Promise<void> {
+    await this.delivery.deliver(record.config.tmuxSession, instruction, {}, beforeWrite);
   }
 
   async snapshot(record: SessionLifecycleRecord): Promise<void> {

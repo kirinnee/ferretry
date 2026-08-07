@@ -15,6 +15,7 @@ import {
   type CgroupHostFacts,
   type SessionSpawnFacts,
 } from '../../../src/lib/cgroups/index.ts';
+import type { SessionEffectKey, SessionEffectLedger } from '../../../src/lib/session/effects/index.ts';
 import {
   defaultSessionLifecycleSettings,
   SessionLifecycleService,
@@ -54,6 +55,36 @@ const AGENT = '/opt/fleet/bin/claude-auto-alpha';
 const HARNESS_COMMAND = [AGENT, '--print'] as const;
 const HOST: CgroupHostFacts = { platform: 'linux', unifiedHierarchy: true, cpus: 4, memoryBytes: 1_000_000 };
 const ENABLED: CgroupConfig = { ...defaultCgroupConfig, enabled: true };
+
+/** A fixture-local durable-effect stand-in, matching the lifecycle integration fixture semantics. */
+function memoryEffectLedger(): SessionEffectLedger {
+  const held = new Map<string, { readonly fingerprint: string; readonly settled: boolean }>();
+  const identity = (key: SessionEffectKey): string => JSON.stringify([key.sessionId, key.effectId]);
+
+  return {
+    inspect: async (key, fingerprint) => {
+      const effect = held.get(identity(key));
+      if (effect === undefined) return 'unclaimed';
+      if (effect.fingerprint !== fingerprint) return 'conflict';
+      return effect.settled ? 'settled' : 'unsettled';
+    },
+    begin: async (key, fingerprint) => {
+      const effect = held.get(identity(key));
+      if (effect !== undefined) {
+        if (effect.fingerprint !== fingerprint) return 'conflict';
+        return effect.settled ? 'settled' : 'unsettled';
+      }
+      held.set(identity(key), { fingerprint, settled: false });
+      return 'perform';
+    },
+    settle: async (key, fingerprint) => {
+      const effect = held.get(identity(key));
+      if (effect === undefined || effect.fingerprint !== fingerprint)
+        throw new Error(`cannot settle unclaimed or conflicting effect ${key.effectId}`);
+      held.set(identity(key), { fingerprint, settled: true });
+    },
+  };
+}
 
 /** A multiplexer that records the argv it was handed and can be held mid-launch. */
 class GatedTmux implements TmuxCommandPort {
@@ -113,6 +144,7 @@ class GatedTmux implements TmuxCommandPort {
 class MemoryRepository implements SessionLifecycleRepository {
   readonly documents = new Map<string, string>();
   readonly events: SessionLifecycleEvent[] = [];
+  async reserve(_id: SessionId): Promise<void> {}
   async read(id: SessionId): Promise<SessionLifecycleRecord | undefined> {
     const document = this.documents.get(id);
     return document === undefined ? undefined : (JSON.parse(document) as SessionLifecycleRecord);
@@ -210,6 +242,7 @@ function harness(input: {
         repository,
         launcher,
         tasks: { writeAssignedTask: async () => '/turns/turn-001.md' },
+        effects: memoryEffectLedger(),
         directories: { resolve: async () => '/canonical' },
         ids: { next: () => parseSessionId(input.id) },
         clock: { now: () => '2026-08-06T00:00:00.000Z' },
@@ -726,6 +759,7 @@ describe('the barrier a resource-limit save and a session bootstrap share', () =
           }),
         ),
         tasks: { writeAssignedTask: async () => '/turns/turn-001.md' },
+        effects: memoryEffectLedger(),
         directories: { resolve: async () => '/canonical' },
         ids: { next: () => parseSessionId('ms8-9999aaaa') },
         clock: { now: () => '2026-08-06T00:00:00.000Z' },

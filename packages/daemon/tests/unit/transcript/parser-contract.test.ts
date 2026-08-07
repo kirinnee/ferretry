@@ -1,9 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import {
+  extendSessionTranscriptRawPrefix,
+  sessionTranscriptRawPrefixStart,
+} from '../../../src/lib/session/transcript/message-token.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
 import { parseTranscriptJsonl } from '../../../src/lib/transcript/jsonl.ts';
-import type { TranscriptInputObserver, TranscriptParser } from '../../../src/lib/transcript/types.ts';
+import type {
+  TranscriptInputObserver,
+  TranscriptParser,
+  TranscriptRawRecord,
+} from '../../../src/lib/transcript/types.ts';
 
 interface ParserFixture {
   readonly name: string;
@@ -222,5 +230,146 @@ describe('JSONL normalization boundary', () => {
     should(actual.every(result => result.events[0]?.kind === 'message')).be.true();
     should(actual.every(result => result.observedInputs.length === 0)).be.true();
     should(actual.every(result => result.issues[0]?.code === 'invalid-record')).be.true();
+  });
+});
+
+/**
+ * The parser is the ONE owner of where a physical record starts and ends, and the only place those
+ * boundaries become exact bytes.
+ *
+ * Every property here is what the selection commitment rests on. If a boundary here disagreed with
+ * the byte offset an event carries, a fork would be bound to its neighbour's content; if a slice
+ * were re-encoded from decoded text, two different malformed records would share one commitment.
+ */
+describe('physical record evidence', () => {
+  const parser = new ClaudeTranscriptParser();
+  const message = (text: string): string => JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
+
+  const parseBytes = (bytes: Uint8Array, endOfInput = true): readonly TranscriptRawRecord[] | undefined =>
+    parseTranscriptJsonl(parser, {
+      text: new TextDecoder().decode(bytes),
+      bytes,
+      source: 'synthetic.jsonl',
+      endOfInput,
+    }).rawRecords;
+
+  const chainOf = (records: readonly TranscriptRawRecord[]): Uint8Array =>
+    records.reduce(
+      (previous, record) => extendSessionTranscriptRawPrefix(previous, record.bytes),
+      sessionTranscriptRawPrefixStart(),
+    );
+
+  it('should emit each record verbatim, terminator included, at its own byte offset', () => {
+    // Arrange
+    const bytes = Buffer.from(`${message('first')}\n${message('second')}\n`, 'utf8');
+
+    // Act
+    const records = parseBytes(bytes) ?? [];
+
+    // Assert
+    should(records).have.length(2);
+    should(records[0]?.byteOffset).equal(0);
+    should(Buffer.from(records[0]?.bytes ?? []).toString('utf8')).equal(`${message('first')}\n`);
+    should(records[1]?.byteOffset).equal(Buffer.byteLength(`${message('first')}\n`, 'utf8'));
+    should(Buffer.concat(records.map(record => Buffer.from(record.bytes))).equals(bytes)).be.true();
+  });
+
+  it('should keep CRLF and blank and unrecognised records in the sequence', () => {
+    // Arrange: a blank line and a record no harness normalizer recognises still occupy their bytes.
+    const bytes = Buffer.from(`${message('first')}\r\n\n{"unrecognised":true}\n`, 'utf8');
+
+    // Act
+    const records = parseBytes(bytes) ?? [];
+
+    // Assert
+    should(records.map(record => Buffer.from(record.bytes).toString('utf8'))).deepEqual([
+      `${message('first')}\r\n`,
+      '\n',
+      '{"unrecognised":true}\n',
+    ]);
+    should(records.map(record => record.byteOffset)).deepEqual([
+      0,
+      Buffer.byteLength(`${message('first')}\r\n`, 'utf8'),
+      Buffer.byteLength(`${message('first')}\r\n\n`, 'utf8'),
+    ]);
+  });
+
+  it('should keep a terminal record exactly as long as it is, inventing no terminator', () => {
+    // Arrange
+    const bytes = Buffer.from(`${message('first')}\n${message('last')}`, 'utf8');
+
+    // Act
+    const records = parseBytes(bytes) ?? [];
+
+    // Assert
+    should(Buffer.from(records[1]?.bytes ?? []).toString('utf8')).equal(message('last'));
+    should(Buffer.from(records[1]?.bytes ?? []).at(-1)).not.equal(0x0a);
+  });
+
+  it('should emit no record for an unterminated tail a live writer is still writing', () => {
+    // Arrange
+    const bytes = Buffer.from(`${message('first')}\n{"half":`, 'utf8');
+
+    // Act
+    const records = parseBytes(bytes, false) ?? [];
+
+    // Assert: half a line has no commitment, because it is not a record yet.
+    should(records).have.length(1);
+    should(Buffer.from(records[0]?.bytes ?? []).toString('utf8')).equal(`${message('first')}\n`);
+  });
+
+  it('should keep two DIFFERENT invalid-UTF-8 records at different commitments', () => {
+    // Arrange: both decode to the SAME replacement character, which is exactly how a chain built
+    // from decoded text collapses them and lets either replace the other at one coordinate.
+    const left = Buffer.concat([Buffer.from('{"a":"'), Buffer.of(0xff), Buffer.from('"}\n')]);
+    const right = Buffer.concat([Buffer.from('{"a":"'), Buffer.of(0xfe), Buffer.from('"}\n')]);
+
+    // Act
+    const leftRecords = parseBytes(left) ?? [];
+    const rightRecords = parseBytes(right) ?? [];
+
+    // Assert
+    should(new TextDecoder().decode(left)).equal(new TextDecoder().decode(right));
+    should(Buffer.from(leftRecords[0]?.bytes ?? []).equals(left)).be.true();
+    should(Buffer.from(chainOf(leftRecords)).equals(Buffer.from(chainOf(rightRecords)))).be.false();
+  });
+
+  it('should separate two records from one record carrying the same bytes', () => {
+    // Arrange
+    const split = Buffer.from(`${message('a')}\n${message('b')}\n`, 'utf8');
+    const joined = Buffer.from(`${message('a')}${message('b')}\n`, 'utf8');
+
+    // Act / Assert
+    should(
+      Buffer.from(chainOf(parseBytes(split) ?? [])).equals(Buffer.from(chainOf(parseBytes(joined) ?? []))),
+    ).be.false();
+  });
+
+  it('should agree with the byte offsets it reports on its own events', () => {
+    // Arrange: a multi-byte character before the second record, so a character count and a byte
+    // count disagree — the drift a chain must never inherit.
+    const bytes = Buffer.from(`${message('héllo wörld')}\n${message('second')}\n`, 'utf8');
+
+    // Act
+    const parsed = parseTranscriptJsonl(parser, {
+      text: bytes.toString('utf8'),
+      bytes,
+      source: 'synthetic.jsonl',
+    });
+
+    // Assert: every event's coordinate names a record this parse emitted.
+    const offsets = new Set((parsed.rawRecords ?? []).map(record => record.byteOffset));
+    should(parsed.events).not.be.empty();
+    should(parsed.events.every(event => event.byteOffset !== undefined && offsets.has(event.byteOffset))).be.true();
+  });
+
+  it('should emit no evidence at all for a text-only caller', () => {
+    // Arrange: a re-encoding cannot promise an exact slice, so none is offered.
+    // Act
+    const parsed = parseTranscriptJsonl(parser, { text: `${message('first')}\n`, source: 'synthetic.jsonl' });
+
+    // Assert
+    should(parsed.rawRecords).be.undefined();
+    should(parsed.events).have.length(1);
   });
 });

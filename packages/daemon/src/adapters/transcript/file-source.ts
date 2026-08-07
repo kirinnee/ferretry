@@ -397,6 +397,14 @@ function cursorOf(state: FollowState): TranscriptFileCursor {
   };
 }
 
+/**
+ * `rawRecords` is CARRIED, never computed here.
+ *
+ * The parser is the one owner of where a physical record starts and ends, so this adapter hands it
+ * the bytes and passes on whatever it says the records were. Splitting the buffer a second time
+ * would be a second answer to that question, and a one-record drift between the two answers would
+ * silently bind every point to its neighbour's content.
+ */
 function batchOf(
   parser: TranscriptParser,
   file: string,
@@ -405,8 +413,18 @@ function batchOf(
   events: TranscriptBatch['events'] = [],
   issues: TranscriptBatch['issues'] = [],
   observedInputs: TranscriptBatch['observedInputs'] = [],
+  rawRecords?: TranscriptBatch['rawRecords'],
 ): TranscriptBatch {
-  return { harness: parser.harness, file, reset, cursor: cursorOf(state), events, observedInputs, issues };
+  return {
+    harness: parser.harness,
+    file,
+    reset,
+    cursor: cursorOf(state),
+    events,
+    observedInputs,
+    issues,
+    ...(rawRecords === undefined ? {} : { rawRecords }),
+  };
 }
 
 function missingResult(
@@ -684,6 +702,9 @@ async function reconcileFollow(
   const parsed = parser.parse(
     {
       text: complete.toString('utf8'),
+      // The very bytes `text` was decoded from, so the parser can report each record's exact slice
+      // instead of a re-encoding of what the decoder made of it.
+      bytes: complete,
       source: file,
       sessionId: options.sessionId,
       endOfInput: false,
@@ -736,7 +757,9 @@ async function reconcileFollow(
   const changed = !state.initialized || reset || appended.byteLength > 0 || state.availability !== 'present';
   return {
     state: next,
-    ...(changed ? { batch: batchOf(parser, file, next, reset, parsed.events, issues, parsed.observedInputs) } : {}),
+    ...(changed
+      ? { batch: batchOf(parser, file, next, reset, parsed.events, issues, parsed.observedInputs, parsed.rawRecords) }
+      : {}),
     more: read.truncated,
   };
 }
@@ -863,6 +886,10 @@ export class NodeTranscriptSource implements TranscriptSource {
     const parsed = this.parser.parse(
       {
         text,
+        // The SAME bounded bytes `text` was decoded from. Record-exact evidence can only come from
+        // these: a decode replaces every invalid sequence irreversibly, and two different malformed
+        // records would otherwise commit to one value and become able to replace each other.
+        bytes,
         source: file,
         sessionId: options.sessionId,
         endOfInput: !read.truncated,
@@ -899,7 +926,7 @@ export class NodeTranscriptSource implements TranscriptSource {
         countLines(bytes) + 1 + (bytes.byteLength > 0 && bytes.at(-1) !== 0x0a && pending.byteLength === 0 ? 1 : 0),
       modifiedMs: info.modifiedMs,
     };
-    return batchOf(this.parser, file, state, false, parsed.events, issues, parsed.observedInputs);
+    return batchOf(this.parser, file, state, false, parsed.events, issues, parsed.observedInputs, parsed.rawRecords);
   }
 
   async *follow(file: string, options: TranscriptFollowOptions = {}): AsyncGenerator<TranscriptBatch> {

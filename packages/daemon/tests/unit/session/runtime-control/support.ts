@@ -1,5 +1,11 @@
 import type { RuntimeModelChoice, SessionView } from '@ferretry/protocol';
 import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
+import type {
+  SessionEffectAdmission,
+  SessionEffectKey,
+  SessionEffectLedger,
+  SessionEffectStanding,
+} from '../../../../src/lib/session/effects/types.ts';
 import { CodexRuntimeCatalogCache } from '../../../../src/lib/session/harness/codex-catalog-cache.ts';
 import type { CodexPickerDrivePort, CodexPickerFrame } from '../../../../src/lib/session/harness/picker-drive.ts';
 import type {
@@ -23,6 +29,36 @@ import { sessionView } from '../../runtime/mounts/support.ts';
  */
 
 export const NOW = '2026-08-06T00:00:00.000Z';
+
+/** A process-local fake for the domain tests; production is always given the file-backed ledger. */
+export class FakeSessionEffectLedger implements SessionEffectLedger {
+  readonly #records = new Map<string, { readonly fingerprint: string; readonly phase: 'begun' | 'settled' }>();
+
+  #key(key: SessionEffectKey): string {
+    return `${key.sessionId}\0${key.effectId}`;
+  }
+
+  async inspect(key: SessionEffectKey, fingerprint: string): Promise<SessionEffectStanding> {
+    const record = this.#records.get(this.#key(key));
+    if (record === undefined) return 'unclaimed';
+    if (record.fingerprint !== fingerprint) return 'conflict';
+    return record.phase === 'settled' ? 'settled' : 'unsettled';
+  }
+
+  async begin(key: SessionEffectKey, fingerprint: string): Promise<SessionEffectAdmission> {
+    const standing = await this.inspect(key, fingerprint);
+    if (standing !== 'unclaimed') return standing;
+    this.#records.set(this.#key(key), { fingerprint, phase: 'begun' });
+    return 'perform';
+  }
+
+  async settle(key: SessionEffectKey, fingerprint: string): Promise<void> {
+    const standing = await this.inspect(key, fingerprint);
+    if (standing !== 'unsettled' && standing !== 'settled')
+      throw new Error(`cannot settle an effect standing ${standing}`);
+    this.#records.set(this.#key(key), { fingerprint, phase: 'settled' });
+  }
+}
 
 /** One journal or state write, in the order it happened. The ORDER is the assertion. */
 export type RepositoryCall =

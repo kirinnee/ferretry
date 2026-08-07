@@ -31,7 +31,7 @@ export function paneIdentityArguments(session: string): readonly string[] {
 }
 
 export function killPaneArguments(paneId: string): readonly string[] {
-  if (!/^%[1-9][0-9]*$/u.test(paneId)) throw new TmuxAddressError('pane id is not usable');
+  if (!/^%(?:0|[1-9][0-9]*)$/u.test(paneId)) throw new TmuxAddressError('pane id is not usable');
   return ['kill-pane', '-t', paneId];
 }
 

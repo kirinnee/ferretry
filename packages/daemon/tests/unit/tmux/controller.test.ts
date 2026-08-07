@@ -355,7 +355,9 @@ describe('tmux bracketed paste', () => {
       ['%12\t', undefined],
       ['\t4821', undefined],
       ['0.0\t4821', undefined],
-      ['%0\t4821', undefined],
+      ['%0\t4821', { paneId: '%0', pid: 4821 }],
+      ['%00\t4821', undefined],
+      ['%01\t4821', undefined],
       ['%12\tnot-a-pid', undefined],
       ['%12\t1', undefined],
       ['%12\t0', undefined],
@@ -379,11 +381,11 @@ describe('tmux bracketed paste', () => {
 
   it('should refuse to build a kill for anything that is not a real pane id', () => {
     // This validation is the last thing standing between the sweep and an arbitrary kill target, so
-    // it rejects rather than coerces. `%0` is excluded deliberately: tmux numbers panes from 1, and
-    // a zero would most likely be a parsed-empty value rather than a pane.
+    // it rejects rather than coerces. A fresh private tmux server assigns its first pane `%0`.
     // Act / Assert
     should(killPaneArguments('%12')).deepEqual(['kill-pane', '-t', '%12']);
-    for (const bad of ['%0', '0.0', '12', '%', '', '%1x', '%-1', 'work-1', '%12 ; rm -rf /', '%１２']) {
+    should(killPaneArguments('%0')).deepEqual(['kill-pane', '-t', '%0']);
+    for (const bad of ['0.0', '12', '%', '', '%00', '%01', '%1x', '%-1', 'work-1', '%12 ; rm -rf /', '%１２']) {
       should(() => killPaneArguments(bad)).throw(TmuxAddressError);
     }
   });

@@ -146,7 +146,7 @@ describe('SessionAttachService', () => {
     const worlds = [
       { ...PANE, tmuxSession: '' },
       { ...PANE, paneId: '41' },
-      { ...PANE, paneId: '%0' },
+      { ...PANE, paneId: '%' },
       { ...PANE, pid: 1 },
       { ...PANE, processStartTicks: 0 },
     ].map(registration => subject({ registrations: [registration] }));

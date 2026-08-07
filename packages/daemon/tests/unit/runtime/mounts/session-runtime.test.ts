@@ -310,7 +310,7 @@ describe('the runtime control route', () => {
     should(JSON.parse(response.body).code).equal('request_id_reused');
   });
 
-  it('should tell a caller its id already reached the harness rather than repeat it', async () => {
+  it('should tell a caller its id may have reached the harness rather than repeat it', async () => {
     // Its own code, not `request_id_reused`: the client did nothing wrong and there is nothing in the
     // request to correct, so "you reused an id" would send it looking for a bug it does not have.
     // Repeating the call is the one thing that must not happen — a second `/compact` discards context
@@ -320,7 +320,7 @@ describe('the runtime control route', () => {
       new FakeSessionRuntime(
         new SessionRuntimeError(
           'unsettled',
-          'request id "req-1" was already performed on this session and its outcome was not recorded',
+          'request id "req-1" already began a runtime control on this session and its outcome was not recorded; the pane may have been touched',
         ),
       ),
     );
@@ -332,7 +332,7 @@ describe('the runtime control route', () => {
     should(response.status).equal(409);
     should(JSON.parse(response.body)).match({
       code: 'runtime_control_unsettled',
-      error: /already performed on this session/u,
+      error: /already began a runtime control on this session/u,
     });
   });
 

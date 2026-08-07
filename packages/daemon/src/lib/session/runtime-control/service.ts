@@ -7,7 +7,8 @@
  *
  * FOUR PRECONDITIONS, IN THIS ORDER, and each one is a different question:
  *
- *   1. The session exists and is not in a terminal status. There is no pane to type into.
+ *   1. The session exists in the EXACT lifecycle status this caller may drive: `running` for the
+ *      mounted control and `starting` for daemon-private startup.
  *   2. It is not holding the picker quarantine.
  *   3. Its pane is alive.
  *   4. Its harness is at an IDLE PROMPT.
@@ -18,10 +19,9 @@
  * next read. A view assembled here from what was REQUESTED would be the configured-model lie this
  * whole row exists to remove, one layer further in.
  *
- * IT LIVES IN THE DOMAIN, not in the composition root. It was written there, where no coverage ledger
- * reaches it: the request-id ledger, both spend sites, all four preconditions, the catalog gate and
- * the quarantine ordering were the most consequential untested code in the daemon. Nothing about the
- * logic changed in moving it; what changed is that it can now be proved.
+ * IT LIVES IN THE DOMAIN, not in the composition root. The one durable effect ledger, both admission
+ * checks, all four preconditions, the catalog gate and the quarantine ordering are therefore proved
+ * without constructing a second mount-owned runtime implementation.
  */
 
 import type { RuntimeControlRequest, RuntimeModelCatalog, SessionView } from '@ferretry/protocol';
@@ -33,13 +33,15 @@ import {
 } from '../../core/inventory.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
+import type { SessionEffectAdmission, SessionEffectLedger } from '../effects/types.ts';
 import type { CodexRuntimeCatalogCache } from '../harness/codex-catalog-cache.ts';
 import { claudeRuntimeCatalog, codexRuntimeCatalog, codexSwitchContext } from '../harness/model-catalog.ts';
 import { CodexModelPickerDriver, type PickerSleeper } from '../harness/picker-drive.ts';
 import { failureMessage } from '../harness/quarantine.ts';
 import type { RuntimeSwitchPlan } from '../harness/runtime-switch.ts';
 import type { HarnessQuirkService } from '../harness/service.ts';
-import { RuntimeRequestLedger, runtimeRequestFingerprint } from './ledger.ts';
+import type { LifecycleSessionStatus } from '../lifecycle/types.ts';
+import { runtimeRequestFingerprint } from './ledger.ts';
 import { documentRefusal, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
 import {
   type RuntimeInjector,
@@ -57,6 +59,8 @@ export const HARNESS_COMPACT_COMMAND = '/compact';
 
 export interface SessionRuntimeControlPorts {
   readonly repository: RuntimeRepository;
+  /** Durable begun/settled ownership for every irreversible runtime-control request. */
+  readonly effects: SessionEffectLedger;
   readonly pane: RuntimePane;
   readonly injector: RuntimeInjector;
   readonly picker: RuntimePickerTransport;
@@ -74,34 +78,19 @@ export interface SessionRuntimeControlPorts {
 }
 
 export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
-  readonly #ledger: RuntimeRequestLedger;
-
-  constructor(
-    private readonly ports: SessionRuntimeControlPorts,
-    ledger: RuntimeRequestLedger = new RuntimeRequestLedger(),
-  ) {
-    this.#ledger = ledger;
-  }
+  constructor(private readonly ports: SessionRuntimeControlPorts) {}
 
   async models(reference: string): Promise<RuntimeModelCatalog> {
     return await this.#catalogFor(this.#require(reference));
   }
 
   async control(reference: string, request: RuntimeControlRequest, requestId: string): Promise<SessionView> {
-    const id = this.#require(reference);
-    const fingerprint = runtimeRequestFingerprint(request);
-    // Checked outside the queue as well as inside it: a replay must not have to wait behind a picker
-    // drive, and two concurrent first attempts must not both get past it — only the queue can make
-    // the second of those true.
-    const answered = this.#ledger.replay(id, requestId, fingerprint);
-    if (answered !== undefined) return answered;
-    return await this.ports.serial.run(id, async () => {
-      const queued = this.#ledger.replay(id, requestId, fingerprint);
-      if (queued !== undefined) return queued;
-      const view = await this.#apply(id, request, () => this.#ledger.spend(id, requestId, fingerprint));
-      this.#ledger.settle(id, requestId, fingerprint, view);
-      return view;
-    });
+    return await this.#drive(reference, request, requestId, 'running');
+  }
+
+  /** The daemon-private half of this same service; no mounted interface exposes the starting window. */
+  async startup(reference: string, request: RuntimeControlRequest, requestId: string): Promise<void> {
+    await this.#drive(reference, request, requestId, 'starting');
   }
 
   /** Both refusals kept apart, because they are two different mistakes and two different statuses. */
@@ -219,11 +208,12 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
   async #apply(
     id: SessionId,
     request: RuntimeControlRequest,
+    admits: LifecycleSessionStatus,
     /** Called the instant before the harness is touched, so a retry can never repeat a keystroke. */
-    spend: () => void,
-  ): Promise<SessionView> {
+    spend: () => Promise<Extract<SessionEffectAdmission, 'perform' | 'settled'>>,
+  ): Promise<{ readonly performed: boolean }> {
     const current = await this.#view(id);
-    const refused = documentRefusal(current, this.ports.clientName);
+    const refused = documentRefusal(current, this.ports.clientName, admits);
     if (refused !== undefined) throw refused;
 
     const launch = await this.#launch(id);
@@ -235,13 +225,13 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
       // Spent BEFORE the keystrokes. `/compact` is the least naturally idempotent arm in the union —
       // compacting twice discards context nobody asked to lose — and it is the arm whose bookkeeping
       // can still fail after the harness has already done the work.
-      spend();
+      if ((await spend()) === 'settled') return { performed: false };
       await this.#inject(launch.tmuxSession, HARNESS_COMPACT_COMMAND);
       await this.ports.repository.journal(id, 'control.session_command', {
         harness: current.config.harness,
         command: 'compact',
       });
-      return await this.#view(id);
+      return { performed: true };
     }
 
     const wanted = switchRequest(current, request);
@@ -257,7 +247,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
     // Everything above this line is decision and refusal, and none of it has touched the pane. The id
     // is spent HERE, on the last line before the first keystroke — a refused plan leaves the id unspent
     // so the caller may fix the request and reuse it, and a driven pane can never be driven again.
-    spend();
+    if ((await spend()) === 'settled') return { performed: false };
     if (plan.kind === 'inject') await this.#inject(launch.tmuxSession, plan.command);
     else await this.#drivePicker(id, launch.tmuxSession, plan);
 
@@ -268,6 +258,69 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
       // A bare picker open is the one arm where the daemon made no choice, so it claims none.
       ...(plan.kind === 'inject' && !plan.claimsOutcome ? { picker: true } : {}),
     });
-    return await this.#view(id);
+    return { performed: true };
+  }
+
+  /**
+   * One control under this daemon's ONE durable effect ledger and ONE per-session runtime queue.
+   * Public and startup callers differ in exactly one value: the lifecycle status they may drive.
+   */
+  async #drive(
+    reference: string,
+    request: RuntimeControlRequest,
+    requestId: string,
+    admits: LifecycleSessionStatus,
+  ): Promise<SessionView> {
+    const id = this.#require(reference);
+    const key = { sessionId: id, effectId: `runtime:${requestId}` } as const;
+    const fingerprint = runtimeRequestFingerprint(request);
+    const replay = async (): Promise<SessionView | undefined> => {
+      const standing = await this.ports.effects.inspect(key, fingerprint).catch((error: unknown) => {
+        throw new SessionRuntimeError('failed', failureMessage(error));
+      });
+      if (standing === 'unclaimed') return undefined;
+      if (standing === 'settled') return await this.#view(id);
+      if (standing === 'conflict')
+        throw new SessionRuntimeError(
+          'conflict',
+          `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
+        );
+      throw new SessionRuntimeError(
+        'unsettled',
+        `request id ${JSON.stringify(requestId)} already began a runtime control on this session and its outcome was not recorded; the pane may have been touched, so read the session rather than retrying`,
+      );
+    };
+
+    // The first check lets an already-settled replay avoid a live picker queue. The second is the
+    // one that keeps concurrent first attempts from both reaching the pane.
+    const answered = await replay();
+    if (answered !== undefined) return answered;
+    return await this.ports.serial.run(id, async () => {
+      const queued = await replay();
+      if (queued !== undefined) return queued;
+      const outcome = await this.#apply(id, request, admits, async () => {
+        const admission = await this.ports.effects.begin(key, fingerprint, this.ports.clock.now()).catch(error => {
+          throw new SessionRuntimeError('failed', failureMessage(error));
+        });
+        if (admission === 'conflict')
+          throw new SessionRuntimeError(
+            'conflict',
+            `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
+          );
+        if (admission === 'unsettled')
+          throw new SessionRuntimeError(
+            'unsettled',
+            `request id ${JSON.stringify(requestId)} already began a runtime control on this session and its outcome was not recorded; the pane may have been touched, so read the session rather than retrying`,
+          );
+        return admission;
+      });
+      // Settle after the pane effect and journal, but before the response projection. A failed final
+      // read can then replay from the durable fact without repeating any keystroke.
+      if (outcome.performed)
+        await this.ports.effects.settle(key, fingerprint, this.ports.clock.now()).catch(error => {
+          throw new SessionRuntimeError('failed', failureMessage(error));
+        });
+      return await this.#view(id);
+    });
   }
 }

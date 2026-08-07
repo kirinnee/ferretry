@@ -66,6 +66,8 @@ export interface StartDaemonOptions {
   /** An explicit executable path is required; the fixture never falls back to a live `fyd` on PATH. */
   readonly command: readonly [string, ...string[]];
   readonly env?: Readonly<Record<string, string>>;
+  /** Let a real compiled daemon own its `<FY_HOME>/tmux.sock` instead of routing tmux to the fixture server. */
+  readonly useDaemonPrivateTmux?: boolean;
   readonly readyUrl?: string;
   readonly timeoutMs?: number;
 }
@@ -721,9 +723,15 @@ export class E2eEnvironment {
     await access(executable, fsConstants.X_OK);
     await this.releasePortLeases();
 
+    const environment = this.childEnvironment(options.env);
+    if (options.useDaemonPrivateTmux === true) {
+      environment.PATH = process.env.PATH ?? '';
+      delete environment.FY_E2E_REAL_TMUX;
+      delete environment.FY_E2E_TMUX_SOCKET;
+    }
     const daemon = await captureProcess(executable, options.command.slice(1), {
       cwd: REPOSITORY_ROOT,
-      env: this.childEnvironment(options.env),
+      env: environment,
     });
     this.daemon = daemon;
     if (options.readyUrl === undefined) return;

@@ -61,6 +61,9 @@ function plan(
 describe('terminal reap policy', () => {
   it('should select an exact registered pane only after durable terminal evidence', () => {
     should(plan().targets).deepEqual([registration()]);
+    should(
+      plan({ registrations: [registration({ paneId: '%0' })], observations: [observed({ paneId: '%0' })] }).targets,
+    ).deepEqual([registration({ paneId: '%0' })]);
   });
 
   it('should refuse an unregistered pane without selecting anything to kill', () => {
@@ -88,6 +91,8 @@ describe('terminal reap policy', () => {
 
   it('should refuse malformed or duplicate identity evidence rather than guessing', () => {
     should(plan({ observations: [observed({ paneId: '0.0' })] }).targets).deepEqual([]);
+    should(plan({ observations: [observed({ paneId: '%00' })] }).targets).deepEqual([]);
+    should(plan({ observations: [observed({ paneId: '%01' })] }).targets).deepEqual([]);
     should(plan({ registrations: [registration(), registration()] }).targets).deepEqual([]);
     should(plan({ registrations: [registration(), registration(), registration()] }).targets).deepEqual([]);
   });

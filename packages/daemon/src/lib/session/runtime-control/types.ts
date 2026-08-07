@@ -23,7 +23,7 @@ export type SessionRuntimeFailure =
   | 'invalid'
   /** No such session. */
   | 'not_found'
-  /** The session's own condition refuses it: a terminal status, a busy pane, a picker quarantine. */
+  /** The session's own condition refuses it: the wrong lifecycle window, a busy pane, a picker quarantine. */
   | 'refused'
   /** The harness cannot express what was asked — a level it has no command for, a model it does not
    *  advertise. A different request could succeed, which is what separates it from `refused`. */
@@ -33,12 +33,13 @@ export type SessionRuntimeFailure =
   /** The same request id was already spent on a DIFFERENT control. */
   | 'conflict'
   /**
-   * The same request id already reached the harness, and how that attempt ended was never recorded.
+   * The same request id was durably begun, and whether it reached the harness or how that attempt
+   * ended was never recorded.
    *
    * DISTINCT FROM `conflict`, because the caller did nothing wrong and there is nothing to correct in
-   * the request. Repeating it is the danger — a second `/compact` discards context nobody asked to
-   * lose — so the honest answer is "it happened; go and look" rather than a replayed success the
-   * daemon cannot vouch for or a retry it must not perform.
+   * the request. Repeating it is the danger — the first `/compact` may already have discarded
+   * context — so the honest answer is "the pane may have been touched; go and look" rather than a
+   * replayed success the daemon cannot vouch for or a retry it must not perform.
    */
   | 'unsettled'
   /** It was attempted, and the attempt failed. */

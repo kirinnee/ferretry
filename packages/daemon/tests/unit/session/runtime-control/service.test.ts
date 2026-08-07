@@ -20,6 +20,7 @@ import {
   FakeRuntimeInjector,
   FakeRuntimePane,
   FakeRuntimeRepository,
+  FakeSessionEffectLedger,
   NOW,
   RecordingSerial,
 } from './support.ts';
@@ -48,6 +49,7 @@ const harnessService = (recovery: 'recovered' | 'quarantined' = 'quarantined') =
 /** The concrete fakes stay concrete, so a test can read what they recorded. */
 interface Overrides {
   readonly repository?: FakeRuntimeRepository;
+  readonly effects?: SessionRuntimeControlPorts['effects'];
   readonly pane?: FakeRuntimePane;
   readonly injector?: FakeRuntimeInjector;
   readonly serial?: RecordingSerial;
@@ -64,8 +66,10 @@ function subjectWith(overrides: Overrides = {}) {
   const pane = overrides.pane ?? new FakeRuntimePane();
   const injector = overrides.injector ?? new FakeRuntimeInjector();
   const serial = overrides.serial ?? new RecordingSerial();
+  const effects = overrides.effects ?? new FakeSessionEffectLedger();
   const ports: SessionRuntimeControlPorts = {
     repository,
+    effects,
     pane,
     injector,
     picker: overrides.picker ?? (() => new FakePickerTransport()),
@@ -77,7 +81,7 @@ function subjectWith(overrides: Overrides = {}) {
     clock: overrides.clock ?? { now: () => NOW },
     clientName: overrides.clientName ?? 'fy',
   };
-  return { ports, repository, pane, injector, serial, subject: new SessionRuntimeControlService(ports) };
+  return { effects, ports, repository, pane, injector, serial, subject: new SessionRuntimeControlService(ports) };
 }
 
 /** The refusal a call produced, as a value. */
@@ -243,9 +247,15 @@ describe('spending the request id', () => {
     should(injector.delivered).be.empty();
   });
 
-  it('should replay the first answer for a genuine retry without touching the harness again', async () => {
-    // Arrange
-    const repository = new FakeRuntimeRepository({ views: [CLAUDE_VIEW()] });
+  it('should answer a genuine retry from a fresh view without touching the harness again', async () => {
+    // Arrange — each read is visibly newer, so replaying a cached projection would fail.
+    const repository = new FakeRuntimeRepository({
+      views: [
+        sessionView('s1', { turn: 1 }, { status: 'running' }),
+        sessionView('s1', { turn: 2 }, { status: 'running' }),
+        sessionView('s1', { turn: 3 }, { status: 'running' }),
+      ],
+    });
     const { subject, injector } = subjectWith({ repository });
 
     // Act
@@ -253,7 +263,9 @@ describe('spending the request id', () => {
     const second = await subject.control('s1', COMPACT, 'req-1');
 
     // Assert
-    should(second).equal(first);
+    should(first.config.turn).equal(2);
+    should(second.config.turn).equal(3);
+    should(second === first).equal(false);
     should(injector.delivered).have.length(1);
   });
 
