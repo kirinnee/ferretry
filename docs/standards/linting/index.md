@@ -41,6 +41,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs
 | `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon               |
 | `a-fetch-binding`            | the PWA never stores an unbound browser `fetch` builtin                    |
 | `a-git-hooks-worktree`       | commit linting works from a linked worktree, concurrently and repeatedly   |
+| `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their two teaching files          |
 | `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers             |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree         |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt  |

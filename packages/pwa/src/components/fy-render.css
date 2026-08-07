@@ -1,0 +1,188 @@
+/* ---- fy-render -------------------------------------------------------------
+   A quiet instrument panel inside the transcript, not a card competing with it.
+
+   Everything geometric here is a token the rest of the shell already uses, and
+   the block deliberately borrows `.kt-rich-file*` and `.kt-fs-*` wholesale from
+   `files.css`: the source and error states of an illustration should read as the
+   same surface as every other code and note surface in the app, because they
+   are the same thing. What is added below is only what those classes cannot
+   know — the illustration plane's proportions, and the fullscreen overlay.
+
+   NO TOUCH-TARGET OVERRIDE. `.kt-btn--sm` already resolves its height through
+   `max(--control-h-sm-desktop, --target-floor)`, and `--target-floor` is 44px on
+   a coarse pointer. Restating 44px here would inflate desktop density for no
+   gain and put the number in a second place. */
+.fy-render {
+  margin-block: var(--gap-md);
+  border: var(--stroke) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+/* The illustration is the dominant plane: it gets the lighter background and
+   the height, and the caption and controls stay chrome around it. */
+.fy-render-stage {
+  display: flex;
+  min-height: 120px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: var(--stroke) solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.fy-render-image {
+  padding: var(--gap-sm);
+}
+
+/* A STAGE HOLDING A NOTE IS A PARAGRAPH, NOT A PICTURE, and the two want
+   opposite things.
+
+   It reserves nothing: the 120px floor is room for an illustration, and a
+   declared limitation, a decode failure and an unaccepted offer are all one
+   sentence. Reserving the plane for them put a 12px line inside a 120px panel
+   above ninety pixels of empty colour, which reads as something still loading
+   rather than as a settled state.
+
+   And it stretches: centring shrinks a note to its text and floats it mid-panel
+   with its accent rail marking nothing. `align-items` alone is not enough — the
+   stage is a ROW, so that only stretches vertically, measured as 493px of note
+   in a 1394px stage — so the note fills the main axis too. At 390px it already
+   filled the measure either way, which is how this survived a review. */
+.fy-render-stage[data-fy-render-stage='note'] {
+  min-height: 0;
+  align-items: stretch;
+  border: 0;
+  background: transparent;
+}
+
+.fy-render-stage[data-fy-render-stage='note'] > .kt-fs-note {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* DOM ORDER IS VISUAL ORDER. The actions row is chrome and lives outside the
+   `<figure>`, so the caption can be the figure's last child — its content model
+   allows only first or last — without any `order` reconciling the two readings.
+   A screen reader and a sighted reader now meet the same sequence. */
+.fy-render-figure {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  margin: 0;
+}
+
+.fy-render-caption {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* INLINE, THE SOURCE PANEL HAS A CEILING. A source-only type opens its panel
+   with no reader action and the preview cap is 32,768 characters, so without one
+   a single block pushes the rest of the message off screen. The panel already
+   scrolls inside itself in fullscreen; this is the same behaviour asked for
+   inline. */
+.fy-render:not([data-fy-render-fullscreen='true']) .kt-fs-code {
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+
+/* ---- fullscreen ------------------------------------------------------------
+   An in-app overlay rather than the Fullscreen API: `Element.requestFullscreen`
+   is unavailable on iOS Safari, which is a first-class target for this PWA, and
+   an overlay keeps Escape and the focus trap in the app's own single stack
+   (`useDialogFocus`) instead of splitting them between the app and the browser.
+
+   `z-index: 50` is the app's established dialog/sheet layer — the same number
+   `rename-sheet`, `migrate-sheet`, `attachment-unlock-prompt`, the command
+   palette and the context menu use. There is no z-index token in this codebase
+   to read it from, and inventing one here would give a scale its first member
+   and no owner, so the literal matches its peers instead. The layers ABOVE it
+   are deliberate: the bulk-stop confirmation (60), the side pane (70/80) and
+   the portrait gate (200) must all be able to cover an open illustration.
+
+   THE VISIBLE BOX, NOT THE LAYOUT VIEWPORT. The element also carries
+   `kt-overlay`, which this app defines for exactly this case — `top: --app-top`,
+   `height: --app-h`, `padding-bottom: env(safe-area-inset-bottom)` — so the
+   overlay follows the same box as the shell. `inset: 0` alone would run the top
+   of an illustration under a notch and put the caption and Exit control (the
+   only dismiss affordance on touch: there is no backdrop click and no swipe)
+   under the home indicator, or behind a software keyboard. Headless Chrome
+   resolves `env()` to zero, so no capture could ever have shown this.
+
+   `inset-inline: 0` STAYS, and is not redundant with `kt-overlay`: that class
+   owns the vertical box and the bottom inset only, so without an explicit
+   horizontal anchor a `position: fixed` element falls back to auto insets and
+   shrink-to-fit width. The vertical box is deliberately left to `kt-overlay`.
+
+   THE SELECTOR CARRIES BOTH CLASSES ON PURPOSE. `.kt-overlay` and
+   `.fy-render-fullscreen` are the same specificity, and `.kt-overlay` is defined
+   LATER — `index.css` imports this file at the top and then declares the overlay
+   contract in its own body — so a single-class rule here loses every property
+   they share, including the safe-area padding this block is paying. `.kt-overlay`
+   remains the vertical-box owner; this only wins the properties it restates. */
+.kt-overlay.fy-render-fullscreen {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  overflow: auto;
+  padding: var(--pad-panel);
+  padding-bottom: max(var(--pad-panel), env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  inset-inline: 0;
+  overscroll-behavior: contain;
+}
+
+.fy-render-fullscreen > .fy-render {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* THE FIGURE IS PART OF THE FULLSCREEN FLEX CHAIN. It sits between the card and
+   the stage, so without a growable, shrinkable box of its own the stage below it
+   has no sized parent to consume: the plane stops filling the overlay, a long
+   source panel pushes the actions row and Exit out of reach, and a tall-fit
+   measurement would be taken against the wrong plane entirely. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-figure {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* A NOTE-BEARING STAGE DOES NOT SHRINK. With `flex: 1 1 auto` a long source
+   panel beside it squeezed the stage to a few pixels, and in the two states
+   whose stage IS the explanation — a declared limitation, and a decode failure —
+   the explanation is precisely what vanished. A 7px gold sliver where "this
+   build does not run Mermaid illustrations" should be leaves a reader looking at
+   raw source with no statement of why; for the failure case it removes the only
+   thing distinguishing a broken image from a deliberate source dump. The source
+   panel already scrolls inside itself here, so nothing else needs to give. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-stage[data-fy-render-stage='note'] {
+  flex: 0 0 auto;
+}
+
+/* FIT THE PLANE, do not escape it. `max-height: none` lifted the reading-column
+   ceiling but the stage still clips and never grows, so a portrait illustration
+   was centred in a viewport-height box with both ends cut off and nothing to
+   scroll — measured at 32% visible on desktop. Fullscreen then showed strictly
+   LESS of the picture than the transcript did, inverting what the control
+   promises. `100%` lets the illustration use the whole plane in both axes, which
+   is what "the biggest possible view" meant. (Panning at natural size would need
+   `overflow: auto` on the stage as well — `auto` alone on a centred flex item
+   clips the top and cannot scroll back to it.) */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-image {
+  max-height: 100%;
+}

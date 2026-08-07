@@ -106,6 +106,14 @@ renderer and one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and
 extend the grammar there rather than adding a second one.
 
+A fenced `fy-render` block renders an illustration inline in an assistant's own transcript message,
+and **nothing in it executes** — `svg` and `image` become an `<img>`, and `html`, `mermaid` and
+`lottie` are shown as escaped source with the limitation stated on screen, because no browser-only
+execution boundary survived measurement. The grammar, the measured `<img>` security result and its
+scope, and the declared gaps that keep handover row 65 open are
+[docs/fy-render.md](docs/fy-render.md). It is **conversation-only**: a fence opener in any durable
+file fails `scripts/validate/no-fy-render-in-docs.sh`.
+
 `packages/daemon` owns a secret store whose contract is **use, never read**: an agent names a secret
 and Ferretry runs a command with the value in _that child's_ environment, so the agent never holds a
 credential. **No route, command or API returns a secret value** — that is enforced by the types, and
