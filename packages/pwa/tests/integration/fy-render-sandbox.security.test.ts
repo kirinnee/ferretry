@@ -37,9 +37,13 @@
  * `should refuse library bytes whose hash was not pinned at build time` is the
  * test that the admission is genuinely needed.
  *
- * THE ARTIFACTS ARE BUILT, NEVER READ FROM A CHECKOUT. `public/` is gitignored
- * and generated, so `beforeAll` runs the real build script. A stale shell would
- * otherwise let this file pass against bytes nobody ships.
+ * THE ARTIFACTS ARE BUILT FRESH IN A CHILD PROCESS, never read from a checkout.
+ * `beforeAll` asks the loader, which spawns the real builder into a private
+ * `mkdtemp` directory and hands back the bytes; nothing here reads `public/` or
+ * `dist/`. A stale shell would otherwise let this file pass against bytes nobody
+ * ships. The compile is OUT of this process on purpose: run together with
+ * `fy-render-component.visual.test.tsx`, which is how `scripts/ci/test.sh int`
+ * runs every integration file, an in-process `Bun.build` wedged the tier.
  *
  * CHROMIUM ONLY, AND THAT IS A STATED LIMIT. Playwright's bundled WebKit is not
  * Safari and is not accepted as evidence for it; the real macOS `safaridriver`
@@ -47,11 +51,12 @@
  */
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { chromium } from 'playwright-core';
 import should from 'should';
-import { buildFyRenderShell, FY_RENDER_SHELL_ARTIFACTS } from '../../scripts/build-fy-render-libs.ts';
+import { sharedChromium } from './support/chromium.ts';
+import { fyRenderFixtureTestSeam, fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
 const sha256 = (text: string): string => `sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}`;
 
@@ -235,6 +240,23 @@ const reportingLibrary = (body: string): string => `(() => {
   };
 })()`;
 
+/**
+ * OUTCOMES, NEVER THE SPELLING OF A REFUSAL — the rule this file now follows.
+ *
+ * `note()` records `THREW: <name>` when a primitive throws, and an earlier version
+ * asserted those names: `SecurityError` ×7, `EvalError` ×3. For a Chromium-only tier
+ * that is defensible, but it cannot be shared —
+ * `tests/fixtures/fy-render-journey.ts` exists so both engines measure ONE
+ * definition, WebKit uses different names, and for storage it may not throw at all.
+ * An engine whose protection is STRONGER must not fail these tests.
+ *
+ * "Did it throw" is not the fix either, because that still asserts a mechanism. Each
+ * assertion below therefore names the EFFECT that must be absent: a computed value
+ * (`value:`), a seeded sentinel read back (`SEEDED`), the parent's secret, an opened
+ * database, an empty request ledger. The raw exception strings stay in the recorded
+ * report as evidence and nothing asserts on them.
+ */
+
 /** Reads the JSON report a reporting library returned. */
 const reportFrom = (result: DriveResult): Record<string, string> => {
   const reply = result.replies.find(item => item.kind === 'mermaid-svg' && item.svg !== undefined);
@@ -273,19 +295,33 @@ const newIsolatedPage = async (): Promise<{ page: Page; foreign: string[]; downl
 };
 
 beforeAll(async () => {
-  // `public/` is generated and gitignored, so the artifacts under test are built
-  // HERE, by calling the real builder. Reading whatever happens to be on disk
-  // would test bytes nobody deploys, and a stale shell would let this file pass
-  // against a policy that no longer ships.
-  //
-  // That import is why `bunfig.int.toml` names `packages/pwa/scripts/**` in
-  // `coveragePathIgnorePatterns`: the module is a build-time generator, not an
-  // adapter, and without that line the int ledger records an out-of-scope path
-  // and `scripts/ci/test.sh` fails on the PATH rather than on any assertion.
-  await buildFyRenderShell();
-  realShell = await readFile(FY_RENDER_SHELL_ARTIFACTS.shell, 'utf8');
-  mermaidBundle = await readFile(FY_RENDER_SHELL_ARTIFACTS.mermaid, 'utf8');
-  lottieBundle = await readFile(FY_RENDER_SHELL_ARTIFACTS.lottie, 'utf8');
+  /**
+   * FRESHLY BUILT, IN A CHILD PROCESS, INTO A PRIVATE DIRECTORY — and this file
+   * neither compiles anything nor reads `public/` or `dist/`.
+   *
+   * Freshness still matters for the same reason it always did: a stale shell would
+   * let this file pass against a policy that no longer ships. What changed is where
+   * the compile happens. Running this file together with
+   * `fy-render-component.visual.test.tsx` — which is how `scripts/ci/test.sh int`
+   * runs them, one Bun process for every integration file — used to WEDGE, and the
+   * operation that never returned was a `Bun.build` inside the test runner. The
+   * loader spawns the builder instead, so nothing here can hang on a compiler.
+   *
+   * `packages/pwa/scripts/**` stays in `bunfig.int.toml`'s
+   * `coveragePathIgnorePatterns` regardless: the builder is a build-time generator
+   * rather than an adapter, and the CLI now runs in a child the Bun coverage
+   * instrument never sees at all.
+   */
+  // THE BROWSER FIRST, before any other setup, so both integration files reach the
+  // one memoised launch in the same order. See `support/chromium.ts`: the wedge this
+  // tier had was two first-time launches racing, and a single obvious ordering is
+  // cheaper to reason about than arguing that a different one is also safe.
+  browser = await sharedChromium();
+
+  const fixture = await fyRenderIntegrationFixture();
+  realShell = fixture.shell;
+  mermaidBundle = fixture.mermaid;
+  lottieBundle = fixture.lottie;
 
   server = Bun.serve({
     hostname: '127.0.0.1',
@@ -335,23 +371,80 @@ beforeAll(async () => {
     },
     websocket: { message() {}, open() {} },
   });
-
-  const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-  if (chrome === null) throw new Error('❌ no Chromium binary found; this tier is real-browser evidence or nothing');
-  browser = await chromium.launch({ executablePath: chrome, headless: true });
 });
 
 /**
- * PER FILE, NOT PER RUN, and that is measured rather than assumed: with both this
- * file and `fy-render-component.visual.test.tsx` in one Bun process, this hook
- * completes before the other file's `beforeAll` begins. It matters because the
- * repository's own command — `scripts/ci/test.sh int` — discovers every
- * integration file in ONE process, so a browser left open here would be open
- * while the other file launches its own.
+ * THIS FILE'S SERVER GOES; THE BROWSER DOES NOT.
+ *
+ * The browser belongs to the process, not to this file — see `support/chromium.ts`
+ * for what was measured. Closing it here would put the relaunch that wedges the
+ * combined run straight back, because hooks are per file and the sibling file may
+ * still need it. Isolation is per CONTEXT and every test closes its own.
  */
 afterAll(async () => {
-  await browser?.close();
   await server?.stop(true);
+});
+
+describe('fy-render fixture loader — the failure path', () => {
+  test('should remove its own private directory when the build fails, and not remember the rejection', async () => {
+    /**
+     * Arrange — a builder that cannot run. Pointing at a module that does not exist
+     * makes the CHILD exit non-zero for a real reason rather than mocking a failure,
+     * and it needs no planted file in the tree.
+     *
+     * The shared memo is TAKEN and put back at the end, so exercising the memoised
+     * entry point here costs the rest of the run no extra real build. The two failing
+     * children exit in milliseconds.
+     */
+    const missing = resolve(import.meta.dir, '../../scripts/no-such-fixture-builder.ts');
+    const saved = fyRenderFixtureTestSeam.takeMemo();
+    fyRenderFixtureTestSeam.useBuilder(missing);
+
+    try {
+      // Act — through the MEMOISED entry point, twice.
+      const first = await fyRenderIntegrationFixture().then(
+        () => null,
+        (error: unknown) => error,
+      );
+      const firstDirectory = fyRenderFixtureTestSeam.lastDirectory();
+      const second = await fyRenderIntegrationFixture().then(
+        () => null,
+        (error: unknown) => error,
+      );
+      const secondDirectory = fyRenderFixtureTestSeam.lastDirectory();
+
+      // Assert — both failed loudly, naming the child's exit rather than a generic
+      // error, so a wedge or a crash cannot be mistaken for a passing build.
+      should(first).be.an.Error();
+      should(String(first)).match(/fixture builder exited/u);
+      should(second).be.an.Error();
+
+      // Assert — THE REJECTION WAS NOT REMEMBERED. A cached rejected promise would be
+      // handed straight back, creating no second directory; a different directory is
+      // the observable proof that the memo cleared itself and really rebuilt.
+      should(firstDirectory).be.a.String();
+      should(secondDirectory).be.a.String();
+      should(secondDirectory).not.equal(firstDirectory);
+
+      // Assert — AND EACH EXACT DIRECTORY IS GONE. This is what the `finally` is for:
+      // a build that throws has already created its `mkdtemp` directory, and no exit
+      // hook can remove it because neither `exit` nor `beforeExit` fires under the Bun
+      // test runner. Asserting the two paths this invocation created — never a scan of
+      // `/tmp`, which would false-fail under `--parallel` where another worker
+      // legitimately creates its own.
+      should(existsSync(firstDirectory as string)).be.false();
+      should(existsSync(secondDirectory as string)).be.false();
+    } finally {
+      fyRenderFixtureTestSeam.useBuilder(null);
+      fyRenderFixtureTestSeam.restoreMemo(saved);
+    }
+
+    // Assert — the loader still works, from the restored memo, so the rest of the run
+    // is unaffected by having failed twice here.
+    const fixture = await fyRenderIntegrationFixture();
+    should(fixture.shell).containEql('Content-Security-Policy');
+    should(fixture.mermaid.length).be.above(0);
+  }, 300_000);
 });
 
 describe('fy-render sandbox — zero-request rendering', () => {
@@ -612,9 +705,11 @@ describe('fy-render sandbox — a script inside the frame cannot fetch a subreso
       should(report.eventSource).startWith('REFUSED');
       // `img-src data:` admits an animation's embedded assets and no remote one.
       should(report.remoteImage).startWith('REFUSED');
-      // A dedicated worker in an opaque origin is refused outright, so this one
-      // reports as a thrown SecurityError rather than as a policy refusal.
-      should(report.worker).equal('THREW: SecurityError');
+      // A dedicated worker never came into existence. THE OUTCOME is that it was not
+      // constructed and asked this server for nothing (the empty ledger below) — the
+      // exception NAME is recorded as evidence and not asserted, because Chromium's
+      // `SecurityError` is not portable and the Safari journey shares this definition.
+      should(report.worker).not.equal('constructed');
       // `sendBeacon` RETURNS TRUE and sends nothing. That return value is the
       // reason this test cannot rest on self-reporting: the API is specified to
       // report only that the request was queued, and CSP drops it afterwards.
@@ -635,10 +730,12 @@ describe('fy-render sandbox — no dynamic code evaluation', () => {
   test('should refuse eval and the Function constructor', async () => {
     // Arrange
     ledger.length = 0;
+    // Each probe computes a DISTINCT value, so the assertion can be "that value never
+    // appeared" rather than "it failed in a particular way".
     const reporter = reportingLibrary(`
-      note('eval', () => eval('1 + 1'));
-      note('newFunction', () => new Function('return 2')());
-      note('functionCtor', () => Function('return 3')());
+      note('eval', () => 'value:' + eval('1 + 1'));
+      note('newFunction', () => 'value:' + new Function('return 2')());
+      note('functionCtor', () => 'value:' + Function('return 3')());
       note('timeoutString', () => { setTimeout('globalThis.__evaluated = true', 0); return 'scheduled'; });
     `);
     const shellPath = publishShell(admitting(reporter));
@@ -656,13 +753,22 @@ describe('fy-render sandbox — no dynamic code evaluation', () => {
         )) as DriveResult,
       );
 
-      // Assert — `'unsafe-eval'` is absent from `script-src`, so each of these is
-      // an EvalError rather than a value. This is what makes the Mermaid bundle's
-      // four inherited `Function("return this")` fallbacks safe if one were ever
-      // reached: the policy refuses them even though the bundle still contains them.
-      should(report.eval).equal('THREW: EvalError');
-      should(report.newFunction).equal('THREW: EvalError');
-      should(report.functionCtor).equal('THREW: EvalError');
+      /**
+       * Assert — NOTHING EVALUATED. `'unsafe-eval'` is absent from `script-src`, and
+       * the effect that matters is that the computed value never came back: not
+       * `2`, not `3`, from any of the three primitives. This is what makes the
+       * Mermaid bundle's four inherited `Function("return this")` fallbacks safe if
+       * one were ever reached — the policy refuses them even though the bundle still
+       * contains them.
+       *
+       * Stated as an outcome rather than as an exception name (Chromium raises
+       * `EvalError`) so an engine that refuses WITHOUT throwing passes too, and so
+       * `tests/fixtures/fy-render-journey.ts` can share one definition with Safari.
+       * The raw name still travels in the recorded report as evidence.
+       */
+      should(report.eval).not.startWith('value:');
+      should(report.newFunction).not.startWith('value:');
+      should(report.functionCtor).not.startWith('value:');
       // A string-bodied `setTimeout` is a third eval path and is refused too. It
       // does not throw at the call site, so the assertion is that the scheduled
       // string never became code.
@@ -683,10 +789,28 @@ describe('fy-render sandbox — the opaque origin has no storage', () => {
       note('localStorage', () => localStorage.getItem('anything'));
       note('sessionStorage', () => sessionStorage.getItem('anything'));
       note('cookieRead', () => 'cookie=[' + document.cookie + ']');
-      note('cookieWrite', () => { document.cookie = 'stolen=1'; return 'assigned'; });
+      // SEEDED SENTINELS, WRITTEN THEN READ BACK. The outcome that matters is that
+      // nothing persisted, and reading it back is an observation; inferring it from
+      // the way the write failed is not, and would fail on an engine that refuses
+      // silently rather than by throwing.
+      note('localStorageWrite', () => { localStorage.setItem('fyStolen', 'SEEDED'); return 'assigned'; });
+      note('localStorageAfterWrite', () => 'read=[' + localStorage.getItem('fyStolen') + ']');
+      note('sessionStorageWrite', () => { sessionStorage.setItem('fyStolen', 'SEEDED'); return 'assigned'; });
+      note('sessionStorageAfterWrite', () => 'read=[' + sessionStorage.getItem('fyStolen') + ']');
+      note('cookieWrite', () => { document.cookie = 'fyStolen=SEEDED'; return 'assigned'; });
+      note('cookieAfterWrite', () => 'cookie=[' + document.cookie + ']');
       note('caches', () => String(caches));
       note('indexedDBFactory', () => String(indexedDB));
-      note('indexedDBOpen', () => { indexedDB.open('exfiltrate'); return 'opened'; });
+      // Resolution, not construction: the request object exists synchronously and
+      // success arrives later, so only a settled open proves a database was reachable.
+      pending.push(settle('indexedDBOpened', new Promise((res, rej) => {
+        try {
+          const request = indexedDB.open('exfiltrate');
+          request.onsuccess = () => res('OPENED');
+          request.onerror = () => rej(new DOMException('onerror', 'NotAllowed'));
+          setTimeout(() => rej(new DOMException('never opened', 'TimeoutError')), 1500);
+        } catch (error) { rej(error); }
+      })));
       note('parentDocument', () => String(parent.document));
       note('parentLocation', () => String(parent.location.href));
       note('origin', () => location.origin);
@@ -706,24 +830,46 @@ describe('fy-render sandbox — the opaque origin has no storage', () => {
         )) as DriveResult,
       );
 
-      // Assert — every storage partition is a SecurityError, which is what an
-      // opaque origin means in practice. `sandbox="allow-scripts"` WITHOUT
-      // `allow-same-origin` is the single attribute all of this rests on; adding
-      // `allow-same-origin` would turn each of these into a working read.
-      should(report.localStorage).equal('THREW: SecurityError');
-      should(report.sessionStorage).equal('THREW: SecurityError');
-      should(report.cookieRead).equal('THREW: SecurityError');
-      should(report.cookieWrite).equal('THREW: SecurityError');
-      should(report.caches).equal('THREW: SecurityError');
-      should(report.indexedDBOpen).equal('THREW: SecurityError');
+      /**
+       * Assert — NO PARTITION YIELDED A VALUE, which is what an opaque origin means
+       * in practice. `sandbox="allow-scripts"` WITHOUT `allow-same-origin` is the
+       * single attribute all of this rests on; adding `allow-same-origin` would turn
+       * each of these into a working read.
+       *
+       * Outcomes rather than exception names: Chromium raises `SecurityError` for
+       * every one of these, WebKit need not, and a WebKit that refused WITHOUT
+       * throwing would be refusing just as hard. The names are recorded in the
+       * report either way — see `refused`.
+       */
+      // NOTHING WAS SEEDED AND NOTHING READ BACK. `SEEDED` is the sentinel each write
+      // tried to store; a jar that refused silently reports `read=[null]` or
+      // `cookie=[]` and passes, which is the point — the claim is about state, not
+      // about exception names.
+      should(report.localStorageAfterWrite ?? '').not.containEql('SEEDED');
+      should(report.sessionStorageAfterWrite ?? '').not.containEql('SEEDED');
+      should(report.cookieAfterWrite ?? '').not.containEql('SEEDED');
+
+      // NOTHING WAS READ, EITHER. The parent document set `fy_render_probe` so a
+      // same-origin frame would have something worth stealing; an opaque one sees
+      // nothing, however it says so.
+      should(report.localStorage ?? '').not.containEql('SEEDED');
+      should(report.sessionStorage ?? '').not.containEql('SEEDED');
+      should(report.cookieRead ?? '').not.containEql('parent-secret');
+
+      // NO DATABASE AND NO CACHE BECAME USABLE. `indexedDBOpened` settles only on a
+      // real `onsuccess`, so this is resolution rather than construction.
+      should(report.indexedDBOpened ?? '').not.containEql('OPENED');
+      should(report.caches ?? '').not.containEql('CacheStorage');
       // NOT a SecurityError, and the difference is worth recording: the FACTORY
       // is a live object in an opaque origin and only USING it throws. A test
       // that asserted `indexedDB` was absent would be asserting something false.
       should(report.indexedDBFactory).equal('[object IDBFactory]');
 
       // Assert — the parent document is unreachable in both directions.
-      should(report.parentDocument).equal('THREW: SecurityError');
-      should(report.parentLocation).equal('THREW: SecurityError');
+      // NEITHER DIRECTION LEAKED. The outcome is that the parent's URL and DOM never
+      // came back — not that reaching for them threw a particular error.
+      should(report.parentDocument ?? '').not.containEql('HTMLDocument');
+      should(report.parentLocation ?? '').not.containEql('http');
 
       // The frame's `location.origin` still READS as the server's origin, which
       // is why `event.origin` authenticates nothing here and the protocol checks

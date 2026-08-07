@@ -1141,10 +1141,34 @@ export async function fyRenderReadBoundedText(
  */
 export type FyRenderSandboxMessage =
   | { readonly kind: 'shell-ready' }
-  | { readonly kind: 'mermaid-svg'; readonly svg: string }
+  | { readonly kind: 'mermaid-svg'; readonly svg: string; readonly theme: FyRenderSandboxTheme }
   | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
   | { readonly kind: 'playing'; readonly playing: boolean }
-  | { readonly kind: 'error'; readonly message: string };
+  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass };
+
+/** Which way the shell was told to paint, echoed back on the compiled diagram. */
+export type FyRenderSandboxTheme = 'dark' | 'light';
+
+/**
+ * WHAT WENT WRONG, AS A MACHINE CLASS the shell chooses and the parent never guesses.
+ *
+ * `library` is the trusted bundle failing to install — the split-deploy case, where
+ * the hash-pinned `script-src` refuses bytes that arrived intact. No author byte is
+ * involved, so blaming the illustration is simply wrong: the reader must be told the
+ * renderer could not be loaded. `render` is everything the DATA can cause — a parse
+ * error, a player refusal, a control failure, a re-admission refusal.
+ *
+ * Why it has to be on the wire rather than inferred: the parent is forbidden from
+ * matching on reader-facing strings (a copy edit would silently change behaviour),
+ * and the shell is the only side that knows which of the two happened. Before this
+ * field existed every `error` became `render`, so a broken deployment told the reader
+ * their diagram could not be drawn — the same defect class the deadline copy repair
+ * removed, on the most operationally likely path.
+ */
+export type FyRenderSandboxErrorClass = 'library' | 'render';
+
+const SANDBOX_THEMES: readonly string[] = ['dark', 'light'];
+const SANDBOX_ERROR_CLASSES: readonly string[] = ['library', 'render'];
 
 const boundedDimension = (value: unknown): number | null => {
   if (typeof value !== 'number' || !Number.isInteger(value)) return null;
@@ -1165,11 +1189,24 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
     case 'shell-ready':
       return hasExactKeys(message, ['kind']) ? { kind: 'shell-ready' } : null;
     case 'mermaid-svg': {
-      if (!hasExactKeys(message, ['kind', 'svg'])) return null;
-      const { svg } = message;
+      if (!hasExactKeys(message, ['kind', 'svg', 'theme'])) return null;
+      const { svg, theme } = message;
       if (typeof svg !== 'string') return null;
       if (byteLength(svg) > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes) return null;
-      return { kind: 'mermaid-svg', svg };
+      /**
+       * THE THEME THE SHELL ACTUALLY COMPILED WITH, refused rather than defaulted.
+       *
+       * Mermaid cannot see the page, so it is told which way to paint and bakes that
+       * into the SVG — which then lives on as an `<img>` for the rest of the
+       * transcript. The parent used to re-read the DOM when the diagram arrived,
+       * which records the theme in force at CALLBACK time; if the reader switched
+       * during the compile, the recorded theme was one the diagram was never drawn
+       * with, and the staleness check then agreed with the document forever. Taking
+       * the value from the producer closes that. Defaulting an unrecognised value
+       * would put the same guess back, so it is refused.
+       */
+      if (typeof theme !== 'string' || !SANDBOX_THEMES.includes(theme)) return null;
+      return { kind: 'mermaid-svg', svg, theme: theme as FyRenderSandboxTheme };
     }
     case 'rendered': {
       if (!hasExactKeys(message, ['kind', 'width', 'height'])) return null;
@@ -1184,12 +1221,20 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
       return { kind: 'playing', playing: message.playing };
     }
     case 'error': {
-      if (!hasExactKeys(message, ['kind', 'message'])) return null;
+      if (!hasExactKeys(message, ['kind', 'message', 'class'])) return null;
       const { message: text } = message;
       if (typeof text !== 'string') return null;
       // Refused, not clipped. See the note above.
       if ([...text].length > FY_RENDER_SANDBOX_LIMITS.messageCharacters) return null;
-      return { kind: 'error', message: text };
+      /**
+       * REQUIRED, and refused rather than defaulted to `render`. A default would be
+       * the parent guessing again — and it would guess "the illustration is broken"
+       * for a message whose sender could not say what happened, which is the exact
+       * wrong direction for the split-deploy case this field exists to name.
+       */
+      const failureClass = message.class;
+      if (typeof failureClass !== 'string' || !SANDBOX_ERROR_CLASSES.includes(failureClass)) return null;
+      return { class: failureClass as FyRenderSandboxErrorClass, kind: 'error', message: text };
     }
     default:
       return null;

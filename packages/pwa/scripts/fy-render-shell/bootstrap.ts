@@ -41,10 +41,10 @@ import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/lib/fy-ren
 
 type Reply =
   | { kind: 'shell-ready' }
-  | { kind: 'mermaid-svg'; svg: string }
+  | { kind: 'mermaid-svg'; svg: string; theme: 'dark' | 'light' }
   | { kind: 'rendered'; width: number; height: number }
   | { kind: 'playing'; playing: boolean }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; class: 'library' | 'render' };
 
 interface LottieAnimation {
   play(): void;
@@ -115,7 +115,17 @@ interface MermaidLibrary {
   /** Every string this frame puts on the wire is cut to a documented length. */
   const clip = (value: unknown): string => String(value).slice(0, FY_RENDER_SANDBOX_LIMITS.messageCharacters);
 
-  const failWith = (reason: unknown): void => send({ kind: 'error', message: clip(reason) });
+  /**
+   * THE SHELL CHOOSES THE CLASS, because it is the only side that knows.
+   *
+   * `library` means the trusted bundle did not become code — the split deploy, where
+   * the hash-pinned `script-src` refuses bytes that arrived intact. `render` is
+   * everything the author's DATA can cause. The parent is forbidden from inferring
+   * this from the sentence, so an unclassified reply would leave it guessing, and its
+   * only safe guess was "the illustration is broken" — wrong for a broken deployment.
+   */
+  const failWith = (failureClass: 'library' | 'render', reason: unknown): void =>
+    send({ class: failureClass, kind: 'error', message: clip(reason) });
 
   const boundedDimension = (value: unknown): number => {
     if (typeof value !== 'number' || !isInteger(value) || value < 1) return 1;
@@ -137,10 +147,20 @@ interface MermaidLibrary {
   };
 
   const renderMermaid = (library: unknown, source: unknown, theme: unknown): void => {
-    if (typeof source !== 'string') return failWith('The diagram source was not text.');
+    if (typeof source !== 'string') return failWith('render', 'The diagram source was not text.');
     install(library);
     const mermaid = (globalThis as unknown as { __fyRenderMermaid?: MermaidLibrary }).__fyRenderMermaid;
-    if (mermaid === undefined) return failWith('The Mermaid library did not load.');
+    /**
+     * `library`, NOT `render`. Appending a script whose hash is not in `script-src`
+     * does not throw — the browser simply never runs it — so the global's absence is
+     * the ONLY honest evidence of a refused install, and it is exactly the split
+     * deploy `docs/fy-render.md` singles out as the failure that will be seen in the
+     * field and misdiagnosed. Nothing about the author's bytes is implicated.
+     */
+    if (mermaid === undefined) return failWith('library', 'The Mermaid library did not load.');
+    // The resolved painting direction, echoed on the reply so the parent never has
+    // to re-read the DOM to learn what this diagram was drawn for.
+    const resolvedTheme: 'dark' | 'light' = theme === 'dark' ? 'dark' : 'light';
     try {
       /**
        * `securityLevel: 'strict'` is Mermaid's own hardening: it strips click
@@ -192,7 +212,7 @@ interface MermaidLibrary {
         ],
         securityLevel: 'strict',
         startOnLoad: false,
-        theme: theme === 'dark' ? 'dark' : 'default',
+        theme: resolvedTheme === 'dark' ? 'dark' : 'default',
       });
       mermaid
         .render('fy-render-diagram', source)
@@ -205,29 +225,31 @@ interface MermaidLibrary {
            * never transferred at all.
            */
           if (encodeUtf8(result.svg).byteLength > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes)
-            return failWith('The compiled diagram is too large to display.');
-          send({ kind: 'mermaid-svg', svg: result.svg });
+            return failWith('render', 'The compiled diagram is too large to display.');
+          send({ kind: 'mermaid-svg', svg: result.svg, theme: resolvedTheme });
         })
         .catch((error: unknown) =>
-          failWith(error instanceof Error ? error.message : 'The diagram could not be drawn.'),
+          failWith('render', error instanceof Error ? error.message : 'The diagram could not be drawn.'),
         );
     } catch (error) {
-      failWith(error instanceof Error ? error.message : 'The diagram could not be drawn.');
+      failWith('render', error instanceof Error ? error.message : 'The diagram could not be drawn.');
     }
   };
 
   const renderLottie = (library: unknown, source: unknown, playing: unknown): void => {
-    if (typeof source !== 'string') return failWith('The animation source was not text.');
+    if (typeof source !== 'string') return failWith('render', 'The animation source was not text.');
     install(library);
     const lottie = (globalThis as unknown as { __fyRenderLottie?: LottieLibrary }).__fyRenderLottie;
-    if (lottie === undefined) return failWith('The Lottie library did not load.');
+    // `library` for the same reason as Mermaid's: a refused install is a deployment
+    // fault, and the author's animation is not implicated in it.
+    if (lottie === undefined) return failWith('library', 'The Lottie library did not load.');
     let data: unknown;
     try {
       data = parseJson(source);
     } catch {
-      return failWith('The animation was not valid JSON.');
+      return failWith('render', 'The animation was not valid JSON.');
     }
-    if (data === null || typeof data !== 'object') return failWith('The animation was not an object.');
+    if (data === null || typeof data !== 'object') return failWith('render', 'The animation was not an object.');
     try {
       animation = lottie.loadAnimation({
         animationData: data,
@@ -241,7 +263,7 @@ interface MermaidLibrary {
         send({ height: boundedDimension(frame.h), kind: 'rendered', width: boundedDimension(frame.w) }),
       );
     } catch (error) {
-      failWith(error instanceof Error ? error.message : 'The animation could not be played.');
+      failWith('render', error instanceof Error ? error.message : 'The animation could not be played.');
     }
   };
 
@@ -253,7 +275,7 @@ interface MermaidLibrary {
       else animation.pause();
       send({ kind: 'playing', playing: next });
     } catch (error) {
-      failWith(error instanceof Error ? error.message : 'The animation could not be controlled.');
+      failWith('render', error instanceof Error ? error.message : 'The animation could not be controlled.');
     }
   };
 

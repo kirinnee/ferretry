@@ -40,12 +40,31 @@ const packageRoot = resolve(import.meta.dir, '..');
 const shellDirectory = resolve(packageRoot, 'scripts/fy-render-shell');
 const publicDirectory = resolve(packageRoot, 'public');
 
-/** The generated set, so tests and `.gitignore` have one place to agree with. */
-export const FY_RENDER_SHELL_ARTIFACTS = {
-  lottie: resolve(publicDirectory, 'fy-render-lottie.js'),
-  mermaid: resolve(publicDirectory, 'fy-render-mermaid.js'),
-  shell: resolve(publicDirectory, 'fy-render-sandbox.html'),
-} as const;
+export interface FyRenderShellArtifacts {
+  readonly shell: string;
+  readonly mermaid: string;
+  readonly lottie: string;
+}
+
+/**
+ * The three generated names, resolved under whichever directory is asked for.
+ *
+ * WHY THIS TAKES A DIRECTORY. Production writes them into `public/` for Vite and
+ * the deploy pipeline, and that is still the default below. The integration
+ * fixture CLI writes them into a private `mkdtemp` directory instead, so two
+ * builds can never write the same three paths — a hazard the security review
+ * named explicitly: `writeFile` is not atomic, so two concurrent builders let a
+ * reader observe torn bytes, fail the hash pin, and be told the library did not
+ * load.
+ */
+export const fyRenderShellArtifactsIn = (directory: string): FyRenderShellArtifacts => ({
+  lottie: resolve(directory, 'fy-render-lottie.js'),
+  mermaid: resolve(directory, 'fy-render-mermaid.js'),
+  shell: resolve(directory, 'fy-render-sandbox.html'),
+});
+
+/** The production set, so `.gitignore` and `build-pwa.sh` have one place to agree with. */
+export const FY_RENDER_SHELL_ARTIFACTS = fyRenderShellArtifactsIn(publicDirectory);
 
 interface Bundle {
   readonly name: string;
@@ -212,42 +231,28 @@ interface BuiltShell {
 }
 
 /**
- * ONE BUILD PER PROCESS, and this is a correctness fix for the test tiers rather
- * than a speed tweak.
+ * PURE PER OUTPUT DIRECTORY, AND DELIBERATELY NOT CACHED.
  *
- * Two integration files call this in `beforeAll` so that each measures a FRESHLY
- * BUILT shell rather than whatever artifact happened to be on disk. Run
- * separately that is right and cheap. Run the way the repository actually runs
- * them — `scripts/ci/test.sh int` discovers every integration file in ONE Bun
- * process — it meant bundling Mermaid twice, writing the same three artifacts
- * twice, and doing it while a Chromium instance was live. Measured: the pair
- * timed out at 60 s inside a real Mermaid compile that takes about a second on
- * its own, so the tier hung rather than failed.
+ * This function used to hold a one-slot process memo, added when two integration
+ * files each called it in `beforeAll` and the pair wedged. That memo was the wrong
+ * shape twice over. It was unkeyed, so gaining an output-directory argument would
+ * have let a second caller silently receive the first caller's directory. And it
+ * did not fix the wedge: an independent diagnosis established that the shell
+ * promise coalesced and COMPLETED, while the visual file's second `Bun.build` —
+ * the one traversing the real component graph — never resolved. A cache cannot
+ * make an unresolved compile safe.
  *
- * CACHING IS SOUND HERE, not a staleness risk, and the reason is worth stating:
- * the inputs are source files, a process cannot edit its own source tree
- * mid-run, and the builder is deterministic — the second call was guaranteed to
- * produce byte-identical output, which is exactly what makes it safe to skip.
- * Every caller still gets the same freshly-built bytes and the artifacts are
- * still written; only the duplicate work is gone.
- *
- * A FAILED BUILD IS NOT REMEMBERED. Caching a rejection would turn one transient
- * failure into a permanently broken process, so the slot is cleared and the
- * caller still sees the rejection.
+ * So the boundary moved out of this file entirely. No `Bun.build` runs inside the
+ * Bun test process any more: `build-fy-render-integration-fixture.ts` is a CLI
+ * that the test loader spawns as a child, and same-process de-duplication is the
+ * LOADER's job — it memoises the child-process promise, which is the thing worth
+ * memoising. This function is now what it always should have been: deterministic
+ * given its inputs, writing only under the directory it is handed.
  */
-let built: Promise<BuiltShell> | null = null;
-
-export const buildFyRenderShell = (): Promise<BuiltShell> => {
-  if (built !== null) return built;
-  const pending = buildFyRenderShellOnce();
-  built = pending;
-  pending.catch(() => {
-    if (built === pending) built = null;
-  });
-  return pending;
-};
-
-const buildFyRenderShellOnce = async (): Promise<BuiltShell> => {
+export const buildFyRenderShell = async (
+  directory: string = publicDirectory,
+): Promise<BuiltShell & { readonly artifacts: FyRenderShellArtifacts }> => {
+  const artifacts = fyRenderShellArtifactsIn(directory);
   const bundleFor = async (name: string, entry: string): Promise<Bundle> => {
     const source = await build(entry);
     assertInvariants(name, source);
@@ -264,12 +269,12 @@ const buildFyRenderShellOnce = async (): Promise<BuiltShell> => {
   const shell = shellDocument(bootstrap, [mermaid, lottie]);
   assertShellContract(shell, [bootstrap, mermaid, lottie]);
 
-  await mkdir(publicDirectory, { recursive: true });
-  await writeFile(FY_RENDER_SHELL_ARTIFACTS.mermaid, mermaid.text, 'utf8');
-  await writeFile(FY_RENDER_SHELL_ARTIFACTS.lottie, lottie.text, 'utf8');
-  await writeFile(FY_RENDER_SHELL_ARTIFACTS.shell, shell, 'utf8');
+  await mkdir(directory, { recursive: true });
+  await writeFile(artifacts.mermaid, mermaid.text, 'utf8');
+  await writeFile(artifacts.lottie, lottie.text, 'utf8');
+  await writeFile(artifacts.shell, shell, 'utf8');
 
-  return { bundles: [bootstrap, mermaid, lottie], shell };
+  return { artifacts, bundles: [bootstrap, mermaid, lottie], shell };
 };
 
 /**

@@ -30,6 +30,40 @@ function Dialog({
   );
 }
 
+/**
+ * A dialog shaped like the one that exposed the hole: a `<details>` fold and a
+ * horizontally scrolling panel BEFORE the buttons in DOM order.
+ *
+ * That order is the point. The trap wraps from the last focusable element to the
+ * first, so an element the selector misses is skipped in BOTH directions when it
+ * precedes everything the selector finds — and the trap `preventDefault()`s the Tab
+ * that would otherwise have reached it, inside a container claiming
+ * `aria-modal="true"`. `fy-render`'s failure state is exactly this shape.
+ */
+function FoldDialog({ onClose = () => {} }: { onClose?: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const { onKeyDown } = useDialogFocus(true, ref, onClose, { autoFocus: false });
+  return (
+    <div ref={ref} role="dialog" aria-label="Fold" tabIndex={-1} onKeyDown={onKeyDown}>
+      <details>
+        <summary>Why</summary>
+        <p>the precise reason</p>
+      </details>
+      <button type="button">Source</button>
+      <button type="button">Exit</button>
+      {/* LAST on purpose. The trap only intervenes at the two ends of its list, so a
+          candidate placed in the middle is never proved to be in the list at all: the
+          native order would carry Tab past it either way. With the summary FIRST and
+          the scrollport LAST, each wrap has to name the other one, and dropping either
+          from the selector makes one of the two tests below fail. */}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: mirrors the shipped scrollport */}
+      <section aria-label="Authored source" tabIndex={0}>
+        <pre>a very long line</pre>
+      </section>
+    </div>
+  );
+}
+
 describe('escape layers', () => {
   it('gives the topmost layer ownership and releases idempotently', () => {
     const first = {};
@@ -90,6 +124,52 @@ describe('useDialogFocus', () => {
     expect(closed).toEqual(['over', 'under']);
 
     await under.unmount();
+  });
+
+  it('wraps forward onto a <summary>, which the selector used to skip entirely', async () => {
+    // Arrange — `<summary>` is focusable natively and carries no `tabindex`, so it
+    // matched none of the selector's arms. The trap then wrapped straight past the fold
+    // and `preventDefault()`ed the Tab that would have reached it — inside a container
+    // claiming `aria-modal="true"`.
+    const dialog = await mount(<FoldDialog />);
+    const summary = dialog.container.querySelector('summary') as HTMLElement;
+    const region = dialog.container.querySelector('section[aria-label]') as HTMLElement;
+    region.focus();
+
+    // Act — Tab from the LAST focusable element, which is where a forward wrap happens.
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Tab' });
+    await interact(() => region.dispatchEvent(event));
+
+    // Assert — it lands on the summary. Without `summary` in the selector the wrap
+    // would land on the Source button instead, so this discriminates.
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(summary);
+
+    await dialog.unmount();
+  });
+
+  it('wraps backward onto an explicitly focusable scrollport, so a long line is reachable', async () => {
+    // Arrange — the other half of the same hole. A scrollport carries no attribute or
+    // tag name the selector could match, so it needs an explicit `tabIndex={0}` from
+    // its own component; Chromium focuses such scrollers natively, which is exactly
+    // why a browser test kept looking correct while the trap skipped them.
+    const dialog = await mount(<FoldDialog />);
+    const summary = dialog.container.querySelector('summary') as HTMLElement;
+    const region = dialog.container.querySelector('section[aria-label]') as HTMLElement;
+    summary.focus();
+
+    // Act — Shift+Tab from the FIRST focusable element, which is where a backward wrap
+    // happens.
+    const back = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Tab', shiftKey: true });
+    await interact(() => summary.dispatchEvent(back));
+
+    // Assert — it lands on the scrollport, because the scrollport is LAST. Were it
+    // missing from the list the wrap would land on the Exit button, so this
+    // discriminates rather than merely reading the fixture's own attribute back.
+    expect(back.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(region);
+
+    await dialog.unmount();
   });
 
   it('ignores every key that is not Escape', async () => {

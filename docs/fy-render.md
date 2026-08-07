@@ -324,11 +324,33 @@ reader is shown, because a jison parse dump quoting the author's own source is n
 Lottie `lifetime` stop is not presented as a failure at all — no error tone, no source panel — because
 nothing went wrong: a healthy animation reached its permitted life.
 
-**A compiled Mermaid diagram belongs to the theme that compiled it.** Mermaid cannot see the page, so
-it is told which way it is painted and bakes that into the SVG, which then lives on as an `<img>`.
-Switching between a dark and a light theme therefore drops the diagram and recompiles it; consent is
-untouched, because the reader approved those bytes and a repaint does not change that. Switching
-between two themes of the same mode keeps the diagram.
+**A compiled Mermaid diagram belongs to the theme that compiled it, and a theme change MARKS IT STALE
+rather than redrawing it.** Mermaid cannot see the page, so it is told which way it is painted and
+bakes that into the SVG, which then lives on as an `<img>`. Switching between a dark and a light theme
+therefore leaves the diagram on screen and puts `The theme changed. Reload to redraw this diagram.` in
+the status region; the reader's Reload is what redraws it. Switching back before reloading clears the
+note by itself.
+
+**Nothing is created or fetched by that transition** — zero frames and zero requests, measured with
+three rendered diagrams on screen. Redrawing automatically was the first repair and it was wrong twice
+over: the work was unbounded in N (every compiled block remounted its frame at once, each refetching a
+multi-megabyte renderer, from a gesture that was not aimed at rendering anything), and recording the
+theme at callback time meant a switch DURING a compile was recorded as the theme the diagram was drawn
+for, which pinned a mismatched diagram silently. The shell now echoes the theme it actually compiled
+with, and the parent never re-reads the document to learn it. Consent is untouched throughout, because
+the reader approved those bytes and a repaint does not change that.
+
+**The fold and the source panel are both keyboard-reachable in fullscreen.** `<summary>` is focusable
+natively but carries no `tabindex`, so it matched none of `useDialogFocus`'s selector arms — and the
+trap does not merely fail to reach such an element, it `preventDefault()`s the Tab that would have,
+inside a container claiming `aria-modal="true"`. `summary` is now in that shared selector, which fixes
+every dialog in the app containing a `<details>`. The authored-source panel is a horizontal scrollport
+that no selector arm could match either, so it is a named `<section>` — which carries the region role
+implicitly — with an explicit `tabIndex={0}`, making it reachable inline and not only in fullscreen.
+Measured in
+real Chromium, the fullscreen failure state's tab order is
+`summary → source panel → Source → Reload → Exit fullscreen`, and the wrap from Exit lands on the
+summary.
 
 **The frame is deliberately unreachable by keyboard and pointer** (`tabIndex={-1}` plus
 `pointer-events: none`), which is why `useDialogFocus`'s focusable-element list has no `iframe` entry.
@@ -435,10 +457,18 @@ gate wording folded under `Why`, and the source panel opened as scaffolding. The
 the reason said out loud, and
 a failed one is visually indistinguishable from an ordinary fence with a note above it.
 
-That last route is worth stating plainly because it will be seen in the field and misdiagnosed: if
-the shell and the library bundles are ever served from two different deploys, the CSP hash will not
-match, the library will not run, and every sandbox block returns to source with "The Mermaid library
-did not load." That is the design failing closed, not a bug.
+That last route is worth stating plainly because it will be seen in the field and misdiagnosed: if the
+shell and the library bundles are ever served from two different deploys, the CSP hash will not match
+and the library will not run. **The reader sees exactly this:**
+
+> The Mermaid renderer could not be loaded. The authored source is shown below.
+
+with **"The Mermaid library did not load."** inside the collapsed **Why** fold. That is the design
+failing closed, not a bug — and the sentence names the RENDERER rather than the illustration, because
+the illustration is fine and the deployment is not. The shell classifies its own failures as
+`library` or `render` on the wire so the parent never has to infer which happened from a sentence; a
+copy edit must not be able to change behaviour. Before that field existed, every shell error was
+classed as a render failure and this path told the reader their diagram could not be drawn.
 
 **That note is deliberately not a live region** — not `role="alert"`, not `role="status"`, not
 `aria-live`. A transcript row re-renders while the assistant is still emitting it, and the grammar
@@ -553,8 +583,17 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    all. A payload inside every limit and still expensive to rasterise is bounded in neither what the
    machine spends nor, for the non-sandbox types, how long the reader waits. Do not describe the caps
    as bounding compute, do not describe the watchdogs as a quota, and do not describe the trust gate
-   as isolation — it decides WHO starts the work and WHEN, not how much of it there can be. See
+   as isolation — it decides WHO starts the work and WHEN, not how much of it there can be.
+
+   **NEITHER WATCHDOG HAS A BROWSER CAPTURE, and both are unit-proven only.** The 15-second Mermaid
+   deadline and the 120-second Lottie lifetime are wall-clock by design, so a browser test would have
+   to wait that long to see one fire; the real-component Chromium journey therefore does not capture
+   either. What is proven, in `tests/unit/fy-render-sandbox.test.tsx` against shortened deadlines, is
+   that each timer fires with the right class (`deadline` for Mermaid, `lifetime` for Lottie), that no
+   message from the frame clears it, and how the block presents each. Nothing anywhere may describe
+   either bound as browser-measured. See
    [Accepted risk](#accepted-risk).
+
 4. **Cross-browser coverage is one engine, and Chromium proof is not Safari proof.** Every measured
    result in this document — the `<img>` sink, the CSP hash pinning, the zero-request ledger — is
    Chrome 150, headless, on Linux. Firefox is unmeasured. Safari is the consequential one for a PWA,

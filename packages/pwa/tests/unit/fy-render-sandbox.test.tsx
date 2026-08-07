@@ -505,7 +505,7 @@ describe('FyRenderSandbox failure classification', () => {
 
       // Act
       const port = handshake(node);
-      run(() => port.postMessage({ kind: 'error', message: dump }));
+      run(() => port.postMessage({ class: 'render', kind: 'error', message: dump }));
       await settle(40);
 
       // Assert — `render` is the only class an author's bytes can cause, and the
@@ -815,7 +815,7 @@ describe('FyRenderBlock sandbox status', () => {
     await settle(20);
 
     // Act — Mermaid's success IS the compiled SVG; there is no `rendered` for it.
-    run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG));
+    run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG, 'dark'));
     await settle(20);
 
     // Assert — the frame is destroyed and what remains is the measured `<img>`.
@@ -839,7 +839,7 @@ describe('FyRenderBlock sandbox failure copy', () => {
     run(() =>
       tree.root
         .findByType(FyRenderSandbox)
-        .props.onCompiled('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject/></svg>'),
+        .props.onCompiled('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject/></svg>', 'dark'),
     );
     await settle(20);
 
@@ -974,19 +974,25 @@ describe('FyRenderBlock sandbox failure copy', () => {
 });
 
 describe('FyRenderBlock sandbox theme ownership', () => {
-  test('should recompile a diagram whose theme no longer matches the page', async () => {
-    // Arrange — Mermaid cannot see the page, so it is TOLD which way it is painted
-    // and bakes that into the SVG; the result then lives on as an `<img>` for the
-    // rest of the transcript's life. This app ships 22 themes, so a dark diagram
-    // stranded on a light surface is unreadable with nothing on screen suggesting
-    // Reload was the remedy.
+  test('should mark a diagram stale and create NO frame when the theme changes', async () => {
+    /**
+     * Arrange — Mermaid cannot see the page, so it is TOLD which way it is painted and
+     * bakes that into the SVG, which then lives on as an `<img>` for the rest of the
+     * transcript. This app ships 22 themes, so a dark diagram stranded on a light
+     * surface is unreadable.
+     *
+     * The first repair redrew automatically, which was unbounded in N — every compiled
+     * block remounted its frame at once, each refetching a multi-megabyte renderer,
+     * from a gesture that was not aimed at rendering anything. So the diagram now
+     * STAYS and the reader is told; Reload is their gesture.
+     */
     const before = document.documentElement.getAttribute('data-theme');
     try {
       const { tree } = mountBlock(mermaidBlock());
       approve(tree);
       await settle(20);
       should(tree.root.findByType(FyRenderSandbox).props.theme).equal('dark');
-      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG));
+      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG, 'dark'));
       await settle(20);
       should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(1);
 
@@ -994,32 +1000,194 @@ describe('FyRenderBlock sandbox theme ownership', () => {
       run(() => document.documentElement.setAttribute('data-theme', 'mission-light'));
       await settle(60);
 
-      // Assert — the diagram is dropped and a frame takes its place, compiling
-      // against the theme now on the document. Consent is untouched: the reader
-      // approved these bytes and a repaint does not change that.
-      should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(0);
-      should(frames(tree)).equal(1);
-      should(tree.root.findByType(FyRenderSandbox).props.theme).equal('light');
-      // And the wait is visible again rather than a stale "ready" over a blank plane.
-      should(status(tree).phase).equal('preparing');
+      // Assert — THE DIAGRAM IS STILL THERE and NO frame was created. That second
+      // count is the whole repair: it is what "zero new fetches until a Reload
+      // gesture" means at the component level.
+      should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(1);
+      should(frames(tree)).equal(0);
+      // And the reader is told, with the remedy named.
+      should(status(tree)).match({
+        phase: 'stale',
+        text: 'The theme changed. Reload to redraw this diagram.',
+      });
+      // A status, not a failure: no error tone and no source panel unfurled.
+      should(status(tree).tone).be.undefined();
+      should(marked(tree, { 'data-fy-render-source': 'true' })).equal(0);
+      // Consent is untouched — the reader approved these bytes and a repaint does not
+      // change that, so they are not asked again.
       should(marked(tree, { 'data-fy-render-consent-action': 'true' })).equal(0);
+
+      // Act — switching BACK before reloading clears the note by itself, because the
+      // comparison is derived and has nothing to undo.
+      run(() => document.documentElement.setAttribute('data-theme', 'mission-dark'));
+      await settle(60);
+
+      // Assert
+      should(status(tree)).match({ phase: 'ready', text: 'The Mermaid illustration is ready.' });
+      should(frames(tree)).equal(0);
     } finally {
       if (before === null) document.documentElement.removeAttribute('data-theme');
       else document.documentElement.setAttribute('data-theme', before);
     }
   });
 
-  test('should leave a diagram alone when the attribute changes but the mode does not', async () => {
-    // Arrange — 22 themes resolve to two modes. Recompiling on every switch between
-    // two dark families would throw away a good diagram and re-run a 3.4 MiB
-    // renderer for a picture that would come back identical.
+  test('should redraw only when the reader presses Reload, and reset the stale note', async () => {
+    // Arrange — a stale diagram, exactly as above.
+    const before = document.documentElement.getAttribute('data-theme');
+    try {
+      const { tree } = mountBlock(mermaidBlock());
+      approve(tree);
+      await settle(20);
+      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG, 'dark'));
+      await settle(20);
+      run(() => document.documentElement.setAttribute('data-theme', 'mission-light'));
+      await settle(60);
+      should(status(tree).phase).equal('stale');
+
+      // Act — the READER's gesture, which is the one the gate has always required.
+      press(tree, 'Reload');
+      await settle(20);
+
+      // Assert — now a frame exists, compiling for the theme now on the page, and the
+      // stale note is gone because the old compile went with it.
+      should(frames(tree)).equal(1);
+      should(tree.root.findByType(FyRenderSandbox).props.theme).equal('light');
+      should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(0);
+      should(status(tree).phase).equal('preparing');
+
+      // Act — and a successful reload resets the state rather than leaving it stale.
+      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG, 'light'));
+      await settle(20);
+
+      // Assert
+      should(status(tree)).match({ phase: 'ready', text: 'The Mermaid illustration is ready.' });
+      should(frames(tree)).equal(0);
+    } finally {
+      if (before === null) document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', before);
+    }
+  });
+
+  test('should not go stale from the theme the shell reported, even across a switch mid-compile', async () => {
+    /**
+     * Arrange — the race the echo closes. The frame is told `dark` at send time; the
+     * reader switches to light WHILE it compiles; the diagram arrives drawn for dark.
+     *
+     * Recording `documentTheme()` at callback time would have written `light` — the
+     * theme the diagram was NOT drawn for — and the comparison would then have agreed
+     * with the document forever, pinning an unreadable diagram with no note.
+     */
+    const before = document.documentElement.getAttribute('data-theme');
+    try {
+      const { tree } = mountBlock(mermaidBlock());
+      approve(tree);
+      await settle(20);
+      should(tree.root.findByType(FyRenderSandbox).props.theme).equal('dark');
+
+      // Act — the switch lands first, then the diagram arrives echoing `dark`.
+      run(() => document.documentElement.setAttribute('data-theme', 'mission-light'));
+      await settle(20);
+      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG, 'dark'));
+      await settle(60);
+
+      // Assert — it is correctly stale, and still no frame was created.
+      should(status(tree).phase).equal('stale');
+      should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(1);
+      should(frames(tree)).equal(0);
+    } finally {
+      if (before === null) document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', before);
+    }
+  });
+
+  test('should create zero new frames and zero new fetches across TWO rendered blocks', async () => {
+    /**
+     * Arrange — the defect this replaced was UNBOUNDED IN N: the observer is per
+     * block, so a reader who had consented to several diagrams and then toggled the
+     * theme caused that many simultaneous frame remounts, each refetching a
+     * multi-megabyte renderer. One block cannot tell a bounded fan-out from an
+     * unbounded one, so this mounts two and counts both frames AND fetches.
+     */
+    const before = document.documentElement.getAttribute('data-theme');
+    const realFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      return new Response('globalThis.__fyRenderStub = true;');
+    }) as unknown as typeof fetch;
+
+    try {
+      const frame = frameMock();
+      const host = hostMock();
+      const tree = mountTree(
+        <>
+          <FyRenderBlock block={mermaidBlock()} />
+          <FyRenderBlock block={mermaidBlock()} />
+        </>,
+        { createNodeMock: element => (element.type === 'iframe' ? frame : host) },
+      );
+      mounted.push(tree);
+
+      /**
+       * Consent to both. HOST ELEMENTS ONLY: `findAllByProps` matches the `Button`
+       * component AND the `<button>` it renders, because the mark passes straight
+       * through — so an unfiltered loop presses each gate twice.
+       */
+      for (const gate of tree.root
+        .findAllByProps({ 'data-fy-render-consent-action': 'true' })
+        .filter(node => typeof node.type === 'string'))
+        run(() => gate.props.onClick());
+      await settle(30);
+      should(frames(tree)).equal(2);
+      for (const sandbox of tree.root.findAllByType(FyRenderSandbox))
+        run(() => sandbox.props.onCompiled(MERMAID_SVG, 'dark'));
+      await settle(30);
+      should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(2);
+      should(frames(tree)).equal(0);
+      /**
+       * THE BASELINE MUST BE NON-ZERO, or the zero-delta assertion below is vacuous:
+       * a broken stub or an effect that never ran would leave both counts at 0 and
+       * "no new fetches" would pass against a component that fetches nothing at all.
+       * Two consented blocks fetch the renderer once each.
+       */
+      const fetchesAfterCompile = fetches;
+      should(fetchesAfterCompile).equal(2);
+
+      // Act — one global theme mutation, with two compiled diagrams on screen.
+      run(() => document.documentElement.setAttribute('data-theme', 'mission-light'));
+      await settle(80);
+
+      // Assert — BOTH diagrams are still there, NO frame was created, and not one
+      // additional byte was requested. This is the claim in its strongest available
+      // form: N blocks, one toggle, zero renderer work.
+      should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(2);
+      should(frames(tree)).equal(0);
+      should(fetches).equal(fetchesAfterCompile);
+      // And both say so, each naming Reload.
+      // `props` is null on the fragment root, so the guard is required rather than
+      // defensive.
+      const stale = tree.root.findAll(
+        node => node.props !== null && node.props['data-fy-render-sandbox-status'] === 'stale',
+      );
+      should(stale.length).equal(2);
+    } finally {
+      globalThis.fetch = realFetch;
+      if (before === null) document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.setAttribute('data-theme', before);
+    }
+  });
+
+  test('should say nothing when the attribute changes but the mode does not', async () => {
+    // Arrange — 22 themes resolve to two modes. Marking a diagram stale on every
+    // switch between two dark families would tell the reader to Reload for a picture
+    // that would come back identical.
     const before = document.documentElement.getAttribute('data-theme');
     try {
       run(() => document.documentElement.setAttribute('data-theme', 'mission-dark'));
       const { tree } = mountBlock(mermaidBlock());
       approve(tree);
       await settle(20);
-      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG));
+      run(() => tree.root.findByType(FyRenderSandbox).props.onCompiled(MERMAID_SVG, 'dark'));
       await settle(20);
 
       // Act
@@ -1029,6 +1197,7 @@ describe('FyRenderBlock sandbox theme ownership', () => {
       // Assert
       should(marked(tree, { 'data-fy-render-diagram': 'true' })).equal(1);
       should(frames(tree)).equal(0);
+      should(status(tree).phase).equal('ready');
     } finally {
       if (before === null) document.documentElement.removeAttribute('data-theme');
       else document.documentElement.setAttribute('data-theme', before);
