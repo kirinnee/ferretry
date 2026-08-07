@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { SessionView } from '@ferretry/protocol';
+import { matchesSessionSearchQuery, type SessionView, sessionSearchTaskHaystack } from '@ferretry/protocol';
 import type { ComponentProps, ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
@@ -16,7 +16,10 @@ import { SessionTerminalSurface } from '../../src/components/session-terminal-su
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
-import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import {
+  SESSION_SEARCH_QUERY_DEBOUNCE_MS,
+  SessionSearchProvider,
+} from '../../src/features/session-search/session-search.tsx';
 import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -39,10 +42,29 @@ const alpha = daemonConnection({
 
 const originalFetch = globalThis.fetch;
 
+/** The session id this URL addresses, so a fixture answers under the scope that asked. */
+const sessionIdOf = (url: URL): string =>
+  decodeURIComponent(url.pathname.split('/v1/sessions/')[1]?.split('/')[0] ?? '');
+
+/**
+ * An EMPTY but protocol-shaped answer for the search provider every session page
+ * mounts.
+ *
+ * `/fs/index` is matched FIRST and deliberately: it does not end with `/fs`, so
+ * a ladder that tests the listing route first answers the index with a directory
+ * listing, the document fails its schema, and every page test quietly runs with
+ * `fileState: 'unavailable'`. Tests that only assert focus would still pass —
+ * which is exactly how that regression stays invisible.
+ */
 const route = (input: string | URL | Request): Response => {
-  const url = String(input);
-  if (url.includes('/v1/sessions/') && url.endsWith('/tasks')) return Response.json({ tasks: [] });
-  return Response.json(url.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
+  const raw = String(input);
+  const url = new URL(raw, 'https://fixture.example.test');
+  const sessionId = sessionIdOf(url);
+  if (url.pathname.endsWith('/fs/index'))
+    return Response.json({ v: 1, sessionId, root: `/work/${sessionId}`, files: [], coverage: 'complete', skipped: [] });
+  if (url.pathname.includes('/v1/sessions/') && url.pathname.endsWith('/tasks'))
+    return Response.json({ v: 1, sessionId, tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' });
+  return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
 };
 
 /** Mirrors the session route's required search boundary around the chat page. */
@@ -464,18 +486,52 @@ describe('SessionChatPage', () => {
   });
 
   test('renders each supported pane surface and current-session task search', async () => {
-    const searchTask = {
-      ...taskSummary({ id: 'F6', title: 'Needle task' }),
-      ask: { source: 'human', text: 'Find the needle' },
-      clarifications: [],
+    // THE SUMMARY AND THE PROSE ARE SEPARATE RECORDS ON PURPOSE.
+    //
+    // `ScopedTaskSummarySchema` is non-strict, so a fixture that hung
+    // `description`/`ask`/`clarifications` on the summary would have them
+    // silently stripped and would keep passing while proving nothing about
+    // prose. Keeping the prose here, and answering `?q=` with the protocol's own
+    // matcher over it, is what makes this page prove the daemon-side search
+    // rather than an unfiltered stub that returns the row whatever is typed.
+    const searchSummary = { ...taskSummary({ id: 'F6', title: 'Needle task' }), sessionId: 'shared' };
+    const searchProse = {
+      id: 'F6',
+      title: 'Needle task',
       description: 'A task used to prove the current-session search action.',
-      sessionId: 'shared',
+      ask: { text: 'Find the needle' },
+      clarifications: [],
     };
-    globalThis.fetch = (async (input: string | URL | Request) => {
+    const seen: Array<{ method: string; pathname: string; search: URLSearchParams }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
-      if (url.pathname.endsWith('/tasks/F6'))
-        return Response.json({ activity: [], sessionId: 'shared', task: searchTask });
-      if (url.pathname.endsWith('/tasks')) return Response.json({ tasks: [searchTask] });
+      seen.push({ method: init?.method ?? 'GET', pathname: url.pathname, search: url.searchParams });
+      // `/fs/index` FIRST: it does not end with `/fs`, so the listing branch
+      // would otherwise answer it with a directory and paint the search
+      // unavailable — taking the file row, and this test's whole point, with it.
+      if (url.pathname.endsWith('/fs/index'))
+        return Response.json({
+          v: 1,
+          sessionId: 'shared',
+          root: '/work/shared',
+          files: [{ name: 'needle.ts', path: 'needle.ts' }],
+          coverage: 'complete',
+          skipped: [],
+        });
+      if (url.pathname.endsWith('/tasks')) {
+        const query = url.searchParams.get('q');
+        const rows =
+          query === null || matchesSessionSearchQuery(sessionSearchTaskHaystack(searchProse), query)
+            ? [searchSummary]
+            : [];
+        return Response.json({
+          v: 1,
+          sessionId: 'shared',
+          tasks: rows,
+          parseErrors: 0,
+          updatedAt: '2026-08-06T00:00:00.000Z',
+        });
+      }
       if (url.pathname.endsWith('/fs')) return Response.json({ entries: [{ name: 'needle.ts', type: 'file' }] });
       return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
     }) as typeof fetch;
@@ -492,6 +548,20 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
+      // THE UNIT-TIER REQUEST LEDGER, taken before any pane is opened so every
+      // request on it belongs to the page's own mount. Before this row a
+      // twelve-task board cost thirteen task reads and a full breadth-first walk
+      // of the session tree; both fan-outs are now zero, and zero is the
+      // assertion rather than the description.
+      await runAsync(async () => {
+        for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+      });
+      const bare = seen.filter(row => row.method === 'GET' && row.pathname.endsWith('/tasks') && !row.search.has('q'));
+      expect(bare).toHaveLength(1);
+      expect(seen.filter(row => row.pathname.endsWith('/fs/index'))).toHaveLength(1);
+      expect(seen.filter(row => row.method === 'GET' && /\/tasks\/[^/]+$/u.test(row.pathname))).toHaveLength(0);
+      expect(seen.filter(row => row.pathname.endsWith('/fs'))).toHaveLength(0);
+
       run(() => buttonNamed(page.root, 'Files').props.onClick({ currentTarget: null }));
       expect(page.root.findAllByType(FilesTab)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
@@ -508,8 +578,27 @@ describe('SessionChatPage', () => {
       expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
       const input = page.root.findByType('input');
       run(() => input.props.onChange({ target: { value: 'needle' } }));
-      const results = page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
+      // The task half is network-bound now. Reading the popup on the very next
+      // line would see the file row alone and count 1 — a failure that looks
+      // like a missing result and is really a missing wait.
+      //
+      // GATED ON THE ANSWER, NOT ON A DURATION. A single sleep of
+      // `SESSION_SEARCH_QUERY_DEBOUNCE_MS + 20` is enough on an idle machine and
+      // measurably is not under full-suite load, where the timer fires late and
+      // the fetch still has to resolve behind it. Waiting for the response this
+      // test is about removes the race instead of widening it.
+      const popupRows = () =>
+        page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
+      const answered = () => seen.some(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle');
+      for (let turn = 0; turn < 40 && !(answered() && popupRows().length === 2); turn += 1)
+        await runAsync(
+          async () => await new Promise(resolve => setTimeout(resolve, SESSION_SEARCH_QUERY_DEBOUNCE_MS / 4)),
+        );
+
+      const results = popupRows();
       expect(results).toHaveLength(2);
+      // Exactly one narrowing request, and the daemon decided what it returned.
+      expect(seen.filter(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle')).toHaveLength(1);
       // By KIND, not by position: results are ranked, so a file and a task can
       // trade places as the scoring changes.
       run(() => results.find(row => row.props['data-result-kind'] === 'file')?.props.onClick());

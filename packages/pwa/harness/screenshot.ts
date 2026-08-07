@@ -227,6 +227,17 @@ async function inspectSessionSearch(page: Page, regionSelector: string) {
       expanded: input.getAttribute('aria-expanded'),
       active,
       activeOwned: activeNode !== null && popup.contains(activeNode),
+      // Both hooks are BOOLEAN — presence is the fact, per the frozen interface
+      // contract — so the partial semantic comes from the fixture and the copy,
+      // never from an attribute value the driver would be free to invent.
+      // `coveragePartial` is only ever present on an unfinished walk; `skipNote`
+      // is rendered at any coverage, because a complete index still leaves out
+      // denied, excluded and unsupported paths and must say which.
+      coveragePartial: region.querySelector('[data-search-coverage]') !== null,
+      skipNote: region.querySelector('[data-search-skips]')?.textContent?.trim() ?? null,
+      // Kept by the harness fetch wrapper, because an answered route never
+      // reaches the network and the driver's own request events see nothing.
+      requests: [...((window as unknown as { __harnessRequests?: readonly string[] }).__harnessRequests ?? [])],
       options: region.querySelectorAll('[role="option"]').length,
       kinds: Array.from(region.querySelectorAll<HTMLElement>('[role="option"]'), option => option.dataset.resultKind),
       indexing: region.querySelector('[data-search-indexing]') !== null,
@@ -287,22 +298,101 @@ function assertSessionSearchGeometry(
     fail(`${label} prints the non-actionable physical-key hint ${JSON.stringify(state.shortcut)} on mobile`);
 }
 
+/** The session the healthy search fixture answers for, and its short-index twin. */
+const SEARCH_SESSION_ID = 'harness-session';
+const SEARCH_PARTIAL_SESSION_ID = 'harness-partial-session';
+
+/**
+ * A task whose SUMMARY contains no `port` — only its original ask does.
+ *
+ * It is the whole point of the mixed-results assertion: a client matching
+ * locally against summaries cannot produce this row, so its presence is the
+ * evidence that the daemon answered the query.
+ */
+const SEARCH_PROSE_ONLY_TASK = 'Retire the legacy state path';
+
+/** The frozen partial-coverage sentence (irish → alexandra interface contract). */
+const SEARCH_PARTIAL_SENTENCE = 'File results are incomplete: the index did not finish.';
+
+/**
+ * One session's reads, taken from the in-page ledger and narrowed to that
+ * session's own route prefix.
+ *
+ * Narrowing by session id is what makes the counts EXACT rather than "at least":
+ * the compiled workspace page renders `harness-workspace` while its search box
+ * reads `harness-session`, so the page's own file reads share no prefix with the
+ * search's and cannot be miscounted as one.
+ */
+function sessionRequestLedger(requests: readonly string[], sessionId: string) {
+  const prefix = `/v1/sessions/${sessionId}/`;
+  const scoped = requests.filter(entry => entry.includes(prefix));
+  const routes = scoped.map(entry => entry.slice(entry.indexOf(prefix) + prefix.length));
+  return {
+    scoped,
+    /** The bare board read: no query string at all. */
+    board: routes.filter(route => route === 'tasks').length,
+    /** Every `q` the reader actually sent, DECODED — so `a+b` cannot pass as `a b`. */
+    queries: routes.flatMap(route => {
+      if (!route.startsWith('tasks?')) return [];
+      const value = new URLSearchParams(route.slice(route.indexOf('?') + 1)).get('q');
+      return value === null ? [] : [value];
+    }),
+    index: routes.filter(route => route === 'fs/index').length,
+    /** The deleted N+1: one detail read per row. */
+    detail: routes.filter(route => /^tasks\/[^?]/.test(route)).length,
+    /** The deleted browser-side walk: one directory listing per node. */
+    listing: routes.filter(route => route.startsWith('fs?')).length,
+  };
+}
+
+/**
+ * Wait until the typed query has actually been SENT for this session.
+ *
+ * Rows can be on screen before it has: files are filtered from the index the
+ * page already holds, while the task half is a debounced request. Inspecting on
+ * the rows alone photographs a half-settled popup and reads back `q=[]` — which
+ * is a race in the driver, not a finding about the product. If the reader never
+ * sends one, this is where that shows up.
+ */
+async function waitForSettledQuery(page: Page, sessionId: string): Promise<void> {
+  await page.waitForFunction(
+    prefix => {
+      const requests = (window as unknown as { __harnessRequests?: readonly string[] }).__harnessRequests ?? [];
+      return requests.some(entry => entry.includes(`${prefix}tasks?`));
+    },
+    `/v1/sessions/${sessionId}/`,
+    { timeout: 10_000 },
+  );
+}
+
+function describeLedger(ledger: ReturnType<typeof sessionRequestLedger>): string {
+  return (
+    `tasks=${ledger.board} q=[${ledger.queries.join('|')}] fs/index=${ledger.index} ` +
+    `tasks/:id=${ledger.detail} fs?path=${ledger.listing}`
+  );
+}
+
 /**
  * Current-session search evidence, both as a state ledger and inside the real
  * compiled workspace shell. Kept in one function so `--search-only` exercises
  * exactly the same journey as the full visual run.
  */
 async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewport, rootUrl: string): Promise<void> {
-  for (const card of ['results', 'no-match', 'indexing', 'unavailable'] as const) {
+  for (const card of ['results', 'no-match', 'indexing', 'unavailable', 'partial-coverage'] as const) {
     await page.goto(`${rootUrl}#session-search`);
     await page.reload();
     const selector = `[data-search-card="${card}"]`;
     const cardRegion = page.locator(selector);
     await cardRegion.waitFor({ state: 'visible' });
 
+    const typed = card === 'no-match' ? 'zzzz-nothing-matches-this' : 'port';
+    // The two cards whose daemon never answers are the two whose reads this
+    // ledger does not record; the rest are the healthy host, one scope each.
+    const ledgerSession = card === 'partial-coverage' ? SEARCH_PARTIAL_SESSION_ID : SEARCH_SESSION_ID;
+    const answers = card !== 'indexing' && card !== 'unavailable';
     const field = cardRegion.locator('[data-current-session-search] input');
     await field.click();
-    await field.fill(card === 'no-match' ? 'zzzz-nothing-matches-this' : 'port');
+    await field.fill(typed);
     await cardRegion.locator('[data-session-search-popup]').waitFor({ state: 'visible' });
     // Presentation is synchronous; evidence is not. Wait for the state this
     // capture claims instead of racing the independent task/file reads.
@@ -310,15 +400,42 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
     else if (card === 'no-match')
       await cardRegion.getByText('No current-session files or tasks match', { exact: false }).waitFor();
     else if (card === 'unavailable') await cardRegion.getByText('unavailable:', { exact: false }).waitFor();
+    else if (card === 'partial-coverage') await cardRegion.locator('[data-search-coverage]').waitFor();
+    if (answers) await waitForSettledQuery(page, ledgerSession);
     const state = await inspectSessionSearch(page, selector);
     assertSessionSearchGeometry(state, `session search ${card}`, viewport);
+    // The `indexing` and `unavailable` cards read hosts this ledger deliberately
+    // does not record, so their entry here is the healthy session the OTHER
+    // providers on this page mount — which is exactly what the zero claims below
+    // are about. Counts of one are NOT asserted on this hash: the root provider
+    // and two cards share `harness-session`, so the board and index reads
+    // legitimately multiply. Only the compiled shell has one provider per scope.
+    const ledger = sessionRequestLedger(state.requests, ledgerSession);
 
     process.stdout.write(
       `   session search ${card} @ ${viewport.name}: expanded=${state.expanded ?? '(none)'} ` +
         `options=${state.options} kinds=${state.kinds.join(',') || '(none)'} active=${state.active ?? '(none)'} ` +
         `indexing=${String(state.indexing)} shortcut=${state.shortcut ?? '(hidden)'} ` +
-        `text-gap=${(state.contentStart - state.leadingRight).toFixed(1)}px\n`,
+        `partial=${String(state.coveragePartial)} skips=${JSON.stringify(state.skipNote)} ` +
+        `text-gap=${(state.contentStart - state.leadingRight).toFixed(1)}px\n` +
+        `   session search ${card} @ ${viewport.name} ledger[${ledgerSession}]: ${describeLedger(ledger)}\n`,
     );
+
+    if (ledger.detail > 0)
+      fail(
+        `the ${card} session-search card still reads task detail at ${viewport.name}: ` +
+          `${ledger.detail} \`/tasks/:id\` request(s)`,
+      );
+    if (ledger.listing > 0)
+      fail(
+        `the ${card} session-search card still walks the filesystem at ${viewport.name}: ` +
+          `${ledger.listing} \`/fs?path=\` request(s)`,
+      );
+    if (answers && ledger.queries.join('|') !== typed)
+      fail(
+        `the ${card} session-search card did not send exactly one settled query at ${viewport.name}: ` +
+          `${JSON.stringify(ledger.queries)}`,
+      );
 
     if (card === 'results') {
       if (!state.kinds.includes('file') || !state.kinds.includes('task'))
@@ -326,6 +443,42 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
           `the results card is not a mixed file/task result set at ${viewport.name}: ${JSON.stringify(state.kinds)}`,
         );
       if (state.active === null) fail(`the results card points aria-activedescendant at nothing at ${viewport.name}`);
+      if (!state.text.includes(SEARCH_PROSE_ONLY_TASK))
+        fail(
+          `the results card lost its ask-prose-only task at ${viewport.name}: ` +
+            `${JSON.stringify(SEARCH_PROSE_ONLY_TASK)} matches \`port\` in no summary field, so its absence ` +
+            `means the query was answered locally rather than by the daemon`,
+        );
+      // A COMPLETE index still names what it deliberately left out — the
+      // fixture's denied, excluded and unsupported entries — and must not borrow
+      // the partial sentence to do it.
+      if (state.coveragePartial) fail(`the results card called a complete index partial at ${viewport.name}`);
+      if (state.skipNote === null || state.skipNote === '')
+        fail(`the results card hid its policy skips at ${viewport.name}`);
+    }
+    if (card === 'partial-coverage') {
+      if (state.options === 0) fail(`the partial-coverage card rendered no indexed rows at ${viewport.name}`);
+      // A short FILE index says nothing about the task half. If the task rows
+      // vanish here, an incomplete walk has been allowed to degrade a result set
+      // it does not own.
+      if (!state.kinds.includes('file') || !state.kinds.includes('task'))
+        fail(
+          `the partial-coverage card let a short file index suppress the task half at ${viewport.name}: ` +
+            JSON.stringify(state.kinds),
+        );
+      if (!state.coveragePartial)
+        fail(`the partial-coverage card never declared its walk unfinished at ${viewport.name}`);
+      if (!state.text.includes(SEARCH_PARTIAL_SENTENCE))
+        fail(
+          `the partial-coverage card rendered rows without qualifying them at ${viewport.name}: ` +
+            `expected ${JSON.stringify(SEARCH_PARTIAL_SENTENCE)}`,
+        );
+      if (state.skipNote === null || state.skipNote === '')
+        fail(`the partial-coverage card never named the work it skipped at ${viewport.name}`);
+      if (state.text.includes('No current-session files or tasks match'))
+        fail(`the partial-coverage card called a short index an empty result at ${viewport.name}`);
+      if (state.text.includes('unavailable:'))
+        fail(`the partial-coverage card called a short index a refusal at ${viewport.name}`);
     }
     const owed: Readonly<Record<string, string>> = {
       'no-match': 'No current-session files or tasks match',
@@ -377,11 +530,39 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   await shellField.focus();
   await shellField.fill('port');
   await shell.locator('[role="option"]').nth(1).waitFor({ state: 'visible' });
+  await waitForSettledQuery(page, SEARCH_SESSION_ID);
   const shellState = await inspectSessionSearch(page, shellSelector);
   assertSessionSearchGeometry(shellState, 'compiled app-shell session search', viewport);
   if (!shellState.focusVisible) fail(`compiled app-shell search has no keyboard focus ring at ${viewport.name}`);
   if (!shellState.kinds.includes('file') || !shellState.kinds.includes('task'))
     fail(`compiled app-shell search is not a mixed selectable result set at ${viewport.name}`);
+
+  /**
+   * The exact ledger, and the only place it can be exact.
+   *
+   * One provider holds `harness-session` on this page, and `/v1/sessions/:id/tasks`
+   * is dialled from exactly one place in the PWA — so `1` is a count, not a floor.
+   * The page's own Files tab and reference reads are `harness-workspace` and are
+   * filtered out by prefix rather than by hoping they did not fire.
+   */
+  const shellLedger = sessionRequestLedger(shellState.requests, SEARCH_SESSION_ID);
+  process.stdout.write(
+    `   compiled shell @ ${viewport.name} ledger[${SEARCH_SESSION_ID}]: ${describeLedger(shellLedger)}\n`,
+  );
+  const shellExpected = { board: 1, queries: 'port', index: 1, detail: 0, listing: 0 };
+  const shellActual = {
+    board: shellLedger.board,
+    queries: shellLedger.queries.join('|'),
+    index: shellLedger.index,
+    detail: shellLedger.detail,
+    listing: shellLedger.listing,
+  };
+  if (JSON.stringify(shellActual) !== JSON.stringify(shellExpected))
+    fail(
+      `the compiled shell's ${SEARCH_SESSION_ID} request ledger is wrong at ${viewport.name}: ` +
+        `expected ${JSON.stringify(shellExpected)}, measured ${JSON.stringify(shellActual)} ` +
+        `from ${JSON.stringify(shellLedger.scoped)}`,
+    );
   const shellTarget = join(outDir, `${viewport.name}-session-search-shell.png`);
   await page.screenshot({ path: shellTarget });
   process.stdout.write(
