@@ -908,6 +908,22 @@ describe('task schemas', () => {
         },
       },
       {
+        name: 'legacy marker without an unstamped human attestation',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'a marker cannot invent its attestation',
+            legacyAttestation: { reason: 'predates-actor-authority-split', splitLandedAt: INSTANT },
+          },
+        },
+      },
+      {
         name: 'stamped legacy marker',
         schema: tasks.TaskActivitySchema,
         value: {

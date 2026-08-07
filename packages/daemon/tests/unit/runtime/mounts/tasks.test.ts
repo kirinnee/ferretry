@@ -895,6 +895,47 @@ describe('the task board mount', () => {
       ]);
     });
 
+    it('should reacquire cross-board scope before replaying one durable peer completion', async () => {
+      // A response-loss retry arrives after the task is already done. The mount must find the exact
+      // durable receipt before deciding that this peer is allowed to reacquire scope to another
+      // member's board; otherwise the reducer would either bypass board scope or refuse the replay.
+      // Arrange
+      const calls: { targetSessionId: string; capability: string; action: string }[] = [];
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async input => {
+            calls.push(input);
+            return RESOLVED_GRANT;
+          },
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s2/tasks', { ...CREATE, status: 'live' }));
+      const completion = { action: 'phase', phase: 'done', reason: 'checked another board' } as const;
+      const headers = {
+        ...agentIn('s1'),
+        'x-fy-board-capability': 'peer-capability',
+        'x-fy-request-id': 'cross-board-click-1',
+      };
+
+      // Act
+      const completed = await dispatch.dispatch(post('/v1/sessions/s2/tasks/F1', completion, headers));
+      const replayed = await dispatch.dispatch(post('/v1/sessions/s2/tasks/F1', completion, headers));
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s2/tasks/F1', headers: human }));
+
+      // Assert
+      should(completed.status).equal(200);
+      should(replayed.status).equal(200);
+      should(calls).deepEqual([
+        { targetSessionId: 's2', capability: 'peer-capability', action: 'mark_done' },
+        { targetSessionId: 's2', capability: 'peer-capability', action: 'mark_done' },
+      ]);
+      const activity = (jsonBody(detail) as unknown as ScopedTaskDetailResponse).activity;
+      should(activity.filter(entry => entry.type === 'status')).have.length(1);
+      should(activity.filter(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).have.length(
+        1,
+      );
+    });
+
     it('should refuse a grant whose peer disagrees with the completion actor without changing the task', async () => {
       // The session header is only attribution; the capability is the board's identity proof.
       // Letting them name different peers would journal a completion under an actor the board did
