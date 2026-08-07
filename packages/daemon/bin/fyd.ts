@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { createHash, randomInt } from 'node:crypto';
-import { accessSync, constants as fsConstants, writeSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   type Advertisement,
   type DaemonCarrier,
@@ -35,6 +35,7 @@ import { BunGitRunner } from '../src/adapters/git/index.ts';
 import {
   BrowserLoginWindowService,
   BrowserProfileStore,
+  NodeSessionBrowserLauncher,
   BrowserWorkerClient,
   BunApiServer,
   BunCommandRunner,
@@ -229,6 +230,7 @@ import {
   type BrowserLoginLifecycle,
   type BrowserViewerHost,
   BrowserViewerStream,
+  BrowserSessionService,
   CALLSIGN_WINDOW_MS,
   CapabilityGrantService,
   type CatalogSubsystem,
@@ -2838,7 +2840,7 @@ function createTaskBoardSubsystem(
  * that has none refuses with a sentence naming what is missing rather than spawning whatever answers
  * to the name.
  */
-function createBrowserLoginWorld(paths: FoundationPaths): BrowserLoginWorld {
+function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () => Promise<void>): BrowserLoginWorld {
   const profile = new BrowserProfileStore(paths.home);
   const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
   const runtime = new NodeBrowserLoginRuntime({
@@ -2851,9 +2853,23 @@ function createBrowserLoginWorld(paths: FoundationPaths): BrowserLoginWorld {
     chromeOverride: () => process.env.FY_CHROME_BIN,
   });
   return {
-    window: new BrowserLoginWindowService({ profile, runtime }),
+    window: new BrowserLoginWindowService({ profile, runtime, closeAgentBrowsers }),
     close: async () => await runtime.close(),
   };
+}
+
+/** A compiled daemon runs the separately compiled browser worker beside itself; source execution
+ * uses Node's WebSocket transport for the TypeScript worker. FY_BROWSER_WORKER_BIN exists for
+ * release smoke. */
+function browserWorkerProgram(): { readonly entry: string; readonly executable: boolean } {
+  const source = process.env.FY_BROWSER_WORKER_SOURCE;
+  if (source?.trim()) return { entry: source, executable: false };
+  const forced = process.env.FY_BROWSER_WORKER_BIN;
+  if (forced?.trim()) return { entry: forced, executable: true };
+  const suffix = process.arch === 'arm64' ? 'linux-arm64' : 'linux-x64-baseline';
+  const sibling = join(dirname(process.execPath), `fyd-browser-worker-${suffix}`);
+  if (existsSync(sibling)) return { entry: sibling, executable: true };
+  return { entry: join(import.meta.dir, 'browser-worker.ts'), executable: false };
 }
 
 function createLearningSubsystem(
@@ -3114,6 +3130,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   };
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
+  // The login window is created before a state home is opened, while browser sessions are created
+  // from that opened home. Keep the callback live so a human login always closes the real workers
+  // that currently hold the shared profile rather than racing their lease.
+  let closeAgentBrowsers: () => Promise<void> = async () => undefined;
   // An operator's own document when they named one, and the state home's otherwise. The confined
   // filesystem port refuses every path outside the home, which is right for the daemon's own state
   // and wrong for a file a person named, so the two are different adapters.
@@ -3489,6 +3509,11 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       },
       defaultSessionResumeSettings,
     );
+  const browserTransport: BrowserTransportWorld = {
+    connectWorker: options => BrowserWorkerClient.connect(options),
+    openViewerStream: (host, sessionId, socket) =>
+      BrowserViewerStream.connect(host, sessionId, new SocketViewerDownstream(socket), new SystemFrameClock()),
+  };
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -3540,11 +3565,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       new TmuxPaneSnapshot(tmux),
     ),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
-    browserTransport: {
-      connectWorker: options => BrowserWorkerClient.connect(options),
-      openViewerStream: (host, sessionId, socket) =>
-        BrowserViewerStream.connect(host, sessionId, new SocketViewerDownstream(socket), new SystemFrameClock()),
-    },
+    browserTransport,
     sessionLauncher: new TmuxSessionLifecycleLauncher(
       // A private absolute socket inside the state home is what keeps managed panes off any
       // tmux server the host already runs.
@@ -3745,7 +3766,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         })),
       };
     },
-    browserLogin: createBrowserLoginWorld(paths),
+    browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
     createSubsystems: (
       storage,
       terminals,
@@ -4072,6 +4093,42 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         analyticsIngest: analyticsIngestion,
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
+        browser: (() => {
+          const service = new BrowserSessionService(
+            sessions,
+            new NodeSessionBrowserLauncher(
+              new BrowserProfileStore(paths.home),
+              browserWorkerProgram().entry,
+              // Bun 1.3's WebSocket client can resolve Chrome's CDP endpoint but times out during
+              // the upgrade. Node's worker-compatible TypeScript loader and WebSocket stack both
+              // work here, including when this daemon is itself a compiled Bun binary.
+              Bun.which('node') ?? process.execPath,
+              process.env,
+              browserTransport.connectWorker,
+              browserWorkerProgram().executable,
+            ),
+            () => Date.now(),
+          );
+          closeAgentBrowsers = async () => await service.closeAll();
+          return {
+            ...service,
+            status: service.status.bind(service),
+            act: service.act.bind(service),
+            attachViewer: service.attachViewer.bind(service),
+            dispatchHumanInput: service.dispatchHumanInput.bind(service),
+            closeAll: service.closeAll.bind(service),
+            stream: async (sessionId, downstream) => {
+              let viewer: BrowserViewerStream | undefined;
+              return {
+                open: async () => {
+                  viewer = await BrowserViewerStream.connect(service, sessionId, downstream, new SystemFrameClock());
+                },
+                fromClient: frame => viewer?.fromClient(frame),
+                close: () => viewer?.close(),
+              };
+            },
+          };
+        })(),
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(
           paths,

@@ -3113,7 +3113,8 @@ describe('daemon boot lifecycle', () => {
     const stoppedBody = BrowserLoginStatusSchema.parse(await stopped.json());
     const afterPrime = BrowserLoginStatusSchema.parse(await (await fetch(url, { headers })).json());
     const confirmWithNoWindow = await act({ action: 'confirm' });
-    // The per-session browser surface: a shipped command told what is missing rather than a 404.
+    // The per-session browser surface is now mounted. This home has no such session, so the real
+    // runtime names the absent session rather than reviving the old unmounted-runtime 501.
     const automation = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/browser`, { headers });
     release();
     const code = await exit;
@@ -3165,7 +3166,7 @@ describe('daemon boot lifecycle', () => {
       'error',
       'the human browser login window is not open',
     );
-    should(automation.status).equal(501);
+    should(automation.status).equal(404);
   });
 
   it('should report its own health, measured by the self-check the boot ran', async () => {

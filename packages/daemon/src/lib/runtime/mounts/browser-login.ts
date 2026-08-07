@@ -1,4 +1,10 @@
-import { BrowserLoginActionSchema } from '@ferretry/protocol';
+import {
+  BrowserActionSchema,
+  BrowserLoginActionSchema,
+  SOCKET_TICKET_TTL_SECONDS,
+  SocketTicketResponseSchema,
+  type BrowserActionResult,
+} from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -9,6 +15,13 @@ import {
   type BrowserLoginLifecycle,
   type BrowserLoginStatus,
 } from '../../browser/control/index.ts';
+import { BrowserSessionError, type BrowserSubsystem } from '../../browser/runtime/index.ts';
+import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
+import type { SocketTicketBroker } from '../../api/socket-ticket.ts';
+
+export interface BrowserMountedSubsystem extends BrowserSubsystem {
+  stream(sessionId: string, downstream: SocketDownstream): Promise<SocketHandler>;
+}
 
 /**
  * The daemon-global human browser-login window: a short-lived virtual desktop, served over a
@@ -90,7 +103,107 @@ async function act(window: BrowserLoginLifecycle, context: RouteContext): Promis
   });
 }
 
-export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiRoute[] {
+function browserFailure(error: unknown): never {
+  if (!(error instanceof BrowserSessionError)) throw error;
+  const status = (
+    { not_found: 404, capacity: 409, not_running: 409, launch_failed: 503, upstream_failed: 502 } as const
+  )[error.code];
+  throw new ApiError(status, error.message, error.code);
+}
+
+function sessionId(context: RouteContext): string {
+  const id = context.params.get('sessionId') ?? '';
+  if (id === '' || id.includes('/') || id.includes('\\'))
+    throw new ApiError(400, 'the session id in the path is not usable', 'bad_request');
+  return id;
+}
+
+async function browserStatus(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
+  return jsonResponse(await browser.status(sessionId(context)).catch(browserFailure));
+}
+
+async function browserAction(browser: BrowserSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const action = await parseBody(context.request, BrowserActionSchema);
+  const result: BrowserActionResult = await browser.act(sessionId(context), action).catch(browserFailure);
+  return jsonResponse(result);
+}
+
+/** The real per-session browser routes. The projection is BrowserStatus, which carries the active tab
+ * and its complete tab list from the daemon-owned worker rather than a UI-local guess. */
+const streamPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/browser/stream`;
+
+export function browserLoginRoutes(
+  window: BrowserLoginLifecycle,
+  browser?: BrowserSubsystem,
+  tickets?: Pick<SocketTicketBroker, 'issue'>,
+): readonly ApiRoute[] {
+  const sessionRoutes: readonly ApiRoute[] =
+    browser === undefined
+      ? [
+          {
+            method: 'GET',
+            path: '/v1/sessions/:sessionId/browser',
+            minimum: 'operator',
+            capability: { capability: 'browser', axis: 'use' },
+            noStore: true,
+            handle: async () => {
+              throw browserAutomationUnmounted();
+            },
+          },
+          {
+            method: 'POST',
+            path: '/v1/sessions/:sessionId/browser',
+            minimum: 'operator',
+            capability: { capability: 'browser', axis: 'use' },
+            noStore: true,
+            handle: async () => {
+              throw browserAutomationUnmounted();
+            },
+          },
+        ]
+      : [
+          {
+            method: 'GET',
+            path: '/v1/sessions/:sessionId/browser',
+            minimum: 'operator',
+            capability: { capability: 'browser', axis: 'use' },
+            noStore: true,
+            handle: async (context: RouteContext) => await browserStatus(browser, context),
+          },
+          {
+            method: 'POST',
+            path: '/v1/sessions/:sessionId/browser',
+            minimum: 'operator',
+            capability: { capability: 'browser', axis: 'use' },
+            noStore: true,
+            handle: async (context: RouteContext) => await browserAction(browser, context),
+          },
+          ...(tickets === undefined
+            ? []
+            : [
+                {
+                  method: 'POST' as const,
+                  path: '/v1/sessions/:sessionId/browser/stream/ticket',
+                  minimum: 'operator' as const,
+                  capability: { capability: 'browser' as const, axis: 'use' as const },
+                  noStore: true,
+                  handle: async (context: RouteContext) => {
+                    const id = sessionId(context);
+                    await browser.status(id).catch(browserFailure);
+                    if (context.credential === undefined) throw new ApiError(401, 'unauthorized', 'unauthorized');
+                    const grant = tickets.issue(context.credential, streamPath(id));
+                    return jsonResponse(
+                      SocketTicketResponseSchema.parse({
+                        ticket: grant.ticket,
+                        ttlSeconds: SOCKET_TICKET_TTL_SECONDS,
+                        expiresAt: new Date(grant.expiresAtMs).toISOString(),
+                      }),
+                      201,
+                    );
+                  },
+                },
+              ]),
+        ];
   return [
     {
       method: 'GET',
@@ -108,26 +221,23 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       noStore: true,
       handle: async context => await act(window, context),
     },
+    ...sessionRoutes,
+  ];
+}
+
+/** Socket handler creation stays at composition: this route proves the existing ticket/capability
+ * boundary before handing its socket to the same browser host HTTP actions address. */
+export function browserSocketRoutes(browser: BrowserMountedSubsystem): readonly SocketRoute[] {
+  return [
     {
-      // A stated refusal rather than a 404. See the header: the worker program and the transport both
-      // exist, but no per-session runtime composes them into something this mount can call.
       method: 'GET',
-      path: '/v1/sessions/:sessionId/browser',
+      path: '/v1/sessions/:sessionId/browser/stream',
       minimum: 'operator',
       capability: { capability: 'browser', axis: 'use' },
-      noStore: true,
-      handle: async () => {
-        throw browserAutomationUnmounted();
-      },
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/browser',
-      minimum: 'operator',
-      capability: { capability: 'browser', axis: 'use' },
-      noStore: true,
-      handle: async () => {
-        throw browserAutomationUnmounted();
+      accept: async context => {
+        const id = sessionId(context);
+        await browser.status(id).catch(browserFailure);
+        return async downstream => await browser.stream(id, downstream);
       },
     },
   ];
