@@ -98,6 +98,47 @@ jobs:
       - name: Prove containment on macOS
         run: nix develop .#ci -c ./scripts/ci/darwin-confinement.sh
 
+  safari-sandbox-shell:
+    name: Sandbox Shell (Safari)
+    permissions:
+      contents: read
+    # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
+    # windows that fail jobs outright and retirement on 2026-11-02, so pinning a release-blocking gate
+    # to it buys a job that starts failing for reasons unrelated to Safari. `macos-15` also ships the
+    # newer Safari/SafariDriver pair. The two remaining `macos-14` jobs above need the same migration
+    # before November; that is not this job's scope, but a new job must not add a third.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # safaridriver has no headless mode and Safari hosts exactly one WebDriver session at a time, so
+      # this runs HEADED in the runner's autologin GUI session and strictly sequentially. The image
+      # already ran `sudo safaridriver --enable` and wrote AllowRemoteAutomation at build time;
+      # re-running is idempotent and costs nothing, and asserting the flag turns the one unproven
+      # assumption behind this job into a loud failure instead of a confusing session error.
+      - name: Prove Safari can host a WebDriver session
+        run: |
+          sudo safaridriver --enable
+          /usr/libexec/PlistBuddy -c 'print AllowRemoteAutomation' "$HOME/Library/WebDriver/com.apple.Safari.plist"
+      # The only claim in this repository that no Linux runner can check: that the sandbox shell's
+      # hash-pinned inline install, its opaque origin and its zero-request posture hold in the browser
+      # every Apple device actually runs. A red here is either a product outage on every iPhone and Mac
+      # or the deletion of the shell's security argument — the script's header says which is which.
+      - name: Prove the fy-render sandbox shell in Safari
+        run: nix develop .#ci -c ./scripts/ci/safari-render-proof.sh
+      # `always()` because a red run is the run whose facts matter most: the artifact carries the exact
+      # policy and hashes measured, the Safari and SafariDriver versions, the ordered request ledger,
+      # every property's rule and outcome, and what a green run does NOT establish.
+      - name: Upload the Safari evidence ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safari-render-proof
+          path: packages/pwa/.artifacts/safari-render/
+          if-no-files-found: warn
+
   compile:
     name: Compile Binaries
     permissions:
