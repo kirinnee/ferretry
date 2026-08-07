@@ -53,10 +53,25 @@ import tailwindConfig from './tailwind.config.ts';
  *
  * The directory remains distinct from the carrier. Its no-store advertisement can
  * withdraw the carrier without rebuilding either end.
+ *
+ * `FY_RELAY_DIRECTORY_ORIGIN` OVERRIDES IT, and until now it did not. Two callers
+ * already passed the variable and got nothing for it — `tests/e2e/support/relay-harness.ts`,
+ * whose comment claimed the bundle carried NO directory while it in fact carried the
+ * production one and dialled it on load, and `harness/app-screenshot.ts`, which needs
+ * an origin its interceptor can answer. The daemon has honoured the same variable all
+ * along (`packages/daemon/src/adapters/system/runtime-environment.ts`: "the environment
+ * wins over the build"), so the two ends disagreed about whether the escape hatch
+ * existed. An empty or blank value is NOT an override — it is how a caller says "use
+ * the default" — and `scripts/validate/relay-config.sh` still holds this file to
+ * importing the shared default, which is the fact it pins.
  */
+const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
+
 export default defineConfig({
   define: {
-    __FY_RELAY_DIRECTORY__: JSON.stringify(HOSTED_RELAY_DIRECTORY_ORIGIN),
+    __FY_RELAY_DIRECTORY__: JSON.stringify(
+      overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
+    ),
   },
   // The static landing owns `/` and the PWA document is `/app/`, but their
   // public assets are emitted once at the site root. Keep every generated chunk

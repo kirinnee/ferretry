@@ -182,7 +182,7 @@ import type { DaemonAccountPickerSlice } from '../src/lib/account-picker-store.t
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
 import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.ts';
@@ -1196,7 +1196,11 @@ const task = (overrides: Partial<Omit<TaskSummary, 'live'>> & { live?: Partial<T
   v: 1,
   id: 'F12',
   kind: 'feature',
-  title: 'Port the remaining PWA feature components',
+  // FIVE WORDS. `TaskTitleSchema` caps a title at five, and this fixture used
+  // six — type-valid and schema-invalid, so every card rendering it was drawing
+  // a task the daemon would refuse. Found by the current-session search, which
+  // is the first surface here to parse these rows rather than only render them.
+  title: 'Port the remaining PWA components',
   workflow: 'quick',
   phase: 'todo',
   dependsOn: [],
@@ -1868,6 +1872,9 @@ const HARNESS_FS_LISTINGS: Readonly<Record<string, unknown>> = {
       { name: 'packages', type: 'dir' },
       { name: 'node_modules', type: 'dir', ignored: true },
       { name: 'CLAUDE.md', type: 'file', size: 4_812 },
+      // Shares `port` with F12 so the search evidence is genuinely mixed: a
+      // file matching both name/path competes with a task matching its title.
+      { name: 'port-plan.md', type: 'file', size: 1_337 },
       { name: 'Taskfile.yaml', type: 'file', size: 9_233 },
       { name: 'flake.nix', type: 'file', size: 2_104 },
       { name: '.env', type: 'file', denied: true },
@@ -1950,9 +1957,69 @@ const HARNESS_FLEET_ENVIRONMENT = {
  * showed "Reading this daemon's secret store…" and "Failed to fetch": the
  * harness's own aborted request, reviewed as if the product had produced it.
  */
+/**
+ * The task board the current-session search reads, as its two routes.
+ *
+ * Its own record rather than more lines inside `HARNESS_DAEMON_READS`: the
+ * search reads a LIST and then one DETAIL per row, and the detail carries the
+ * description, original ask and clarifications a summary deliberately drops —
+ * which is precisely what item #6 searches and therefore what a capture of it
+ * has to contain. Built from the existing `TASKS` so the rows a screenshot
+ * shows are the same rows every other task card in this harness shows.
+ */
+const HARNESS_SEARCH_PROSE: Readonly<Record<string, { readonly ask: string; readonly clarification: string }>> = {
+  F12: {
+    ask: 'Finish porting the PWA feature components so the workspace stops falling back.',
+    clarification: 'Include the side-pane surfaces, not just the transcript.',
+  },
+  B7: {
+    ask: 'The transcript jumps to the bottom whenever older messages are prepended.',
+    clarification: 'Only reproducible with the composer focused.',
+  },
+  C3: {
+    ask: 'Retire the legacy state path now that every reader is on the new home.',
+    clarification: 'Leave the migration command in place for one more release.',
+  },
+};
+
+const harnessTaskDetail = (summary: TaskSummary): unknown => {
+  const prose = HARNESS_SEARCH_PROSE[summary.id] ?? { ask: summary.title, clarification: '' };
+  return {
+    sessionId: 'harness-session',
+    activity: [],
+    task: {
+      ...summary,
+      sessionId: 'harness-session',
+      description: `${summary.title}. Tracked on the tree board and searchable by its number, ${summary.id}.`,
+      ask: { text: prose.ask, source: summary.askSource },
+      clarifications: prose.clarification
+        ? [
+            {
+              text: prose.clarification,
+              source: 'human-message',
+              at: '2026-08-05T00:00:00.000Z',
+              by: 'user',
+              byName: null,
+            },
+          ]
+        : [],
+    },
+  };
+};
+
+const HARNESS_SEARCH_TASK_READS: Readonly<Record<string, unknown>> = {
+  '/v1/sessions/harness-session/tasks': {
+    tasks: TASKS.map(summary => ({ ...summary, sessionId: 'harness-session' })),
+  },
+  ...Object.fromEntries(
+    TASKS.map(summary => [`/v1/sessions/harness-session/tasks/${summary.id}`, harnessTaskDetail(summary)]),
+  ),
+};
+
 const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
   '/v1/fleet/environment': HARNESS_FLEET_ENVIRONMENT,
+  ...HARNESS_SEARCH_TASK_READS,
 };
 
 /** Which pairing a request is addressed to, taken from the fixtures themselves. */
@@ -2038,8 +2105,7 @@ const HARNESS_TERMINAL_DECK: TerminalDeckDependencies = {
   create: async () => HARNESS_TERMINAL_LISTING.terminals[0] as never,
   rename: async () => HARNESS_TERMINAL_LISTING.terminals[0] as never,
   close: async () => ({ closed: true }),
-  streamUrl: async () => 'wss://harness.invalid/stream',
-  openSocket: () => ({ binaryType: 'arraybuffer', addEventListener() {}, close() {}, send() {} }) as never,
+  attach: async () => ({ write() {}, control() {}, close() {} }),
   loadXterm: () => new Promise(() => {}),
   watchTheme: () => () => {},
   confirmClose: () => false,
@@ -6019,7 +6085,7 @@ function SessionWorkspaceHarness() {
         sessionCount={7}
         connectionStatus="open"
         themeToggle={<Button size="sm">Theme</Button>}
-        currentSessionSearch={<SessionSearchControl />}
+        currentSessionSearch={<SessionSearchControl shortcutTarget />}
       />
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
@@ -6323,6 +6389,83 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
 };
 
 /**
+ * The current-session search, in each state it can honestly be in (#6).
+ *
+ * ITS OWN PAGE, for the same reason the pickers have one: the result popup is
+ * absolutely positioned, and the gallery's scroller clips it. Each card carries
+ * its own provider, and the STATE IS THE DAEMON — the healthy fixture indexes
+ * and answers, `checkingDaemon` never settles so the control is genuinely
+ * mid-index, and `unreachableDaemon` fails the way a browser fails. None of the
+ * three is posed: the copy in the capture is the copy the product renders when
+ * a real daemon behaves that way.
+ *
+ * The driver types into these boxes rather than being handed a pre-filled query,
+ * so what a capture proves is the real change → present → rank → render path.
+ */
+function SessionSearchStateCard({
+  title,
+  note,
+  connection,
+  searchScope,
+}: {
+  readonly title: string;
+  readonly note: string;
+  readonly connection: DaemonConnection;
+  readonly searchScope: DaemonSessionScope;
+}) {
+  return (
+    <section className="flex flex-col gap-sm" data-search-card={title}>
+      <div>
+        <h3 className="m-0 text-ui font-semibold text-fg">{title}</h3>
+        <p className="m-0 text-2xs text-muted">{note}</p>
+      </div>
+      {/* Room for the popup to hang into: it is `absolute`, so the card has to
+          reserve the space or the next card is drawn over the evidence. */}
+      <div className="pb-[19rem]">
+        <SessionSearchProvider connection={connection} focusSignal={0} scope={searchScope}>
+          <div className="max-w-[34rem]">
+            <SessionSearchControl />
+          </div>
+        </SessionSearchProvider>
+      </div>
+    </section>
+  );
+}
+
+function SessionSearchHarness() {
+  return (
+    <div className="kt-shell overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-[720px] flex-col gap-lg px-3 py-4">
+        <SessionSearchStateCard
+          connection={daemon}
+          note="Files and tasks, ranked together. A file matching its name and its path outranks a task matching only its title."
+          searchScope={scope}
+          title="results"
+        />
+        <SessionSearchStateCard
+          connection={daemon}
+          note="A query nothing matches. Said as a no-match answer, which is not the same sentence as a failure."
+          searchScope={scope}
+          title="no-match"
+        />
+        <SessionSearchStateCard
+          connection={checkingDaemon}
+          note="Still building the index. The trailing slot drops the shortcut hint to say so."
+          searchScope={daemonSessionScope(checkingDaemon, 'harness-session')}
+          title="indexing"
+        />
+        <SessionSearchStateCard
+          connection={unreachableDaemon}
+          note="A half that could not be read is named, and never rendered as an empty result."
+          searchScope={daemonSessionScope(unreachableDaemon, 'harness-session')}
+          title="unavailable"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * One picker per page, because the popover is absolutely positioned and the
  * gallery's scroller clips it. Its own map rather than a branch bolted onto the
  * fleet one: two units appending to the same object is the conflict this file
@@ -6347,6 +6490,8 @@ if (host) {
         <StandaloneSettingsPageHarness />
       ) : window.location.hash === '#session-workspace' ? (
         <SessionWorkspaceHarness />
+      ) : window.location.hash === '#session-search' ? (
+        <SessionSearchHarness />
       ) : window.location.hash === '#browser-full-viewport' ? (
         <BrowserFullViewportHarness />
       ) : fleetFrame !== undefined ? (

@@ -34,11 +34,16 @@
  * paired on a relay this daemon no longer dials, and that is a different decision than the one they
  * made. Nothing here changes state and nothing here discloses a credential.
  *
- * ## PAIRING IS STILL DIRECT-ONLY
+ * ## IT IS NOT A WAY IN, WHICHEVER CARRIER FIRST CONTACT USED
  *
- * This route is reached with the device token the pairing exchange already issued, so it cannot be a
- * way in: first contact with a daemon remains direct, over an address reachable on its own once. See
- * `docs/pairing.md` and `docs/relay-protocol.md` §13.
+ * This heading used to read "PAIRING IS STILL DIRECT-ONLY", and that is no longer true: first contact
+ * may cross a rendezvous as the one-attempt sealed exchange `docs/relay-protocol.md` §14 defines. The
+ * property this route actually needs never depended on it. This answer is reached with the device
+ * token pairing already issued — `authenticated`, per the section above — so it discloses a set to a
+ * caller that has one and is unreachable to a caller that does not, on every carrier. What changed
+ * with §14 is where a device gets its FIRST copy of the set: a direct redemption reads it off the
+ * response, a relayed one reads the same object out of the sealed `paired` record, and this route is
+ * the refresh either way. See `docs/pairing.md` and `docs/relay-protocol.md` §§13–14.
  */
 
 import { type DaemonCarrier, DaemonCarriersViewSchema } from '@ferretry/protocol';

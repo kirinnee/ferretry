@@ -81,6 +81,7 @@ import {
   routePageKey,
   setupPath,
 } from './lib/pages/routes.ts';
+import { browserTerminalDeckDependencies } from './components/session-terminal-deck.tsx';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
@@ -146,6 +147,32 @@ export const isTextEntryTarget = (target: EventTarget | null): boolean => {
   if (element.isContentEditable === true) return true;
   const tagName = typeof element.tagName === 'string' ? element.tagName.toUpperCase() : '';
   return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+};
+
+interface ShortcutTargetLike {
+  closest?(selector: string): unknown;
+}
+
+/** A modal owns every chord dispatched from inside it, including from buttons. */
+const isModalShortcutTarget = (target: EventTarget | null): boolean => {
+  if (target === null || typeof target !== 'object') return false;
+  const closest = (target as ShortcutTargetLike).closest;
+  return typeof closest === 'function' && closest.call(target, 'dialog, [role="dialog"], [aria-modal="true"]') !== null;
+};
+
+/**
+ * The two text-entry places where current-session Cmd/Ctrl+K is intentional.
+ *
+ * The composer is where a session reader normally stands, and the search box
+ * itself supports the ordinary re-select gesture. Every other editable field
+ * keeps its native chord even on a session route.
+ */
+const isSessionSearchShortcutTarget = (target: EventTarget | null): boolean => {
+  if (target === null || typeof target !== 'object') return false;
+  const closest = (target as ShortcutTargetLike).closest;
+  return (
+    typeof closest === 'function' && closest.call(target, 'form.fy-composer, [data-current-session-search]') !== null
+  );
 };
 
 const notificationPermission = (): NotificationPermissionState =>
@@ -522,6 +549,27 @@ const browserWorkspaceRefreshEnvironment: SessionWorkspaceRefreshEnvironment = {
 
 function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const store = useAppStore();
+  // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
+  // object changes identity, and a remount mid-session tears down a live shell.
+  //
+  // THE MEASURED CARRIER IS THE THIRD ARGUMENT, AND IT WAS NOT PASSED. `browserTerminalDeckDependencies`
+  // declares it, `browserTerminalStreamAttach` gates the DIRECT branch on it, and the default is
+  // `() => undefined` — so the composition root left the production deck permanently answering "no
+  // carrier measured", which turns every direct attach into the retryable `TERMINAL_STREAM_NO_CARRIER`
+  // and leaves a direct session's terminals cycling the deck's backoff instead of opening a socket.
+  // It is a GETTER rather than the subscribed `measuredCarrier` below on purpose: a carrier is a
+  // measurement read per attach, and depending on the subscribed value here would give this memo a
+  // new identity the moment a walk decides — remounting the deck and tearing down the live shell the
+  // memo exists to protect.
+  const terminalDeck = useMemo(
+    () =>
+      browserTerminalDeckDependencies(
+        store.carrier.fetch,
+        async (daemon, request) => await store.carrier.openStream(daemon, request),
+        () => store.carrier.activeMethod(scope.daemonId),
+      ),
+    [scope.daemonId, store.carrier],
+  );
   const { navigate } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
@@ -535,6 +583,19 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The highest event sequence this browser has actually received. `0` means none yet. */
+  const [liveCursor, setLiveCursor] = useState(0);
+  /**
+   * The carrier this daemon's traffic is MEASURED on, subscribed rather than read once.
+   *
+   * `useActiveCarrier` re-renders when the router publishes a new answer, which is what makes the
+   * live-feed effect below re-run the moment a walk decides — and what lets this route state the
+   * carrier on a surface that is mounted whenever a session is open. `ActiveCarrierCard` says the
+   * same thing at length, but it lives in Settings, and a reader (or a harness) looking at a session
+   * should not have to navigate away to find out how its bytes are travelling.
+   */
+  const measuredCarrier = useActiveCarrier(store.carrier, daemonId);
+  const carrierKind = measuredCarrier?.ok === true ? measuredCarrier.method.kind : 'none';
   const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
 
   useEffect(() => {
@@ -573,6 +634,50 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     };
   }, [connection, daemonId, sessionId, store.clients, store.fleet]);
 
+  /**
+   * THE LIVE FEED, AND THE FIRST THING IN THIS APP THAT CONSUMES ONE.
+   *
+   * `/v1/events` has been mounted on the daemon and read by nothing: the transcript arrives on a
+   * three-second poll, which is honest and is not live. Subscribing here makes an arriving event
+   * refresh the transcript at once, and it is the same subscription on either carrier — the typed
+   * client's transport opens a `wss://` socket on direct and a §14 stream session on a relay, and
+   * this effect does not know which.
+   *
+   * A FAILED STREAM IS NOT AN ERROR THE READER IS SHOWN. The poll is still running underneath and
+   * still refreshing; losing the feed makes the screen slower, not wrong, and reporting it as a
+   * session failure would take a working workspace away over a lost optimisation.
+   *
+   * The cursor is what a harness polls: it only ever moves forward, and it is non-empty exactly once
+   * something has arrived — so "an event reached this browser" is readable without matching copy.
+   */
+  useEffect(() => {
+    // NOT UNTIL A CARRIER HAS BEEN MEASURED, and that is the whole fix rather than a guard. A
+    // carrier is decided by the first request that walks, so this effect can run before any walk has
+    // finished — and a subscription opened then takes the direct branch, opens a socket at an
+    // address a relayed browser cannot reach, and dies into the catch below with no retry and
+    // nothing on screen.
+    //
+    // THE DEPENDENCY IS THE CHOICE OBJECT, NOT ITS KIND. Depending on the kind alone would leave a
+    // stream subscribed to a carrier the router has replaced whenever the replacement happens to be
+    // the same kind — relay A for relay B. That is not reachable through today's router, which only
+    // ever replaces a winner by way of `undefined`, but "not reachable today" is a fact about one
+    // call site rather than about this effect, and the object costs nothing to depend on.
+    if (client === null || measuredCarrier?.ok !== true) return;
+    const abort = new AbortController();
+    void client
+      .stream(
+        sessionId,
+        0,
+        event => {
+          setLiveCursor(current => Math.max(current, event.sequence));
+          void refreshControl.current?.refresh(true);
+        },
+        abort.signal,
+      )
+      .catch(() => undefined);
+    return () => abort.abort();
+  }, [client, measuredCarrier, sessionId]);
+
   useEffect(() => {
     const foreground = { daemonId, sessionId };
     setForegroundPinScope(foreground);
@@ -592,7 +697,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   );
 
   return (
-    <div className="h-full min-h-0 w-full" data-daemon={scope.daemonId} data-session={scope.sessionId}>
+    <div
+      className="h-full min-h-0 w-full"
+      data-daemon={scope.daemonId}
+      data-session={scope.sessionId}
+      // The live feed's cursor: `0` until an event has arrived, then monotonic. A harness proving
+      // that a stream reached this browser polls this rather than watching the transcript's text,
+      // which changes for reasons that have nothing to do with the carrier.
+      data-live-events={String(liveCursor)}
+      data-carrier-kind={carrierKind}
+    >
       {/* These live regions outlive every loading/error/content swap. */}
       <p className="sr-only" role="status" aria-live="polite" data-session-state={sessionState}>
         {SESSION_STATE_MESSAGE[sessionState]}
@@ -606,6 +720,13 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           browserLogin={store.browserLogin}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
+          // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,
+          // rename, close, and the ticket purchase — defaulted to the raw network, so on a
+          // relay-only network a reader opening a shell got a bare `Failed to fetch` from an
+          // address the relay exists because the browser cannot reach it. Its live stream is bound
+          // the same way: `openStream` answers a §14 stream session on a rendezvous and `null` on
+          // direct, so the deck asks one question and gets whichever carrier is live.
+          deck={terminalDeck}
           dictationSettings={dictation.settings}
           client={client}
           connection={connection}
@@ -1099,14 +1220,30 @@ export function AppShell() {
     routeAnnouncer.current?.focus();
   }, [pageKey]);
 
+  /**
+   * THE SHORTCUT YIELDS TO A FIELD ONLY WHERE THERE IS SOMETHING TO YIELD FOR.
+   *
+   * Off a session route the chord opens the global palette, and yielding to a
+   * focused field is deliberate — see the test that presses it inside an input,
+   * a textarea, a select and a contenteditable and requires the keystroke to
+   * survive.
+   *
+   * ON a session route it is item #6's current-session search, and the field the
+   * reader is almost always in is the composer — a `<textarea>`. That one field,
+   * and the search itself, deliberately reach the palette. Other editable and
+   * modal contexts keep the chord: a rename field or an open dialog owns its
+   * keyboard interaction and must not be escaped through by a global listener.
+   */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
-      if (isTextEntryTarget(event.target)) return;
+      const sessionScoped = currentSessionScope !== null;
+      if (isModalShortcutTarget(event.target)) return;
+      if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();
-      if (currentSessionScope !== null) setSessionSearchFocusSignal(current => current + 1);
+      if (sessionScoped) setSessionSearchFocusSignal(current => current + 1);
       else openPalette();
     };
     window.addEventListener('keydown', onKeyDown, true);
@@ -1153,7 +1290,7 @@ export function AppShell() {
             active={appBarDestinationForRoute(pageRoute)}
             onNavigate={navigate}
             themeToggle={<ThemeToggle />}
-            {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl /> })}
+            {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
           />
           {/*
             The finder's touch affordance wraps the page area rather than one

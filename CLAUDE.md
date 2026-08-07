@@ -84,10 +84,21 @@ to discover fails closed to direct-only with the consequence and the remedy said
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. The PWA's interim three-way carrier chooser
-and self-hosting route are still there and removing them is still an explicit GAP, and **pairing
-itself can never be relayed** — a relayed session is opened with the device grant the pairing
-exchange has not issued yet, so first contact with a daemon is always direct. Protocol
-§13 names each remaining piece and its state.
+and self-hosting route are still there and removing them is still an explicit GAP. **First contact
+is no longer direct-only.** A relay session commits to one of three modes with its first sealed
+record (protocol §14): a request session, one live event or terminal stream, or a one-attempt
+`pair` — sent only after the daemon is proved against the QR-pinned fingerprint, never as an
+anonymous routed request, with its own relay guess budget so an internet stranger cannot expire a
+code a LAN device could still redeem. **The QR stays the ordinary one-version `v1` fragment** — daemon
+address, code, fingerprint, no rendezvous — because the scanning device reads the SAME hosted
+directory advertisement the daemon read and finds the fallback itself, so **a device that can never
+reach the daemon's address pairs anyway** and then reconnects as an ordinary authenticated session.
+The mint's `discoveredRelayUrl` is host-facing only: it exists so `fy pair`, Add Device and
+`fyd --check` know a loopback daemon is redeemable and what to disclose, and it is derived from relay
+provenance so a self-hosted rendezvous yields nothing. That is a **declared GAP** — a fresh device
+cannot discover a self-hosted rendezvous, and naming one in the link is deferred, not promised. All
+three modes are built on both ends; read §14 for the state machine and §13 for what is still
+outstanding around it rather than restating either here.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one

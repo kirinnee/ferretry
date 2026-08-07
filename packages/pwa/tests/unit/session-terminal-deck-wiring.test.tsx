@@ -15,6 +15,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { browserTerminalDeckDependencies } from '../../src/components/session-terminal-deck.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import type { RelayClientSession } from '../../src/lib/relay-session.ts';
+import type { TerminalStreamHandlers } from '../../src/lib/web-terminals.ts';
 import '../support/dom.ts';
 
 const alpha = daemonConnection({
@@ -24,6 +26,22 @@ const alpha = daemonConnection({
 });
 const scope = daemonSessionScope(alpha, 'shared');
 const TERMINAL = 'a1b2c3d4e5f6';
+
+/** A viewer that records nothing: these cases are about what the factory DIALS, not what it reads. */
+const noHandlers = (): TerminalStreamHandlers => ({
+  onOpen: () => undefined,
+  onBytes: () => undefined,
+  onClosed: () => undefined,
+  onRefused: () => undefined,
+});
+
+/** The smallest thing `openStream` may answer with: a session that is open and carries nothing. */
+const fakeStreamSession = (): RelayClientSession =>
+  ({
+    onStreamClosed: () => undefined,
+    sendStream: () => undefined,
+    closeStream: () => undefined,
+  }) as unknown as RelayClientSession;
 /** The shape the protocol's socket-ticket schema actually accepts. */
 const TICKET = 'fy_ticket_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
@@ -97,35 +115,63 @@ describe('browserTerminalDeckDependencies', () => {
     );
   });
 
-  test('buys a ticket over HTTP and leaves the device token out of the socket URL', async () => {
+  test('buys a ticket over HTTP and opens a socket that carries no device token', async () => {
     // The URL outlives the socket in history and in any log that retains it, so
     // the long-lived credential must never be in it. The ticket is one-time and
     // audience-bound to this exact stream.
     const calls: { url: string; method: string }[] = [];
+    const opened: string[] = [];
+    class FakeSocket {
+      binaryType = '';
+      constructor(url: string) {
+        opened.push(url);
+      }
+      addEventListener(): void {}
+    }
     stub('fetch', daemonFetch(calls) as unknown as typeof fetch);
+    stub('WebSocket', FakeSocket as unknown as typeof WebSocket);
 
-    const url = await browserTerminalDeckDependencies().streamUrl(alpha, scope, TERMINAL);
+    await browserTerminalDeckDependencies(undefined, undefined, () => ({
+      kind: 'direct',
+      daemonUrl: 'https://alpha.example.test',
+    })).attach(alpha, scope, TERMINAL, noHandlers());
 
     expect(calls.at(0)).toEqual({
       url: `https://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL}/stream/ticket`,
       method: 'POST',
     });
-    expect(url).toBe(`wss://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL}/stream?ticket=${TICKET}`);
-    expect(url).not.toContain('alpha-token');
+    expect(opened).toEqual([
+      `wss://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL}/stream?ticket=${TICKET}`,
+    ]);
+    expect(opened[0]).not.toContain('alpha-token');
   });
 
-  test('opens the socket at the URL it was given and nowhere else', async () => {
-    const opened: string[] = [];
-    class FakeSocket {
-      constructor(url: string) {
-        opened.push(url);
-      }
-    }
-    stub('WebSocket', FakeSocket as unknown as typeof WebSocket);
+  /*
+   * §14: "A client must also not BUY a ticket it means to spend here — a single-use ticket minted
+   * for a surface that refuses it is a credential the daemon burned for nothing, so the refusal
+   * happens before the purchase, not after." A relayed attach must therefore reach neither `fetch`
+   * nor `WebSocket`.
+   */
+  test('opens a relayed terminal as a stream session, minting no ticket and opening no socket', async () => {
+    const calls: { url: string; method: string }[] = [];
+    stub('fetch', daemonFetch(calls) as unknown as typeof fetch);
+    stub(
+      'WebSocket',
+      class {
+        constructor() {
+          throw new Error('no socket may be opened for a relayed terminal');
+        }
+      } as unknown as typeof WebSocket,
+    );
+    const asked: string[] = [];
 
-    browserTerminalDeckDependencies().openSocket(`wss://alpha.example.test/stream?ticket=${TICKET}`);
+    await browserTerminalDeckDependencies(undefined, async (_daemon, request) => {
+      asked.push(request.path);
+      return fakeStreamSession();
+    }).attach(alpha, scope, TERMINAL, noHandlers());
 
-    expect(opened).toEqual([`wss://alpha.example.test/stream?ticket=${TICKET}`]);
+    expect(asked).toEqual([`/v1/sessions/shared/terminals/${TERMINAL}/stream`]);
+    expect(calls).toEqual([]);
   });
 
   test('names the shell in the confirmation, because closing one ends a process', async () => {

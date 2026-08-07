@@ -1,4 +1,4 @@
-import type { PairingInvitationLink } from '@ferretry/protocol';
+import { PAIRING_FRAGMENT_PATTERN, type PairingInvitationLink } from '@ferretry/protocol';
 
 /**
  * The last check before a pairing link becomes a QR.
@@ -39,12 +39,29 @@ function assertPairableDaemonUrl(value: string): void {
 /**
  * The link to encode, or a refusal naming what the phone would have rejected.
  *
- * The `v1` prefix is checked too: it is what tells the PWA that a fragment is a pairing claim at all,
- * and a link without it lands on the cold screen as though nobody had scanned anything.
+ * THE VERSION PREFIX IS CHECKED THROUGH THE PROTOCOL'S OWN PATTERN, and that is the whole lesson of
+ * the defect this line used to be. It read `#v1;` literally, because when it was written there was
+ * one version and this file could not be wrong about it. Then the daemon briefly learned to mint a
+ * `v2` fragment naming a rendezvous — and `fy pair` refused the daemon's own link outright: no code,
+ * no QR, no link, on the one screen that exists to hand a person all three.
+ *
+ * THE LESSON OUTLIVED THE VERSION THAT TAUGHT IT. That `v2` form is withdrawn and the writer emits
+ * `v1` again, so a literal check would pass today — which is exactly why it is not restored. The rule
+ * that was supposed to prevent the original defect — ship the tolerant reader before the emitter — was
+ * applied to the PWA and missed here, because nobody had noticed that the fragment has TWO readers and
+ * that the host's own screen is one of them. So this keeps no list of versions: it asks the package
+ * that owns the fragment. A version this reader has never heard of is the protocol's fact to add, in
+ * one place, rather than a string three packages each have to remember to change.
+ *
+ * What it is still asking is unchanged: is this a pairing claim at all? Without a version prefix the
+ * PWA treats the fragment as somebody else's and shows the cold screen, so a scan looks like nothing
+ * happened rather than like a broken link. It deliberately does NOT read the fragment's fields —
+ * `PairingCodeMintResponseSchema` already binds them to the daemon, code and fingerprint the link was
+ * minted with, and a second opinion here would be a second thing to keep in step.
  */
 export function checkedPairUrl(invitation: PairingInvitationLink): string {
   const pairUrl = absoluteHttpUrl(invitation.pairUrl, 'pairing URL');
-  if (!pairUrl.hash.startsWith('#v1;')) throw new Error('pairing URL does not carry a v1 pairing fragment');
+  if (!PAIRING_FRAGMENT_PATTERN.test(pairUrl.hash)) throw new Error('pairing URL does not carry a pairing fragment');
   assertPairableDaemonUrl(invitation.daemonUrl);
   return invitation.pairUrl;
 }

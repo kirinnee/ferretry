@@ -58,6 +58,20 @@ const mintedLocalOnly = (): PairingCodeMintResponse =>
     reach: 'local-only',
   });
 const mintedWithoutLink = (): PairingCodeMintResponse => ({ ...code, refusal: 'wildcard-bind' });
+/**
+ * THE DEFAULT INSTALL ONCE A RENDEZVOUS CAN BE DISCOVERED, which is the combination this file had no
+ * case for. The direct address is still loopback — so the notice is owed — and another device can
+ * still redeem the link, because the scanning phone finds the same hosted rendezvous the daemon did.
+ * The panel renders those on two independent conditions, so only a case that is BOTH can catch them
+ * being collapsed back together.
+ */
+const mintedRelayedLocalOnly = (): PairingCodeMintResponse =>
+  minted({
+    daemonUrl: 'http://127.0.0.1:7431',
+    pairUrl: `https://ferretry.pages.dev/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=7F3K-Q2ND;fp=${DAEMON_ID}`,
+    reach: 'local-only',
+    discoveredRelayUrl: 'wss://relay.example',
+  });
 
 const device = (overrides: Partial<PairedDevice> = {}): PairedDevice => ({
   id: DEVICE_ID,
@@ -164,6 +178,36 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).not.toContain('Show this to the device you are adding');
     expect(text(renderer)).toContain('Show it to a browser on this machine');
     expect(text(renderer)).not.toContain('Show it to the phone you are adding');
+  });
+
+  it('draws BOTH the QR and the local-only notice when a discovered rendezvous makes loopback redeemable', () => {
+    // THE COMBINATION THAT MOTIVATED THE SPLIT, AND HAD NO TEST. The QR and the notice used to move
+    // together because they only ever had one cause: a local-only link could not be redeemed elsewhere,
+    // so it earned a warning INSTEAD of a QR. A loopback bind on a discoverable rendezvous breaks that
+    // in half — the link IS redeemable, and the address is still local, so the reader is owed both.
+    // Suppressing the notice because a QR appeared would delete the disclosure exactly when there is
+    // something new to disclose. `fy pair` has the equivalent case; without this one the two surfaces
+    // could silently diverge where §14 says they must agree.
+    // Arrange, Act
+    const renderer = card({ invite: mintedRelayedLocalOnly() });
+
+    // Assert — both, on one panel.
+    should(marked(renderer, 'data-pair-qr')).have.length(1);
+    should(marked(renderer, 'data-pair-local-only')).have.length(1);
+    should(marked(renderer, 'data-pair-offer', 'local-only')).have.length(1);
+    // The disclosure names the rendezvous and what it can and cannot observe.
+    expect(text(renderer)).toContain('wss://relay.example');
+    expect(text(renderer)).toContain('another device can redeem it through');
+    expect(text(renderer)).toContain('can never read the code or the exchange');
+    // A QR is genuinely on the glass, so nothing may claim otherwise — the contradiction the plain
+    // local-only sentence would have printed if it had been reused here unchanged.
+    expect(text(renderer)).not.toContain('no QR is drawn');
+    expect(text(renderer)).toContain('Show this to the device you are adding');
+    // THE QR CARRIES THE ORDINARY LINK. The rendezvous is disclosed beside it and is not in the
+    // fragment; the phone finds that address for itself.
+    expect(text(renderer)).toContain('ferretry.pages.dev/pair#v1;');
+    expect(text(renderer)).not.toContain('#v2;');
+    expect(text(renderer)).not.toContain(';relay=');
   });
 
   it('offers no link at all when the daemon has no address, and still shows the code', () => {

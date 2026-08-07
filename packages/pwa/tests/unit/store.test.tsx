@@ -15,8 +15,9 @@ import {
   useAppStore,
   useConnectionSnapshot,
 } from '../../src/lib/store.tsx';
+import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import { interact, mount, must } from '../support/dom.ts';
-import { newDaemonIdentity, relayCrypto, settle as settleTasks } from '../support/relay.ts';
+import { autoDial, newDaemonIdentity, relayCrypto, settle as settleTasks } from '../support/relay.ts';
 
 const RELAY_DIRECTORY = 'https://directory.example.test';
 const HOSTED_RELAY_URL = 'https://hosted-relay.example.test';
@@ -165,6 +166,295 @@ describe('exchangePairing', () => {
         }),
       ),
     ).rejects.toThrow('does not match its fingerprint');
+  });
+
+  /*
+   * A RUNTIME WITHOUT `AbortSignal.timeout` USED TO PAIR WITH NOTHING. The unguarded static call
+   * threw a `TypeError` before `fetcher` was reached, the catch read it as direct-unreachable, and a
+   * v1/direct-only link — which has no rendezvous to fall back to — reported that programming error
+   * as the transport verdict. The fallback controller path must still contact a reachable direct
+   * daemon, and the static is restored in `finally` so a thrown assertion cannot leak the absence
+   * into a later case.
+   */
+  it('pairs directly even when the runtime omits AbortSignal.timeout', async () => {
+    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    const requests: string[] = [];
+    try {
+      const connection = await exchangePairing(
+        { daemonUrl: 'https://daemon.example.test', daemonId, code: 'one-time-code' },
+        async input => {
+          requests.push(String(input));
+          return Response.json({
+            daemonId,
+            deviceToken: `fy_device_${'t'.repeat(43)}`,
+            daemonName: 'workstation',
+            capabilities: [],
+            carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
+          });
+        },
+      );
+
+      // THE DIRECT DAEMON WAS CALLED — the missing static no longer prevents the fetch — and the
+      // walk's first leg paired, so no rendezvous was spent.
+      expect(requests).toEqual(['https://daemon.example.test/v1/pair']);
+      expect(String(connection.daemonId)).toBe(daemonId);
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: nativeTimeout,
+        configurable: true,
+        writable: true,
+      });
+    }
+    expect(typeof AbortSignal.timeout).toBe('function');
+  });
+
+  /*
+   * THE FALLBACK TIMER, NOT THE NATIVE STATIC, IS WHAT HAS TO DEADLINE A HUNG DIRECT FETCH. A
+   * blackholed address never rejects on its own, so the fallback controller's timer firing at the
+   * injected short deadline is what classifies direct as unreachable and hands the same single-use
+   * code to the rendezvous. The static is removed to force the controller path; the relay leg is a
+   * scripted daemon that seals a real redemption, so the case proves the whole walk rather than a
+   * mock of it.
+   */
+  it('aborts a hung direct fetch at the injected deadline over the fallback timer and pairs over the relay', async () => {
+    const identity = await newDaemonIdentity();
+    const RELAY = 'wss://relay.mine.test';
+    const response = {
+      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      daemonId: identity.daemonId,
+      daemonName: 'Studio',
+      capabilities: [],
+      carriers: [{ kind: 'relay', url: RELAY }],
+    };
+    const auto = autoDial(identity, { paired: response });
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    const directStarted = Date.now();
+    let abortedAt: number | undefined;
+    try {
+      const connection = await exchangePairing(
+        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+        {
+          // The rendezvous the walk falls back to comes from the DISCOVERED advertisement, not from
+          // the link — the seed above is the ordinary three-field one a v1 fragment produces.
+          hostedRelayUrl: RELAY,
+          fetcher: async (_input, init) =>
+            await new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener(
+                'abort',
+                () => {
+                  abortedAt = Date.now() - directStarted;
+                  reject(new DOMException('the direct fetch was aborted', 'AbortError'));
+                },
+                { once: true },
+              );
+            }),
+          relayCrypto,
+          relayDial: auto.dial,
+          directTimeoutMs: 20,
+        },
+      );
+
+      // The walk moved past the aborted direct leg and redeemed the same code over the rendezvous,
+      // which is §1's direct-first walk when direct does not answer.
+      expect(String(connection.daemonId)).toBe(identity.daemonId);
+      const pairRequest = auto.requests[0] as { t: string; code: string; deviceName: string };
+      expect(pairRequest.t).toBe('pair');
+      expect(pairRequest.code).toBe('7F3K-Q2ND');
+      expect(pairRequest.deviceName).toBe('Ferretry PWA');
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: nativeTimeout,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    // THE TIMER FIRED AT THE INJECTED ~20ms, not the four-second default, so the hung fetch was
+    // classified unreachable and the relay leg ran well inside the code's two-minute life.
+    expect(abortedAt).toBeGreaterThanOrEqual(10);
+    expect(abortedAt).toBeLessThan(1000);
+  });
+
+  /*
+   * NO TIMER SURVIVES A SETTLED DIRECT FETCH. The native static owns an internal timer no `clear()`
+   * reaches, so this case forces the controller path and then reads the signal the fetcher received:
+   * had the fallback timer not been cleared in the direct fetch's `finally`, it would have aborted
+   * that signal well inside the wait below. An un-aborted signal past the deadline is the proof, not
+   * an assertion against a mock. The static is restored in `finally` — the same shape every
+   * monkeypatch in this file follows — which is the guarantee that a thrown assertion restores it.
+   */
+  it('clears the fallback timer once a direct fetch settles, and restores the static it stubbed', async () => {
+    const daemonId = `fy_daemon_${'d'.repeat(43)}`;
+    const success = Response.json({
+      daemonId,
+      deviceToken: `fy_device_${'t'.repeat(43)}`,
+      daemonName: 'workstation',
+      capabilities: [],
+      carriers: [{ kind: 'direct', url: 'https://daemon.example.test' }],
+    });
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    let directSignal: AbortSignal | undefined;
+    try {
+      const connection = await exchangePairing(
+        { daemonUrl: 'https://daemon.example.test', daemonId, code: 'code' },
+        {
+          fetcher: async (_input, init) => {
+            directSignal = init?.signal ?? undefined;
+            return success;
+          },
+          directTimeoutMs: 30,
+        },
+      );
+      expect(String(connection.daemonId)).toBe(daemonId);
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: nativeTimeout,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    // Had `clear()` not run, the 30ms fallback timer would have aborted this signal inside the wait.
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(directSignal?.aborted).toBe(false);
+    expect(typeof AbortSignal.timeout).toBe('function');
+  });
+
+  /*
+   * THE DEADLINE CAN BURN A CODE THE DAEMON ACTUALLY REDEEMED, AND THE READER HAS TO BE TOLD.
+   *
+   * The four-second deadline exists because a blackholed address never rejects on its own, and it
+   * stays. What it cannot do is prove the POST never landed: a reachable-but-slow daemon — a
+   * tailnet, a loaded host, the persistence await inside the pairing service's own `grant` — can
+   * consume the code and mint a device while this side has already stopped waiting. The walk then
+   * presents the same single-use code at the rendezvous and gets a sealed `pair-refused`, which is
+   * the daemon telling the truth about a code the CANCELLED attempt may itself have spent.
+   *
+   * Reported as "that code is wrong, expired or already spent" alone, the owner mints another and
+   * never learns that a device is paired under a token nobody holds. So this exact sequence — a
+   * direct fetch aborted at the deadline, then a sealed refusal — must name the possibility and the
+   * remedy. The daemon here is the scripted one, sealing a REAL refusal record.
+   */
+  it('warns that the cancelled direct attempt may have paired when the relay then reports a refusal', async () => {
+    const identity = await newDaemonIdentity();
+    const auto = autoDial(identity, { pairRefused: true });
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    let reason: unknown;
+    try {
+      reason = await exchangePairing(
+        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+        {
+          hostedRelayUrl: 'wss://relay.mine.test',
+          // Hangs until the deadline aborts it — the daemon's side of this request is unobserved.
+          fetcher: async (_input, init) =>
+            await new Promise<Response>((_resolve, rejectFetch) => {
+              init?.signal?.addEventListener(
+                'abort',
+                () => rejectFetch(new DOMException('the direct fetch was aborted', 'AbortError')),
+                { once: true },
+              );
+            }),
+          relayCrypto,
+          relayDial: auto.dial,
+          directTimeoutMs: 20,
+        },
+      ).then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', { value: nativeTimeout, configurable: true, writable: true });
+    }
+
+    // The relay leg really ran and really was refused — the code reached the scripted daemon.
+    expect((auto.requests[0] as { t: string }).t).toBe('pair');
+    // It stays a REFUSAL for every consumer that classifies one: `pairing-screen.tsx` reads this
+    // class to decide between "mint another code" and "check your network", and the daemon did
+    // refuse. Widening it to a plain Error would send the reader to fix a network that was fine.
+    expect(reason).toBeInstanceOf(RelayPairingRefusedError);
+    const message = (reason as Error).message;
+    // The three things the plain refusal cannot say: what may have happened, what to look for, and
+    // that minting again is necessary but may not be sufficient.
+    expect(message).toContain('may have completed that pairing');
+    expect(message).toContain('revoke');
+    expect(message).toContain('fy pair');
+  });
+
+  /*
+   * AND THE ORDINARY CASE IS UNCHANGED, which is the half that keeps the warning meaningful. A
+   * fetch that REJECTS on its own — a refused connection, a DNS failure, an offline radio — proves
+   * the request never landed, so a refusal after it is only ever about the code. Telling that
+   * reader to go hunting for a phantom device would be the new sentence doing the same damage the
+   * old one did, in the opposite direction.
+   */
+  it('leaves a refusal after an ordinary transport failure saying only that the code is spent', async () => {
+    const identity = await newDaemonIdentity();
+    const auto = autoDial(identity, { pairRefused: true });
+
+    const reason = await exchangePairing(
+      { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+      {
+        hostedRelayUrl: 'wss://relay.mine.test',
+        // Rejects immediately and of its own accord: nothing was cancelled, nothing was in flight.
+        fetcher: async () => {
+          throw new TypeError('Failed to fetch');
+        },
+        relayCrypto,
+        relayDial: auto.dial,
+      },
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    expect(reason).toBeInstanceOf(RelayPairingRefusedError);
+    expect((reason as Error).message).toBe('this pairing code is wrong, expired or already spent');
+    expect((reason as Error).message).not.toContain('revoke');
+  });
+
+  /*
+   * A SUCCESSFUL RELAY FALLBACK AFTER THE SAME ABORT IS ALSO UNCHANGED. The ambiguity only ever
+   * decides how a REFUSAL is worded; a redemption that completed over the rendezvous is an ordinary
+   * success and must not acquire a warning about a pairing that plainly did not happen twice.
+   */
+  it('pairs silently over the relay when the cancelled direct attempt is followed by a redemption', async () => {
+    const identity = await newDaemonIdentity();
+    const RELAY = 'wss://relay.mine.test';
+    const auto = autoDial(identity, {
+      paired: {
+        deviceToken: `fy_device_${'t'.repeat(43)}`,
+        daemonId: identity.daemonId,
+        daemonName: 'Studio',
+        capabilities: [],
+        carriers: [{ kind: 'relay', url: RELAY }],
+      },
+    });
+    const nativeTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', { value: undefined, configurable: true, writable: true });
+    try {
+      const connection = await exchangePairing(
+        { daemonUrl: 'https://studio.example', daemonId: identity.daemonId, code: '7F3K-Q2ND' },
+        {
+          hostedRelayUrl: RELAY,
+          fetcher: async (_input, init) =>
+            await new Promise<Response>((_resolve, rejectFetch) => {
+              init?.signal?.addEventListener('abort', () => rejectFetch(new Error('aborted')), { once: true });
+            }),
+          relayCrypto,
+          relayDial: auto.dial,
+          directTimeoutMs: 20,
+        },
+      );
+
+      expect(String(connection.daemonId)).toBe(identity.daemonId);
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', { value: nativeTimeout, configurable: true, writable: true });
+    }
   });
 });
 

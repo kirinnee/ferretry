@@ -49,8 +49,6 @@ describe('who the grants govern', () => {
     // Arrange — a relayed request that presents every loopback-looking signal it possibly could.
     const relayed = tunnelApiRequest(
       {
-        t: 'req',
-        id: 1,
         method: 'POST',
         path: '/v1/fleet/apply',
         headers: {
@@ -61,6 +59,7 @@ describe('who the grants govern', () => {
         query: [['token', 'anything']],
       },
       'device-token',
+      'rendezvous-session',
     );
 
     // Act

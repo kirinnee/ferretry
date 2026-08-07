@@ -1,6 +1,6 @@
-import { mkdir, realpath, rm } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import type { IDaemonProcessPort, INixGcRootPort } from '../../lib/daemon/ports.ts';
+import { mkdir, readdir, realpath, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import type { HeldGcRoot, IDaemonProcessPort, INixGcRootPort } from '../../lib/daemon/ports.ts';
 
 /**
  * The Nix garbage-collection root, held through `nix-store`.
@@ -20,6 +20,19 @@ export class NixStoreGcRoot implements INixGcRootPort {
   async realPath(path: string): Promise<string> {
     // An unresolvable path is not a Nix path; the caller classifies it and moves on.
     return await realpath(path).catch(() => path);
+  }
+
+  /**
+   * Which roots are in this directory, reported with the paths they were found at.
+   *
+   * Unreadable is answered as empty rather than as a failure: a directory that does not exist yet is
+   * the ordinary first-run state, and one that cannot be listed leads the caller to REGISTER roots,
+   * which is the safe direction. Nothing is filtered by shape — an entry here that no snapshot
+   * accounts for is precisely what the caller has to be able to see and release.
+   */
+  async held(directory: string): Promise<readonly HeldGcRoot[]> {
+    const names = await readdir(directory).catch(() => [] as string[]);
+    return names.map(name => ({ name, path: join(directory, name) }));
   }
 
   async pin(storePath: string, rootPath: string): Promise<string | undefined> {

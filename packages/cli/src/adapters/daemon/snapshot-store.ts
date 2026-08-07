@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { type BigIntStats, createReadStream, type Stats } from 'node:fs';
+import { type BigIntStats, createReadStream, type Dirent, type Stats } from 'node:fs';
 import {
   chmod,
   copyFile,
@@ -23,6 +23,9 @@ import type {
   DaemonSnapshotBuild,
   DaemonSnapshotIdentity,
   IDaemonSnapshotPort,
+  RetainedSnapshot,
+  RetainedSnapshotInventory,
+  RetainedSnapshotIssue,
 } from '../../lib/daemon/ports.ts';
 
 const DIGEST = /^[0-9a-f]{64}$/u;
@@ -385,6 +388,82 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     );
   }
 
+  /**
+   * Name every retained snapshot without proving any of them, and never fail for one bad entry.
+   *
+   * Deliberately NOT `list()` with verification switched off. It answers a different question, so it
+   * makes different promises: it reads one small manifest per entry and no executable at all, and a
+   * directory it cannot trust becomes a structured fact in `unreadable` rather than a throw. An interrupted
+   * build leaves exactly such a directory — `build` reserves the content address before it moves the
+   * files in, and by design no later build repairs it — and putting the verifying listing on the
+   * critical path of every mutating verb meant one of those disabled the whole lifecycle surface.
+   *
+   * `complete` is false whenever anything was skipped, INCLUDING the whole store being unreadable. A
+   * caller may only add protection from an incomplete inventory: an entry that could not be read is a
+   * snapshot that is still there. A store that does not exist yet is complete and empty, which is the
+   * ordinary state of a host that has never built one.
+   */
+  async retained(): Promise<RetainedSnapshotInventory> {
+    let rootState: Stats | undefined;
+    try {
+      rootState = await this.#optionalLstat(this.root);
+    } catch (error) {
+      return {
+        snapshots: [],
+        complete: false,
+        unreadable: [{ path: this.root, reason: `could not be inspected: ${errorMessage(error)}` }],
+      };
+    }
+    if (rootState === undefined) return { snapshots: [], complete: true, unreadable: [] };
+
+    const directory = join(this.root, SNAPSHOTS);
+    let entries: Dirent[];
+    try {
+      // This is structural validation only: real managed directories and durable promotion evidence,
+      // with no executable read or digest. A present root with a missing or symlinked child is damage,
+      // not the same answer as a store that has never existed.
+      await this.#validateStore(rootState);
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      return {
+        snapshots: [],
+        complete: false,
+        unreadable: [{ path: this.root, reason: `store structure could not be trusted: ${errorMessage(error)}` }],
+      };
+    }
+    const snapshots: RetainedSnapshot[] = [];
+    const unreadable: RetainedSnapshotIssue[] = [];
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const outcome = await this.#retainedEntry(entry);
+      if ('reason' in outcome) unreadable.push(outcome);
+      else snapshots.push(outcome);
+    }
+    const [first, ...rest] = unreadable;
+    return first === undefined
+      ? { snapshots, complete: true, unreadable: [] }
+      : { snapshots, complete: false, unreadable: [first, ...rest] };
+  }
+
+  /** One entry's identity from its manifest, or the adapter facts explaining why it was not trusted. */
+  async #retainedEntry(entry: Dirent): Promise<RetainedSnapshot | RetainedSnapshotIssue> {
+    const directory = join(this.root, SNAPSHOTS, entry.name);
+    if (!entry.isDirectory() || !SNAPSHOT_ID.test(entry.name)) {
+      return { path: directory, reason: 'is not a daemon snapshot directory' };
+    }
+    try {
+      const state = await lstat(directory);
+      // A snapshot directory is sealed read-only when its build finishes, so a writable one is an
+      // interrupted build: incomplete, unrunnable, and never to be counted as retained.
+      this.#requireDirectory(state, directory, false);
+      const manifestPath = join(directory, MANIFEST);
+      this.#requireRegular(await lstat(manifestPath), manifestPath, false);
+      const manifest = await this.#readManifest(entry.name, manifestPath);
+      return { id: entry.name, sourceBinary: manifest.sourceBinary };
+    } catch (error) {
+      return { path: directory, reason: `could not be trusted: ${errorMessage(error)}` };
+    }
+  }
+
   async #ensureStore(): Promise<void> {
     const parent = dirname(this.root);
     await ensureDirectoryHierarchy(parent, this.options);
@@ -552,23 +631,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     this.#requireRegular(manifestState, manifestPath, false);
     this.#requireRegular(binaryState, binaryPath, true);
 
-    let document: unknown;
-    try {
-      document = JSON.parse(await readFile(manifestPath, 'utf8')) as unknown;
-    } catch (error) {
-      throw new DaemonSnapshotStoreError('damaged', `cannot parse ${manifestPath}: ${errorMessage(error)}`);
-    }
-    const parsed = SnapshotManifestSchema.safeParse(document);
-    if (!parsed.success) {
-      throw new DaemonSnapshotStoreError('damaged', `invalid daemon snapshot manifest ${manifestPath}`);
-    }
-    const manifest = parsed.data;
-    if (manifest.daemon.product !== this.options.daemon.product || manifest.daemon.name !== this.options.daemon.name) {
-      throw new DaemonSnapshotStoreError('damaged', `${manifestPath} belongs to a different daemon`);
-    }
-    if (manifest.id !== id || manifest.digest !== id.slice('sha256-'.length) || !isAbsolute(manifest.sourceBinary)) {
-      throw new DaemonSnapshotStoreError('damaged', `${manifestPath} does not identify snapshot ${id}`);
-    }
+    const manifest = await this.#readManifest(id, manifestPath);
     const [actual, canonicalSnapshots, canonicalBinary] = await Promise.all([
       digestFile(binaryPath),
       realpath(join(this.root, SNAPSHOTS)),
@@ -588,6 +651,28 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       bytes: manifest.bytes,
       createdAt: manifest.createdAt,
     };
+  }
+
+  /** Parse the manifest identity once; only `#readSnapshot` continues on to hash the executable. */
+  async #readManifest(id: string, manifestPath: string): Promise<SnapshotManifest> {
+    let document: unknown;
+    try {
+      document = JSON.parse(await readFile(manifestPath, 'utf8')) as unknown;
+    } catch (error) {
+      throw new DaemonSnapshotStoreError('damaged', `cannot parse ${manifestPath}: ${errorMessage(error)}`);
+    }
+    const parsed = SnapshotManifestSchema.safeParse(document);
+    if (!parsed.success) {
+      throw new DaemonSnapshotStoreError('damaged', `invalid daemon snapshot manifest ${manifestPath}`);
+    }
+    const manifest = parsed.data;
+    if (manifest.daemon.product !== this.options.daemon.product || manifest.daemon.name !== this.options.daemon.name) {
+      throw new DaemonSnapshotStoreError('damaged', `${manifestPath} belongs to a different daemon`);
+    }
+    if (manifest.id !== id || manifest.digest !== id.slice('sha256-'.length) || !isAbsolute(manifest.sourceBinary)) {
+      throw new DaemonSnapshotStoreError('damaged', `${manifestPath} does not identify snapshot ${id}`);
+    }
+    return manifest;
   }
 
   #requireDirectory(state: Stats, path: string, writable: boolean): void {

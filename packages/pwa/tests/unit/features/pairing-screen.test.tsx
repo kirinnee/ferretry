@@ -4,6 +4,7 @@ import { PairingScreen } from '../../../src/features/pairing/pairing-screen.tsx'
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import type { QrScanHost } from '../../../src/lib/pair-scan.ts';
 import type { PairingArrival, PairingSeed } from '../../../src/lib/pairing.ts';
+import { RelayPairingRefusedError } from '../../../src/lib/relay-session.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 
 const alpha = daemonConnection({
@@ -17,7 +18,8 @@ const records = [
   { ...beta, pairedAt: 1, lastSelectedAt: 1 },
 ] as const;
 
-const LINK = 'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=single-use;fp=daemon-a';
+const LINK =
+  'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=7F3K-Q2ND;fp=fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd';
 const SEED: PairingSeed = { daemonUrl: 'https://daemon.example.test', daemonId: 'daemon-a', code: 'single-use' };
 const PREFILLED: PairingArrival = { kind: 'seed', seed: SEED };
 
@@ -201,6 +203,28 @@ describe('PairingScreen exchange', () => {
     await screen.unmount();
   });
 
+  /*
+   * The other half of the same rule. A sealed `pair-refused` means the DAEMON judged this code, and
+   * §14 gives its remedy as "the direct route's own sentence — the code is wrong, expired or spent;
+   * mint a fresh one". The two causes must never share a sentence, and the attribute is what a
+   * browser harness reads instead of matching on the copy.
+   */
+  it('sends a reader whose code the daemon refused to mint a fresh one', async () => {
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onPair: async () => {
+        throw new RelayPairingRefusedError();
+      },
+    });
+
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+
+    expect(screen.container.querySelector('[data-pairing-failure="refusal"]')).not.toBeNull();
+    expect(screen.container.textContent).toContain('Pairing codes are single-use and short-lived.');
+    expect(screen.container.textContent).not.toContain('its code is probably still good');
+    await screen.unmount();
+  });
+
   it('fails honestly when the daemon cannot be reached, and offers a fresh start', async () => {
     const screen = await screenWith({
       arrival: PREFILLED,
@@ -213,7 +237,10 @@ describe('PairingScreen exchange', () => {
 
     expect(screen.container.textContent).toContain('Pairing failed');
     expect(screen.container.textContent).toContain('Failed to fetch');
-    expect(screen.container.textContent).toContain('Pairing codes are single-use and short-lived.');
+    // One remedy per reason: nothing reached the daemon, so the code is probably still good and
+    // telling this reader to mint another would send them to redo the step that was working.
+    expect(screen.container.querySelector('[data-pairing-failure="transport"]')).not.toBeNull();
+    expect(screen.container.textContent).toContain('its code is probably still good');
     expect(screen.container.textContent).not.toContain('Connected');
 
     await interact(() => buttonNamed(screen.container, 'Start over').click());

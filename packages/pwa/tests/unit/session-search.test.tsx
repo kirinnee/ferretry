@@ -5,11 +5,16 @@ import { sessionReferenceSurface } from '../../src/components/reference-surface.
 import {
   filterSessionSearchResults,
   matchesSessionSearch,
+  MAX_SESSION_SEARCH_RESULTS,
+  SESSION_SEARCH_ANNOUNCE_DEBOUNCE_MS,
+  sessionSearchResultKey,
+  SessionSearchControl,
   SessionSearchProvider,
   type SessionSearchResourceState,
   SessionTasksSearchSurface,
   useSessionSearch,
 } from '../../src/features/session-search/session-search.tsx';
+import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../src/shell/palette-shortcut.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../src/lib/quote.ts';
@@ -138,14 +143,24 @@ describe('current-session search model', () => {
       expect(surface.root.findByProps({ 'data-task-id': 'F6' })).toBeDefined();
 
       const input = surface.root.findByType('input');
-      run(() => input.props.onChange({ target: { value: 'needle' } }));
-      const results = surface.root
-        .find(node => String(node.props.className).includes('z-[80]'))
-        .findAllByType('button');
-      expect(results).toHaveLength(2);
-      run(() => results[0]?.props.onClick());
-      run(() => results[1]?.props.onClick());
-      expect(opened).toEqual(['tasks', 'file:src/needle.ts']);
+      // Opening a result also DISMISSES the popup, so each activation starts
+      // from a freshly presented list rather than from rows the previous click
+      // has already unmounted.
+      const rows = (): ReturnType<typeof surface.root.findAllByType> => {
+        run(() => input.props.onChange({ target: { value: 'needle' } }));
+        return surface.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
+      };
+      const first = rows();
+      expect(first).toHaveLength(2);
+      run(() => first[0]?.props.onClick());
+      // `rows()` runs its own `act`, so it is called between activations rather
+      // than inside one: nesting `act` in `act` does not re-render.
+      const second = rows();
+      run(() => second[1]?.props.onClick());
+      // Ranked, so `src/needle.ts` leads: it matches in both its name and its
+      // path, while the task matches only in its title. Both rows still open
+      // their own destination, which is what this test is about.
+      expect(opened).toEqual(['file:src/needle.ts', 'tasks']);
     } finally {
       run(() => surface.unmount());
     }
@@ -172,7 +187,9 @@ describe('current-session search model', () => {
       const input = unavailable.root.findByType('input');
       run(() => input.props.onChange({ target: { value: 'anything' } }));
       expect(JSON.stringify(unavailable.toJSON())).toContain('Tasks are unavailable');
-      expect(JSON.stringify(unavailable.toJSON())).toContain('Files unavailable.');
+      expect(JSON.stringify(unavailable.toJSON())).toContain(
+        'Files unavailable: The daemon returned an incomplete file listing.',
+      );
     } finally {
       run(() => unavailable.unmount());
     }
@@ -415,9 +432,20 @@ describe('the published scope and the published evidence never disagree', () => 
     readonly taskIds: readonly string[];
     /** What the workspace's reference surface would prove from THIS pairing. */
     readonly resolvesF6: boolean;
+    readonly query: string;
+    readonly presenting: string | null;
+    readonly activeResultKey: string | null;
   }
 
-  function ScopeProbe({ onObserve }: { readonly onObserve: (observation: Observation) => void }) {
+  type SearchController = Pick<ReturnType<typeof useSessionSearch>, 'present' | 'setActiveIndex' | 'setQuery'>;
+
+  function ScopeProbe({
+    onObserve,
+    onControl,
+  }: {
+    readonly onObserve: (observation: Observation) => void;
+    readonly onControl: (control: SearchController) => void;
+  }) {
     const search = useSessionSearch();
     // Mirrors SessionChatPage: ready evidence for the scope on screen becomes
     // the task snapshot the session's one reference surface proves against.
@@ -430,11 +458,16 @@ describe('the published scope and the published evidence never disagree', () => 
             scope: search.scope,
             ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
           });
+    const activeResult = search.results[search.activeIndex];
+    onControl(search);
     onObserve({
       daemonId: search.scope?.daemonId,
       taskState: search.taskState,
       taskIds: search.tasks.map(task => task.id),
       resolvesF6: surface?.taskReferenceResolver?.('F6') === true,
+      query: search.query,
+      presenting: search.presenting,
+      activeResultKey: activeResult === undefined ? null : sessionSearchResultKey(activeResult),
     });
     return null;
   }
@@ -466,12 +499,16 @@ describe('the published scope and the published evidence never disagree', () => 
     }) as typeof fetch;
 
     const seen: Observation[] = [];
+    let control: SearchController | undefined;
     const observe = (observation: Observation): void => {
       seen.push(observation);
     };
+    const captureControl = (current: SearchController): void => {
+      control = current;
+    };
     const tree = render(
       <SessionSearchProvider connection={alpha} focusSignal={0} scope={alphaScope}>
-        <ScopeProbe onObserve={observe} />
+        <ScopeProbe onControl={captureControl} onObserve={observe} />
       </SessionSearchProvider>,
     );
     try {
@@ -481,11 +518,25 @@ describe('the published scope and the published evidence never disagree', () => 
       expect(seen.some(o => o.daemonId === 'alpha' && o.taskState === 'ready' && o.taskIds.includes('F6'))).toBe(true);
       expect(seen.some(o => o.daemonId === 'alpha' && o.resolvesF6)).toBe(true);
 
+      if (control === undefined) throw new Error('scope probe never published its search controls');
+      run(() => {
+        control?.setQuery('6');
+        control?.present('scope-probe');
+      });
+      // Select after the query render so setActiveIndex sees the result set the
+      // reader is actually looking at, rather than the previous empty one.
+      run(() => control?.setActiveIndex(0));
+      expect(seen.at(-1)).toMatchObject({
+        query: '6',
+        presenting: 'scope-probe',
+        activeResultKey: 'task:F6',
+      });
+
       const before = seen.length;
       await runAsync(async () => {
         tree.update(
           <SessionSearchProvider connection={beta} focusSignal={0} scope={betaScope}>
-            <ScopeProbe onObserve={observe} />
+            <ScopeProbe onControl={captureControl} onObserve={observe} />
           </SessionSearchProvider>,
         );
         await settle();
@@ -501,9 +552,581 @@ describe('the published scope and the published evidence never disagree', () => 
       // inheriting alpha's ready: that is what makes it synchronous.
       expect(onBeta[0]?.taskState).toBe('loading');
       // Beta's own read still lands, so this is a reset and not a freeze.
-      expect(seen.at(-1)).toMatchObject({ daemonId: 'beta', taskState: 'ready', taskIds: [] });
+      expect(seen.at(-1)).toMatchObject({
+        daemonId: 'beta',
+        taskState: 'ready',
+        taskIds: [],
+        query: '',
+        presenting: null,
+        activeResultKey: null,
+      });
     } finally {
       run(() => tree.unmount());
+    }
+  });
+});
+
+/**
+ * The interaction layer (#6 G2–G5, G7). Everything below drives the CONTROL —
+ * its keyboard contract, which mount presents the popup, what the trailing slot
+ * is allowed to claim, and the order and cap of what it lists.
+ */
+describe('current-session search control', () => {
+  /** A key event as the control reads it: a key, a composing flag, a default. */
+  const keyEvent = (key: string, composing = false, keyCode = 0) => {
+    let defaultPrevented = false;
+    return {
+      key,
+      keyCode,
+      nativeEvent: { isComposing: composing },
+      preventDefault: () => {
+        defaultPrevented = true;
+      },
+      get defaultPrevented(): boolean {
+        return defaultPrevented;
+      },
+    };
+  };
+
+  const mountControl = async (
+    props: { readonly shortcutTarget?: boolean; readonly touchAffected?: boolean } = {},
+    openers?: { readonly onFile: (path: string) => void; readonly onTasks: () => void },
+  ) => {
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        {openers ? <SearchOpeners onFile={openers.onFile} onTasks={openers.onTasks} /> : null}
+        <SessionSearchControl {...props} />
+      </SessionSearchProvider>,
+    );
+    await settle();
+    return view;
+  };
+
+  const popup = (view: ReturnType<typeof render>) =>
+    view.root.findAll(node => String(node.props.className).includes('z-[80]'));
+
+  const rows = (view: ReturnType<typeof render>) => popup(view)[0]?.findAllByType('button') ?? [];
+
+  test('ranks a file matching name and path above a task matching only its title', () => {
+    const ranked = filterSessionSearchResults(
+      [task({ title: 'Needle task' })],
+      [{ kind: 'file', name: 'needle.ts', path: 'src/needle.ts' }],
+      'needle',
+    );
+
+    expect(ranked).toHaveLength(2);
+    expect(ranked[0]).toMatchObject({ kind: 'file', path: 'src/needle.ts' });
+    expect(ranked[1]).toMatchObject({ kind: 'task' });
+  });
+
+  test('keeps every substring member a rank of zero would have dropped', () => {
+    // Membership matches the joined haystack's `F6`, while the ranking field
+    // deliberately treats task ids as anchored and therefore scores the loose
+    // query `6` as zero. The row must still be listed: ranking orders what
+    // matching found, it does not re-decide it.
+    const across = filterSessionSearchResults([task({ title: 'Needle task' })], [], '6');
+
+    expect(across).toHaveLength(1);
+    expect(across[0]).toMatchObject({ kind: 'task', task: { id: 'F6' } });
+  });
+
+  test('ranks stably, leaving equal scores in their original order', () => {
+    const ranked = filterSessionSearchResults(
+      [task({ id: 'F7', title: 'Needle task' }), task({ id: 'F8', title: 'Needle task' })],
+      [],
+      'needle',
+    );
+
+    expect(ranked.map(result => (result.kind === 'task' ? result.task.id : result.path))).toEqual(['F7', 'F8']);
+  });
+
+  test('caps the presented rows and says exactly how many it is holding back', async () => {
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/tasks')) return Response.json({ tasks: [] });
+      if (url.pathname.endsWith('/fs'))
+        return Response.json({
+          entries: Array.from({ length: MAX_SESSION_SEARCH_RESULTS + 5 }, (_, index) => ({
+            name: `needle-${index}.ts`,
+            type: 'file',
+          })),
+        });
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const view = await mountControl();
+    try {
+      await settle();
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+
+      expect(rows(view)).toHaveLength(MAX_SESSION_SEARCH_RESULTS);
+      expect(view.root.findByProps({ 'data-search-capped': '' }).children.join('')).toContain('5 more matches');
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('presents the popup only for the mount the reader is in, and never two at once', async () => {
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionSearchControl />
+        <SessionSearchControl />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const inputs = view.root.findAllByType('input');
+      expect(inputs).toHaveLength(2);
+
+      // TWO MOUNTS, TWO IDS. One literal id shared by the app bar and an open
+      // pane is a duplicate DOM id, and the label then points at whichever the
+      // browser happened to find first.
+      const [first, second] = inputs;
+      expect(first?.props.id).not.toBe(second?.props.id);
+      expect(view.root.findAllByType('label').map(node => node.props.htmlFor)).toEqual([
+        first?.props.id,
+        second?.props.id,
+      ]);
+
+      run(() => first?.props.onChange({ target: { value: 'needle' } }));
+      expect(popup(view)).toHaveLength(1);
+      expect(first?.props['aria-expanded']).toBe(true);
+      expect(second?.props['aria-expanded']).toBe(false);
+
+      // The second mount claiming focus moves the popup rather than adding one.
+      run(() => second?.props.onFocus());
+      expect(popup(view)).toHaveLength(1);
+      expect(first?.props['aria-expanded']).toBe(false);
+      expect(second?.props['aria-expanded']).toBe(true);
+      // The query is shared, so moving presentation never re-filters anything.
+      expect(second?.props.value).toBe('needle');
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('lets exactly one mount answer the shared global focus signal', async () => {
+    let focusCount = 0;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionSearchControl shortcutTarget />
+        <SessionSearchControl />
+      </SessionSearchProvider>,
+      {
+        createNodeMock: element =>
+          element.type === 'input'
+            ? {
+                focus: () => {
+                  focusCount += 1;
+                },
+                select: () => undefined,
+              }
+            : null,
+      },
+    );
+    try {
+      await settle();
+      run(() =>
+        view.update(
+          <SessionSearchProvider connection={daemon} focusSignal={3} scope={scope}>
+            <SessionSearchControl shortcutTarget />
+            <SessionSearchControl />
+          </SessionSearchProvider>,
+        ),
+      );
+      expect(focusCount).toBe(1);
+      expect(popup(view)).toHaveLength(1);
+      expect(view.root.findAllByType('input').filter(node => node.props['aria-expanded'] === true)).toHaveLength(1);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('does not replay an already-consumed focus signal when the control remounts', async () => {
+    let focusCount = 0;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={7} scope={scope}>
+        <SessionSearchControl shortcutTarget />
+      </SessionSearchProvider>,
+      {
+        createNodeMock: element =>
+          element.type === 'input'
+            ? {
+                focus: () => {
+                  focusCount += 1;
+                },
+                select: () => undefined,
+              }
+            : null,
+      },
+    );
+    try {
+      await settle();
+      expect(focusCount).toBe(0);
+      expect(popup(view)).toHaveLength(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('moves the active row with the arrows and wraps, pointing at it rather than focusing it', async () => {
+    const view = await mountControl();
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'e' } }));
+      const listed = rows(view);
+      expect(listed.length).toBeGreaterThan(1);
+      expect(input.props['aria-activedescendant']).toBe(listed[0]?.props.id);
+      expect(listed[0]?.props['aria-selected']).toBe(true);
+      // Not a tab stop: the text box owns the only one.
+      expect(listed.every(row => row.props.tabIndex === -1)).toBe(true);
+
+      const down = keyEvent('ArrowDown');
+      run(() => input.props.onKeyDown(down));
+      expect(down.defaultPrevented).toBe(true);
+      expect(view.root.findByType('input').props['aria-activedescendant']).toBe(listed[1]?.props.id);
+
+      // Wraps at the end rather than stopping dead.
+      run(() => input.props.onKeyDown(keyEvent('ArrowUp')));
+      run(() => input.props.onKeyDown(keyEvent('ArrowUp')));
+      expect(view.root.findByType('input').props['aria-activedescendant']).toBe(listed[listed.length - 1]?.props.id);
+
+      run(() => input.props.onKeyDown(keyEvent('Home')));
+      expect(view.root.findByType('input').props['aria-activedescendant']).toBe(listed[0]?.props.id);
+      run(() => input.props.onKeyDown(keyEvent('End')));
+      expect(view.root.findByType('input').props['aria-activedescendant']).toBe(listed[listed.length - 1]?.props.id);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('keeps the active result identity when the independently loaded half reorders the list', async () => {
+    let releaseFiles: ((response: Response) => void) | undefined;
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/tasks/F6'))
+        return Promise.resolve(
+          Response.json({ activity: [], sessionId: 'session-a', task: task({ title: 'Needle task' }) }),
+        );
+      if (url.pathname.endsWith('/tasks'))
+        return Promise.resolve(Response.json({ tasks: [task({ title: 'Needle task' })] }));
+      if (url.pathname.endsWith('/fs'))
+        return new Promise<Response>(resolve => {
+          releaseFiles = resolve;
+        });
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const opened: string[] = [];
+    const view = await mountControl(
+      {},
+      { onFile: path => opened.push(`file:${path}`), onTasks: () => opened.push('tasks') },
+    );
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const taskRow = rows(view)[0];
+      expect(taskRow?.props['data-result-kind']).toBe('task');
+      run(() => taskRow?.props.onMouseEnter());
+      const chosenId = view.root.findByType('input').props['aria-activedescendant'];
+      expect(JSON.stringify(view.toJSON())).toContain("Indexing this session's files…");
+      expect(JSON.stringify(view.toJSON())).not.toContain("Indexing this session's tasks…");
+      await runAsync(
+        async () => await new Promise(resolve => setTimeout(resolve, SESSION_SEARCH_ANNOUNCE_DEBOUNCE_MS + 20)),
+      );
+      expect(view.root.findByProps({ 'aria-live': 'polite' }).children.join('')).toBe('');
+
+      releaseFiles?.(Response.json({ entries: [{ name: 'needle.ts', type: 'file' }] }));
+      await settle();
+      await runAsync(
+        async () => await new Promise(resolve => setTimeout(resolve, SESSION_SEARCH_ANNOUNCE_DEBOUNCE_MS + 20)),
+      );
+
+      const reordered = rows(view);
+      expect(reordered.map(row => row.props['data-result-kind'])).toEqual(['file', 'task']);
+      expect(view.root.findByType('input').props['aria-activedescendant']).toBe(chosenId);
+      expect(view.root.findByProps({ 'aria-live': 'polite' }).children.join('')).toBe('2 results');
+      const enter = keyEvent('Enter');
+      run(() => view.root.findByType('input').props.onKeyDown(enter));
+      expect(opened).toEqual(['tasks']);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('leaves a key it does not answer to alone, and yields everything to a composing IME', async () => {
+    const view = await mountControl();
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'e' } }));
+      const before = view.root.findByType('input').props['aria-activedescendant'];
+
+      const ordinary = keyEvent('PageDown');
+      run(() => input.props.onKeyDown(ordinary));
+      expect(ordinary.defaultPrevented).toBe(false);
+
+      // An IME candidate window owns the arrows and Enter while it is up.
+      const composing = keyEvent('ArrowDown', true);
+      run(() => input.props.onKeyDown(composing));
+      expect(composing.defaultPrevented).toBe(false);
+      expect(view.root.findByType('input').props['aria-activedescendant']).toBe(before);
+
+      const composingEscape = keyEvent('Escape', true);
+      run(() => input.props.onKeyDown(composingEscape));
+      expect(composingEscape.defaultPrevented).toBe(false);
+      expect(popup(view)).toHaveLength(1);
+
+      // Some engines expose composition only through the legacy 229 sentinel;
+      // it receives the same protection as `isComposing`.
+      const legacyComposition = keyEvent('Enter', false, 229);
+      run(() => input.props.onKeyDown(legacyComposition));
+      expect(legacyComposition.defaultPrevented).toBe(false);
+      expect(popup(view)).toHaveLength(1);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('opens the active row on Enter and closes behind itself', async () => {
+    const opened: string[] = [];
+    const view = await mountControl(
+      {},
+      { onFile: path => opened.push(`file:${path}`), onTasks: () => opened.push('tasks') },
+    );
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const listed = rows(view);
+      const activeKind = listed[0]?.props['data-result-kind'];
+
+      const enter = keyEvent('Enter');
+      run(() => input.props.onKeyDown(enter));
+
+      expect(enter.defaultPrevented).toBe(true);
+      expect(opened).toHaveLength(1);
+      expect(opened[0]?.startsWith(activeKind === 'file' ? 'file:' : 'tasks')).toBe(true);
+      // Activating dismisses; a popup left open over the thing it just opened is
+      // a popup the reader has to dismiss twice.
+      expect(popup(view)).toHaveLength(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('dismisses on Escape WITHOUT clearing the query the Tasks list is filtered by', async () => {
+    const view = await mountControl();
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      expect(popup(view)).toHaveLength(1);
+
+      const escapeKey = keyEvent('Escape');
+      run(() => input.props.onKeyDown(escapeKey));
+
+      expect(escapeKey.defaultPrevented).toBe(true);
+      expect(popup(view)).toHaveLength(0);
+      // THE QUERY SURVIVES. It is shared context and also drives the Tasks
+      // list's own filter, so clearing it here would silently unfilter a
+      // surface nobody dismissed.
+      expect(view.root.findByType('input').props.value).toBe('needle');
+
+      // A second Escape on an already-dismissed control is not this control's
+      // key to swallow.
+      const again = keyEvent('Escape');
+      run(() => input.props.onKeyDown(again));
+      expect(again.defaultPrevented).toBe(false);
+
+      // Typing brings it back without any other gesture.
+      run(() => input.props.onChange({ target: { value: 'needle.' } }));
+      expect(popup(view)).toHaveLength(1);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('dismisses when keyboard focus leaves the control', async () => {
+    const view = await mountControl();
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      expect(popup(view)).toHaveLength(1);
+
+      run(() => input.props.onBlur({ relatedTarget: null }));
+
+      expect(popup(view)).toHaveLength(0);
+      expect(view.root.findByType('input').props.value).toBe('needle');
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('says it is INDEXING while it builds, and never calls a failed index an empty result', async () => {
+    globalThis.fetch = (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const indexing = await mountControl();
+    try {
+      const input = indexing.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const drawn = JSON.stringify(indexing.toJSON());
+
+      expect(drawn).toContain("Indexing this session's files and tasks…");
+      expect(drawn).not.toContain('Searching current-session data');
+      // The trailing slot says the one true thing: an index still being built
+      // outranks a shortcut hint.
+      // By host node: the icon renders as a component AND the svg it returns,
+      // and both carry the marker prop.
+      expect(
+        indexing.root.findAll(node => node.type === 'svg' && node.props['data-search-indexing'] !== undefined),
+      ).toHaveLength(1);
+      expect(indexing.root.findAll(node => node.props['data-search-shortcut'] !== undefined)).toHaveLength(0);
+      // A half-built index is not a no-match answer.
+      expect(drawn).not.toContain('No current-session files or tasks match');
+    } finally {
+      run(() => indexing.unmount());
+    }
+
+    globalThis.fetch = (async () => Response.json({ entries: [], truncated: true })) as unknown as typeof fetch;
+    const broken = await mountControl();
+    try {
+      const input = broken.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const drawn = JSON.stringify(broken.toJSON());
+
+      expect(drawn).toContain(
+        'Tasks unavailable: The daemon returned an unreadable task list. Files unavailable: The daemon returned an incomplete file listing.',
+      );
+      expect(drawn).not.toContain('No current-session files or tasks match');
+    } finally {
+      run(() => broken.unmount());
+    }
+
+    globalThis.fetch = (() => Promise.reject(new Error('Failed to fetch'))) as unknown as typeof fetch;
+    const refused = await mountControl();
+    try {
+      const input = refused.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      expect(JSON.stringify(refused.toJSON())).toContain(
+        'Tasks unavailable: Failed to fetch. Files unavailable: Failed to fetch.',
+      );
+    } finally {
+      run(() => refused.unmount());
+    }
+  });
+
+  test('names only the independently moving half and does not repeat it inside a refusal alert', async () => {
+    let releaseTasks: ((response: Response) => void) | undefined;
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/tasks'))
+        return new Promise<Response>(resolve => {
+          releaseTasks = resolve;
+        });
+      if (url.pathname.endsWith('/fs')) return Promise.resolve(Response.json({ entries: [] }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const tasksMoving = await mountControl();
+    try {
+      const input = tasksMoving.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const drawn = JSON.stringify(tasksMoving.toJSON());
+      expect(drawn).toContain("Indexing this session's tasks…");
+      expect(drawn).not.toContain("Indexing this session's files…");
+      releaseTasks?.(Response.json({ tasks: [] }));
+      await settle();
+    } finally {
+      run(() => tasksMoving.unmount());
+    }
+
+    globalThis.fetch = ((input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/tasks')) return Promise.reject(new Error('task read refused'));
+      if (url.pathname.endsWith('/fs')) return new Promise<Response>(() => undefined);
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const failedTasks = await mountControl();
+    try {
+      const input = failedTasks.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const drawn = JSON.stringify(failedTasks.toJSON());
+      expect(drawn).toContain('Tasks unavailable: task read refused.');
+      expect(drawn).toContain("Indexing this session's files…");
+      expect(drawn.match(/Indexing/g)).toHaveLength(1);
+      expect(drawn).not.toContain('No current-session files or tasks match');
+    } finally {
+      run(() => failedTasks.unmount());
+    }
+  });
+
+  test('prints a shortcut only on a device that has one, in that platform’s own spelling', async () => {
+    const keyboard = await mountControl({ touchAffected: false });
+    try {
+      const hint = keyboard.root.findAll(node => node.props['data-search-shortcut'] !== undefined);
+      expect(hint).toHaveLength(1);
+      expect(JSON.stringify(keyboard.toJSON())).toContain(paletteShortcutLabel());
+      expect(keyboard.root.findByType('input').props['aria-keyshortcuts']).toBe(PALETTE_KEYSHORTCUTS);
+    } finally {
+      run(() => keyboard.unmount());
+    }
+
+    // A phone has no ⌘ and no Ctrl. Printing one is the exact mistake
+    // `palette-shortcut.ts` exists to prevent, so the slot stays empty — while
+    // the shortcut itself remains DECLARED, because a paired keyboard can still
+    // press it.
+    const touch = await mountControl({ touchAffected: true });
+    try {
+      expect(touch.root.findAll(node => node.props['data-search-shortcut'] !== undefined)).toHaveLength(0);
+      expect(touch.root.findByType('input').props['aria-keyshortcuts']).toBe(PALETTE_KEYSHORTCUTS);
+    } finally {
+      run(() => touch.unmount());
+    }
+  });
+
+  test('answers an explicit shortcut with focus on every device, touch included', async () => {
+    // `paletteFocusPolicy` withholds focus from a touch-affected reader when the
+    // PALETTE opens itself. This is the other input domain: the reader pressed a
+    // key chord, which is proof of a keyboard, and a tablet reporting a coarse
+    // pointer must not have its deliberate keystroke ignored.
+    let focused = 0;
+    let selected = 0;
+    // react-test-renderer gives host refs `null`, so a ref-gated effect silently
+    // never runs without a node mock — the effect would look proved and be dead.
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionSearchControl shortcutTarget touchAffected={true} />
+      </SessionSearchProvider>,
+      {
+        createNodeMock: element =>
+          element.type === 'input'
+            ? {
+                focus: () => {
+                  focused += 1;
+                },
+                select: () => {
+                  selected += 1;
+                },
+              }
+            : null,
+      },
+    );
+    try {
+      await settle();
+      run(() =>
+        view.update(
+          <SessionSearchProvider connection={daemon} focusSignal={2} scope={scope}>
+            <SessionSearchControl shortcutTarget touchAffected={true} />
+          </SessionSearchProvider>,
+        ),
+      );
+      expect(focused).toBe(1);
+      expect(selected).toBe(1);
+      const input = view.root.findByType('input');
+      expect(input.props.role).toBe('combobox');
+      expect(input.props['aria-autocomplete']).toBe('list');
+      // Answering the shortcut also PRESENTS before a query exists: the reader
+      // asked to search, and a focused box over a hidden result list is half an
+      // answer.
+      expect(view.root.findAll(node => String(node.props.className).includes('z-[80]'))).toHaveLength(1);
+      expect(JSON.stringify(view.toJSON())).toContain("Type to search this session's files and tasks.");
+    } finally {
+      run(() => view.unmount());
     }
   });
 });

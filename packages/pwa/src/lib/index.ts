@@ -263,6 +263,7 @@ export * from './quote.ts';
 export * from './reference-host.ts';
 export * from './references.ts';
 export * from './relay-carrier.ts';
+export * from './relay-pairing.ts';
 export * from './relay-session.ts';
 export * from './remark-table-labels.ts';
 export * from './remote-browser.ts';

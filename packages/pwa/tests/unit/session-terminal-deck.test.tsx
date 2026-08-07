@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../src/components/session-terminal-deck.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { fakeDeck, terminalListing, terminalView, xtermSpy } from '../support/terminal-deck.ts';
@@ -175,6 +176,63 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  /*
+   * A refusal that arrives BEFORE the stream ever opens, which is what a relayed carrier does.
+   * `docs/relay-protocol.md` §14 gives `stream-refused` a status so "it is gone" can be told from
+   * "the daemon broke" — a 403 the capability guard decided, a 404 for a terminal that was never
+   * opened — and it is final for that attempt. Retrying would ask a permanent refusal the same
+   * question at fifteen-second intervals forever, so the deck says refused and stops.
+   */
+  test('reports a stream the daemon refused outright, and does not retry it', async () => {
+    let attempts = 0;
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      attach: async (_daemon, _scope, _id, handlers) => {
+        attempts += 1;
+        handlers.onRefused(403, 'the operator refused this capability');
+        throw new TerminalStreamRefused(403, 'the operator refused this capability');
+      },
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    expect(attempts).toBe(1);
+    expect(json(page)).toContain('refused');
+    expect(json(page)).not.toContain('reconnecting');
+    run(() => page.unmount());
+  });
+
+  /*
+   * A tab switched away from mid-attach must not leave a stream nobody is watching. The attach is
+   * asynchronous on both carriers — a ticket purchase, or a rendezvous handshake — so the pane can
+   * be gone by the time it resolves, and what resolves then has to be closed rather than held.
+   */
+  test('closes a stream that finishes attaching after its pane is gone', async () => {
+    const closes: { code: number; reason: string }[] = [];
+    let release = (): void => undefined;
+    const attached = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      attach: async () => {
+        await attached;
+        return {
+          write: () => undefined,
+          control: () => undefined,
+          close: (code: number, reason: string) => closes.push({ code, reason }),
+        };
+      },
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    run(() => page.unmount());
+    await runAsync(async () => {
+      release();
+      await settle();
+    });
+
+    expect(closes).toEqual([{ code: 1000, reason: 'terminal tab detached' }]);
+  });
+
   test('creates, renames and closes a shell through the daemon that owns it', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
@@ -327,7 +385,7 @@ describe('SessionTerminalDeck co-control', () => {
   test('retries a stream the ticket exchange refused, because a token survives a network change', async () => {
     let attempts = 0;
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
-      streamUrl: async () => {
+      attach: async () => {
         attempts += 1;
         throw new Error('ticket unavailable');
       },

@@ -64,8 +64,6 @@ describe('the relay tunnel envelope', () => {
     // Act
     const built = tunnelApiRequest(
       {
-        t: 'req',
-        id: 7,
         method: 'POST',
         path: '/v1/sessions',
         query: [
@@ -76,6 +74,7 @@ describe('the relay tunnel envelope', () => {
         body: '{"name":"x"}',
       },
       'fy_device_token',
+      'rendezvous-session-1',
     );
 
     // Assert
@@ -87,9 +86,7 @@ describe('the relay tunnel envelope', () => {
     should(built.loopback).be.false();
     should(await built.text()).equal('{"name":"x"}');
     // Assert — a request with no body reads as an empty one rather than throwing on demand.
-    should(await tunnelApiRequest({ t: 'req', id: 8, method: 'GET', path: '/v1/health' }, 'fy_device').text()).equal(
-      '',
-    );
+    should(await tunnelApiRequest({ method: 'GET', path: '/v1/health' }, 'fy_device', 's1').text()).equal('');
   });
 
   it('should answer with the response, or name the size that did not fit rather than truncating it', () => {
