@@ -32,7 +32,8 @@
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
         "harness/app-screenshot.ts",
-        "harness/main.tsx"
+        "harness/main.tsx",
+        "harness/tasks-pane-benchmark.tsx"
       ],
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "harness/**/*.{ts,tsx}", "vite.config.ts"]
     }
