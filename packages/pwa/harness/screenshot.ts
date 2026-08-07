@@ -43,6 +43,7 @@ const PHONE_CONTEXT = {
 
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
+const SEARCH_ONLY = process.argv.includes('--search-only');
 
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
@@ -178,6 +179,215 @@ function run(command: string, args: readonly string[]): void {
   const result = spawnSync(command, [...args], { cwd: packageDir, stdio: 'inherit' });
   if (result.error) fail(`${command} could not be started: ${result.error.message}`);
   if (result.status !== 0) fail(`${command} ${args.join(' ')} exited ${result.status}`);
+}
+
+type HarnessViewport = (typeof VIEWPORTS)[number];
+
+/** Read paint and accessibility facts from one presented search control. */
+async function inspectSessionSearch(page: Page, regionSelector: string) {
+  return await page.evaluate(selector => {
+    const region = document.querySelector<HTMLElement>(selector);
+    if (region === null) throw new Error(`missing session-search region ${selector}`);
+    const input = region.querySelector<HTMLInputElement>('[data-current-session-search] input');
+    const leading = region.querySelector<HTMLElement>('[data-search-leading]');
+    const trailing = region.querySelector<HTMLElement>('[data-search-trailing]');
+    const popup = region.querySelector<HTMLElement>('[data-session-search-popup]');
+    if (input === null || leading === null || trailing === null || popup === null)
+      throw new Error(`incomplete session-search geometry in ${selector}`);
+
+    const inputBox = input.getBoundingClientRect();
+    const leadingBox = leading.getBoundingClientRect();
+    const trailingBox = trailing.getBoundingClientRect();
+    const popupBox = popup.getBoundingClientRect();
+    const style = getComputedStyle(input);
+    const borderStart = Number.parseFloat(style.borderInlineStartWidth) || 0;
+    const borderEnd = Number.parseFloat(style.borderInlineEndWidth) || 0;
+    const paddingStart = Number.parseFloat(style.paddingInlineStart) || 0;
+    const paddingEnd = Number.parseFloat(style.paddingInlineEnd) || 0;
+    const active = input.getAttribute('aria-activedescendant');
+    const activeNode = active === null ? null : document.getElementById(active);
+    const sampleX = Math.round(popupBox.left + popupBox.width / 2);
+    const sampleY = Math.round(popupBox.top + Math.min(popupBox.height / 2, 20));
+    const hit = document.elementFromPoint(sampleX, sampleY);
+    const clippers: string[] = [];
+    for (let ancestor = popup.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+      const ancestorStyle = getComputedStyle(ancestor);
+      const clipsX = /^(auto|scroll|hidden|clip)$/.test(ancestorStyle.overflowX);
+      const clipsY = /^(auto|scroll|hidden|clip)$/.test(ancestorStyle.overflowY);
+      if (!clipsX && !clipsY) continue;
+      const box = ancestor.getBoundingClientRect();
+      if (
+        (clipsX && (popupBox.left < box.left - 0.5 || popupBox.right > box.right + 0.5)) ||
+        (clipsY && (popupBox.top < box.top - 0.5 || popupBox.bottom > box.bottom + 0.5))
+      )
+        clippers.push(`${ancestor.tagName.toLocaleLowerCase()}.${ancestor.className}`);
+    }
+
+    return {
+      expanded: input.getAttribute('aria-expanded'),
+      active,
+      activeOwned: activeNode !== null && popup.contains(activeNode),
+      options: region.querySelectorAll('[role="option"]').length,
+      kinds: Array.from(region.querySelectorAll<HTMLElement>('[role="option"]'), option => option.dataset.resultKind),
+      indexing: region.querySelector('[data-search-indexing]') !== null,
+      shortcut: region.querySelector('[data-search-shortcut]')?.textContent ?? null,
+      text: region.textContent ?? '',
+      focused: document.activeElement === input,
+      focusVisible: input.matches(':focus-visible'),
+      contentStart: inputBox.left + borderStart + paddingStart,
+      contentEnd: inputBox.right - borderEnd - paddingEnd,
+      leadingRight: leadingBox.right,
+      trailingLeft: trailingBox.left,
+      popup: {
+        top: popupBox.top,
+        right: popupBox.right,
+        bottom: popupBox.bottom,
+        left: popupBox.left,
+      },
+      popupOwned: hit !== null && popup.contains(hit),
+      clippers,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    };
+  }, regionSelector);
+}
+
+function assertSessionSearchGeometry(
+  state: Awaited<ReturnType<typeof inspectSessionSearch>>,
+  label: string,
+  viewport: HarnessViewport,
+): void {
+  if (state.expanded !== 'true') fail(`${label} did not present its popup at ${viewport.name}`);
+  if (!state.focused) fail(`${label} lost focus from its combobox at ${viewport.name}`);
+  if (state.contentStart < state.leadingRight + 4)
+    fail(
+      `${label} lets its leading glyph overlap the text/caret at ${viewport.name}: ` +
+        `content starts ${state.contentStart.toFixed(1)}px, glyph ends ${state.leadingRight.toFixed(1)}px`,
+    );
+  if (state.contentEnd > state.trailingLeft - 4)
+    fail(
+      `${label} does not reserve its trailing spinner/hint slot at ${viewport.name}: ` +
+        `content ends ${state.contentEnd.toFixed(1)}px, slot starts ${state.trailingLeft.toFixed(1)}px`,
+    );
+  const popup = state.popup;
+  if (
+    popup.top < -0.5 ||
+    popup.left < -0.5 ||
+    popup.right > state.viewport.width + 0.5 ||
+    popup.bottom > state.viewport.height + 0.5
+  )
+    fail(
+      `${label} popup leaves ${viewport.name}: ${popup.left.toFixed(1)},${popup.top.toFixed(1)} → ` +
+        `${popup.right.toFixed(1)},${popup.bottom.toFixed(1)} in ${state.viewport.width}x${state.viewport.height}`,
+    );
+  if (state.clippers.length > 0) fail(`${label} popup is clipped at ${viewport.name} by ${state.clippers.join(', ')}`);
+  if (!state.popupOwned) fail(`${label} popup is painted under another layer at ${viewport.name}`);
+  if (state.active !== null && !state.activeOwned)
+    fail(`${label} aria-activedescendant does not name one of its own options at ${viewport.name}`);
+  if (viewport.name === 'mobile' && state.shortcut !== null)
+    fail(`${label} prints the non-actionable physical-key hint ${JSON.stringify(state.shortcut)} on mobile`);
+}
+
+/**
+ * Current-session search evidence, both as a state ledger and inside the real
+ * compiled workspace shell. Kept in one function so `--search-only` exercises
+ * exactly the same journey as the full visual run.
+ */
+async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewport, rootUrl: string): Promise<void> {
+  for (const card of ['results', 'no-match', 'indexing', 'unavailable'] as const) {
+    await page.goto(`${rootUrl}#session-search`);
+    await page.reload();
+    const selector = `[data-search-card="${card}"]`;
+    const cardRegion = page.locator(selector);
+    await cardRegion.waitFor({ state: 'visible' });
+
+    const field = cardRegion.locator('[data-current-session-search] input');
+    await field.click();
+    await field.fill(card === 'no-match' ? 'zzzz-nothing-matches-this' : 'port');
+    await cardRegion.locator('[data-session-search-popup]').waitFor({ state: 'visible' });
+    // Presentation is synchronous; evidence is not. Wait for the state this
+    // capture claims instead of racing the independent task/file reads.
+    if (card === 'results') await cardRegion.locator('[role="option"]').nth(1).waitFor({ state: 'visible' });
+    else if (card === 'no-match')
+      await cardRegion.getByText('No current-session files or tasks match', { exact: false }).waitFor();
+    else if (card === 'unavailable') await cardRegion.getByText('unavailable:', { exact: false }).waitFor();
+    const state = await inspectSessionSearch(page, selector);
+    assertSessionSearchGeometry(state, `session search ${card}`, viewport);
+
+    process.stdout.write(
+      `   session search ${card} @ ${viewport.name}: expanded=${state.expanded ?? '(none)'} ` +
+        `options=${state.options} kinds=${state.kinds.join(',') || '(none)'} active=${state.active ?? '(none)'} ` +
+        `indexing=${String(state.indexing)} shortcut=${state.shortcut ?? '(hidden)'} ` +
+        `text-gap=${(state.contentStart - state.leadingRight).toFixed(1)}px\n`,
+    );
+
+    if (card === 'results') {
+      if (!state.kinds.includes('file') || !state.kinds.includes('task'))
+        fail(
+          `the results card is not a mixed file/task result set at ${viewport.name}: ${JSON.stringify(state.kinds)}`,
+        );
+      if (state.active === null) fail(`the results card points aria-activedescendant at nothing at ${viewport.name}`);
+    }
+    const owed: Readonly<Record<string, string>> = {
+      'no-match': 'No current-session files or tasks match',
+      indexing: "Indexing this session's files and tasks",
+      unavailable: 'unavailable:',
+    };
+    const sentence = owed[card];
+    if (sentence !== undefined && !state.text.includes(sentence))
+      fail(`the ${card} session-search card never said ${JSON.stringify(sentence)} at ${viewport.name}`);
+    if (card === 'unavailable' && state.text.includes('No current-session files or tasks match'))
+      fail(`the unavailable session-search card called a failed index an empty result at ${viewport.name}`);
+
+    const target = join(outDir, `${viewport.name}-session-search-${card}.png`);
+    await page.screenshot({ path: target });
+    process.stdout.write(`📸 ${viewport.name} session search ${card} -> ${target}\n`);
+  }
+
+  await page.goto(`${rootUrl}#session-workspace`);
+  await page.reload();
+  const shellSelector = '#harness-session-workspace-page';
+  const shell = page.locator(shellSelector);
+  await shell.waitFor({ state: 'visible' });
+  if (viewport.name === 'mobile') {
+    await shell.getByRole('button', { name: 'Choose destination' }).click();
+    await page.locator('[data-app-bar-destination-search]').waitFor({ state: 'visible' });
+  }
+  const destinationShortcut = await page.evaluate(() => {
+    const finders = Array.from(document.querySelectorAll<HTMLElement>('[data-app-bar-destination-search]'));
+    return {
+      finders: finders.length,
+      ariaClaims: finders.filter(finder => finder.hasAttribute('aria-keyshortcuts')).length,
+      physicalLegends: finders.filter(finder => /\bCtrl\s*K\b|⌘\s*K/u.test(finder.textContent ?? '')).length,
+    };
+  });
+  if (destinationShortcut.finders === 0)
+    fail(`compiled app shell has no clickable global Find entry at ${viewport.name}`);
+  if (destinationShortcut.ariaClaims > 0 || destinationShortcut.physicalLegends > 0)
+    fail(
+      `global Find still claims the current-session shortcut at ${viewport.name}: ` +
+        `${destinationShortcut.ariaClaims} aria claim(s), ${destinationShortcut.physicalLegends} physical legend(s)`,
+    );
+  if (viewport.name === 'mobile') {
+    await page.keyboard.press('Escape');
+    await page.locator('[data-app-bar-destination-search]').waitFor({ state: 'hidden' });
+  }
+  const shellField = shell.locator('[data-app-bar-session-search-slot] [data-current-session-search] input');
+  // Programmatic keyboard focus makes the focus-visible ring part of the
+  // evidence without pretending a phone has a physical Ctrl key.
+  await shellField.focus();
+  await shellField.fill('port');
+  await shell.locator('[role="option"]').nth(1).waitFor({ state: 'visible' });
+  const shellState = await inspectSessionSearch(page, shellSelector);
+  assertSessionSearchGeometry(shellState, 'compiled app-shell session search', viewport);
+  if (!shellState.focusVisible) fail(`compiled app-shell search has no keyboard focus ring at ${viewport.name}`);
+  if (!shellState.kinds.includes('file') || !shellState.kinds.includes('task'))
+    fail(`compiled app-shell search is not a mixed selectable result set at ${viewport.name}`);
+  const shellTarget = join(outDir, `${viewport.name}-session-search-shell.png`);
+  await page.screenshot({ path: shellTarget });
+  process.stdout.write(
+    `📸 ${viewport.name} compiled app-shell session search (${shellState.options} options, ` +
+      `${shellState.kinds.join(',')}) -> ${shellTarget}\n`,
+  );
 }
 
 /**
@@ -342,6 +552,10 @@ try {
         const page = await context.newPage();
         try {
           await page.goto(server.url.toString());
+          if (SEARCH_ONLY) {
+            await captureSessionSearchEvidence(page, viewport, server.url.toString());
+            continue;
+          }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
             const taskBoard = page.locator('#harness-task-board');
@@ -1565,6 +1779,8 @@ try {
             await page.screenshot({ path: pickerTarget });
             process.stdout.write(`📸 ${viewport.name} picker ${frame} -> ${pickerTarget}\n`);
           }
+
+          await captureSessionSearchEvidence(page, viewport, server.url.toString());
 
           // Back to the gallery: every capture after this one expects the shell, and a page left on a
           // fleet fragment made the next locator wait for an app bar that is not on it.

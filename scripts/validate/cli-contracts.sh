@@ -13,6 +13,7 @@ cli_contracts=(
   name-single-source
   daemon-default-address
   loopback-single-source
+  pairing-fragment-readers
   state-home-log-directory
   state-home-layout-claim
   state-home-default
@@ -532,6 +533,95 @@ loopback-single-source)
     fi
     [ "${copy_status}" -gt 1 ] && echo "❌ failed to scan package source for loopback predicates" >&2 && exit "${copy_status}"
   fi
+  ;;
+pairing-fragment-readers)
+  # THE PAIRING FRAGMENT HAS MORE THAN ONE READER, AND THAT IS WHAT BROKE.
+  #
+  # The daemon mints a link whose fragment carries a version. `packages/cli` reads it to render the
+  # host's own pairing screen; `packages/pwa` reads it to decide a scan is a pairing claim at all.
+  # When the daemon briefly learned to mint `v2` — a fragment naming a rendezvous — the CLI still
+  # tested for `#v1;` literally, so `fy pair` refused the daemon's own link: no code, no QR, no link,
+  # exit 1, on a daemon that was working perfectly. The two-release rule that should have prevented it
+  # was applied to the browser reader and missed the host one, because nobody had counted the readers.
+  #
+  # So this gate asserts the AGREEMENT rather than a version number, and it derives what it checks
+  # from the WRITER. A gate that listed the versions itself would be a third place to forget.
+  #
+  # THE `v2` FORM IS WITHDRAWN AND THIS GATE SURVIVES IT, deliberately. Relayed first pairing ships on
+  # the ordinary `v1` link because the scanning device discovers the hosted rendezvous from its own
+  # build, so there is exactly one version again. The defect this caught was a SHAPE defect — a reader
+  # spelling a version — not a version defect, and deleting the gate with the version that taught it
+  # would leave the next second version unguarded. What DID have to change is the behaviour probe: it
+  # used to demand at least two versions, which is now false by design, so it asserts instead that the
+  # one version the writer emits is accepted and that the writer puts no rendezvous in it.
+  fragment_owner="packages/protocol/src/lib/pairing.ts"
+  cli_reader="${cli_pkg}/src/lib/pair/link.ts"
+  pwa_reader="packages/pwa/src/lib/pairing.ts"
+  for each in "${fragment_owner}" "${cli_reader}" "${pwa_reader}"; do
+    [ ! -f "${each}" ] && echo "❌ pairing fragment reader is missing: ${each}" >&2 && exit 1
+  done
+
+  # One owner for "which versions exist". Both readers must ask it rather than spell one.
+  rg -qF 'export const PAIRING_FRAGMENT_PATTERN' "${fragment_owner}" || {
+    echo "❌ ${fragment_owner} no longer owns PAIRING_FRAGMENT_PATTERN" >&2
+    exit 1
+  }
+  for reader in "${cli_reader}" "${pwa_reader}"; do
+    rg -qF 'PAIRING_FRAGMENT_PATTERN' "${reader}" || {
+      echo "❌ ${reader} does not recognise a pairing fragment through PAIRING_FRAGMENT_PATTERN" >&2
+      exit 1
+    }
+    # The exact shape of the regression, refused by shape rather than by the string: prose may
+    # discuss `#v1;`, but no reader may TEST for a version prefix of its own.
+    set +e
+    hardcoded="$(rg --line-number -- "startsWith\([\"'][#]v[0-9]" "${reader}")"
+    hardcoded_status=$?
+    set -e
+    if [ "${hardcoded_status}" -eq 0 ]; then
+      echo "❌ ${reader} tests a hard-coded fragment version instead of asking ${fragment_owner}:" >&2
+      printf '%s\n' "${hardcoded}" >&2
+      exit 1
+    fi
+    [ "${hardcoded_status}" -gt 1 ] && echo "❌ failed to scan ${reader} for a hard-coded version" >&2 && exit 1
+  done
+
+  # And the behaviour, because a shared constant proves nothing if the reader still refuses the link.
+  # What the writer EMITS is built for real and handed to the CLI's own check.
+  # shellcheck disable=SC2016 # The JavaScript template literals must reach Bun without shell expansion.
+  bun -e '
+    const { formatPairingFragment, pairingLinkUrl, PAIRING_FRAGMENT_PATTERN } = await import(
+      "./packages/protocol/src/lib/pairing.ts"
+    );
+    const { checkedPairUrl } = await import("./packages/cli/src/lib/pair/link.ts");
+    const daemonUrl = "https://box.example";
+    const seed = { daemonUrl, code: "7F3K-Q2ND", daemonId: `fy_daemon_${"a".repeat(43)}` };
+    const fragment = formatPairingFragment(seed);
+    const version = fragment.slice(0, fragment.indexOf(";"));
+    if (!PAIRING_FRAGMENT_PATTERN.test(`#${fragment}`)) {
+      throw new Error(`the shared recognizer refuses a fragment its own writer minted: ${version}`);
+    }
+    const pairUrl = pairingLinkUrl("https://ferretry.pages.dev/pair", seed);
+    try {
+      checkedPairUrl({ daemonUrl, pairUrl, reach: "any-device" });
+    } catch (error) {
+      throw new Error(`the CLI reader refuses a ${version} link the daemon can mint: ${error.message}`);
+    }
+    // NO RENDEZVOUS IN THE LINK, whatever a caller puts beside the seed. The mint response carries a
+    // discovered address for the HOST screen to disclose; the fragment carries none, because the
+    // scanning device finds it in its own build. A writer that put it back would make a QR the vehicle
+    // for an arbitrary carrier address, which is the deferred general case.
+    const spiked = pairingLinkUrl("https://ferretry.pages.dev/pair", {
+      ...seed,
+      relayCandidate: "wss://rendezvous.example",
+      relay: "wss://rendezvous.example",
+    });
+    if (spiked !== pairUrl || /relay/.test(spiked)) {
+      throw new Error(`the writer put a rendezvous into a pairing fragment: ${spiked}`);
+    }
+  ' || {
+    echo "❌ a pairing link the daemon can mint is refused by the CLI that renders it, or names a rendezvous" >&2
+    exit 1
+  }
   ;;
 nix-packages)
   # Nix's default package is the normal profile-install entry point. It must join the independently

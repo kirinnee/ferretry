@@ -150,7 +150,10 @@ export const daemonCarriers = (daemon: DaemonConnection): readonly ConnectionMet
  * was ever written down. A daemon too old to answer `GET /v1/carriers` still cannot say where it can
  * be reached, so a browser that offered it only the direct address it cannot get to would take that
  * working path away and have no way to learn it back: the refresh that would teach it needs a
- * connection it can no longer make, and pairing again is direct-only by construction.
+ * connection it can no longer make, and re-pairing cannot supply one either. That last clause used to
+ * read "pairing again is direct-only by construction", which §14 retired — a redemption may now cross
+ * a rendezvous. It does not rescue THIS daemon: a relayed redemption is answered by a §14 pairing
+ * session, which a daemon too old to publish a carrier set does not serve.
  *
  * IT IS NOT PROMOTED INTO THE CACHE AND MUST NEVER BE. The stored set is what the DAEMON said, and a
  * guess written into it would outlive the advertisement that produced it — which is the kill switch

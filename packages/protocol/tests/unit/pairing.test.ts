@@ -2,15 +2,21 @@ import { describe, it } from 'bun:test';
 import {
   DaemonIdSchema,
   DeviceTokenSchema,
+  formatPairingFragment,
+  invitationRedeemableByAnotherDevice,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   PAIRING_DEVICE_NAME_MAX_LENGTH,
+  PAIRING_FRAGMENT_PATTERN,
   PairingCodeMintRequestSchema,
   PairingCodeMintResponseSchema,
   PairingCodeStatusResponseSchema,
+  type PairingLinkSeed,
+  pairingLinkUrl,
   pairingMintOutcome,
   PairingRequestSchema,
   PairingResponseSchema,
+  parsePairingFragment,
 } from '@ferretry/protocol';
 import should from 'should';
 
@@ -20,6 +26,7 @@ const pairingId = `fy_pair_${'c'.repeat(22)}`;
 
 const DAEMON_URL = 'https://workstation.example.test';
 const PAIR_APP = 'https://ferretry.pages.dev/pair';
+const RELAY_URL = 'wss://relay.example';
 const FRAGMENT = `#v1;url=${encodeURIComponent(DAEMON_URL)};code=7F3K-Q2ND;fp=${daemonId}`;
 
 /** The code half of every mint, which both shapes carry unchanged. */
@@ -240,6 +247,146 @@ describe('pairing protocol', () => {
       kind: 'refusal',
       refusal: 'wildcard-bind',
     });
+  });
+
+  it('should write the one fragment form from one codec, byte-identical to every shipped link', () => {
+    const seed: PairingLinkSeed = { daemonUrl: DAEMON_URL, code: '7F3K-Q2ND', daemonId };
+    should(`#${formatPairingFragment(seed)}`).equal(FRAGMENT);
+    should(pairingLinkUrl(PAIR_APP, seed)).equal(`${PAIR_APP}${FRAGMENT}`);
+    // The writer re-proves the code, so a mint composes the same spelling the schema demands back.
+    should(formatPairingFragment({ ...seed, code: ' 7f3k q2nd ' })).containEql('code=7F3K-Q2ND');
+  });
+
+  it('should never write a rendezvous into a fragment, whatever a caller passes beside the seed', () => {
+    // THE LOAD-BEARING ASSERTION OF THE HOSTED-ONLY NARROWING. A rendezvous reaches the mint response
+    // as a host-facing disclosure and must never reach the QR: the scanning device finds the hosted
+    // relay in its own build's advertisement, and a link that named one would be the deferred general
+    // case shipped by accident. Extra keys are spelled through a cast because the type already
+    // forbids them — this pins the WRITER's behaviour, not the type's.
+    const seed = { daemonUrl: DAEMON_URL, code: '7F3K-Q2ND', daemonId } as const;
+    const withExtras = { ...seed, relayCandidate: RELAY_URL, relay: RELAY_URL } as PairingLinkSeed;
+    should(formatPairingFragment(withExtras)).equal(FRAGMENT.slice(1));
+    should(formatPairingFragment(withExtras)).not.containEql('relay');
+    should(pairingLinkUrl(PAIR_APP, withExtras)).equal(`${PAIR_APP}${FRAGMENT}`);
+  });
+
+  it('should refuse to write a link from values a reader would refuse', () => {
+    const seed = { daemonUrl: DAEMON_URL, code: '7F3K-Q2ND', daemonId } as const;
+    should(() => formatPairingFragment({ ...seed, code: 'BAD' })).throw();
+    should(() => formatPairingFragment({ ...seed, daemonId: 'fingerprint' })).throw();
+  });
+
+  it('should read the fragment back, with and without the leading hash', () => {
+    const seed = { daemonUrl: DAEMON_URL, code: '7F3K-Q2ND', daemonId } as const;
+    should(parsePairingFragment(FRAGMENT)).deepEqual(seed);
+    should(parsePairingFragment(FRAGMENT.slice(1))).deepEqual(seed);
+    // The code arrives however a person typed it and leaves normalised.
+    should(parsePairingFragment(`v1;url=${encodeURIComponent(DAEMON_URL)};code=7f3kq2nd;fp=${daemonId}`).code).equal(
+      '7F3K-Q2ND',
+    );
+  });
+
+  it('should ignore an unrecognised field and refuse a repeated one', () => {
+    // An unknown name is the next version arriving; a duplicate is a real ambiguity.
+    should(parsePairingFragment(`${FRAGMENT};hint=later`)).deepEqual({
+      daemonUrl: DAEMON_URL,
+      code: '7F3K-Q2ND',
+      daemonId,
+    });
+    should(() => parsePairingFragment(`${FRAGMENT};code=7F3K-Q2ND`)).throw(/repeats code/u);
+    should(() => parsePairingFragment(`${FRAGMENT};hint=a;hint=b`)).throw(/repeats hint/u);
+  });
+
+  it('should ignore a relay field on a link rather than ever honouring one', () => {
+    // `relay` is an unrecognised name and stays one. No writer emits it, and a reader that dialled it
+    // would let whoever composed a URL choose where this browser opens a pre-auth socket. The
+    // withdrawn `v2` form is what made this case worth its own test: the field name now has no
+    // meaning at any version, valid-looking or not.
+    for (const relay of [RELAY_URL, 'ws://relay.example', 'not a url', '']) {
+      const fragment = `${FRAGMENT};relay=${encodeURIComponent(relay)}`;
+      should(parsePairingFragment(fragment)).deepEqual({ daemonUrl: DAEMON_URL, code: '7F3K-Q2ND', daemonId });
+    }
+    // And the version that would have carried it is not readable at all, so a stale emitter fails
+    // loudly here rather than having its rendezvous quietly honoured.
+    should(() => parsePairingFragment(`#v2;url=${encodeURIComponent(DAEMON_URL)};code=7F3K-Q2ND;fp=${daemonId}`)).throw(
+      /version/u,
+    );
+  });
+
+  it('should name the exact reason a fragment cannot be a pairing link', () => {
+    should(() => parsePairingFragment(`#v3;url=a;code=b;fp=c`)).throw(/version/u);
+    should(() => parsePairingFragment('')).throw(/version/u);
+    should(() => parsePairingFragment('#v1')).throw(/must include url, code, and fp/u);
+    should(() => parsePairingFragment(`#v1;url=${encodeURIComponent(DAEMON_URL)};code=7F3K-Q2ND`)).throw(
+      /must include url, code, and fp/u,
+    );
+    should(() => parsePairingFragment(`${FRAGMENT};noequals`)).throw(/name=value/u);
+    should(() => parsePairingFragment(`${FRAGMENT};=orphan`)).throw(/name=value/u);
+    should(() => parsePairingFragment(`${FRAGMENT};hint=%ZZ`)).throw(/not decodable/u);
+    should(() => parsePairingFragment(`#v1;url=not%20a%20url;code=7F3K-Q2ND;fp=${daemonId}`)).throw(/daemon address/u);
+    should(() => parsePairingFragment(`#v1;url=${encodeURIComponent(DAEMON_URL)};code=BAD;fp=${daemonId}`)).throw(
+      /invalid code/u,
+    );
+    should(() => parsePairingFragment(`#v1;url=${encodeURIComponent(DAEMON_URL)};code=7F3K-Q2ND;fp=nope`)).throw(
+      /invalid fingerprint/u,
+    );
+  });
+
+  it('should gate arrivals on exactly the version the parser accepts', () => {
+    for (const fragment of [FRAGMENT, FRAGMENT.slice(1), '#v1']) {
+      should(PAIRING_FRAGMENT_PATTERN.test(fragment)).be.true();
+    }
+    // `v2` belongs here rather than in the accepted list: the gate and the parser move together, and
+    // a gate that admitted a version the parser refuses would turn a loud `unreadable` into a silent
+    // cold screen for somebody who just scanned a QR.
+    for (const fragment of ['#v2;url=a', 'v2', '#v3;url=a', '#v12;url=a', 'https://example.test', '', '#']) {
+      should(PAIRING_FRAGMENT_PATTERN.test(fragment)).be.false();
+    }
+  });
+
+  it('should disclose a discovered rendezvous only beside a link, and never inside the pair URL', () => {
+    const withRelay = invitation({ discoveredRelayUrl: RELAY_URL, reach: 'local-only' });
+    should(PairingCodeMintResponseSchema.parse(withRelay)).deepEqual(withRelay);
+    // THE DISCLOSURE DOES NOT CHANGE THE LINK. The `pairUrl` above is the ordinary three-field
+    // fragment, and a response whose link named the rendezvous instead is refused — which is what
+    // stops a future edit putting the address back into the QR.
+    should(withRelay.pairUrl).equal(`${PAIR_APP}${FRAGMENT}`);
+    should(withRelay.pairUrl).not.containEql('relay');
+    const v2PairUrl = `${PAIR_APP}#v2;url=${encodeURIComponent(DAEMON_URL)};code=7F3K-Q2ND;fp=${daemonId};relay=${encodeURIComponent(RELAY_URL)}`;
+    should(PairingCodeMintResponseSchema.safeParse({ ...withRelay, pairUrl: v2PairUrl }).success).be.false();
+    should(
+      PairingCodeMintResponseSchema.safeParse(
+        invitation({ pairUrl: `${PAIR_APP}${FRAGMENT};relay=${encodeURIComponent(RELAY_URL)}` }),
+      ).success,
+    ).be.false();
+    // A refusal has no address to disclose one beside, and an address the dial rule refuses is
+    // refused at the schema rather than printed on a host's screen.
+    should(PairingCodeMintResponseSchema.safeParse(refusal({ discoveredRelayUrl: RELAY_URL })).success).be.false();
+    should(
+      PairingCodeMintResponseSchema.safeParse(invitation({ discoveredRelayUrl: 'ws://relay.example' })).success,
+    ).be.false();
+  });
+
+  it('should let one narrowing say when another device can redeem, a discovered rendezvous included', () => {
+    const withRelay = invitation({ discoveredRelayUrl: RELAY_URL, reach: 'local-only' });
+    const outcome = pairingMintOutcome(PairingCodeMintResponseSchema.parse(withRelay));
+    should(outcome).deepEqual({
+      kind: 'invitation',
+      daemonUrl: DAEMON_URL,
+      pairUrl: `${PAIR_APP}${FRAGMENT}`,
+      reach: 'local-only',
+      discoveredRelayUrl: RELAY_URL,
+    });
+    // The QR question, answered once: a local-only direct address stops meaning unredeemable the
+    // moment a rendezvous is published, and stays unredeemable when none is.
+    if (outcome.kind !== 'invitation') throw new Error('expected an invitation');
+    should(invitationRedeemableByAnotherDevice(outcome)).be.true();
+    const plain = pairingMintOutcome(PairingCodeMintResponseSchema.parse(invitation()));
+    if (plain.kind !== 'invitation') throw new Error('expected an invitation');
+    should(invitationRedeemableByAnotherDevice(plain)).be.true();
+    const localOnly = pairingMintOutcome(PairingCodeMintResponseSchema.parse(invitation({ reach: 'local-only' })));
+    if (localOnly.kind !== 'invitation') throw new Error('expected an invitation');
+    should(invitationRedeemableByAnotherDevice(localOnly)).be.false();
   });
 
   it('should distinguish local countdown state from a successful redemption acknowledgement', () => {

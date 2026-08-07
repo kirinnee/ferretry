@@ -1,4 +1,4 @@
-import type { PairingInvitationLink } from '@ferretry/protocol';
+import { type PairingInvitationLink, pairingLinkUrl } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { checkedPairUrl, pairingDaemonHost } from '../../../src/lib/pair/link';
@@ -57,14 +57,37 @@ describe('pairing link check', () => {
     should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7431', reach: 'local-only' }))).equal(PAIR_URL);
   });
 
-  it('should refuse a pairing URL that is not a v1 pairing claim at all', () => {
-    // Without the `v1` prefix the PWA treats the fragment as somebody else's and shows the cold
+  it('should accept the fragment version the daemon mints, through the owner rather than its own list', () => {
+    // THE REGRESSION THIS PINS. This reader hard-coded `#v1;`, the daemon briefly learned to mint
+    // `#v2;` whenever it published a rendezvous, and `fy pair` then refused the daemon's own link — no
+    // code, no QR, no link, on the one screen that exists to hand a person all three. The fragment has
+    // two readers, the host's own screen is one of them, and only the other one was taught the second
+    // version.
+    //
+    // THE `v2` FORM IS WITHDRAWN AND THIS TEST STILL HAS WORK TO DO, which is why it is re-keyed
+    // rather than deleted: what it now proves is that whatever the WRITER emits is accepted here. It
+    // fails if this reader ever spells a version of its own again — the shape of the original defect —
+    // because the link is built by the codec that owns the version rather than by this file.
+    const minted = pairingLinkUrl('https://ferretry.pages.dev/pair', {
+      daemonUrl: DAEMON_URL,
+      code: CODE,
+      daemonId: DAEMON_ID,
+    });
+    should(checkedPairUrl(bent({ pairUrl: minted }))).equal(minted);
+    should(minted).not.containEql('relay');
+  });
+
+  it('should refuse a pairing URL that is not a pairing claim at all', () => {
+    // Without a version prefix the PWA treats the fragment as somebody else's and shows the cold
     // screen, so a scan would look like nothing happened rather than like a broken link.
-    should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair#v2;code=X' }))).throw(
-      'pairing URL does not carry a v1 pairing fragment',
+    should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair#v9;code=X' }))).throw(
+      'pairing URL does not carry a pairing fragment',
+    );
+    should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair#somebody-elses' }))).throw(
+      'pairing URL does not carry a pairing fragment',
     );
     should(() => checkedPairUrl(bent({ pairUrl: 'https://ferretry.pages.dev/pair' }))).throw(
-      'pairing URL does not carry a v1 pairing fragment',
+      'pairing URL does not carry a pairing fragment',
     );
     should(() => checkedPairUrl(bent({ pairUrl: '/pair#v1;code=X' }))).throw(/pairing URL must be absolute/u);
     should(() => checkedPairUrl(bent({ pairUrl: 'javascript:alert(1)#v1;' }))).throw(

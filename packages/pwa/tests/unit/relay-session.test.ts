@@ -58,7 +58,7 @@ const opened = async (overrides: Partial<RelayClientSessionDependencies> = {}): 
   const session = new RelayClientSession({
     crypto: relayCrypto,
     daemonId: identity.daemonId,
-    deviceToken: DEVICE_TOKEN,
+    mode: { kind: 'auth', deviceToken: DEVICE_TOKEN },
     socket,
     ...overrides,
   });
@@ -73,6 +73,21 @@ const serving = async (overrides: Partial<RelayClientSessionDependencies> = {}):
   if (hello === undefined) throw new Error('the session sent no hello');
   await harness.session.receiveBinary(await harness.daemon.answer(hello));
   await harness.session.receiveBinary(await harness.daemon.record({ t: 'authenticated', protocol: RELAY_PROTOCOL_ID }));
+  return harness;
+};
+
+/** A keyed stream the daemon has accepted: ready to carry frames and conclude. */
+const streaming = async (overrides: Partial<RelayClientSessionDependencies> = {}): Promise<Harness> => {
+  const harness = await opened({
+    mode: { kind: 'stream', deviceToken: DEVICE_TOKEN, path: '/v1/events' },
+    ...overrides,
+  });
+  const hello = harness.socket.sent[0];
+  if (hello === undefined) throw new Error('the session sent no hello');
+  await harness.session.receiveBinary(await harness.daemon.answer(hello));
+  const ready = harness.session.ready();
+  await harness.session.receiveBinary(await harness.daemon.record({ t: 'stream-opened', protocol: RELAY_PROTOCOL_ID }));
+  await ready;
   return harness;
 };
 
@@ -164,7 +179,7 @@ describe('a relay session reading frames from its carrier', () => {
     const session = new RelayClientSession({
       crypto: relayCrypto,
       daemonId: identity.daemonId,
-      deviceToken: DEVICE_TOKEN,
+      mode: { kind: 'auth', deviceToken: DEVICE_TOKEN },
       socket,
     });
     await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(4)));
@@ -288,6 +303,39 @@ describe('a relay session completing its handshake', () => {
   });
 });
 
+describe('a streaming relay session', () => {
+  it('should contain a throwing close listener and still notify following and late listeners once', async () => {
+    const failures: unknown[] = [];
+    const reportingFault = new Error('the reporting port failed');
+    const { session, daemon } = await streaming({
+      onStreamListenerFailure: reason => {
+        failures.push(reason);
+        throw reportingFault;
+      },
+    });
+    const listenerFault = new Error('the first close observer failed');
+    const observed: { source: string; code: number; reason: string }[] = [];
+    session.onStreamClosed(() => {
+      throw listenerFault;
+    });
+    session.onStreamClosed(closed => observed.push({ source: 'following', ...closed }));
+
+    await session.receiveBinary(
+      await daemon.record({ t: 'stream-close', protocol: RELAY_PROTOCOL_ID, code: 1013, reason: 'fell behind' }),
+    );
+    session.onStreamClosed(closed => observed.push({ source: 'late', ...closed }));
+
+    // Neither another local close nor the carrier's teardown may announce the latched outcome again.
+    session.closeStream(1000, 'again');
+    session.carrierClosed(4440, 'the stream is complete');
+    should(observed).eql([
+      { source: 'following', code: 1013, reason: 'fell behind' },
+      { source: 'late', code: 1013, reason: 'fell behind' },
+    ]);
+    should(failures).eql([listenerFault]);
+  });
+});
+
 describe('a serving relay session', () => {
   it('should answer a request by its own identifier, headers and body absent or present', async () => {
     const { session, daemon } = await serving();
@@ -314,9 +362,14 @@ describe('a serving relay session', () => {
     );
 
     const unasked = await serving();
-    const outstanding = unasked.session.request({ method: 'GET', path: '/x' });
+    // THE HANDLER IS ATTACHED BEFORE THE REJECTION CAN FIRE, and that is not a style choice. The
+    // record below rejects this request from inside `receiveBinary`; a promise that rejects while
+    // nothing is watching it is an unhandled rejection, which Bun fails the file for — intermittently,
+    // because whether the test's own `await` has attached a handler by then is a matter of microtask
+    // timing. Wrapping first makes the case deterministic against what it is actually asserting.
+    const outstanding = failure(unasked.session.request({ method: 'GET', path: '/x' }));
     await unasked.session.receiveBinary(await unasked.daemon.record({ t: 'res', id: 99, status: 200 }));
-    should((await failure(outstanding)).message).match(/did not send/u);
+    should((await outstanding).message).match(/did not send/u);
   });
 
   it('should return credit once it owes half a window, and never before', async () => {

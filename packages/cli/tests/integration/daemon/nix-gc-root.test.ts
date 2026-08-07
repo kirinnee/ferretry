@@ -168,6 +168,78 @@ describe('nix garbage-collection root adapter', () => {
     should(missing).equal(join(root, 'not-here'));
   });
 
+  it('should report every root in the directory, with the path each was found at', async () => {
+    // Arrange — one root per retained snapshot is the whole point of the directory, so discovery has
+    // to be able to see a root the caller never asked about: that is how a snapshot the store no
+    // longer retains gets its closure released.
+    const root = await createTemporaryRoot();
+    const directory = join(root, 'snapshots', 'fyd');
+    const first = `sha256-${'a'.repeat(64)}`;
+    const second = `sha256-${'b'.repeat(64)}`;
+    const subject = new NixStoreGcRoot(new RecordingProcesses());
+    // `pin` creates the directory and asks `nix-store` to write the link; the links themselves are
+    // written here because the real `nix-store` is scripted out of this suite, for the reasons above.
+    await subject.pin(STORE_PATH, join(directory, first));
+    await symlink(STORE_PATH, join(directory, first));
+    await symlink(STORE_PATH, join(directory, second));
+
+    // Act
+    const held = await subject.held(directory);
+
+    // Assert — the path travels back with the name, so nothing has to re-derive where a root lives.
+    should([...held].sort((left, right) => left.name.localeCompare(right.name))).deepEqual([
+      { name: first, path: join(directory, first) },
+      { name: second, path: join(directory, second) },
+    ]);
+  });
+
+  it.each([
+    { name: 'a directory that does not exist yet', suffix: 'never-created' },
+    { name: 'a path that is not a directory at all', suffix: 'blocked' },
+  ])('should answer $name as holding nothing rather than fail', async ({ suffix }) => {
+    // Arrange — the first-run state, and a damaged one. Both lead the caller to REGISTER roots, which
+    // is the safe direction: refusing here would refuse the install over a directory listing.
+    const root = await createTemporaryRoot();
+    const target = join(root, suffix);
+    if (suffix === 'blocked') await writeFile(target, 'not a directory');
+
+    // Act
+    const held = await new NixStoreGcRoot(new RecordingProcesses()).held(target);
+
+    // Assert
+    should(held).be.empty();
+  });
+
+  it('should keep a second snapshot root beside the first instead of replacing it', async () => {
+    // Arrange — the defect this directory exists for: one root per daemon protected only whatever ran
+    // last, so the snapshot a rollback would select lost the closure it needs.
+    const root = await createTemporaryRoot();
+    const directory = join(root, 'snapshots', 'fyd');
+    const older = `sha256-${'c'.repeat(64)}`;
+    const newer = `sha256-${'d'.repeat(64)}`;
+    const olderStore = '/nix/store/zxcvbnmasdfghjklq1w2r3y4i5p6a7s8-ferretry-0.124.0';
+    const processes = new RecordingProcesses();
+    const subject = new NixStoreGcRoot(processes);
+    // The older snapshot's root, exactly as `nix-store --add-root` leaves it.
+    await subject.pin(olderStore, join(directory, older));
+    await symlink(olderStore, join(directory, older));
+
+    // Act — a newer snapshot is promoted over it.
+    await subject.pin(STORE_PATH, join(directory, newer));
+
+    // Assert — the stale-link clearing inside `pin` reaches only the root it was given, so the older
+    // snapshot still names its own closure and is still runnable after a garbage collection.
+    should(await readlink(join(directory, older))).equal(olderStore);
+    should(processes.ran.at(-1)).deepEqual([
+      'nix-store',
+      '--add-root',
+      join(directory, newer),
+      '--indirect',
+      '--realise',
+      STORE_PATH,
+    ]);
+  });
+
   it('should release a root by removing the link, and treat an absent one as released', async () => {
     // Arrange
     const root = await createTemporaryRoot();

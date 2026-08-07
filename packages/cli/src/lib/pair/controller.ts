@@ -1,4 +1,5 @@
 import {
+  invitationRedeemableByAnotherDevice,
   localOnlyNotice,
   PAIRING_CODE_TTL_SECONDS,
   type PairingCodeMintResponse,
@@ -131,17 +132,30 @@ export class PairController {
   /**
    * What this screen can offer, decided from the DAEMON'S answer and never from this host.
    *
-   * A QR IS ENCODED ONLY WHEN A QR IS WANTED. `local-only` means the address is right for a browser on
-   * this machine and dead on any other, so drawing one would be an offer to a phone that cannot take
-   * it — the exact failure this command shipped. Nothing here re-derives that judgement: it arrives on
-   * the wire as `reach`, decided by the daemon's configuration, because the device that will redeem
-   * this code is not the one running this command.
+   * A QR IS ENCODED ONLY WHEN ANOTHER DEVICE CAN REDEEM IT. `reach: 'local-only'` describes the
+   * DIRECT address alone — it is right for a browser on this machine and dead on any other — but a
+   * `discoveredRelayUrl` beside it means a different device can still redeem this link, because the
+   * scanning phone reads the same hosted directory advertisement the daemon did and dials that
+   * rendezvous itself when loopback fails. `invitationRedeemableByAnotherDevice` is the one place that
+   * judgement is made, so this does not re-derive it. Drawing a QR for a direct address alone dead on
+   * a phone is the exact failure this command shipped; that case — `local-only`, nothing discoverable
+   * — is still the only one that reaches the no-QR offer below.
+   *
+   * A RELAYED LOCAL-ONLY OFFER CARRIES BOTH. The QR is drawn because the rendezvous makes it
+   * redeemable, and `localOnlyNotice` is passed the same address, so the screen also discloses that a
+   * rendezvous now sees this exchange's metadata and names the direct-bind upgrade that would need
+   * none. THE QR ITSELF NAMES NO RENDEZVOUS: the link is the ordinary `v1` fragment, and the address
+   * disclosed here never enters it.
    */
   async #offer(outcome: PairingMintOutcome, options: PairOptions): Promise<PairingOffer> {
     if (outcome.kind === 'refusal') return { kind: 'refusal', notice: refusalNotice(outcome.refusal) };
     const link = checkedPairUrl(outcome);
-    if (outcome.reach === 'local-only') return { kind: 'local-only', link, notice: localOnlyNotice(outcome.daemonUrl) };
-    return { kind: 'qr', link, qr: await this.deps.qr.encode(link, options.large === true ? 'large' : 'compact') };
+    if (!invitationRedeemableByAnotherDevice(outcome)) {
+      return { kind: 'local-only', link, notice: localOnlyNotice(outcome.daemonUrl) };
+    }
+    const qr = await this.deps.qr.encode(link, options.large === true ? 'large' : 'compact');
+    if (outcome.reach !== 'local-only') return { kind: 'qr', link, qr };
+    return { kind: 'qr', link, qr, notice: localOnlyNotice(outcome.daemonUrl, outcome.discoveredRelayUrl) };
   }
 
   /**

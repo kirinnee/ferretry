@@ -208,17 +208,24 @@ describe('activeCarrierStatus', () => {
   it('names the carrier the app actually dials, whichever one was chosen', () => {
     // This line used to be the literal 'Direct', passed in by the composition
     // root whenever anything was paired — the same claim for every carrier, and
-    // measured by nothing.
-    // It then said nothing dials a relay, which was true when written and is not
-    // now: both ends dial. What is still true at the END OF SETUP is that pairing
-    // itself is always direct, so that is what this says — and it points at the one
-    // surface that reports a MEASURED carrier rather than deriving one here.
+    // measured by nothing. It then said nothing dials a relay, which was true when
+    // written and is not now. It then said `Direct — pairing is always direct`,
+    // which is the SAME unmeasured claim wearing a protocol rule as a disguise:
+    // `docs/relay-protocol.md` §14 gave first contact a relayed session mode, and
+    // `exchangePairing` walks direct, then the ONE rendezvous this build discovered
+    // for itself. (An earlier version of this comment named a middle leg, "the
+    // link's rendezvous" — the withdrawn `v2` fragment. No link carries one.) So
+    // what this may state is the ORDER, and it must not state an answer.
     for (const chosen of ['direct', 'default-relay', 'own-relay', undefined] as const) {
-      expect(activeCarrierStatus(chosen)).toContain('Direct — pairing is always direct');
+      expect(activeCarrierStatus(chosen)).toContain('Not measured yet');
+      expect(activeCarrierStatus(chosen)).toContain('tried directly first');
       expect(activeCarrierStatus(chosen)).toContain('Settings › Daemons');
       expect(activeCarrierStatus(chosen)).not.toContain('nothing dials a relay yet');
+      // The retired claims, each named so neither can come back by a rewording.
+      expect(activeCarrierStatus(chosen)).not.toContain('pairing is always direct');
+      expect(activeCarrierStatus(chosen)).not.toStartWith('Direct');
     }
-    expect(activeCarrierStatus('own-relay')).toContain('through your own relay');
+    expect(activeCarrierStatus('own-relay')).toContain('then your own relay');
   });
 });
 
@@ -232,11 +239,16 @@ describe('what the step says', () => {
     // It describes the arrangement. Claiming the app already falls back would be
     // a claim about behaviour that does not exist yet.
     expect(HOSTED_RELAY_ROW_NOTE).not.toContain('falls back');
-    // Both ends dial now, so the note names the two real constraints instead of
-    // claiming the fallback cannot happen at all.
+    // Both ends dial now, and §14 has since carried first pairing and live streams
+    // as well — so the note may no longer claim either is impossible. What it names
+    // is what is left: a relay only helps if the daemon holds one, and the feature
+    // surfaces of §13 piece 3 still dial the daemon's own address.
     expect(TRANSPORT_NOT_WIRED_NOTE).not.toContain('dials it yet');
-    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('Pairing itself always goes straight to the daemon');
-    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('live updates need a direct connection');
+    expect(TRANSPORT_NOT_WIRED_NOTE).not.toContain('Pairing itself always goes straight to the daemon');
+    expect(TRANSPORT_NOT_WIRED_NOTE).not.toContain('live updates need a direct connection');
+    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('can still pair');
+    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('Live updates and terminals travel the relay too');
+    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('dials a relay of its own');
   });
 
   it('discloses what the hosted relay can and cannot see, and never advertises an address', () => {

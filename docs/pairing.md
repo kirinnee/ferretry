@@ -51,6 +51,29 @@ beside it, and off the host that is the operator's to switch off.
 code has no credential yet — the **code is** the credential for that one request. Everything else either
 mints a credential, lists and revokes them, or is read with one.
 
+### Redemption has two carriers, and one of them is not a route
+
+`POST /v1/pair` is the **direct** redemption. A device that cannot reach the daemon's address at all
+redeems through a rendezvous instead: a **sealed `pair` record** on a pre-auth relay session, specified
+exactly in [relay-protocol.md](relay-protocol.md) §14 — the daemon is proved against the QR-pinned
+fingerprint before the code is sent, exactly one attempt per session, one sealed outcome (`paired`
+carrying this same redemption response verbatim, or one generic `pair-refused`), then the session
+closes. The relayed path is deliberately a **record and not a route**: a pre-auth session issues no
+requests, so "`POST /v1/pair` is the only public route on this surface" stays literally true, and no
+credential-less request path exists for the next `minimum: 'none'` route to inherit. Direct is still
+attempted first, like every other exchange in this product; the rendezvous is the fallback, not a
+choice. What a relay operator can and cannot observe about a redemption is §10 and §13 of the same
+document: fingerprint, client IP, timing and frame shape, and the fact that a first pairing happened
+— never the code, the minted device token, the device name, the payload, or the outcome of the
+exchange itself.
+
+**What the device does next is ordinary.** The pairing session ends the moment its outcome is
+sealed, so the browser reconnects with the grant it was just issued and speaks the ordinary
+authenticated request session — the same one a device paired over the LAN uses — and opens a
+separate relay session per live stream when it wants events or a terminal. There is no relayed mode
+a paired device stays in: pairing is one exchange, and everything after it is the product's normal
+traffic over whichever carrier the walk won.
+
 ### What a redemption hands back
 
 `POST /v1/pair` answers with `carriers`: **every way this daemon can be reached**, not merely the address
@@ -87,9 +110,10 @@ answer rather than merging into it — that is what makes both halves of a disag
 relay the daemon dropped disappears instead of being dialled forever, and a relay the daemon added arrives
 without anybody re-pairing. A merge would only ever fix the second.
 
-**Pairing itself is still never relayed.** This route is reached with the token redemption already issued,
-so it cannot be a way in; first contact with a daemon is always direct, over an address reachable on its
-own once.
+**This route is not a way in.** It is reached with the token redemption already issued, on any
+carrier. Pairing itself now has a relayed form too — the sealed record above, not a route — so first
+contact no longer requires an address reachable on its own: a daemon that publishes a rendezvous is
+pairable by a phone that can never dial it directly.
 
 ### Who may mint
 
@@ -106,16 +130,56 @@ and the mint response carries that answer rather than making each renderer infer
 
 - `reach: "any-device"` accompanies an address another device can dial. The command line and browser
   panel show the link and draw its QR.
-- `reach: "local-only"` accompanies a loopback address. The link remains valid for a browser on this
-  machine, but neither surface draws a QR: on a phone, loopback names the phone. Both say who can use
-  the link and name the fix beside it.
+- `reach: "local-only"` accompanies a loopback address, and describes the **direct** address alone.
+  Alone, it means no QR: on a phone, loopback names the phone. Beside a `discoveredRelayUrl` it no
+  longer means unredeemable — the QR is drawn, because another device can redeem the link through a
+  rendezvous **it discovers for itself** — and the notice says what that rendezvous can observe.
+  `localOnlyNotice` owns both sentences; no surface re-derives the answer, and
+  `invitationRedeemableByAnotherDevice` in `@ferretry/protocol` is the one narrowing that decides
+  whether a QR is drawn at all.
 - `refusal` replaces `daemonUrl`, `pairUrl`, and `reach` when a wildcard bind or missing port leaves no
   address to hand out. The daemon still mints the short-lived code; the surfaces show no link and name
-  the fix for **that** reason.
+  the fix for **that** reason. A refusal never carries a `discoveredRelayUrl` — the supported
+  invariant, enforced by the schema, is that **a disclosed rendezvous only ever rides beside a link**:
+  there is no address to disclose one beside, and no link to draw.
+
+### The link names no rendezvous; the device finds one itself
+
+The fragment is one form, `#v1;url=…;code=…;fp=…`, byte-identical to every link a daemon has ever
+written. One codec in `@ferretry/protocol` (`formatPairingFragment` / `parsePairingFragment`) writes
+and reads it, so the daemon and the browser cannot hold different opinions about the same string:
+readers require `url`/`code`/`fp`, ignore an unrecognised field name — a stray `relay=` included, which
+is therefore never honoured — and refuse a duplicated one.
+
+**A relayed first pairing needs nothing in the link when both ends resolve the same directory
+candidate.** The scanning device's build carries `HOSTED_RELAY_DIRECTORY_ORIGIN` by default, reads
+that no-store advertisement once per document, and dials the address it names when the daemon's own
+address fails ([relay-protocol.md](relay-protocol.md) §14). The daemon uses the same default, so stock
+builds meet at one rendezvous. Its runtime override and the PWA's build-time override are independent,
+however; an operator using them must point both ends at the same directory. That address serves **one
+redemption** and is never stored — what a device navigates by afterwards is the redemption response's
+`carriers`, and the browser refuses a relayed pairing whose published set does not name the rendezvous
+the exchange crossed.
+
+`discoveredRelayUrl` on the mint response is **host-facing only**. It exists so `fy pair`, the
+Add-a-device panel and `fyd --check` know a loopback-bound daemon is redeemable anyway, and so they can
+disclose which rendezvous the daemon expects to see the exchange's metadata. It is derived from relay
+**provenance** at the composition root — only an address read from the daemon's directory, never an
+operator's own configured block, and never merely the first published relay. It therefore describes
+the daemon's candidate; it cannot prove that a PWA compiled with an independent override reads the
+same directory. **No version escape hatch was spent:** a relay-bearing `v2` form was built and
+withdrawn before any release, so a future second version may still land its pattern and its parser
+together.
 
 **A remedy that cannot be followed is a dead end with extra steps**, so there is one per reason rather
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
-sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own:
+sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own.
+
+Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
+`local-only` daemon that also dials a discoverable rendezvous is already redeemable from another
+device, so its remedy is the upgrade to a connection with no third party on the path rather than the
+unlock it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
+this table is the no-rendezvous wording:
 
 | reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -144,7 +208,14 @@ not who will **redeem**; the normal phone journey is minted locally and redeemed
 ### What bounds a guess
 
 - a **two-minute** TTL and a **five-attempt** budget per code, whichever comes first;
-- a fixed-window rate limit per peer, independent of that budget, so broken uploads cannot spend it;
+- a **separate relay budget** per code for attempts arriving through a rendezvous, which can never
+  spend the direct five: without the split, anyone on the internet who knows a public fingerprint
+  could expire a code sitting on somebody's desk. Exhausting the relay budget closes the **relay**
+  path for that code and leaves a device on the LAN able to redeem it —
+  [relay-protocol.md](relay-protocol.md) §14 owns the numbers and the disclosure;
+- a fixed-window rate limit per peer, independent of that budget, so broken uploads cannot spend it —
+  and a relayed caller's rate-limit identity is derived from its rendezvous session, never collapsed
+  into a bucket the whole internet shares;
 - one active code per daemon: minting **replaces** its predecessor, which is why a UI must not offer a
   mint button beside a live code;
 - the comparison is constant-time and runs even when there is no active code, so timing says nothing
@@ -218,3 +289,19 @@ row states what its revoke will do before the press.
 - **`pairing.configure` governs no route.** Like `terminal` and `browser`, its configure
   axis governs exactly one thing: whether a remote caller may re-grant the capability. See
   [grants.md](grants.md).
+- **A stock fresh device cannot discover an arbitrary self-hosted rendezvous.** A pairing fragment
+  carries only the daemon's direct address, code and fingerprint, so its sole relayed first-pairing
+  candidate is whatever directory its own build reads. A private PWA build can discover a self-hosted
+  address when both ends are pointed at the directory that advertises it, but no existing link tells a
+  stock build where an operator's directory lives. A daemon published only through an explicit
+  self-hosted carrier is therefore pairable only from a device that can already reach its direct
+  address, and naming a rendezvous in the link is deferred. `fy pair`, the Add-a-device panel and
+  `fyd --check` fail closed for that daemon: they draw no QR and print the plain local-only sentence.
+- **A private directory origin must be configured independently on both ends.** Both ends share the
+  default, but `FY_RELAY_DIRECTORY_ORIGIN` is a runtime daemon override and a build-time PWA override.
+  Setting only one sends the scanning device to a rendezvous the daemon does not hold, so direct is
+  still tried first but relayed first contact ends at `4404`; the current pairing surface does not name
+  the configuration mismatch. The fingerprint is pinned before any pairing code, token or payload is
+  sent, so the wrong directory or rendezvous learns none of those secrets. It can still learn metadata
+  the owner did not intend to share: the directory sees the device IP and request timing, and its
+  rendezvous sees the device IP, daemon fingerprint and connection timing.

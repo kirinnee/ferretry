@@ -15,7 +15,7 @@ import { DaemonCarrierRouter } from '../../../src/lib/relay-carrier.ts';
 import {
   ActiveCarrierCard,
   CARRIER_NO_FALLBACK,
-  CARRIER_NO_LIVE_UPDATES,
+  CARRIER_STREAM_DISCLOSURE,
   CARRIER_UNMEASURED,
 } from '../../../src/features/carrier/active-carrier-card.tsx';
 import { useActiveCarrier } from '../../../src/hooks/use-active-carrier.ts';
@@ -41,7 +41,7 @@ describe('the active carrier card', () => {
     const rendered = text(card);
     should(rendered).containEql('Connected over direct.');
     for (const observer of describeConnectionMethod(DIRECT).observers) should(rendered).containEql(observer);
-    should(rendered).not.containEql(CARRIER_NO_LIVE_UPDATES);
+    should(rendered).not.containEql(CARRIER_STREAM_DISCLOSURE);
     should(rendered).not.containEql(CARRIER_NO_FALLBACK);
   });
 
@@ -59,7 +59,7 @@ describe('the active carrier card', () => {
     should(rendered).containEql('Hosted relay');
     should(rendered).containEql('Connected over hosted relay because direct was not reachable (Failed to fetch)');
     should(rendered).containEql('Passed over');
-    should(rendered).containEql(CARRIER_NO_LIVE_UPDATES);
+    should(rendered).containEql(CARRIER_STREAM_DISCLOSURE);
     // The honest hosted disclosure, not a paraphrase of it.
     should(rendered).containEql('They cannot read frame payloads, device tokens, session content, commands, output');
   });

@@ -647,13 +647,17 @@ describe('this computer, by hand', () => {
   it('restates what the chosen fallback would see, where the connection becomes real', async () => {
     // The carrier choice was made several screens — possibly several days —
     // before anything was connected, and it is a decision about somebody else's
-    // infrastructure. Saying "Direct" here and stopping would quietly retire it.
+    // infrastructure. Naming a carrier here and stopping would quietly retire it.
     const progress = walking({ step: 'connect' });
     progress.chooseConnection('default-relay');
     progress.goTo('done');
     const relayed = await pageWith({ progress, fleetReady: true });
 
-    expect(relayed.view.container.textContent).toContain('Connection in use: Direct');
+    // It used to read `Connection in use: Direct`, on the reasoning that pairing is
+    // always direct. §14 gave redemption a relayed session mode, so this screen has
+    // no measured answer to report and states the ORDER instead.
+    expect(relayed.view.container.textContent).toContain('Connection in use: Not measured yet');
+    expect(relayed.view.container.textContent).toContain('tried directly first, then the relay');
     const disclosure = must(
       relayed.view.container.querySelector('[data-onboarding-fallback-disclosure]'),
       'the fallback disclosure',
