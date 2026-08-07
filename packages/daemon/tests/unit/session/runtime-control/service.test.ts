@@ -150,6 +150,77 @@ describe('resolving the session a control names', () => {
   });
 });
 
+describe('restating dependency failures', () => {
+  it('should restate a repository view failure as a runtime failure', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository();
+    repository.view = async () => {
+      throw new Error('the session view is unreadable');
+    };
+    const { subject } = subjectWith({ repository });
+
+    // Act / Assert
+    should(await refusal(subject.models('s1'))).match({
+      failure: 'failed',
+      message: 'the session view is unreadable',
+    });
+  });
+
+  it('should restate an effect inspection failure before entering the mutation fence', async () => {
+    // Arrange
+    const effects = new FakeSessionEffectLedger();
+    effects.inspect = async () => {
+      throw new Error('the effect ledger cannot be inspected');
+    };
+    const serial = new RecordingSerial();
+    const { subject, injector } = subjectWith({ effects, serial });
+
+    // Act
+    const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+    // Assert
+    should(failure).match({ failure: 'failed', message: 'the effect ledger cannot be inspected' });
+    should(serial.entered).equal(0);
+    should(injector.delivered).be.empty();
+  });
+
+  it('should restate an effect admission failure without touching the harness', async () => {
+    // Arrange
+    const effects = new FakeSessionEffectLedger();
+    effects.begin = async () => {
+      throw new Error('the effect cannot be begun');
+    };
+    const { subject, injector, repository } = subjectWith({ effects });
+
+    // Act
+    const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+    // Assert
+    should(failure).match({ failure: 'failed', message: 'the effect cannot be begun' });
+    should(injector.delivered).be.empty();
+    should(repository.calls).be.empty();
+  });
+
+  it('should restate an effect settlement failure without repeating the completed input', async () => {
+    // Arrange
+    const effects = new FakeSessionEffectLedger();
+    effects.settle = async () => {
+      throw new Error('the effect cannot be settled');
+    };
+    const { subject, injector, repository } = subjectWith({ effects });
+
+    // Act
+    const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+    const retry = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+    // Assert
+    should(failure).match({ failure: 'failed', message: 'the effect cannot be settled' });
+    should(retry).match({ failure: 'unsettled' });
+    should(injector.delivered).deepEqual([['fy-s1', '/compact']]);
+    should(repository.calls).match([{ kind: 'journal', event: 'control.session_command' }]);
+  });
+});
+
 describe('the four preconditions, in order', () => {
   it('should refuse a session in a terminal status before it looks at a pane', async () => {
     // Arrange
