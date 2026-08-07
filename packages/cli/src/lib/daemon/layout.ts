@@ -1,4 +1,4 @@
-import { isAbsolute, join, normalize, parse } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
 export type DaemonManagerKind = 'systemd' | 'launchd' | 'direct';
@@ -59,15 +59,51 @@ export interface DaemonLayout {
   readonly launchdServiceTarget: string;
   readonly launchAgentFile: string;
   /**
-   * Where the Nix garbage-collection root for the daemon executable is kept.
+   * The directory holding ONE Nix garbage-collection root per retained daemon snapshot.
+   *
+   * A directory rather than a single link, because a root's lifetime is its SNAPSHOT's lifetime. One
+   * root per daemon could protect only the closure of whatever was promoted last, so the snapshot a
+   * rollback would select kept its verified executable and lost the loader and shared libraries that
+   * executable still needs — `nix-collect-garbage` deleted them, and the rollback the store was built
+   * to make safe stopped being runnable. Every retained snapshot gets its own root and keeps it.
    *
    * Deliberately NOT under the state home. The state home is the daemon's, and its layout model
    * refuses any entry it has not declared — a CLI-created directory there is exactly the defect that
-   * made the daemon unable to start on a fresh machine. It is also a symbolic link, and the daemon's
-   * filesystem port refuses symbolic links anywhere inside the state home. It belongs to the CLI's
-   * own installation, so it lives beside the CLI's other installation artifacts.
+   * made the daemon unable to start on a fresh machine. These are also symbolic links, and the
+   * daemon's filesystem port refuses symbolic links anywhere inside the state home. They belong to
+   * the CLI's own installation, so they live beside the CLI's other installation artifacts.
    */
-  readonly nixGcRoot: string;
+  readonly nixGcRootDirectory: string;
+  /**
+   * The one-per-daemon root earlier releases kept, which the per-snapshot roots above replace.
+   *
+   * Named so it can be RELEASED rather than left holding a store path nothing can account for. It is
+   * a sibling of the per-snapshot directory instead of its parent on purpose: a symbolic link cannot
+   * also be the directory the new roots live in, so reusing that name would have made an upgraded
+   * install unable to create any root at all.
+   */
+  readonly supersededNixGcRoot: string;
+  /**
+   * The claims that serialize this daemon's mutating lifecycle commands across separate invocations.
+   *
+   * **Keyed on every ownership target the verbs may actually use, not on where this CLI keeps its own
+   * files.** Under a state-directory key, one shell exporting `XDG_STATE_HOME` and another taking the
+   * default took two different claims, contended for nothing, and interleaved the root update and the
+   * definition write over the SAME unit file and the same daemon — the precise failure the claims
+   * exist to prevent, reachable in spite of them. A systemd host therefore claims its unit file and
+   * logical user-manager unit; a launchd host claims its plist and domain/label. Both also claim the
+   * daemon-qualified state home because either platform falls back to a direct child when no
+   * definition is installed. Finally, the snapshot store stands for itself and the roots derived from
+   * the same state directory, so two environments cannot share those artifacts without excluding one
+   * another.
+   *
+   * The array is already in one SEMANTIC acquisition order: manager target, snapshot/root ownership,
+   * manager definition, direct daemon. Ordering by role rather than unresolved path spelling keeps
+   * alias paths and different locale settings from reversing two physical claims into a deadlock.
+   * Category-qualified hidden names prevent two roles from aliasing one claim accidentally. Two
+   * daemon names remain independent.
+   */
+  readonly lifecycleLocks: readonly [string, ...string[]];
 }
 
 export class InvalidDaemonEnvironmentError extends Error {
@@ -167,9 +203,13 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
   const snapshotRoot = join(stateDirectory, product, 'daemon-snapshots', daemonName);
+  const manager = managerForPlatform(input.platform);
+  const systemdUnitName = `${daemonName}.service`;
+  const systemdUnitFile = join(configHome, 'systemd', 'user', systemdUnitName);
+  const launchAgentFile = join(homeDirectory, 'Library', 'LaunchAgents', `${launchdLabel}.plist`);
 
   return {
-    manager: managerForPlatform(input.platform),
+    manager,
     daemonName,
     product,
     stateHome,
@@ -177,12 +217,100 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     logFile: join(logDirectory, `${daemonName}.log`),
     snapshotRoot,
     searchPath: input.searchPath,
-    systemdUnitName: `${daemonName}.service`,
-    systemdUnitFile: join(configHome, 'systemd', 'user', `${daemonName}.service`),
+    systemdUnitName,
+    systemdUnitFile,
     launchdLabel,
     launchdDomain,
     launchdServiceTarget: `${launchdDomain}/${launchdLabel}`,
-    launchAgentFile: join(homeDirectory, 'Library', 'LaunchAgents', `${launchdLabel}.plist`),
-    nixGcRoot: join(stateDirectory, product, 'nix', daemonName),
+    launchAgentFile,
+    nixGcRootDirectory: join(stateDirectory, product, 'nix', 'snapshots', daemonName),
+    supersededNixGcRoot: join(stateDirectory, product, 'nix', daemonName),
+    lifecycleLocks: lifecycleLocksFor(manager, {
+      systemdUnitName,
+      systemdUnitFile,
+      launchdLabel,
+      launchAgentFile,
+      snapshotRoot,
+      stateHome,
+      daemonName,
+      userId,
+    }),
   };
+}
+
+/** The artifacts a lifecycle claim can be keyed on, one per way of owning the daemon. */
+interface LifecycleArtifacts {
+  readonly systemdUnitName: string;
+  readonly systemdUnitFile: string;
+  readonly launchdLabel: string;
+  readonly launchAgentFile: string;
+  readonly snapshotRoot: string;
+  readonly stateHome: string;
+  readonly daemonName: string;
+  readonly userId: number;
+}
+
+/**
+ * Where the claims live, decided by everything the mutating verbs may own on this host.
+ *
+ * The shared manager target covers commands sent to one systemd unit or launchd label even when two
+ * environments resolve different definition paths. `/tmp` is the one stable cross-environment
+ * directory on both supported platforms; the uid keeps users independent, and its sticky bit means
+ * another user can at worst occupy the predictable name and make the lifecycle fail closed. The
+ * definition claim covers the actual file, the direct claim covers the state home used when that file
+ * is absent, and the snapshot claim covers both the store and the root directory derived from the same
+ * `XDG_STATE_HOME`.
+ *
+ * Checking which owner is active before acquiring would merely move the race. The fixed role order
+ * below is therefore load-bearing: unresolved aliases can spell the same directories in opposite
+ * lexical orders, but they cannot move a physical claim from one semantic position to another.
+ */
+function lifecycleLocksFor(manager: DaemonManagerKind, artifacts: LifecycleArtifacts): readonly [string, ...string[]] {
+  const snapshots = claimBeside(artifacts.snapshotRoot, 'snapshot-store');
+  const direct = claimBeside(artifacts.stateHome, `${artifacts.daemonName}.direct`);
+  if (manager === 'direct') return [snapshots, direct];
+  const definition = claimBeside(
+    manager === 'systemd' ? artifacts.systemdUnitFile : artifacts.launchAgentFile,
+    'definition',
+  );
+  const target = join(
+    '/tmp',
+    `.${String(artifacts.userId)}.${manager}.${
+      manager === 'systemd' ? artifacts.systemdUnitName : artifacts.launchdLabel
+    }.target.lifecycle.lock`,
+  );
+  return [target, snapshots, definition, direct];
+}
+
+/**
+ * A hidden, injective identity beside an artifact.
+ *
+ * Length-prefix BOTH components before joining them. Merely adding a leading dot collapses `foo` and
+ * `.foo`, while punctuation-delimited tuples collapse boundaries such as `(a, b.c)` and `(a.b, c)`.
+ * A claim residue must never make either pair look like the same owner and block an unrelated daemon.
+ */
+function claimBeside(artifact: string, qualifier: string): string {
+  const name = basename(artifact);
+  return join(dirname(artifact), `.${claimComponent(name)}.${claimComponent(qualifier)}.lifecycle.lock`);
+}
+
+/** A filename-safe, exactly decodable component; the length makes punctuation inside it irrelevant. */
+function claimComponent(value: string): string {
+  return `${String(value.length)}-${value}`;
+}
+
+/**
+ * The garbage-collection root that holds one snapshot's runtime closure.
+ *
+ * THE ONLY place a snapshot identity becomes a root path. The controller decides which snapshots need
+ * roots and the adapter registers them, and neither may spell this join itself: a root the CLI writes
+ * under one rule and reads back under another is a root that protects a closure nobody can find
+ * again, which is the same defect as no root at all. Discovering held roots therefore returns the
+ * paths it found rather than re-deriving them, so this function is the sole writer of the mapping.
+ *
+ * The identity is checked as a plain name because it becomes a filename: a snapshot id is
+ * `sha256-<64 hex digits>`, and anything carrying a separator would silently retarget the write.
+ */
+export function daemonSnapshotGcRoot(rootDirectory: string, snapshotId: string): string {
+  return join(requireDirectory(rootDirectory, 'nix root directory'), requireName(snapshotId, 'snapshot id'));
 }

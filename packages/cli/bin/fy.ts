@@ -41,6 +41,7 @@ import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
 import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
+import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
@@ -408,6 +409,7 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     searchPath: environment.PATH ?? '',
   });
   const processes = new BunDaemonProcess();
+  const clock = new SystemMillisecondClock();
   const files = new FileServiceStore();
   // Every supervisor claims the state home before it creates the log directory inside it, so the
   // marker exists before the first entry does whichever way round `fy` and `fyd` are run.
@@ -425,12 +427,15 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
+    // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
+    // and the bound a peer may legitimately hold are measured against one source of time.
+    lifecycle: new FileDaemonLifecycleLock(processes, clock),
     snapshots: new FileDaemonSnapshotStore({
       root: layout.snapshotRoot,
       daemon: { product: layout.product, name: layout.daemonName },
       sourceBinary: () => resolveDaemonBinary(environment, daemonName),
     }),
-    clock: new SystemMillisecondClock(),
+    clock,
     out,
   });
 }
