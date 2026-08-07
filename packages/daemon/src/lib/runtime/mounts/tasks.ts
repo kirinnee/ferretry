@@ -525,6 +525,17 @@ function markDoneRequestId(context: RouteContext): string {
   return value;
 }
 
+/** Whether this exact peer and caller-owned id already have a durable top-agent completion receipt. */
+function hasPeerCompletionReceipt(entry: TaskEntry, actorId: string, requestId: string): boolean {
+  return entry.activity.some(
+    activity =>
+      activity.type === 'status' &&
+      activity.actor === actorId &&
+      activity.data.verifiedByTopAgent === true &&
+      activity.data.authorization?.requestId === requestId,
+  );
+}
+
 /** Applies one action to one task. */
 async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
@@ -542,7 +553,16 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
       actor = { ...actor, doneRequestIdentity: { requestId, fingerprint: completionFingerprint } };
     }
     const current = await board.detail(taskId).catch(reraise);
-    if (current.task.phase === 'live') {
+    // A peer can retry a response it lost only after the durable completion has made this task
+    // `done`. Its own board writes are already allowed, but the peer named by that exact durable
+    // receipt must reacquire scope to another member's board before the reducer can replay it.
+    // Looking up the receipt first also preserves the ordinary 403 for a different peer recycling
+    // someone else's request id. A live request always needs the grant; only that path spends it
+    // into a new authorization record.
+    const needsBoardScope =
+      current.task.phase === 'live' ||
+      (requestId !== '' && actor.sessionId !== sessionId && hasPeerCompletionReceipt(current, actor.id, requestId));
+    if (needsBoardScope) {
       const capability = headerValue(context.request, BOARD_CAPABILITY_HEADER)?.trim();
       if (capability === undefined || capability === '')
         throw new ApiError(
@@ -572,19 +592,23 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
       actor = {
         ...actor,
         boardAuthorizedForSession: sessionId,
-        markDoneAuthorization: {
-          boardId: grant.boardId,
-          grantId: grant.grantId,
-          sessionId: grant.sessionId,
-          targetSessionId: sessionId,
-          role: grant.role,
-          boardEpoch: grant.boardEpoch,
-          coordinatorEpoch: grant.coordinatorEpoch,
-          runtimeGeneration: grant.runtimeGeneration,
-          action: 'mark_done',
-          requestId: markDoneRequestId(context),
-          requestFingerprint: completionFingerprint,
-        },
+        ...(current.task.phase === 'live'
+          ? {
+              markDoneAuthorization: {
+                boardId: grant.boardId,
+                grantId: grant.grantId,
+                sessionId: grant.sessionId,
+                targetSessionId: sessionId,
+                role: grant.role,
+                boardEpoch: grant.boardEpoch,
+                coordinatorEpoch: grant.coordinatorEpoch,
+                runtimeGeneration: grant.runtimeGeneration,
+                action: 'mark_done',
+                requestId: markDoneRequestId(context),
+                requestFingerprint: completionFingerprint,
+              },
+            }
+          : {}),
       };
     }
   }

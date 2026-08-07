@@ -488,16 +488,14 @@ const taskDoneReplay = (entry: TaskEntry, action: TaskActionRequest, actor: Task
     matching = activity;
   }
   if (matching === undefined) return 'none';
-  const latestCompletion = [...entry.activity]
-    .reverse()
-    .find(
-      activity =>
-        activity.type === 'status' &&
-        activity.data.from === 'live' &&
-        activity.data.to === 'done' &&
-        activity.data.phaseFrom === 'live' &&
-        activity.data.phaseTo === 'done',
-    );
+  const latestCompletion = [...entry.activity].reverse().find(
+    activity =>
+      activity.type === 'status' &&
+      // A manual block overlays status rather than phase, so a legitimate completion can be
+      // `blocked → done` while its workflow move is still `live → done`.
+      activity.data.phaseFrom === 'live' &&
+      activity.data.phaseTo === 'done',
+  );
   return matchingCount === 1 && latestCompletion === matching && entry.task.phase === 'done' ? 'exact' : 'reused';
 };
 

@@ -503,6 +503,40 @@ describe('task schemas', () => {
     for (const value of values) should(tasks.TaskActivitySchema.parse(value)).deepEqual(value);
   });
 
+  it('should retain unstamped human attestations that the previous release wrote', () => {
+    // These records are intentionally not held to the new writer's semantic invariants. A reader
+    // must retain them so it can mark their human claims legacy-unreliable instead of treating the
+    // entire snapshot as damaged.
+    const values = [
+      {
+        ...activityBase,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'researched',
+          phaseFrom: 'research',
+          phaseTo: 'research',
+          reason: 'unblocked',
+          approvedByHuman: true,
+        },
+      },
+      {
+        ...activityBase,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason: 'validated after unblock',
+          verifiedByHuman: true,
+        },
+      },
+    ];
+
+    for (const value of values) should(tasks.TaskActivitySchema.parse(value)).deepEqual(value);
+  });
+
   it('should resolve every task action member', () => {
     // Arrange
     const values = [
@@ -587,6 +621,41 @@ describe('task schemas', () => {
             phaseFrom: 'build',
             phaseTo: 'built',
             reason: 'not a completion',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'human verification whose status contradicts its completion phase',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'todo',
+            to: 'in_progress',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'contradictory transition',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'current human verification attributed to a peer actor',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'not a human actor',
             verifiedByHuman: true,
             attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
           },
@@ -729,6 +798,37 @@ describe('task schemas', () => {
         },
       },
       {
+        name: 'top-agent receipt for a different completion request',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'recorded completion',
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization: {
+              boardId: 'board-1',
+              grantId: 'grant-1',
+              sessionId: 'session-1',
+              targetSessionId: 'session-1',
+              role: 'top_agent',
+              boardEpoch: 1,
+              coordinatorEpoch: 1,
+              runtimeGeneration: 1,
+              action: 'mark_done',
+              requestId: 'completion-1',
+              requestFingerprint: { action: 'phase', phase: 'done', reason: 'different completion' },
+            },
+          },
+        },
+      },
+      {
         name: 'unstamped top-agent attestation',
         schema: tasks.TaskActivitySchema,
         value: {
@@ -784,6 +884,23 @@ describe('task schemas', () => {
             phaseFrom: 'research',
             phaseTo: 'research',
             reason: 'unblocked',
+            approvedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'backward human approval',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'designed',
+            to: 'researched',
+            phaseFrom: 'design',
+            phaseTo: 'research',
+            reason: 'not an approval',
             approvedByHuman: true,
             attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
           },

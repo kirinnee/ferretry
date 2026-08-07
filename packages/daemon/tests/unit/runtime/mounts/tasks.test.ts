@@ -749,6 +749,35 @@ describe('the task board mount', () => {
       should(body.phase).equal('build');
     });
 
+    it('should journal a headerless admin CLI completion as admin-cli', async () => {
+      // `human` deliberately has the shared admin bearer and CLI client header but no pane-session
+      // header. The task route records the normalized API classification honestly; that operational
+      // attribution is separate from, and never synthesized from, a board grant.
+      // Arrange
+      const { dispatch } = await withTask();
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const completed = await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks/F1', { action: 'status', status: 'done', reason: 'checked from the CLI' }),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(completed.status).equal(200);
+      const activity = (jsonBody(detail) as unknown as ScopedTaskDetailResponse).activity;
+      const recorded = [...activity].reverse().find(entry => entry.type === 'status');
+      should(recorded).not.be.undefined();
+      should(recorded?.actor).equal('admin-cli');
+      should(recorded?.data).have.property('verifiedByHuman', true);
+      should(recorded?.data).have.property('attestationSemantics', 'actor-authority-split');
+      should(recorded?.data).not.have.property('authorization');
+    });
+
     it('should report a blocked task with the reason the human gave', async () => {
       // Arrange
       const { dispatch } = await withTask();
@@ -898,6 +927,7 @@ describe('the task board mount', () => {
       should(jsonBody(refused)).have.property('code', 'forbidden');
       const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
       should(body.task.phase).equal('live');
+      should(body.activity).have.length(4);
       should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
     });
 
@@ -930,6 +960,7 @@ describe('the task board mount', () => {
       should(refused.status).equal(409);
       const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
       should(body.task.phase).equal('live');
+      should(body.activity).have.length(4);
       should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
     });
 

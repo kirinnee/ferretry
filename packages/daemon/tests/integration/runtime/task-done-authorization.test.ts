@@ -263,6 +263,40 @@ describe('completing shared live work', () => {
     const completed = (await withGrant.json()) as { readonly phase: string };
     // And a response lost after either commit is the same logical click, not a done → done conflict.
     const responseLossRetry = await markDone(completionHeaders);
+
+    // The grant holder can also close work on another member's board. This is the replay shape that
+    // needs an authorization scope after the first response was lost: the reducer's durable receipt
+    // must remain reachable even though the task is no longer live.
+    const coordinatorTasks = `http://127.0.0.1:${port}/v1/sessions/${coordinator.config.id}/tasks`;
+    const openedCrossSessionTask = await fetch(coordinatorTasks, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'feature',
+        title: 'Retry another board',
+        ask: { text: 'prove cross-session replay', source: 'integration' },
+        status: 'live',
+      }),
+    });
+    const crossSessionTaskId = ((await openedCrossSessionTask.json()) as { readonly id: string }).id;
+    const crossSessionHeaders = {
+      ...peer,
+      'x-fy-board-capability': rootCapability,
+      'x-fy-request-id': 'mark-done-cross-session-click-1',
+    };
+    const markDoneOnCoordinator = async (): Promise<Response> =>
+      await fetch(`${coordinatorTasks}/${encodeURIComponent(crossSessionTaskId)}`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', ...crossSessionHeaders },
+        body: JSON.stringify({ action: 'phase', phase: 'done', reason: 'Marked done on the coordinator board.' }),
+      });
+    const crossSessionCompletion = await markDoneOnCoordinator();
+    const crossSessionResponseLossRetry = await markDoneOnCoordinator();
+    const crossSessionDetail = (await (
+      await fetch(`${coordinatorTasks}/${encodeURIComponent(crossSessionTaskId)}`, { headers })
+    ).json()) as {
+      readonly activity: readonly unknown[];
+    };
     const sameIdDifferentBody = await markDone(completionHeaders, 'Marked done with a changed reason.');
     const otherActorSameId = await markDone({
       'x-ferretry-session-id': coordinator.config.id,
@@ -306,6 +340,9 @@ describe('completing shared live work', () => {
     should(withGrant.status).equal(200);
     should(inFlightRetry.status).equal(200);
     should(responseLossRetry.status).equal(200);
+    should(openedCrossSessionTask.status).equal(201);
+    should(crossSessionCompletion.status).equal(200);
+    should(crossSessionResponseLossRetry.status).equal(200);
     should(completed.phase).equal('done');
     // A same-id body collision remains a refusal, and another peer cannot spend ROOT's receipt.
     should(sameIdDifferentBody.status).equal(409);
@@ -339,6 +376,21 @@ describe('completing shared live work', () => {
     // A record this daemon wrote is trustworthy on its face, so it carries no legacy marker.
     should(recorded.data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
     should(recorded.data).not.have.property('legacyAttestation');
+    should(persisted.filter(entry => entry.type === 'status')).have.length(1);
     should(persisted.filter(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).have.length(1);
+    const crossSessionPersisted = crossSessionDetail.activity.map(entry => entry as TaskActivity);
+    const crossSessionRecorded = TaskActivitySchema.parse(lastStatusActivity(crossSessionPersisted));
+    should(crossSessionRecorded.actor).equal(`peer:${root.config.id}`);
+    should(crossSessionRecorded.data).have.property('verifiedByTopAgent', true);
+    should(crossSessionRecorded.data).have.property('authorization').which.is.a.Object();
+    const crossSessionAuthorization = (
+      crossSessionRecorded.data as { readonly authorization?: Record<string, unknown> }
+    ).authorization;
+    should(crossSessionAuthorization).have.property('sessionId', root.config.id);
+    should(crossSessionAuthorization).have.property('targetSessionId', coordinator.config.id);
+    should(crossSessionPersisted.filter(entry => entry.type === 'status')).have.length(1);
+    should(
+      crossSessionPersisted.filter(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true),
+    ).have.length(1);
   });
 });

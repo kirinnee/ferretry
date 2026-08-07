@@ -194,6 +194,52 @@ describe('FileTaskStore', () => {
     });
   });
 
+  it('should read a prior-release blocked approval without making the board unavailable', async () => {
+    await withTempRoot(async root => {
+      // Arrange — this was a normal manual-block clear written by the previous daemon. It is
+      // unstamped because that writer had not learned the actor/authority split yet.
+      const legacyBlockedClear: TaskActivity = {
+        v: 1,
+        seq: 2,
+        time: INSTANT,
+        actor: 'admin-cli',
+        actorName: null,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'researched',
+          phaseFrom: 'research',
+          phaseTo: 'research',
+          reason: 'unblocked',
+          approvedByHuman: true,
+        },
+      };
+      const legacy = JSON.stringify({
+        v: 1,
+        tasks: [
+          {
+            task: task({
+              workflow: 'research-first',
+              phase: 'research',
+              status: 'blocked',
+              statusReason: 'waiting on review',
+            }),
+            activity: [createdActivity(), legacyBlockedClear],
+          },
+        ],
+      });
+      const store = new FileTaskStore(await writeBoard(root, legacy));
+
+      // Act — if the new activity refinement rejected an old record, this exact call would throw
+      // TaskStateUnavailableError and every route for the board would answer 503.
+      const actual = await store.read();
+
+      // Assert
+      should(actual).containEql({ v: TASK_SNAPSHOT_SCHEMA_VERSION });
+      should(actual.tasks[0]?.activity[1]).deepEqual(legacyBlockedClear);
+    });
+  });
+
   it('should return the reducer result while committing the whole container', async () => {
     await withTempRoot(async root => {
       // Arrange

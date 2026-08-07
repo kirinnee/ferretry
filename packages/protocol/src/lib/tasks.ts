@@ -234,10 +234,15 @@ const CreatedTaskActivitySchema = z.object({
  * The writer's positive declaration that it kept WHO acted apart from WHAT authorized it.
  *
  * Stamped on every human and top-agent attestation written by code that draws the distinction.
- * Its absence — not its date — is what marks an attestation unreliable, because the instant a fix
- * reaches any given daemon cannot be known when the fix is written, and old code goes on writing
- * conflated records until its host is upgraded. Trust is therefore granted on positive evidence
- * only, which fails closed.
+ * It proves that the writer kept the normalized API actor classification separate from board-grant
+ * authorization when it made this record. It is not cryptographic proof that an `admin-cli` or
+ * `admin-ui` classification belongs to a particular person: those classifications remain the
+ * documented honest-client operational boundary of the shared admin bearer.
+ *
+ * Its absence — not its date — is what marks a human attestation unreliable, because the instant a
+ * fix reaches any given daemon cannot be known when the fix is written, and old code goes on
+ * writing conflated records until its host is upgraded. Trust in the writer's separation is
+ * therefore granted on positive evidence only, which fails closed.
  */
 export const ACTOR_AUTHORITY_SPLIT_SEMANTICS = 'actor-authority-split';
 
@@ -286,13 +291,51 @@ const StatusTaskActivitySchema = z
     const humanVerification = data.verifiedByHuman === true;
     const topAgentVerification = data.verifiedByTopAgent === true;
     const attestations = Number(approval) + Number(humanVerification) + Number(topAgentVerification);
-    const completion =
-      data.from === 'live' && data.to === 'done' && data.phaseFrom === 'live' && data.phaseTo === 'done';
+    const statusAndPhaseAgree =
+      (data.from === 'blocked' || TASK_STATUS_PHASE[data.from] === data.phaseFrom) &&
+      (data.to === 'blocked' || TASK_STATUS_PHASE[data.to] === data.phaseTo);
+    // `blocked` deliberately overlays a task's phase, so a blocked live task completes as
+    // `status: blocked → done` while its semantic transition remains `phase: live → done`.
+    const completion = statusAndPhaseAgree && data.phaseFrom === 'live' && data.phaseTo === 'done';
+    const approvedWorkflowMove =
+      (data.phaseFrom === 'research' && (data.phaseTo === 'design' || data.phaseTo === 'done')) ||
+      (data.phaseFrom === 'design' && data.phaseTo === 'build');
+    const usesCurrentSemantics = data.attestationSemantics === ACTOR_AUTHORITY_SPLIT_SEMANTICS;
+
+    // The semantic coherence rules below describe the positive promise made by the new writer.
+    // They cannot retroactively invalidate a v1 history that an earlier daemon really wrote: the
+    // decoder must retain those entries so the read path can label their human attestations legacy
+    // rather than turning the whole board unavailable. Top-agent receipts are not historical human
+    // attestations, though; a record making that new claim must carry its positive semantics stamp.
+    if (!usesCurrentSemantics) {
+      if (topAgentVerification) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification must declare actor-authority-split semantics',
+          path: ['data', 'attestationSemantics'],
+        });
+      }
+      if (data.legacyAttestation !== undefined && !approval && !humanVerification) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a legacy marker is only valid for an unstamped human attestation',
+          path: ['data', 'legacyAttestation'],
+        });
+      }
+      return;
+    }
 
     if (attestations > 1) {
       context.addIssue({
         code: 'custom',
         message: 'a status entry may carry exactly one attestation kind',
+        path: ['data'],
+      });
+    }
+    if (attestations > 0 && !statusAndPhaseAgree) {
+      context.addIssue({
+        code: 'custom',
+        message: 'an attestation status and phase transition must describe the same move',
         path: ['data'],
       });
     }
@@ -303,10 +346,7 @@ const StatusTaskActivitySchema = z
         path: ['data', 'verifiedByHuman'],
       });
     }
-    if (
-      approval &&
-      ((data.phaseFrom !== 'research' && data.phaseFrom !== 'design') || data.phaseFrom === data.phaseTo)
-    ) {
+    if (approval && !approvedWorkflowMove) {
       context.addIssue({
         code: 'custom',
         message: 'a human approval must advance out of research or design',
@@ -353,11 +393,16 @@ const StatusTaskActivitySchema = z
           path: ['actor'],
         });
       }
-      if (data.attestationSemantics !== ACTOR_AUTHORITY_SPLIT_SEMANTICS) {
+      const fingerprint = authorization?.requestFingerprint;
+      if (
+        fingerprint !== undefined &&
+        (fingerprint.reason !== data.reason ||
+          (fingerprint.action === 'phase' ? data.note !== undefined : fingerprint.note !== data.note))
+      ) {
         context.addIssue({
           code: 'custom',
-          message: 'a top-agent verification must declare actor-authority-split semantics',
-          path: ['data', 'attestationSemantics'],
+          message: 'a top-agent authorization receipt must describe this exact completion request',
+          path: ['data', 'authorization', 'requestFingerprint'],
         });
       }
     }
@@ -368,7 +413,14 @@ const StatusTaskActivitySchema = z
         path: ['data', 'authorization'],
       });
     }
-    if (data.attestationSemantics !== undefined && attestations === 0) {
+    if ((approval || humanVerification) && entry.actor.startsWith('peer:')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a current human attestation cannot be attributed to a peer actor',
+        path: ['actor'],
+      });
+    }
+    if (attestations === 0) {
       context.addIssue({
         code: 'custom',
         message: 'attestation semantics require an attestation claim',

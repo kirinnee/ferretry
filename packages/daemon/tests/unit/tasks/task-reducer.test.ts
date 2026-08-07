@@ -304,6 +304,34 @@ describe('applyTaskAction — status and phase', () => {
     should(markLegacyAttestations([lastActivity(outcome.entry)])[0]?.data).not.have.property('legacyAttestation');
   });
 
+  it('should let a human complete a blocked live task and attest the phase transition', () => {
+    // A manual block overlays status only. The workflow is still live, so clearing it directly by
+    // completing the task must validate and journal `phase: live → done`, not insist that status
+    // had already been separately restored to live.
+    // Arrange
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'blocked', statusReason: 'waiting on validation' }));
+
+    // Act
+    const outcome = act(
+      snapshot,
+      'F1',
+      { action: 'status', status: 'done', reason: 'validated after unblock' },
+      human(),
+    );
+
+    // Assert
+    const recorded = lastActivity(outcome.entry);
+    should(outcome.entry.task).containEql({ phase: 'done', status: 'done' });
+    should(recorded.data).containEql({
+      from: 'blocked',
+      to: 'done',
+      phaseFrom: 'live',
+      phaseTo: 'done',
+      verifiedByHuman: true,
+      attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+    });
+  });
+
   it('should record a board-granted agent as the top agent, with the grant it acted under', () => {
     // Arrange — the actor shape the task mount produces after a `mark_done` authorization.
     const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
@@ -322,6 +350,27 @@ describe('applyTaskAction — status and phase', () => {
     // The whole defect: a peer completion journalled as a human verification.
     should(recorded.data).not.have.property('verifiedByHuman');
     should(recorded.actor).equal(`peer:${SESSION_ID}`);
+  });
+
+  it('should let a top agent complete a blocked live task with its exact receipt', () => {
+    // Arrange
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'blocked', statusReason: 'awaiting final check' }));
+
+    // Act
+    const outcome = act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, topAgent());
+
+    // Assert
+    const recorded = lastActivity(outcome.entry);
+    should(outcome.entry.task).containEql({ phase: 'done', status: 'done' });
+    should(recorded.data).containEql({
+      from: 'blocked',
+      to: 'done',
+      phaseFrom: 'live',
+      phaseTo: 'done',
+      verifiedByTopAgent: true,
+      authorization: MARK_DONE_GRANT,
+      attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+    });
   });
 
   it('should refuse malformed or mismatched top-agent evidence without writing a completion', () => {
@@ -512,6 +561,8 @@ describe('applyTaskAction — status and phase', () => {
     shouldRefuse('transition', () =>
       act(completion.snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, otherActorSameId),
     );
+    should(completion.entry.task.phase).equal('done');
+    should(completion.entry.activity).have.length(2);
     should(reopened.entry.task.phase).equal('build');
     should(reopened.entry.activity).have.length(4);
   });

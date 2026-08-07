@@ -15,11 +15,13 @@ import { ACTOR_AUTHORITY_SPLIT_SEMANTICS, type TaskActivity } from '@ferretry/pr
  * date the old code writes conflated records AFTER, and every one of those would read as trustworthy.
  * That is fail-OPEN, and on the one question this exists to answer.
  *
- * So the direction is inverted. Code that keeps identity and authority apart stamps every attestation
- * it writes with {@link ACTOR_AUTHORITY_SPLIT_SEMANTICS}; absence of that stamp is the classifier.
- * A record is trusted only on POSITIVE evidence it was written under the split, never on the absence
- * of evidence that it was not — so a conflated record written a year from now by an un-upgraded host
- * is still marked, and no clock has to be right.
+ * So the direction is inverted. Code that keeps normalized API actor classification and authority
+ * apart stamps every attestation it writes with {@link ACTOR_AUTHORITY_SPLIT_SEMANTICS}; absence of
+ * that stamp is the classifier. The stamp attests to that code-path separation, not to a
+ * cryptographically authenticated human principal. A record is trustworthy only on POSITIVE
+ * evidence it was written under the split, never on the absence of evidence that it was not — so a
+ * conflated record written a year from now by an un-upgraded host is still marked, and no clock has
+ * to be right.
  *
  * WHY THIS IS A READ AND NOT A REWRITE. The stored bytes are evidence, and a repair that edited them
  * would replace one unfounded claim with another — this cannot recover which attestations were

@@ -114,6 +114,73 @@ describe('task snapshot decoding', () => {
     should(actual.parseErrors[0]?.detail).containEql('expected gap-free seq 2');
   });
 
+  it('should decode prior-release blocked human attestations without dropping later history', () => {
+    // Previous daemons wrote both of these truthful-to-their-model shapes without the new positive
+    // semantics stamp. They are evidence, not corruption: dropping the first would also make the
+    // following sequence look gapped and turn a readable board into an unavailable one.
+    // Arrange
+    const blockedClear = {
+      v: 1,
+      seq: 2,
+      time: '2026-07-30T18:00:00.000Z',
+      actor: 'admin-cli',
+      actorName: null,
+      type: 'status',
+      data: {
+        from: 'blocked',
+        to: 'researched',
+        phaseFrom: 'research',
+        phaseTo: 'research',
+        reason: 'unblocked',
+        approvedByHuman: true,
+      },
+    };
+    const blockedCompletion = {
+      v: 1,
+      seq: 2,
+      time: '2026-07-30T18:00:00.000Z',
+      actor: 'admin-cli',
+      actorName: null,
+      type: 'status',
+      data: {
+        from: 'blocked',
+        to: 'done',
+        phaseFrom: 'live',
+        phaseTo: 'done',
+        reason: 'validated after unblock',
+        verifiedByHuman: true,
+      },
+    };
+    const input = {
+      v: 1,
+      tasks: [
+        {
+          task: task({ workflow: 'research-first', phase: 'research', status: 'blocked', statusReason: 'waiting' }),
+          activity: [activity(1), blockedClear],
+        },
+        {
+          task: task({
+            id: 'F2' as Task['id'],
+            phase: 'done',
+            status: 'done',
+            statusReason: 'validated after unblock',
+          }),
+          activity: [activity(1), blockedCompletion],
+        },
+      ],
+    };
+
+    // Act
+    const actual = decodeTaskSnapshot(input);
+
+    // Assert — v1 remains a readable migration input; the current reader normalizes the outer
+    // container to v2 only after preserving every actual history entry.
+    should(actual).containEql({ fatal: false, parseErrors: [] });
+    should(actual.snapshot.v).equal(TASK_SNAPSHOT_SCHEMA_VERSION);
+    should(actual.snapshot.tasks[0]?.activity[1]).deepEqual(blockedClear);
+    should(actual.snapshot.tasks[1]?.activity[1]).deepEqual(blockedCompletion);
+  });
+
   it('should keep a task whose history is not a list at all, reporting the loss', () => {
     // Arrange
     const input = { v: 1, tasks: [{ task: task(), activity: 'gone' }] };
