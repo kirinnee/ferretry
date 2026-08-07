@@ -227,11 +227,17 @@ const buildFyRenderFixtureOnce = async (): Promise<FyRenderFixtureBytes> => {
      * comment describing something that never happens. SIGKILL is the only signal a
      * wedged child cannot decline, which is the entire point.
      *
-     * `deadline` rejects on its own, so the loser of the race can never leave an
-     * unhandled rejection: the aggregate's own rejection is swallowed by a no-op
-     * catch attached BEFORE the race begins.
+     * `deadline` REJECTS, which is why there is no flag to check afterwards. An
+     * earlier draft set a `timedOut` boolean and re-tested it below the race — dead
+     * code, because a rejected `deadline` leaves the race by throwing and that branch
+     * is never reached. The rejection carries the sentence; a flag would only have
+     * been readable if the timeout had resolved, which would have meant not bounding
+     * anything.
+     *
+     * The loser of the race can never leave an unhandled rejection either: the
+     * aggregate's own rejection is swallowed by a no-op catch attached BEFORE the
+     * race begins.
      */
-    let timedOut = false;
     let expiry: ReturnType<typeof setTimeout> | undefined;
 
     const finished = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
@@ -241,7 +247,6 @@ const buildFyRenderFixtureOnce = async (): Promise<FyRenderFixtureBytes> => {
 
     const deadline = new Promise<never>((_resolve, reject) => {
       expiry = setTimeout(() => {
-        timedOut = true;
         child.kill('SIGKILL');
         reject(new Error(`the fy-render fixture builder did not finish within ${buildTimeoutMs}ms and was killed`));
       }, buildTimeoutMs);
@@ -249,10 +254,6 @@ const buildFyRenderFixtureOnce = async (): Promise<FyRenderFixtureBytes> => {
 
     try {
       const [stdout, stderr, code] = await Promise.race([finished, deadline]);
-      if (timedOut)
-        throw new Error(
-          `the fy-render fixture builder did not finish within ${buildTimeoutMs}ms and was killed\n--- stderr ---\n${stderr}`,
-        );
       if (code !== 0)
         throw new Error(
           `the fy-render fixture builder exited ${code}\n--- stderr ---\n${stderr}\n--- stdout ---\n${stdout}`,

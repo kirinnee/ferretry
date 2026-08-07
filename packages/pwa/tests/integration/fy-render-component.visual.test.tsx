@@ -853,17 +853,27 @@ describe('fy-render component evidence — layout and focus', () => {
         await page.keyboard.press('Tab');
         order.push(await focused());
       }
+
+      // CAPTURED HERE, at the END OF THE WALK, which is the state this scene is named
+      // for. Taking it after the indicator loop below showed whatever that loop
+      // focused last, so the two captures were identical and one of them was lying
+      // about what it pictured.
+      await shot('focus-04-fullscreen-tab-order', { order, walkEndedOn: await focused() });
+
       /**
        * REACHABLE IS NOT INDICATED. The order above proves both new stops can be
        * reached; it says nothing about whether a keyboard reader can SEE where they
        * are. `<section tabindex="0">` is a novel non-button stop, and the app's
        * unconditional `:focus-visible` outline is a belief until measured — so each
        * non-button stop is focused in turn and its resolved outline width read back.
+       *
+       * The SUMMARY IS FOCUSED LAST so the capture below pictures a different element
+       * from the one above, and its name is honest about which.
        */
       const indicators: Record<string, string> = {};
       for (const [name, selector] of [
-        ['summary', '.kt-fs-why > summary'],
         ['scrollport', '[data-fy-render-source="true"]'],
+        ['summary', '.kt-fs-why > summary'],
       ] as const) {
         await page.locator(selector).focus();
         indicators[name] = await page.evaluate(() => {
@@ -873,7 +883,7 @@ describe('fy-render component evidence — layout and focus', () => {
           return `${style.outlineWidth}|${style.outlineStyle}`;
         });
       }
-      await shot('focus-05-indicators', { indicators, order });
+      await shot('focus-05-indicators', { indicators, showing: await focused() });
       for (const name of ['summary', 'scrollport'] as const) {
         // A nonzero, non-`none` outline. `0px` or `none` would mean the stop exists
         // and is invisible, which is worse than not being a stop at all.
@@ -881,7 +891,6 @@ describe('fy-render component evidence — layout and focus', () => {
         should(indicators[name]).not.containEql('|none');
       }
 
-      await shot('focus-04-fullscreen-tab-order', { indicators, order });
       /**
        * THE WHOLE SEQUENCE, EXACTLY. The requirement names all five stops and their
        * order, so a missing, extra or reordered control has to fail — a loose
