@@ -46,15 +46,25 @@ export const referenceToken = (reference: Reference): string | null => {
 };
 
 /**
- * Whether this exact reference is already a token in the draft.
+ * Whether this effective reference target is already a token in the draft.
  *
  * Compared as CANONICAL tokens of parsed references, so `%TERMINAL:ab12` and
  * `%terminal:ab12` count as one, and a token welded inside a longer word — which
- * `findReferences` never reports — is not a match at all.
+ * `findReferences` never reports — is not a match at all. Tasks additionally use
+ * the composer's session: bare `&F12` and `&F12@{this-session}` are the same
+ * target, while two foreign owners remain distinct.
  */
-export const draftCarriesReference = (draft: string, reference: Reference): boolean => {
+export const draftCarriesReference = (draft: string, reference: Reference, scope?: DaemonSessionScope): boolean => {
   const wanted = referenceToken(reference);
-  return wanted !== null && findReferences(draft).some(match => referenceToken(match.reference) === wanted);
+  if (wanted === null) return false;
+  return findReferences(draft).some(match => {
+    if (reference.kind !== 'task' || match.reference.kind !== 'task' || scope === undefined)
+      return referenceToken(match.reference) === wanted;
+    return (
+      match.reference.id.toUpperCase() === reference.id.toUpperCase() &&
+      (match.reference.sessionId ?? scope.sessionId) === (reference.sessionId ?? scope.sessionId)
+    );
+  });
 };
 
 /**
@@ -88,7 +98,7 @@ export const addReferenceToComposer = (reference: Reference, scope: DaemonSessio
   const target = composerQuoteTarget(scope);
   if (target === null) return 'no-composer';
   const draft = target.draft();
-  if (draftCarriesReference(draft, reference)) return 'duplicate';
+  if (draftCarriesReference(draft, reference, scope)) return 'duplicate';
   target.replaceDraft(composeReferenceDraft(draft, token));
   return 'added';
 };

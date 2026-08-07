@@ -907,7 +907,11 @@ describe('SessionChatPage', () => {
       await runAsync(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
-      expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
+      expect(
+        page.root
+          .findByType(ReferenceSurfaceProvider)
+          .props.surface.taskReferenceResolver?.({ form: 'local', id: 'F6' }),
+      ).toMatchObject({ daemonId: 'alpha', sessionId: 'shared', id: 'F6' });
       const input = page.root.findByType('input');
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       const results = page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');

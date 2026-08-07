@@ -46,7 +46,8 @@ rule exists so a model cannot fabricate a destination by writing one.
 | `@path`            | A file              | `@src/api.ts`, `@./README.md` | Session-relative, `./`-relative, or absolute inside the cwd |
 | `@path:line`       | A file at one line  | `@src/api.ts:120`             | 1-based                                                     |
 | `@path:line-end`   | A file line range   | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                           |
-| `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits                     |
+| `&ID`              | This session's task | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits                     |
+| `&ID@{session}`    | An exact task owner | `&F12@{mshahp8i-fb9fe194}`    | Session id is exact and case-sensitive                      |
 | `!AN`              | An Attention item   | `!A3`                         | Always `A` + a positive number                              |
 | `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
 | `%terminal:<key>`  | A live terminal     | `%terminal:0a1b2c3d4e5f`      | The daemon's own terminal id; session-scoped                |
@@ -56,11 +57,16 @@ Both skill sigils are accepted because the harnesses differ: Claude invokes a sk
 Codex as `$name`. Whichever you type is what the reader keeps seeing — a reference is never rewritten
 into "the canonical form" behind your back.
 
-Terminals and browser pages are **surfaces**, and they are the one family that is SESSION-scoped
-rather than fleet-scoped: the twelve hex characters that name a shell in one session name nothing at
-all in another, so a proved surface carries both the daemon and the session it was proved against.
-A surface reference is never an index — "the second terminal" shifts when a neighbour closes, and a
-shifted reference is how an agent types into the wrong shell.
+Task ids belong to sessions. The durable bare form `&F12` always means F12 in the session being read;
+it is never searched across a Shared board. The additive qualified form puts the exact owner after
+the id: `&F12@{Session_A-1}`. Braces are required, the task id case-folds to uppercase, and every byte
+of the session id keeps its authored case. Session ids may contain letters, digits, `.`, `_`, and `-`,
+are at most 128 characters, must begin with a letter or digit, and cannot be `.` or `..`.
+
+Terminals and browser pages are **surfaces**. The twelve hex characters that name a shell in one
+session name nothing at all in another, so a proved surface carries both the daemon and the session
+it was proved against. A surface reference is never an index — "the second terminal" shifts when a
+neighbour closes, and a shifted reference is how an agent types into the wrong shell.
 
 ### What is NOT a reference
 
@@ -71,12 +77,18 @@ shifted reference is how an agent types into the wrong shell.
   grammar does not, because `:` and `/` are its own token boundaries.
 - `$HOME`, `$PATH` — skill names are lowercase, so a shell variable is never read as a skill.
 - `50%`, `100%` — a `%` only opens a surface candidate before `terminal:` or `browser:`.
+- `&F12@{}`, `&F12@{.}`, `&F12@{../other}`, `&F12@{missing` — malformed task qualifiers. None
+  becomes a bare `&F12` link; the whole attempted qualified token remains prose.
 
 ### Boundaries
 
 A token has to start at the beginning of the text or after whitespace or one of `([{"'`` ` ``<>=—–`,
 and end at the end or before whitespace or ordinary punctuation. So `bob@example.com` is an address,
 `and/or` is a word, and `see :zelda.` links `:zelda` and keeps the full stop.
+
+For a qualified task the right boundary is checked after `}`: `&F12@{Session_A-1}.` keeps the full
+stop. `@` is deliberately not a right boundary for a bare task, so an empty, unsafe, overlong,
+unterminated, or otherwise malformed qualifier can never degrade to a link for its `&F12` prefix.
 
 ## 3. Escaping
 
@@ -92,15 +104,16 @@ never rewritten.
 
 ## 4. What each click opens
 
-| Reference    | Click opens                                                              |
-| ------------ | ------------------------------------------------------------------------ |
-| `:agent`     | That agent's session, **on the daemon the reference was proved against** |
-| `@file`      | A file tab in the side pane, scrolled to the referenced line or range    |
-| `&task`      | The Tasks pane for this session                                          |
-| `!attention` | The Attention pane for this session                                      |
-| `/skill`     | The Skills pane for this session                                         |
-| `%terminal:` | That exact terminal instance's tab                                       |
-| `%browser:`  | Nothing yet — no browser worker exists to prove a page, see section 7    |
+| Reference                   | Click opens                                                              |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `:agent`                    | That agent's session, **on the daemon the reference was proved against** |
+| `@file`                     | A file tab in the side pane, scrolled to the referenced line or range    |
+| bare `&task`                | The Tasks pane for this session                                          |
+| qualified `&task@{session}` | Not wired yet — the later Shared-board surface will select the exact row |
+| `!attention`                | The Attention pane for this session                                      |
+| `/skill`                    | The Skills pane for this session                                         |
+| `%terminal:`                | That exact terminal instance's tab                                       |
+| `%browser:`                 | Nothing yet — no browser worker exists to prove a page, see section 7    |
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
 new tab.
@@ -110,18 +123,18 @@ new tab.
 Triggers are how a picker is opened. They are not authored syntax: what the picker inserts is always
 one of the tokens in section 2.
 
-| Trigger | Menu                | Inserts                             |
-| ------- | ------------------- | ----------------------------------- |
-| `@`     | Files               | `@path`                             |
-| `@@`    | Fleet agents        | `:name`                             |
-| `@@@`   | Tasks               | `&ID`                               |
-| `@@@@`  | Attention           | `!AN`                               |
-| `:`     | Fleet agents        | `:name`                             |
-| `&`     | Tasks               | `&ID`                               |
-| `!`     | Attention           | `!AN`                               |
-| `$`     | Skills              | `/name` on Claude, `$name` on Codex |
-| `/`     | Commands and skills | `/name` on Claude, `$name` on Codex |
-| `%`     | Live surfaces       | `%terminal:<key>`                   |
+| Trigger | Menu                 | Inserts                             |
+| ------- | -------------------- | ----------------------------------- |
+| `@`     | Files                | `@path`                             |
+| `@@`    | Fleet agents         | `:name`                             |
+| `@@@`   | This session's tasks | `&ID`                               |
+| `@@@@`  | Attention            | `!AN`                               |
+| `:`     | Fleet agents         | `:name`                             |
+| `&`     | This session's tasks | `&ID`                               |
+| `!`     | Attention            | `!AN`                               |
+| `$`     | Skills               | `/name` on Claude, `$name` on Codex |
+| `/`     | Commands and skills  | `/name` on Claude, `$name` on Codex |
+| `%`     | Live surfaces        | `%terminal:<key>`                   |
 
 Every family is reachable two ways, and both ways read one source. The repeated-`@` ladder is the
 DISCOVERABLE one — a single sigil, repeated, teaches four families from a legend — and the direct
@@ -130,6 +143,10 @@ sigil is what you use once you know, because it is the first character of the to
 The picker inserts what the harness invokes, which is why `$` can insert `/name`: an invocation the
 harness ignores is a broken offer. That is not the same as rewriting an authored reference, which
 never happens.
+
+The `&` and `@@@` pickers remain local by default and insert bare tokens. When the later Shared-board
+surface supplies an action for a foreign row, it will generate the qualified spelling through
+`formatReference` and deliver it into the current/viewer's composer, never the owner's composer.
 
 There is deliberately no fifth `@@@@@` tier: Pins are a top link strip, not a reference tier
 (handover #63), and they are readable composer text rather than a second reference grammar. Template
@@ -189,14 +206,15 @@ that goes nowhere costs the reader a tap and their trust.
 
 What "proved" means per kind:
 
-| Kind        | Proof                                                          |
-| ----------- | -------------------------------------------------------------- |
-| `agent`     | A session in **this daemon's** fleet slice holds that callsign |
-| `file`      | The session filesystem answers with a canonical, readable path |
-| `task`      | The id is in this session's task board                         |
-| `attention` | The id is in this session's Attention ledger                   |
-| `skill`     | The name is in this session's skills catalog                   |
-| `surface`   | The session's owner is holding that terminal or page right now |
+| Kind             | Proof                                                                      |
+| ---------------- | -------------------------------------------------------------------------- |
+| `agent`          | A session in **this daemon's** fleet slice holds that callsign             |
+| `file`           | The session filesystem answers with a canonical, readable path             |
+| bare `task`      | The id is in this session's local task snapshot                            |
+| qualified `task` | The exact current-session local row or authorized foreign Shared board row |
+| `attention`      | The id is in this session's Attention ledger                               |
+| `skill`          | The name is in this session's skills catalog                               |
+| `surface`        | The session's owner is holding that terminal or page right now             |
 
 A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
 answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with
@@ -212,6 +230,23 @@ still share a shell. No listing at all still proves nothing, and stays prose.
 Everything is keyed by `(daemonId, …)`. A resolved agent reference carries the daemon it was proved
 against and navigates to `/d/:daemon/session/:id`, so a reference in one daemon's transcript can
 never open a same-named session on another.
+
+A task resolver answers with the identity it proved; truthiness is not proof. The answer must carry
+a nonblank daemon id, a safe exact session id, and the normalized task id that was asked for. A
+qualified answer must also carry the exact session that was asked for. Bare lookup is offered only
+the local-session input; a qualified foreign lookup is offered only ready, authorized Shared board
+rows. An aggregate row can never satisfy a bare token.
+
+Resolved task links carry the exact five-key envelope
+`#fy-reference?kind=task&daemon=<daemon>&session=<session>&id=F12&form=<local|qualified>` and identity
+`task:<daemon>:<session>:F12:<form>`. On a primary unmodified click the renderer asks the same lookup
+again and requires the daemon, session, id, and form to equal the painted link. A scope change,
+missing/refused aggregate, lost membership, or missing row makes it inert. Modifier and middle
+clicks retain the browser's own behavior.
+
+The older internal `kind=task&id=F12` href and `task:F12` identity were ephemeral DOM artifacts, not
+durable authored syntax. The strict decoder refuses them; a transcript already open across this
+upgrade may leave those old painted links inert until it repaints or reloads.
 
 ## 7. References inside code
 
@@ -238,6 +273,9 @@ Rules:
 5. A proved-CLOSED surface stays literal inside code rather than becoming a tombstone: striking a
    token through would misrepresent the snippet as containing a `<del>`, and code is verbatim.
 
+Bare and qualified task tokens follow the same rule. `&F12@{Session_A-1}` inside inline or fenced
+code may be decorated when proved, but its braces, case, and every surrounding byte are unchanged.
+
 ## 8. Adding a new reference kind
 
 The grammar is meant to be extended in one place, not forked. To add a kind:
@@ -255,3 +293,9 @@ The grammar is meant to be extended in one place, not forked. To add a kind:
 `%browser:` is in exactly that intermediate state today: it parses and encodes, and nothing can prove
 it — there is no browser worker and no authoritative page list, so a page is neither open nor
 demonstrably closed. Teaching one resolver about pages is the whole remaining change.
+
+Qualified tasks extend the existing `task` kind; they are not a second reference family. Any change
+to their shape must update the task arm of `parseReferenceToken`/`findReferences`, `formatReference`,
+`resolveReference`, `referenceHref`/`parseReferenceHref`, `referenceIdentity`, `revalidateReference`,
+and `referenceTitle` together. `formatReference` is the sole owner of both `&F12` and
+`&F12@{session}` spelling, including generated composer and task-board text.

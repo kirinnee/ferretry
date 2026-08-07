@@ -52,6 +52,7 @@ import {
   type ReferenceResolvers,
   type ResolvedReference,
   type ResolvedSurfaceReference,
+  type ResolvedTaskReference,
   referenceHref,
   referenceIdentity,
   referenceTitle,
@@ -102,7 +103,7 @@ export interface MarkdownProps {
   readonly className?: string;
   /** Proves `:callsign` against one daemon's live fleet. Without it, prose. */
   readonly agentReferenceResolver?: AgentReferenceResolver;
-  /** Proves `&task` against the daemon's board. Syntax alone never links. */
+  /** Proves local/qualified task lookups from their scope-bound evidence. */
   readonly taskReferenceResolver?: TaskReferenceResolver;
   /** Proves `!attention` against this session's ledger. */
   readonly attentionReferenceResolver?: AttentionReferenceResolver;
@@ -114,7 +115,7 @@ export interface MarkdownProps {
   readonly skillReferenceResolver?: SkillReferenceResolver;
   /** Session filesystem context. Without it, code-shaped text stays plain. */
   readonly resolveFilePaths?: FilePathResolver;
-  readonly onTaskOpen?: (id: string, opener?: HTMLElement | null) => void;
+  readonly onTaskOpen?: (reference: ResolvedTaskReference, opener?: HTMLElement | null) => void;
   readonly onCodeReferenceOpen?: (reference: CodeReference, opener?: HTMLElement | null) => void;
   readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
   /** Focuses one proved live surface — the terminal or page the token names.
@@ -204,7 +205,7 @@ export const Markdown = memo(function Markdown({
         );
         break;
       case 'task':
-        onTaskOpen?.(target.id, opener);
+        onTaskOpen?.(target, opener);
         break;
       case 'attention':
         onAttentionOpen?.(target.id, opener);
@@ -260,7 +261,12 @@ export const Markdown = memo(function Markdown({
       )
         return;
       event.preventDefault();
-      openReference(target, event.currentTarget);
+      // Paint-time proof can go stale without changing the authored text. Ask
+      // again on the primary in-app click and require the exact painted identity;
+      // a changed daemon/session/task/form makes the old link inert.
+      const current = revalidateReference(target, trustedResolvers);
+      if (current === null || referenceIdentity(current) !== referenceIdentity(target)) return;
+      openReference(current, event.currentTarget);
     };
 
   /**

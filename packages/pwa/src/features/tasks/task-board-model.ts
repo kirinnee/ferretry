@@ -7,6 +7,8 @@
  */
 
 import type { TaskBoardLane, TaskPhase, TaskSummary, TaskWorkflow } from '@ferretry/protocol';
+import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { formatReference } from '../../lib/references.ts';
 import { TASK_STATUS_META, type TaskStateMeta } from './task-presentation.ts';
 
 /**
@@ -33,8 +35,43 @@ export const TASK_WORKFLOW_LABEL: Readonly<Record<TaskWorkflow, string>> = {
 export const taskBoardLane = (phase: TaskPhase): TaskBoardLane =>
   phase === 'research' || phase === 'design' || phase === 'build' ? 'in_progress' : phase;
 
-/** All human-facing task references use the `&F12` sigil. */
-export const taskReference = (id: string): `&${string}` => `&${id.replace(/^[#&]/u, '')}`;
+const unprefixedTaskId = (id: string): string => id.replace(/^[#&]/u, '');
+const inertTaskLabel = (value: string): string => value.replaceAll('&', '');
+
+/** All local human-facing task references use the canonical formatter. */
+export const taskReference = (id: string): string => {
+  const taskId = unprefixedTaskId(id);
+  try {
+    return formatReference({ kind: 'task', id: taskId });
+  } catch {
+    // Activity history can retain an id from damaged/older data. Keep the label
+    // renderable but inert: inventing a sigil token would address another task.
+    return inertTaskLabel(taskId);
+  }
+};
+
+/**
+ * Spell a row's task relative to the session whose composer/transcript reads it.
+ * A current-session row stays bare; a foreign row names its exact owner.
+ */
+export const taskReferenceFor = (
+  viewerScope: Pick<DaemonSessionScope, 'sessionId'>,
+  ownerSessionId: string,
+  id: string,
+): string => {
+  const taskId = unprefixedTaskId(id);
+  try {
+    return formatReference({
+      kind: 'task',
+      id: taskId,
+      ...(ownerSessionId === viewerScope.sessionId ? {} : { sessionId: ownerSessionId }),
+    });
+  } catch {
+    // Never fall back to a bare token for a foreign/unsafe owner: that would
+    // silently point at the viewer's task. Unqualified text is the fail-closed UI.
+    return inertTaskLabel(taskId);
+  }
+};
 
 /** The state a row wears: blocked outranks whichever phase it is blocked in. */
 export const taskBoardState = (task: Pick<TaskSummary, 'blocked' | 'phase'>): TaskStateMeta =>
