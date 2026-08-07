@@ -173,12 +173,17 @@ export const cgroupConfigView = {
     perAgent: { cpuPercent: 40, memoryPercent: 40 },
   },
   supported: true,
-  fleetSlice: 'fy.slice',
+  fleetSlice: 'ferretry-fleet.slice',
+  // The values a host manager is actually given: a percentage of the WHOLE machine for CPU — 80% of
+  // eight CPUs is `640%` — and decimal bytes for memory. This fixture used to carry the unified
+  // hierarchy's raw `cpu.max` pair (`"640000 100000"`), which is a second spelling of the same fact
+  // and one no `set-property` would accept. `packages/daemon/src/lib/cgroups/limits.ts` owns the
+  // conversion; every fixture, wire value and written property comes from it.
   effective: {
     cpus: 8,
     memoryBytes: 8_000_000,
-    fleet: { cpuQuota: '640000 100000', memoryMax: '6400000' },
-    perAgent: { cpuQuota: '320000 100000', memoryMax: '3200000' },
+    fleet: { cpuQuota: '640%', memoryMax: '6400000' },
+    perAgent: { cpuQuota: '320%', memoryMax: '3200000' },
   },
   restartRequiredSessions: [],
   warnings: [],

@@ -12,6 +12,20 @@ export interface SessionPaneRegistrar {
   register(record: SessionLifecycleRecord): Promise<void>;
 }
 
+/**
+ * The one seam through which a managed pane can be launched inside a resource-limited scope.
+ *
+ * It takes the argv rather than the record, and answers with the argv the pane must actually exec.
+ * The record's own `command` is DURABLE and stays the harness command: a relaunch after enforcement
+ * is turned off must run the same session directly, so the wrapper can never be baked into what was
+ * written down.
+ *
+ * A launcher constructed without one launches exactly as it did before this port existed.
+ */
+export interface AgentLaunchWrapper {
+  command(sessionId: string, command: readonly string[]): Promise<readonly string[]>;
+}
+
 /** A session with no stored environment launches with none, which is the pre-credential behaviour. */
 const NO_ENVIRONMENT: SessionEnvironmentStore = {
   write: async () => undefined,
@@ -26,6 +40,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     private readonly environment: SessionEnvironmentStore = NO_ENVIRONMENT,
     private readonly registrar?: SessionPaneRegistrar,
     private readonly snapshots?: LastSnapshotWriter,
+    private readonly limits?: AgentLaunchWrapper,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -33,7 +48,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
   }
 
   async launch(record: SessionLifecycleRecord): Promise<void> {
-    const [program, ...arguments_] = record.config.command;
+    // Resolved per launch, from the saved limits and this session's own spawn record, and applied to
+    // the argv rather than to the durable command — see `AgentLaunchWrapper`. A daemon with no
+    // wrapper, or one whose limits are off, gets back exactly what it passed in.
+    const wrapped = (await this.limits?.command(record.config.id, record.config.command)) ?? record.config.command;
+    const [program, ...arguments_] = wrapped;
     if (program === undefined) throw new Error('session command is empty');
     // Read per launch rather than cached at construction: a relaunch after a rotated credential must
     // hand the pane the CURRENT secret, and one launcher instance serves every session.

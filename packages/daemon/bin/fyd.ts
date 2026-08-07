@@ -44,6 +44,13 @@ import {
   BunSecretShell,
   BunSqliteIndexFactory,
   CachedUsageFeed,
+  FileCgroupApplyStatusStore,
+  FileCgroupConfigStore,
+  FileSessionSpawnFacts,
+  hostCgroupFacts,
+  ProcCgroupPlacements,
+  RegisteredCgroupPaneLedger,
+  SpawnCgroupCommands,
   CommandUsageSource,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -232,6 +239,8 @@ import {
   CALLSIGN_WINDOW_MS,
   CapabilityGrantService,
   type CatalogSubsystem,
+  CgroupLaunchPlanner,
+  CgroupService,
   type ChildGrantRequester,
   ClaudeTranscriptParser,
   type ClockPort,
@@ -3163,6 +3172,35 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // half-launched pane must not make every unrelated document write wait behind it.
   const sessionMutations = new KeyedSerialExecutor();
   /**
+   * Fleet resource limits: the three collaborators both halves of the feature share.
+   *
+   * ONE DOCUMENT, ONE HOST, ONE COMMAND RUNNER, and two callers — the launch below, which decides
+   * the argv a pane execs, and the settings subsystem further down, which reports and applies. They
+   * are separate objects because they need different things (only the settings side reads live
+   * placements), and they cannot disagree because every number either one uses is derived by
+   * `src/lib/cgroups` from these same three.
+   *
+   * THE HOST IS MEASURED ONCE. A machine does not grow CPUs while a daemon runs, and reading it per
+   * request would let the effective limit the panel displays differ from the property the next
+   * launch writes.
+   */
+  const cgroupConfigStore = new FileCgroupConfigStore(stateFiles, paths);
+  const cgroupHost = hostCgroupFacts();
+  // Bounded. Both callers hold the session lifecycle's barrier while this runs, so a user manager
+  // that accepts a connection and never answers would otherwise stall every session start, stop and
+  // resume in the daemon for as long as it stayed silent.
+  const cgroupCommands = new SpawnCgroupCommands();
+  const sessionSpawnFacts = new FileSessionSpawnFacts(stateFiles, paths);
+  const cgroupLaunchPlanner = new CgroupLaunchPlanner({
+    store: cgroupConfigStore,
+    host: cgroupHost,
+    commands: cgroupCommands,
+    sessions: sessionSpawnFacts,
+    // A nonce per launch, from the same source as every other unguessable value here, so a relaunch
+    // cannot collide with a scope that is still deactivating.
+    nonce: () => crypto.randomUUID().slice(0, 8),
+  });
+  /**
    * The routing catalog, with its ONE refusal restated in a taxonomy `src/lib` may name.
    *
    * `FileRoutingCatalog` deliberately has no default — the catalog IS the routing doctrine — so an
@@ -3432,6 +3470,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   });
   const createResumeLauncher = (storage: DaemonStorage): ResumeLauncher => {
     const controller = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
+    const registrar = new DurableTerminalPaneRegistrar(paths.home, controller, stateFiles, paths);
     return new TmuxResumeLauncher(
       controller,
       async id => {
@@ -3454,6 +3493,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       },
       new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
       lastSnapshots,
+      // The SAME planner initial startup uses: a replacement pane is a new launch and must receive
+      // the configuration saved immediately before it, without restarting this daemon.
+      cgroupLaunchPlanner,
+      registrar,
     );
   };
   /**
@@ -3483,9 +3526,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         turns: resumeTurns,
         monitors: new NoMonitorSupervision(),
         gate: launchGate,
-        // Its own queue: a revive must not serialize behind storage-wide work while it holds a
-        // half-replaced terminal.
-        serial: new KeyedSerialExecutor(),
+        // The lifecycle's process-wide queue, also taken exclusively by resource-limit PATCH. A
+        // replacement pane is a bootstrap too: a save cannot land between its planner read and the
+        // registered replacement process appearing.
+        serial: sessionMutations,
       },
       defaultSessionResumeSettings,
     );
@@ -3557,6 +3601,11 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       sessionEnvironments,
       new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),
       lastSnapshots,
+      // What makes the resource-limit settings a capability rather than a stored preference: the
+      // compiled daemon's own launch path asks, per pane, whether this session runs inside a
+      // scope. Supervision and this daemon are never wrapped — see `lib/cgroups/exemption.ts` and
+      // the planner's header — and a launch with limits off is byte-for-byte what it always was.
+      cgroupLaunchPlanner,
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {
@@ -3994,6 +4043,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // make every unrelated document write in the process wait behind it.
         serial: new KeyedSerialExecutor(),
       });
+      // The SAME durable registration ledger the reap sweep reads, over the storage this boot
+      // opened. Resource limits and the reap both need "which panes does this daemon own, and which
+      // of their sessions are provably over" — two readers of one ledger, never two ledgers.
+      const cgroupPanes = new DurableTerminalPaneStore(storage, stateFiles, paths);
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -4018,6 +4071,47 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
         fleet,
+        /**
+         * How much of this machine the managed fleet may take.
+         *
+         * IT SHARES THE LAUNCH PATH'S COLLABORATORS — the same saved document, the same measured
+         * host, the same command runner — so the effective limits this reports are the ones the
+         * next pane is actually given. A second store here would let the panel display a ceiling no
+         * launch ever writes.
+         *
+         * IT TAKES THE SESSION LIFECYCLE'S OWN EXECUTOR, exclusively. That is the single owner of
+         * mutation ordering in this process, and taking it is what stops a save from landing in the
+         * gap between a start choosing its argv and the pane existing — and what orders two saves
+         * against each other. A private lock here would be a second owner of one question, and the
+         * two would order the same pair of operations differently.
+         *
+         * THE PANE LEDGER IS THIS DAEMON'S OWN REGISTRATIONS, read through the same two ports the
+         * reap sweep uses. A pane this daemon did not register is not one it may reconfigure.
+         */
+        cgroups: new CgroupService({
+          store: cgroupConfigStore,
+          // Beside the saved document, in the same directory: what this host refused to apply
+          // outlives the answer to the save that met the refusal, so a page refresh or a restart
+          // cannot report a session that kept its old cap as a current one.
+          applyStatus: new FileCgroupApplyStatusStore(stateFiles, paths),
+          host: cgroupHost,
+          commands: cgroupCommands,
+          placements: new ProcCgroupPlacements(),
+          panes: new RegisteredCgroupPaneLedger(
+            paths.home,
+            // The TOLERANT read of the same ledger the reap refuses on: a settings surface must not
+            // go dark because one registration was hand-edited, and the same observer the reap uses
+            // re-proves each pane's incarnation before its pid may be addressed.
+            { list: daemonId => cgroupPanes.scan(daemonId) },
+            { list: daemonId => cgroupPanes.sessions(daemonId) },
+            new ExactTmuxPaneReaper(launchTmux),
+          ),
+          sessions: sessionSpawnFacts,
+          serial: sessionMutations,
+          // Measured, not asserted: the surface warns if this very process turns out to be inside
+          // the slice it is capping.
+          daemonPid: process.pid,
+        }),
         foreignHistory,
         // This owns no cache and no provider policy: the mounted fleet health reader and the daemon
         // usage feed already own those. One service per opened state home serializes only this

@@ -865,9 +865,18 @@ function DictationFlowHarness({
  */
 const HARNESS_CGROUP_HOST = { cpus: 8, memoryBytes: 34_359_738_368 } as const;
 
+/**
+ * The two values a host manager is actually given.
+ *
+ * A PERCENTAGE OF THE WHOLE MACHINE for CPU — 80% of eight CPUs is `640%` — and decimal bytes for
+ * memory. This fixture used to compute the unified hierarchy's raw `cpu.max` pair
+ * (`"640000 100000"`), which is a second spelling of one fact and one that no `set-property` would
+ * accept, so a reviewer looking at the captured panel was reading a number the daemon never writes.
+ * `packages/daemon/src/lib/cgroups/limits.ts` owns the conversion and this mirrors it exactly.
+ */
 const harnessCgroupQuota = (cpuPercent: number, memoryPercent: number) => ({
-  cpuQuota: `${HARNESS_CGROUP_HOST.cpus * cpuPercent * 1_000} 100000`,
-  memoryMax: String(Math.round((HARNESS_CGROUP_HOST.memoryBytes * memoryPercent) / 100)),
+  cpuQuota: `${Math.max(1, Math.round(cpuPercent * HARNESS_CGROUP_HOST.cpus))}%`,
+  memoryMax: String(Math.max(1, Math.floor((memoryPercent / 100) * HARNESS_CGROUP_HOST.memoryBytes))),
 });
 
 const harnessCgroupView = (config: CgroupConfigView['config']): CgroupConfigView => ({
@@ -876,17 +885,22 @@ const harnessCgroupView = (config: CgroupConfigView['config']): CgroupConfigView
   // controls that would do something. The unsupported presentation is a real
   // state, but it belongs to a platform this fixture is not pretending to be.
   supported: true,
-  fleetSlice: 'fy.slice',
+  // The slice a real daemon names, derived there from the product scope rather than written out.
+  fleetSlice: 'ferretry-fleet.slice',
   effective: {
     cpus: HARNESS_CGROUP_HOST.cpus,
     memoryBytes: HARNESS_CGROUP_HOST.memoryBytes,
     fleet: harnessCgroupQuota(config.fleet.cpuPercent, config.fleet.memoryPercent),
     perAgent: harnessCgroupQuota(config.perAgent.cpuPercent, config.perAgent.memoryPercent),
   },
-  // Nothing is running under this fixture's slice, so there is no session whose
-  // restart a change would wait for and no half-applied host to report.
-  restartRequiredSessions: [],
-  warnings: [],
+  // The captured state deliberately carries both kinds of evidence the surface must make visible:
+  // a running pane whose saved limit needs a relaunch, and a host-manager refusal that means the
+  // durable configuration is newer than the live scope. A happy-only fixture cannot prove either
+  // warning survives the trip through the production card.
+  restartRequiredSessions: ['msh-harness-running'],
+  warnings: [
+    'user manager unavailable — the saved limits are stored but are not in force; relaunch affected sessions once the host manager is reachable',
+  ],
 });
 
 const HARNESS_CGROUP_CONFIG: CgroupConfigView['config'] = {
