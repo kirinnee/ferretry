@@ -383,6 +383,11 @@ export function SessionSearchProvider({
       }
       setQueryState(next);
       setActiveKey(null);
+      // Raw spelling belongs to the input; the normalized value is the query
+      // snapshot's identity. A case/whitespace-only edit must not replace an
+      // unavailable answer with `searching`, because the debounced reader will
+      // not re-arm for an identity it has already asked.
+      if (normalizedNext === normalizedQuery) return;
       if (scope === null) return;
       if (normalizedNext === null) {
         publish(key, current => ({
@@ -1046,16 +1051,21 @@ export function SessionTasksSearchSurface() {
   const [markingDoneKey, setMarkingDoneKey] = useState<string | null>(null);
   const [markDoneError, setMarkDoneError] = useState<string | null>(null);
   const [referenceMessage, setReferenceMessage] = useState('');
+  const parsedQuery = SessionSearchQuerySchema.safeParse(search.query);
+  const normalizedQuery = parsedQuery.success ? normalizeSessionSearchQuery(parsedQuery.data) : null;
+  const taskFilterUnavailable = normalizedQuery !== null && search.matchState === 'unavailable';
   const tasks = useMemo(() => {
-    const parsed = SessionSearchQuerySchema.safeParse(search.query);
-    const normalized = parsed.success ? normalizeSessionSearchQuery(parsed.data) : null;
     const matchedIds =
-      normalized !== null && normalized === search.matchQuery ? new Set(search.matches.map(task => task.id)) : null;
+      normalizedQuery !== null && search.matchState === 'ready' && normalizedQuery === search.matchQuery
+        ? new Set(search.matches.map(task => task.id))
+        : null;
     // The query response decides membership only. The mount board remains the
     // source of every row and action, so a query cannot replace reference/action
-    // evidence with a newer or differently projected summary.
+    // evidence with a newer or differently projected summary. If narrowing
+    // fails, keep that proved board visible and name the failed filter below;
+    // an empty pane would falsely claim that the query matched zero tasks.
     const source =
-      normalized === null
+      normalizedQuery === null || taskFilterUnavailable
         ? search.tasks
         : matchedIds === null
           ? []
@@ -1063,7 +1073,16 @@ export function SessionTasksSearchSurface() {
     return source.map(task =>
       search.scope === null ? task : (optimistic.get(taskOverlayKey(search.scope, task.id)) ?? task),
     );
-  }, [optimistic, search.matchQuery, search.matches, search.query, search.scope, search.tasks]);
+  }, [
+    normalizedQuery,
+    optimistic,
+    search.matchQuery,
+    search.matches,
+    search.matchState,
+    search.scope,
+    search.tasks,
+    taskFilterUnavailable,
+  ]);
   const selected = tasks.find(task => task.id === selectedId) ?? null;
   const markingDoneId =
     search.scope === null || markingDoneKey === null
@@ -1185,6 +1204,18 @@ export function SessionTasksSearchSurface() {
           {tasks.length} task{tasks.length === 1 ? '' : 's'}
         </span>
       </div>
+      {taskFilterUnavailable ? (
+        <p
+          className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-ui text-warn"
+          data-task-filter-unavailable=""
+          role="alert"
+        >
+          <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
+          <span>
+            Task filtering failed; showing all mounted tasks. {search.matchError ?? 'The daemon returned no reason.'}
+          </span>
+        </p>
+      ) : null}
       {selected && <TaskQuickSummary task={selected} />}
       {markDoneError !== null ? (
         <p className="m-0 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-ui text-err" role="alert">

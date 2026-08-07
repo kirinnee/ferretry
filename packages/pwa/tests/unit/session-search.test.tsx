@@ -498,6 +498,51 @@ describe('what one mounted session scope costs', () => {
     }
   });
 
+  test('keeps a failed normalized query unavailable when only its raw spelling changes', async () => {
+    const seen: Recorded[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      seen.push({ method: init?.method ?? 'GET', pathname: url.pathname, search: url.searchParams });
+      if (url.pathname.endsWith('/fs/index')) return Response.json(fileIndexResponse());
+      if (url.pathname.endsWith('/tasks') && url.searchParams.has('q'))
+        return new Response('too busy', { status: 503 });
+      if (url.pathname.endsWith('/tasks')) return Response.json(taskListResponse([needleTask()]));
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionSearchControl />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      await afterQuerySettles();
+
+      expect(queryTaskReads(seen)).toHaveLength(1);
+      expect(JSON.stringify(view.toJSON())).toContain('Task search unavailable');
+
+      // Both edits are the same trim-and-folded identity. They update what the
+      // reader sees, but neither earns another request nor erases the standing
+      // refusal with a searching state no effect is armed to settle.
+      for (const value of ['needle ', 'NEEDLE']) {
+        run(() => input.props.onChange({ target: { value } }));
+        await afterQuerySettles();
+      }
+
+      const drawn = JSON.stringify(view.toJSON());
+      expect(input.props.value).toBe('NEEDLE');
+      expect(queryTaskReads(seen)).toHaveLength(1);
+      expect(drawn).toContain('Task search unavailable');
+      expect(drawn).toContain('HTTP 503');
+      expect(drawn).not.toContain("Searching this session's tasks");
+      expect(view.root.findAll(node => node.props['data-search-searching'] !== undefined)).toHaveLength(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
   test('refuses a query the daemon would reject, at the input, instead of spending a 400', async () => {
     const { seen, view } = await mountProvider({ tasks: [needleTask()] });
     const invalid = view.root.findByType('input');
@@ -1110,6 +1155,50 @@ describe('the Tasks surface acts on summaries', () => {
       const popupTasks = surface.root.findAll(node => node.props['data-result-kind'] === 'task');
       expect(popupTasks).toHaveLength(1);
       expect(popupTasks[0]?.findAllByType('span')[0]?.children.join('')).toBe('Query payload title');
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+
+  test('keeps mounted tasks and names a failed filter after the popup is dismissed', async () => {
+    const seen: Recorded[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      seen.push({ method: init?.method ?? 'GET', pathname: url.pathname, search: url.searchParams });
+      if (url.pathname.endsWith('/fs/index')) return Response.json(fileIndexResponse({ files: [] }));
+      if (url.pathname.endsWith('/tasks') && url.searchParams.has('q'))
+        return new Response('too busy', { status: 503 });
+      if (url.pathname.endsWith('/tasks')) return Response.json(taskListResponse([needleTask()]));
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const input = surface.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      await afterQuerySettles();
+      run(() => input.props.onBlur({ relatedTarget: null }));
+
+      // Dismissing the transient popup cannot dismiss the only explanation of
+      // a persistent pane filter. The stable mounted board remains actionable
+      // while the pane states plainly that its narrowing answer failed.
+      expect(surface.root.findAll(node => node.props['data-session-search-popup'] !== undefined)).toHaveLength(0);
+      const notice = surface.root.findByProps({ 'data-task-filter-unavailable': '' });
+      expect(notice.props.role).toBe('alert');
+      expect(surface.root.findAllByProps({ 'data-task-id': 'F6' }).length).toBeGreaterThan(0);
+      expect(queryTaskReads(seen)).toHaveLength(1);
+      const drawn = JSON.stringify(surface.toJSON());
+      expect(drawn).toContain('Task filtering failed; showing all mounted tasks.');
+      expect(drawn).toContain('HTTP 503');
+      expect(drawn).toContain('Needle task');
+      expect(surface.root.findAll(node => node.type === 'span' && node.children.join('') === '1 task')).toHaveLength(1);
+      expect(surface.root.findAll(node => node.type === 'span' && node.children.join('') === '0 tasks')).toHaveLength(
+        0,
+      );
     } finally {
       run(() => surface.unmount());
     }
