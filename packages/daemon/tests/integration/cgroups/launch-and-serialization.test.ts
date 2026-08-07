@@ -196,8 +196,12 @@ const memoryApplyStatus = (): CgroupApplyStatusStore => {
   };
 };
 
-/** Delivery is not what this file is about; the first turn is not exercised. */
-const NO_DELIVERY = { deliver: async () => undefined } as unknown as TmuxPaneDelivery;
+/** Delivery exercises only the durable admission boundary; it performs no pane mutation. */
+const NO_DELIVERY = {
+  deliver: async (_session: string, _text: string, _options: unknown, beforeWrite?: () => Promise<void>) => {
+    await beforeWrite?.();
+  },
+} as unknown as TmuxPaneDelivery;
 
 interface Harness {
   readonly log: string[];
