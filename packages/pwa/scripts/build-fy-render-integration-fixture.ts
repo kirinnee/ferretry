@@ -6,8 +6,8 @@
  * integration files used to compile their own inputs inside the Bun test process:
  * the sandbox shell and its two library bundles, the app stylesheet, and — only in
  * the visual file — a scene entry traversing the real `FyRenderBlock` graph. Run
- * the way `scripts/ci/test.sh int` runs them, which is every integration file in
- * ONE Bun process, the pair wedged. Not failed: wedged, which is worse, because a
+ * together in ONE Bun process — an unisolated/direct combined run, the way the pair
+ * was first reproduced — they wedged. Not failed: wedged, which is worse, because a
  * hang consumes the job timeout and produces no diagnostic. Two reviewers
  * reproduced it independently, and the process tree showed a Bun test process
  * asleep in `ep_poll` with no Chromium alive — the last thing to start was the
@@ -18,6 +18,15 @@
  * stop compiling inside the test runner. So this is a CLI, the test loader spawns
  * it with `process.execPath`, and no `Bun.build` runs in the Bun test process any
  * more.
+ *
+ * WHY THE COMPILE STAYS OUT EVEN UNDER THE ISOLATED WORKER. The official
+ * integration entrypoints now run with one isolated worker (`--parallel=1`), which
+ * implies `--isolate` — a fresh global per file — so each file owns a fresh browser
+ * and fixture and there is no shared in-process compile to wedge on. The child
+ * builder remains the seam a DIRECT same-process invocation (several files in one
+ * Bun process, no `--parallel`) keeps relying on: that run shares one global, the
+ * loader's process-level memo deduplicates the build, and the compile stays out of
+ * the runner where it used to hang.
  *
  * WHAT IT GUARANTEES
  *
