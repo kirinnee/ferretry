@@ -31,7 +31,13 @@ export function SessionDetails({ daemonId, session, now = Date.now(), onClose }:
       <dl>
         <Detail label="Status" value={sessionStatusLabel(state.status)} />
         <Detail label="Mode" value={config.mode} />
-        <Detail label="Model" value={(config.model ?? config.modelHint) || '—'} />
+        {/* OBSERVED BEFORE CONFIGURED, which is the same order the CLI reads.
+            `state.observedModel` is what the harness reported it is actually
+            answering with; `config.model` is what somebody asked for, and a
+            request a harness silently declined is exactly the case where the
+            two differ. Showing intent first would make a failed switch look
+            like a successful one, and the reader has no other way to tell. */}
+        <Detail label="Model" value={state.observedModel || config.model || config.modelHint || '—'} />
         <Detail label="Turn" value={String(state.turn)} />
         <Detail label="Context" value={state.contextPercent === undefined ? '—' : `${state.contextPercent}%`} />
         <Detail label="Activity" value={state.activity ?? 'No activity recorded'} />

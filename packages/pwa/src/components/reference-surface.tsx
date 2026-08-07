@@ -30,7 +30,7 @@ import { createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { createSurfaceReferenceResolver } from '../lib/surface-references.ts';
-import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
+import { type BoardAggregateTaskReferenceRow, createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
 import {
   openSidePaneFileTab,
   openSidePaneTab,
@@ -74,6 +74,8 @@ export interface SessionReferenceSurfaceOptions {
   readonly sessions?: readonly SessionView[];
   /** This session's task board, when the host already holds it. */
   readonly tasks?: readonly { readonly id: string }[];
+  /** Ready, authorized Shared board rows. Later aggregate wiring supplies this. */
+  readonly boardTasks?: readonly BoardAggregateTaskReferenceRow[];
   /** This session's unresolved Attention ledger, when the host already holds it. */
   readonly attentionIds?: readonly AttentionId[];
   /** This session's skills catalog names, when the host already holds it. */
@@ -107,7 +109,7 @@ const fileSelection = (line?: number, endLine?: number): SidePaneFileSelection |
  * second half-built detail view.
  */
 export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions): ReferenceSurface {
-  const { connection, scope, cwd, sessions, tasks, attentionIds, skills, terminals, onNavigate } = options;
+  const { connection, scope, cwd, sessions, tasks, boardTasks, attentionIds, skills, terminals, onNavigate } = options;
   const attention = attentionIds === undefined ? undefined : new Set<string>(attentionIds);
   // EXACT names, never case-folded. The catalog accepts any nonempty trimmed
   // name, while the reference grammar accepts lowercase ones only — so folding a
@@ -118,11 +120,19 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
   // arriving here was parsed by that grammar and is therefore already lowercase,
   // which is what makes exact membership the correct and complete test.
   const skillNames = skills === undefined ? undefined : new Set(skills);
+  const taskResolver =
+    tasks === undefined && boardTasks === undefined
+      ? undefined
+      : createTaskReferenceResolver({
+          scope,
+          ...(tasks === undefined ? {} : { localTasks: tasks }),
+          ...(boardTasks === undefined ? {} : { boardTasks }),
+        });
   return {
     ...(sessions === undefined
       ? {}
       : { agentReferenceResolver: createAgentReferenceResolver(scope.daemonId, sessions) }),
-    ...(tasks === undefined ? {} : { taskReferenceResolver: createTaskReferenceResolver(tasks) }),
+    ...(taskResolver === undefined ? {} : { taskReferenceResolver: taskResolver }),
     ...(attention === undefined ? {} : { attentionReferenceResolver: (id: AttentionId) => attention.has(id) }),
     ...(skillNames === undefined ? {} : { skillReferenceResolver: (name: string) => skillNames.has(name) }),
     // Always supplied, because this resolver is the only thing that can say

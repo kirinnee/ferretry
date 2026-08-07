@@ -85,6 +85,10 @@ const settingIds = (view: ReactTestRenderer): string[] =>
     .findAll(node => node.props['data-setting-id'] !== undefined)
     .map(section => String(section.props['data-setting-id']));
 
+/** Every switch inside one setting's own panel, in rendered order. */
+const settingSwitches = (view: ReactTestRenderer, id: string) =>
+  view.root.findByProps({ 'data-setting-id': id }).findAllByProps({ role: 'switch' });
+
 const selectDesktopSection = (view: ReactTestRenderer, section: string): void => {
   run(() => view.root.findByProps({ 'data-settings-section-choice': section }).props.onClick());
 };
@@ -157,7 +161,13 @@ describe('SettingsPage sections', () => {
     const view = render(page({ connections: [alpha, beta] }));
 
     selectDesktopSection(view, 'behaviour');
-    expect(settingIds(view)).toEqual(['composer-markdown', 'composer-enter-key', 'dictation', 'notifications']);
+    expect(settingIds(view)).toEqual([
+      'composer-markdown',
+      'composer-enter-key',
+      'composer-suggestions',
+      'dictation',
+      'notifications',
+    ]);
     expect(view.root.findAllByProps({ 'data-settings-section': 'appearance' })).toHaveLength(0);
     expect(view.root.findByProps({ 'data-settings-section': 'behaviour' }).props.id).toBe('settings-section-panel');
 
@@ -165,6 +175,44 @@ describe('SettingsPage sections', () => {
     expect(settingIds(view)).toEqual([]);
     expect(view.root.findByProps({ 'aria-label': 'Connected daemons' })).toBeDefined();
     expect(view.root.findAllByProps({ 'data-settings-section': 'behaviour' })).toHaveLength(0);
+
+    run(() => view.unmount());
+  });
+
+  it('persists the composer suggestion families and Vim keys as shared device controls', () => {
+    const storage = memoryStorage();
+    const controls = new DaemonControlsStore(storage);
+    const view = render(page({ controls }));
+
+    selectDesktopSection(view, 'behaviour');
+    const suggestions = settingSwitches(view, 'composer-suggestions');
+    expect(suggestions.map(control => control.props['aria-checked'])).toEqual([true, true, true]);
+
+    // Only the family pressed moves; the @ ladder and $ skills are untouched.
+    run(() => suggestions[1]?.props.onClick());
+    expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([
+      true,
+      false,
+      true,
+    ]);
+    expect(controls.snapshot().device.directReferenceSuggestions).toBe(false);
+    expect(controls.snapshot().device.mentionSuggestions).toBe(true);
+    expect(controls.snapshot().device.skillSuggestions).toBe(true);
+
+    // Vim shares the composer-editing control with Markdown highlighting, and
+    // is the second switch there rather than a page of its own.
+    const editing = settingSwitches(view, 'composer-markdown');
+    expect(editing).toHaveLength(2);
+    expect(editing[1]?.props['aria-checked']).toBe(false);
+    run(() => editing[1]?.props.onClick());
+    expect(controls.snapshot().device.composerVimMode).toBe(true);
+    expect(settingSwitches(view, 'composer-markdown')[1]?.props['aria-checked']).toBe(true);
+
+    // Both are properties of this screen: they survive a reload and read the
+    // same for a daemon this page never named.
+    const reloaded = new DaemonControlsStore(storage);
+    expect(reloaded.controls(beta.daemonId).directReferenceSuggestions).toBe(false);
+    expect(reloaded.controls(beta.daemonId).composerVimMode).toBe(true);
 
     run(() => view.unmount());
   });

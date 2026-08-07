@@ -18,10 +18,18 @@ import { harnessQuirks } from './quirks.ts';
 /** Reasoning levels a harness with a native effort command accepts. */
 export const RUNTIME_EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh'];
 
-/** Efforts that only exist behind Codex's Advanced Reasoning submenu. Their
- *  presence is what proves the quick picker will open that submenu rather than
- *  applying a preset directly. */
-const ADVANCED_EFFORTS: readonly string[] = ['max', 'ultra'];
+/**
+ * Efforts that only exist behind Codex's Advanced Reasoning submenu. Their
+ * presence is what proves the quick picker will open that submenu rather than
+ * applying a preset directly.
+ *
+ * EXPORTED BECAUSE THE DRIVER NEEDS THE SAME LIST. This module decides "the
+ * submenu will open"; the driver decides "navigate through it". A second copy
+ * beside the driver is one fact with two owners — add a level to one and the
+ * planner promises a path the driver will not take, or the driver hunts for a
+ * submenu the planner said would not appear.
+ */
+export const ADVANCED_EFFORTS: readonly string[] = ['max', 'ultra'];
 
 export interface CodexReasoningChoice {
   readonly value: string;
@@ -45,9 +53,21 @@ export interface CodexPickerTarget {
   readonly model: string;
   readonly effort: string;
   /** The effort the quick row would apply instead of the requested one, when the
-   *  account advertises it. Informational for the driver's own logging; the
-   *  decision to preflight is `needsPreflight`. */
+   *  account advertises it. NAMES the preset for a refusal message; it is never
+   *  what decides whether to refuse — see {@link CodexPickerTarget.quickPickerAppliesPreset}. */
   readonly quickPickerDefaultEffort?: string;
+  /**
+   * The quick picker would apply SOME preset level for this model rather than
+   * offering the requested one, and that preset is not provably the requested
+   * effort.
+   *
+   * A SEPARATE FLAG FROM THE NAME ABOVE, because the dangerous case is precisely
+   * the one with no name: an account that advertises levels and no default gives
+   * a quick row whose effect nobody can predict. Deciding from the name alone
+   * read that case as "no mismatch", so the driver selected the row and the
+   * daemon reported the requested level for a session running the preset one.
+   */
+  readonly quickPickerAppliesPreset?: true;
 }
 
 export interface HarnessRuntimeSwitchRequest {
@@ -80,16 +100,21 @@ export type RuntimeSwitchPlan =
       readonly requestedEffort?: string;
       readonly claimsOutcome: boolean;
     }
-  /** Drive the modal picker to an exact model and effort, then verify. */
-  | {
-      readonly kind: 'drive_picker';
-      readonly target: CodexPickerTarget;
-      /**
-       * True when the quick picker would apply a preset effort directly, so the
-       * driver must read the real screen before selecting anything.
-       */
-      readonly needsPreflight: boolean;
-    }
+  /**
+   * Drive the modal picker to an exact model and effort, then verify.
+   *
+   * THERE IS NO "SHOULD THE DRIVER PREFLIGHT" FLAG, and its absence is the
+   * decision. This plan used to carry `needsPreflight`, set exactly when the
+   * quick picker would apply a preset effort — but the driver opens and parses
+   * the real screen before selecting anything either way, so the flag chose
+   * between two identical behaviours while reading like a safety switch. The
+   * guarantee now lives where it is enforced: {@link CodexModelPickerDriver.drive}
+   * preflights unconditionally, and a caller cannot opt out. What this plan does
+   * carry is the evidence that preflight JUDGES — `quickPickerAppliesPreset` and
+   * the preset's name — because those are facts about the account, not about
+   * whether to look.
+   */
+  | { readonly kind: 'drive_picker'; readonly target: CodexPickerTarget }
   /** The request cannot be served. */
   | { readonly kind: 'refused'; readonly reason: string };
 
@@ -112,12 +137,13 @@ function opensReasoningMenu(choice: CodexModelChoice): boolean {
 /**
  * Plan a Codex switch, which always means driving the picker.
  *
- * The preflight decision is where the source had a hole: it computed the
- * mismatch as `defaultReasoningEffort !== requestedEffort`, which for a model
- * whose default the account does not advertise yields `undefined`, so no
- * preflight ran and the driver selected a quick row that could apply an unknown
- * effort. An unknown default is not a match — it is the case where reading the
- * real screen matters most — so it now preflights.
+ * The preset verdict is where the source had a hole: it computed the mismatch as
+ * `defaultReasoningEffort !== requestedEffort`, which for a model whose default
+ * the account does not advertise yields `undefined`, so the target was marked
+ * safe and the driver selected a quick row that could apply an unknown effort.
+ * An unknown default is not a match — it is precisely the case nobody can
+ * predict — so it is marked {@link CodexPickerTarget.quickPickerAppliesPreset}
+ * and the driver refuses it against the real screen.
  */
 function planCodexSwitch(model: string, effort: string, catalog: CodexModelCatalog | undefined): RuntimeSwitchPlan {
   if (catalog === undefined) return refused('the live Codex model catalog must be read before a targeted switch');
@@ -128,16 +154,17 @@ function planCodexSwitch(model: string, effort: string, catalog: CodexModelCatal
   }
   const quickPickerApplies = !opensReasoningMenu(advertised);
   const defaultEffort = advertised.defaultReasoningEffort;
+  // The quick row is only safe when it provably applies the very effort asked for. An unknown default
+  // is NOT a match — it is the case where reading the real screen matters most.
+  const presetWouldWin = quickPickerApplies && defaultEffort !== effort;
   return {
     kind: 'drive_picker',
     target: {
       model,
       effort,
-      ...(quickPickerApplies && defaultEffort !== undefined && defaultEffort !== effort
-        ? { quickPickerDefaultEffort: defaultEffort }
-        : {}),
+      ...(presetWouldWin && defaultEffort !== undefined ? { quickPickerDefaultEffort: defaultEffort } : {}),
+      ...(presetWouldWin ? { quickPickerAppliesPreset: true as const } : {}),
     },
-    needsPreflight: quickPickerApplies && defaultEffort !== effort,
   };
 }
 

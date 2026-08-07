@@ -2,8 +2,8 @@
  * One canonical reference grammar and proof gate for every Markdown surface.
  *
  * References are authored as plain sigil tokens:
- *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `%surface:key`
- *   `/skill` or `$skill`
+ *   `:agent`  `@file[:line[-end]]`  `&task[@{session}]`  `!attention`
+ *   `%surface:key`  `/skill` or `$skill`
  *
  * A reference is a TOKEN, never a Markdown link. `[label](#fy-reference?…)`
  * written by hand is not a reference and never becomes one: the renderer only
@@ -37,9 +37,10 @@
  * SURFACES ARE SESSION-SCOPED, WHICH IS A CORRECTNESS PROPERTY, NOT A STYLE ONE.
  * A `%terminal:…` token names one live surface inside ONE session, and a proved
  * surface therefore carries the daemon AND the session it was proved against.
- * Agent, task and attention identities are fleet-wide; a terminal id is not — the
- * same twelve hex characters mean nothing outside the session that owns them, and
- * an agent told to type into "that terminal" must never reach a different one.
+ * Agent identities carry their fleet-wide daemon/session answer. Task proof is
+ * session-scoped, and a resolved task now carries that daemon/session answer too.
+ * The same terminal-id hex characters mean nothing outside the session that owns
+ * them, and an agent told to type into "that terminal" must never reach another.
  *
  * A SURFACE THAT IS GONE SAYS SO. Every other family resolves to a link or to
  * plain prose, because "we cannot prove it" and "it is not there" are the same
@@ -76,7 +77,14 @@ export interface FileReference extends CodeReference {
 export interface TaskReference {
   readonly kind: 'task';
   readonly id: string;
+  /** Exact owner, present only in the authored qualified form. */
+  readonly sessionId?: string;
 }
+
+/** The two questions a task proof source can be asked. */
+export type TaskReferenceLookup =
+  | { readonly form: 'local'; readonly id: string }
+  | { readonly form: 'qualified'; readonly id: string; readonly sessionId: string };
 
 export interface AttentionReference {
   readonly kind: 'attention';
@@ -144,10 +152,23 @@ export interface ResolvedSurfaceReference extends SurfaceReference {
   readonly sessionId: string;
 }
 
+/** The stable task identity an evidence source proved. */
+export interface ResolvedTask {
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+  readonly id: string;
+}
+
+/** A proved task plus the authored question form that produced the proof. */
+export interface ResolvedTaskReference extends ResolvedTask {
+  readonly kind: 'task';
+  readonly form: 'local' | 'qualified';
+}
+
 export type ResolvedReference =
   | ResolvedAgentReference
   | FileReference
-  | TaskReference
+  | ResolvedTaskReference
   | AttentionReference
   | ResolvedSurfaceReference
   | SkillReference;
@@ -162,13 +183,28 @@ export interface ReferenceMatch {
 
 const INTEGER = /^[1-9][0-9]*$/u;
 const FILE_TOKEN = /^@(?!@)([/.\p{L}\p{N}_+@#-]*[\p{L}\p{N}_+@#-])(?::([1-9][0-9]*)(?:-([1-9][0-9]*))?)?$/u;
-const AGENT_NAME = /^[a-z][a-z0-9-]{0,31}$/iu;
-const AGENT_TOKEN = /^:([a-z][a-z0-9-]{0,31})$/iu;
-const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const TASK_ID = /^[BFIC][0-9]{1,9}$/iu;
-const TASK_TOKEN = /^&([BFIC][0-9]{1,9})$/iu;
-const ATTENTION_ID = /^A[1-9][0-9]*$/u;
-const ATTENTION_TOKEN = /^!(A[1-9][0-9]*)$/u;
+/**
+ * The BODY of each sigil token, written once.
+ *
+ * Each of these shapes used to be spelled three times — in the `…_ID`/`…_NAME`
+ * validator, in the `…_TOKEN` parser, and again inside `CANDIDATE_ALTERNATIVES`
+ * below — and a composer that offers a picker for the same tokens would have
+ * been a fourth. Three copies of `[a-z][a-z0-9-]{0,31}` agree only for as long
+ * as nobody edits one of them.
+ */
+const AGENT_NAME_BODY = '[a-z][a-z0-9-]{0,31}';
+const TASK_ID_BODY = '[BFIC][0-9]{1,9}';
+const SESSION_ID_BODY = '[A-Za-z0-9][A-Za-z0-9._-]{0,127}';
+const ATTENTION_ID_BODY = 'A[1-9][0-9]*';
+const SKILL_NAME_BODY = '[a-z][a-z0-9-]{0,63}';
+const AGENT_NAME = new RegExp(`^${AGENT_NAME_BODY}$`, 'iu');
+const AGENT_TOKEN = new RegExp(`^:(${AGENT_NAME_BODY})$`, 'iu');
+const SESSION_ID = new RegExp(`^${SESSION_ID_BODY}$`, 'u');
+const TASK_ID = new RegExp(`^${TASK_ID_BODY}$`, 'iu');
+const QUALIFIED_TASK_TOKEN = new RegExp(`^&(${TASK_ID_BODY})@\\{(${SESSION_ID_BODY})\\}$`, 'iu');
+const TASK_TOKEN = new RegExp(`^&(${TASK_ID_BODY})$`, 'iu');
+const ATTENTION_ID = new RegExp(`^${ATTENTION_ID_BODY}$`, 'u');
+const ATTENTION_TOKEN = new RegExp(`^!(${ATTENTION_ID_BODY})$`, 'u');
 /**
  * A surface key is deliberately dot-free. Daemon terminal ids are twelve hex
  * characters and page keys are `page-<n>`, so a dot buys nothing — and it would
@@ -184,8 +220,8 @@ const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu
 // variable a message contains. Namespaced invocation forms a harness may accept
 // elsewhere (`plugin:skill`, `apps/web:deploy`) are NOT references, because
 // their separators are this grammar's own boundaries.
-const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/u;
-const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
+const SKILL_NAME = new RegExp(`^${SKILL_NAME_BODY}$`, 'u');
+const SKILL_TOKEN = new RegExp(`^[/$](${SKILL_NAME_BODY})$`, 'u');
 
 // Each alternative owns its right boundary. A colon may naturally follow
 // agent/task/attention prose, but it cannot terminate a file candidate because
@@ -199,18 +235,85 @@ const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
 // quoted strings, not `String.raw`, because a backtick is one of the boundary
 // characters and `String.raw` would keep the backslash escaping it needs — which
 // a `u`-mode character class rejects as an invalid escape.
-const BOUNDARY_BEFORE = '(^|[\\s([{"\'`<>=—–])';
+const BOUNDARY_BEFORE_CHARS = '\\s([{"\'`<>=—–';
+const BOUNDARY_BEFORE = `(^|[${BOUNDARY_BEFORE_CHARS}])`;
 const BOUNDARY_AFTER = '(?=$|[\\s)\\]}"\'`,;!?<>:.=—–])';
 const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
 const CANDIDATE_ALTERNATIVES = [
-  `:[a-z][a-z0-9-]{0,31}${BOUNDARY_AFTER}`,
-  `&[BFIC][0-9]{1,9}${BOUNDARY_AFTER}`,
-  `!A[1-9][0-9]*${BOUNDARY_AFTER}`,
+  `:${AGENT_NAME_BODY}${BOUNDARY_AFTER}`,
+  // MUST precede the bare arm. The bare arm does not accept `@` as a right
+  // boundary, so a malformed/unterminated qualifier cannot fall back to `&F12`.
+  `&${TASK_ID_BODY}@\\{${SESSION_ID_BODY}\\}${BOUNDARY_AFTER}`,
+  `&${TASK_ID_BODY}${BOUNDARY_AFTER}`,
+  `!${ATTENTION_ID_BODY}${BOUNDARY_AFTER}`,
   `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
-  `[/$][a-z][a-z0-9-]{0,63}${BOUNDARY_AFTER}`,
+  `[/$]${SKILL_NAME_BODY}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
 ];
 const REFERENCE_CANDIDATE = new RegExp(`${BOUNDARY_BEFORE}(${CANDIDATE_ALTERNATIVES.join('|')})`, 'giu');
+const LEFT_BOUNDARY = new RegExp(`^[${BOUNDARY_BEFORE_CHARS}]$`, 'u');
+
+/**
+ * May a reference token BEGIN after this character?
+ *
+ * Exported as the decision rather than as the character set, because the
+ * composer asks exactly this question while a token is still being typed and
+ * an independent answer there is the defect this repository names: a picker
+ * that opens where the grammar refuses inserts a token the renderer can never
+ * prove, and the reader sees a reference that silently stays prose.
+ *
+ * `undefined` means "nothing precedes it", which is the `^` half of the same
+ * rule. Note that the `@` and `%` scans in the composer engine deliberately use
+ * a WIDER rule of their own (`see:@src` opens a file picker) — that divergence
+ * predates this function and is recorded in `docs/reference-standard.md`.
+ */
+export function isReferenceLeftBoundary(previous: string | undefined): boolean {
+  return previous === undefined || LEFT_BOUNDARY.test(previous);
+}
+
+/**
+ * The sigils that open a picker for a complete token of their own family.
+ *
+ * `@` and `%` are absent on purpose: they are the composer's own triggers (a
+ * repeated-`@` run selects a family, `%` opens surfaces) rather than a token
+ * whose first character is the whole prefix. `/` is absent because it opens the
+ * harness command line, which is not a reference family.
+ */
+export const DIRECT_REFERENCE_SIGILS = [':', '&', '!', '$'] as const;
+export type DirectReferenceSigil = (typeof DIRECT_REFERENCE_SIGILS)[number];
+
+/**
+ * What a HALF-TYPED token of each family may still look like.
+ *
+ * A picker has to decide on incomplete bytes: `&F` is not a task reference and
+ * never will be on its own, but it can still become `&F12`, while `&x` cannot
+ * become anything. Every pattern here is the body above with its final
+ * quantifier relaxed to admit the empty tail — and only that, so a query these
+ * accept is exactly a query some complete token starts with.
+ *
+ * The mapped type is the completeness proof: a fifth direct sigil is a compile
+ * error here rather than a family that silently offers nothing.
+ */
+const DIRECT_SIGIL_PREFIX = {
+  // Every prefix of an agent name is itself a valid agent name.
+  ':': new RegExp(`^${AGENT_NAME_BODY}$`, 'iu'),
+  '&': /^[BFIC][0-9]{0,9}$/iu,
+  // Case-sensitive, exactly as `ATTENTION_TOKEN` is: `!a3` is not a reference.
+  '!': /^A(?:[1-9][0-9]*)?$/u,
+  // Lowercase only, which is what keeps `$HOME` and `$PATH` out of the picker.
+  $: new RegExp(`^${SKILL_NAME_BODY}$`, 'u'),
+} as const satisfies { readonly [Sigil in DirectReferenceSigil]: RegExp };
+
+/**
+ * Could this partially typed query still grow into a complete token for `sigil`?
+ *
+ * An empty query answers `true` — a bare sigil is the prefix of every token in
+ * its family. Whether a picker should OPEN there is a different question, and
+ * one the composer owns: opening on a bare `:` would put a menu over `note: `.
+ */
+export function acceptsDirectReferenceQuery(sigil: DirectReferenceSigil, query: string): boolean {
+  return query === '' || DIRECT_SIGIL_PREFIX[sigil].test(query);
+}
 
 function positiveInteger(value: string | undefined): number | undefined {
   if (!value || !INTEGER.test(value)) return undefined;
@@ -249,6 +352,10 @@ function validCodeReference(reference: CodeReference): boolean {
 export function parseReferenceToken(raw: string): Reference | null {
   const agent = raw.match(AGENT_TOKEN);
   if (agent?.[1]) return { kind: 'agent', name: agent[1].toLowerCase() };
+
+  const qualifiedTask = raw.match(QUALIFIED_TASK_TOKEN);
+  if (qualifiedTask?.[1] && qualifiedTask[2] && safeSessionId(qualifiedTask[2]))
+    return { kind: 'task', id: qualifiedTask[1].toUpperCase(), sessionId: qualifiedTask[2] };
 
   const task = raw.match(TASK_TOKEN);
   if (task?.[1]) return { kind: 'task', id: task[1].toUpperCase() };
@@ -312,7 +419,8 @@ export interface ResolvedAgent {
 export type AgentReferenceResolver = (lookup: AgentReferenceLookup) => ResolvedAgent | null | undefined;
 /** Answers a candidate path with its canonical session-relative path, or nothing. */
 export type FileReferenceResolver = (candidatePath: string) => string | null | undefined;
-export type TaskReferenceResolver = (id: string) => boolean;
+/** Answers with the exact task identity proved for the authored lookup. */
+export type TaskReferenceResolver = (lookup: TaskReferenceLookup) => ResolvedTask | null | undefined;
 export type AttentionReferenceResolver = (id: AttentionId) => boolean;
 /** Answers whether this session's own skills catalog carries that name. */
 export type SkillReferenceResolver = (name: string) => boolean;
@@ -383,9 +491,15 @@ export function formatReference(reference: Reference | ResolvedReference): strin
       return `@${reference.path}${location}`;
     }
     case 'task': {
-      const id = reference.id.toUpperCase();
+      const id = typeof reference.id === 'string' ? reference.id.toUpperCase() : '';
       if (!TASK_ID.test(id)) throw new TypeError('invalid task reference');
-      return `&${id}`;
+      if ('form' in reference) {
+        if (validResolvedTaskReference(reference) === null) throw new TypeError('invalid resolved task reference');
+        return reference.form === 'qualified' ? `&${id}@{${reference.sessionId}}` : `&${id}`;
+      }
+      if (reference.sessionId === undefined) return `&${id}`;
+      if (!safeSessionId(reference.sessionId)) throw new TypeError('invalid task reference');
+      return `&${id}@{${reference.sessionId}}`;
     }
     case 'attention':
       if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid attention reference');
@@ -412,6 +526,45 @@ function resolvedAgent(value: ResolvedAgent | null | undefined): ResolvedAgentRe
   if (!value || !safeSessionId(value.sessionId) || !AGENT_NAME.test(value.name)) return null;
   if (typeof value.daemonId !== 'string' || value.daemonId.trim() === '') return null;
   return { kind: 'agent', daemonId: value.daemonId, sessionId: value.sessionId, name: value.name.toLowerCase() };
+}
+
+function taskLookup(reference: TaskReference): TaskReferenceLookup | null {
+  const id = typeof reference.id === 'string' ? reference.id.toUpperCase() : '';
+  if (!TASK_ID.test(id)) return null;
+  if (reference.sessionId === undefined) return { form: 'local', id };
+  return safeSessionId(reference.sessionId) ? { form: 'qualified', id, sessionId: reference.sessionId } : null;
+}
+
+/** Validate the task owner's answer against both the grammar and the question. */
+function resolvedTask(
+  asked: TaskReferenceLookup,
+  value: ResolvedTask | null | undefined,
+): ResolvedTaskReference | null {
+  const id = typeof asked.id === 'string' ? asked.id.toUpperCase() : '';
+  if (!TASK_ID.test(id)) return null;
+  if (asked.form === 'qualified' && !safeSessionId(asked.sessionId)) return null;
+  if (!value || typeof value.daemonId !== 'string' || value.daemonId.trim() === '') return null;
+  if (!safeSessionId(value.sessionId)) return null;
+  const answerId = typeof value.id === 'string' ? value.id.toUpperCase() : '';
+  if (!TASK_ID.test(answerId) || answerId !== id) return null;
+  if (asked.form === 'qualified' && value.sessionId !== asked.sessionId) return null;
+  return {
+    kind: 'task',
+    daemonId: value.daemonId,
+    sessionId: value.sessionId,
+    id: answerId,
+    form: asked.form,
+  };
+}
+
+/** Validate an already-painted task reference without changing its question form. */
+function validResolvedTaskReference(reference: ResolvedTaskReference): ResolvedTaskReference | null {
+  if (reference.form !== 'local' && reference.form !== 'qualified') return null;
+  const asked: TaskReferenceLookup =
+    reference.form === 'qualified'
+      ? { form: 'qualified', id: reference.id, sessionId: reference.sessionId }
+      : { form: 'local', id: reference.id };
+  return resolvedTask(asked, reference);
 }
 
 /**
@@ -472,8 +625,11 @@ export function resolveReference(reference: Reference, resolvers: ReferenceResol
         const resolved: FileReference = { ...reference, path };
         return validCodeReference(resolved) ? resolved : null;
       }
-      case 'task':
-        return resolvers.task?.(reference.id) ? reference : null;
+      case 'task': {
+        if (!resolvers.task) return null;
+        const lookup = taskLookup(reference);
+        return lookup === null ? null : resolvedTask(lookup, resolvers.task(lookup));
+      }
       case 'attention':
         return resolvers.attention?.(reference.id) ? reference : null;
       case 'surface':
@@ -518,10 +674,15 @@ export function referenceHref(reference: ResolvedReference): string {
       if (reference.line !== undefined) query.set('line', String(reference.line));
       if (reference.endLine !== undefined) query.set('end', String(reference.endLine));
       break;
-    case 'task':
-      if (!TASK_ID.test(reference.id)) throw new TypeError('invalid resolved task reference');
-      query.set('id', reference.id.toUpperCase());
+    case 'task': {
+      const task = validResolvedTaskReference(reference);
+      if (task === null) throw new TypeError('invalid resolved task reference');
+      query.set('daemon', task.daemonId);
+      query.set('session', task.sessionId);
+      query.set('id', task.id);
+      query.set('form', task.form);
       break;
+    }
     case 'attention':
       if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid resolved attention reference');
       query.set('id', reference.id);
@@ -576,9 +737,14 @@ export function parseReferenceHref(href: string | undefined): ResolvedReference 
     return validCodeReference(reference) ? reference : null;
   }
   if (kind === 'task') {
-    if (!exactKeys(query, ['kind', 'id'])) return null;
-    const id = one(query, 'id')?.toUpperCase();
-    return id && TASK_ID.test(id) ? { kind: 'task', id } : null;
+    if (!exactKeys(query, ['kind', 'daemon', 'session', 'id', 'form'])) return null;
+    const daemonId = one(query, 'daemon');
+    const sessionId = one(query, 'session');
+    const id = one(query, 'id');
+    const form = one(query, 'form');
+    if (!daemonId || !sessionId || !id || (form !== 'local' && form !== 'qualified')) return null;
+    const asked: TaskReferenceLookup = form === 'qualified' ? { form, id, sessionId } : { form, id };
+    return resolvedTask(asked, { daemonId: daemonId as DaemonId, sessionId, id });
   }
   if (kind === 'attention') {
     if (!exactKeys(query, ['kind', 'id'])) return null;
@@ -611,7 +777,7 @@ export function referenceIdentity(reference: ResolvedReference): string {
     case 'file':
       return `file:${reference.path}:${reference.line ?? ''}:${reference.endLine ?? ''}`;
     case 'task':
-      return `task:${reference.id}`;
+      return `task:${reference.daemonId}:${reference.sessionId}:${reference.id}:${reference.form}`;
     case 'attention':
       return `attention:${reference.id}`;
     case 'surface':
@@ -644,8 +810,20 @@ export function revalidateReference(
         const path = resolvers.file?.(reference.path);
         return path === reference.path && validCodeReference(reference) ? reference : null;
       }
-      case 'task':
-        return resolvers.task?.(reference.id) ? reference : null;
+      case 'task': {
+        if (!resolvers.task || validResolvedTaskReference(reference) === null) return null;
+        const lookup: TaskReferenceLookup =
+          reference.form === 'qualified'
+            ? { form: 'qualified', id: reference.id, sessionId: reference.sessionId }
+            : { form: 'local', id: reference.id };
+        const current = resolvedTask(lookup, resolvers.task(lookup));
+        return current?.daemonId === reference.daemonId &&
+          current.sessionId === reference.sessionId &&
+          current.id === reference.id &&
+          current.form === reference.form
+          ? current
+          : null;
+      }
       case 'attention':
         return resolvers.attention?.(reference.id) ? reference : null;
       case 'surface': {
@@ -675,7 +853,7 @@ export function referenceTitle(reference: ResolvedReference): string {
         return `Open @${reference.path} at lines ${reference.line}–${reference.endLine}`;
       return `Open @${reference.path} at line ${reference.line}`;
     case 'task':
-      return `Open task &${reference.id}`;
+      return `Open task ${formatReference(reference)}`;
     case 'attention':
       return `Open attention !${reference.id}`;
     case 'surface':

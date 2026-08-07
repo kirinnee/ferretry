@@ -216,6 +216,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
   },
   sessionSignal: new FakeSessionSignal(),
+  sessionRuntime: {
+    models: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    control: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   // The declared-wait loop serves no route, so it contributes nothing to the table below. It is a
   // mounted subsystem because a background loop the daemon never constructs is the same absent
   // capability as an unserved route — see the field's own comment.
@@ -285,7 +293,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 106, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 108, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -369,6 +377,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
       'POST /v1/sessions/:sessionId/migrate',
+      'GET /v1/sessions/:sessionId/runtime-models',
+      'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',

@@ -43,7 +43,10 @@ describe('referenceToken', () => {
   test('should render a canonical token and refuse what the grammar rejects', () => {
     // Assert
     should(referenceToken(surface)).equal(token);
+    should(referenceToken({ kind: 'task', id: 'f12' })).equal('&F12');
+    should(referenceToken({ kind: 'task', id: 'f12', sessionId: 'Session_A-1' })).equal('&F12@{Session_A-1}');
     should(referenceToken({ kind: 'surface', surface: 'terminal', key: 'bad key' })).be.null();
+    should(referenceToken({ kind: 'task', id: 'F12', sessionId: '..' })).be.null();
   });
 });
 
@@ -78,6 +81,25 @@ describe('draftCarriesReference', () => {
   test('should answer false for a reference the grammar cannot write down', () => {
     // Assert
     should(draftCarriesReference(token, { kind: 'surface', surface: 'terminal', key: 'bad key' })).be.false();
+  });
+
+  test('should compare task duplicates by their effective target in the composer scope', () => {
+    // Assert — bare self and explicitly-qualified self are one target.
+    should(draftCarriesReference('work on &F12', { kind: 'task', id: 'F12', sessionId: 'sess-1' }, scopeA)).be.true();
+    should(draftCarriesReference('work on &F12@{sess-1}', { kind: 'task', id: 'F12' }, scopeA)).be.true();
+
+    // Foreign neighbours, including the same id, remain distinct.
+    should(draftCarriesReference('work on &F12', { kind: 'task', id: 'F12', sessionId: 'sess-2' }, scopeA)).be.false();
+    should(
+      draftCarriesReference('work on &F12@{sess-2}', { kind: 'task', id: 'F12', sessionId: 'sess-3' }, scopeA),
+    ).be.false();
+    should(
+      draftCarriesReference('work on &f12@{Session_A}', { kind: 'task', id: 'F12', sessionId: 'Session_A' }, scopeA),
+    ).be.true();
+    should(
+      draftCarriesReference('work on &F12@{Session_A}', { kind: 'task', id: 'F12', sessionId: 'session_a' }, scopeA),
+    ).be.false();
+    should(draftCarriesReference('welded x&F12@{sess-1}', { kind: 'task', id: 'F12' }, scopeA)).be.false();
   });
 });
 
@@ -118,6 +140,29 @@ describe('addReferenceToComposer', () => {
     should(state.draft).equal(`already ${token} here`);
   });
 
+  test('should treat a bare-self and qualified-self task as one composer target', () => {
+    // Arrange
+    const bare = composer(scopeA, 'already &F12 here');
+
+    // Act & Assert
+    should(addReferenceToComposer({ kind: 'task', id: 'F12', sessionId: 'sess-1' }, scopeA)).equal('duplicate');
+    should(bare.draft).equal('already &F12 here');
+  });
+
+  test('should append a foreign qualified task to the viewer composer only', () => {
+    // Arrange
+    const viewer = composer(scopeA, 'compare');
+    const otherDaemon = composer(scopeB, 'untouched');
+
+    // Act
+    const outcome = addReferenceToComposer({ kind: 'task', id: 'f12', sessionId: 'sess-2' }, scopeA);
+
+    // Assert
+    should(outcome).equal('added');
+    should(viewer.draft).equal('compare &F12@{sess-2} ');
+    should(otherDaemon.draft).equal('untouched');
+  });
+
   test('should say so when no composer is mounted for the session', () => {
     // Assert
     should(addReferenceToComposer(surface, scopeA)).equal('no-composer');
@@ -129,6 +174,18 @@ describe('addReferenceToComposer', () => {
 
     // Act
     const outcome = addReferenceToComposer({ kind: 'surface', surface: 'terminal', key: 'bad key' }, scopeA);
+
+    // Assert
+    should(outcome).equal('rejected');
+    should(state.draft).equal('untouched');
+  });
+
+  test('should reject an unsafe qualified task without touching the viewer draft', () => {
+    // Arrange
+    const state = composer(scopeA, 'untouched');
+
+    // Act
+    const outcome = addReferenceToComposer({ kind: 'task', id: 'F12', sessionId: '..' }, scopeA);
 
     // Assert
     should(outcome).equal('rejected');

@@ -42,6 +42,8 @@ import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
+import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
+import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
@@ -137,6 +139,12 @@ export interface MountedSubsystems {
    *  A background loop nothing constructs is the same absent capability as an unserved route, and
    *  before this field the daemon recorded every park and woke none of them. */
   readonly monitor: MonitorLoop;
+  /** Changing what a RUNNING session is running: which model, and how hard it thinks. Independent
+   *  controls, because the browser offers them as two chips and the harnesses genuinely differ —
+   *  one takes a native command, the other has only a modal picker to drive. It also serves the
+   *  live catalog those choices come from, which is the account's own answer rather than a table
+   *  in this repository. */
+  readonly sessionRuntime: SessionRuntimeSubsystem;
   /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
    *  document, and the relaunch that puts a different agent in the same session's chair. */
   readonly sessionMigrate: SessionMigrateSubsystem;
@@ -285,6 +293,13 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
     // other, and both belong above the deeper per-session subsystems.
     ...sessionMigrateRoutes(subsystems.sessionMigrate),
+    // The runtime controls register beside the migration, and for the same reason: both change what
+    // is running in a session that already exists. Both paths are one-segment patterns under
+    // `/v1/sessions/:sessionId` whose final literals (`runtime`, `runtime-models`) no other route
+    // uses, and a literal segment is matched literally — so `runtime-models` can neither shadow nor
+    // be shadowed by `runtime`, and neither can be swallowed by the one-segment `GET
+    // /v1/sessions/:sessionId` above, which is a whole segment shallower.
+    ...sessionRuntimeRoutes(subsystems.sessionRuntime),
     // The signal registers with the rest of the write surface for the same reason the revive and the
     // migration do: it is a one-segment pattern under `/v1/sessions/:sessionId` whose final literal
     // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above

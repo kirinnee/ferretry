@@ -171,42 +171,54 @@ describe('planRuntimeSwitch on a picker harness', () => {
     });
   });
 
-  it('should drive the picker without a preflight when the model opens the reasoning menu', () => {
+  it('should leave the target unmarked when the model opens the reasoning menu', () => {
     // Arrange / Act
     const plan = planRuntimeSwitch({ harness: 'codex', model: 'gpt-5-codex', effort: 'high' }, codexContext);
 
-    // Assert: an advanced effort exists, so the quick row cannot silently apply a
-    // preset and no screen read is needed first.
-    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-codex', effort: 'high' }, needsPreflight: false });
+    // Assert: an advanced effort exists, so the quick row cannot silently apply a preset. The driver
+    // still reads the real screen — it always does — but it has nothing to refuse this target on.
+    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-codex', effort: 'high' } });
   });
 
-  it('should preflight when the quick row would apply a different preset effort', () => {
+  it('should mark the target when the quick row would apply a different preset effort', () => {
     // Arrange / Act
     const plan = planRuntimeSwitch({ harness: 'codex', model: 'gpt-5-mini', effort: 'high' }, codexContext);
 
     // Assert
     should(plan).eql({
       kind: 'drive_picker',
-      target: { model: 'gpt-5-mini', effort: 'high', quickPickerDefaultEffort: 'low' },
-      needsPreflight: true,
+      target: {
+        model: 'gpt-5-mini',
+        effort: 'high',
+        quickPickerDefaultEffort: 'low',
+        // The FLAG is what the driver refuses on; the name above only makes the refusal readable.
+        quickPickerAppliesPreset: true,
+      },
     });
   });
 
-  it('should skip the preflight when the quick row already applies the requested effort', () => {
+  it('should leave the target unmarked when the quick row already applies the requested effort', () => {
     // Arrange / Act
     const plan = planRuntimeSwitch({ harness: 'codex', model: 'gpt-5-mini', effort: 'low' }, codexContext);
 
     // Assert
-    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-mini', effort: 'low' }, needsPreflight: false });
+    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-mini', effort: 'low' } });
   });
 
-  it('should preflight when the account advertises no default effort at all', () => {
+  it('should mark the target when the account advertises no default effort at all', () => {
     // Arrange / Act
     const plan = planRuntimeSwitch({ harness: 'codex', model: 'gpt-5-terra', effort: 'high' }, codexContext);
 
     // Assert: an unknown default is not a match. The source compared it as one and
     // selected a quick row that could apply an effort nobody asked for.
-    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-terra', effort: 'high' }, needsPreflight: true });
+    //
+    // The flag travels WITHOUT a name beside it, and that pairing is the whole point: this is the
+    // case with no preset to name, and a driver that decided from the name alone read it as "no
+    // mismatch" and selected the row anyway.
+    should(plan).eql({
+      kind: 'drive_picker',
+      target: { model: 'gpt-5-terra', effort: 'high', quickPickerAppliesPreset: true },
+    });
   });
 
   it('should refuse a model the live catalog does not advertise', () => {
@@ -254,6 +266,6 @@ describe('planRuntimeSwitch on a picker harness', () => {
     const plan = planRuntimeSwitch({ harness: 'codex', model: 'gpt-5-pro', effort: 'high' }, context);
 
     // Assert
-    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-pro', effort: 'high' }, needsPreflight: false });
+    should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-pro', effort: 'high' } });
   });
 });

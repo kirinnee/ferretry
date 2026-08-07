@@ -74,6 +74,14 @@ const buttonNamed = (root: ReactTestInstance, label: string): ReactTestInstance 
   return button;
 };
 
+const buttonWithLabelSpan = (root: ReactTestInstance, label: string): ReactTestInstance => {
+  const button = root
+    .findAllByType('button')
+    .find(candidate => candidate.findAllByType('span').some(span => span.children.join('') === label));
+  if (button === undefined) throw new Error(`missing ${label} button`);
+  return button;
+};
+
 const client = (calls: string[], next: SessionView): SessionChatClient =>
   ({
     answer: async (_id: string, toolUseId: string) => {
@@ -94,6 +102,46 @@ const client = (calls: string[], next: SessionView): SessionChatClient =>
       return next;
     },
   }) as unknown as SessionChatClient;
+
+/**
+ * A client whose `runtime` is a REAL prototype method over private state.
+ *
+ * The shipped `DaemonApiClient` is this shape, and the defect it pins cannot be
+ * seen from an arrow-function mock: an arrow ignores its receiver, so an unbound
+ * call still succeeds and every test passes while the built app throws
+ * `Cannot read properties of undefined` and sends nothing. Touching `#sent` is
+ * what makes the receiver load-bearing — call this method detached and it dies
+ * before it records anything, exactly as the minified client did.
+ */
+class ReceiverBoundChatClient {
+  readonly #sent: { sessionId: string; command: unknown; requestId: string | undefined }[] = [];
+
+  constructor(private readonly next: SessionView) {}
+
+  get sent(): readonly { sessionId: string; command: unknown; requestId: string | undefined }[] {
+    return this.#sent;
+  }
+
+  async answer(): Promise<SessionView> {
+    return this.next;
+  }
+  async send(): Promise<{ accepted: boolean }> {
+    return { accepted: true };
+  }
+  async interrupt(): Promise<SessionView> {
+    return this.next;
+  }
+  async resume(): Promise<SessionView> {
+    return this.next;
+  }
+  async stop(): Promise<SessionView> {
+    return this.next;
+  }
+  async runtime(sessionId: string, command: unknown, requestId?: string): Promise<SessionView> {
+    this.#sent.push({ sessionId, command, requestId });
+    return this.next;
+  }
+}
 
 describe('SessionChatPage', () => {
   test('threads the daemon account and cached usage stores into migration', () => {
@@ -170,6 +218,287 @@ describe('SessionChatPage', () => {
       const runtime = page.root.findByType(ComposerRuntime);
       expect(runtime.props.view.config.id).toBe('shared');
       expect(runtime.props.canControl).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('opens the runtime sheet on a running session whose prompt is ready, and loads its catalog', async () => {
+    // THE CHIPS ASK ABOUT THE PROMPT, THE TRANSCRIPT ASKS ABOUT LIVENESS. This
+    // page used to answer both with `statusMark(...).klass === 'active'`, which
+    // is `active` for every ordinary `running` session — so both chips were dead
+    // on exactly the sessions a reader works in, and the only reachable sheet
+    // was on a session that happened to be `waiting`. The transcript and the
+    // composer must keep the liveness answer; only the chips move.
+    // Arrange
+    const ready = sessionView('runtime-ready', { state: { promptReady: true, status: 'running' } });
+    const catalogCalls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/runtime-models')) {
+        catalogCalls.push(new URL(url).pathname);
+        return Response.json({
+          harness: 'claude',
+          source: 'wrapper-inventory',
+          choices: [{ value: 'claude-opus-5', label: 'Opus 5', reasoningEfforts: [] }],
+        });
+      }
+      return route(input);
+    }) as typeof fetch;
+    const runtimeClient: SessionChatClient = { ...client([], ready), runtime: async () => ready };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={ready}
+      />,
+    );
+
+    try {
+      // Assert — the two questions are answered separately, and only one moved.
+      expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
+      expect(page.root.findByType(Transcript).props.busy).toBe(true);
+      expect(page.root.findByType(Composer).props.busy).toBe(true);
+
+      // Act — the reader taps the chip the old gate had disabled.
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(false);
+      run(() => modelChip.props.onClick());
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+
+      // Assert — the sheet reached the catalog and rendered its labelled list.
+      expect(catalogCalls).toEqual(['/v1/sessions/runtime-ready/runtime-models']);
+      const choices = page.root.findAll(
+        node => node.type === 'ul' && node.props['aria-label'] === 'Switch claude model in place',
+      );
+      expect(choices).toHaveLength(1);
+      expect(
+        (choices[0] as ReactTestInstance).findAllByType('button').map(button => button.props['aria-label']),
+      ).toEqual(['Switch model in place to Opus 5']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('lets a running session with no reported readiness attempt the switch anyway', async () => {
+    // ABSENT IS UNKNOWN, NOT BUSY. The shipping daemon omits `promptReady` for
+    // idle sessions whose runtime-control POST it then accepts after inspecting
+    // the live pane, so pre-refusing on a missing field takes away a control the
+    // reader actually has. The chip opens, and the daemon stays the authority.
+    // Arrange
+    const unknown = sessionView('runtime-unknown', { state: { status: 'running' } });
+    const runtimeClient: SessionChatClient = { ...client([], unknown), runtime: async () => unknown };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={unknown}
+      />,
+    );
+
+    try {
+      // Assert
+      expect(unknown.state.promptReady).toBeUndefined();
+      expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(false);
+
+      // Act — the sheet opens and offers its choices rather than a refusal.
+      run(() => modelChip.props.onClick());
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+
+      // Assert — no pre-refusal warning, because nothing said the prompt is busy.
+      expect(
+        page.root.findAll(
+          node => typeof node.type === 'string' && node.children.join('').startsWith('Wait for an idle prompt before'),
+        ),
+      ).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('refuses the runtime chips on an explicitly busy prompt, without disabling the composer', async () => {
+    // `false` is the one answer that IS evidence: the daemon said this pane is
+    // mid-turn, so the refusal is stated at the trigger rather than spending a
+    // tap to reach a sheet that can only say no.
+    // Arrange
+    const busyPrompt = sessionView('runtime-busy', { state: { promptReady: false, status: 'running' } });
+    const runtimeClient: SessionChatClient = { ...client([], busyPrompt), runtime: async () => busyPrompt };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={busyPrompt}
+      />,
+    );
+
+    try {
+      // Assert
+      expect(page.root.findByType(ComposerRuntime).props.busy).toBe(true);
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(true);
+      expect(modelChip.props.title).toBe('Busy: wait for an idle prompt to switch.');
+      // A refused SWITCH is not a refused session: the reader may still type.
+      expect(page.root.findByType(Composer).props.disabled).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('calls the runtime route on its client, not as a detached function', async () => {
+    // A REAL CLIENT IS AN OBJECT. The page has to feature-check the optional
+    // route, and reading it into a local to call it lost the receiver: the built
+    // app reached the handler, threw on the first private field, and sent no
+    // POST. Everything else here is unchanged behaviour asserted alongside it.
+    // Arrange
+    const next = sessionView('shared', { state: { observedModel: 'gpt-5.6-sol' } });
+    const receiver = new ReceiverBoundChatClient(next);
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={receiver as unknown as SessionChatClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={view => published.push(view)}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+
+    try {
+      const modelControls = page.root.findByType(ComposerRuntime).props.renderModelControls({
+        open: true,
+        onClose: () => undefined,
+        onClaudeEffortSent: () => undefined,
+        onSwitchFailed: () => undefined,
+        onSwitchSubmitted: () => undefined,
+      }) as ReactElement<ComponentProps<typeof RuntimeModelControls>>;
+
+      // Act — this is the call that threw in production.
+      await runAsync(() =>
+        modelControls.props.api.runtime(alpha, 'shared', { action: 'effort', effort: 'high' }, 'r1'),
+      );
+
+      // Assert — it reached the method WITH its instance, and still publishes.
+      expect(receiver.sent).toEqual([
+        { sessionId: 'shared', command: { action: 'effort', effort: 'high' }, requestId: 'r1' },
+      ]);
+      expect(published).toEqual([next]);
+
+      // The stale-scope guard is unchanged, and still refuses before the client.
+      await expect(
+        modelControls.props.api.runtime(
+          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-token' }),
+          'shared',
+          { action: 'model' },
+          'foreign',
+        ),
+      ).rejects.toThrow('runtime control belongs to a session that is no longer active');
+      expect(receiver.sent).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('rebinds the runtime route to a replaced client, not only to a changed method', async () => {
+    // THE HAZARD A METHOD DEPENDENCY CANNOT SEE. `runtime` lives on the
+    // prototype, so two clients of the same class expose the SAME function
+    // reference. A memo keyed on `client.runtime` therefore never recomputes
+    // across a client swap and keeps sending this session's commands through the
+    // client that has been replaced — a stale credential, or a daemon the reader
+    // has since left. Nothing else in this suite would notice: the identity that
+    // has to change is the receiver, which only a real object carries.
+    // Arrange
+    const next = sessionView('shared');
+    const previous = new ReceiverBoundChatClient(next);
+    const current = new ReceiverBoundChatClient(next);
+    const published: SessionView[] = [];
+    // Stable across both renders, so `publish` — the memo's other dependency —
+    // cannot recompute the binding for us and hide a regression.
+    const onSessionChange = (view: SessionView) => published.push(view);
+    const onBack = () => undefined;
+    const session = sessionView('shared');
+    const pageFor = (chatClient: ReceiverBoundChatClient) => (
+      <SessionChatPage
+        client={chatClient as unknown as SessionChatClient}
+        connection={alpha}
+        entries={[]}
+        onBack={onBack}
+        onSessionChange={onSessionChange}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = render(withSessionSearch(pageFor(previous)));
+
+    try {
+      // The premise, stated rather than assumed: one method, two clients.
+      expect(previous.runtime).toBe(current.runtime);
+
+      // Act — the same mounted page is handed the replacement client.
+      run(() => page.update(withSessionSearch(pageFor(current))));
+      const modelControls = page.root.findByType(ComposerRuntime).props.renderModelControls({
+        open: true,
+        onClose: () => undefined,
+        onClaudeEffortSent: () => undefined,
+        onSwitchFailed: () => undefined,
+        onSwitchSubmitted: () => undefined,
+      }) as ReactElement<ComponentProps<typeof RuntimeModelControls>>;
+      await runAsync(() => modelControls.props.api.runtime(alpha, 'shared', { action: 'model' }, 'r2'));
+
+      // Assert — the live client took it, and the replaced one saw nothing.
+      expect(current.sent).toEqual([{ sessionId: 'shared', command: { action: 'model' }, requestId: 'r2' }]);
+      expect(previous.sent).toEqual([]);
+      expect(published).toEqual([next]);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('withdraws the runtime controls when the replacement client has no such route', async () => {
+    // The feature check is not a mount-time decision. A client swapped in for one
+    // that cannot reach the route must take the chips with it, or the reader is
+    // offered a switch nothing can carry.
+    // Arrange
+    const next = sessionView('shared');
+    const onBack = () => undefined;
+    const onSessionChange = () => undefined;
+    const session = sessionView('shared');
+    const pageFor = (chatClient: SessionChatClient) => (
+      <SessionChatPage
+        client={chatClient}
+        connection={alpha}
+        entries={[]}
+        onBack={onBack}
+        onSessionChange={onSessionChange}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = render(withSessionSearch(pageFor(new ReceiverBoundChatClient(next) as unknown as SessionChatClient)));
+
+    try {
+      expect(page.root.findAllByType(ComposerRuntime)).toHaveLength(1);
+
+      // Act — the replacement omits the optional runtime route entirely.
+      run(() => page.update(withSessionSearch(pageFor(client([], next)))));
+
+      // Assert
+      expect(page.root.findAllByType(ComposerRuntime)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }
@@ -358,6 +687,79 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('hands the composer the reader’s suggestion switches and Vim preference, mapped once above it', () => {
+    const suggestions = { mentionSuggestions: false, directReferenceSuggestions: true, skillSuggestions: false };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        composerSuggestions={suggestions}
+        composerVimMode
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      // Passed through by identity: a page that rebuilt this object would make
+      // the composer re-issue an open list's request on every render.
+      expect(page.root.findByType(Composer).props.suggestions).toBe(suggestions);
+      expect(page.root.findByType(Composer).props.vimMode).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('opens the native Codex picker through the mounted runtime sheet and navigates to Terminal', async () => {
+    const calls: Array<{ id: string; command: unknown; requestId: string | undefined }> = [];
+    const codex = sessionView('shared', {
+      config: { harness: 'codex' },
+      state: { promptReady: true, status: 'awaiting_user' },
+    });
+    const runtimeClient: SessionChatClient = {
+      ...client([], codex),
+      runtime: async (id, command, requestId) => {
+        calls.push({ id, command, requestId });
+        return codex;
+      },
+    };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        canControl
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={codex}
+      />,
+    );
+    try {
+      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(0);
+      const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
+      expect(modelChip.props.disabled).toBe(false);
+      run(() => modelChip.props.onClick());
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+
+      const nativePicker = buttonWithLabelSpan(page.root, 'Use native picker in Terminal');
+      expect(nativePicker.props.disabled).toBe(false);
+      await runAsync(async () => {
+        nativePicker.props.onClick();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ id: 'shared', command: { action: 'model' } });
+      expect(typeof calls[0]?.requestId).toBe('string');
+      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('runs lifecycle actions through the visible daemon and confirms stop before mutating', async () => {
     const calls: string[] = [];
     const published: SessionView[] = [];
@@ -505,7 +907,11 @@ describe('SessionChatPage', () => {
       await runAsync(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
-      expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
+      expect(
+        page.root
+          .findByType(ReferenceSurfaceProvider)
+          .props.surface.taskReferenceResolver?.({ form: 'local', id: 'F6' }),
+      ).toMatchObject({ daemonId: 'alpha', sessionId: 'shared', id: 'F6' });
       const input = page.root.findByType('input');
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       const results = page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
@@ -560,6 +966,22 @@ describe('SessionChatPage', () => {
   test('mounts Skills on ONE catalog read and proves that catalog in the transcript', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const asked: string[] = [];
+    const requested: string[] = [];
+    const sharedClient: SessionChatClient = {
+      ...client([], sessionView('shared')),
+      request: async (path, schema) => {
+        requested.push(path);
+        return schema.parse({
+          v: 1,
+          sessionId: 'shared',
+          items: [],
+          resolved: [],
+          count: 0,
+          parseErrors: 0,
+          updatedAt: '2026-08-06T00:00:00.000Z',
+        });
+      },
+    };
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/skills')) {
@@ -574,7 +996,7 @@ describe('SessionChatPage', () => {
     openSidePaneTab(scope, 'skills');
     const page = renderSessionChatPage(
       <SessionChatPage
-        client={client([], sessionView('shared'))}
+        client={sharedClient}
         connection={alpha}
         entries={[]}
         onBack={() => undefined}
@@ -594,6 +1016,10 @@ describe('SessionChatPage', () => {
       // ONE read. The pane joins the page's, so the daemon is asked once even
       // though two things in this workspace need the answer.
       expect(asked).toEqual(['https://alpha.example.test/v1/sessions/shared/skills']);
+      // The composer bundle owns only Attention here. Tasks and skills come
+      // from the workspace owners above, so a fully capable client still does
+      // not issue duplicate reads for either family.
+      expect(requested).toEqual(['/v1/sessions/shared/attention']);
       // …and the names it returned are what the transcript proves against, so a
       // `/floop` this pane just inserted is a live reference rather than prose.
       const provider = page.root.findByType(ReferenceSurfaceProvider);

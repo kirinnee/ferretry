@@ -59,6 +59,50 @@ describe('TmuxTerminalRuntime', () => {
     should(absent).deepEqual([]);
   });
 
+  it('should never report activity before creation when tmux rounds a fresh terminal to a whole second', async () => {
+    // TWO CLOCKS AT TWO PRECISIONS. The creation stamp is our own ISO string with
+    // MILLISECONDS; `#{session_activity}` is a UNIX time in WHOLE SECONDS. A
+    // terminal opened at …:19.997 and not typed into since therefore reported
+    // activity at …:19.000 — 997ms before it existed — and `TerminalViewSchema`
+    // refuses exactly that pair, so ONE freshly opened shell made
+    // `GET /v1/sessions/:id/terminals` unparseable for every reader of the
+    // listing. Genuine later activity must still be reported as itself, so the
+    // clamp is a floor at creation rather than a second truncation.
+    // Arrange
+    const createdAt = '2026-08-06T17:04:19.997Z';
+    const createdAtMs = Date.parse(createdAt);
+    const untouchedSeconds = Math.floor(createdAtMs / 1_000);
+    const typedIntoSeconds = untouchedSeconds + 60;
+    const row = (id: string, activitySeconds: number): string =>
+      [
+        `fy-webterm-${terminal.ownerId}-${id}`,
+        terminal.ownerId,
+        id,
+        terminal.title,
+        createdAt,
+        terminal.root,
+        '',
+        String(activitySeconds),
+        '100',
+        '30',
+      ].join('\t');
+    const fake = new FakeTmux([
+      ok(`${row('0123456789ab', untouchedSeconds)}\n${row('0123456789cd', typedIntoSeconds)}\n`),
+    ]);
+    const subject = new TmuxTerminalRuntime(fake, () => createdAtMs + 5_000);
+
+    // Act
+    const listed = await subject.list();
+
+    // Assert
+    // The drift the daemon really served, stated rather than assumed.
+    should(untouchedSeconds * 1_000).be.below(createdAtMs);
+    should(listed.map(record => [record.createdAtMs, record.lastActivityAtMs])).deepEqual([
+      [createdAtMs, createdAtMs],
+      [createdAtMs, typedIntoSeconds * 1_000],
+    ]);
+  });
+
   it('should carry ownership on the pane itself, and read an unknown one as unrecorded', async () => {
     // Ownership has to survive a daemon restart to be worth reading, so it lives
     // in a tmux user option beside the terminal's own id rather than in daemon

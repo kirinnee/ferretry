@@ -18,6 +18,7 @@ export type SettingId =
   | 'chat-width'
   | 'composer-markdown'
   | 'composer-enter-key'
+  | 'composer-suggestions'
   | 'dictation'
   | 'notifications';
 
@@ -79,10 +80,28 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
   {
     id: 'composer-markdown',
-    label: 'Composer Markdown',
+    label: 'Composer editing',
     description:
-      'Colour Markdown markers in the native message textarea and show a separate live rendered preview with proven, clickable references. Off by default pending a mobile Safari pass.',
-    keywords: ['composer', 'markdown', 'preview', 'syntax', 'highlight', 'references', 'links', 'message', 'editor'],
+      'Colour Markdown markers in the native message textarea and show a separate live rendered preview with proven, clickable references — off by default pending a mobile Safari pass. Optional Vim-style modal keys live here too; the native textarea stays the input owner either way.',
+    keywords: [
+      'composer',
+      'markdown',
+      'preview',
+      'syntax',
+      'highlight',
+      'references',
+      'links',
+      'message',
+      'editor',
+      'vim',
+      'vi',
+      'modal',
+      'normal mode',
+      'insert mode',
+      'hjkl',
+      'keys',
+      'keybindings',
+    ],
   },
   {
     id: 'composer-enter-key',
@@ -90,6 +109,37 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'Choose whether Enter sends or starts a new line in the transcript composer. The other action stays reachable with Shift+Enter on a keyboard or the visible composer controls on touch.',
     keywords: ['enter', 'return', 'send', 'newline', 'new line', 'shift enter', 'composer', 'keyboard'],
+  },
+  {
+    id: 'composer-suggestions',
+    label: 'Reference suggestions',
+    description:
+      'Choose which reference families the composer offers while you type: the @ ladder for files, agents, tasks and attention; the direct :agent, &task and !attention sigils; and $ skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / command menu is never suppressed.',
+    keywords: [
+      'composer',
+      'suggestion',
+      'suggestions',
+      'autocomplete',
+      'complete',
+      'completion',
+      'menu',
+      'popover',
+      'typeahead',
+      'reference',
+      'references',
+      'mention',
+      'at',
+      'sigil',
+      'trigger',
+      'file',
+      'agent',
+      'task',
+      'attention',
+      'skill',
+      'quiet',
+      'noise',
+      'off',
+    ],
   },
   {
     id: 'theme',
@@ -166,7 +216,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'behaviour',
     label: 'Behaviour',
     description: 'How composing, dictation, and notifications behave on this browser.',
-    settingIds: ['composer-markdown', 'composer-enter-key', 'dictation', 'notifications'],
+    settingIds: ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
   },
   {
     id: 'daemons',

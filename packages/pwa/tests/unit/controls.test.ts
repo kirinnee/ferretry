@@ -9,6 +9,7 @@ import {
   controlsFor,
   DaemonControlsStore,
   DEFAULT_DEVICE_CONTROLS,
+  type DeviceControls,
   emptyControlsRecord,
   evictDaemonScopes,
   MAX_DAEMON_SCOPES,
@@ -47,6 +48,31 @@ class MemoryStorage implements ControlsStorage {
 }
 
 const stored = (record: unknown): string => JSON.stringify(record);
+
+/**
+ * Every device field, each holding a value that differs from its default.
+ *
+ * Typed as the total `DeviceControls`, so a new control is a COMPILE error here
+ * until it is listed — which is what makes the loop over it a completeness proof
+ * rather than a sample. The failure it guards is specific: a field the interface
+ * has and the patch path does not enumerate applies on screen, persists nothing,
+ * and no type and no gate notices.
+ */
+const ALTERED_DEVICE_CONTROLS: DeviceControls = {
+  query: 'needle',
+  mode: 'interactive',
+  rcOnly: true,
+  includeFinished: true,
+  dashboardView: 'table',
+  density: 'compact',
+  chatWidth: 'readable',
+  composerEnterKey: 'send',
+  sidebarCollapsed: true,
+  mentionSuggestions: false,
+  directReferenceSuggestions: false,
+  skillSuggestions: false,
+  composerVimMode: true,
+};
 
 const scopeRecord = (entries: readonly (readonly [string, string, number])[]): ControlsRecord => {
   let record = emptyControlsRecord();
@@ -87,6 +113,13 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // Enter follows the current device until the reader explicitly chooses.
       composerEnterKey: null,
       sidebarCollapsed: true,
+      // Same precedent as chatWidth: a payload written before the composer
+      // fields existed means every suggestion family is offered and Vim keys
+      // are off, which is exactly what the app did then — so no version bump.
+      mentionSuggestions: true,
+      directReferenceSuggestions: true,
+      skillSuggestions: true,
+      composerVimMode: false,
     });
     // The old shape had no daemon scopes at all.
     should(Object.keys(record.scopes)).be.empty();
@@ -132,6 +165,32 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { composerEnterKey: 'toggle' } })).device
         .composerEnterKey,
     ).be.null();
+  });
+
+  it('reads each composer suggestion family on its own and defaults an unreadable one to offered', () => {
+    for (const field of ['mentionSuggestions', 'directReferenceSuggestions', 'skillSuggestions'] as const) {
+      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { [field]: false } })).device[field]).be.false();
+      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { [field]: true } })).device[field]).be.true();
+      // A hand-edited non-boolean is that field's default, not another field's.
+      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { [field]: 'off' } })).device[field]).be.true();
+    }
+
+    const mixed = parseControlsRecord(
+      stored({ v: CONTROLS_VERSION, device: { mentionSuggestions: 'nope', skillSuggestions: false } }),
+    ).device;
+    should(mixed.mentionSuggestions).be.true();
+    should(mixed.skillSuggestions).be.false();
+    should(mixed.directReferenceSuggestions).be.true();
+  });
+
+  it('keeps Vim-style composer editing off unless it was explicitly turned on', () => {
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { composerVimMode: true } })).device.composerVimMode,
+    ).be.true();
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { composerVimMode: 'yes' } })).device.composerVimMode,
+    ).be.false();
+    should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: {} })).device.composerVimMode).be.false();
   });
 
   it('accepts each valid persisted density and mode, and rejects the rest', () => {
@@ -255,6 +314,20 @@ describe('pure transitions', () => {
     should(withDeviceControls(record, { query: '', mode: 'all' })).be.exactly(record);
     // An explicitly undefined value leaves the field alone rather than clobbering it.
     should(withDeviceControls(record, { query: undefined })).be.exactly(record);
+  });
+
+  it('treats a composer switch already in that position as a no-op by identity', () => {
+    const record = emptyControlsRecord();
+    // The defaults ARE the pre-field behaviour, so re-asserting them writes nothing.
+    should(withDeviceControls(record, { mentionSuggestions: true, composerVimMode: false })).be.exactly(record);
+
+    const quiet = withDeviceControls(record, { skillSuggestions: false });
+    should(quiet).not.be.exactly(record);
+    should(quiet.device.skillSuggestions).be.false();
+    // Only the family that was asked for moves.
+    should(quiet.device.mentionSuggestions).be.true();
+    should(quiet.device.directReferenceSuggestions).be.true();
+    should(withDeviceControls(quiet, { skillSuggestions: false })).be.exactly(quiet);
   });
 
   it('applies a device patch immutably and ignores explicit undefined and unknown keys', () => {
@@ -483,6 +556,24 @@ describe('DaemonControlsStore', () => {
     // A device patch must not disturb any daemon's scope.
     should(store.controls(alpha).projectScope).equal('/work/alpha');
     should(store.controls(alpha).sidebarCollapsed).be.true();
+  });
+
+  it('applies, persists and reloads every device field, so a new control cannot be dropped in silence', () => {
+    const fields = Object.keys(DEFAULT_DEVICE_CONTROLS) as (keyof DeviceControls)[];
+    should(fields).have.length(Object.keys(ALTERED_DEVICE_CONTROLS).length);
+
+    for (const field of fields) {
+      const altered = ALTERED_DEVICE_CONTROLS[field];
+      // An altered value equal to the default would make the rest vacuous.
+      should(altered).not.equal(DEFAULT_DEVICE_CONTROLS[field]);
+
+      const storage = new MemoryStorage();
+      const store = new DaemonControlsStore(storage);
+
+      should(store.setDeviceControls({ [field]: altered } as Partial<DeviceControls>)[field]).equal(altered);
+      should(storage.writes).have.length(1);
+      should(new DaemonControlsStore(storage).snapshot().device[field]).equal(altered);
+    }
   });
 
   it('works with no storage at all, keeping controls for the life of the tab', () => {

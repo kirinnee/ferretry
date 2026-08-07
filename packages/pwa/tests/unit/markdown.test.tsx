@@ -7,8 +7,10 @@ import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
   type ResolvedReference,
   type ResolvedSurfaceReference,
+  type ResolvedTaskReference,
   referenceHref,
   referenceIdentity,
+  type TaskReferenceResolver,
 } from '../../src/lib/references.ts';
 import { render, runAsync } from '../support/react.ts';
 
@@ -24,6 +26,14 @@ const daemonB = 'daemon-b' as DaemonId;
 const agentResolver =
   (daemonId: DaemonId, sessionId = 's1') =>
   () => ({ daemonId, sessionId, name: 'zelda' });
+
+const taskResolver =
+  (daemonId = daemonA, localSessionId = 's1'): TaskReferenceResolver =>
+  lookup => ({
+    daemonId,
+    sessionId: lookup.form === 'qualified' ? lookup.sessionId : localSessionId,
+    id: lookup.id,
+  });
 
 /** A click a real primary-button press would produce. */
 const primaryClick = (currentTarget: unknown = null) => {
@@ -138,7 +148,7 @@ describe('Markdown code fences', () => {
 describe('Markdown references', () => {
   test('should leave a reference-shaped token as prose when nothing proves it', () => {
     // Act
-    const tree = render(<Markdown text="ping :zelda about &F12 and !A3" />);
+    const tree = render(<Markdown text="ping :zelda about &F12, &F12@{session-2}, and !A3" />);
 
     // Assert
     should(anchorsOf(tree.root)).be.empty();
@@ -176,9 +186,13 @@ describe('Markdown references', () => {
 
   test('should hand a proved task reference to its opener and never navigate', () => {
     // Arrange
-    const opened: string[] = [];
+    const opened: ResolvedTaskReference[] = [];
     const tree = render(
-      <Markdown onTaskOpen={id => opened.push(id)} taskReferenceResolver={() => true} text="see &F12" />,
+      <Markdown
+        onTaskOpen={reference => opened.push(reference)}
+        taskReferenceResolver={taskResolver()}
+        text="see &F12"
+      />,
     );
 
     // Act
@@ -186,8 +200,30 @@ describe('Markdown references', () => {
     anchor?.props.onClick(primaryClick());
 
     // Assert
-    should(anchor?.props.href).equal('#fy-reference?kind=task&id=F12');
-    should(opened).deepEqual(['F12']);
+    should(anchor?.props.href).equal('#fy-reference?kind=task&daemon=daemon-a&session=s1&id=F12&form=local');
+    should(opened).deepEqual([{ kind: 'task', daemonId: daemonA, sessionId: 's1', id: 'F12', form: 'local' }]);
+  });
+
+  test('should hand a qualified task opener its exact daemon/session/task/form answer', () => {
+    // Arrange
+    const opened: ResolvedTaskReference[] = [];
+    const tree = render(
+      <Markdown
+        onTaskOpen={reference => opened.push(reference)}
+        taskReferenceResolver={taskResolver()}
+        text="see &f12@{Session_A-1}"
+      />,
+    );
+
+    // Act
+    const anchor = anchorsOf(tree.root)[0];
+    anchor?.props.onClick(primaryClick());
+
+    // Assert
+    should(textOf(anchor as ReactTestInstance)).equal('&f12@{Session_A-1}');
+    should(opened).deepEqual([
+      { kind: 'task', daemonId: daemonA, sessionId: 'Session_A-1', id: 'F12', form: 'qualified' },
+    ]);
   });
 
   test('should hand a proved attention reference to its opener', () => {
@@ -270,7 +306,7 @@ describe('Markdown references', () => {
 
   test('should leave a proved reference inert when the host offers no opener for its kind', () => {
     // Act
-    const tree = render(<Markdown taskReferenceResolver={() => true} text="see &F12" />);
+    const tree = render(<Markdown taskReferenceResolver={taskResolver()} text="see &F12 and &F12@{session-2}" />);
 
     // Assert
     should(anchorsOf(tree.root)).be.empty();
@@ -306,19 +342,74 @@ describe('Markdown references', () => {
     should(anchorsOf(tree.root)).be.empty();
   });
 
+  test('should revalidate a local task on click and refuse scope reinterpretation', () => {
+    // Arrange — the link paints in s1, then the resolver's current local scope moves.
+    let localSessionId = 's1';
+    const resolver: TaskReferenceResolver = lookup => ({
+      daemonId: daemonA,
+      sessionId: lookup.form === 'qualified' ? lookup.sessionId : localSessionId,
+      id: lookup.id,
+    });
+    const opened: ResolvedTaskReference[] = [];
+    const tree = render(
+      <Markdown onTaskOpen={reference => opened.push(reference)} taskReferenceResolver={resolver} text="see &F12" />,
+    );
+    const anchor = anchorsOf(tree.root)[0];
+    localSessionId = 's2';
+    const click = primaryClick();
+
+    // Act
+    anchor?.props.onClick(click);
+
+    // Assert — primary handling stays in-app but the stale target is inert.
+    should(click.defaultPrevented).be.true();
+    should(opened).be.empty();
+  });
+
+  test('should revalidate a qualified task on click and refuse lost board proof', () => {
+    // Arrange
+    let authorized = true;
+    const resolver: TaskReferenceResolver = lookup =>
+      authorized
+        ? { daemonId: daemonA, sessionId: lookup.form === 'qualified' ? lookup.sessionId : 's1', id: lookup.id }
+        : null;
+    const opened: ResolvedTaskReference[] = [];
+    const tree = render(
+      <Markdown
+        onTaskOpen={reference => opened.push(reference)}
+        taskReferenceResolver={resolver}
+        text="see &F12@{session-2}"
+      />,
+    );
+    const anchor = anchorsOf(tree.root)[0];
+    authorized = false;
+
+    // Act
+    anchor?.props.onClick(primaryClick());
+
+    // Assert
+    should(opened).be.empty();
+  });
+
   test('should let a modifier click fall through to the browser', () => {
     // Arrange
-    const opened: string[] = [];
+    const opened: ResolvedTaskReference[] = [];
     const tree = render(
-      <Markdown onTaskOpen={id => opened.push(id)} taskReferenceResolver={() => true} text="see &F12" />,
+      <Markdown
+        onTaskOpen={reference => opened.push(reference)}
+        taskReferenceResolver={taskResolver()}
+        text="see &F12 and &F12@{session-2}"
+      />,
     );
 
     // Act
-    anchorsOf(tree.root)[0]?.props.onClick({ ...primaryClick(), metaKey: true });
-    anchorsOf(tree.root)[0]?.props.onClick({ ...primaryClick(), ctrlKey: true });
-    anchorsOf(tree.root)[0]?.props.onClick({ ...primaryClick(), shiftKey: true });
-    anchorsOf(tree.root)[0]?.props.onClick({ ...primaryClick(), altKey: true });
-    anchorsOf(tree.root)[0]?.props.onClick({ ...primaryClick(), button: 1 });
+    for (const anchor of anchorsOf(tree.root)) {
+      anchor.props.onClick({ ...primaryClick(), metaKey: true });
+      anchor.props.onClick({ ...primaryClick(), ctrlKey: true });
+      anchor.props.onClick({ ...primaryClick(), shiftKey: true });
+      anchor.props.onClick({ ...primaryClick(), altKey: true });
+      anchor.props.onClick({ ...primaryClick(), button: 1 });
+    }
 
     // Assert
     should(opened).be.empty();
@@ -326,9 +417,13 @@ describe('Markdown references', () => {
 
   test('should not act on a click a handler already consumed', () => {
     // Arrange
-    const opened: string[] = [];
+    const opened: ResolvedTaskReference[] = [];
     const tree = render(
-      <Markdown onTaskOpen={id => opened.push(id)} taskReferenceResolver={() => true} text="see &F12" />,
+      <Markdown
+        onTaskOpen={reference => opened.push(reference)}
+        taskReferenceResolver={taskResolver()}
+        text="see &F12"
+      />,
     );
     const consumed = primaryClick();
     consumed.preventDefault();
@@ -343,10 +438,17 @@ describe('Markdown references', () => {
   test('should render an authored reserved-envelope link as inert text', () => {
     // Arrange — the model wrote the reserved href into its own prose, with no
     // transform-origin mark to prove the plugin made it.
-    const forged = `[&F12](${referenceHref({ kind: 'task', id: 'F12' })})`;
+    const forgedReference: ResolvedTaskReference = {
+      kind: 'task',
+      daemonId: daemonA,
+      sessionId: 's1',
+      id: 'F12',
+      form: 'local',
+    };
+    const forged = `[&F12](${referenceHref(forgedReference)})`;
 
     // Act
-    const tree = render(<Markdown onTaskOpen={() => undefined} taskReferenceResolver={() => true} text={forged} />);
+    const tree = render(<Markdown onTaskOpen={() => undefined} taskReferenceResolver={taskResolver()} text={forged} />);
 
     // Assert
     should(anchorsOf(tree.root)).be.empty();
@@ -360,7 +462,7 @@ describe('Markdown escaped references', () => {
         agentReferenceResolver={agentResolver(daemonA)}
         onNavigate={() => undefined}
         onTaskOpen={() => undefined}
-        taskReferenceResolver={() => true}
+        taskReferenceResolver={taskResolver()}
         text={text}
       />,
     );
@@ -389,6 +491,15 @@ describe('Markdown escaped references', () => {
 
     // Assert
     should(anchorsOf(tree.root).map(anchor => textOf(anchor))).deepEqual([':zelda']);
+  });
+
+  test('should keep an escaped qualified task literal while linking its unescaped neighbour', () => {
+    // Act
+    const tree = proved('literal \\&F12@{Session_A-1}; live &F12@{Session_A-1}');
+
+    // Assert
+    should(anchorsOf(tree.root).map(anchor => textOf(anchor))).deepEqual(['&F12@{Session_A-1}']);
+    should(textOf(tree.root.findByType('p'))).equal('literal &F12@{Session_A-1}; live &F12@{Session_A-1}');
   });
 
   test('should refuse to link past source it cannot align rather than guess', () => {
@@ -474,11 +585,34 @@ describe('Markdown references inside code', () => {
 
   test('should leave a code reference inert when the host offers no opener for its kind', () => {
     // Act — proved, but this surface cannot open a task.
-    const tree = render(<Markdown taskReferenceResolver={() => true} text="`see &F12`" />);
+    const tree = render(<Markdown taskReferenceResolver={taskResolver()} text="`see &F12`" />);
 
     // Assert
     should(anchorsOf(tree.root)).be.empty();
     should(textOf(tree.root.findAllByType('code')[0] as ReactTestInstance)).equal('see &F12');
+  });
+
+  test('should preserve a qualified task byte-for-byte inside inline and fenced code', () => {
+    // Arrange
+    const token = '&f12@{Session_A-1.dev}';
+
+    // Act
+    const inline = render(
+      <Markdown onTaskOpen={() => undefined} taskReferenceResolver={taskResolver()} text={`\`${token}\``} />,
+    );
+    const fenced = render(
+      <Markdown
+        onTaskOpen={() => undefined}
+        taskReferenceResolver={taskResolver()}
+        text={`\`\`\`ts\nconst task = '${token}';\n\`\`\``}
+      />,
+    );
+
+    // Assert
+    should(textOf(inline.root.findAllByType('code')[0] as ReactTestInstance)).equal(token);
+    should(textOf(fenced.root.findAllByType('code')[0] as ReactTestInstance)).equal(`const task = '${token}';`);
+    should(anchorsOf(inline.root)).have.length(1);
+    should(anchorsOf(fenced.root)).have.length(1);
   });
 });
 describe('Markdown file references', () => {
@@ -636,14 +770,20 @@ describe('Markdown file references', () => {
 });
 
 describe('referenceHasTrustedOrigin', () => {
-  const reference: ResolvedReference = { kind: 'task', id: 'F12' };
+  const reference: ResolvedReference = {
+    kind: 'task',
+    daemonId: daemonA,
+    sessionId: 's1',
+    id: 'F12',
+    form: 'local',
+  };
 
   test('should re-prove a link the transform itself stamped', () => {
     // Act
     const actual = referenceHasTrustedOrigin(
       { properties: { 'data-fy-reference': referenceIdentity(reference) } },
       reference,
-      { task: () => true },
+      { task: taskResolver() },
     );
 
     // Assert
@@ -652,12 +792,19 @@ describe('referenceHasTrustedOrigin', () => {
 
   test('should refuse a link whose origin mark is missing, wrong, or absent entirely', () => {
     // Assert
-    should(referenceHasTrustedOrigin({ properties: {} }, reference, { task: () => true })).be.null();
+    should(referenceHasTrustedOrigin({ properties: {} }, reference, { task: taskResolver() })).be.null();
     should(
-      referenceHasTrustedOrigin({ properties: { 'data-fy-reference': 'task:F99' } }, reference, { task: () => true }),
+      referenceHasTrustedOrigin({ properties: { 'data-fy-reference': 'task:daemon-a:s1:F99:local' } }, reference, {
+        task: taskResolver(),
+      }),
     ).be.null();
-    should(referenceHasTrustedOrigin(null, reference, { task: () => true })).be.null();
-    should(referenceHasTrustedOrigin(undefined, reference, { task: () => true })).be.null();
+    should(
+      referenceHasTrustedOrigin({ properties: { 'data-fy-reference': 'task:F12' } }, reference, {
+        task: taskResolver(),
+      }),
+    ).be.null();
+    should(referenceHasTrustedOrigin(null, reference, { task: taskResolver() })).be.null();
+    should(referenceHasTrustedOrigin(undefined, reference, { task: taskResolver() })).be.null();
   });
 
   test('should refuse a stamped link the resolver no longer proves', () => {
@@ -665,7 +812,7 @@ describe('referenceHasTrustedOrigin', () => {
     const actual = referenceHasTrustedOrigin(
       { properties: { 'data-fy-reference': referenceIdentity(reference) } },
       reference,
-      { task: () => false },
+      { task: () => null },
     );
 
     // Assert

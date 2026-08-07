@@ -14,7 +14,10 @@
  *     so the first-load pointer policy stays free to choose compact on a phone
  *     and full on a desktop.
  *   - `chatWidth` absent means `'full'`, which IS the behaviour that predates the
- *     field — which is why adding it needed no version bump.
+ *     field — which is why adding it needed no version bump. The four composer
+ *     preferences follow that precedent exactly: absent means every suggestion
+ *     family is offered and Vim keys are off, which is what this app did before
+ *     they existed, so they add no version either.
  *   - An empty `projectScope` is NO scope, not a folder named nothing.
  *   - A patch that changes nothing writes nothing and notifies nobody.
  *
@@ -82,6 +85,27 @@ export interface DeviceControls {
   /** null follows this device’s input capability rather than another device’s choice. */
   readonly composerEnterKey: ComposerEnterKeyPreference | null;
   readonly sidebarCollapsed: boolean;
+  /**
+   * Whether the composer OFFERS the whole `@` ladder — bare `@` files and the
+   * repeated `@@` / `@@@` / `@@@@` tiers alike.
+   *
+   * Every suggestion field below governs a MENU and nothing else. An authored
+   * reference is still parsed, still proved and still linked with the menu off,
+   * and inserting one from elsewhere (the transcript's Add to chat) is not a
+   * suggestion and never consults these. That asymmetry is the whole contract:
+   * turning a family off removes an offer, never a capability.
+   */
+  readonly mentionSuggestions: boolean;
+  /** Whether the direct sigils `:` agent, `&` task and `!` attention open a menu. */
+  readonly directReferenceSuggestions: boolean;
+  /** Whether `$` opens the skill menu. `/` is a command surface and is never governed. */
+  readonly skillSuggestions: boolean;
+  /**
+   * Optional Vim-style modal editing in the composer. Off by default, and the
+   * native textarea remains the input owner either way: this changes which keys
+   * mean what, never which element holds the draft, the selection or dictation.
+   */
+  readonly composerVimMode: boolean;
 }
 
 /** What a screen renders: device preferences plus THIS daemon's project scope. */
@@ -103,19 +127,24 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   chatWidth: 'full',
   composerEnterKey: null,
   sidebarCollapsed: false,
+  mentionSuggestions: true,
+  directReferenceSuggestions: true,
+  skillSuggestions: true,
+  composerVimMode: false,
 });
 
-const DEVICE_KEYS = [
-  'query',
-  'mode',
-  'rcOnly',
-  'includeFinished',
-  'dashboardView',
-  'density',
-  'chatWidth',
-  'composerEnterKey',
-  'sidebarCollapsed',
-] as const satisfies readonly (keyof DeviceControls)[];
+/**
+ * DERIVED from the defaults rather than listed a second time.
+ *
+ * A hand-written literal with `as const satisfies readonly (keyof DeviceControls)[]`
+ * proves soundness — no wrong key — and NOT completeness. A field added to
+ * `DeviceControls` and forgotten here would make `withDeviceControls` drop that
+ * field's patch in silence: the switch flips on screen, nothing persists, and no
+ * type and no gate says so. `DEFAULT_DEVICE_CONTROLS` is a total `DeviceControls`,
+ * so the compiler already refuses a missing member there, and reading its keys
+ * moves the omission from a runtime surprise to an impossibility.
+ */
+const DEVICE_KEYS = Object.keys(DEFAULT_DEVICE_CONTROLS) as readonly (keyof DeviceControls)[];
 
 /** One daemon's remembered scope. `seq` is its recency for LRU eviction. */
 export interface DaemonScopeEntry {
@@ -165,6 +194,9 @@ export const emptyControlsRecord = (): ControlsRecord => ({
 const readProjectScope = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() !== '' ? value : null;
 
+/** A persisted flag, or that field's own default — never another field's. */
+const readFlag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
+
 const readDeviceControls = (value: unknown): DeviceControls => {
   const fields = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   return {
@@ -173,9 +205,8 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.mode === 'all' || fields.mode === 'auto' || fields.mode === 'interactive'
         ? fields.mode
         : DEFAULT_DEVICE_CONTROLS.mode,
-    rcOnly: typeof fields.rcOnly === 'boolean' ? fields.rcOnly : DEFAULT_DEVICE_CONTROLS.rcOnly,
-    includeFinished:
-      typeof fields.includeFinished === 'boolean' ? fields.includeFinished : DEFAULT_DEVICE_CONTROLS.includeFinished,
+    rcOnly: readFlag(fields.rcOnly, DEFAULT_DEVICE_CONTROLS.rcOnly),
+    includeFinished: readFlag(fields.includeFinished, DEFAULT_DEVICE_CONTROLS.includeFinished),
     dashboardView: fields.dashboardView === 'cards' || fields.dashboardView === 'table' ? fields.dashboardView : null,
     density:
       fields.density === 'full' || fields.density === 'compact' || fields.density === 'minimal' ? fields.density : null,
@@ -185,8 +216,14 @@ const readDeviceControls = (value: unknown): DeviceControls => {
         : DEFAULT_DEVICE_CONTROLS.chatWidth,
     composerEnterKey:
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
-    sidebarCollapsed:
-      typeof fields.sidebarCollapsed === 'boolean' ? fields.sidebarCollapsed : DEFAULT_DEVICE_CONTROLS.sidebarCollapsed,
+    sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
+    mentionSuggestions: readFlag(fields.mentionSuggestions, DEFAULT_DEVICE_CONTROLS.mentionSuggestions),
+    directReferenceSuggestions: readFlag(
+      fields.directReferenceSuggestions,
+      DEFAULT_DEVICE_CONTROLS.directReferenceSuggestions,
+    ),
+    skillSuggestions: readFlag(fields.skillSuggestions, DEFAULT_DEVICE_CONTROLS.skillSuggestions),
+    composerVimMode: readFlag(fields.composerVimMode, DEFAULT_DEVICE_CONTROLS.composerVimMode),
   };
 };
 

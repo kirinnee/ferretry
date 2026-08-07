@@ -113,7 +113,11 @@ import {
   ProcfsSessionRootPinner,
   RunnerSessionGit,
 } from '../src/adapters/session/filesystem/index.ts';
-import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
+import {
+  CodexAppServerCatalog,
+  TmuxCodexPickerDrive,
+  TmuxCodexPickerPane,
+} from '../src/adapters/session/harness/index.ts';
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
@@ -236,6 +240,7 @@ import {
   ClaudeTranscriptParser,
   type ClockPort,
   CodexPickerCleanup,
+  CodexRuntimeCatalogCache,
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
@@ -268,6 +273,7 @@ import {
   fleetManifestRefusal,
   FleetManifestUnreadableError,
   foreignAdvertisementNotice,
+  HARNESS_PICKER_COMMAND,
   HarnessQuirkService,
   harnessAbsentWarning,
   harnessMigrationRefusal,
@@ -298,6 +304,7 @@ import {
   type OperatorPasswordPort,
   normalizeCallsign,
   type ObservedSession,
+  observedRuntimeStatePatch,
   type OpenedAnalyticsIndexStore,
   OperatorReadService,
   overriddenBy,
@@ -316,6 +323,7 @@ import {
   portCandidates,
   publishableDirectCarrier,
   publishedDaemonCarriers,
+  projectObservedRuntime,
   projectStructuredQuestion,
   type QuotaFailoverLoop,
   QuotaFailoverService,
@@ -387,6 +395,7 @@ import {
   SessionResumeService,
   type SessionResumeSubsystem,
   type SessionRootPinner,
+  SessionRuntimeControlService,
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
@@ -3463,6 +3472,38 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    */
   const launchTmux = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
   /**
+   * The per-harness workarounds, held as a local because TWO things read them: the world publishes
+   * it, and the runtime-control subsystem below plans every switch through it. A second construction
+   * would give the control path its own picker cleanup, so the recovery that runs after a failed
+   * drive would not be the one this daemon declared.
+   */
+  const harnessService = new HarnessQuirkService(
+    new CodexPickerCleanup(
+      // The picker pane goes through the same private-socket process port as every
+      // other tmux touch: cleanup sends keys, so reaching the host's default
+      // server would be sending them into somebody else's terminal.
+      new TmuxCodexPickerPane(tmux),
+      { sleep: milliseconds => Bun.sleep(milliseconds) },
+    ),
+    // The instruction a quarantined session shows a human names the CLI they
+    // actually type, not this daemon — `fyd resume` is not a command. The daemon
+    // cannot read the CLI package without depending on it, so the name is a
+    // constant here, as it already is everywhere the daemon quotes a `fy`
+    // command.
+    CLIENT_NAME,
+  );
+  /**
+   * ONE held Codex catalog for the whole daemon.
+   *
+   * The probe is an ephemeral second speaker to a live account, so opening the model sheet twice must
+   * not start two of them — and a per-subsystem cache would do exactly that. The probe itself runs
+   * the account's OWN executable in the session's OWN directory, which is what makes its answer the
+   * list that account's picker will render.
+   */
+  const codexRuntimeModels = new CodexRuntimeCatalogCache((binary, cwd) =>
+    new CodexAppServerCatalog({ clientName: DAEMON_NAME, clientVersion: daemonVersion }).models(binary, cwd),
+  );
+  /**
    * ONE launch gate and ONE turn store for every path that relaunches or hands over a turn.
    *
    * The gate is a process-wide ledger of launches in flight, and its whole value is that a caller
@@ -3690,21 +3731,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     },
     sessions: planner,
     provenance: new SessionProvenanceStamper(clock),
-    harness: new HarnessQuirkService(
-      new CodexPickerCleanup(
-        // The picker pane goes through the same private-socket process port as every
-        // other tmux touch: cleanup sends keys, so reaching the host's default
-        // server would be sending them into somebody else's terminal.
-        new TmuxCodexPickerPane(tmux),
-        { sleep: milliseconds => Bun.sleep(milliseconds) },
-      ),
-      // The instruction a quarantined session shows a human names the CLI they
-      // actually type, not this daemon — `fyd resume` is not a command. The daemon
-      // cannot read the CLI package without depending on it, so the name is a
-      // constant here, as it already is everywhere the daemon quotes a `fy`
-      // command.
-      CLIENT_NAME,
-    ),
+    harness: harnessService,
     transcripts: {
       sources: transcriptSources,
       search: (events, query, options) => searchTranscript(events, query, options),
@@ -3766,7 +3793,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
-      const projectQuestionState = async (id: SessionId): Promise<void> => {
+      //
+      // TWO PROJECTIONS OVER ONE TAIL, not two reads. The open structured question and the harness's
+      // own account of which model it is running are both recovered from the same 400 events, and
+      // folding them into one patch is what keeps a session read at one transcript pass. Both are
+      // additive over whatever the document already holds, so neither can erase the other's fields.
+      const projectSessionEvidence = async (id: SessionId): Promise<void> => {
         const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
         // A transcript that cannot be proved belongs to this session is not a
         // benign empty transcript.  Leave the durable state untouched: its own
@@ -3775,18 +3807,31 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         if (transcript.kind !== 'read') return;
         const current = SessionStateSchema.safeParse(await storage.readState(id));
         if (!current.success) return;
-        const patch = structuredQuestionStatePatch(current.data, projectStructuredQuestion(transcript.events));
+        const question = structuredQuestionStatePatch(current.data, projectStructuredQuestion(transcript.events));
+        // The model the harness SAID it was using, never the one the session was launched with.
+        // Nothing else in the daemon writes these three fields, so every surface that shows a
+        // running model — the composer chips, the context window, `fy ls` — is reading this.
+        const patch = {
+          ...question,
+          ...observedRuntimeStatePatch(current.data, projectObservedRuntime(transcript.events)),
+        };
         if (Object.keys(patch).length === 0) return;
         await storage.updateState(id, raw => {
           const verified = SessionStateSchema.safeParse(raw);
           if (!verified.success) return raw;
           const next = { ...(raw as Record<string, unknown>), ...patch };
-          if (patch.pendingQuestion === undefined) delete next.pendingQuestion;
-          if (patch.needsHumanKind === undefined) delete next.needsHumanKind;
+          // The two removals belong to the QUESTION projection alone, and are applied only when that
+          // projection had something to say. An observation says nothing about whether a question is
+          // still open — so letting a moved model erase `needsHumanKind` would clear the very
+          // quarantine a failed picker drive writes.
+          if (Object.keys(question).length > 0) {
+            if (question.pendingQuestion === undefined) delete next.pendingQuestion;
+            if (question.needsHumanKind === undefined) delete next.needsHumanKind;
+          }
           return next as typeof raw;
         });
       };
-      const sessions = createSessionDirectorySubsystem(paths, storage, projectQuestionState);
+      const sessions = createSessionDirectorySubsystem(paths, storage, projectSessionEvidence);
       // Originals are keyed by this daemon's durable pairing identity even
       // inside its private state home. A plaintext unlock is deliberately not a
       // storage operation: it remains in the store's process-local cache only.
@@ -4053,6 +4098,63 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionAnswer: createSessionAnswerSubsystem(storage, sessions, launchTmux),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
+        sessionRuntime: new SessionRuntimeControlService({
+          /**
+           * The durable boundary, as five delegations.
+           *
+           * A reference arrives as three outcomes rather than two: not an id at all, a well-formed id
+           * nobody holds, and a session. The service answers `400` and `404` from that distinction,
+           * so collapsing it here would change what these routes already reply.
+           */
+          repository: {
+            find: reference => {
+              const id = tryParseSessionId(reference);
+              if (id === undefined) return { kind: 'invalid' };
+              return storage.findSession(id) === undefined ? { kind: 'missing' } : { kind: 'session', id };
+            },
+            view: async id => await sessions.get(id).catch(() => undefined),
+            launch: async id => {
+              // PARSED, not asserted: a control types into a real terminal, so a configuration
+              // document that no longer validates must refuse rather than address whatever pane it
+              // names — the same rule the send slice's terminal follows.
+              const parsed = SessionLifecycleConfigSchema.safeParse(
+                lifecycleConfigDocument(await storage.readConfig(id)),
+              );
+              return parsed.success ? parsed.data : undefined;
+            },
+            journal: async (id, event, data) => {
+              await storage.append(id, event, data);
+            },
+            quarantine: async (id, patch) => {
+              await storage.updateState(id, current => ({ ...(current as Record<string, unknown>), ...patch }));
+            },
+          },
+          pane: launchTmux,
+          injector: new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+          // Bound to one session per drive, and addressed by pane id from there on.
+          picker: tmuxSession =>
+            new TmuxCodexPickerDrive(
+              tmux,
+              launchTmux,
+              new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+              tmuxSession,
+              HARNESS_PICKER_COMMAND,
+            ),
+          // The world's own harness service, so the decision a control performs and the recovery a
+          // failed drive runs are the ones this daemon published rather than a second construction.
+          harness: harnessService,
+          accounts,
+          // ONE cache for the daemon. Per-subsystem caches would each spawn their own probe, which
+          // is the second speaker to a live account this cache exists to prevent.
+          catalog: codexRuntimeModels,
+          // Its own queue: a picker drive holds the session for several seconds of keystrokes, and
+          // must not make every unrelated document write wait behind it.
+          serial: new KeyedSerialExecutor(),
+          sleeper: { sleep: milliseconds => Bun.sleep(milliseconds) },
+          clock,
+          // The instruction a quarantined session shows a human names the CLI they actually type.
+          clientName: CLIENT_NAME,
+        }),
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.

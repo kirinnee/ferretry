@@ -3,9 +3,12 @@ import type { AttentionId } from '@ferretry/protocol';
 import should from 'should';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
+  acceptsDirectReferenceQuery,
+  DIRECT_REFERENCE_SIGILS,
   findReferences,
   formatCodeReference,
   formatReference,
+  isReferenceLeftBoundary,
   parseReferenceHref,
   parseReferenceToken,
   REFERENCE_CLOSED_ATTRIBUTE,
@@ -13,6 +16,8 @@ import {
   type ResolvedAgent,
   type ResolvedReference,
   type ResolvedSurfaceReference,
+  type ResolvedTask,
+  type ResolvedTaskReference,
   referenceHref,
   referenceIdentity,
   remarkReferences,
@@ -21,13 +26,19 @@ import {
   type SurfaceProof,
   type SurfaceReference,
   surfaceReferenceClosed,
+  type TaskReferenceLookup,
+  type TaskReferenceResolver,
 } from '../../src/lib/references.ts';
 
 const daemonId = 'daemon-a' as DaemonId;
 
 /** A live fleet answer for the daemon under test. */
 const agent = (sessionId: string, name = 'zelda'): ResolvedAgent => ({ daemonId, sessionId, name });
-
+const task = (sessionId: string, id = 'F12', owner = daemonId): ResolvedTask => ({
+  daemonId: owner,
+  sessionId,
+  id,
+});
 /** Reads a node's children as a list, so assertions stay one expression long. */
 const kids = (node: MdTree | undefined): MdTree[] => node?.children ?? [];
 
@@ -53,6 +64,8 @@ describe('parseReferenceToken', () => {
     ['@src/api.ts:120-120', { kind: 'file', path: 'src/api.ts', line: 120, endLine: 120 }],
     ['&F12', { kind: 'task', id: 'F12' }],
     ['&f12', { kind: 'task', id: 'F12' }],
+    ['&F12@{mshahp8i-fb9fe194}', { kind: 'task', id: 'F12', sessionId: 'mshahp8i-fb9fe194' }],
+    ['&f12@{Session_A-1.dev}', { kind: 'task', id: 'F12', sessionId: 'Session_A-1.dev' }],
     ['!A3', { kind: 'attention', id: 'A3' }],
     ['/liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
     ['$liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
@@ -89,6 +102,15 @@ describe('parseReferenceToken', () => {
     ':1zelda',
     ':zelda_name',
     '&A3',
+    '&F12@',
+    '&F12@{}',
+    '&F12@{.}',
+    '&F12@{..}',
+    '&F12@{-leading}',
+    '&F12@{under/other}',
+    '&F12@{nested@{other}}',
+    '&F12@{unterminated',
+    `&F12@{${'s'.repeat(129)}}`,
     '!A0',
     'pin:thing',
     '/',
@@ -128,6 +150,14 @@ describe('parseReferenceToken', () => {
 
     // Assert
     should(actual).be.null();
+  });
+
+  test('should accept the exact session-id length ceiling and preserve every byte', () => {
+    // Arrange
+    const sessionId = `S${'a'.repeat(127)}`;
+
+    // Assert
+    should(parseReferenceToken(`&f12@{${sessionId}}`)).deepEqual({ kind: 'task', id: 'F12', sessionId });
   });
 });
 
@@ -181,6 +211,59 @@ describe('findReferences', () => {
     // Act & Assert
     should(findReferences('a plain sentence with no references')).deepEqual([]);
   });
+
+  test('should find a qualified task through punctuation without changing session-id case', () => {
+    // Arrange
+    const text = 'See &f12@{Session_A-1.dev}, then continue.';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(actual).deepEqual([
+      {
+        reference: { kind: 'task', id: 'F12', sessionId: 'Session_A-1.dev' },
+        raw: '&f12@{Session_A-1.dev}',
+        start: text.indexOf('&f12'),
+        end: text.indexOf('&f12') + '&f12@{Session_A-1.dev}'.length,
+      },
+    ]);
+  });
+
+  test('should never degrade an attempted malformed qualifier to a bare task', () => {
+    // Arrange
+    const malformed = [
+      '&F12@',
+      '&F12@{}',
+      '&F12@{.}',
+      '&F12@{..}',
+      '&F12@{_leading}',
+      '&F12@{bad/path}',
+      '&F12@{bad\\path}',
+      '&F12@{bad space}',
+      '&F12@{bad:colon}',
+      '&F12@{café}',
+      '&F12@{bad%20value}',
+      '&F12@{unterminated',
+      '&F12@{one}@{two}',
+      `&F12@{${'s'.repeat(129)}}`,
+      '&F1234567890@{session-1}',
+      '&Z1@{session-1}',
+    ];
+
+    // Act & Assert
+    for (const token of malformed) should(findReferences(`before ${token} after`)).deepEqual([]);
+  });
+
+  test('should end a qualified task before every ordinary prose terminator', () => {
+    // Arrange
+    const token = '&F12@{session-1}';
+    const terminators = [' ', ')', ']', '}', '"', "'", '`', ',', ';', '!', '?', '<', '>', ':', '.', '=', '—', '–'];
+
+    // Act & Assert
+    for (const terminator of terminators)
+      should(findReferences(`${token}${terminator}`).map(match => match.raw)).deepEqual([token]);
+  });
 });
 
 describe('formatReference', () => {
@@ -191,6 +274,7 @@ describe('formatReference', () => {
     should(formatReference({ kind: 'file', path: 'src/api.ts', line: 12 })).equal('@src/api.ts:12');
     should(formatReference({ kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 })).equal('@src/api.ts:12-20');
     should(formatReference({ kind: 'task', id: 'f12' })).equal('&F12');
+    should(formatReference({ kind: 'task', id: 'f12', sessionId: 'Session_A-1.dev' })).equal('&F12@{Session_A-1.dev}');
     should(formatReference({ kind: 'attention', id: 'A3' as AttentionId })).equal('!A3');
   });
 
@@ -199,7 +283,23 @@ describe('formatReference', () => {
     should(() => formatReference({ kind: 'agent', name: '1nope' })).throw(TypeError);
     should(() => formatReference({ kind: 'file', path: '../secret' })).throw(TypeError);
     should(() => formatReference({ kind: 'task', id: 'Z9' })).throw(TypeError);
+    should(() => formatReference({ kind: 'task', id: 'F12', sessionId: '..' })).throw(TypeError);
     should(() => formatReference({ kind: 'attention', id: 'A0' as AttentionId })).throw(TypeError);
+  });
+
+  test('should let resolved task form, not the carried owner alone, choose the spelling', () => {
+    // Arrange
+    const local: ResolvedTaskReference = {
+      kind: 'task',
+      daemonId,
+      sessionId: 'session-1',
+      id: 'F12',
+      form: 'local',
+    };
+
+    // Assert
+    should(formatReference(local)).equal('&F12');
+    should(formatReference({ ...local, form: 'qualified' })).equal('&F12@{session-1}');
   });
 
   test('should format a file open target from its bare location', () => {
@@ -274,10 +374,61 @@ describe('resolveReference', () => {
     should(resolveReference({ kind: 'file', path: 'api.ts' }, { file: () => '../escape' })).be.null();
   });
 
-  test('should prove tasks and attention only on a positive answer', () => {
+  test('should ask the distinct local and qualified task lookups and keep their form', () => {
+    // Arrange
+    const lookups: TaskReferenceLookup[] = [];
+    const resolveTask: TaskReferenceResolver = lookup => {
+      lookups.push(lookup);
+      return task(lookup.form === 'qualified' ? lookup.sessionId : 'session-1', lookup.id.toLowerCase());
+    };
+
+    // Act
+    const local = resolveReference({ kind: 'task', id: 'f12' }, { task: resolveTask });
+    const qualified = resolveReference({ kind: 'task', id: 'f12', sessionId: 'Session_A-1' }, { task: resolveTask });
+
     // Assert
-    should(resolveReference({ kind: 'task', id: 'F12' }, { task: () => true })).deepEqual({ kind: 'task', id: 'F12' });
-    should(resolveReference({ kind: 'task', id: 'F12' }, { task: () => false })).be.null();
+    should(lookups).deepEqual([
+      { form: 'local', id: 'F12' },
+      { form: 'qualified', id: 'F12', sessionId: 'Session_A-1' },
+    ]);
+    should(local).deepEqual({ kind: 'task', daemonId, sessionId: 'session-1', id: 'F12', form: 'local' });
+    should(qualified).deepEqual({
+      kind: 'task',
+      daemonId,
+      sessionId: 'Session_A-1',
+      id: 'F12',
+      form: 'qualified',
+    });
+  });
+
+  test('should validate the resolver answer instead of accepting truthiness', () => {
+    // Arrange
+    const qualified = { kind: 'task' as const, id: 'F12', sessionId: 'session-2' };
+
+    // Assert — a real but substituted neighbour is not proof of the question.
+    should(resolveReference({ kind: 'task', id: 'F12' }, { task: () => null })).be.null();
+    should(resolveReference({ kind: 'task', id: 'F12' }, { task: () => task('session-1', 'F13') })).be.null();
+    should(resolveReference(qualified, { task: () => task('session-3') })).be.null();
+    should(resolveReference(qualified, { task: () => task('..') })).be.null();
+    should(resolveReference(qualified, { task: () => task('session-2', 'F12', '  ' as DaemonId) })).be.null();
+  });
+
+  test('should refuse an invalid authored task before asking any resolver', () => {
+    // Arrange
+    let calls = 0;
+    const resolver: TaskReferenceResolver = () => {
+      calls += 1;
+      return task('session-1');
+    };
+
+    // Assert
+    should(resolveReference({ kind: 'task', id: 'Z1' }, { task: resolver })).be.null();
+    should(resolveReference({ kind: 'task', id: 'F12', sessionId: '..' }, { task: resolver })).be.null();
+    should(calls).equal(0);
+  });
+
+  test('should leave attention on its existing boolean proof contract', () => {
+    // Assert
     should(resolveReference({ kind: 'attention', id: 'A3' as AttentionId }, { attention: () => true })).deepEqual({
       kind: 'attention',
       id: 'A3',
@@ -301,12 +452,21 @@ describe('resolveReference', () => {
 });
 
 describe('referenceHref and parseReferenceHref', () => {
+  const localTask: ResolvedTaskReference = {
+    kind: 'task',
+    daemonId,
+    sessionId: 'session-1',
+    id: 'F12',
+    form: 'local',
+  };
+  const qualifiedTask: ResolvedTaskReference = { ...localTask, sessionId: 'Session_A-1', form: 'qualified' };
   const roundTrip: readonly ResolvedReference[] = [
     { kind: 'agent', daemonId, sessionId: 'session-1', name: 'zelda' },
     { kind: 'file', path: 'src/api.ts' },
     { kind: 'file', path: 'src/api.ts', line: 12 },
     { kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 },
-    { kind: 'task', id: 'F12' },
+    localTask,
+    qualifiedTask,
     { kind: 'attention', id: 'A3' as AttentionId },
     { kind: 'skill', name: 'summary' },
   ];
@@ -320,6 +480,16 @@ describe('referenceHref and parseReferenceHref', () => {
       should(actual).deepEqual(reference);
     });
   }
+
+  test('should encode the exact task answer plus the authored question form', () => {
+    // Assert
+    should(referenceHref(localTask)).equal(
+      '#fy-reference?kind=task&daemon=daemon-a&session=session-1&id=F12&form=local',
+    );
+    should(referenceHref(qualifiedTask)).equal(
+      '#fy-reference?kind=task&daemon=daemon-a&session=Session_A-1&id=F12&form=qualified',
+    );
+  });
 
   test('should carry the daemon in an agent envelope so a link cannot cross daemons', () => {
     // Act
@@ -339,7 +509,10 @@ describe('referenceHref and parseReferenceHref', () => {
     // Assert
     should(() => referenceHref({ kind: 'agent', daemonId, sessionId: '..', name: 'zelda' })).throw(TypeError);
     should(() => referenceHref({ kind: 'file', path: '../secret' })).throw(TypeError);
-    should(() => referenceHref({ kind: 'task', id: 'Z1' })).throw(TypeError);
+    should(() => referenceHref({ ...localTask, id: 'Z1' })).throw(TypeError);
+    should(() => referenceHref({ ...localTask, sessionId: '..' })).throw(TypeError);
+    should(() => referenceHref({ ...localTask, daemonId: '  ' as DaemonId })).throw(TypeError);
+    should(() => referenceHref({ ...localTask, form: 'other' as 'local' })).throw(TypeError);
     should(() => referenceHref({ kind: 'attention', id: 'A0' as AttentionId })).throw(TypeError);
   });
 
@@ -353,8 +526,8 @@ describe('referenceHref and parseReferenceHref', () => {
 
   test('should reject an envelope carrying extra or repeated keys', () => {
     // Assert
-    should(parseReferenceHref('#fy-reference?kind=task&id=F12&extra=1')).be.null();
-    should(parseReferenceHref('#fy-reference?kind=task&id=F12&id=F13')).be.null();
+    should(parseReferenceHref(`${referenceHref(localTask)}&extra=1`)).be.null();
+    should(parseReferenceHref(`${referenceHref(localTask)}&id=F13`)).be.null();
     should(parseReferenceHref('#fy-reference?kind=agent&daemon=d&id=s&name=z&name=y')).be.null();
     should(parseReferenceHref('#fy-reference?kind=attention&id=A3&id=A4')).be.null();
   });
@@ -373,10 +546,20 @@ describe('referenceHref and parseReferenceHref', () => {
 
   test('should reject an envelope whose id is not the shape its kind demands', () => {
     // Assert
-    should(parseReferenceHref('#fy-reference?kind=task&id=Z1')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=task&daemon=d&session=s&id=Z1&form=local')).be.null();
     should(parseReferenceHref('#fy-reference?kind=attention&id=A0')).be.null();
     should(parseReferenceHref('#fy-reference?kind=file&path=..%2Fsecret')).be.null();
     should(parseReferenceHref('#fy-reference?kind=agent&daemon=d&id=..&name=zelda')).be.null();
+  });
+
+  test('should reject legacy, incomplete, unsafe, and embellished task envelopes', () => {
+    // Assert — old DOM artifacts fail closed until the transcript repaints.
+    should(parseReferenceHref('#fy-reference?kind=task&id=F12')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=task&daemon=d&session=s&id=F12')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=task&daemon=d&session=..&id=F12&form=local')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=task&daemon=&session=s&id=F12&form=local')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=task&daemon=d&session=s&id=F12&form=other')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=task&daemon=d&session=s&id=F12&form=qualified&form=local')).be.null();
   });
 
   test('should reject an agent envelope whose keys are present but empty', () => {
@@ -400,9 +583,29 @@ describe('referenceIdentity', () => {
     // Assert
     should(referenceIdentity({ kind: 'file', path: 'a.ts', line: 2, endLine: 3 })).equal('file:a.ts:2:3');
     should(referenceIdentity({ kind: 'file', path: 'a.ts' })).equal('file:a.ts::');
-    should(referenceIdentity({ kind: 'task', id: 'F12' })).equal('task:F12');
+    should(referenceIdentity({ kind: 'task', daemonId, sessionId: 's1', id: 'F12', form: 'local' })).equal(
+      'task:daemon-a:s1:F12:local',
+    );
     should(referenceIdentity({ kind: 'attention', id: 'A3' as AttentionId })).equal('attention:A3');
     should(referenceIdentity({ kind: 'skill', name: 'summary' })).equal('skill:summary');
+  });
+
+  test('should distinguish a task by daemon, session, id, and authored form', () => {
+    // Arrange
+    const reference: ResolvedTaskReference = {
+      kind: 'task',
+      daemonId,
+      sessionId: 's1',
+      id: 'F12',
+      form: 'local',
+    };
+
+    // Assert
+    const identity = referenceIdentity(reference);
+    should(referenceIdentity({ ...reference, daemonId: 'daemon-b' as DaemonId })).not.equal(identity);
+    should(referenceIdentity({ ...reference, sessionId: 's2' })).not.equal(identity);
+    should(referenceIdentity({ ...reference, id: 'F13' })).not.equal(identity);
+    should(referenceIdentity({ ...reference, form: 'qualified' })).not.equal(identity);
   });
 });
 
@@ -459,13 +662,52 @@ describe('revalidateReference', () => {
     should(revalidateReference({ kind: 'file', path: 'src/api.ts' }, { file: () => 'src/other.ts' })).be.null();
   });
 
-  test('should re-prove tasks and attention through their boards', () => {
-    // Assert
-    should(revalidateReference({ kind: 'task', id: 'F12' }, { task: () => true })).deepEqual({
+  test('should re-prove a task with the same exact question and painted answer', () => {
+    // Arrange
+    const local: ResolvedTaskReference = {
       kind: 'task',
+      daemonId,
+      sessionId: 'session-1',
       id: 'F12',
-    });
-    should(revalidateReference({ kind: 'task', id: 'F12' }, { task: () => false })).be.null();
+      form: 'local',
+    };
+    const qualified: ResolvedTaskReference = { ...local, sessionId: 'session-2', form: 'qualified' };
+    const asked: TaskReferenceLookup[] = [];
+    const resolver: TaskReferenceResolver = lookup => {
+      asked.push(lookup);
+      return task(lookup.form === 'qualified' ? lookup.sessionId : 'session-1', lookup.id);
+    };
+
+    // Assert
+    should(revalidateReference(local, { task: resolver })).deepEqual(local);
+    should(revalidateReference(qualified, { task: resolver })).deepEqual(qualified);
+    should(asked).deepEqual([
+      { form: 'local', id: 'F12' },
+      { form: 'qualified', id: 'F12', sessionId: 'session-2' },
+    ]);
+  });
+
+  test('should reject any task revalidation substitution or scope reinterpretation', () => {
+    // Arrange
+    const local: ResolvedTaskReference = {
+      kind: 'task',
+      daemonId,
+      sessionId: 'session-1',
+      id: 'F12',
+      form: 'local',
+    };
+    const qualified: ResolvedTaskReference = { ...local, sessionId: 'session-2', form: 'qualified' };
+
+    // Assert
+    should(revalidateReference(local, { task: () => task('session-2') })).be.null();
+    should(revalidateReference(local, { task: () => task('session-1', 'F13') })).be.null();
+    should(revalidateReference(local, { task: () => task('session-1', 'F12', 'daemon-b' as DaemonId) })).be.null();
+    should(revalidateReference(qualified, { task: () => task('session-1') })).be.null();
+    should(revalidateReference(local, {})).be.null();
+  });
+
+  test('should re-prove attention through its existing ledger', () => {
+    // Assert
     should(revalidateReference({ kind: 'attention', id: 'A3' as AttentionId }, { attention: () => true })).deepEqual({
       kind: 'attention',
       id: 'A3',
@@ -553,7 +795,8 @@ describe('remarkReferences', () => {
   const resolvers = {
     agent: () => agent('s1'),
     file: (candidate: string) => (candidate === 'src/api.ts' ? 'src/api.ts' : null),
-    task: (id: string) => id === 'F12',
+    task: (lookup: TaskReferenceLookup) =>
+      lookup.id === 'F12' ? task(lookup.form === 'qualified' ? lookup.sessionId : 's1') : null,
     attention: () => true,
   };
 
@@ -583,9 +826,24 @@ describe('remarkReferences', () => {
 
     // Assert
     const link = kids(kids(tree)[0]).find(node => node.type === 'link');
-    should(link?.url).equal('#fy-reference?kind=task&id=F12');
+    should(link?.url).equal('#fy-reference?kind=task&daemon=daemon-a&session=s1&id=F12&form=local');
     should(link?.title).equal('Open task &F12');
-    should(link?.data?.hProperties?.['data-fy-reference']).equal('task:F12');
+    should(link?.data?.hProperties?.['data-fy-reference']).equal('task:daemon-a:s1:F12:local');
+  });
+
+  test('should link a qualified task with its exact owner while preserving authored bytes', () => {
+    // Arrange
+    const tree = paragraph('see &f12@{Session_A-1} now');
+
+    // Act
+    remarkReferences({ resolvers })(tree);
+
+    // Assert
+    const link = kids(kids(tree)[0]).find(node => node.type === 'link');
+    should(kids(link)[0]?.value).equal('&f12@{Session_A-1}');
+    should(link?.url).equal('#fy-reference?kind=task&daemon=daemon-a&session=Session_A-1&id=F12&form=qualified');
+    should(link?.title).equal('Open task &F12@{Session_A-1}');
+    should(link?.data?.hProperties?.['data-fy-reference']).equal('task:daemon-a:Session_A-1:F12:qualified');
   });
 
   test('should title a file link by what opening it will do', () => {
@@ -964,6 +1222,84 @@ describe('surface references', () => {
 
       // Assert
       should(tree).deepEqual(paragraph('maybe %terminal:live'));
+    });
+  });
+});
+
+describe('the composer-facing half of the grammar', () => {
+  describe('isReferenceLeftBoundary', () => {
+    test('should answer for the same characters the scanner itself accepts', () => {
+      // Act & Assert — nothing before a token is the `^` half of the rule.
+      should(isReferenceLeftBoundary(undefined)).be.true();
+      for (const previous of [' ', '\n', '\t', '(', '[', '{', '"', "'", '`', '<', '>', '=', '—', '–'])
+        should(isReferenceLeftBoundary(previous)).be.true();
+      for (const previous of ['a', 'Z', '9', '_', '-', '.', '/', ':', '&', '!', '$', '@', '%', ',', ';'])
+        should(isReferenceLeftBoundary(previous)).be.false();
+    });
+
+    test('should agree with what findReferences actually links', () => {
+      // Arrange — the decision exists so a picker cannot open where the scanner
+      // refuses, so the two are asserted against each other rather than apart.
+      const prefixes = [' ', '(', 'x', ':', '.', ''];
+
+      for (const prefix of prefixes) {
+        // Act
+        const linked = findReferences(`${prefix}:zelda`).length === 1;
+
+        // Assert
+        should(linked).equal(isReferenceLeftBoundary(prefix === '' ? undefined : prefix));
+      }
+    });
+  });
+
+  describe('acceptsDirectReferenceQuery', () => {
+    test('should name exactly the four sigils that open a family of their own', () => {
+      // Assert — `@`, `%` and `/` are composer triggers, not token prefixes.
+      should([...DIRECT_REFERENCE_SIGILS]).deepEqual([':', '&', '!', '$']);
+    });
+
+    test('should accept every prefix of a complete token, and the bare sigil', () => {
+      // Arrange — a picker decides on half-typed bytes, so each proper prefix of
+      // a real token has to stay viable all the way up to the token itself.
+      const complete: readonly [(typeof DIRECT_REFERENCE_SIGILS)[number], string][] = [
+        [':', 'zelda'],
+        ['&', 'F12'],
+        ['!', 'A31'],
+        ['$', 'summary'],
+      ];
+
+      for (const [sigil, body] of complete)
+        for (let length = 0; length <= body.length; length++) {
+          // Act & Assert
+          should(acceptsDirectReferenceQuery(sigil, body.slice(0, length))).be.true();
+          // And the completed token really is one this grammar parses.
+          should(parseReferenceToken(`${sigil}${body}`)).not.be.null();
+        }
+    });
+
+    test('should refuse a query no token of that family could ever start with', () => {
+      // Act & Assert — `$HOME` is the reason skills are lowercase-only, and
+      // `!a3` is the reason attention is not case-folded.
+      should(acceptsDirectReferenceQuery('$', 'HOME')).be.false();
+      should(acceptsDirectReferenceQuery('$', 'PATH')).be.false();
+      should(acceptsDirectReferenceQuery('!', 'a3')).be.false();
+      should(acceptsDirectReferenceQuery('!', 'B3')).be.false();
+      should(acceptsDirectReferenceQuery('!', 'A0')).be.false();
+      should(acceptsDirectReferenceQuery('&', 'x1')).be.false();
+      should(acceptsDirectReferenceQuery('&', 'F1234567890')).be.false();
+      should(acceptsDirectReferenceQuery(':', '1zelda')).be.false();
+      should(acceptsDirectReferenceQuery(':', 'a'.repeat(33))).be.false();
+    });
+
+    test('should fold case exactly where the token grammar folds it', () => {
+      // Act & Assert — agents and tasks are case-insensitive; attention and
+      // skills are not, and a picker must not offer what the parser refuses.
+      should(acceptsDirectReferenceQuery(':', 'Zelda')).be.true();
+      should(acceptsDirectReferenceQuery('&', 'f12')).be.true();
+      should(acceptsDirectReferenceQuery('$', 'Summary')).be.false();
+      should(parseReferenceToken(':Zelda')).deepEqual({ kind: 'agent', name: 'zelda' });
+      should(parseReferenceToken('&f12')).deepEqual({ kind: 'task', id: 'F12' });
+      should(parseReferenceToken('$Summary')).be.null();
     });
   });
 });
