@@ -60,6 +60,9 @@ export class TaskListController {
   async run(input: TaskListInput): Promise<void> {
     const view = resolveTaskListView(input.options);
     const filters = buildTaskListFilters(input.options);
+    if (input.scope.sessionId === null && filters.some(([name]) => name === 'q')) {
+      refuse('--query searches the current session and cannot be combined with --all');
+    }
     const board = await this.gateway.list(input.scope, filters);
     if (input.json) return this.output.success(asJson(board));
     if (input.markdown) return this.output.success(renderTaskBoardMarkdown(board));

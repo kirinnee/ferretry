@@ -21,6 +21,7 @@ export * from './push.ts';
 export * from './relay-session.ts';
 export * from './secrets.ts';
 export * from './service.ts';
+export * from './session-search.ts';
 export * from './session.ts';
 export * from './socket-ticket.ts';
 export * from './state-home-layout.ts';

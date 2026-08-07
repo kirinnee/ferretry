@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import type { SessionFileIndexResponse } from '@ferretry/protocol';
 import { createElement } from 'react';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   changesUrl,
   codeReferenceRelativePath,
@@ -10,6 +9,7 @@ import {
   fileUrl,
   fsApi,
   fsTabAvailable,
+  indexUrl,
   isAbort,
   isUnknownRoute,
   listUrl,
@@ -19,6 +19,8 @@ import {
   resolveFsFilePaths,
   useFsProbe,
 } from '../../src/components/files-api.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { render, runAsync } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a-token' });
@@ -38,6 +40,66 @@ describe('files API', () => {
     expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
     expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
     expect(() => fsApi.list(daemonA, scopeB, '')).toThrow('file scope must belong');
+  });
+
+  /**
+   * The whole-tree file index, which is this file's ONLY caller-visible answer to
+   * "what can this session search".
+   *
+   * It is a sibling of `changes`, not of `list`: there is no `path`, so the URL
+   * must not go through `query()` and must never acquire a `?path=` — a browser
+   * walking the tree one directory at a time is the exact fan-out the index
+   * replaced. The route is `fs/index`, which deliberately does NOT end in `/fs`,
+   * and every fixture ladder in the suite has to branch on it first for that
+   * reason.
+   */
+  it('reads the whole-session file index over one credentialled request with no path parameter', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    // `satisfies` rather than a bare literal: without it `v` widens to `number`
+    // and `coverage` to `string`, and the fixture stops being assignable to the
+    // document this route actually returns.
+    const document = {
+      v: 1,
+      sessionId: 'same/session',
+      root: '/work/same-session',
+      files: [{ name: 'needle.ts', path: 'src/needle.ts' }],
+      coverage: 'complete',
+      skipped: [{ reason: 'denied', count: 1 }],
+    } satisfies SessionFileIndexResponse;
+    const index = await fsApi.index(daemonA, scopeA, undefined, async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify(document), { headers: { 'content-type': 'application/json' } });
+    });
+
+    expect(index).toEqual(document);
+    expect(indexUrl(scopeA)).toBe('/v1/sessions/same%2Fsession/fs/index');
+    // No `?path=`, and it is NOT the listing route with a suffix.
+    expect(indexUrl(scopeA)).not.toContain('?');
+    expect(indexUrl(scopeA).endsWith('/fs')).toBe(false);
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs/index');
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer a-token');
+    // The reader's own question is never answered from a cache: the daemon walks
+    // the tree inside the request, so a stale index is a wrong answer.
+    expect(calls[0]?.init?.cache).toBe('no-store');
+  });
+
+  it('refuses an index read for another daemon and preserves the daemon’s own refusal', async () => {
+    // A session id is daemon-local, so the same id on two daemons names two
+    // different sessions. Reading beta's index through alpha's credentials would
+    // hand a reader another machine's file names.
+    expect(() => fsApi.index(daemonA, scopeB)).toThrow('file scope must belong');
+    await expect(
+      fsApi.index(
+        daemonA,
+        scopeA,
+        undefined,
+        async () =>
+          new Response(JSON.stringify({ error: 'filesystem access is switched off', code: 'grant_denied' }), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    ).rejects.toMatchObject({ status: 403, message: 'filesystem access is switched off', code: 'grant_denied' });
   });
 
   it('does not share an in-flight code-reference directory lookup across daemons', async () => {

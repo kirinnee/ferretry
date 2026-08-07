@@ -1,3 +1,12 @@
+import {
+  SessionFileIndexEntrySchema,
+  SessionFileIndexSkipReasonSchema,
+  type SessionFileIndex,
+  type SessionFileIndexCoverage,
+  type SessionFileIndexEntry,
+  type SessionFileIndexSkip,
+  type SessionFileIndexSkipReason,
+} from '@ferretry/protocol';
 import { gateCandidates, isDeniedPath, looksBinary, normalizeRelativePath } from './path-policy.ts';
 import type {
   AfterValidationHook,
@@ -8,6 +17,8 @@ import type {
   SessionChangesView,
   SessionGit,
   SessionRootPinner,
+  SpawnBudget,
+  WorkBudget,
 } from './ports.ts';
 import {
   type FsDiffView,
@@ -17,9 +28,172 @@ import {
   type FsListing,
   MAX_DIFF_SIDE_BYTES,
   MAX_FILE_BYTES,
+  MAX_INDEX_CANDIDATES,
+  MAX_INDEX_DIRECTORIES,
+  MAX_INDEX_FILES,
+  MAX_INDEX_LIST_BYTES,
+  MAX_INDEX_WALL_MS,
   MAX_LISTING_ENTRIES,
   type ResolvedTarget,
 } from './types.ts';
+
+/**
+ * How much of a tree one index read may look at, and for how long.
+ *
+ * Tests narrow these; a route narrows nothing and supplies only the caller's `signal`, so the shipped
+ * surface always runs under the full defaults.
+ */
+export interface IndexBounds {
+  readonly maxFiles?: number;
+  readonly maxCandidates?: number;
+  readonly maxDirectories?: number;
+  /** Wall-clock budget for the WHOLE read. Defaults to {@link MAX_INDEX_WALL_MS}. */
+  readonly budgetMs?: number;
+  /** The caller's cancellation. A client that hung up is work nobody will read. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A deadline and a caller's cancellation, asked as one question.
+ *
+ * Both mean the same thing to every loop below — stop starting things — so they are one predicate
+ * rather than two checks that could disagree about which one fired. The clock is read through the
+ * injected reader so a test can expire a budget deterministically instead of sleeping.
+ */
+class IndexBudget implements SpawnBudget {
+  private readonly deadlineMs: number;
+
+  constructor(
+    private readonly nowMs: () => number,
+    budgetMs: number,
+    private readonly signal: AbortSignal | undefined,
+  ) {
+    this.deadlineMs = nowMs() + budgetMs;
+  }
+
+  expired(): boolean {
+    return this.signal?.aborted === true || this.nowMs() >= this.deadlineMs;
+  }
+
+  /**
+   * What is left for a child this call is about to start — zero exactly when {@link expired} is true.
+   *
+   * A caller who has hung up has no time left, not merely a deadline that has not arrived yet. Saying
+   * otherwise would let an implementation that bounds a spawn by this number alone start one for nobody,
+   * which is the whole failure the checks around it exist to prevent.
+   */
+  remainingMs(): number {
+    if (this.signal?.aborted === true) return 0;
+    return Math.max(0, this.deadlineMs - this.nowMs());
+  }
+}
+
+/**
+ * Roots a filename search never enters, even when they are not ignored.
+ *
+ * This is intentionally INDEX policy rather than the filesystem denylist: a person may explicitly open
+ * an ordinary source-map under `dist`, while putting every generated artifact into a global search makes
+ * that search slower and noisier. Secret-like basenames still go through {@link isDeniedPath}; Git's own
+ * ignore rules are applied before this list by `git ls-files --exclude-standard`.
+ */
+const INDEX_EXCLUDED_DIRECTORIES = new Set([
+  '.cache',
+  '.git',
+  '.gradle',
+  '.hg',
+  '.next',
+  '.svn',
+  '.terraform',
+  '.venv',
+  '__pycache__',
+  'build',
+  'coverage',
+  'dist',
+  'generated',
+  'node_modules',
+  'out',
+  'target',
+  'vendor',
+  'venv',
+]);
+
+/** Is any component an explicitly noisy index root? */
+function isIndexExcludedPath(rel: string): boolean {
+  return rel.split('/').some(segment => INDEX_EXCLUDED_DIRECTORIES.has(segment.toLowerCase()));
+}
+
+/** Locale-independent byte-order spelling for deterministic traversal and response order. */
+function comparePath(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Test-only narrowed bounds still have to be real bounds. */
+function indexLimit(value: number | undefined, fallback: number, label: string): number {
+  const limit = value ?? fallback;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > fallback) {
+    throw new RangeError(`${label} must be a non-negative safe integer no larger than ${fallback}`);
+  }
+  return limit;
+}
+
+/** What one index read left out, counted while it happens and turned into rows only at the end. */
+type SkipTally = Map<SessionFileIndexSkipReason, number>;
+
+/** Records `amount` more omissions for one reason. A zero is not an omission and never becomes a row. */
+function tally(skips: SkipTally, reason: SessionFileIndexSkipReason, amount: number): void {
+  if (amount <= 0) return;
+  skips.set(reason, (skips.get(reason) ?? 0) + amount);
+}
+
+/** The tally as the total record the wire carries. */
+function skipRecord(skips: SkipTally): SessionFileIndexSkip[] {
+  return SessionFileIndexSkipReasonSchema.options.flatMap(reason => {
+    const count = skips.get(reason);
+    return count === undefined ? [] : [{ reason, count }];
+  });
+}
+
+/** Only a bound biting or a subtree we could not read means the walk itself did not finish. */
+function coverageOf(skips: SkipTally): SessionFileIndexCoverage {
+  return skips.has('unreadable') || skips.has('truncated') ? 'partial' : 'complete';
+}
+
+/** Sort the fully inspected rows before applying the response bound, and record every omitted row. */
+function boundedIndexFiles(
+  files: readonly SessionFileIndexEntry[],
+  maxFiles: number,
+  skips: SkipTally,
+): SessionFileIndexEntry[] {
+  const sorted = [...files].sort((left, right) => comparePath(left.path, right.path));
+  tally(skips, 'truncated', sorted.length - maxFiles);
+  return sorted.slice(0, maxFiles);
+}
+
+/**
+ * One indexed row, or `undefined` for a path no read route would accept anyway.
+ *
+ * Everything that reaches an index is re-validated by the SAME syntactic gate the read routes apply, so
+ * an index can never offer a row that answers 400 when a reader opens it. A filename holding a control
+ * character or a backslash is legal on disk and is exactly such a row.
+ */
+function indexEntry(rel: string): SessionFileIndexEntry | undefined {
+  let normalized: string;
+  try {
+    normalized = normalizeRelativePath(rel);
+  } catch {
+    return undefined;
+  }
+  const name = normalized.split('/').at(-1) ?? '';
+  const parsed = SessionFileIndexEntrySchema.safeParse({ path: normalized, name });
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** A Git candidate that is absent or not an ordinary current file is safely unsupported, not unreadable. */
+function unsupportedCandidate(error: unknown): boolean {
+  return (
+    error instanceof FsError && ['not_found', 'not_a_directory', 'not_a_file', 'escapes_root'].includes(error.code)
+  );
+}
 
 /**
  * Read-only working-tree access for ONE session, rooted at its own cwd.
@@ -40,6 +214,13 @@ export class SessionFilesystem {
   constructor(
     private readonly pinner: SessionRootPinner,
     private readonly git: SessionGit,
+    /**
+     * How this reads the clock, injected so a deadline can be proven without waiting for one.
+     *
+     * Defaulted rather than required because exactly one call in this class is timed, and making every
+     * construction site name a clock to get the same answer would be ceremony that hides which one it is.
+     */
+    private readonly nowMs: () => number = () => Date.now(),
   ) {}
 
   /** The session root, freshly resolved. A since-deleted worktree is a clean `not_found`. */
@@ -70,6 +251,244 @@ export class SessionFilesystem {
     } finally {
       await pinned.close();
     }
+  }
+
+  /**
+   * Every file under the session root a read could serve, in ONE answer, with what it left out.
+   *
+   * WHY THIS EXISTS AT ALL. A client that wants to search filenames used to walk the tree itself, one
+   * HTTP call per directory, and the daemon refuses to enumerate `.git`, `node_modules` and every
+   * gitignored directory — so the client met a 403 in the FIRST listing of any Git checkout and, having
+   * no way to tell "this subtree is closed" from "this read failed", reported the whole session as
+   * having no files. The inversion is the point: a refusal is a COUNTED ROW here, never the answer.
+   *
+   * WHY A REPOSITORY IS ONE COMMAND AND EVERYTHING ELSE IS A WALK. Inside a worktree, `--exclude-standard`
+   * is the gitignore rule applied by the tool that defines it, in a single answer whatever the tree's
+   * depth — which is both the right owner and the difference between one round trip and thousands.
+   * Outside one there is no ignore rule to honour, so a bounded descriptor walk is both cheaper and
+   * safer than asking Git about a directory that is not in a repository at all.
+   *
+   * WHAT THIS IS NOT. It is a list of NAMES, never of bytes, and it grants nothing: every path it
+   * returns is re-gated by {@link SessionFilesystem.readFile} before a single byte is served. The
+   * denylist runs here anyway, because a name like `deploy/prod.pem` is itself worth withholding.
+   */
+  async index(cwd: string, bounds: IndexBounds = {}): Promise<SessionFileIndex> {
+    const maxFiles = indexLimit(bounds.maxFiles, MAX_INDEX_FILES, 'index file limit');
+    const maxCandidates = indexLimit(bounds.maxCandidates, MAX_INDEX_CANDIDATES, 'index candidate limit');
+    const maxDirectories = indexLimit(bounds.maxDirectories, MAX_INDEX_DIRECTORIES, 'index directory limit');
+    const budgetMs = indexLimit(bounds.budgetMs, MAX_INDEX_WALL_MS, 'index time budget');
+    const budget = new IndexBudget(this.nowMs, budgetMs, bounds.signal);
+    const pinned = await this.pinner.pin(cwd);
+    try {
+      const skips: SkipTally = new Map();
+      // A caller who has already gone away gets the shape of an answer and none of the work. The pin is
+      // still taken, because `root` is a fact about the session that only the pin can state, and it is
+      // one open-and-close rather than a tree walk. Nothing beneath it is asked anything.
+      if (budget.expired()) {
+        tally(skips, 'truncated', 1);
+        return { root: pinned.rootReal, files: [], coverage: coverageOf(skips), skipped: skipRecord(skips) };
+      }
+      // Deliberately NOT caught: a worktree whose ignore rules cannot be established must not fall back
+      // to the walk, because that walk would enumerate exactly the directories the ignore gate closes.
+      // Given the remaining budget because this asks Git too, and a bound that only covered the reads
+      // AFTER it would be a bound on the cheaper half of the call.
+      const repo = await this.git.repoInfo(pinned.policyCwd, budget);
+      // Asked again before anything else starts. An abort that landed while Git was answering must not
+      // be the reason a NEW child is spawned; what it cannot do is reach into one already running.
+      if (budget.expired()) {
+        tally(skips, 'truncated', 1);
+        return { root: pinned.rootReal, files: [], coverage: coverageOf(skips), skipped: skipRecord(skips) };
+      }
+      const files = repo.repo
+        ? await this.indexTracked(pinned, maxFiles, maxCandidates, skips, budget)
+        : await this.indexWalk(pinned, maxFiles, maxCandidates, maxDirectories, skips, budget);
+      return { root: pinned.rootReal, files, coverage: coverageOf(skips), skipped: skipRecord(skips) };
+    } finally {
+      await pinned.close();
+    }
+  }
+
+  /**
+   * A Git worktree's index: one command, then the denylist over what it named.
+   *
+   * A failure to ask Git is recorded as `unreadable` rather than raised. The caller asked "what can I
+   * search here", and the honest answer to a broken interrogation is an empty PARTIAL index — a 403
+   * would be the client's cue to render "no files", which is the defect this whole method replaces.
+   */
+  private async indexTracked(
+    pinned: PinnedRoot,
+    maxFiles: number,
+    maxCandidates: number,
+    skips: SkipTally,
+    budget: SpawnBudget,
+  ): Promise<SessionFileIndexEntry[]> {
+    let listed: Awaited<ReturnType<SessionGit['listFiles']>>;
+    try {
+      // Git gets what is left of the whole call, not a timeout of its own: a child allowed to run for
+      // longer than the answer is worth would spend the budget the walk after it still has to fit in.
+      listed = await this.git.listFiles(pinned.policyCwd, MAX_INDEX_LIST_BYTES, budget);
+    } catch {
+      tally(skips, 'unreadable', 1);
+      return [];
+    }
+
+    const candidates = [...new Set(listed.paths)].sort(comparePath);
+    const files: SessionFileIndexEntry[] = [];
+    let denied = 0;
+    let excluded = 0;
+    let unsupported = 0;
+    let overflow = listed.truncated ? 1 : 0;
+    if (candidates.length > maxCandidates) overflow += candidates.length - maxCandidates;
+    const considered = candidates.slice(0, maxCandidates);
+    for (const [position, path] of considered.entries()) {
+      // Two reasons to stop, counted the same way, because they leave a reader in the same position:
+      // these paths were not looked at. `maxFiles` belongs here rather than only in the response bound —
+      // the candidates are already in the comparator's order, so once that many rows are accepted every
+      // remaining one sorts after all of them and would be sliced off after being opened for nothing.
+      if (files.length >= maxFiles || budget.expired()) {
+        overflow += considered.length - position;
+        break;
+      }
+      if (isIndexExcludedPath(path)) {
+        excluded += 1;
+        continue;
+      }
+      if (isDeniedPath(path)) {
+        denied += 1;
+        continue;
+      }
+      const entry = indexEntry(path);
+      if (entry === undefined) {
+        unsupported += 1;
+        continue;
+      }
+      let target: PinnedTarget;
+      try {
+        // `git ls-files --cached` can name a deleted file and either half can be a symlink. The same
+        // descriptor-confined walk as a read is therefore the final authority, never Git's pathname.
+        target = await pinned.open(entry.path);
+      } catch (error) {
+        if (unsupportedCandidate(error)) unsupported += 1;
+        else tally(skips, 'unreadable', 1);
+        continue;
+      }
+      try {
+        if (
+          target.metadata.type !== 'file' ||
+          target.canonical !== entry.path ||
+          isIndexExcludedPath(target.canonical) ||
+          isDeniedPath(target.canonical)
+        ) {
+          unsupported += 1;
+          continue;
+        }
+        files.push(entry);
+      } finally {
+        await target.close();
+      }
+    }
+    tally(skips, 'denied', denied);
+    tally(skips, 'excluded', excluded);
+    tally(skips, 'unsupported', unsupported);
+    tally(skips, 'truncated', overflow);
+    return boundedIndexFiles(files, maxFiles, skips);
+  }
+
+  /**
+   * A non-repository tree's index: a bounded breadth-first walk through the PIN.
+   *
+   * Every directory is opened from the pinned root by the same component-by-component walk the listing
+   * uses, so nothing here escapes the session folder and no interior symlink is followed. A directory
+   * that cannot be opened or enumerated costs its own subtree and NOTHING else — that isolation is the
+   * whole reason this is a walk with a tally rather than one `Promise.all` that rejects.
+   */
+  private async indexWalk(
+    pinned: PinnedRoot,
+    maxFiles: number,
+    maxCandidates: number,
+    maxDirectories: number,
+    skips: SkipTally,
+    budget: WorkBudget,
+  ): Promise<SessionFileIndexEntry[]> {
+    const files: SessionFileIndexEntry[] = [];
+    const queue: string[] = [''];
+    let inspected = 0;
+    let visited = 0;
+    let denied = 0;
+    let excluded = 0;
+    let unsupported = 0;
+    let unreadable = 0;
+    let overflow = 0;
+
+    walk: while (true) {
+      const rel = queue.shift();
+      if (rel === undefined) break;
+      if (visited >= maxDirectories || budget.expired()) {
+        // This directory plus everything still queued behind it. A floor, not a total: what those
+        // directories hold is exactly what was not looked at. A spent budget stops here for the same
+        // reason a spent directory count does, and says so in the same word.
+        overflow += 1 + queue.length;
+        break;
+      }
+      visited += 1;
+
+      let target: PinnedTarget;
+      try {
+        target = await pinned.open(rel, { wantDirectory: true });
+      } catch {
+        unreadable += 1;
+        continue;
+      }
+      try {
+        const listing = await target.list(MAX_LISTING_ENTRIES, budget);
+        if (listing.truncated) overflow += 1;
+        const children = [...listing.entries].sort((left, right) => comparePath(left.name, right.name));
+        for (const child of children) {
+          if (inspected >= maxCandidates || budget.expired()) {
+            // A floor: the current entry exists, and the queue proves more work may remain.
+            overflow += 1;
+            break walk;
+          }
+          inspected += 1;
+          const childRel = rel === '' ? child.name : `${rel}/${child.name}`;
+          if (isIndexExcludedPath(childRel)) {
+            excluded += 1;
+            continue;
+          }
+          if (isDeniedPath(childRel)) {
+            denied += 1;
+            continue;
+          }
+          // A symlink is never served by this viewer at any depth, so indexing one would offer a row
+          // that cannot be opened; an escaping one would also name a path outside the session folder.
+          if (child.escapes || child.type === 'symlink') {
+            unsupported += 1;
+            continue;
+          }
+          if (child.type === 'dir') {
+            queue.push(childRel);
+            continue;
+          }
+          const entry = indexEntry(childRel);
+          if (entry === undefined) {
+            unsupported += 1;
+            continue;
+          }
+          files.push(entry);
+        }
+      } catch {
+        unreadable += 1;
+      } finally {
+        await target.close();
+      }
+    }
+
+    tally(skips, 'denied', denied);
+    tally(skips, 'excluded', excluded);
+    tally(skips, 'unsupported', unsupported);
+    tally(skips, 'unreadable', unreadable);
+    tally(skips, 'truncated', overflow);
+    return boundedIndexFiles(files, maxFiles, skips);
   }
 
   /**

@@ -400,6 +400,9 @@ export function toApiRequest(request: Request, remoteAddress: string | undefined
     headers: headersFrom(Object.fromEntries(request.headers)),
     clientAddress: remoteAddress,
     loopback: remoteAddress !== undefined && isLoopbackPeer(remoteAddress),
+    // The runtime's own abort, passed through rather than re-derived: it is what a disconnect actually
+    // fires, and a handler that walks a tree needs to hear it from the transport that noticed.
+    signal: request.signal,
     // Both reads stay LAZY — nothing here touches the body until a route asks for it, so a body-less
     // route and a protocol switch each pay nothing. A bounded read goes piece by piece rather than
     // through `request.text()`, because that call is the allocation the bound exists to prevent.

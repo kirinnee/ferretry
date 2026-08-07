@@ -1,3 +1,4 @@
+import type { SessionFileIndexEntry, SessionFileIndexResponse } from '@ferretry/protocol';
 import type { FsChange, FsChanges, FsEntry, FsFileView, FsListing } from './wire.ts';
 
 function entryFlags(entry: FsEntry): string {
@@ -19,6 +20,22 @@ export function renderListing(listing: FsListing): string {
     return `  ${marker}  ${size.padStart(8)}  ${entry.name}${flags === '' ? '' : `  ${flags}`}`;
   });
   return [header, ...rows].join('\n');
+}
+
+/**
+ * The searchable file index, and — always — what it could not cover.
+ *
+ * The skip record is printed even when nothing matched, because "no results" over a partial index and
+ * "no results" over a complete one are different answers and only one of them means the file is not
+ * there. A reader who is told the walk stopped can ask a narrower question instead of concluding wrongly.
+ */
+export function renderFileIndex(index: SessionFileIndexResponse, matched: readonly SessionFileIndexEntry[]): string {
+  const omitted = index.skipped.map(skip => `${skip.count} ${skip.reason}`).join(', ');
+  const header =
+    `${index.root}: ${matched.length} of ${index.files.length} indexed ${index.files.length === 1 ? 'file' : 'files'}` +
+    ` (${index.coverage})${omitted === '' ? '' : ` — not indexed: ${omitted}`}`;
+  if (matched.length === 0) return `${header}\n  No matching files.`;
+  return [header, ...matched.map(entry => `  ${entry.path}`)].join('\n');
 }
 
 /** File content, or an explicit reason the daemon safely withheld it. */

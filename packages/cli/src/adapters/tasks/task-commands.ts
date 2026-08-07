@@ -96,6 +96,7 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--assignee <who>', 'only tasks owned by this teammate')
     .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
     .option('--status <status>', 'only this status (repeatable)', collect, [])
+    .option('--query <text>', 'only tasks whose number, title, description, ask or clarifications contain this text')
     .option('--md', 'render the board as markdown')
     .option('--all', 'read every session on this host')
     .action(async (options: TaskListOptions & ScopeOptions) => {

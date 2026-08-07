@@ -10,6 +10,7 @@ import {
   hasDiffableChange,
   parseBatchCheck,
   parseCheckIgnore,
+  parseFileList,
   parseHeadTreeEntry,
   parseNumstat,
   parsePorcelainStatus,
@@ -17,8 +18,10 @@ import {
   type RenderedDiff,
   relabelDiffHeaders,
   type SessionChangesView,
+  type SessionFileList,
   type SessionGit,
   type SessionRepoInfo,
+  type SpawnBudget,
   withLineStats,
 } from '../../../lib/session/filesystem/index.ts';
 import type { GitExecution, GitRunner, GitWorkingDirectory } from '../../../lib/worktrees/ports.ts';
@@ -60,10 +63,33 @@ interface TextExecution {
   readonly stdout: string;
 }
 
+/**
+ * What is left of a budget, as the runner's own timeout — and nothing at all without one.
+ *
+ * Rounded UP so a fraction of a millisecond is still a millisecond: rounding down would hand the runner
+ * a zero, which it reads as "kill this immediately" rather than as "there is no time left", and the two
+ * are different instructions to give a child that has not started yet.
+ */
+function spawnBound(budget: SpawnBudget | undefined): { timeoutMs?: number } {
+  return budget === undefined ? {} : { timeoutMs: Math.ceil(budget.remainingMs()) };
+}
+
 export class RunnerSessionGit implements SessionGit {
   constructor(private readonly runner: GitRunner) {}
 
-  async repoInfo(cwd: GitWorkingDirectory): Promise<SessionRepoInfo> {
+  /**
+   * Two commands under ONE budget, which is why the budget rather than a timeout comes in.
+   *
+   * A timeout alone would let a caller who allowed ten seconds wait twenty, and — worse — a cancellation
+   * that arrived while the first command was running would be invisible here and the second would start
+   * anyway. So the budget is asked again in between: an expired one returns what the FIRST command
+   * already established and spawns nothing, and the port says a caller who supplied a budget must re-ask
+   * it before trusting `hasHead`.
+   */
+  async repoInfo(cwd: GitWorkingDirectory, budget?: SpawnBudget): Promise<SessionRepoInfo> {
+    // The index checks before calling, and the adapter repeats the check because this port is public:
+    // an already-spent budget is not a licence to spawn a child with a zero-millisecond timeout.
+    if (budget?.expired() === true) return { repo: false, prefix: '', hasHead: false };
     // Never throws for "not a repo": that is a valid state the viewer reports so a client hides its diff
     // affordances.
     const inside = await this.text(
@@ -71,16 +97,53 @@ export class RunnerSessionGit implements SessionGit {
       ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix'],
       cwd,
       [0, 128],
+      budget,
     );
     const facts = parseRevParse(inside.stdout);
     if (!facts.insideWorkTree) return { repo: false, prefix: '', hasHead: false };
+    const shape = { repo: true as const, ...(facts.root ? { root: facts.root } : {}), prefix: facts.prefix };
+    // The placeholder the port documents: `hasHead` was never asked, and saying so would cost the spawn
+    // this branch exists to avoid.
+    if (budget?.expired() === true) return { ...shape, hasHead: false };
 
-    const head = await this.text('git rev-parse HEAD', ['rev-parse', '--verify', '--quiet', 'HEAD'], cwd, [0, 1, 128]);
+    const head = await this.text(
+      'git rev-parse HEAD',
+      ['rev-parse', '--verify', '--quiet', 'HEAD'],
+      cwd,
+      [0, 1, 128],
+      budget,
+    );
+    return { ...shape, hasHead: head.execution.exitCode === 0 };
+  }
+
+  /**
+   * Every path under this working directory Git does not exclude, in one command.
+   *
+   * `--cached` plus `--others --exclude-standard` is tracked content plus untracked content minus
+   * everything the ignore rules cover — and `--exclude-standard` is the ONLY spelling of that rule this
+   * daemon should ever hold, because it is Git's own. Reimplementing `.gitignore` matching to build a
+   * search index is how a build directory full of credentials ends up in one.
+   *
+   * Paths come back relative to THIS directory and bounded to it, which is what keeps a session started
+   * in a repository subdirectory from indexing its siblings — the same containment `--relative` gives
+   * the changes list, obtained here by Git's own default rather than by a flag.
+   */
+  async listFiles(cwd: GitWorkingDirectory, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList> {
+    // No command was asked, so the empty list is explicitly incomplete rather than confidently empty.
+    if (budget?.expired() === true) return { paths: [], truncated: true };
+    const execution = await this.runner.run({
+      args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      cwd,
+      maxStdoutBytes: maxBytes,
+      // The caller's remaining budget when it has one, so this child cannot outlive the answer it is
+      // part of. Without one the runner applies its own default — the arguments are a fixed list either
+      // way, and no caller input is ever spelled into a command line.
+      ...spawnBound(budget),
+    });
+    requireGitExit('git ls-files', execution);
     return {
-      repo: true,
-      ...(facts.root ? { root: facts.root } : {}),
-      prefix: facts.prefix,
-      hasHead: head.execution.exitCode === 0,
+      paths: parseFileList(decodeGitOutput(execution), execution.stdoutTruncated),
+      truncated: execution.stdoutTruncated,
     };
   }
 
@@ -244,8 +307,13 @@ export class RunnerSessionGit implements SessionGit {
     args: readonly string[],
     cwd: GitWorkingDirectory,
     acceptedExitCodes: readonly number[],
+    budget?: SpawnBudget,
   ): Promise<TextExecution> {
-    const execution = requireGitExit(action, await this.runner.run({ args, cwd }), acceptedExitCodes);
+    const execution = requireGitExit(
+      action,
+      await this.runner.run({ args, cwd, ...spawnBound(budget) }),
+      acceptedExitCodes,
+    );
     return { execution, stdout: decodeGitOutput(execution) };
   }
 }

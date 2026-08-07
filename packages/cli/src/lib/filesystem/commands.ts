@@ -19,6 +19,17 @@ export function registerFilesystemCommands(program: Command, controller: Filesys
 
   json(
     fs
+      .command('index')
+      .alias('search')
+      .description('every searchable file under the session root in one read, with what it left out')
+      .argument('<id>', 'session id or callsign')
+      .option('--query <text>', 'only files whose name or path contains this text'),
+  ).action(async (id: string, options: { query?: string; json?: boolean }) => {
+    await controller.index(id, options);
+  });
+
+  json(
+    fs
       .command('cat')
       .alias('file')
       .argument('<id>', 'session id or callsign')

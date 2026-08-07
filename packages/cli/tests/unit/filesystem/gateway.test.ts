@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { filesystemPath, ProtocolFilesystemGateway } from '../../../src/lib/filesystem/gateway.ts';
-import { changesView, fileView, listing, RecordingClient } from './fixtures.ts';
+import { changesView, fileIndex, fileView, listing, RecordingClient } from './fixtures.ts';
 
 describe('filesystem gateway', () => {
   it('should address the session and relative paths without accepting a root', async () => {
@@ -49,5 +49,32 @@ describe('filesystem gateway', () => {
 
     // Act + Assert
     await should(subject.list('ses-1')).be.rejected();
+  });
+});
+
+describe('the file index dial', () => {
+  it('should address the index under the session it belongs to', async () => {
+    // Arrange
+    const client = new RecordingClient();
+    client.responses.push(fileIndex);
+    const subject = new ProtocolFilesystemGateway(client);
+
+    // Act
+    await subject.index(' Fable/one ');
+
+    // Assert
+    should(client.calls.map(call => call.path)).deepEqual(['/v1/sessions/Fable%2Fone/fs/index']);
+  });
+
+  it('should parse the index through the protocol schema rather than trusting daemon bytes', async () => {
+    // A document claiming completeness over a walk that could not finish is exactly what the schema
+    // refuses, and the client must not be the place that decides to believe it anyway.
+    // Arrange
+    const client = new RecordingClient();
+    client.responses.push({ ...fileIndex, coverage: 'complete' });
+    const subject = new ProtocolFilesystemGateway(client);
+
+    // Act + Assert
+    await should(subject.index('ses-1')).be.rejected();
   });
 });

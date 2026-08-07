@@ -1,3 +1,4 @@
+import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse, textResponse } from '../../api/responses.ts';
@@ -108,6 +109,36 @@ async function file(
   }
 }
 
+/**
+ * Every searchable file under the session root, with a total record of what was left out.
+ *
+ * This is the one route in the family that answers about the WHOLE tree, and it is the reason a client
+ * no longer walks the tree itself: a browser doing that met a 403 on the first listing of any Git
+ * checkout — `.git` is refused by name — and had no way to tell a closed subtree from a failed read.
+ * Here a refusal is a counted row and the response still arrives 200, which is what makes "nothing
+ * matched" and "I could not look" different answers.
+ *
+ * Still `noStore`: a list of every filename under a session is not bytes, but it is a map of somebody's
+ * working tree, and a shared browser profile is no place to leave one.
+ */
+async function index(
+  filesystem: SessionFilesystem,
+  sessions: SessionDirectorySubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = sessionId(context);
+  const cwd = await sessionCwd(sessions, id);
+  try {
+    // Bounds are the domain's own; the only thing a route contributes is the caller's cancellation,
+    // because the transport is the only layer that knows the caller stopped waiting.
+    const view = await filesystem.index(cwd, { signal: context.request.signal });
+    const response: SessionFileIndexResponse = { v: SESSION_FILE_INDEX_VERSION, sessionId: id, ...view };
+    return jsonResponse(response);
+  } catch (error) {
+    return refuse(error);
+  }
+}
+
 async function changes(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
@@ -170,6 +201,14 @@ export function sessionFilesystemRoutes(
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await file(filesystem, sessions, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/fs/index',
+      minimum: 'operator',
+      capability: { capability: 'filesystem', axis: 'use' },
+      noStore: true,
+      handle: async context => await index(filesystem, sessions, context),
     },
     {
       method: 'GET',

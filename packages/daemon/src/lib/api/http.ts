@@ -30,6 +30,14 @@ export interface ApiRequest {
    *  loopback peers, so a token can never travel in a loggable URL across a network hop. */
   readonly loopback: boolean;
   /**
+   * Fires when the caller gives up, so a long read can stop instead of finishing for nobody.
+   *
+   * Optional because most handlers answer in one read and have nothing to abandon, and requiring it
+   * would make every request fixture carry a signal nothing asks about. A handler that ignores it is
+   * correct; one that walks a whole working tree is the case this exists for.
+   */
+  readonly signal?: AbortSignal;
+  /**
    * Reads the body as text, under a byte bound when one is stated.
    *
    * Lazy so a route that needs no body never pays to buffer one, and so a protocol switch — which
