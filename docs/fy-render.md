@@ -322,7 +322,17 @@ classes are startup, library, render, deadline and lifetime; a Mermaid or Lottie
 the compiled-SVG gate's own refusal go inside a collapsed `Why` fold rather than into the sentence a
 reader is shown, because a jison parse dump quoting the author's own source is not the app's voice. A
 Lottie `lifetime` stop is not presented as a failure at all — no error tone, no source panel — because
-nothing went wrong: a healthy animation reached its permitted life.
+nothing went wrong: a healthy animation reached its permitted life. A **stale** theme takes `warn`,
+the tone this app reserves for a stated limitation, because it is neither a failure nor nothing.
+
+**The folded diagnostic is monospaced, and that is asserted rather than photographed.** A jison dump's
+caret rule only points at the right column in a fixed-pitch face, so `.fy-render-why-body` carries
+`var(--font-mono)` and the code size, matching `.kt-fs-pre`. **The evidence host has no fixed-pitch
+font installed** — measured, `iiii` and `mmmm` render at different widths under generic `monospace`,
+and the only user font present is DejaVu Sans — so the capture still looks proportional and no pixel
+claim is made from it. The browser test asserts the _computed_ `font-family` and that the line breaks
+survive; the alignment itself is what the rule delivers on a machine with fonts. This is the same
+shape of caveat `fy-render.css` already carries for `env()` resolving to zero under headless Chrome.
 
 **A compiled Mermaid diagram belongs to the theme that compiled it, and a theme change MARKS IT STALE
 rather than redrawing it.** Mermaid cannot see the page, so it is told which way it is painted and
@@ -469,6 +479,25 @@ the illustration is fine and the deployment is not. The shell classifies its own
 `library` or `render` on the wire so the parent never has to infer which happened from a sentence; a
 copy edit must not be able to change behaviour. Before that field existed, every shell error was
 classed as a render failure and this path told the reader their diagram could not be drawn.
+
+**A TAB LEFT OPEN ACROSS A DEPLOY IS THE OTHER SKEW, and it is quieter.** The two ends have different
+lifetimes: `/fy-render-sandbox.html` is `Cache-Control: no-cache`, so a frame mounted after a deploy
+revalidates and loads the **new** shell, while the parent ships under `/assets/*` as
+`max-age=31536000, immutable` and stays the **old** build inside a long-lived tab's module graph until
+the page is reloaded.
+
+The wire parse refuses whole messages rather than tolerating unknown shapes — `error` requires `class`
+and `mermaid-svg` requires `theme`, both under exact-key parsing — and a message that fails to parse is
+dropped in silence, because answering it would be answering whoever sent it. **That refusal is
+deliberate and stays.** Its cost is that a version-skewed pairing (new shell, old parent, or the
+reverse) drops the reply instead of showing it: no diagram appears, the status region reads
+`Preparing the … renderer…`, and the block eventually reports its watchdog outcome — the `deadline`
+sentence after fifteen seconds for Mermaid, or `lifetime` after two minutes for Lottie. The cause is
+version skew and the sentence names a timer, so **reloading the page is the remedy**, and a field
+diagnosis that sees a deadline on a freshly deployed build should suspect an open tab before it
+suspects the diagram. Permissive compatibility parsing is not the fix and is not offered: it would
+reintroduce exactly the "accept a shape the sender should not have been able to build" hole that
+exact-key parsing exists to close.
 
 **That note is deliberately not a live region** — not `role="alert"`, not `role="status"`, not
 `aria-live`. A transcript row re-renders while the assistant is still emitting it, and the grammar

@@ -1010,8 +1010,23 @@ describe('FyRenderBlock sandbox theme ownership', () => {
         phase: 'stale',
         text: 'The theme changed. Reload to redraw this diagram.',
       });
-      // A status, not a failure: no error tone and no source panel unfurled.
-      should(status(tree).tone).be.undefined();
+      /**
+       * A WARNING, NOT A FAILURE, and not card chrome either.
+       *
+       * `warn` is the tone this app reserves for a stated limitation — the gap between
+       * `err` (something failed) and no tone at all. It earns it: a dark-compiled
+       * diagram on a light surface keeps its node fills and text but loses its EDGE
+       * STROKES and edge labels to near-white-on-white, so the topology is what goes,
+       * and the sentence saying so was sitting in the same soft treatment as the
+       * caption beneath it.
+       *
+       * The CLASS is asserted with the attribute because `data-tone` is styled through
+       * `.kt-fs-note[data-tone='warn']` — the attribute alone would be inert, which is
+       * exactly the mistake this pair of assertions exists to catch.
+       */
+      should(status(tree).tone).equal('warn');
+      should(statusRegion(tree).props.className).containEql('kt-fs-note');
+      // Still not a failure: no source panel unfurled, and `err` stays for real ones.
       should(marked(tree, { 'data-fy-render-source': 'true' })).equal(0);
       // Consent is untouched — the reader approved these bytes and a repaint does not
       // change that, so they are not asked again.

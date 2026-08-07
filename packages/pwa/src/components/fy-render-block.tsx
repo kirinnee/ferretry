@@ -552,7 +552,25 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
             : 'idle';
 
   /** Absent for `lifetime`, which is the whole point of `sandboxTone`. */
-  const sandboxToneAttribute = sandboxError === null ? undefined : sandboxTone(sandboxError.kind);
+  /**
+   * `warn` FOR STALE, `err` FOR A FAILURE, AND THE CLASS TRAVELS WITH IT.
+   *
+   * A stale diagram is not a cosmetic mismatch — a dark-compiled Mermaid on a light
+   * surface keeps its node fills and text but loses its EDGE STROKES and edge labels
+   * to near-white-on-white, so the topology is what goes. The sentence explaining
+   * that was sitting in `--fg-soft`/`--text-sm` under a ~700px diagram, the same
+   * treatment as the caption beneath it, and read as ordinary card chrome.
+   *
+   * `warn` is exactly the tone this app reserves for a stated limitation — the gap
+   * between `err` (something failed) and nothing at all. It needs `kt-fs-note` to be
+   * visible: `data-tone` is styled through `.kt-fs-note[data-tone='warn']`, so the
+   * attribute alone would be inert, which is why the class list below keys off the
+   * same condition rather than off `failed` only.
+   */
+  const sandboxToneAttribute =
+    sandboxError !== null ? sandboxTone(sandboxError.kind) : sandboxPhase === 'stale' ? 'warn' : undefined;
+  /** Only the toned phases take the note surface; `preparing`/`ready` stay a soft line. */
+  const sandboxStatusToned = sandboxPhase === 'failed' || sandboxPhase === 'stale';
 
   const sandboxStatus =
     sandboxError !== null
@@ -738,7 +756,7 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
               atomic region would put "Why" on the end of every announcement. */}
           {sandboxed ? (
             <div
-              className={sandboxPhase === 'failed' ? 'kt-fs-note fy-render-status' : 'fy-render-status'}
+              className={sandboxStatusToned ? 'kt-fs-note fy-render-status' : 'fy-render-status'}
               data-fy-render-sandbox-status={sandboxPhase}
               {...(sandboxPhase === 'failed' ? { 'data-fy-render-error': 'true' } : {})}
               {...(sandboxToneAttribute === undefined ? {} : { 'data-tone': sandboxToneAttribute })}

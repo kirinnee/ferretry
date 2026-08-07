@@ -853,7 +853,35 @@ describe('fy-render component evidence — layout and focus', () => {
         await page.keyboard.press('Tab');
         order.push(await focused());
       }
-      await shot('focus-04-fullscreen-tab-order', { order });
+      /**
+       * REACHABLE IS NOT INDICATED. The order above proves both new stops can be
+       * reached; it says nothing about whether a keyboard reader can SEE where they
+       * are. `<section tabindex="0">` is a novel non-button stop, and the app's
+       * unconditional `:focus-visible` outline is a belief until measured — so each
+       * non-button stop is focused in turn and its resolved outline width read back.
+       */
+      const indicators: Record<string, string> = {};
+      for (const [name, selector] of [
+        ['summary', '.kt-fs-why > summary'],
+        ['scrollport', '[data-fy-render-source="true"]'],
+      ] as const) {
+        await page.locator(selector).focus();
+        indicators[name] = await page.evaluate(() => {
+          const active = document.activeElement;
+          if (active === null) return 'none';
+          const style = getComputedStyle(active);
+          return `${style.outlineWidth}|${style.outlineStyle}`;
+        });
+      }
+      await shot('focus-05-indicators', { indicators, order });
+      for (const name of ['summary', 'scrollport'] as const) {
+        // A nonzero, non-`none` outline. `0px` or `none` would mean the stop exists
+        // and is invisible, which is worse than not being a stop at all.
+        should(indicators[name]).not.startWith('0px');
+        should(indicators[name]).not.containEql('|none');
+      }
+
+      await shot('focus-04-fullscreen-tab-order', { indicators, order });
       /**
        * THE WHOLE SEQUENCE, EXACTLY. The requirement names all five stops and their
        * order, so a missing, extra or reordered control has to fail — a loose
@@ -924,6 +952,35 @@ describe('fy-render component evidence — layout and focus', () => {
       should((await page.locator('[data-fy-render-sandbox-status="stale"]').first().innerText()).trim()).equal(
         'The theme changed. Reload to redraw this diagram.',
       );
+
+      /**
+       * AND IT LOOKS LIKE A WARNING, not like card chrome. A dark-compiled diagram on
+       * a light surface keeps its node fills and text but loses its EDGE STROKES and
+       * edge labels to near-white-on-white, so the topology is what goes — the
+       * sentence saying so cannot sit in the same soft treatment as the caption under
+       * it. `warn` is the tone this app reserves for a stated limitation, between
+       * `err` and nothing.
+       *
+       * The class is asserted with the attribute because `data-tone` is styled through
+       * `.kt-fs-note[data-tone='warn']` — the attribute alone would be inert, which is
+       * precisely the mistake this assertion exists to catch. The resolved colour is
+       * read back so "styled" is measured rather than assumed.
+       */
+      const stale = page.locator('[data-fy-render-sandbox-status="stale"]').first();
+      should(await stale.getAttribute('data-tone')).equal('warn');
+      should(await stale.getAttribute('class')).containEql('kt-fs-note');
+      const staleStyle = await page.evaluate(() => {
+        const element = document.querySelector('[data-fy-render-sandbox-status="stale"]');
+        if (element === null) return null;
+        const style = getComputedStyle(element);
+        return { background: style.backgroundColor, color: style.color };
+      });
+      const readyStyle = await page.evaluate(() => {
+        const element = document.querySelector('.fy-render-caption');
+        return element === null ? null : getComputedStyle(element).color;
+      });
+      // Distinguishable from the caption beneath it, which is the defect this fixes.
+      should(staleStyle?.color).not.equal(readyStyle);
       await shot('theme-01-three-blocks-stale', {
         diagrams: 3,
         frames: 0,
