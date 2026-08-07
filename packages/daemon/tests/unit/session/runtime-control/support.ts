@@ -16,6 +16,7 @@ import type {
   RuntimeRepository,
 } from '../../../../src/lib/session/runtime-control/types.ts';
 import type { SessionId } from '../../../../src/lib/session-id.ts';
+import type { SerialExecutor } from '../../../../src/lib/ports.ts';
 import type { InjectionOutcome } from '../../../../src/lib/tmux/delivery.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 
@@ -217,6 +218,35 @@ export class RecordingSerial {
       mine.catch(() => undefined),
     );
     return await mine;
+  }
+
+  async runExclusive<T>(work: () => Promise<T>): Promise<T> {
+    return await work();
+  }
+}
+
+/**
+ * A caller-owned fence that rejects same-key recursion immediately instead of hanging the test.
+ *
+ * Production's `KeyedSerialExecutor` is deliberately non-reentrant too, but its honest failure mode
+ * is to wait on the work that is waiting on it. This double turns that deadlock into a precise unit
+ * assertion while retaining the same contract.
+ */
+export class FailOnReentrySerial implements SerialExecutor {
+  readonly requested: string[] = [];
+  readonly entered: string[] = [];
+  readonly #held = new Set<string>();
+
+  async run<T>(key: string, work: () => Promise<T>): Promise<T> {
+    this.requested.push(key);
+    if (this.#held.has(key)) throw new Error(`serial key ${key} is not reentrant`);
+    this.#held.add(key);
+    this.entered.push(key);
+    try {
+      return await work();
+    } finally {
+      this.#held.delete(key);
+    }
   }
 
   async runExclusive<T>(work: () => Promise<T>): Promise<T> {

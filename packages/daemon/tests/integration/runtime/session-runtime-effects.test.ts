@@ -6,6 +6,7 @@ import type { RuntimeControlRequest } from '@ferretry/protocol';
 import should from 'should';
 import { FileSessionEffectLedger } from '../../../src/adapters/session/effects/file-session-effect-ledger.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import type { SessionEffectLedger } from '../../../src/lib/session/effects/types.ts';
 import { parseSessionId } from '../../../src/lib/session-id.ts';
 import {
   SessionRuntimeControlService,
@@ -42,6 +43,7 @@ interface Work {
   readonly tmux: string[];
   readonly delivery: string[];
   readonly journal: string[];
+  readonly order: string[];
 }
 
 type RuntimeParts = SessionRuntimeControlPorts;
@@ -56,7 +58,8 @@ async function subject(
   } = {},
 ): Promise<{
   readonly runtime: SessionRuntimeControlService;
-  readonly effects: FileSessionEffectLedger;
+  readonly effects: SessionEffectLedger;
+  readonly serial: KeyedSerialExecutor;
   readonly work: Work;
   readonly sessionReads: () => number;
 }> {
@@ -64,14 +67,29 @@ async function subject(
   const home = await mkdtemp(join(tmpdir(), `fy-runtime-effects-${label}-`));
   directories.add(home);
   let temporary = 0;
-  const effects = new FileSessionEffectLedger(
+  const work: Work = { tmux: [], delivery: [], journal: [], order: [] };
+  const durableEffects = new FileSessionEffectLedger(
     id => join(home, id),
     () => {
       temporary += 1;
       return `t${temporary}`;
     },
   );
-  const work: Work = { tmux: [], delivery: [], journal: [] };
+  const effects: SessionEffectLedger = {
+    inspect: async (effectKey, fingerprint) => {
+      work.order.push('effect:inspect');
+      return await durableEffects.inspect(effectKey, fingerprint);
+    },
+    begin: async (effectKey, fingerprint, at) => {
+      work.order.push('effect:begin');
+      return await durableEffects.begin(effectKey, fingerprint, at);
+    },
+    settle: async (effectKey, fingerprint, at) => {
+      work.order.push('effect:settle');
+      await durableEffects.settle(effectKey, fingerprint, at);
+    },
+  };
+  const serial = new KeyedSerialExecutor();
   let reads = 0;
   const lifecycle = {
     id: SESSION,
@@ -96,12 +114,14 @@ async function subject(
     launch: async id => (id === SESSION ? lifecycle : undefined),
     journal: async (_id, type) => {
       work.journal.push(type);
+      work.order.push('journal');
     },
     quarantine: async () => undefined,
   };
   const pane: RuntimeParts['pane'] = {
     state: async (session: string) => {
       work.tmux.push(`state:${session}`);
+      work.order.push('pane:state');
       return { alive: true, dead: false, promptReady: true };
     },
     stop: async (session: string) => {
@@ -111,6 +131,7 @@ async function subject(
   const injector: RuntimeParts['injector'] = {
     deliver: async (session: string, text: string) => {
       work.delivery.push(`${session}:${text}`);
+      work.order.push('inject');
       return 'handled-local' as const;
     },
   };
@@ -155,12 +176,13 @@ async function subject(
           throw new Error('replay consulted the runtime catalog');
         },
       } as unknown as RuntimeParts['catalog'],
-      serial: new KeyedSerialExecutor(),
+      serial,
       sleeper: { sleep: async () => undefined },
       clock: { now: () => BEGUN_AT },
       clientName: 'fy',
     }),
     effects,
+    serial,
     work,
     sessionReads: () => reads,
   };
@@ -192,7 +214,9 @@ describe('production session runtime effect replay', () => {
     should(second.config.turn).equal(2);
     should(first === second).equal(false);
     should(fixture.sessionReads()).equal(2);
-    should(fixture.work).eql({ tmux: [], delivery: [], journal: [] });
+    should(fixture.work.tmux).eql([]);
+    should(fixture.work.delivery).eql([]);
+    should(fixture.work.journal).eql([]);
   });
 
   it('should refuse an unsettled replay without risking a second pane effect', async () => {
@@ -207,7 +231,9 @@ describe('production session runtime effect replay', () => {
     should(error.failure).equal('unsettled');
     should(error.message).match(/pane may have been touched/u);
     should(fixture.sessionReads()).equal(0);
-    should(fixture.work).eql({ tmux: [], delivery: [], journal: [] });
+    should(fixture.work.tmux).eql([]);
+    should(fixture.work.delivery).eql([]);
+    should(fixture.work.journal).eql([]);
   });
 
   it('should conflict when the same effect key carries a different production tuple', async () => {
@@ -224,7 +250,9 @@ describe('production session runtime effect replay', () => {
     should(error.failure).equal('conflict');
     should(error.message).match(/different runtime control/u);
     should(fixture.sessionReads()).equal(0);
-    should(fixture.work).eql({ tmux: [], delivery: [], journal: [] });
+    should(fixture.work.tmux).eql([]);
+    should(fixture.work.delivery).eql([]);
+    should(fixture.work.journal).eql([]);
   });
 
   it('should settle before a transient closing-view failure and replay without repeating the pane act', async () => {
@@ -244,6 +272,7 @@ describe('production session runtime effect replay', () => {
     should(fixture.sessionReads()).equal(3);
     should(fixture.work.delivery).eql(['fy-runtime-replay:/effort high']);
     should(fixture.work.journal).eql(['control.runtime_model']);
+    should(fixture.work.order.slice(0, 3)).eql(['effect:inspect', 'effect:inspect', 'pane:state']);
   });
 });
 
@@ -269,7 +298,13 @@ describe('startup and public runtime isolation', () => {
     const fixture = await subject('startup-on-running', { status: 'running', drivable: true });
 
     // Act
-    const error = await refusal(async () => await fixture.runtime.startup(SESSION, REQUEST, REQUEST_ID));
+    const error = await refusal(
+      async () =>
+        await fixture.serial.run(
+          SESSION,
+          async () => await fixture.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID),
+        ),
+    );
 
     // Assert
     should(error.failure).equal('refused');
@@ -283,12 +318,21 @@ describe('startup and public runtime isolation', () => {
     const fixture = await subject('startup-drives', { status: 'starting', drivable: true });
 
     // Act
-    await fixture.runtime.startup(SESSION, REQUEST, REQUEST_ID);
+    await fixture.serial.run(SESSION, async () => await fixture.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID));
 
     // Assert: one injection, one journal act, and the durable effect closed so a replay resumes.
     should(fixture.work.delivery).eql(['fy-runtime-replay:/effort high']);
     should(fixture.work.journal).eql(['control.runtime_model']);
     should(await fixture.effects.inspect(key, FINGERPRINT)).equal('settled');
+    should(fixture.work.order.slice(0, 6)).eql([
+      'effect:inspect',
+      'pane:state',
+      'effect:begin',
+      'inject',
+      'journal',
+      'effect:settle',
+    ]);
+    should(fixture.work.order.filter(item => item === 'effect:settle')).have.length(1);
   });
 
   it('should admit exactly one pane act when a public control is scheduled before the startup', async () => {
@@ -297,7 +341,7 @@ describe('startup and public runtime isolation', () => {
 
     // Act
     const error = await refusal(async () => await fixture.runtime.control(SESSION, REQUEST, 'operator-1'));
-    await fixture.runtime.startup(SESSION, REQUEST, REQUEST_ID);
+    await fixture.serial.run(SESSION, async () => await fixture.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID));
 
     // Assert: the public call refused on status and spent nothing; only the startup touched the pane.
     should(error.failure).equal('refused');
@@ -314,7 +358,7 @@ describe('startup and public runtime isolation', () => {
     const fixture = await subject('startup-then-public', { status: 'starting', drivable: true });
 
     // Act
-    await fixture.runtime.startup(SESSION, REQUEST, REQUEST_ID);
+    await fixture.serial.run(SESSION, async () => await fixture.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID));
     const error = await refusal(async () => await fixture.runtime.control(SESSION, REQUEST, 'operator-1'));
 
     // Assert
@@ -330,7 +374,7 @@ describe('startup and public runtime isolation', () => {
     // Act
     const outcomes = await Promise.allSettled([
       fixture.runtime.control(SESSION, REQUEST, 'operator-1'),
-      fixture.runtime.startup(SESSION, REQUEST, REQUEST_ID),
+      fixture.serial.run(SESSION, async () => await fixture.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID)),
     ]);
 
     // Assert: whichever ran first, the public one is refused and the pane is driven once.
@@ -349,8 +393,14 @@ describe('startup and public runtime isolation', () => {
     await unsettled.effects.begin(key, FINGERPRINT, BEGUN_AT);
 
     // Act
-    await settled.runtime.startup(SESSION, REQUEST, REQUEST_ID);
-    const error = await refusal(async () => await unsettled.runtime.startup(SESSION, REQUEST, REQUEST_ID));
+    await settled.serial.run(SESSION, async () => await settled.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID));
+    const error = await refusal(
+      async () =>
+        await unsettled.serial.run(
+          SESSION,
+          async () => await unsettled.runtime.startupWhileHeld(SESSION, REQUEST, REQUEST_ID),
+        ),
+    );
 
     // Assert: a settled startup is a boundary already crossed; an unsettled one may have reached the
     // pane and must never be repeated. Neither drives anything.
@@ -359,5 +409,8 @@ describe('startup and public runtime isolation', () => {
     should(error.failure).equal('unsettled');
     should(unsettled.work.delivery).eql([]);
     should(unsettled.work.journal).eql([]);
+    should(settled.sessionReads()).equal(1);
+    should(settled.work.order.filter(item => item === 'effect:settle')).have.length(1);
+    should(unsettled.work.order).eql(['effect:begin', 'effect:inspect']);
   });
 });

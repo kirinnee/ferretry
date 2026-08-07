@@ -141,7 +141,7 @@ const transitions: Readonly<Record<LifecycleSessionStatus, readonly LifecycleSes
   created: ['starting', 'stopped'],
   starting: ['running', 'failed', 'kill_failed', 'stopped'],
   running: ['failed', 'kill_failed', 'stopped'],
-  failed: ['starting', 'stopped'],
+  failed: ['starting', 'kill_failed', 'stopped'],
   kill_failed: ['kill_failed', 'stopped'],
   stopped: [],
 };

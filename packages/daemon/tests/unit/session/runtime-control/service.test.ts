@@ -5,6 +5,7 @@ import type { CodexPickerCleanup } from '../../../../src/lib/session/harness/cle
 import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';
 import { HarnessQuirkService } from '../../../../src/lib/session/harness/service.ts';
 import {
+  runtimeQuarantineState,
   SessionRuntimeControlService,
   type SessionRuntimeControlPorts,
 } from '../../../../src/lib/session/runtime-control/service.ts';
@@ -16,6 +17,7 @@ import {
   CODEX_VIEW,
   catalogCache,
   FakeAccounts,
+  FailOnReentrySerial,
   FakePickerTransport,
   FakeRuntimeInjector,
   FakeRuntimePane,
@@ -52,7 +54,7 @@ interface Overrides {
   readonly effects?: SessionRuntimeControlPorts['effects'];
   readonly pane?: FakeRuntimePane;
   readonly injector?: FakeRuntimeInjector;
-  readonly serial?: RecordingSerial;
+  readonly serial?: SessionRuntimeControlPorts['serial'];
   readonly picker?: SessionRuntimeControlPorts['picker'];
   readonly harness?: SessionRuntimeControlPorts['harness'];
   readonly accounts?: SessionRuntimeControlPorts['accounts'];
@@ -294,6 +296,31 @@ describe('spending the request id', () => {
     // Assert: the queue was entered twice and never held by two at once.
     should(serial.entered).equal(2);
     should(serial.peak).equal(1);
+  });
+
+  it('should enter a caller-held startup fence without re-entering it, while public control acquires it', async () => {
+    // Arrange: this serial throws on same-key recursion, turning the production executor's deadlock
+    // mode into an immediate assertion. Startup sees `starting`; mounted control sees `running`.
+    const startupSerial = new FailOnReentrySerial();
+    const startupRepository = new FakeRuntimeRepository({ views: [CLAUDE_VIEW({ status: 'starting' })] });
+    const startup = subjectWith({ repository: startupRepository, serial: startupSerial });
+    const publicSerial = new FailOnReentrySerial();
+    const mounted = subjectWith({ serial: publicSerial });
+
+    // Act
+    await startupSerial.run('s1', async () => {
+      await startup.subject.startupWhileHeld('s1', EFFORT, 'startup-1');
+    });
+    await mounted.subject.control('s1', COMPACT, 'public-1');
+
+    // Assert: startup used only the caller's entry; mounted control made its own single entry.
+    should(startupSerial.requested).deepEqual(['s1']);
+    should(startupSerial.entered).deepEqual(['s1']);
+    should(startup.injector.delivered).deepEqual([['fy-s1', '/effort high']]);
+    should(startup.repository.calls.filter(call => call.kind === 'journal')).have.length(1);
+    should(publicSerial.requested).deepEqual(['s1']);
+    should(publicSerial.entered).deepEqual(['s1']);
+    should(mounted.injector.delivered).deepEqual([['fy-s1', '/compact']]);
   });
 });
 
@@ -589,5 +616,51 @@ describe('a picker drive that failed part way', () => {
     should(repository.calls).be.empty();
     should(pane.stopped).be.empty();
     should(failure).match({ failure: 'failed' });
+  });
+
+  it('should merge only safe quarantine fields over a standing failed-stop verdict', () => {
+    // Arrange
+    const patch = {
+      status: 'failed',
+      health: 'crashed',
+      promptReady: false,
+      finishedAt: NOW,
+      reason: 'picker recovery failed',
+      needsHuman: 'run fy resume s1',
+      needsHumanKind: CODEX_PICKER_QUARANTINE_KIND,
+    } as const;
+
+    // Act
+    const protectedState = runtimeQuarantineState(
+      {
+        id: 's1',
+        status: 'kill_failed',
+        reason: 'operator stop: tmux refused',
+        finishedAt: '2026-08-05T00:00:00.000Z',
+        exitCode: 137,
+      },
+      patch,
+    );
+    const ordinaryState = runtimeQuarantineState({ id: 's1', status: 'running', reason: 'old' }, patch);
+
+    // Assert
+    should(protectedState).deepEqual({
+      id: 's1',
+      status: 'kill_failed',
+      reason: 'operator stop: tmux refused',
+      finishedAt: '2026-08-05T00:00:00.000Z',
+      exitCode: 137,
+      health: 'crashed',
+      promptReady: false,
+      needsHuman: 'run fy resume s1',
+      needsHumanKind: CODEX_PICKER_QUARANTINE_KIND,
+    });
+    should(ordinaryState).containDeep({
+      status: 'failed',
+      reason: 'picker recovery failed',
+      finishedAt: NOW,
+      health: 'crashed',
+      promptReady: false,
+    });
   });
 });

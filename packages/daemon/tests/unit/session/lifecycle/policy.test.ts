@@ -226,6 +226,43 @@ describe('session lifecycle policy', () => {
     );
   });
 
+  it('should let a failed runtime yield to a stronger failed-stop verdict', () => {
+    // Arrange: runtime recovery may persist `failed` while it owns the shared mutation fence. A stop
+    // already queued behind it must still be able to record that the pane then refused to die.
+    const starting = transitionSessionRecord(createSessionRecord(request(), context()).record, 'starting', NOW).record;
+    const failed = transitionSessionRecord(
+      starting,
+      'failed',
+      '2026-07-31T10:02:00.000Z',
+      'runtime picker could not recover',
+    ).record;
+
+    // Act
+    const stopped = transitionSessionRecord(
+      failed,
+      'kill_failed',
+      '2026-07-31T10:03:00.000Z',
+      'operator stop: tmux refused',
+    );
+
+    // Assert: the verified stop owns the verdict and reason, while prior lifecycle timestamps remain.
+    should(stopped.record.state).deepEqual({
+      id: 'session-1',
+      status: 'kill_failed',
+      startedAt: NOW,
+      finishedAt: '2026-07-31T10:02:00.000Z',
+      reason: 'operator stop: tmux refused',
+    });
+    should(stopped.record.config.updatedAt).equal('2026-07-31T10:03:00.000Z');
+    should(stopped.event).deepEqual({
+      type: 'session.kill_failed',
+      data: { reason: 'operator stop: tmux refused' },
+    });
+    should(() => transitionSessionRecord(stopped.record, 'starting', NOW)).throw(
+      'cannot transition session session-1 from kill_failed to starting',
+    );
+  });
+
   it('should keep a pane that refused to die visible, repeatable, and still stoppable', () => {
     // Arrange
     const running = transitionSessionRecord(

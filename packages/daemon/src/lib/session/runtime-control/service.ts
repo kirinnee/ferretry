@@ -31,9 +31,10 @@ import {
   findAccountByAgent,
   servableModels,
 } from '../../core/inventory.ts';
+import { jsonObject, type JsonValue } from '../../json.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
-import type { SessionEffectAdmission, SessionEffectLedger } from '../effects/types.ts';
+import type { SessionEffectAdmission, SessionEffectKey, SessionEffectLedger } from '../effects/types.ts';
 import type { CodexRuntimeCatalogCache } from '../harness/codex-catalog-cache.ts';
 import { claudeRuntimeCatalog, codexRuntimeCatalog, codexSwitchContext } from '../harness/model-catalog.ts';
 import { CodexModelPickerDriver, type PickerSleeper } from '../harness/picker-drive.ts';
@@ -47,8 +48,10 @@ import {
   type RuntimeInjector,
   type RuntimePane,
   type RuntimePickerTransport,
+  type RuntimeQuarantinePatch,
   type RuntimeRepository,
   SessionRuntimeError,
+  type SessionRuntimeStartupHeldPort,
   type SessionRuntimeSubsystem,
 } from './types.ts';
 
@@ -56,6 +59,25 @@ import {
 export const HARNESS_PICKER_COMMAND = '/model';
 /** The harness-native context command. It is not a message and never advances the turn. */
 export const HARNESS_COMPACT_COMMAND = '/compact';
+
+/**
+ * Merge picker quarantine fields without weakening a verified failed-stop verdict.
+ *
+ * The storage adapter calls this inside its atomic state update. A standing `kill_failed` owns the
+ * termination result, so runtime recovery may close its input gates and add diagnostics but may not
+ * replace the status, reason, finish time, exit code, or any other terminal evidence.
+ */
+export function runtimeQuarantineState(current: JsonValue, patch: RuntimeQuarantinePatch): JsonValue {
+  const state = jsonObject(current) ?? {};
+  if (state.status !== 'kill_failed') return { ...state, ...patch };
+  return {
+    ...state,
+    health: patch.health,
+    promptReady: patch.promptReady,
+    needsHuman: patch.needsHuman,
+    needsHumanKind: patch.needsHumanKind,
+  };
+}
 
 export interface SessionRuntimeControlPorts {
   readonly repository: RuntimeRepository;
@@ -77,7 +99,7 @@ export interface SessionRuntimeControlPorts {
   readonly clientName: string;
 }
 
-export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
+export class SessionRuntimeControlService implements SessionRuntimeSubsystem, SessionRuntimeStartupHeldPort {
   constructor(private readonly ports: SessionRuntimeControlPorts) {}
 
   async models(reference: string): Promise<RuntimeModelCatalog> {
@@ -85,12 +107,22 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
   }
 
   async control(reference: string, request: RuntimeControlRequest, requestId: string): Promise<SessionView> {
-    return await this.#drive(reference, request, requestId, 'running');
+    const id = this.#require(reference);
+    const effect = this.#effect(id, request, requestId);
+    // A settled retry need not wait behind a live picker drive. The held path repeats this check,
+    // because only that second read can exclude two concurrent first attempts.
+    const replay = await this.#replay(effect, requestId);
+    if (replay !== undefined) return replay;
+    return await this.ports.serial.run(
+      id,
+      async () => await this.#driveWhileHeld(effect, request, requestId, 'running'),
+    );
   }
 
-  /** The daemon-private half of this same service; no mounted interface exposes the starting window. */
-  async startup(reference: string, request: RuntimeControlRequest, requestId: string): Promise<void> {
-    await this.#drive(reference, request, requestId, 'starting');
+  /** The daemon-private half; its lifecycle caller already owns this session's mutation fence. */
+  async startupWhileHeld(reference: string, request: RuntimeControlRequest, requestId: string): Promise<void> {
+    const id = this.#require(reference);
+    await this.#driveWhileHeld(this.#effect(id, request, requestId), request, requestId, 'starting');
   }
 
   /** Both refusals kept apart, because they are two different mistakes and two different statuses. */
@@ -103,7 +135,9 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
   }
 
   async #view(id: SessionId): Promise<SessionView> {
-    const current = await this.ports.repository.view(id);
+    const current = await this.ports.repository.view(id).catch((error: unknown) => {
+      throw new SessionRuntimeError('failed', failureMessage(error));
+    });
     if (current === undefined)
       throw new SessionRuntimeError('failed', `session ${id} exists but its documents do not satisfy the protocol`);
     return current;
@@ -261,66 +295,76 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem {
     return { performed: true };
   }
 
+  #effect(
+    id: SessionId,
+    request: RuntimeControlRequest,
+    requestId: string,
+  ): { readonly id: SessionId; readonly key: SessionEffectKey; readonly fingerprint: string } {
+    return {
+      id,
+      key: { sessionId: id, effectId: `runtime:${requestId}` },
+      fingerprint: runtimeRequestFingerprint(request),
+    };
+  }
+
+  async #replay(
+    effect: { readonly id: SessionId; readonly key: SessionEffectKey; readonly fingerprint: string },
+    requestId: string,
+  ): Promise<SessionView | undefined> {
+    const standing = await this.ports.effects.inspect(effect.key, effect.fingerprint).catch((error: unknown) => {
+      throw new SessionRuntimeError('failed', failureMessage(error));
+    });
+    if (standing === 'unclaimed') return undefined;
+    if (standing === 'settled') return await this.#view(effect.id);
+    if (standing === 'conflict')
+      throw new SessionRuntimeError(
+        'conflict',
+        `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
+      );
+    throw new SessionRuntimeError(
+      'unsettled',
+      `request id ${JSON.stringify(requestId)} already began a runtime control on this session and its outcome was not recorded; the pane may have been touched, so read the session rather than retrying`,
+    );
+  }
+
   /**
-   * One control under this daemon's ONE durable effect ledger and ONE per-session runtime queue.
-   * Public and startup callers differ in exactly one value: the lifecycle status they may drive.
+   * One control while the process-wide session mutation fence is already held.
+   *
+   * Public control reaches this through `serial.run`; startup reaches it from the lifecycle's
+   * `beforeFirstTurn` callback. This method must never acquire the non-reentrant serial itself.
    */
-  async #drive(
-    reference: string,
+  async #driveWhileHeld(
+    effect: { readonly id: SessionId; readonly key: SessionEffectKey; readonly fingerprint: string },
     request: RuntimeControlRequest,
     requestId: string,
     admits: LifecycleSessionStatus,
   ): Promise<SessionView> {
-    const id = this.#require(reference);
-    const key = { sessionId: id, effectId: `runtime:${requestId}` } as const;
-    const fingerprint = runtimeRequestFingerprint(request);
-    const replay = async (): Promise<SessionView | undefined> => {
-      const standing = await this.ports.effects.inspect(key, fingerprint).catch((error: unknown) => {
-        throw new SessionRuntimeError('failed', failureMessage(error));
-      });
-      if (standing === 'unclaimed') return undefined;
-      if (standing === 'settled') return await this.#view(id);
-      if (standing === 'conflict')
+    const queued = await this.#replay(effect, requestId);
+    if (queued !== undefined) return queued;
+    const outcome = await this.#apply(effect.id, request, admits, async () => {
+      const admission = await this.ports.effects
+        .begin(effect.key, effect.fingerprint, this.ports.clock.now())
+        .catch(error => {
+          throw new SessionRuntimeError('failed', failureMessage(error));
+        });
+      if (admission === 'conflict')
         throw new SessionRuntimeError(
           'conflict',
           `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
         );
-      throw new SessionRuntimeError(
-        'unsettled',
-        `request id ${JSON.stringify(requestId)} already began a runtime control on this session and its outcome was not recorded; the pane may have been touched, so read the session rather than retrying`,
-      );
-    };
-
-    // The first check lets an already-settled replay avoid a live picker queue. The second is the
-    // one that keeps concurrent first attempts from both reaching the pane.
-    const answered = await replay();
-    if (answered !== undefined) return answered;
-    return await this.ports.serial.run(id, async () => {
-      const queued = await replay();
-      if (queued !== undefined) return queued;
-      const outcome = await this.#apply(id, request, admits, async () => {
-        const admission = await this.ports.effects.begin(key, fingerprint, this.ports.clock.now()).catch(error => {
-          throw new SessionRuntimeError('failed', failureMessage(error));
-        });
-        if (admission === 'conflict')
-          throw new SessionRuntimeError(
-            'conflict',
-            `request id ${JSON.stringify(requestId)} was already spent on a different runtime control for this session`,
-          );
-        if (admission === 'unsettled')
-          throw new SessionRuntimeError(
-            'unsettled',
-            `request id ${JSON.stringify(requestId)} already began a runtime control on this session and its outcome was not recorded; the pane may have been touched, so read the session rather than retrying`,
-          );
-        return admission;
-      });
-      // Settle after the pane effect and journal, but before the response projection. A failed final
-      // read can then replay from the durable fact without repeating any keystroke.
-      if (outcome.performed)
-        await this.ports.effects.settle(key, fingerprint, this.ports.clock.now()).catch(error => {
-          throw new SessionRuntimeError('failed', failureMessage(error));
-        });
-      return await this.#view(id);
+      if (admission === 'unsettled')
+        throw new SessionRuntimeError(
+          'unsettled',
+          `request id ${JSON.stringify(requestId)} already began a runtime control on this session and its outcome was not recorded; the pane may have been touched, so read the session rather than retrying`,
+        );
+      return admission;
     });
+    // Settle after the pane effect and journal, but before the response projection. A failed final
+    // read can then replay from the durable fact without repeating any keystroke.
+    if (outcome.performed)
+      await this.ports.effects.settle(effect.key, effect.fingerprint, this.ports.clock.now()).catch(error => {
+        throw new SessionRuntimeError('failed', failureMessage(error));
+      });
+    return await this.#view(effect.id);
   }
 }

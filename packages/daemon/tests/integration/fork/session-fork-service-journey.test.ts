@@ -574,7 +574,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
       environment: environments(),
       tmuxSession: id => sessionTmuxName(id, defaultSessionLifecycleSettings),
       runtime: {
-        startup: async (sessionId, request, requestId) => {
+        startupWhileHeld: async (sessionId, request, requestId) => {
           const id = parseSessionId(sessionId);
           const key = { sessionId: id, effectId: `runtime:${requestId}` } as const;
           const fingerprint = runtimeEffectFingerprint(request);

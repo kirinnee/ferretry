@@ -72,6 +72,17 @@ export interface SessionRuntimeSubsystem {
   control(sessionId: string, request: RuntimeControlRequest, requestId: string): Promise<SessionView>;
 }
 
+/**
+ * The daemon-private startup half of the runtime service.
+ *
+ * The caller already owns the process-wide mutation fence for this session. Keeping that fact in a
+ * separate capability instead of a boolean on the mounted subsystem makes a nested, non-reentrant
+ * queue acquisition impossible to request through the public API.
+ */
+export interface SessionRuntimeStartupHeldPort {
+  startupWhileHeld(sessionId: string, request: RuntimeControlRequest, requestId: string): Promise<void>;
+}
+
 /** The launch record a control needs: which pane to type into, and whose executable answers for it. */
 export interface RuntimeLaunchTarget {
   readonly tmuxSession: string;

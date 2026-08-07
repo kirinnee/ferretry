@@ -119,7 +119,6 @@ import {
   SessionForkTargetBinder,
   SessionForkTargetResolver,
   type SessionForkStartAccountResolver,
-  type SessionForkStartupRuntimePort,
 } from '../src/adapters/fork/index.ts';
 import {
   FileSessionAttachmentCopier,
@@ -483,6 +482,8 @@ import {
   type SessionResumeSubsystem,
   type SessionRootPinner,
   SessionRuntimeControlService,
+  type SessionRuntimeStartupHeldPort,
+  runtimeQuarantineState,
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
@@ -1488,7 +1489,7 @@ function createSessionControlSubsystem(
    * session is `starting`, which the public path refuses by design. A start and a fork occupy the
    * identical window and go through the identical entry point.
    */
-  runtime: SessionForkStartupRuntimePort,
+  runtime: SessionRuntimeStartupHeldPort,
   /**
    * The spawn-side warden stamp, decided at create because create is the only moment it can be.
    *
@@ -1702,7 +1703,7 @@ function createSessionControlSubsystem(
           startupRuntime === undefined
             ? undefined
             : async () => {
-                await runtime.startup(id, startupRuntime, `${requestId}:startup-runtime`);
+                await runtime.startupWhileHeld(id, startupRuntime, `${requestId}:startup-runtime`);
               },
         );
       } catch (error) {
@@ -4041,7 +4042,7 @@ interface ForkSubsystemParts {
   readonly messageTokens: SessionTranscriptMessageTokenCodec;
   readonly environment: Pick<FileSessionEnvironmentStore, 'read'>;
   /** The startup half only — the intermediate annotation must not erase it. */
-  readonly runtime: SessionForkStartupRuntimePort;
+  readonly runtime: SessionRuntimeStartupHeldPort;
   readonly view: (id: SessionId) => Promise<SessionView | undefined>;
   readonly ids: SessionForkIdFactory;
   readonly clock: ClockPort;
@@ -5298,7 +5299,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
             await storage.append(id, event, data);
           },
           quarantine: async (id, patch) => {
-            await storage.updateState(id, current => ({ ...(current as Record<string, unknown>), ...patch }));
+            await storage.updateState(id, current => runtimeQuarantineState(current, patch));
           },
         },
         pane: launchTmux,
@@ -5320,9 +5321,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // ONE cache for the daemon. Per-subsystem caches would each spawn their own probe, which
         // is the second speaker to a live account this cache exists to prevent.
         catalog: codexRuntimeModels,
-        // Its own queue: a picker drive holds the session for several seconds of keystrokes, and
-        // must not make every unrelated document write wait behind it.
-        serial: new KeyedSerialExecutor(),
+        // The lifecycle's process-wide per-session fence. Public control acquires it; startup enters
+        // through the explicit held capability from lifecycle's before-first-turn callback.
+        serial: sessionMutations,
         sleeper: { sleep: milliseconds => Bun.sleep(milliseconds) },
         clock,
         // The instruction a quarantined session shows a human names the CLI they actually type.

@@ -40,7 +40,6 @@
 
 import { createHash } from 'node:crypto';
 import {
-  type RuntimeControlRequest,
   type SessionConfig,
   SessionConfigSchema,
   type SessionTransferPlan,
@@ -57,6 +56,7 @@ import type { ClockPort } from '../../lib/ports.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import { startupModelArguments } from '../../lib/session/harness/startup.ts';
 import { assignedTaskDocument } from '../../lib/session/lifecycle/policy.ts';
+import type { SessionRuntimeStartupHeldPort } from '../../lib/session/runtime-control/types.ts';
 import {
   type LifecycleSessionStatus,
   MAX_ASSIGNED_TASK_LENGTH,
@@ -106,10 +106,6 @@ import { SessionAttachmentCopyError } from '../transfer/attachment-copier.ts';
  * It answers nothing. A fork's startup control is applied for its effect on the pane, and the view
  * the fork reports is read afterwards from the session itself.
  */
-export interface SessionForkStartupRuntimePort {
-  startup(sessionId: string, request: RuntimeControlRequest, requestId: string): Promise<void>;
-}
-
 /**
  * A target that cannot be shown to be the one this plan reserved.
  *
@@ -201,7 +197,7 @@ export interface SessionForkTargetBinderPorts {
   /** The lifecycle policy's own deterministic tmux name for this target id. */
   readonly tmuxSession: (targetSessionId: SessionId) => string;
   /** The startup half of the one runtime subsystem, used to apply the fork's effort before turn one. */
-  readonly runtime: SessionForkStartupRuntimePort;
+  readonly runtime: SessionRuntimeStartupHeldPort;
   /** The view every other surface reads, so a fork answers with the session they will show. */
   readonly view: (targetSessionId: SessionId) => Promise<SessionView | undefined>;
   /** The target's own private directory: the string a rollout is later correlated by. */
@@ -1046,7 +1042,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       startup === undefined
         ? undefined
         : async () => {
-            await this.ports.runtime.startup(id, startup, `${plan.planId}:startup-runtime`);
+            await this.ports.runtime.startupWhileHeld(id, startup, `${plan.planId}:startup-runtime`);
           },
     );
     return await this.observe(id, plan);

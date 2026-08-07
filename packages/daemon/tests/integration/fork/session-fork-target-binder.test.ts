@@ -266,7 +266,7 @@ async function harness(
      * begun/settled/conflict handling, same lost-outcome injection.
      */
     runtime: {
-      startup: async (sessionId, request, requestId) => {
+      startupWhileHeld: async (sessionId, request, requestId) => {
         const id = parseSessionId(sessionId);
         const key = { sessionId: id, effectId: `runtime:${requestId}` } as const;
         const fingerprint = runtimeEffectFingerprint(request);
