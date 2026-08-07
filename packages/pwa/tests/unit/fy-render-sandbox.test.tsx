@@ -159,14 +159,42 @@ const settle = async (ms: number): Promise<void> => {
  * a pending request holding the event loop open. The default here answers every
  * request; the two tests that care about fetching install their own stub.
  */
+/**
+ * THIS FILE OWNS THE DOCUMENT THEME IT TESTS AGAINST, and that is an isolation fix
+ * rather than tidiness.
+ *
+ * `documentTheme()` reads `<html data-theme>` live, which is correct production
+ * behaviour. These tests were nonetheless written against the AMBIENT default — no
+ * attribute, which resolves to `dark` — and `bun test` runs the whole unit tier in one
+ * process with one shared happy-dom document. So the assumption held when this file
+ * ran alone and broke when anything published a theme first.
+ *
+ * Measured, not guessed: `theme-toggle.test.tsx` mounts the real toggle, which
+ * publishes `data-theme` through `useTheme` and never puts it back, and
+ * `bun test theme-toggle.test.tsx fy-render-sandbox.test.tsx` reproduces exactly the
+ * three failures the full gate reported — one `ready` that had become `stale`, and two
+ * `expected 'light' to be 'dark'`.
+ *
+ * Pinning the value per test makes this file independent of whatever ran before it,
+ * and restoring the ambient value afterwards means it leaves nothing behind for
+ * whatever runs next. Fixing only the leaker would have left the next publisher free
+ * to break this file again.
+ */
+const OWNED_THEME = 'studio-dark';
+let ambientTheme: string | null = null;
+
 const realFetch = globalThis.fetch;
 beforeEach(() => {
+  ambientTheme = document.documentElement.getAttribute('data-theme');
+  document.documentElement.setAttribute('data-theme', OWNED_THEME);
   globalThis.fetch = (async () => new Response('globalThis.__fyRenderStub = true;')) as unknown as typeof fetch;
 });
 
 const mounted: ReactTestRenderer[] = [];
 afterEach(() => {
   globalThis.fetch = realFetch;
+  if (ambientTheme === null) document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', ambientTheme);
   while (mounted.length > 0) {
     const tree = mounted.pop();
     try {
