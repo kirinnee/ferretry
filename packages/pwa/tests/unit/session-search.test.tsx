@@ -498,6 +498,41 @@ describe('what one mounted session scope costs', () => {
     }
   });
 
+  test('withdraws a settled query to idle when the input is cleared', async () => {
+    const { seen, view } = await mountProvider({ tasks: [needleTask()] });
+    try {
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      await afterQuerySettles();
+
+      expect(queryTaskReads(seen)).toHaveLength(1);
+      expect(view.root.findAll(node => node.props['data-session-search-popup'] !== undefined)).toHaveLength(1);
+
+      run(() => input.props.onChange({ target: { value: '' } }));
+      // Wait past the query debounce so this also proves withdrawal did not
+      // merely postpone a second request for the blank identity.
+      await afterQuerySettles();
+
+      const drawn = JSON.stringify(view.toJSON());
+      expect(input.props.value).toBe('');
+      expect(queryTaskReads(seen)).toHaveLength(1);
+      const popups = view.root.findAll(node => node.props['data-session-search-popup'] !== undefined);
+      expect(popups).toHaveLength(1);
+      expect(
+        popups[0]?.findAll(
+          node => node.type === 'p' && node.children.join('') === "Type to search this session's files and tasks.",
+        ),
+      ).toHaveLength(1);
+      expect(popups[0]?.findAll(node => node.props['data-search-searching'] !== undefined)).toHaveLength(0);
+      expect(popups[0]?.findAll(node => node.props.role === 'alert')).toHaveLength(0);
+      expect(popups[0]?.findAll(node => node.props['data-result-kind'] !== undefined)).toHaveLength(0);
+      expect(drawn).not.toContain('Task search unavailable');
+      expect(drawn).not.toContain('No current-session files or tasks match');
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
   test('keeps a failed normalized query unavailable when only its raw spelling changes', async () => {
     const seen: Recorded[] = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
