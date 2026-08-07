@@ -1266,7 +1266,9 @@ describe('the command palette shortcut', () => {
     const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
     await settle();
     const search = must(
-      view.container.querySelector<HTMLInputElement>('#current-session-search'),
+      // By the control's stable marker, not by a literal id: the id is now
+      // per-mount (`useId`) so the app bar and an open pane cannot collide.
+      view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
       'the current-session search input',
     );
 
@@ -1274,6 +1276,111 @@ describe('the command palette shortcut', () => {
 
     expect(document.activeElement).toBe(search);
     expect(paletteOpen(view.container)).toBe(false);
+    await view.unmount();
+  });
+
+  it('reaches the search from inside the composer, which is where a session reader stands', async () => {
+    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    await settle();
+    const search = must(
+      view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
+      'the current-session search input',
+    );
+
+    // The REAL COMPOSER textarea, not an unrelated element appended by the
+    // test: session search deliberately claims this editable context and no
+    // other one.
+    const composer = must(
+      view.container.querySelector<HTMLTextAreaElement>('form.fy-composer textarea'),
+      'the session composer',
+    );
+    composer.focus();
+    const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true });
+    await interact(() => composer.dispatchEvent(event));
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(search);
+    expect(paletteOpen(view.container)).toBe(false);
+
+    // And from inside the search itself it is the ordinary re-select, not a
+    // keystroke the field swallows.
+    const again = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    await interact(() => search.dispatchEvent(again));
+    expect(again.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(search);
+
+    // Escape closes the current-session palette and restores the exact opener,
+    // even after Cmd+K was pressed a second time inside the search itself.
+    const escapeKey = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await interact(() => search.dispatchEvent(escapeKey));
+    expect(escapeKey.defaultPrevented).toBe(true);
+    expect(search.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(composer);
+
+    await view.unmount();
+  });
+
+  it('dismisses on an outside pointer without moving focus or clearing the shared query', async () => {
+    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    await settle();
+    const search = must(
+      view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
+      'the current-session search input',
+    );
+
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+    const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'input setter');
+    await interact(() => {
+      setter.call(search, 'needle');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(search.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(search);
+
+    // `pointerdown` alone on a non-focusable outside target does not blur the
+    // field. This therefore exercises the document capture listener itself,
+    // rather than letting the existing blur handler make the assertion pass.
+    await interact(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, cancelable: true })));
+
+    expect(search.getAttribute('aria-expanded')).toBe('false');
+    expect(search.value).toBe('needle');
+    expect(document.activeElement).toBe(search);
+    await view.unmount();
+  });
+
+  it('leaves session-route shortcuts inside unrelated editors and modal contexts', async () => {
+    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    await settle();
+    const search = must(
+      view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
+      'the current-session search input',
+    );
+
+    const rename = document.createElement('input');
+    document.body.appendChild(rename);
+    rename.focus();
+    const editable = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true });
+    await interact(() => rename.dispatchEvent(editable));
+    expect(editable.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(rename);
+    expect(search.getAttribute('aria-expanded')).toBe('false');
+
+    // Native dialogs are modal contexts even without redundant role/aria
+    // attributes, so the structural guard names the element too.
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('open', '');
+    const action = document.createElement('button');
+    dialog.appendChild(action);
+    document.body.appendChild(dialog);
+    action.focus();
+    const modal = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    await interact(() => action.dispatchEvent(modal));
+    expect(modal.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(action);
+    expect(search.getAttribute('aria-expanded')).toBe('false');
+
+    rename.remove();
+    dialog.remove();
     await view.unmount();
   });
 
