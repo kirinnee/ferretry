@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { type FileHandle, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { SessionTransferPlan } from '@ferretry/protocol';
-import { SessionTransferPlanSchema } from '@ferretry/protocol';
+import { InstantSchema, SessionTransferPlanSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   FileSessionTransferPlanStore,
@@ -249,6 +249,30 @@ describe('FileSessionTransferPlanStore record/replay (authoritative global recei
     should(outcome.receipt.fingerprint).equal(transferRequestFingerprint(plan));
     should(subject.receiptPath(PLAN_ID)).equal(join(forks, `${PLAN_ID}.json`));
     should((await readdir(forks)).sort()).deepEqual([`${PLAN_ID}.json`]);
+  });
+
+  it('uses protocol-valid default instants when no clock is injected', async () => {
+    // Arrange — deterministic temporary names, but deliberately no fourth constructor clock argument.
+    const home = await tempDirectory('transfer-receipt-default-instant');
+    const subject = new FileSessionTransferPlanStore(
+      planId => forkReceiptPath(join(home, 'state'), planId),
+      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
+      counter(),
+    );
+
+    // Act
+    const outcome = await subject.record(makePlan({}), {
+      requestId: REQUEST,
+      targetId: 'target-session',
+      phase: 'requested',
+    });
+    const receipt = await subject.load(PLAN_ID);
+    if (receipt === undefined) throw new Error('expected the default-clock receipt to be persisted');
+
+    // Assert — wall-clock values are intentionally not compared; the durable contract is an offset-bearing instant.
+    should(outcome.status).equal('created');
+    for (const instant of [receipt.createdAt, receipt.updatedAt, receipt.phaseHistory[0]?.at])
+      should(InstantSchema.safeParse(instant).success).be.true();
   });
 
   it('round-trips the receipt, embedding the full parsed plan', async () => {

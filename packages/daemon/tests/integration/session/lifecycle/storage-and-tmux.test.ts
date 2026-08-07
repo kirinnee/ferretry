@@ -444,6 +444,41 @@ describe('TmuxSessionLifecycleLauncher', () => {
     ]);
   });
 
+  it('should register a launched pane and wait publicly for its startup prompt', async () => {
+    // Arrange — use the real launcher, controller and delivery adapter over an inspectable tmux port.
+    const port = new RecordingTmuxPort();
+    const slept: number[] = [];
+    const registered: SessionLifecycleRecord[] = [];
+    const controller = new TmuxController(port);
+    const subject = new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async milliseconds => {
+        slept.push(milliseconds);
+      }),
+      undefined,
+      {
+        register: async actual => {
+          await Promise.resolve();
+          registered.push(actual);
+        },
+      },
+    );
+    const input = record('registered-session');
+
+    // Act — registration is part of a completed launch; readiness is a separate public startup step.
+    await subject.launch(input);
+    port.calls.length = 0;
+    port.pollsBeforeReady = 1;
+    await subject.ready(input);
+
+    // Assert — the registrar sees the complete record only once launch has completed, while ready only polls.
+    should(registered).deepEqual([input]);
+    should(slept).deepEqual([100]);
+    should(port.commands().filter(command => command === 'display-message')).have.length(2);
+    should(port.commands().filter(command => command === 'capture-pane')).have.length(4);
+    should(port.commands()).not.containEql('send-keys');
+  });
+
   it('should wait for a ready prompt before typing the first turn into the pane', async () => {
     // Arrange — the harness is still drawing itself for the first two `state` polls.
     const server = new FakeTmuxServer();
