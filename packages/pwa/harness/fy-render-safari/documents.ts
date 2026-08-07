@@ -245,8 +245,102 @@ export const neverReadyDocument = (shell: GeneratedShell): string =>
     '<script>/* fy-render never-ready probe */</script>',
   );
 
-/** The component that owns the frame; both of its facts are read, never retyped. */
+/** The component that owns the frame; every fact of its is read, never retyped. */
 export const PRODUCTION_FRAME_COMPONENT = 'src/components/fy-render-sandbox.tsx';
+
+/** The harness file whose fetch must carry the same options the component's does. */
+export const REPLICA_PARENT_SOURCE = 'harness/fy-render-safari/parent.ts';
+
+/**
+ * Comments are removed before any source is scanned for code, because a comment
+ * that quotes the shape being looked for is exactly what a scanner should not find.
+ * The component's header quotes `redirect: 'error'` in prose, one paragraph above
+ * the call that uses it.
+ */
+const withoutComments = (source: string): string =>
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter(line => !/^\s*(\/\/|\*)/.test(line))
+    .join('\n');
+
+/**
+ * The option KEYS of the first `await fetch(…, { … })` in a file, at the top level
+ * of that object literal.
+ *
+ * WHY KEYS AND WHY FROM SOURCE. The harness's parent is a replica of the production
+ * component's bridge, and a replica whose fetch options have quietly diverged is a
+ * replica that measures a request the product does not make. Reading both files and
+ * comparing the two sets is a drift gate with no retyping anywhere on either side —
+ * and it is the check that would have caught `redirect: 'error'` being added to
+ * production while the replica still passed two options.
+ *
+ * Values are deliberately NOT compared. `signal` names a controller with a
+ * different lifetime here (see `parent.ts`), and a value comparison would either
+ * fail on that or have to carve out an exception large enough to hide a real change.
+ */
+export const readFetchOptionKeys = (source: string, path: string): readonly string[] => {
+  const code = withoutComments(source);
+  const call = code.indexOf('await fetch(');
+  if (call === -1)
+    throw new Error(
+      `❌ could not find an \`await fetch(\` in ${path}. This gate compares the production library fetch with the harness replica of it; if either moved, teach this reader the new shape rather than deleting the comparison.`,
+    );
+  const open = code.indexOf('{', call);
+  if (open === -1) throw new Error(`❌ the \`await fetch(\` in ${path} passes no options object`);
+
+  let depth = 0;
+  let body = '';
+  for (let index = open; index < code.length; index += 1) {
+    const character = code[index];
+    if (character === undefined) break;
+    // A string literal contributes no key, and skipping it wholesale also keeps a
+    // brace or a colon inside a URL from moving the depth counter.
+    if (character === "'" || character === '"' || character === '`') {
+      index += 1;
+      while (index < code.length && code[index] !== character) index += code[index] === '\\' ? 2 : 1;
+      continue;
+    }
+    if (character === '{') {
+      depth += 1;
+      continue;
+    }
+    if (character === '}') {
+      depth -= 1;
+      if (depth === 0) break;
+      continue;
+    }
+    if (depth === 1) body += character;
+  }
+  if (depth !== 0) throw new Error(`❌ the \`await fetch(\` options object in ${path} is unterminated`);
+
+  const keys = body
+    .split(',')
+    .map(part => (part.split(':')[0] ?? '').trim())
+    .filter(key => /^[A-Za-z][A-Za-z0-9]*$/.test(key));
+  if (keys.length === 0) throw new Error(`❌ the \`await fetch(\` in ${path} passes an empty options object`);
+  return [...keys].sort();
+};
+
+/**
+ * Fails when the replica's library fetch and production's no longer pass the same
+ * options.
+ *
+ * Fail closed, and name both sides: the remedy is always to change the replica,
+ * never to relax this. A request made with different options is a different
+ * request, and this whole job exists to measure the one the product makes.
+ */
+export const assertReplicaFetchMatchesProduction = (
+  production: readonly string[],
+  replica: readonly string[],
+): void => {
+  if (production.join(' ') === replica.join(' ')) return;
+  const missing = production.filter(key => !replica.includes(key));
+  const extra = replica.filter(key => !production.includes(key));
+  throw new Error(
+    `❌ the harness replica's library fetch no longer passes the same options as production. ${PRODUCTION_FRAME_COMPONENT} passes {${production.join(', ')}}; ${REPLICA_PARENT_SOURCE} passes {${replica.join(', ')}}.${missing.length > 0 ? ` Missing from the replica: ${missing.join(', ')}.` : ''}${extra.length > 0 ? ` Only in the replica: ${extra.join(', ')}.` : ''} Change the replica so it makes the request the product makes; do not relax this comparison.`,
+  );
+};
 
 export interface ProductionFrameContract {
   /** The URL the component sets on the frame, e.g. `/fy-render-sandbox.html`. */
