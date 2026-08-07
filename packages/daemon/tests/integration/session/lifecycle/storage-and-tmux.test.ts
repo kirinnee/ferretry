@@ -449,6 +449,14 @@ describe('TmuxSessionLifecycleLauncher', () => {
     const port = new RecordingTmuxPort();
     const slept: number[] = [];
     const registered: SessionLifecycleRecord[] = [];
+    let announceRegistrarEntry = (): void => undefined;
+    const entered = new Promise<void>(resolve => {
+      announceRegistrarEntry = resolve;
+    });
+    let releaseRegistration = (): void => undefined;
+    const registrationRelease = new Promise<void>(resolve => {
+      releaseRegistration = resolve;
+    });
     const controller = new TmuxController(port);
     const subject = new TmuxSessionLifecycleLauncher(
       controller,
@@ -458,21 +466,41 @@ describe('TmuxSessionLifecycleLauncher', () => {
       undefined,
       {
         register: async actual => {
-          await Promise.resolve();
           registered.push(actual);
+          announceRegistrarEntry();
+          await registrationRelease;
         },
       },
     );
     const input = record('registered-session');
 
-    // Act — registration is part of a completed launch; readiness is a separate public startup step.
-    await subject.launch(input);
+    // Act — a fire-and-forget registrar would let this launch settle while registration remains held.
+    let launchSettled = false;
+    const launch = subject.launch(input).then(
+      result => {
+        launchSettled = true;
+        return result;
+      },
+      error => {
+        launchSettled = true;
+        throw error;
+      },
+    );
+    await entered;
+    await Promise.resolve();
+
+    // Assert — the complete record entered the registrar, but launch cannot finish until it releases.
+    should(registered).deepEqual([input]);
+    should(launchSettled).be.false();
+
+    // Act — registration is now complete; readiness remains a separate public startup step.
+    releaseRegistration();
+    await launch;
     port.calls.length = 0;
     port.pollsBeforeReady = 1;
     await subject.ready(input);
 
-    // Assert — the registrar sees the complete record only once launch has completed, while ready only polls.
-    should(registered).deepEqual([input]);
+    // Assert — ready only polls after the awaited registration completes.
     should(slept).deepEqual([100]);
     should(port.commands().filter(command => command === 'display-message')).have.length(2);
     should(port.commands().filter(command => command === 'capture-pane')).have.length(4);
