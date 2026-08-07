@@ -253,7 +253,7 @@ Prevent repeated breakage in everyday development.
 | --: | :--: | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ------- | ------- |
 |   3 |  ☑   | **Fix gitlint in worktrees**        | Make commit linting work reliably inside mandatory Git worktrees.                               | —       | #4, #31 |
 |   4 |  ☑   | **Stop hiding untracked files**     | Always show untracked files so new callees cannot disappear from reviews or commits.            | —       | #3, #31 |
-|   5 |  ☐   | **Land Tasks pane performance fix** | Make Tasks load quickly by eliminating sequential task-file reads; record before/after timings. | —       | #35     |
+|   5 |  ☑   | **Land Tasks pane performance fix** | Make Tasks load quickly by eliminating sequential task-file reads; record before/after timings. | —       | #35     |
 
 **#3 is complete (2026-08-06).** PR #283 had diagnosed the mechanism correctly and then broken
 commit linting repo-wide: its `shellHook` block ran `pre-commit install` without `-f` on every
@@ -288,48 +288,57 @@ status reader independently passes `--untracked-files=all` in
 `packages/daemon/src/adapters/worktrees/git-gateway.ts`, and the daemon-scoped PWA changes request
 in `packages/pwa/src/components/files-api.ts` uses the shared `browserFetch` transport without
 filtering `??` rows; `packages/pwa/tests/unit/files-api.test.ts` keeps that final path covered.
-**#5 is PARTIAL and stays open. The half that is done is not the half the row names.** The
-aggregate route is fixed and measured; the PWA Tasks pane this row is about has a different, still
-unfixed problem. Read the next three paragraphs as "backend done, pane outstanding" and do not tick
-this row on the strength of the benchmark below.
+**#5 is complete (2026-08-07), with the two performance histories kept distinct.** The earlier
+`37af20d4` (`fix(tasks): parallelize fleet board reads (#282)`) bounded the fleet-wide aggregate
+`GET /v1/tasks` walk used by the CLI; it did not accelerate the current-session PWA pane. The pane's
+historical source at `e222f87d25f0712eac47325722b1fdd742c0a207` fetched one list, one detail per
+task, and recursively walked files in the browser. The production source at
+`b81c64e69e64a058fa7df884c55d6303d8c036b7` instead consumes bounded task summaries, delegates the
+settled query, and reads `/fs/index`. Evidence commit
+`a2975021990c26dcd95e9b9c2d89ae9d0d04409e` adds the reproducible real-pane harness and controller;
+it does not replace either production implementation with a proxy.
 
-**Done: the aggregate fleet walk.** `37af20d4`
-(`fix(tasks): parallelize fleet board reads (#282)`) replaced one awaited
-`board(sessionId).list()` per session in `GET /v1/tasks` with a bounded fan-out ported from kteam's
-`FLEET_READ_CONCURRENCY` / `mapPooled` pair. That route is the capability behind `fy task list` when
-no session is named — a CLI surface. Each board is a single snapshot file
-(`packages/daemon/src/adapters/tasks/file-task-store.ts`), so N sessions really was N serialised
-file reads and nothing below the route can batch further.
+The citable run used Chrome `150.0.7871.186`, a clean runner tree
+`2840b420060788b6570567011b4134b26f078301` with parent `b81c64e69e64a058fa7df884c55d6303d8c036b7`,
+and this exact benchmark command after acquiring `/tmp/ferretry-f117-heavy-gate.lock` on inherited
+fd 9 and passing both the trusted and independent direct `/proc` audits before execution:
 
-**Outstanding: the Tasks pane itself, which was never the beneficiary.** The PWA's current-session
-search calls `/v1/sessions/:sessionId/tasks` — a single board, no fleet walk — and then issues **one
-further `GET /v1/sessions/:sessionId/tasks/:taskId` per task**, all at once through an unbounded
-`Promise.all` (`readTasks` in `packages/pwa/src/features/session-search/session-search.tsx`). A board
-of N tasks therefore costs an **unbounded N + 1 HTTP-request fan-out**, and because the daemon's
-detail handler re-reads the whole board before answering one task, roughly **2N + 1 reads of the
-same snapshot file**. That repeated per-task board-read cost is untouched by anything here. Closing
-#5 means collapsing that N+1 — the list response already carries every summary field the pane
-renders — and then recording a pane-level before/after. Neither is done, so there is deliberately
-**no row-level timing claimed** yet. That later pane integration and its measurement belong to #6's
-current-session search work; this branch deliberately does not touch them.
+```sh
+FERRETRY_F117_TRUSTED_HEAVY_AUDIT=passed bun scripts/local/bench-tasks-pane.ts
+```
 
-**The done half has a reproducible measurement, not an unsupported number.** It measures the
-aggregate route only; it says nothing about the pane. `scripts/local/bench-fleet-task-reads.ts` runs both
-access patterns against the same fixture in one interpreter — the pre-`37af20d4` sequential loop,
-reimplemented because the change deleted it, and the shipped route through the real
-`ApiRouter`/`ApiDispatcher`. Probe: 96 sessions, one `FakeTaskBoard` each
-(`packages/daemon/tests/unit/runtime/mounts/support.ts`), 12 ms injected per board read, 3 samples
-per arm, fixture rebuilt between samples, unit wall-clock milliseconds by `performance.now()`,
-median reported. It is offline and touches no state home; `bun scripts/local/bench-fleet-task-reads.ts`
-reproduces it and `--boards/--latency/--samples` vary it. A malformed, zero or fractional
-`--boards`/`--samples` exits 2 rather than reporting a `NaN` median, and the closing line says
-FASTER or SLOWER according to what was actually measured. Each run prints the commit it measured and
-says so when the tree is dirty. A one-board or zero-latency probe is explicitly **INCONCLUSIVE**:
-there are no overlapping reads whose effect could be separated from timer and scheduling noise. The
-warmed, alternating-pair evidence recorded for this branch used 96 boards, 12 ms injected latency and
-3 samples: **1,253.9 ms** before against **28.9 ms** after, a **43.4×** reduction. Fresh runs remain
-the source of current-tree evidence because wall-clock timings vary; the ratio is a floor because only
-the AFTER arm pays routing, authorization and serialization.
+The fixture was 40 tasks and 25 directories with two files each plus a README, with deterministic
+12 ms API-response latency. Both real bundles were warmed, then six pairs alternated equal leading
+positions. The metric order below is task-paint / mount-settled / query-paint / workflow in
+milliseconds. Task-paint ends on the second animation frame after the exact task rows paint;
+mount-settled ends when the complete task/file ledger drains; query-paint ends on the second frame
+after the exact filtered rows paint; workflow ends when the settled query ledger drains.
+
+```text
+1 BEFORE→AFTER  BEFORE 199.2 / 567.8 / 29.0 / 601.6   AFTER 66.6 / 69.4 / 228.3 / 302.6
+2 AFTER→BEFORE  BEFORE 196.4 / 580.5 / 30.0 / 615.8   AFTER 70.1 / 72.9 / 228.8 / 310.1
+3 BEFORE→AFTER  BEFORE 184.4 / 554.0 / 28.1 / 586.7   AFTER 66.1 / 68.6 / 228.0 / 302.1
+4 AFTER→BEFORE  BEFORE 185.2 / 534.1 / 32.5 / 571.2   AFTER 55.2 / 57.8 / 228.3 / 290.8
+5 BEFORE→AFTER  BEFORE 187.7 / 550.0 / 18.9 / 573.6   AFTER 66.8 / 69.3 / 228.7 / 304.5
+6 AFTER→BEFORE  BEFORE 185.7 / 542.3 / 24.8 / 571.3   AFTER 52.7 / 55.7 / 228.5 / 288.2
+```
+
+Paired medians were task-paint **186.7 → 66.3 ms**, mount-settled **552.0 → 68.9 ms**,
+query-paint **28.5 → 228.4 ms**, and workflow **580.2 → 302.3 ms**. This run therefore measured the
+complete workflow **1.92× faster after**; it is a measurement of this deterministic fixture, not a
+forecast.
+
+The request ledger was exact and had zero unknown requests. BEFORE mount and final state were both
+67 scoped GETs: one task list, 40 task details, one root `/fs`, and 25 recursive `/fs?path=` reads.
+AFTER mount was exactly two GETs — one task list and one `/fs/index` — and the settled query added
+exactly one `tasks?q=needle`, for a final total of three; task-detail and recursive-file counts
+remained zero. Separate production-after probes proved: a partial index leaves all 40 tasks visible;
+a visible query error retains all 40 mounted tasks; slow `alpha` is aborted and only `beta` remains
+visible after settlement; and an initial task failure shows `Tasks are unavailable` rather than a
+false empty state. The separately run focused production test passed **55/55 tests, 250 assertions**
+and covers late-resolution generation fencing; the benchmark itself says explicitly that it does
+not prove that unit-only case. Browser, loopback server, and private temporary-tree cleanup completed,
+and both post-run audits were clear with the runner still clean.
 
 **The bound now has one owner, and its unit is a SESSION.** `readTaskBoardFleet`
 (`packages/daemon/src/lib/task-boards/fleet-read.ts`) is the only way the board domain walks every
