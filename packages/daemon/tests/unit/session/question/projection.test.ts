@@ -872,4 +872,24 @@ describe('structured question projection', () => {
     should(none).deepEqual({ pendingQuestion: undefined, needsHumanKind: undefined });
     should(structuredQuestionStatePatch({ id: 's1', status: 'running', turn: 1 }, { kind: 'none' })).deepEqual({});
   });
+
+  it('materializes question evidence without ever making a kill-failed pane input-capable', () => {
+    const pending = projectStructuredQuestion([question]);
+    const current = {
+      id: 's1',
+      status: 'kill_failed' as const,
+      turn: 1,
+      pendingQuestion: { toolUseId: 'tool-1', questions: [{ question: 'Ship?' }] },
+    };
+
+    for (const outcome of ['accepted', 'confirmed', 'failed', 'quarantined', 'acknowledged', 'withdrawn'] as const)
+      should(structuredQuestionStatePatch(current, pending, [answer(outcome)]).status).equal('kill_failed');
+
+    should(
+      structuredQuestionStatePatch(
+        { id: 's1', status: 'kill_failed', turn: 1 },
+        { kind: 'needs-human', reason: 'the question shape is unknown' },
+      ),
+    ).match({ status: 'kill_failed', needsHumanKind: 'structured-question-unrecognized' });
+  });
 });

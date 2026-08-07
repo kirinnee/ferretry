@@ -172,6 +172,10 @@ export class StructuredQuestionService {
     try {
       pending = await this.repository.pending(input.id);
     } catch (error) {
+      // A repository may positively refuse a lifecycle state (notably `kill_failed`) before the
+      // terminal is touched. Preserve that refusal as such; only an unreadable/failed state read is
+      // converted into a withdrawn attempt.
+      if (error instanceof StructuredQuestionRefused) throw error;
       const failure = new StructuredQuestionDriveFailure(
         error instanceof Error ? error.message : String(error),
         'none',

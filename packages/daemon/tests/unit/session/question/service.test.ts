@@ -278,6 +278,24 @@ describe('structured question service', () => {
     should(harness.repository.failures).deepEqual([]);
   });
 
+  it('preserves an explicit lifecycle refusal before the driver or recovery can touch the pane', async () => {
+    const harness = subject();
+    harness.repository.pendingError = new StructuredQuestionRefused(
+      'the previous terminal shutdown was not confirmed; stop it successfully before answering',
+    );
+
+    const failure = await harness.service
+      .answer({ id: ID, toolUseId: 'question-1', labels: [] })
+      .catch((error: unknown) => error);
+
+    should(failure).be.instanceOf(StructuredQuestionRefused);
+    should((failure as Error).message).match(/stop it successfully before answering/u);
+    should(harness.driver.calls).deepEqual([]);
+    should(harness.recovery.snapshots).deepEqual([]);
+    should(harness.recovery.cancellations).deepEqual([]);
+    should(harness.repository.failures).deepEqual([]);
+  });
+
   it('releases an atomic-confirmation failure after the pane visibly advanced, without Escape', async () => {
     const harness = subject();
     harness.repository.answeredError = new Error('state write failed');

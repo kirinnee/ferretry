@@ -10,8 +10,8 @@ import {
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
-  refusalNotice,
   type RegisterProjectRequest,
+  refusalNotice,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -339,13 +339,13 @@ import {
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
-  type RelayPairingRedeemer,
-  type RelayStreamDispatch,
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
-  ResumeCancelled,
+  type RelayPairingRedeemer,
+  type RelayStreamDispatch,
   type ResumeAnswerAttention,
+  ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
@@ -360,9 +360,9 @@ import {
   refuseOccupiedAddress,
   refuseUnbindableAddress,
   relaunchCommand,
-  releasedAnswerAttentionOwnedBy,
   relayCarrierRemedy,
   relayCarriersNeedDiscovery,
+  releasedAnswerAttentionOwnedBy,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
@@ -419,7 +419,6 @@ import {
   type SocketTicketBroker,
   SocketTicketRegistry,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
   StructuredQuestionRefused,
@@ -1853,6 +1852,8 @@ function createSessionAnswerSubsystem(
   serial: KeyedSerialExecutor,
   lastSnapshots: FileLastSnapshotStore,
 ): SessionAnswerSubsystem {
+  const statusProtectedFromAnswer = (status: SessionView['state']['status']): boolean =>
+    status === 'completed' || status === 'stopped' || status === 'failed' || status === 'kill_failed';
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
     if (id === undefined)
@@ -1872,6 +1873,12 @@ function createSessionAnswerSubsystem(
             'failed',
             `session ${id} state is unreadable; it cannot be treated as no question`,
           );
+        if (statusProtectedFromAnswer(state.data.status))
+          throw new StructuredQuestionRefused(
+            state.data.status === 'kill_failed'
+              ? `the previous terminal shutdown for ${id} was not confirmed; stop it successfully before answering`
+              : `session ${id} is ${state.data.status}; a terminal session cannot accept a structured answer`,
+          );
         return state.data.pendingQuestion ?? undefined;
       },
       answered: async (id, toolUseId, answers, confirmation) => {
@@ -1883,7 +1890,10 @@ function createSessionAnswerSubsystem(
             throw new SessionAnswerError('refused', `question ${toolUseId} is no longer pending; it was not cleared`);
           const next: Record<string, unknown> = {
             ...(current as Record<string, unknown>),
-            status: 'running',
+            // The transform runs under storage's session lock. If a lifecycle stop committed while
+            // the driver was waiting for visible advance, its verdict wins this race even though the
+            // answer itself may still be stamped as visibly delivered.
+            status: statusProtectedFromAnswer(parsed.data.status) ? parsed.data.status : 'running',
             lastAnsweredQuestionToolUseId: toolUseId,
           };
           delete next.pendingQuestion;
@@ -1960,22 +1970,21 @@ function createSessionAnswerSubsystem(
             return current;
           const next: Record<string, unknown> = { ...(current as Record<string, unknown>) };
           if (parsed.data.pendingQuestion?.toolUseId === question.toolUseId) {
-            next.status = running ? 'running' : 'awaiting_user';
-            next.health = running ? 'healthy' : 'idle';
-            next.promptReady = promptReady;
-            next.reason = reason;
-            next.lastActivityAt = clock.now();
+            // A concurrent lifecycle verdict is stronger than answer recovery. Release the exact
+            // form binding, but never turn a completed/stopped/failed/kill_failed session live or
+            // overwrite the reason explaining that verdict.
+            if (!statusProtectedFromAnswer(parsed.data.status)) {
+              next.status = running ? 'running' : 'awaiting_user';
+              next.health = running ? 'healthy' : 'idle';
+              next.promptReady = promptReady;
+              next.reason = reason;
+              next.lastActivityAt = clock.now();
+            }
             next.openTools = (parsed.data.openTools ?? []).filter(tool => tool !== question.toolUseId);
             delete next.pendingQuestion;
           }
-          if (
-            (parsed.data.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND ||
-              parsed.data.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND) &&
-            parsed.data.needsHuman?.includes(question.toolUseId) === true
-          ) {
-            delete next.needsHuman;
-            delete next.needsHumanKind;
-          }
+          // Do not infer ownership from prose here. The ledger projector is the sole owner of an
+          // exact structured-answer attention clear, after the failed receipt has been appended.
           return next as typeof current;
         });
         // Both audit lines are downstream of the atomic state release and best-effort. Losing an
@@ -2064,10 +2073,7 @@ function createSessionAnswerSubsystem(
           if (!parsed.success) return current;
           const next: Record<string, unknown> = {
             ...(current as Record<string, unknown>),
-            status:
-              parsed.data.status === 'completed' || parsed.data.status === 'stopped' || parsed.data.status === 'failed'
-                ? parsed.data.status
-                : 'awaiting_user',
+            status: statusProtectedFromAnswer(parsed.data.status) ? parsed.data.status : 'awaiting_user',
             needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
             // The projection's own builder, not a copy of its sentence: this first write IS one of
             // the two messages `releasedAnswerAttentionOwnedBy` recognises, so a second literal here
@@ -4130,7 +4136,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // state, and a later read/tick will project it after the key becomes idle. After a restart
       // there is no holder, so stranded evidence honestly becomes quarantine.
       const answerLedger = new FileAnswerLedger(id => createSessionPaths(paths, id).directory, clock);
-      const answerSerial = new KeyedSerialExecutor();
+      // The answer, its monitor projection, released-advisory resume, and lifecycle mutation share
+      // one session key. In particular, a stop that starts after answer keys land must wait for the
+      // post-drive state commit; if the stop then records `kill_failed`, no later answer write can
+      // resurrect it. Storage keeps its own lower-level queue, so none of these operations re-enters
+      // this executor while holding it.
+      const answerSerial = sessionMutations;
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       //
@@ -4154,26 +4165,38 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
             ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
           });
           for (const settlement of answerEvidence.settlements) await answerLedger.append(id, settlement);
-          const question = structuredQuestionStatePatch(current.data, projection, answerEvidence.records.values());
+          const answerRecords = [...answerEvidence.records.values()];
+          const observedRuntime = projectObservedRuntime(transcript.events);
+          const question = structuredQuestionStatePatch(current.data, projection, answerRecords);
           // The model the harness SAID it was using, never the one the session was launched with.
           // Nothing else in the daemon writes these three fields, so every surface that shows a
           // running model — the composer chips, the context window, `fy ls` — is reading this.
           const patch = {
             ...question,
-            ...observedRuntimeStatePatch(current.data, projectObservedRuntime(transcript.events)),
+            ...observedRuntimeStatePatch(current.data, observedRuntime),
           };
           if (Object.keys(patch).length === 0) return;
           await storage.updateState(id, raw => {
             const verified = SessionStateSchema.safeParse(raw);
             if (!verified.success) return raw;
-            const next = { ...(raw as Record<string, unknown>), ...patch };
+            // Recompute under storage's session lock. A lifecycle stop can commit after the
+            // transcript read but before this transform; applying the stale patch would otherwise
+            // resurrect its `kill_failed` verdict as `awaiting_question`.
+            const currentQuestion = structuredQuestionStatePatch(verified.data, projection, answerRecords);
+            const currentPatch = {
+              ...currentQuestion,
+              ...observedRuntimeStatePatch(verified.data, observedRuntime),
+            };
+            if (Object.keys(currentPatch).length === 0) return raw;
+            const next = { ...(raw as Record<string, unknown>), ...currentPatch };
             // Removals belong to the QUESTION projection alone and only when it explicitly names
             // the field. A model observation must never erase a picker or answer quarantine.
-            if (Object.hasOwn(question, 'pendingQuestion') && question.pendingQuestion === undefined)
+            if (Object.hasOwn(currentQuestion, 'pendingQuestion') && currentQuestion.pendingQuestion === undefined)
               delete next.pendingQuestion;
-            if (Object.hasOwn(question, 'needsHumanKind') && question.needsHumanKind === undefined)
+            if (Object.hasOwn(currentQuestion, 'needsHumanKind') && currentQuestion.needsHumanKind === undefined)
               delete next.needsHumanKind;
-            if (Object.hasOwn(question, 'needsHuman') && question.needsHuman === undefined) delete next.needsHuman;
+            if (Object.hasOwn(currentQuestion, 'needsHuman') && currentQuestion.needsHuman === undefined)
+              delete next.needsHuman;
             return next as typeof raw;
           });
         });

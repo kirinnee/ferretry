@@ -2,9 +2,9 @@ import type { PendingQuestion, SessionState } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptQuestion } from '../../transcript/types.ts';
 import {
   type AnswerOperationRecord,
+  answerEvidenceForQuestion,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
-  answerEvidenceForQuestion,
 } from './answer-ledger.ts';
 
 export type StructuredQuestionProjection =
@@ -201,7 +201,14 @@ export function structuredQuestionStatePatch(
         : undefined;
   const toolUseId = current.pendingQuestion?.toolUseId ?? projectedToolUseId;
   const evidence = toolUseId === undefined ? { kind: 'none' as const } : answerEvidenceForQuestion(records, toolUseId);
-  const terminal = current.status === 'completed' || current.status === 'stopped' || current.status === 'failed';
+  // `kill_failed` is not a finished session: it is the stronger verdict that the pane may still be
+  // alive after a failed stop. Question evidence may still be materialized for inspection, but it
+  // must never turn that verdict back into an input-capable status.
+  const statusProtected =
+    current.status === 'completed' ||
+    current.status === 'stopped' ||
+    current.status === 'failed' ||
+    current.status === 'kill_failed';
   const newerQuestion =
     projection.kind === 'pending' && projection.question.toolUseId !== toolUseId ? projection.question : undefined;
   if (
@@ -218,7 +225,7 @@ export function structuredQuestionStatePatch(
     return {
       pendingQuestion: newerQuestion,
       lastAnsweredQuestionToolUseId: toolUseId,
-      status: terminal
+      status: statusProtected
         ? current.status
         : newerQuestion === undefined
           ? current.status === 'awaiting_question'
@@ -237,7 +244,7 @@ export function structuredQuestionStatePatch(
       return {};
     return {
       pendingQuestion: newerQuestion,
-      status: terminal ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      status: statusProtected ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
       needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
       needsHuman: releasedAnswerAttention(evidence.record),
       ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
@@ -257,7 +264,7 @@ export function structuredQuestionStatePatch(
       return {};
     return {
       pendingQuestion: newerQuestion,
-      status: terminal ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      status: statusProtected ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
       ...(evidence.kind === 'released' && evidence.record.reason !== undefined
         ? { reason: evidence.record.reason }
         : {}),
@@ -282,7 +289,7 @@ export function structuredQuestionStatePatch(
       return {};
     return {
       pendingQuestion: boundQuestion,
-      status: terminal ? current.status : boundQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      status: statusProtected ? current.status : boundQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
       needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
       needsHuman: unconfirmedBoundAnswerAttention(evidence.record),
       ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
@@ -309,7 +316,7 @@ export function structuredQuestionStatePatch(
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
     return {
       pendingQuestion,
-      status: terminal
+      status: statusProtected
         ? current.status
         : pendingQuestion === undefined
           ? current.status === 'awaiting_question'
@@ -339,7 +346,7 @@ export function structuredQuestionStatePatch(
     if (pendingQuestion === undefined && current.pendingQuestion === undefined && attentionStanding) return {};
     return {
       pendingQuestion,
-      status: terminal ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      status: statusProtected ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
       ...(attentionStanding
         ? {}
         : {
@@ -367,7 +374,7 @@ export function structuredQuestionStatePatch(
       return {};
     return {
       pendingQuestion,
-      status: terminal ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
+      status: statusProtected ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
       needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
       needsHuman: unconfirmedOrphanAnswerAttention(orphan),
       ...(orphan.reason === undefined ? {} : { reason: orphan.reason }),
@@ -391,10 +398,7 @@ export function structuredQuestionStatePatch(
     );
     return {
       pendingQuestion: projection.question,
-      status:
-        current.status === 'completed' || current.status === 'stopped' || current.status === 'failed'
-          ? current.status
-          : 'awaiting_question',
+      status: statusProtected ? current.status : 'awaiting_question',
       ...(current.needsHumanKind === 'structured-question-unrecognized' ? { needsHumanKind: undefined } : {}),
       ...(staleAnswerAttention ? clearAnswerAttention : {}),
     };
@@ -402,10 +406,7 @@ export function structuredQuestionStatePatch(
   if (projection.kind === 'needs-human')
     return {
       pendingQuestion: undefined,
-      status:
-        current.status === 'completed' || current.status === 'stopped' || current.status === 'failed'
-          ? current.status
-          : 'awaiting_user',
+      status: statusProtected ? current.status : 'awaiting_user',
       needsHumanKind: 'structured-question-unrecognized',
       reason: projection.reason,
     };

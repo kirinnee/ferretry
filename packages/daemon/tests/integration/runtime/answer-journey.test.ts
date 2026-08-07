@@ -61,6 +61,19 @@ while read -r _; do printf 'submit\\n' >> "$log"; done
 sleep 300
 `;
 
+/** Holds the visible advance behind a file gate, so a concurrent stop can be ordered exactly. */
+const GATED_FORM_SCRIPT = `#!/usr/bin/env bash
+log="$1"
+gate="$2"
+printf '  ${QUESTION}\\n\\n❯ Yes\\n  No\\n'
+if read -r _; then printf 'submit\\n' >> "$log"; fi
+while [[ ! -e "$gate" ]]; do sleep 0.01; done
+printf '\\033[2J\\033[H'
+printf 'Understood. Working on it now.\\n'
+while read -r _; do printf 'submit\\n' >> "$log"; done
+sleep 300
+`;
+
 /** Accept Enter without advancing, then advance only when recovery sends its one bounded Escape. */
 const FAILURE_SCRIPT = `#!/usr/bin/env bash
 log="$1"
@@ -82,20 +95,23 @@ fi
 sleep 300
 `;
 
-const TRANSCRIPT = `${JSON.stringify({
-  type: 'assistant',
-  message: {
-    role: 'assistant',
-    content: [
-      {
-        type: 'tool_use',
-        id: TOOL_USE_ID,
-        name: 'AskUserQuestion',
-        input: { questions: [{ question: QUESTION, options: [{ label: 'Yes' }, { label: 'No' }] }] },
-      },
-    ],
-  },
-})}\n`;
+const transcriptFor = (toolUseId: string): string =>
+  `${JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: toolUseId,
+          name: 'AskUserQuestion',
+          input: { questions: [{ question: QUESTION, options: [{ label: 'Yes' }, { label: 'No' }] }] },
+        },
+      ],
+    },
+  })}\n`;
+
+const TRANSCRIPT = transcriptFor(TOOL_USE_ID);
 
 const RESOLVED_TRANSCRIPT = `${TRANSCRIPT}${JSON.stringify({
   type: 'user',
@@ -189,6 +205,31 @@ async function livePane(home: string, scratch: string): Promise<string> {
   return log;
 }
 
+/** A real form that records submit immediately and advances only after the test releases its gate. */
+async function gatedPane(home: string, scratch: string): Promise<{ readonly gate: string; readonly log: string }> {
+  const socket = join(home, 'tmux.sock');
+  sockets.add(socket);
+  const script = join(scratch, 'gated-form.sh');
+  const log = join(scratch, 'gated-input.log');
+  const gate = join(scratch, 'allow-advance');
+  await writeFile(script, GATED_FORM_SCRIPT, { mode: 0o700 });
+  await chmod(script, 0o700);
+  await writeFile(log, '');
+  const created = await tmuxCommand(socket, 'new-session', '-d', '-s', TMUX_SESSION, `bash ${script} ${log} ${gate}`);
+  should(created).equal(0);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    if (text.includes(QUESTION) && text.includes('❯ Yes')) break;
+    await Bun.sleep(25);
+  }
+  return { gate, log };
+}
+
 /** A real form that visibly refuses the answer but responds to recovery's single Escape. */
 async function failingPane(home: string, scratch: string): Promise<string> {
   const socket = join(home, 'tmux.sock');
@@ -223,7 +264,7 @@ async function failingPane(home: string, scratch: string): Promise<string> {
 async function seed(
   home: string,
   port: number,
-  transcript: string,
+  transcript: string | undefined,
   /**
    * What a RELAUNCH will actually run. The journeys that never resume keep the shipped
    * `/usr/bin/env claude`, which is only ever inspected; the resume journey would genuinely execute
@@ -270,20 +311,24 @@ async function seed(
   // Merged onto the RAW document, because `SessionConfigSchema` carries neither block and parsing
   // strips both. `command` and `tmuxSession` are what the answer driver resolves the pane from —
   // `lifecycleConfigDocument` derives `agent` from `command[0]`, and a config without them makes the
-  // route answer 500 before it reaches a terminal at all. `transcript` is merged exactly as the
-  // daemon's own provenance store merges it; a transcript nothing can resolve is an unread one.
+  // route answer 500 before it reaches a terminal at all. When present, `transcript` is merged
+  // exactly as the daemon's own provenance store merges it; absence is the honest unresolved shape.
   await opened.storage.updateConfig(id, current => ({
     ...(current as Record<string, unknown>),
     command: [...command],
     tmuxSession: TMUX_SESSION,
-    transcript: {
-      v: 1,
-      home,
-      identity: 'minted',
-      harnessSessionId: `${SESSION_ID}-harness`,
-      file: transcript,
-      resolvedAt: at,
-    },
+    ...(transcript === undefined
+      ? {}
+      : {
+          transcript: {
+            v: 1,
+            home,
+            identity: 'minted',
+            harnessSessionId: `${SESSION_ID}-harness`,
+            file: transcript,
+            resolvedAt: at,
+          },
+        }),
   }));
   await opened.storage.writeState(
     id,
@@ -332,6 +377,38 @@ async function shutdown(daemon: Daemon): Promise<void> {
   for (const cleanup of daemon.cleanups) await cleanup();
 }
 
+/** Mutates a seeded state through production storage while no daemon owns that state home. */
+async function patchStateOffline(home: string, patch: Readonly<Record<string, unknown>>): Promise<void> {
+  process.env.FY_HOME = home;
+  const opened = await buildWorld().storage.open();
+  try {
+    await opened.storage.updateState(
+      parseSessionId(SESSION_ID),
+      current =>
+        ({
+          ...(current as Record<string, unknown>),
+          ...patch,
+        }) as typeof current,
+    );
+  } finally {
+    await opened.storage.close();
+  }
+}
+
+async function rawState(sessionDirectory: string) {
+  return SessionStateSchema.parse(JSON.parse(await readFile(join(sessionDirectory, 'state.json'), 'utf8')));
+}
+
+/** Polls storage itself: no session GET is allowed to be the thing that materializes this question. */
+async function waitForRawPendingQuestion(sessionDirectory: string, toolUseId: string) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const state = await rawState(sessionDirectory);
+    if (state.pendingQuestion?.toolUseId === toolUseId) return state;
+    await Bun.sleep(25);
+  }
+  throw new Error(`monitor did not materialize structured question ${toolUseId} in raw state`);
+}
+
 const answerRequest = (port: number, daemon: Daemon, requestId: string, labels: readonly string[]) =>
   fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/answer`, {
     method: 'POST',
@@ -341,6 +418,25 @@ const answerRequest = (port: number, daemon: Daemon, requestId: string, labels: 
       labels: [...labels],
       answers: [{ kind: 'selection', labels: [...labels] }],
     }),
+  });
+
+const otherAnswerRequest = (port: number, daemon: Daemon, requestId: string, toolUseId: string, text: string) =>
+  fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/answer`, {
+    method: 'POST',
+    headers: { ...daemon.headers, 'x-fy-request-id': requestId },
+    body: JSON.stringify({
+      toolUseId,
+      labels: [],
+      other: text,
+      answers: [{ kind: 'other', text }],
+    }),
+  });
+
+const stopRequest = (port: number, daemon: Daemon, reason: string) =>
+  fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/stop`, {
+    method: 'POST',
+    headers: daemon.headers,
+    body: JSON.stringify({ reason }),
   });
 
 /**
@@ -374,16 +470,16 @@ const sendRequest = (port: number, daemon: Daemon, requestId: string, message: s
   });
 
 /** A busy answer/monitor key makes a read return its current view rather than wait; the next poll projects it. */
-async function waitForPendingQuestion(port: number, daemon: Daemon) {
+async function waitForPendingQuestion(port: number, daemon: Daemon, toolUseId = TOOL_USE_ID) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
       headers: daemon.headers,
     });
     const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
-    if (view.state.pendingQuestion?.toolUseId === TOOL_USE_ID) return view;
+    if (view.state.pendingQuestion?.toolUseId === toolUseId) return view;
     await Bun.sleep(25);
   }
-  throw new Error(`structured question ${TOOL_USE_ID} did not materialize`);
+  throw new Error(`structured question ${toolUseId} did not materialize`);
 }
 
 describe('the structured answer journey', () => {
@@ -536,6 +632,217 @@ describe('the structured answer journey', () => {
     }
 
     await shutdown(restarted);
+  }, 120_000);
+
+  it('never clears a tool-10 attention when tool-1 fails preflight and Escape releases its form', async () => {
+    const olderToolUseId = 'tool-10';
+    const currentToolUseId = 'tool-1';
+    const cases = [
+      {
+        label: 'blocking',
+        kind: 'structured-answer-unconfirmed' as const,
+        message: `answer request standing-request for ${olderToolUseId} may have reached the form, and release was not confirmed; inspect the session before continuing`,
+      },
+      {
+        label: 'released',
+        kind: 'structured-answer-released-unconfirmed' as const,
+        message: firstWriteReleasedAnswerAttention(olderToolUseId),
+      },
+    ];
+
+    for (const attention of cases) {
+      const home = await tempDirectory(`fyd-answer-colliding-${attention.label}-home`);
+      const scratch = await tempDirectory(`fyd-answer-colliding-${attention.label}-scratch`);
+      const transcript = join(scratch, 'session.jsonl');
+      await writeFile(transcript, transcriptFor(currentToolUseId));
+      const port = await freeLoopbackPort();
+      const sessionDirectory = await seed(home, port, transcript);
+      await patchStateOffline(home, {
+        needsHumanKind: attention.kind,
+        needsHuman: attention.message,
+      });
+      const log = await failingPane(home, scratch);
+      const daemon = await boot(home, port);
+
+      const pending = await waitForPendingQuestion(port, daemon, currentToolUseId);
+      should(pending.state).match({
+        pendingQuestion: { toolUseId: currentToolUseId },
+        needsHumanKind: attention.kind,
+        needsHuman: attention.message,
+      });
+
+      // `Other` is valid protocol input, but this real pane renders only Yes/No. The production
+      // driver therefore fails with `choice-missing` before any answer key, positively binds the
+      // same form for one Escape, and settles this operation as a proved failure.
+      const requestId = `${REQUEST_ID}:colliding-${attention.label}`;
+      const failed = await otherAnswerRequest(port, daemon, requestId, currentToolUseId, 'Explain in prose');
+      const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
+      should(failureBody.code).equal('answer_released');
+      should(failureBody.error).match(/structured form was released/u);
+      should(await submits(log)).deepEqual(['escape']);
+
+      const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
+        headers: daemon.headers,
+      });
+      const released = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
+      should(released.state).match({
+        needsHumanKind: attention.kind,
+        needsHuman: attention.message,
+      });
+      should(released.state.pendingQuestion ?? undefined).be.undefined();
+      const outcomes = (await readFile(join(sessionDirectory, 'channel', 'answers.jsonl'), 'utf8'))
+        .split('\n')
+        .filter(Boolean)
+        .map(
+          line =>
+            JSON.parse(line) as { readonly requestId: string; readonly outcome: string; readonly resolution?: string },
+        )
+        .filter(row => row.requestId === requestId)
+        .map(row => row.resolution ?? row.outcome);
+      should(outcomes).deepEqual(['accepted', 'failed']);
+
+      await shutdown(daemon);
+    }
+  }, 120_000);
+
+  it('materializes a transcript question on kill-failed state without a GET, then refuses every answer key', async () => {
+    const home = await tempDirectory('fyd-answer-kill-failed-home');
+    const scratch = await tempDirectory('fyd-answer-kill-failed-scratch');
+    const transcript = join(scratch, 'session.jsonl');
+    await writeFile(transcript, TRANSCRIPT);
+    const port = await freeLoopbackPort();
+    const sessionDirectory = await seed(home, port, transcript);
+    await patchStateOffline(home, {
+      status: 'kill_failed',
+      reason: 'the pane remained live after its stop failed',
+    });
+    const log = await livePane(home, scratch);
+    const daemon = await boot(home, port);
+
+    // No session route has been read. The daemon's immediate monitor tick alone must discover the
+    // question in raw storage, while preserving the unsafe live-pane verdict that hides/refuses it.
+    const materialized = await waitForRawPendingQuestion(sessionDirectory, TOOL_USE_ID);
+    should(materialized).match({
+      status: 'kill_failed',
+      pendingQuestion: { toolUseId: TOOL_USE_ID },
+      reason: 'the pane remained live after its stop failed',
+    });
+    should(await submits(log)).deepEqual([]);
+
+    const refused = await answerRequest(port, daemon, `${REQUEST_ID}:kill-failed`, ['Yes']);
+    const refusal = JSON.parse(await statusOf(refused, 409)) as { readonly code: string; readonly error: string };
+    should(refusal.code).equal('answer_refused');
+    should(refusal.error).match(/stop it successfully before answering/u);
+    should(await submits(log)).deepEqual([]);
+    should(await rawState(sessionDirectory)).match({
+      status: 'kill_failed',
+      pendingQuestion: { toolUseId: TOOL_USE_ID },
+      reason: 'the pane remained live after its stop failed',
+    });
+
+    await shutdown(daemon);
+  }, 120_000);
+
+  it('refuses a materialized question on failed state before sending any answer or recovery key', async () => {
+    const home = await tempDirectory('fyd-answer-failed-home');
+    const scratch = await tempDirectory('fyd-answer-failed-scratch');
+    const transcript = join(scratch, 'session.jsonl');
+    await writeFile(transcript, TRANSCRIPT);
+    const port = await freeLoopbackPort();
+    const sessionDirectory = await seed(home, port, transcript);
+    await patchStateOffline(home, {
+      status: 'failed',
+      reason: 'the session already reached a terminal failure',
+    });
+    const log = await livePane(home, scratch);
+    const daemon = await boot(home, port);
+
+    const materialized = await waitForRawPendingQuestion(sessionDirectory, TOOL_USE_ID);
+    should(materialized).match({
+      status: 'failed',
+      pendingQuestion: { toolUseId: TOOL_USE_ID },
+      reason: 'the session already reached a terminal failure',
+    });
+    should(await submits(log)).deepEqual([]);
+
+    const refused = await answerRequest(port, daemon, `${REQUEST_ID}:failed`, ['Yes']);
+    const refusal = JSON.parse(await statusOf(refused, 409)) as { readonly code: string; readonly error: string };
+    should(refusal.code).equal('answer_refused');
+    should(refusal.error).match(/failed.*terminal|terminal.*failed/iu);
+    should(await submits(log)).deepEqual([]);
+    should(await rawState(sessionDirectory)).match({
+      status: 'failed',
+      pendingQuestion: { toolUseId: TOOL_USE_ID },
+      reason: 'the session already reached a terminal failure',
+    });
+
+    await shutdown(daemon);
+  }, 120_000);
+
+  it('serializes a stop after live answer keys and lets its kill-failed verdict win durably', async () => {
+    const home = await tempDirectory('fyd-answer-stop-race-home');
+    const scratch = await tempDirectory('fyd-answer-stop-race-scratch');
+    const port = await freeLoopbackPort();
+    // Deliberately no transcript provenance: the exact pending form is seeded below, so no monitor
+    // projection changes its lifecycle `running` status before the real stop service reads it.
+    const sessionDirectory = await seed(home, port, undefined);
+    await patchStateOffline(home, {
+      status: 'running',
+      pendingQuestion: {
+        toolUseId: TOOL_USE_ID,
+        questions: [{ question: QUESTION, options: [{ label: 'Yes' }, { label: 'No' }] }],
+      },
+    });
+    // The stop snapshots before it kills. A directory at the exact snapshot path makes that real
+    // adapter fail while the real tmux pane stays live, deterministically producing `kill_failed`.
+    await mkdir(join(sessionDirectory, 'last-snapshot.txt'));
+    const pane = await gatedPane(home, scratch);
+    const daemon = await boot(home, port);
+
+    let earlyAnswer: Response | undefined;
+    const answering = answerRequest(port, daemon, `${REQUEST_ID}:stop-race`, ['Yes']).then(response => {
+      earlyAnswer = response;
+      return response;
+    });
+    for (let attempt = 0; attempt < 200 && !(await submits(pane.log)).includes('submit'); attempt += 1)
+      await Bun.sleep(25);
+    if (!(await submits(pane.log)).includes('submit') && earlyAnswer !== undefined)
+      throw new Error(
+        `the gated answer settled before sending its key (${earlyAnswer.status}): ${await earlyAnswer.clone().text()}`,
+      );
+    should(await submits(pane.log)).deepEqual(['submit']);
+
+    // The answer owns the shared lifecycle/answer key until its visible-advance commit. A stop
+    // requested now must remain queued rather than publish a verdict that a later answer write can
+    // overwrite.
+    let stopSettled = false;
+    const stopping = stopRequest(port, daemon, 'the race stop must remain authoritative').then(response => {
+      stopSettled = true;
+      return response;
+    });
+    await Bun.sleep(100);
+    should(stopSettled).be.false();
+    should(await rawState(sessionDirectory)).match({ status: 'running', pendingQuestion: { toolUseId: TOOL_USE_ID } });
+
+    await writeFile(pane.gate, 'advance');
+    await statusOf(await answering, 200);
+    const stopFailure = JSON.parse(await statusOf(await stopping, 500)) as {
+      readonly code: string;
+      readonly error: string;
+    };
+    should(stopFailure.code).equal('session_launch_failed');
+    should(stopFailure.error).match(/last-snapshot\.txt|directory/iu);
+
+    const final = await rawState(sessionDirectory);
+    should(final).match({
+      status: 'kill_failed',
+      lastAnsweredQuestionToolUseId: TOOL_USE_ID,
+      reason: /the race stop must remain authoritative/u,
+    });
+    should(final.pendingQuestion ?? undefined).be.undefined();
+    should(await submits(pane.log)).deepEqual(['submit']);
+
+    await shutdown(daemon);
   }, 120_000);
 
   it('retains the exact question and refuses prose when a dead pane cannot prove release', async () => {
