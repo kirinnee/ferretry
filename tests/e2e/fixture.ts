@@ -176,16 +176,36 @@ function signalExitCode(signal: NodeJS.Signals | null): number {
   return 128 + (osConstants.signals[signal] ?? 0);
 }
 
-function captureProcess(
+function isTransientBunSpawnFailure(error: unknown): boolean {
+  const failure = error as NodeJS.ErrnoException & { readonly syscall?: string };
+  return failure.code === 'EBADF' && failure.syscall === 'epoll_ctl';
+}
+
+async function captureProcess(
   executable: string,
   args: readonly string[],
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
-): CapturedProcess {
-  const child = spawn(executable, [...args], {
-    cwd: options.cwd,
-    env: options.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+): Promise<CapturedProcess> {
+  const launch = (): ChildProcessByStdio<null, Readable, Readable> =>
+    spawn(executable, [...args], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  let child: ChildProcessByStdio<null, Readable, Readable>;
+  try {
+    child = launch();
+  } catch (error) {
+    /**
+     * Bun 1.3 can synchronously lose an epoll registration while Playwright's just-closed Chromium
+     * is releasing its pipes. No child exists when `spawn` throws, so yielding once and repeating
+     * that registration is safe. Match the kernel operation as well as `EBADF`: executable errors,
+     * asynchronous child failures and product exit codes must all remain one-attempt results.
+     */
+    if (!isTransientBunSpawnFailure(error)) throw error;
+    await Bun.sleep(0);
+    child = launch();
+  }
   let out = '';
   let err = '';
   child.stdout.setEncoding('utf8');
@@ -223,7 +243,7 @@ async function runCaptured(
   args: readonly string[],
   options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly timeoutMs?: number },
 ): Promise<CommandResult> {
-  const captured = captureProcess(executable, args, options);
+  const captured = await captureProcess(executable, args, options);
   try {
     return await withTimeout(captured.exited, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, basename(executable));
   } catch (error) {
@@ -701,7 +721,7 @@ export class E2eEnvironment {
     await access(executable, fsConstants.X_OK);
     await this.releasePortLeases();
 
-    const daemon = captureProcess(executable, options.command.slice(1), {
+    const daemon = await captureProcess(executable, options.command.slice(1), {
       cwd: REPOSITORY_ROOT,
       env: this.childEnvironment(options.env),
     });

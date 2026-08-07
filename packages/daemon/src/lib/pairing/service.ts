@@ -18,6 +18,7 @@ import {
   type PairingId,
   PairingIdSchema,
   type PairingReach,
+  pairingLinkUrl,
   PairingRequestSchema,
   type PairingResponse,
   PairingResponseSchema,
@@ -164,6 +165,30 @@ interface ActivePairing {
   readonly code: PairingCode;
   readonly expiresAtMs: number;
   attempts: number;
+  /**
+   * WRONG GUESSES THAT ARRIVED OVER A RENDEZVOUS, counted apart from `attempts` on purpose.
+   *
+   * Redemption used to be reachable only from the daemon's own network; a relayed carrier makes it
+   * reachable by anybody on the internet who knows a public fingerprint, which is public — it is in
+   * the QR. What such a caller can buy is not the code (32^8 of them, two minutes, a constant-time
+   * compare) but the code's AVAILABILITY: on one shared counter, five junk guesses from anywhere
+   * would kill a code sitting on somebody's desk before its owner finished walking to their phone.
+   *
+   * So a relayed miss spends this and never `attempts`, and exhausting it closes the relay path for
+   * this code alone — see {@link ActivePairing.relayClosed}. The code stays alive for a device on
+   * the LAN with its five direct guesses untouched.
+   */
+  relayAttempts: number;
+  /** Set when the relay budget is spent. The code lives on; only the relayed carrier is refused. */
+  relayClosed: boolean;
+}
+
+/** What a relayed redemption presents. Typed at the boundary because the tunnel already parsed a
+ *  record to reach here — the values are still checked below against the pairing API's own schema,
+ *  which owns their bounds. */
+export interface RelayPairingAttempt {
+  readonly code: string;
+  readonly deviceName: string;
 }
 
 /**
@@ -212,6 +237,23 @@ interface PairingServiceOptions {
    * halfway through a redemption either.
    */
   readonly carriers: readonly DaemonCarrier[];
+  /**
+   * The rendezvous a device that has never met this daemon can find FOR ITSELF, or nothing.
+   *
+   * IT IS PROVENANCE, NOT AN ADDRESS FROM THE LIST ABOVE, and that distinction is the whole value of
+   * the field. This used to be derived here as "the first published relay of any kind", which was
+   * wrong in exactly the case it mattered: an operator's own rendezvous is published and is NOT
+   * something a fresh phone can discover, so disclosing it beside a QR promised a first pairing that
+   * cannot happen. The composition root supplies this only for a DISCOVERED source — one this daemon
+   * read from the hosted directory advertisement, which is the same advertisement the scanning
+   * device's own build reads — so the claim is true by construction and a self-hosted deployment
+   * fails closed to nothing. That closed door is the declared GAP in `docs/relay-protocol.md` §13.
+   *
+   * IT NEVER REACHES THE LINK. The fragment is `v1;url=…;code=…;fp=…` and carries no rendezvous;
+   * this value exists so the HOST's own screens know a loopback-bound daemon is redeemable anyway and
+   * can draw the QR plus the metadata disclosure.
+   */
+  readonly discoveredRelayUrl?: string;
   readonly clock: PairingClock;
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
@@ -284,7 +326,7 @@ export class PairingService {
     const code = PairingCodeSchema.parse(this.options.cryptography.pairingCode());
     const expiresAtMs = this.options.clock.now() + PAIRING_CODE_TTL_SECONDS * 1_000;
     const expiresAt = instant(expiresAtMs);
-    this.active = { pairingId, code, expiresAtMs, attempts: 0 };
+    this.active = { pairingId, code, expiresAtMs, attempts: 0, relayAttempts: 0, relayClosed: false };
     this.observations.set(pairingId, { pairingId, status: 'pending', expiresAt });
 
     return PairingCodeMintResponseSchema.parse({
@@ -307,19 +349,35 @@ export class PairingService {
    * with their phone. The minter is local and the redeemer is not. There is no request in scope to
    * reach for, so the mistake cannot be made here.
    */
-  #link(
-    code: PairingCode,
-  ):
-    | { readonly daemonUrl: string; readonly pairUrl: string; readonly reach: PairingReach }
+  #link(code: PairingCode):
+    | {
+        readonly daemonUrl: string;
+        readonly pairUrl: string;
+        readonly reach: PairingReach;
+        readonly discoveredRelayUrl?: string;
+      }
     | { readonly refusal: AdvertisementRefusal } {
     if (this.advertisement.kind === 'none') return { refusal: this.advertisement.refusal };
     const daemonUrl = this.advertisement.url;
     return {
       daemonUrl,
-      pairUrl: pairingUrl(this.pairingAppUrl, daemonUrl, code, this.daemonId),
+      // Composed by the protocol's own writer rather than spelled here. The mint schema verifies this
+      // URL against these very fields, and a second speller would be the invisible difference that
+      // breaks a reader nobody tested.
+      //
+      // THE SEED IS THE THREE FIELDS AND NOTHING ELSE. It briefly carried a rendezvous, so a device
+      // that could not reach `daemonUrl` had somewhere to dial — the circularity is real, and it is
+      // now resolved on the OTHER side: the scanning device reads the hosted directory advertisement
+      // its own build carries and finds the same rendezvous this daemon dialled, so the link does not
+      // have to tell it. A QR that named an arbitrary address is the larger, deferred question.
+      pairUrl: pairingLinkUrl(this.pairingAppUrl, { daemonUrl, code, daemonId: this.daemonId }),
       // The decision's vocabulary translated into the wire's, in the one place that crosses between
       // them: an address a different device can dial is an address any device can redeem.
       reach: this.advertisement.kind === 'address' ? 'any-device' : 'local-only',
+      // Passed through from the composition root, never derived from `options.carriers`: only a
+      // DISCOVERED rendezvous is something a fresh device can find, and this list cannot say which
+      // entry that is. See the option's own comment for why the difference is not cosmetic.
+      ...(this.options.discoveredRelayUrl === undefined ? {} : { discoveredRelayUrl: this.options.discoveredRelayUrl }),
     };
   }
 
@@ -428,7 +486,67 @@ export class PairingService {
       if (active.attempts >= PAIRING_CODE_MAX_ATTEMPTS) this.expire(active);
       return REFUSED;
     }
+    return await this.grant(active, parsed.data.deviceName, now);
+  }
 
+  /**
+   * ONE REDEMPTION, ARRIVING OVER A RENDEZVOUS INSTEAD OF OVER THE BOUND ADDRESS.
+   *
+   * IT TAKES NO `ApiRequest`, AND THAT IS THE SECURITY PROPERTY RATHER THAN A CONVENIENCE. A relayed
+   * session that could build a request would be an anonymous relayed caller reaching a route table,
+   * and the next route somebody marks public would be published to the internet by accident. The
+   * relay's pairing branch calls this and only this: a pre-credential session issues no requests at
+   * all, so `POST /v1/pair` — public on the route table — stays unreachable through a relay, and the
+   * tunnel's invariant that a relayed request carries exactly one credential stays literally true.
+   *
+   * THERE IS NO FIXED-WINDOW ADMISSION HERE, deliberately. `redeem` keys {@link PairingRateLimiter}
+   * by the caller's address because many direct attempts share one; a relayed attempt costs a whole
+   * rendezvous session, the session identifier is minted by the rendezvous and cannot repeat, and the
+   * tunnel permits exactly one credential record per session. A limiter keyed by a value that is
+   * unique per attempt admits every time — it is not a limit, it is an entry evicting real ones from
+   * a bounded map. What actually bounds this path is structural: one attempt per session, a ceiling
+   * on pre-credential sessions per link, the rendezvous' own arrival rate, and the relay budget below.
+   *
+   * NOTHING IS REFUSED EARLY, including the case where no code is minted at all. Answering faster
+   * when there is nothing to guess would tell an unauthenticated internet caller when to start
+   * guessing, so the comparison against the dummy runs exactly as it does for a wrong code and both
+   * end in the same refusal.
+   */
+  async redeemOverRelay(attempt: RelayPairingAttempt): Promise<PairingRedemption> {
+    const parsed = PairingRequestSchema.safeParse(attempt);
+    const candidate = parsed.success ? parsed.data.code : attempt.code;
+    const active = this.active;
+    const matches = this.compare(candidate, active?.code ?? DUMMY_PAIRING_CODE);
+    const now = this.options.clock.now();
+
+    if (active === undefined) return REFUSED;
+    if (now >= active.expiresAtMs) {
+      this.expire(active);
+      return REFUSED;
+    }
+    // A spent relay budget refuses AFTER the comparison, like every other cause: the whole point of
+    // the separate budget is that this refusal is invisible from the LAN, and a faster answer here
+    // would announce to the attacker that their own guesses had closed the path.
+    if (active.relayClosed) return REFUSED;
+    if (!parsed.success) return REFUSED;
+    if (!matches) {
+      active.relayAttempts += 1;
+      // `relayClosed`, NEVER `expire`. This is the entire separation: the code survives, its five
+      // direct guesses survive, and only the carrier the guesses came over is shut.
+      if (active.relayAttempts >= PAIRING_CODE_MAX_ATTEMPTS) active.relayClosed = true;
+      return REFUSED;
+    }
+    return await this.grant(active, parsed.data.deviceName, now);
+  }
+
+  /**
+   * The one successful path, shared by both carriers so neither can drift into granting differently.
+   *
+   * A device paired over a rendezvous and a device paired over the bound address receive the same
+   * response from the same code here — `carriers` included, which is what the relayed device
+   * navigates by afterwards.
+   */
+  private async grant(active: ActivePairing, deviceName: string, now: number): Promise<PairingRedemption> {
     // The consume is the synchronous state change immediately before any persistence await. A
     // concurrent call therefore sees no active code and cannot enter the successful branch.
     this.active = undefined;
@@ -437,7 +555,7 @@ export class PairingService {
     const record: PairingDeviceRecord = {
       id: this.options.cryptography.deviceId(),
       daemonId: this.daemonId,
-      name: parsed.data.deviceName,
+      name: deviceName,
       platform: 'browser',
       createdAt,
       lastSeenAt: createdAt,
@@ -457,7 +575,7 @@ export class PairingService {
       status: 'redeemed',
       expiresAt: instant(active.expiresAtMs),
       redeemedAt: createdAt,
-      deviceName: parsed.data.deviceName,
+      deviceName,
     });
     return {
       kind: 'paired',
@@ -507,10 +625,4 @@ function normalizedAdvertisement(advertisement: Advertisement): Advertisement {
   return advertisement.kind === 'none'
     ? advertisement
     : { ...advertisement, url: new URL(advertisement.url).toString() };
-}
-
-function pairingUrl(appUrl: string, daemonUrl: string, code: PairingCode, daemonId: DaemonId): string {
-  const url = new URL(appUrl);
-  url.hash = `v1;url=${encodeURIComponent(daemonUrl)};code=${code};fp=${encodeURIComponent(daemonId)}`;
-  return url.toString();
 }

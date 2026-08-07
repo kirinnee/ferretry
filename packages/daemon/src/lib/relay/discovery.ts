@@ -318,16 +318,35 @@ export function describeRelayCarrierPosture(source: RelayCarrierSource, configFi
 }
 
 /**
- * WHAT PAIRING COSTS EVEN WHEN A RELAY IS DIALLED, said wherever a carrier is reported.
+ * WHAT FIRST CONTACT NEEDS, said wherever a carrier is reported.
  *
- * A relayed session is opened with the device grant the pairing exchange has not issued yet
- * (`docs/relay-protocol.md` §13), so the FIRST contact with a daemon is always direct no matter what
- * carries the ones after it. Somebody who cannot pair is otherwise told a relay is up and left to
- * conclude the product is broken, which is exactly the week this text exists because of.
+ * THIS USED TO BE `PAIRING_IS_ALWAYS_DIRECT`, and the claim was retired rather than reworded. It read
+ * "pairing itself always goes straight to the daemon, so a browser has to reach this machine directly
+ * once", on the reasoning that a relayed session is opened with a device grant the pairing exchange
+ * has not issued yet. `docs/relay-protocol.md` §14 answered that: the QR is the out-of-band enrolment
+ * path, the daemon is proved against the pinned fingerprint before any plaintext leaves the device,
+ * and a one-attempt sealed `pair` record redeems the code through the rendezvous. So a device that can
+ * never reach this address pairs anyway — over the ordinary `#v1` link, because it finds the rendezvous
+ * in its OWN build's hosted directory advertisement rather than being told one in the QR. (An earlier
+ * draft of this comment said the daemon mints a `#v2` link naming the relay; no such link ships, and
+ * the paragraph below is why the distinction matters here rather than being a detail of the codec.)
+ *
+ * WHAT IS LEFT IS A CONDITION, NOT A RULE, and it is the one an owner acts on: direct is still tried
+ * first and is still the better path, and a daemon that dials NO rendezvous has to be reachable on its
+ * own address once. Saying the old sentence beside a healthy carrier now sends somebody to open a
+ * firewall they do not need to touch — the inverse of the failure the text was written for.
+ *
+ * IT NAMES THE HOSTED RELAY AND NOT "the relay this daemon dials", BECAUSE OF A DECLARED GAP. A device
+ * that has never paired discovers exactly one rendezvous — the hosted advertisement it reads for
+ * itself. A rendezvous an operator runs is not findable by such a device, so promising a first pairing
+ * over one would be this text making the same kind of overclaim in the opposite direction. Naming a
+ * self-hosted rendezvous to a fresh device is deferred; `docs/relay-protocol.md` §13 records it.
  */
-export const PAIRING_IS_ALWAYS_DIRECT =
-  'pairing itself always goes straight to the daemon, so a browser has to reach this machine ' +
-  'directly once — same network, a VPN, a tailnet, or a public address.';
+export const PAIRING_REACH_NOTICE =
+  'pairing tries this machine’s own address first, so a browser on the same network, a VPN, a tailnet ' +
+  'or a public address pairs directly; a device that cannot reach it redeems the code through ' +
+  'Ferretry’s hosted relay, and without that this address is the only way in — a rendezvous you run ' +
+  'yourself cannot yet be found by a device that has never paired.';
 
 /**
  * What a boot says when there is no carrier: the reason, the consequence, and what to do.
@@ -361,11 +380,14 @@ export function describeAbsentRelayCarrier(input: {
  * otherwise say the same thing twice, and because this is the part a person acts on.
  *
  * A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE AND GETS ITS OWN PATH. Naming only the relay
- * would leave the reader exactly as stuck as before: pairing is ALWAYS direct, so a daemon on
- * `127.0.0.1` that dials nothing cannot be paired with from another device at all, no matter what
- * happens to the relay afterwards. The order is what makes it actionable — bind every interface so
- * the network and loopback both keep working, advertise the one URL another device can dial, then
- * let a carrier keep it reachable after that device leaves the network.
+ * would leave the reader exactly as stuck as before: a daemon on `127.0.0.1` that dials nothing
+ * cannot be paired with from another device at all. THE CONCLUSION IS UNCHANGED AND ITS REASON IS
+ * NOT — it used to be "pairing is ALWAYS direct", which §14 retired. What holds is narrower and
+ * exact: a device pairs over a rendezvous only through a rendezvous THIS daemon holds, and this
+ * daemon holds none, so there is neither an address it can dial nor a room it could meet it in. The
+ * order is what makes it actionable — bind every interface so the network and loopback both keep
+ * working, advertise the one URL another device can dial, then let a carrier keep it reachable after
+ * that device leaves the network.
  */
 export function relayCarrierRemedy(source: RelayCarrierSource, configFile: string, host: string): readonly string[] {
   const relay =
@@ -377,8 +399,8 @@ export function relayCarrierRemedy(source: RelayCarrierSource, configFile: strin
     return ['this daemon is reachable only from this machine’s own network: nothing off it can connect.', relay];
   }
   return [
-    `this daemon is bound to ${host} and dials no relay, so NO other device can reach it — and because ` +
-      'pairing is always direct, nothing can pair with it either.',
+    `this daemon is bound to ${host} and dials no relay, so NO other device can reach it — and with no ` +
+      'rendezvous of its own to redeem a code through, nothing can pair with it either.',
     `to pair: set "host" in ${configFile} to "${WILDCARD_BIND_HOST}" and set "publicUrl" to this ` +
       'machine’s URL on the local network, restart, and pair from a browser on that same network.',
     `to stay reachable once that browser leaves the network, a carrier is still needed — ${relay}`,

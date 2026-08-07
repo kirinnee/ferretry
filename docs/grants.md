@@ -92,6 +92,13 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   `pairing` **off** and can never switch it back **on**. An operator who decides that only the machine
   itself hands out credentials therefore makes a decision that sticks: a stolen phone cannot restore an
   access its owner revoked, and it cannot re-grant itself the ability to mint more.
+- **`pairing` governs MINTING, never redemption — on every carrier.** Redemption's credential is the
+  code itself: `POST /v1/pair` is public because the redeeming device has no other credential yet, and
+  the relayed redemption (`relay-protocol.md` §14) is a sealed record on a pre-auth session for exactly
+  the same reason. So an operator who switches `pairing` off has not switched off a redemption path —
+  they have stopped new codes from existing, and with nothing minted there is nothing to redeem,
+  directly or through a rendezvous. The exposure of the gap is bounded by the live code's two minutes,
+  and it is stated here rather than discovered during an incident.
 - **Revoking is on the `use` axis, deliberately.** Ending a code and ending a device's access are both
   _exercising_ pairing rather than changing how the host behaves. Putting either behind `configure`
   would add a gate between a person and a stolen phone at the one moment it matters.

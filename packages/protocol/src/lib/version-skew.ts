@@ -13,9 +13,17 @@
  * failure is total for that exchange, not partial, and it looks like the daemon refusing the client.
  *
  * So: **a key added to a device-facing `strictObject` ships in the same release as the client that
- * reads it, or it is a breaking change.** `PairingResponseSchema.carriers` was added under that rule.
- * The pairing fragment is already versioned (`v1;…`), and a second version of it is the escape hatch
- * if one is ever genuinely needed — it is not a substitute for shipping the pair together.
+ * reads it, or it is a breaking change.** `PairingResponseSchema.carriers` was added under that rule,
+ * and so was `PairingCodeMintResponse.discoveredRelayUrl` — whose readers are `fy pair`, shipped in
+ * the same release as `fyd`, and the hosted Add-a-device panel, which deploys ahead of the binary.
+ *
+ * THE FRAGMENT'S VERSION ESCAPE HATCH WAS NOT SPENT, and this paragraph used to say it had been. A
+ * relay-bearing `v2` form was built here and withdrawn before any release: relayed first pairing
+ * ships with the ORDINARY `v1` link, because the scanning device discovers the hosted rendezvous from
+ * its own build rather than reading one out of the QR. So the fragment is still `v1;…`, no shipped
+ * reader was ever asked to understand a second form, and a future `v2` may still land its pattern and
+ * its parser together (`docs/relay-protocol.md` §14). That is a strictly better position than a spent
+ * hatch, which is why the correction is recorded rather than quietly dropped.
  *
  * The OTHER direction is safe and needs no ceremony: a newer client reading an older daemon sees the
  * key absent, which is what a schema default is for, and the default has to mean what the older

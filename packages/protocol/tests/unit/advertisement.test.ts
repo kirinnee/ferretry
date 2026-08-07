@@ -116,6 +116,23 @@ describe('the advertised address', () => {
     should(local.remedy).containEql('accepts connections from other devices on your network');
   });
 
+  it('should stop calling a link unredeemable the moment a rendezvous can carry it', () => {
+    // A published relay changes the AUDIENCE, not the reach: the direct address is still loopback,
+    // and the link is still redeemable from another device — through the rendezvous, which is named
+    // beside what it can observe, because the disclosure belongs next to the offer.
+    const relayed = localOnlyNotice('http://127.0.0.1:7431', 'wss://relay.example');
+    should(relayed.audience).containEql('another device can redeem it through the rendezvous at wss://relay.example');
+    should(relayed.audience).containEql('http://127.0.0.1:7431');
+    should(relayed.audience).containEql('observes connection metadata');
+    should(relayed.audience).containEql('never read the code');
+    should(relayed.audience).not.containEql('no QR');
+    // The direct bind stays on offer as the upgrade it now is, with the same honest widening.
+    should(relayed.remedy).startWith('for a direct connection that no rendezvous carries');
+    should(relayed.remedy).containEql(`"host": "${WILDCARD_BIND_HOST}"`);
+    should(relayed.remedy).containEql('e.g. http://192.168.1.10:7431');
+    should(relayed.remedy).containEql('accepts connections from other devices on your network');
+  });
+
   it('should carry the daemon’s own port into the example, never the compiled-in default', () => {
     // ADVICE WITH THE WRONG PORT IN IT IS ADVICE TO TYPE THE WRONG NUMBER. A first boot whose
     // preferred port was taken is on another one, and an example naming the default points at

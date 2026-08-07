@@ -24,7 +24,14 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { DoctorReportSchema, HealthViewSchema, type SessionStatus, type WardenVerdictsView } from '@ferretry/protocol';
+import {
+  DoctorReportSchema,
+  type FyEvent,
+  HealthViewSchema,
+  type SessionStatus,
+  SOCKET_TICKET_TTL_SECONDS,
+  type WardenVerdictsView,
+} from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { StrictMode } from 'react';
 
@@ -46,6 +53,7 @@ import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
+import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -61,7 +69,7 @@ const beta = daemonConnection({
 });
 const GAMMA_ID = `fy_daemon_${'g'.repeat(43)}`;
 const GAMMA_TOKEN = `fy_device_${'t'.repeat(43)}`;
-const GAMMA_FRAGMENT = `v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=${GAMMA_ID}`;
+const GAMMA_FRAGMENT = `v1;url=https%3A%2F%2Fgamma.example.test;code=7F3K-Q2ND;fp=${GAMMA_ID}`;
 
 const HOSTED_RELAY = { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' } as const;
 
@@ -84,6 +92,44 @@ const gammaRelayed = daemonConnection({
   baseUrl: 'https://gamma.example.test',
   deviceToken: GAMMA_TOKEN,
   carriers: [{ kind: 'direct', daemonUrl: 'https://gamma.example.test' }, HOSTED_RELAY],
+});
+
+/**
+ * One running shell on the `shared` session, and the ticket the daemon sells for its socket.
+ *
+ * The deck is driven through the ROOT'S OWN dependency object here rather than an injected fake, so
+ * these are the daemon's real wire shapes: anything the protocol's schemas reject would surface as
+ * an empty deck that never attaches, which is indistinguishable from the bug under test.
+ */
+const TERMINAL_ID = 'a1b2c3d4e5f6';
+const TERMINAL_TICKET = `fy_ticket_${'a'.repeat(43)}`;
+const terminalListing = {
+  sessionId: 'shared',
+  terminals: [
+    {
+      id: TERMINAL_ID,
+      sessionId: 'shared',
+      title: 'build',
+      state: 'running',
+      cols: 80,
+      rows: 24,
+      viewers: 0,
+      createdAt: '2026-08-01T10:00:00.000Z',
+      lastActivityAt: '2026-08-01T10:05:00.000Z',
+      idleDeadline: '2026-08-01T11:05:00.000Z',
+    },
+  ],
+  limits: { perSession: 6, global: 24, runningGlobal: 1, idleTimeoutSeconds: 900, scrollbackLines: 5_000 },
+};
+
+/** One frame off `/v1/events`, carrying only what the session route reads from it. */
+const liveEvent = (sequence: number): FyEvent => ({
+  sequence,
+  time: '2026-08-01T10:00:00.000Z',
+  sessionId: 'shared',
+  type: 'assistant/message',
+  source: 'daemon',
+  data: {},
 });
 
 const doctorReport = {
@@ -146,6 +192,11 @@ afterEach(() => {
   setPath('/');
   localStorage.clear();
   requestedUrls.length = 0;
+  // WHICH PANES ARE OPEN IS MODULE STATE, not this shell's. A test that opens the terminal pane
+  // therefore leaves it open for every later mount of the same route — and a deck mounted by
+  // accident lists, buys a ticket and dials a real socket at a host that does not exist, which
+  // surfaces as an unhandled socket error in whichever unrelated test happens to be running.
+  resetSidePaneTabsStates();
 });
 
 /* ---------- the mounted shell --------------------------------------------- */
@@ -182,11 +233,26 @@ interface HealthRead {
   readonly timeout: number | undefined;
 }
 
+/**
+ * One live `/v1/events` subscription the mounted session route actually opened.
+ *
+ * The fake stream cannot RESOLVE (see below), so the only way a test can say "an event reached this
+ * browser" is to keep the daemon's half of the subscription: `emit` is the route's own callback, and
+ * calling it is exactly what a delivered frame does.
+ */
+interface LiveFeed {
+  readonly sessionId: string | undefined;
+  readonly after: number;
+  readonly emit: (event: FyEvent) => void;
+}
+
 const appStore = async (
   reads: string[],
   options: ShellOptions = {},
   transcriptReads: string[] = [],
   healthReads: HealthRead[] = [],
+  liveFeeds: LiveFeed[] = [],
+  carrierRequests: string[] = [],
 ): Promise<AppStore> =>
   await createAppStore({
     repository: new MemoryRepository(),
@@ -216,6 +282,25 @@ const appStore = async (
         },
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
+        /*
+         * The live event feed the session route subscribes to. It never resolves and never rejects:
+         * a real one runs for the life of the workspace, and a fake that RESOLVED would tell the
+         * route its feed had ended the moment it opened. Aborting is what stops it, as in production.
+         */
+        stream: async (
+          sessionId: string | undefined,
+          after: number,
+          onEvent: (event: FyEvent) => void,
+          signal?: AbortSignal,
+        ) =>
+          await new Promise<void>(resolve => {
+            if (signal?.aborted === true) {
+              resolve();
+              return;
+            }
+            liveFeeds.push({ sessionId, after, emit: onEvent });
+            signal?.addEventListener('abort', () => resolve(), { once: true });
+          }),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
         wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
         wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,
@@ -236,18 +321,28 @@ const appStore = async (
         },
       } as unknown as FyApiClient;
     },
-    // Only the pairing exchange has a shape the root itself depends on; every
+    // Only the pairing exchange and the terminal deck have shapes the root itself depends on; every
     // other page reads through a store port that answers an empty document.
-    fetcher: async input =>
-      String(input).endsWith('/v1/pair')
-        ? Response.json({
-            daemonId: GAMMA_ID,
-            deviceToken: GAMMA_TOKEN,
-            daemonName: 'gamma',
-            capabilities: [],
-            carriers: [{ kind: 'direct', url: 'https://gamma.example.test' }],
-          })
-        : Response.json({}),
+    fetcher: async input => {
+      const url = String(input);
+      carrierRequests.push(url);
+      if (url.endsWith('/v1/pair'))
+        return Response.json({
+          daemonId: GAMMA_ID,
+          deviceToken: GAMMA_TOKEN,
+          daemonName: 'gamma',
+          capabilities: [],
+          carriers: [{ kind: 'direct', url: 'https://gamma.example.test' }],
+        });
+      if (url.endsWith('/stream/ticket'))
+        return Response.json({
+          ticket: TERMINAL_TICKET,
+          ttlSeconds: SOCKET_TICKET_TTL_SECONDS,
+          expiresAt: '2026-08-01T10:00:30.000Z',
+        });
+      if (url.endsWith('/terminals')) return Response.json(terminalListing);
+      return Response.json({});
+    },
   });
 
 /**
@@ -263,7 +358,9 @@ const renderShell = async (
   const reads: string[] = [];
   const transcriptReads: string[] = [];
   const healthReads: HealthRead[] = [];
-  const store = await appStore(reads, options, transcriptReads, healthReads);
+  const liveFeeds: LiveFeed[] = [];
+  const carrierRequests: string[] = [];
+  const store = await appStore(reads, options, transcriptReads, healthReads, liveFeeds, carrierRequests);
   for (const daemon of paired) {
     if (typeof daemon !== 'string') store.connections.add(daemon);
     else store.connections.add(daemon === alpha.daemonId ? alpha : beta);
@@ -276,7 +373,7 @@ const renderShell = async (
       </StoreProvider>
     </RouterProvider>,
   );
-  return { healthReads, reads, store, transcriptReads, view };
+  return { carrierRequests, healthReads, liveFeeds, reads, store, transcriptReads, view };
 };
 
 const settle = async (): Promise<void> => {
@@ -285,6 +382,49 @@ const settle = async (): Promise<void> => {
     await Promise.resolve();
   });
 };
+
+/**
+ * Settles a surface whose effects cross REAL task boundaries, not just microtasks.
+ *
+ * The terminal deck loads its emulator through a dynamic `import()` and only then attaches, so the
+ * chain is module load → listing → ticket → socket, with a task between the links and a first module
+ * load that is measurably slower than the rest. `settle` flushes two microtasks, which is right for
+ * everything else here and is not enough for that.
+ *
+ * It stops on the CONDITION rather than after a fixed count, so a loaded machine waits longer instead
+ * of failing; the ceiling is only there so a genuine regression fails in a second rather than hanging.
+ */
+const settleUntil = async (ready: () => boolean, turns = 60): Promise<void> => {
+  for (let turn = 0; turn < turns && !ready(); turn += 1) {
+    await interact(async () => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    });
+  }
+};
+
+/**
+ * A socket that records its URL and does nothing else.
+ *
+ * The deck's direct attach ends in `new WebSocket(...)`; a real one here would dial a host that does
+ * not exist and surface as an unhandled socket error in whichever test happened to be running when
+ * it gave up. What this test is about is the URL — a ticket bought on the carrier's own fetcher, for
+ * the daemon the route named — so recording it is the whole job.
+ */
+const recordingSocket = (opened: string[]): unknown =>
+  class RecordingSocket {
+    static readonly OPEN = 1;
+    binaryType = 'blob';
+    readyState = 0;
+
+    constructor(url: string) {
+      opened.push(url);
+    }
+
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    send(): void {}
+    close(): void {}
+  };
 
 /** Which screen of the setup guide is on the glass, if it is on the glass at all. */
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
@@ -673,6 +813,124 @@ describe('AppShell', () => {
     expect(session?.textContent).not.toContain('Beta Agent');
     expect(reads).toEqual(['alpha:shared']);
     await view.unmount();
+  });
+
+  /*
+   * THE TWO MACHINE-READABLE FACTS A MOUNTED SESSION STATES ABOUT ITS OWN CARRIER AND FEED.
+   *
+   * `ActiveCarrierCard` says the carrier at length, and it lives in Settings — so a reader, or a
+   * compiled-browser journey, looking at a session had nothing to read without navigating away.
+   * Both attributes therefore sit on the session route's own root, and both start at their honest
+   * "nothing has happened yet" value rather than at a guess: `none` is NOT `direct`, because no walk
+   * has measured anything, and `0` is not "an event arrived".
+   */
+  it('states the measured carrier and the live-event cursor on the mounted session route', async () => {
+    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+
+    const session = view.container.querySelector('[data-session="shared"]');
+    expect(session?.getAttribute('data-carrier-kind')).toBe('none');
+    expect(session?.getAttribute('data-live-events')).toBe('0');
+    await view.unmount();
+  });
+
+  /**
+   * WHAT AN ARRIVING EVENT DOES, which is the half of the live feed that had never been executed.
+   *
+   * The subscription itself was already proved by the attribute above; the CALLBACK — the two lines
+   * that move the cursor and pull the transcript forward — was reachable only from a daemon that
+   * actually delivered, and no test had one. Both halves matter and they fail differently: a cursor
+   * that never advances leaves a compiled-browser journey with nothing to poll, and a refresh that
+   * never fires leaves the reader on the three-second poll this subscription exists to beat.
+   *
+   * The walk is driven for real rather than faked, because the effect refuses to subscribe until a
+   * carrier has been MEASURED — so "no feed before a walk" is asserted first, and it is the same gate
+   * the route's comment describes rather than a separate claim.
+   */
+  it('advances the live cursor and refreshes the session when the measured feed delivers an event', async () => {
+    const { liveFeeds, reads, store, transcriptReads, view } = await renderShell('/d/alpha/session/shared', [
+      alpha.daemonId,
+    ]);
+    await settle();
+    expect(liveFeeds).toEqual([]);
+
+    await interact(async () => {
+      await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`);
+    });
+    await settle();
+
+    const feed = must(liveFeeds[0], 'the live event subscription');
+    expect(feed.sessionId).toBe('shared');
+    // From the beginning of the journal: the route has no cursor of its own to resume from yet.
+    expect(feed.after).toBe(0);
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+    expect(session.getAttribute('data-carrier-kind')).toBe('direct');
+    const sessionReads = reads.length;
+    const logReads = transcriptReads.length;
+
+    await interact(() => feed.emit(liveEvent(9)));
+    await settle();
+
+    expect(session.getAttribute('data-live-events')).toBe('9');
+    expect(reads.length).toBeGreaterThan(sessionReads);
+    expect(transcriptReads.length).toBeGreaterThan(logReads);
+
+    // MONOTONIC, and that is the property a poller depends on: a replayed or out-of-order frame must
+    // never rewind a cursor another reader has already seen move past it.
+    await interact(() => feed.emit(liveEvent(4)));
+    await settle();
+
+    expect(session.getAttribute('data-live-events')).toBe('9');
+    await view.unmount();
+  });
+
+  /**
+   * THE TERMINAL DECK'S THIRD DEPENDENCY: the carrier the deck's attach is allowed to read.
+   *
+   * `browserTerminalDeckDependencies` takes a measured-carrier getter and defaults it to
+   * `() => undefined`, and this root passed only two arguments — so the production deck answered "no
+   * carrier measured" forever. That is not a silent nicety: `browserTerminalStreamAttach` gates the
+   * DIRECT branch on exactly that getter, so every direct session's terminals threw
+   * `TERMINAL_STREAM_NO_CARRIER` and cycled the deck's reconnect backoff instead of buying a ticket
+   * and opening a socket. Nothing in the type system notices a defaulted argument, and no deck test
+   * can notice it either — the deck is always handed a fake — so the regression has to be the ROOT'S
+   * own deck, driven through the real pane, on the real carrier router.
+   *
+   * The socket is the assertion because it is the far end of the whole chain: a ticket bought on the
+   * carrier's fetcher, at the daemon the route named, for the terminal the daemon listed.
+   */
+  it('gives the production terminal deck the measured carrier its direct attach is gated on', async () => {
+    const sockets: string[] = [];
+    const restoreSocket = patchGlobal(globalThis, 'WebSocket', recordingSocket(sockets));
+    const { carrierRequests, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    try {
+      await settle();
+      // The deck is not mounted yet, so nothing has asked the daemon about terminals at all.
+      expect(carrierRequests.some(url => url.includes('/terminals'))).toBe(false);
+
+      await interact(() =>
+        must(
+          [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+            button => button.textContent === 'Terminal',
+          ),
+          'the Terminal pane launcher',
+        ).click(),
+      );
+      await settleUntil(() => sockets.length > 0);
+
+      expect(carrierRequests).toContain('https://alpha.example.test/v1/sessions/shared/terminals');
+      expect(carrierRequests).toContain(
+        `https://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL_ID}/stream/ticket`,
+      );
+      expect(sockets).toEqual([
+        `wss://alpha.example.test/v1/sessions/shared/terminals/${TERMINAL_ID}/stream?ticket=${TERMINAL_TICKET}`,
+      ]);
+    } finally {
+      // Unmounted and restored even when an assertion above threw: a retained deck keeps its refresh
+      // interval, and a leaked real `WebSocket` fails a later test rather than this one.
+      await view.unmount();
+      restoreSocket();
+    }
   });
 
   it('applies the persisted chat measure to the real session surface', async () => {
