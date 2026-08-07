@@ -1,11 +1,16 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse } from '@ferretry/protocol';
+import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse, Task } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type TaskSubsystem, taskActor, taskLive, taskRoutes } from '../../../../src/lib/runtime/mounts/tasks.ts';
-import { TASK_UNAVAILABLE_MESSAGE, TaskError } from '../../../../src/lib/tasks/index.ts';
+import {
+  ACTOR_AUTHORITY_SPLIT_LANDED_AT,
+  TASK_UNAVAILABLE_MESSAGE,
+  TaskError,
+} from '../../../../src/lib/tasks/index.ts';
+import { TASK_SNAPSHOT_SCHEMA_VERSION } from '../../../../src/lib/tasks/task-snapshot.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   AT,
@@ -30,6 +35,43 @@ const CREATE = {
   kind: 'feature',
   title: 'Wire the task boards',
   ask: { text: 'mount the boards', source: 'human' },
+} as const;
+
+/** A task as a pre-split daemon left it on disk: shipped, and attested by a flag nobody can check. */
+const legacyTask = () =>
+  ({
+    v: 1,
+    id: 'F1',
+    kind: 'feature',
+    title: 'Wire the task boards',
+    description: '',
+    ask: { text: 'mount the boards', source: 'human' },
+    clarifications: [],
+    workflow: 'quick',
+    phase: 'done',
+    dependsOn: [],
+    status: 'done',
+    statusReason: 'claimed complete',
+    assignee: null,
+    repo: null,
+    files: [],
+    links: { prs: [], branch: null, commits: [], docs: [] },
+    order: null,
+    createdAt: AT,
+    createdBy: 'peer:s1',
+    updatedAt: AT,
+  }) as Task;
+
+/** What the board authorizer resolves for a peer that really does hold `mark_done`. */
+const RESOLVED_GRANT = {
+  boardId: 'board-1',
+  grantId: 'grant-1',
+  sessionId: 's1',
+  role: 'top_agent',
+  allowedActions: ['mark_done'],
+  boardEpoch: 4,
+  coordinatorEpoch: 2,
+  runtimeGeneration: 7,
 } as const;
 
 /** The dispatcher a request is driven through, over the routes and the credentials the daemon uses. */
@@ -583,6 +625,52 @@ describe('the task board mount', () => {
       should(body.activity.map(event => event.type)).deepEqual(['created']);
     });
 
+    it('should mark an unstamped human attestation on read, however recent its timestamp', async () => {
+      // Arrange — a record an UN-UPGRADED host wrote long after this fix was authored. A cutoff
+      // date would read it as trustworthy; the missing semantics stamp is what gives it away.
+      const board = new FakeTaskBoard('s1', {
+        v: TASK_SNAPSHOT_SCHEMA_VERSION,
+        tasks: [
+          {
+            task: legacyTask(),
+            activity: [
+              {
+                v: 1,
+                seq: 1,
+                time: '2027-11-02T08:00:00.000Z',
+                actor: 'peer:s1',
+                actorName: null,
+                type: 'status',
+                data: {
+                  from: 'live',
+                  to: 'done',
+                  phaseFrom: 'live',
+                  phaseTo: 'done',
+                  reason: 'claimed complete',
+                  verifiedByHuman: true,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const dispatch = dispatcher({ boards: { s1: board } });
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+      const body = jsonBody(response) as unknown as ScopedTaskDetailResponse;
+
+      // Assert
+      should(response.status).equal(200);
+      const recorded = body.activity[0]?.data as Record<string, unknown>;
+      should(recorded).have.property('legacyAttestation', {
+        reason: 'predates-actor-authority-split',
+        splitLandedAt: ACTOR_AUTHORITY_SPLIT_LANDED_AT,
+      });
+      // The claim itself is left exactly as stored: marked as unreliable, never reclassified.
+      should(recorded).have.property('verifiedByHuman', true);
+    });
+
     it('should return only the history after the sequence the caller already holds', async () => {
       // Arrange
       const { dispatch } = await withTask();
@@ -661,6 +749,35 @@ describe('the task board mount', () => {
       should(body.phase).equal('build');
     });
 
+    it('should journal a headerless admin CLI completion as admin-cli', async () => {
+      // `human` deliberately has the shared admin bearer and CLI client header but no pane-session
+      // header. The task route records the normalized API classification honestly; that operational
+      // attribution is separate from, and never synthesized from, a board grant.
+      // Arrange
+      const { dispatch } = await withTask();
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const completed = await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks/F1', { action: 'status', status: 'done', reason: 'checked from the CLI' }),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(completed.status).equal(200);
+      const activity = (jsonBody(detail) as unknown as ScopedTaskDetailResponse).activity;
+      const recorded = [...activity].reverse().find(entry => entry.type === 'status');
+      should(recorded).not.be.undefined();
+      should(recorded?.actor).equal('admin-cli');
+      should(recorded?.data).have.property('verifiedByHuman', true);
+      should(recorded?.data).have.property('attestationSemantics', 'actor-authority-split');
+      should(recorded?.data).not.have.property('authorization');
+    });
+
     it('should report a blocked task with the reason the human gave', async () => {
       // Arrange
       const { dispatch } = await withTask();
@@ -734,6 +851,7 @@ describe('the task board mount', () => {
         boardActions: {
           authorize: async input => {
             calls.push(input);
+            return RESOLVED_GRANT;
           },
         },
       });
@@ -748,19 +866,143 @@ describe('the task board mount', () => {
       const missing = await dispatch.dispatch(
         post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase: 'done', reason: 'claimed complete' }, agentIn('s1')),
       );
-      const done = await dispatch.dispatch(
+      const anonymous = await dispatch.dispatch(
         post(
           '/v1/sessions/s1/tasks/F1',
           { action: 'phase', phase: 'done', reason: 'claimed complete' },
           { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability' },
         ),
       );
+      const done = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability', 'x-fy-request-id': 'click-1' },
+        ),
+      );
 
       // Assert
       should(missing.status).equal(401);
+      // A grant with no caller-supplied id would journal provenance nothing can be joined back to
+      // one decision, so the completion is refused rather than recorded against an invented key.
+      should(anonymous.status).equal(400);
+      should(jsonBody(anonymous)).have.property('code', 'missing_request_id');
       should(done.status).equal(200);
       should((jsonBody(done) as unknown as ScopedTaskView).phase).equal('done');
-      should(calls).deepEqual([{ targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' }]);
+      should(calls).deepEqual([
+        { targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' },
+        { targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' },
+      ]);
+    });
+
+    it('should reacquire cross-board scope before replaying one durable peer completion', async () => {
+      // A response-loss retry arrives after the task is already done. The mount must find the exact
+      // durable receipt before deciding that this peer is allowed to reacquire scope to another
+      // member's board; otherwise the reducer would either bypass board scope or refuse the replay.
+      // Arrange
+      const calls: { targetSessionId: string; capability: string; action: string }[] = [];
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async input => {
+            calls.push(input);
+            return RESOLVED_GRANT;
+          },
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s2/tasks', { ...CREATE, status: 'live' }));
+      const completion = { action: 'phase', phase: 'done', reason: 'checked another board' } as const;
+      const headers = {
+        ...agentIn('s1'),
+        'x-fy-board-capability': 'peer-capability',
+        'x-fy-request-id': 'cross-board-click-1',
+      };
+
+      // Act
+      const completed = await dispatch.dispatch(post('/v1/sessions/s2/tasks/F1', completion, headers));
+      const replayed = await dispatch.dispatch(post('/v1/sessions/s2/tasks/F1', completion, headers));
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s2/tasks/F1', headers: human }));
+
+      // Assert
+      should(completed.status).equal(200);
+      should(replayed.status).equal(200);
+      should(calls).deepEqual([
+        { targetSessionId: 's2', capability: 'peer-capability', action: 'mark_done' },
+        { targetSessionId: 's2', capability: 'peer-capability', action: 'mark_done' },
+      ]);
+      const activity = (jsonBody(detail) as unknown as ScopedTaskDetailResponse).activity;
+      should(activity.filter(entry => entry.type === 'status')).have.length(1);
+      should(activity.filter(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).have.length(
+        1,
+      );
+    });
+
+    it('should refuse a grant whose peer disagrees with the completion actor without changing the task', async () => {
+      // The session header is only attribution; the capability is the board's identity proof.
+      // Letting them name different peers would journal a completion under an actor the board did
+      // not authorize, which is false provenance even though the capability itself is valid.
+      // Arrange
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async () => ({ ...RESOLVED_GRANT, sessionId: 's2' }),
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const refused = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 's2-capability', 'x-fy-request-id': 'click-2' },
+        ),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(refused.status).equal(403);
+      should(jsonBody(refused)).have.property('code', 'forbidden');
+      const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
+      should(body.task.phase).equal('live');
+      should(body.activity).have.length(4);
+      should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
+    });
+
+    it('should refuse malformed board evidence without creating a trusted top-agent attestation', async () => {
+      // Arrange — a mount adapter is still a trust boundary: a broken authorizer must not become a
+      // positively stamped completion merely because it returned an object of the broad grant shape.
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async () => ({ ...RESOLVED_GRANT, role: 'read', allowedActions: ['read'] }),
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const refused = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 'malformed-capability', 'x-fy-request-id': 'click-3' },
+        ),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(refused.status).equal(409);
+      const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
+      should(body.task.phase).equal('live');
+      should(body.activity).have.length(4);
+      should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
     });
 
     it('should keep a shared live completion unavailable when the board authorizer cannot mount', async () => {

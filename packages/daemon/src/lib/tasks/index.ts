@@ -1,3 +1,4 @@
+export * from './task-attestation.ts';
 export * from './task-error.ts';
 export * from './task-graph.ts';
 export * from './task-id.ts';

@@ -100,7 +100,17 @@ const taskCases: SchemaCase[] = [
   { name: 'links', schema: tasks.TaskLinksSchema, value: links },
   { name: 'link field', schema: tasks.TaskLinkFieldSchema, value: 'pr' },
   { name: 'task', schema: tasks.TaskSchema, value: task },
+  {
+    name: 'done request fingerprint',
+    schema: tasks.TaskDoneRequestFingerprintSchema,
+    value: { action: 'phase', phase: 'done', reason: 'checked the release' },
+  },
   { name: 'authorization', schema: tasks.TaskAuthorizationProvenanceSchema, value: authorization },
+  {
+    name: 'legacy attestation',
+    schema: tasks.LegacyAttestationSchema,
+    value: { reason: 'predates-actor-authority-split', splitLandedAt: INSTANT },
+  },
   { name: 'activity type', schema: tasks.TaskActivityTypeSchema, value: 'created' },
   { name: 'activity', schema: tasks.TaskActivitySchema, value: createdActivity },
   { name: 'assignee health', schema: tasks.TaskAssigneeHealthSchema, value: 'active' },
@@ -429,6 +439,46 @@ describe('task schemas', () => {
         type: 'status',
         data: { from: 'todo', to: 'in_progress', phaseFrom: 'todo', phaseTo: 'build', reason: 'started' },
       },
+      {
+        ...activityBase,
+        actor: 'peer:session-1',
+        type: 'status',
+        data: {
+          from: 'live',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason: 'checked the release',
+          verifiedByTopAgent: true,
+          attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          authorization: {
+            boardId: 'board-1',
+            grantId: 'grant-1',
+            sessionId: 'session-1',
+            targetSessionId: 'session-1',
+            role: 'top_agent',
+            boardEpoch: 1,
+            coordinatorEpoch: 1,
+            runtimeGeneration: 1,
+            action: 'mark_done',
+            requestId: 'completion-1',
+            requestFingerprint: { action: 'phase', phase: 'done', reason: 'checked the release' },
+          },
+        },
+      },
+      {
+        ...activityBase,
+        type: 'status',
+        data: {
+          from: 'live',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason: 'historical record',
+          verifiedByHuman: true,
+          legacyAttestation: { reason: 'predates-actor-authority-split', splitLandedAt: INSTANT },
+        },
+      },
       { ...activityBase, type: 'note', data: { text: 'note' } },
       { ...activityBase, type: 'link', data: { field: 'pr', value: 'https://example.test/pr/1' } },
       { ...activityBase, type: 'assign', data: { from: null, to: 'session-1' } },
@@ -451,6 +501,93 @@ describe('task schemas', () => {
 
     // Act + Assert
     for (const value of values) should(tasks.TaskActivitySchema.parse(value)).deepEqual(value);
+  });
+
+  it('should retain unstamped human attestations that the previous release wrote', () => {
+    // These records are intentionally not held to the new writer's semantic invariants. A reader
+    // must retain them so it can mark their human claims legacy-unreliable instead of treating the
+    // entire snapshot as damaged.
+    const values = [
+      {
+        ...activityBase,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'researched',
+          phaseFrom: 'research',
+          phaseTo: 'research',
+          reason: 'unblocked',
+          approvedByHuman: true,
+        },
+      },
+      {
+        ...activityBase,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason: 'validated after unblock',
+          verifiedByHuman: true,
+        },
+      },
+    ];
+
+    for (const value of values) should(tasks.TaskActivitySchema.parse(value)).deepEqual(value);
+  });
+
+  it('should preserve blocked completion overlays and reject blocked destinations that advance phase', () => {
+    const reason = 'completed while manually blocked';
+    const attestations = [
+      { name: 'human', actor: 'user', evidence: { verifiedByHuman: true } },
+      {
+        name: 'top-agent',
+        actor: 'peer:session-1',
+        evidence: {
+          verifiedByTopAgent: true,
+          authorization: {
+            boardId: 'board-1',
+            grantId: 'grant-1',
+            sessionId: 'session-1',
+            targetSessionId: 'session-1',
+            role: 'top_agent',
+            boardEpoch: 1,
+            coordinatorEpoch: 1,
+            runtimeGeneration: 1,
+            action: 'mark_done',
+            requestId: 'completion-1',
+            requestFingerprint: { action: 'phase', phase: 'done', reason },
+          },
+        },
+      },
+    ] as const;
+    const contradictoryCases: SchemaCase[] = [];
+
+    for (const { name, actor, evidence } of attestations) {
+      const completion = {
+        ...activityBase,
+        actor,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason,
+          ...evidence,
+          attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+        },
+      };
+      should(tasks.TaskActivitySchema.parse(completion)).deepEqual(completion);
+      contradictoryCases.push({
+        name: `${name} blocked destination advancing phase`,
+        schema: tasks.TaskActivitySchema,
+        value: { ...completion, data: { ...completion.data, to: 'blocked' } },
+      });
+    }
+
+    assertRejects(contradictoryCases);
   });
 
   it('should resolve every task action member', () => {
@@ -524,6 +661,319 @@ describe('task schemas', () => {
         name: 'opaque activity data',
         schema: tasks.TaskActivitySchema,
         value: { ...activityBase, type: 'note', data: { arbitrary: true } },
+      },
+      {
+        name: 'human verification outside a live completion',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'in_progress',
+            to: 'built',
+            phaseFrom: 'build',
+            phaseTo: 'built',
+            reason: 'not a completion',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'human verification whose status contradicts its completion phase',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'todo',
+            to: 'in_progress',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'contradictory transition',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'current human verification attributed to a peer actor',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'not a human actor',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'top-agent verification outside a live completion',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'built',
+            phaseFrom: 'live',
+            phaseTo: 'built',
+            reason: 'not a completion',
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization: {
+              boardId: 'board-1',
+              grantId: 'grant-1',
+              sessionId: 'session-1',
+              targetSessionId: 'session-1',
+              role: 'top_agent',
+              boardEpoch: 1,
+              coordinatorEpoch: 1,
+              runtimeGeneration: 1,
+              action: 'mark_done',
+              requestId: 'completion-1',
+              requestFingerprint: { action: 'phase', phase: 'done', reason: 'not a completion' },
+            },
+          },
+        },
+      },
+      {
+        name: 'human attestation carrying a board receipt',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'receipt cannot make this human',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization,
+          },
+        },
+      },
+      {
+        name: 'semantics stamp without an attestation',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'todo',
+            to: 'in_progress',
+            phaseFrom: 'todo',
+            phaseTo: 'build',
+            reason: 'started',
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'contradictory human and top-agent attestations',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'contradictory',
+            verifiedByHuman: true,
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'top-agent attestation without exact authorization receipt',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'incomplete evidence',
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization,
+          },
+        },
+      },
+      {
+        name: 'top-agent attestation with blank durable authorization ids',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'blank evidence is not evidence',
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization: {
+              boardId: 'board-1',
+              grantId: '   ',
+              sessionId: 'session-1',
+              targetSessionId: 'session-1',
+              role: 'top_agent',
+              boardEpoch: 1,
+              coordinatorEpoch: 1,
+              runtimeGeneration: 1,
+              action: 'mark_done',
+              requestId: '   ',
+              requestFingerprint: {
+                action: 'phase',
+                phase: 'done',
+                reason: 'blank evidence is not evidence',
+              },
+            },
+          },
+        },
+      },
+      {
+        name: 'top-agent receipt for a different completion request',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          actor: 'peer:session-1',
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'recorded completion',
+            verifiedByTopAgent: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            authorization: {
+              boardId: 'board-1',
+              grantId: 'grant-1',
+              sessionId: 'session-1',
+              targetSessionId: 'session-1',
+              role: 'top_agent',
+              boardEpoch: 1,
+              coordinatorEpoch: 1,
+              runtimeGeneration: 1,
+              action: 'mark_done',
+              requestId: 'completion-1',
+              requestFingerprint: { action: 'phase', phase: 'done', reason: 'different completion' },
+            },
+          },
+        },
+      },
+      {
+        name: 'unstamped top-agent attestation',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'missing semantics',
+            verifiedByTopAgent: true,
+            authorization: {
+              boardId: 'board-1',
+              role: 'top_agent',
+              boardEpoch: 1,
+              coordinatorEpoch: 1,
+              runtimeGeneration: 1,
+              action: 'mark_done',
+              requestId: 'completion-1',
+              requestFingerprint: { action: 'phase', phase: 'done', reason: 'missing semantics' },
+            },
+          },
+        },
+      },
+      {
+        name: 'legacy marker without an unstamped human attestation',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'a marker cannot invent its attestation',
+            legacyAttestation: { reason: 'predates-actor-authority-split', splitLandedAt: INSTANT },
+          },
+        },
+      },
+      {
+        name: 'stamped legacy marker',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'live',
+            to: 'done',
+            phaseFrom: 'live',
+            phaseTo: 'done',
+            reason: 'contradictory legacy',
+            verifiedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+            legacyAttestation: { reason: 'predates-actor-authority-split', splitLandedAt: INSTANT },
+          },
+        },
+      },
+      {
+        name: 'same-phase human approval',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'blocked',
+            to: 'researched',
+            phaseFrom: 'research',
+            phaseTo: 'research',
+            reason: 'unblocked',
+            approvedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
+      },
+      {
+        name: 'backward human approval',
+        schema: tasks.TaskActivitySchema,
+        value: {
+          ...activityBase,
+          type: 'status',
+          data: {
+            from: 'designed',
+            to: 'researched',
+            phaseFrom: 'design',
+            phaseTo: 'research',
+            reason: 'not an approval',
+            approvedByHuman: true,
+            attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+          },
+        },
       },
     ];
 

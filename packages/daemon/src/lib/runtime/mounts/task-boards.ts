@@ -33,6 +33,7 @@ import { isTaskBoardError, TaskBoardError } from '../../task-boards/error.ts';
 import { TaskBoardInvitationService } from '../../task-boards/invitation-service.ts';
 import { TaskBoardMembershipService } from '../../task-boards/membership-service.ts';
 import type {
+  TaskBoardAuthorization,
   TaskBoardCredential,
   TaskBoardCredentialIssuer,
   TaskBoardRepository,
@@ -236,11 +237,19 @@ function peerCredential(
  * affordance never constitutes permission.
  */
 export interface TaskBoardTaskActionAuthorizer {
+  /**
+   * Answers with the grant it resolved, not merely without throwing.
+   *
+   * A permission the caller cannot describe is a permission nothing can journal: the decision was
+   * made against a board, a role and an epoch triple, and returning `void` threw all of that away
+   * at the one moment it was known. The task mount turns this into the record that says WHAT
+   * authorized a completion, so the answer has to survive the call.
+   */
   authorize(input: {
     readonly targetSessionId: string;
     readonly capability: string;
     readonly action: TaskBoardAction;
-  }): Promise<void>;
+  }): Promise<TaskBoardAuthorization>;
 }
 
 export function taskBoardTaskActionAuthorizer(world: TaskBoardSubsystem): TaskBoardTaskActionAuthorizer {
@@ -249,7 +258,14 @@ export function taskBoardTaskActionAuthorizer(world: TaskBoardSubsystem): TaskBo
     authorize: async ({ targetSessionId, capability, action }) => {
       const [state, sessions] = await Promise.all([subsystem.repository.snapshot(), subsystem.sessions.snapshot()]);
       const credential = peerCredential(state, sessions, capability, subsystem.issuer);
-      subsystem.services.authorization.resolveTaskScope(state, sessions, targetSessionId, credential, action);
+      const scope = subsystem.services.authorization.resolveTaskScope(
+        state,
+        sessions,
+        targetSessionId,
+        credential,
+        action,
+      );
+      return scope.authorization;
     },
   };
 }
