@@ -32,4 +32,13 @@ coveragePathIgnorePatterns = [
   "packages/pwa/src/features/**",
   "packages/pwa/src/hooks/**",
   "packages/pwa/src/shell/**",
+  # BUILD-TIME GENERATORS, not adapters. `scripts/build-fy-render-libs.ts` emits the `fy-render`
+  # sandbox shell and its two pinned library bundles; the Chromium security tier imports it so that
+  # it measures a FRESHLY BUILT shell rather than whatever artifact happened to be on disk, which is
+  # the difference between testing the design and testing a stale file.
+  #
+  # Without this line the int ledger records a `packages/pwa/scripts/…` path, `scripts/ci/test.sh`'s
+  # awk gate refuses it as "coverage path outside src/adapters", and the tier fails on a PATH rather
+  # than on a test — which looks like nothing to do with the file that caused it.
+  "packages/pwa/scripts/**",
 ]

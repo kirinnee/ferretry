@@ -186,3 +186,88 @@
 .fy-render[data-fy-render-fullscreen='true'] .fy-render-image {
   max-height: 100%;
 }
+
+/*
+ * There is deliberately no `[data-fy-render-stage='sandbox']` rule. The sandbox
+ * case takes the BASE `.fy-render-stage` layout — the same illustration plane a
+ * decoded `<img>` gets — because a live frame is a picture, not a note. Only
+ * `note` needs to opt out of that plane, so only `note` has a rule. Reading the
+ * missing selector as an omission and adding one would be the regression.
+ *
+ * THE SANDBOX FRAME.
+ *
+ * It is sized by this stylesheet and never by a message from inside it: a frame
+ * that could ask the page for more room could ask for all of it, and the
+ * dimensions it reports are bounded and used for nothing. `aspect-ratio` keeps a
+ * sensible shape at both viewports without the parent having to know what the
+ * illustration turned out to be.
+ */
+.fy-render-frame {
+  display: block;
+  width: 100%;
+  min-height: 12rem;
+  /* THE DYNAMIC UNIT, matching its two siblings exactly — `.kt-rich-file-image`
+     and `.kt-rich-file-frame` are both `min(60dvh, 720px)` and the source panel
+     two rules up is `50dvh`. On iOS Safari `vh` resolves against the LARGE
+     viewport, so with browser chrome showing a `60vh` frame took more than 60%
+     of what the reader could actually see — on the engine this PWA calls
+     first-class. */
+  max-height: min(60dvh, 720px);
+  aspect-ratio: 16 / 10;
+  border: 0;
+  background: transparent;
+  color-scheme: normal;
+  /* NOT POINTER-FOCUSABLE, and this is the second half of a deliberate decision
+     rather than a styling flourish (the first half is `tabIndex={-1}` in
+     `fy-render-sandbox.tsx`).
+
+     The frame is a separate, opaque-origin document. A keydown delivered inside
+     it never reaches the parent, and the app's Escape listener lives on the
+     PARENT document — so one tap or click on a live animation in fullscreen used
+     to move `document.activeElement` into the frame and kill Escape from that
+     moment on, leaving Exit as the only way out. On touch Exit is already the
+     only dismiss affordance, and tapping the picture is the most natural thing a
+     reader does in fullscreen.
+
+     Nothing in the frame is interactive — Play/Pause is a parent button that
+     speaks over the capability port — so refusing it the pointer costs the reader
+     nothing and lets wheel and touch scrolling pass through to the page instead
+     of being swallowed by a cross-document child. */
+  pointer-events: none;
+}
+
+/* THE SANDBOX STATUS LINE. Soft, small and the same voice as the caption for the
+   two transient states, because "Preparing the Mermaid renderer…" is a status and
+   not a warning. The failure phases take `kt-fs-note` from the component instead,
+   so a failure reads as the app's ordinary failure surface. */
+.fy-render-status {
+  min-width: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+/* IT MUST STAY IN THE ACCESSIBILITY TREE AND OUT OF THE LAYOUT, which is why
+   `display: none` and a visually-hidden class are both wrong here: the first
+   removes the region from the tree so its first text reads as an insertion, and
+   the second is a positioned box this app has already had escape a scrollport.
+   An empty `<div>` with no padding is zero-height on its own; the only thing it
+   still costs is one `gap` from `.fy-render-figure`, which this cancels exactly. */
+.fy-render-status[data-fy-render-sandbox-status='idle'] {
+  margin-block-start: calc(-1 * var(--gap-sm));
+}
+
+/* THE FOLDED DIAGNOSTIC IS MACHINE TEXT, so it keeps its own line breaks. A
+   Mermaid parse error is a multi-line jison dump with an ASCII caret rule under
+   the offending column; collapsing that into one line is what made it look like
+   mangled app copy. `kt-fs-why-body` already caps the measure at 60ch. */
+.fy-render-why-body {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* In fullscreen the frame may use the room the overlay gives it. */
+.fy-render-fullscreen .fy-render-frame {
+  max-height: none;
+  height: 100%;
+}

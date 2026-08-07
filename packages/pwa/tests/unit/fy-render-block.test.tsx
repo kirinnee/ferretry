@@ -437,11 +437,11 @@ describe('FyRenderBlock static types', () => {
 
 describe('FyRenderBlock source-only types', () => {
   test('should say plainly that this build does not run the payload', () => {
-    for (const [block, label] of [
-      [htmlBlock(), 'HTML'],
-      [parsed('type: mermaid', 'alt: A graph', '---', 'graph TD;'), 'Mermaid'],
-      [parsed('type: lottie', 'alt: A spinner', '---', '{"v":"5.7.0"}'), 'Lottie'],
-    ] as const) {
+    // `html` is the only type left on this path, and that is the declared gap.
+    // `mermaid` and `lottie` moved to the sandbox and are covered by their own
+    // describe below; if either ever comes back here, that is a regression in
+    // the feature rather than in this test.
+    for (const [block, label] of [[htmlBlock(), 'HTML']] as const) {
       // Act
       const tree = render(<FyRenderBlock block={block} />);
 
@@ -621,11 +621,11 @@ describe('FyRenderBlock failure fallback', () => {
     const tree = render(<FyRenderBlock block={svgBlock()} />);
     should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' }).length).equal(0);
 
-    // Act
-    run(() => tree.update(<FyRenderBlock block={parsed('type: mermaid', 'alt: A graph', '---', 'graph TD;')} />));
+    // Act — `html` is the remaining source-only type.
+    run(() => tree.update(<FyRenderBlock block={htmlBlock()} />));
 
     // Assert — the note says the source is shown below, so it had better be.
-    should(allText(tree.root)).containEql('This build does not run Mermaid illustrations');
+    should(allText(tree.root)).containEql('This build does not run HTML illustrations');
     should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' })).have.length(1);
     run(() => tree.unmount());
   });

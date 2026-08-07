@@ -4,6 +4,39 @@
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
 
+# The `fy-render` sandbox shell. Its CONTENT policy travels in the document as a
+# `<meta http-equiv>`, which is enforced independently inside the opaque frame and
+# keeps the script hashes in the same generated file as the scripts they pin. This
+# rule carries only the two things a meta tag cannot express.
+#
+# The `!` line is load-bearing. Without it Cloudflare appends this policy to the
+# `/*` one, and `/*` carries `frame-ancestors 'none'` — which would make the shell
+# unframeable and the whole feature inert. `/*` itself is deliberately untouched.
+#
+# `sandbox allow-scripts` re-applies the opaque origin at the response level, so
+# navigating straight to this URL yields an inert document rather than a live one.
+/fy-render-sandbox.html
+  ! Content-Security-Policy
+  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-cache
+
+# The two trusted library bundles the PARENT fetches and transfers over the
+# capability port; the frame never requests them itself.
+#
+# `no-cache` means revalidate, NOT "do not store": the bytes are reused across
+# visits but a deploy can never be pinned behind a stale copy. These filenames are
+# fixed rather than content-addressed, so they must not be marked immutable — an
+# immutable stale bundle would fail the shell's hash pin and disable the feature
+# until the cache expired, with no way to push a fix.
+/fy-render-mermaid.js
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-cache
+
+/fy-render-lottie.js
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-cache
+
 /index.html
   Cache-Control: no-cache, no-store, must-revalidate
 
