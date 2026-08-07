@@ -2,11 +2,11 @@
  * ONE Chromium for the whole test process, launched exactly once.
  *
  * WHAT WAS MEASURED, and it took three rounds to localize. With both `fy-render`
- * integration files in one Bun process — which is how `scripts/ci/test.sh int` runs
- * every integration file — the run does not fail, it wedges. Instrumented step by
- * step, the surviving stall is precise: `fixture done`, `reads done`,
- * `server done`, `launch start`, and then nothing until the hook budget expires.
- * The same file ALONE reaches `launch done` and passes 12/12 in 9 s.
+ * integration files in ONE Bun process — an unisolated/direct combined run — the
+ * run does not fail, it wedges. Instrumented step by step, the surviving stall is
+ * precise: `fixture done`, `reads done`, `server done`, `launch start`, and then
+ * nothing until the hook budget expires. The same file ALONE reaches `launch done`
+ * and passes 12/12 in 9 s.
  *
  * So the defect is not the compile (that was a separate, real wedge, removed by
  * `fy-render-integration-fixture.ts` spawning a child), and it is not launching
@@ -19,6 +19,15 @@
  *
  * The repair is to make "the first launch" happen once. A memoised promise means the
  * second caller awaits the same initialisation instead of starting a competing one.
+ *
+ * WHERE THAT MEMO NOW BITES. The official integration entrypoints run with one
+ * isolated worker (`--parallel=1`), which implies `--isolate` — a fresh global per
+ * file — so each file launches its own browser and there is no second caller in the
+ * same global to race it. The memo is still load-bearing for a DIRECT same-process
+ * invocation (several files in one Bun process, no `--parallel`): there the two
+ * `beforeAll` hooks DO share one global, the second awaits the first launch, and the
+ * wedge stays fixed. It is harmless under isolation, where each file's single call
+ * is the first.
  *
  * THE BROWSER IS NEVER CLOSED BY A TEST. An `afterAll` would be actively wrong:
  * hooks are per file, so the first file's teardown would close the browser the

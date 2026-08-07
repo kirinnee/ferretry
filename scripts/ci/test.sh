@@ -23,6 +23,20 @@ if [[ ${mode} != "unit" ]]; then
   timeout_flag=(--timeout 120000)
 fi
 
+# The test-FILE worker count, ON THE COMMAND LINE — this is file-level parallelism,
+# not in-test concurrency, so `--max-concurrency` is not a substitute. The
+# integration tier's files each open a real browser, and an unisolated combined run
+# wedges on overlapping `chromium.launch` and fixture lifecycles (see
+# `packages/pwa/tests/integration/support/chromium.ts`). `--parallel=1` runs those
+# files in exactly one worker, which implies `--isolate` (a fresh global per file),
+# so each file owns a fresh browser and fixture. That is the demonstrated repair for
+# the class of browser closure measured under aggregate file-worker pressure. Unit
+# and SIT keep the default: nothing about them is file-serial.
+parallel_flag=()
+if [[ ${mode} == "int" ]]; then
+  parallel_flag=(--parallel=1)
+fi
+
 if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
   [[ -n ${CLI_BIN:-} ]] && chmod +x "${CLI_BIN}"
@@ -77,7 +91,7 @@ echo "🧪 Running ${mode} tests with coverage..."
 rm -rf "${coverage_dir}"
 
 set +e
-bun test --config="${config}" "${timeout_flag[@]}" --coverage
+bun test --config="${config}" "${timeout_flag[@]}" "${parallel_flag[@]}" --coverage
 test_status=$?
 set -e
 
