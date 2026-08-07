@@ -454,6 +454,26 @@ describe('structured question projection', () => {
     });
   });
 
+  it('clears the exact stale blocking advisory from a failed predecessor while exposing a newer question', () => {
+    const newer = {
+      ...question,
+      call: {
+        ...question.call,
+        id: 'tool-2',
+        questions: [{ question: 'Deploy?', options: [{ label: 'Now' }], multiple: false }],
+      },
+    } satisfies TranscriptEvent;
+    const patch = structuredQuestionStatePatch(
+      { id: 's1', status: 'awaiting_user', turn: 2, ...unconfirmedAttention() },
+      projectStructuredQuestion([newer]),
+      [answer('failed')],
+    );
+
+    should(patch).match({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-2' } });
+    should(patch).have.property('needsHumanKind', undefined);
+    should(patch).have.property('needsHuman', undefined);
+  });
+
   it('retires a standing blocking state from an acknowledgement whose form left the tail', () => {
     const patch = structuredQuestionStatePatch(
       { id: 's1', status: 'awaiting_user', turn: 2, ...unconfirmedAttention() },
