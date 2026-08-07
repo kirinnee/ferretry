@@ -10,8 +10,8 @@ import {
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
-  refusalNotice,
   type RegisterProjectRequest,
+  refusalNotice,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -98,8 +98,8 @@ import {
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoRelayIdentityKeys,
-  WebPushFetchTransport,
   WebCryptoSecretCipher,
+  WebPushFetchTransport,
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
@@ -138,7 +138,7 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
-import { TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
+import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -219,6 +219,12 @@ import {
   type AnalyticsPricingRate,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
+  AnswerAcknowledged,
+  AnswerReleased,
+  AnswerRequestConflict,
+  AnswerTerminalFailure,
+  AnswerToolAlreadyHandled,
+  AnswerUnconfirmed,
   type ApiServerHandle,
   type ApiServerPort,
   type ArgumentAnswer,
@@ -244,6 +250,7 @@ import {
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
+  chooseRelayCarrierSources,
   configuredAt,
   contextWindowForSession,
   createFoundationPaths,
@@ -262,22 +269,27 @@ import {
   defaultSessionResumeSettings,
   defaultSessionSendSettings,
   defaultStartWaitPolicy,
+  describeAbsentRelayCarrier,
   describeConfiguration,
+  describeGrantPosture,
+  describeRelayCarrierPosture,
+  dialledRelayUrl,
   doneMarkerCertifiesTurn,
   type ExecutableResolverPort,
   exactWorkerAssignee,
   FleetEventStreamService,
+  FleetManifestUnreadableError,
   FleetRefreshService,
   ForeignHistoryImporter,
   type FoundationPaths,
+  firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
-  FleetManifestUnreadableError,
   foreignAdvertisementNotice,
   HARNESS_PICKER_COMMAND,
+  type HarnessPreflight,
   HarnessQuirkService,
   harnessAbsentWarning,
   harnessMigrationRefusal,
-  type HarnessPreflight,
   harnessPreflightSummary,
   InitialAttachmentError,
   InvalidDeadlineRefused,
@@ -295,47 +307,44 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
-  chooseRelayCarrierSources,
-  dialledRelayUrl,
-  describeAbsentRelayCarrier,
-  describeGrantPosture,
-  describeRelayCarrierPosture,
   NO_PASSWORD_DISCLOSURE,
-  type OperatorPasswordPort,
   normalizeCallsign,
   type ObservedSession,
-  observedRuntimeStatePatch,
   type OpenedAnalyticsIndexStore,
+  type OperatorPasswordPort,
   OperatorReadService,
+  observedRuntimeStatePatch,
   overriddenBy,
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
   PinService,
-  PushService,
-  type PushSubscriptionSubsystem,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  PushService,
+  type PushSubscriptionSubsystem,
   packageRole,
+  paneShowsActiveWork,
   parseSessionId,
   parseWardenConfigPatch,
   planInitialAttachments,
   portCandidates,
-  publishableDirectCarrier,
-  publishedDaemonCarriers,
   projectObservedRuntime,
   projectStructuredQuestion,
+  publishableDirectCarrier,
+  publishedDaemonCarriers,
   type QuotaFailoverLoop,
   QuotaFailoverService,
+  RELAY_DIRECTORY_NOT_ASKED,
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
-  type RelayPairingRedeemer,
-  type RelayStreamDispatch,
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
-  RELAY_DIRECTORY_NOT_ASKED,
+  type RelayPairingRedeemer,
+  type RelayStreamDispatch,
+  type ResumeAnswerAttention,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
@@ -345,17 +354,18 @@ import {
   readDaemonRelayIdentity,
   readDoctorReport,
   readHarnessPreflight,
+  reconcileAnswerEvidence,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
   refuseUnbindableAddress,
   relaunchCommand,
-  relayCarriersNeedDiscovery,
   relayCarrierRemedy,
+  relayCarriersNeedDiscovery,
+  releasedAnswerAttentionOwnedBy,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
-  unreadableManifestPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
   type ScratchReclamation,
@@ -408,6 +418,9 @@ import {
   SignalRefused,
   type SocketTicketBroker,
   SocketTicketRegistry,
+  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  StructuredAnswerCoordinator,
+  StructuredQuestionAttemptFailed,
   StructuredQuestionRefused,
   StructuredQuestionService,
   SttEnhancementService,
@@ -439,6 +452,7 @@ import {
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
+  unreadableManifestPreflight,
   usageProbeCommand,
   usageRefreshMs,
   WARDEN_LABEL,
@@ -676,7 +690,19 @@ export interface DaemonWorld {
    * The launcher is passed IN rather than captured so overriding `createResumeLauncher` on a world
    * actually changes what revives.
    */
-  readonly createSessionResume: (storage: DaemonStorage, launcher: ResumeLauncher) => SessionResumeService;
+  readonly createSessionResume: (
+    storage: DaemonStorage,
+    launcher: ResumeLauncher,
+    /** Where the released structured-answer advisory is durably dismissed; see
+     *  `createResumeAnswerAttention`. Passed IN for the launcher's reason: it is built from the
+     *  answer ledger and the answer queue, which belong to the mounted subsystems rather than the
+     *  world, and a second construction would dismiss on a queue nothing else holds. */
+    answerAttention: ResumeAnswerAttention,
+    /** The session's ANSWER/monitor queue, used as the resume service's own serializer. Passed in
+     *  because it belongs to the mounted subsystems, and shared because a dismissal must hold it
+     *  from the old pane's release through the final clear — see `SessionResumePorts.serial`. */
+    serial: KeyedSerialExecutor,
+  ) => SessionResumeService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
    *  instead of one probe per session. Its sources are configured and its refresh
    *  period is the fleet's declared `usage.interval`, so it is built once both
@@ -1638,6 +1664,109 @@ function createSessionResumeSubsystem(
 }
 
 /**
+ * The durable half of dismissing a released structured-answer advisory.
+ *
+ * THIS REPLACES A WRAPPER THAT RAN AFTER THE SERVICE, and every clause below is one of the ways
+ * that wrapper was wrong. It read the state BEFORE the resume and appended AFTER it, so the service
+ * had already cleared the attention by the time the record was written — the opposite of the order
+ * the survey claims. It accepted `preserved`, which is a relaunch that failed. It did not require a
+ * message-free request, so prose could dismiss the warning. It selected by
+ * `needsHuman.includes(toolUseId)` and looped over EVERY match, so one dismissal could close
+ * several tools, including a `failed` one. And it cleared the state itself, giving the daemon two
+ * owners for one decision.
+ *
+ * Here the service decides and calls this; this one only picks the record and appends.
+ *
+ * IT TAKES NO LOCK OF ITS OWN, and that is load-bearing twice over. The resume service is built on
+ * the SAME answer/monitor executor (see `createSessionResume`), so by the time this runs the answer
+ * queue is already held for this session — a nested acquisition would deadlock the dismissal
+ * against itself, and it would buy nothing, because the queue it wants is the one it is inside.
+ * Holding that queue across the whole critical section is also what makes the clear that follows
+ * safe: no drive and no projection can publish a newer advisory between this append and it.
+ *
+ * THE RECORD IS THE ONE THE STANDING ADVISORY NAMES, decided by `releasedAnswerAttentionOwnedBy` —
+ * the projection's own ownership predicate, reused rather than reimplemented. Counting quarantined
+ * rows was the first thing wrong with the obvious version: a session carrying an unrelated older
+ * quarantine would refuse to dismiss the warning actually on screen. Looking for the tool id inside
+ * the prose was the second: `tool-1` matches a sentence about `tool-10`, and neither a tool id nor a
+ * request id is constrained enough to be recovered from a sentence at all. The predicate compares
+ * the standing message against the exact one this daemon would have minted FOR THAT RECORD, so a
+ * message this daemon did not write owns nothing.
+ *
+ * PER RECORD, NOT PER TOOL. Two request ids may name one rendered form, and the canonical message
+ * carries both — so collapsing the owners by tool id would call two genuinely distinct operations
+ * one owner and dismiss whichever came first.
+ *
+ * FAIL CLOSED ON ANYTHING BUT EXACTLY ONE OWNER. Zero means nothing in the ledger claims the warning
+ * on screen, and inventing an owner would fabricate a dismissal; several mean the daemon cannot tell
+ * WHICH operation the person read about — which is the honest answer for the composition root's
+ * first-write wording, since it names only the tool and several records may share one. Both leave
+ * the advisory standing, which is the recoverable direction: a warning that stays up can be
+ * dismissed again, a record that was wrongly closed cannot be reopened.
+ *
+ * AN ALREADY-ACKNOWLEDGED OWNER IS SUCCESS, NOT A CONFLICT. The append is durable before the state
+ * clears, so a crash in that gap leaves exactly this shape: the row says `acknowledged` and the
+ * advisory still stands. Refusing there would strand the session forever on the one path meant to
+ * recover it, so the retry appends nothing, returns, and lets the service finish the clear.
+ */
+function createResumeAnswerAttention(storage: DaemonStorage, answerLedger: FileAnswerLedger): ResumeAnswerAttention {
+  return {
+    acknowledge: async (id, actor) => {
+      const state = SessionStateSchema.safeParse(await storage.readState(id));
+      if (!state.success)
+        throw new Error(
+          `session ${id} has no readable state document, so the structured-answer advisory it carries ` +
+            `cannot be matched to the operation it names; the advisory stands`,
+        );
+      const records = [...(await answerLedger.all(id)).values()];
+      // OWNERSHIP IS COUNTED OVER EVERY RECORD, not over the dismissable ones. The rendered
+      // sentence is not an injective encoding of the pair that built it — `(requestId "r",
+      // toolUseId "t for u")` and `(requestId "r for t", toolUseId "u")` render the same string,
+      // and the composition root's first write renders the same string for every request id that
+      // ever named its tool. Counting only the candidates would let a `confirmed` co-owner sit
+      // outside the count, leaving exactly one candidate and an ambiguity the guard exists to
+      // catch. So: exactly one owner in the whole ledger, THEN that owner must be dismissable.
+      const owners = records.filter(record => releasedAnswerAttentionOwnedBy(state.data, record));
+      if (owners.length !== 1)
+        throw new Error(
+          `the released structured-answer advisory on session ${id} is owned by ${owners.length} answer ` +
+            `operations rather than exactly one, so there is no single dismissal to record; it stands`,
+        );
+      // biome-ignore lint/style/noNonNullAssertion: the list was just checked to hold exactly one
+      const record = owners[0]!;
+      // Already closed, and the advisory is still up: this is the crash gap between the append and
+      // the clear, so the retry does nothing here and lets the service finish the clear.
+      if (record.outcome === 'acknowledged') return;
+      // `failed`, `accepted`, `confirmed` and `withdrawn` are other things entirely, and rewriting
+      // any of them as `acknowledged` would misreport what happened to that operation.
+      if (record.outcome !== 'quarantined')
+        throw new Error(
+          `the answer operation owning the advisory on session ${id} reads as ${record.outcome}, not a ` +
+            `released quarantine, so dismissing it would misreport what happened; the advisory stands`,
+        );
+      await answerLedger.append(id, {
+        ...record,
+        outcome: 'acknowledged',
+        reason: 'an explicit human relaunch dismissed the structured-answer advisory without confirming its answer',
+      });
+      // Best effort, and deliberately after the ledger: the audit line is for a reader, the
+      // ledger row is the decision, and a journal that will not accept a line must not undo one.
+      await storage
+        .append(id, 'interaction.answer_acknowledged', {
+          toolUseId: record.toolUseId,
+          requestId: record.requestId,
+          // The operator the SERVICE already authorized, carried through for attribution. Nothing
+          // here re-decides eligibility from it — that decision is the action bit, and a second
+          // copy of the test living down here is exactly how the old wrapper drifted.
+          actor,
+          resolution: 'explicit-human-relaunch',
+        })
+        .catch(() => undefined);
+    },
+  };
+}
+
+/**
  * How each send refusal the domain raises is answered.
  *
  * `pending` is kept apart from `refused` because the two ask the caller for different things: a
@@ -1718,8 +1847,13 @@ function createSessionAnswerSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   tmux: TmuxController,
+  clock: ClockPort,
+  ledger: FileAnswerLedger,
+  serial: KeyedSerialExecutor,
+  lastSnapshots: FileLastSnapshotStore,
 ): SessionAnswerSubsystem {
-  const settled = new Map<string, SessionView>();
+  const statusProtectedFromAnswer = (status: SessionView['state']['status']): boolean =>
+    status === 'completed' || status === 'stopped' || status === 'failed' || status === 'kill_failed';
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
     if (id === undefined)
@@ -1727,6 +1861,9 @@ function createSessionAnswerSubsystem(
     if (storage.findSession(id) === undefined) throw new SessionAnswerError('not_found', `no session ${reference}`);
     return id;
   };
+  const tmuxSession = async (id: SessionId): Promise<string> =>
+    SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession;
+  const driver = new TmuxStructuredQuestionDriver(tmux, tmuxSession, milliseconds => Bun.sleep(milliseconds));
   const service = new StructuredQuestionService(
     {
       pending: async id => {
@@ -1735,6 +1872,12 @@ function createSessionAnswerSubsystem(
           throw new SessionAnswerError(
             'failed',
             `session ${id} state is unreadable; it cannot be treated as no question`,
+          );
+        if (statusProtectedFromAnswer(state.data.status))
+          throw new StructuredQuestionRefused(
+            state.data.status === 'kill_failed'
+              ? `the previous terminal shutdown for ${id} was not confirmed; stop it successfully before answering`
+              : `session ${id} is ${state.data.status}; a terminal session cannot accept a structured answer`,
           );
         return state.data.pendingQuestion ?? undefined;
       },
@@ -1747,53 +1890,248 @@ function createSessionAnswerSubsystem(
             throw new SessionAnswerError('refused', `question ${toolUseId} is no longer pending; it was not cleared`);
           const next: Record<string, unknown> = {
             ...(current as Record<string, unknown>),
-            status: 'running',
+            // The transform runs under storage's session lock. If a lifecycle stop committed while
+            // the driver was waiting for visible advance, its verdict wins this race even though the
+            // answer itself may still be stamped as visibly delivered.
+            status: statusProtectedFromAnswer(parsed.data.status) ? parsed.data.status : 'running',
             lastAnsweredQuestionToolUseId: toolUseId,
           };
           delete next.pendingQuestion;
           return next as typeof current;
         });
-        await storage.append(id, 'interaction.answer', {
-          toolUseId,
-          confirmation: confirmation.confirmedBy,
-          answerCount: answers.length,
+        // The state stamp is the answer commit point. A best-effort audit line must never turn its
+        // successful atomic clear into a failure that recovery would misread as an open form.
+        await storage
+          .append(id, 'interaction.answer', {
+            toolUseId,
+            confirmation: confirmation.confirmedBy,
+            answerCount: answers.length,
+          })
+          .catch(() => undefined);
+      },
+      retained: async (id, question, answers, context) => {
+        const questionText = question.questions.map(item => item.question).join('\n\n');
+        const pane = context.snapshot;
+        await storage
+          .append(id, 'interaction.question_failed', {
+            action: 'answer',
+            disposition: 'retained',
+            toolUseId: question.toolUseId,
+            error: context.failure.message,
+            acceptance: context.failure.acceptance,
+            matcher: context.failure.diagnostics,
+            answerCount: answers.length,
+            questionText,
+            questions: question.questions.map(item => item.question),
+            pendingQuestion: question,
+            ...(context.snapshot === undefined ? {} : { snapshot: 'last-snapshot.txt' }),
+            ...(context.snapshotError === undefined ? {} : { snapshotError: context.snapshotError }),
+            ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
+            ...(pane === undefined
+              ? {}
+              : {
+                  pane: {
+                    alive: pane.alive,
+                    dead: pane.dead,
+                    promptReady: pane.promptReady,
+                    activeWork: pane.alive && !pane.dead && paneShowsActiveWork(pane.visible),
+                    excerpt: pane.visible.split('\n').slice(-40).join('\n').slice(-6_000),
+                  },
+                }),
+          })
+          .catch(() => undefined);
+      },
+      failed: async (id, question, answers, context) => {
+        const questionText = question.questions.map(item => item.question).join('\n\n');
+        // The service calls this boundary only after the exact form's cancellation was positively
+        // observed. An unconfirmed Escape never reaches this writer and therefore cannot erase the
+        // pending binding merely because prose would be more convenient.
+        const pane = context.cancellation?.pane ?? context.snapshot;
+        const active = pane?.alive === true && !pane.dead && paneShowsActiveWork(pane.visible);
+        const cancelledPane = context.cancellation?.pane;
+        const running =
+          cancelledPane?.alive === true &&
+          !cancelledPane.dead &&
+          !cancelledPane.promptReady &&
+          paneShowsActiveWork(cancelledPane.visible);
+        const promptReady = cancelledPane?.alive === true && !cancelledPane.dead && cancelledPane.promptReady;
+        const reason = `structured answer failed; structured form released; reply in prose to: ${questionText.replaceAll('\n', ' / ')}`;
+        await storage.updateState(id, current => {
+          const parsed = SessionStateSchema.safeParse(current);
+          if (!parsed.success)
+            throw new SessionAnswerError('failed', `session ${id} state became unreadable while releasing the form`);
+          // A newer question owns itself. Failure recovery may release only the exact tool id whose
+          // drive failed; observing that it already vanished is also a successful release.
+          if (
+            parsed.data.pendingQuestion !== undefined &&
+            parsed.data.pendingQuestion !== null &&
+            parsed.data.pendingQuestion.toolUseId !== question.toolUseId
+          )
+            return current;
+          const next: Record<string, unknown> = { ...(current as Record<string, unknown>) };
+          if (parsed.data.pendingQuestion?.toolUseId === question.toolUseId) {
+            // A concurrent lifecycle verdict is stronger than answer recovery. Release the exact
+            // form binding, but never turn a completed/stopped/failed/kill_failed session live or
+            // overwrite the reason explaining that verdict.
+            if (!statusProtectedFromAnswer(parsed.data.status)) {
+              next.status = running ? 'running' : 'awaiting_user';
+              next.health = running ? 'healthy' : 'idle';
+              next.promptReady = promptReady;
+              next.reason = reason;
+              next.lastActivityAt = clock.now();
+            }
+            next.openTools = (parsed.data.openTools ?? []).filter(tool => tool !== question.toolUseId);
+            delete next.pendingQuestion;
+          }
+          // Do not infer ownership from prose here. The ledger projector is the sole owner of an
+          // exact structured-answer attention clear, after the failed receipt has been appended.
+          return next as typeof current;
         });
+        // Both audit lines are downstream of the atomic state release and best-effort. Losing an
+        // append cannot make a successfully released question look like a failed recovery.
+        await storage
+          .append(id, 'interaction.question_failed', {
+            action: 'answer',
+            toolUseId: question.toolUseId,
+            error: context.failure.message,
+            acceptance: context.failure.acceptance,
+            matcher: context.failure.diagnostics,
+            answerCount: answers.length,
+            questionText,
+            questions: question.questions.map(item => item.question),
+            ...(context.snapshot === undefined ? {} : { snapshot: 'last-snapshot.txt' }),
+            ...(context.snapshotError === undefined ? {} : { snapshotError: context.snapshotError }),
+            ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
+            ...(pane === undefined
+              ? {}
+              : {
+                  pane: {
+                    alive: pane.alive,
+                    dead: pane.dead,
+                    promptReady: pane.promptReady,
+                    activeWork: active,
+                    excerpt: pane.visible.split('\n').slice(-40).join('\n').slice(-6_000),
+                  },
+                }),
+          })
+          .catch(() => undefined);
+        await storage
+          .append(id, 'interaction.question_cancelled', {
+            toolUseId: question.toolUseId,
+            reason: 'answer failed; structured form released for prose reply',
+            confirmedBy: context.cancellation?.confirmedBy ?? context.releaseConfirmedBy ?? 'state-release',
+            ...(context.cancellationError === undefined ? {} : { cancellationError: context.cancellationError }),
+            questionText,
+            pendingQuestion: null,
+          })
+          .catch(() => undefined);
       },
     },
-    new TmuxStructuredQuestionDriver(
-      tmux,
-      async id => SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
-      milliseconds => Bun.sleep(milliseconds),
-    ),
+    driver,
+    {
+      snapshot: async id => {
+        const pane = await tmux.state(await tmuxSession(id));
+        const text = pane.history.trim() === '' ? pane.visible : pane.history;
+        if (text.trim() !== '') await lastSnapshots.write(id, text);
+        return pane;
+      },
+      cancel: async (id, question) => await driver.cancel(id, question),
+    },
   );
-  return {
-    answer: async (reference, request) => {
-      const id = require(reference);
-      const key = `${id}:${request.requestId}`;
-      const already = settled.get(key);
-      if (already !== undefined) return already;
-      await service
-        .answer({
-          id,
-          toolUseId: request.toolUseId,
-          labels: request.labels,
-          ...(request.other === undefined ? {} : { other: request.other }),
-          ...(request.responses === undefined ? {} : { responses: request.responses }),
-          ...(request.answers === undefined ? {} : { answers: request.answers }),
-        })
-        .catch(error => {
-          if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
-          if (error instanceof SessionAnswerError) throw error;
-          throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));
-        });
+  const coordinator = new StructuredAnswerCoordinator({
+    service,
+    ledger,
+    // The answer/monitor queue supplied by the composition root. It is not STORAGE's queue: clearing
+    // the form re-enters storage, while transcript reprojection must wait out this live drive.
+    serial,
+    clock,
+    // Reconciliation reads the state document and nothing else, so an unreadable one is missing
+    // evidence rather than evidence of absence: it keeps the receipt accepted and never re-drives.
+    state: async id => {
+      const parsed = SessionStateSchema.safeParse(await storage.readState(id).catch(() => undefined));
+      return parsed.success ? parsed.data : undefined;
+    },
+    // RE-READ, never cached. The answer's outcome is that the form is settled; the view is derived
+    // state that keeps moving, and a stored copy would answer a replay with a session as it was.
+    view: async id => {
       const view = await sessions.get(id).catch(() => undefined);
       if (view === undefined)
         throw new SessionAnswerError(
           'failed',
           `session ${id} answer was confirmed but its updated documents are unreadable`,
         );
-      settled.set(key, view);
       return view;
+    },
+    // This is an advisory only after the service positively released the exact native form. It
+    // remains durable across reads and prose sends, but send/resume policy does not mistake it for
+    // an unknown modal. The original answer remains unconfirmed until the authoritative answer
+    // stamp can prove it; prose is progress, not retroactive confirmation.
+    quarantine: async (id, record) => {
+      await storage
+        .updateState(id, current => {
+          const parsed = SessionStateSchema.safeParse(current);
+          if (!parsed.success) return current;
+          const next: Record<string, unknown> = {
+            ...(current as Record<string, unknown>),
+            status: statusProtectedFromAnswer(parsed.data.status) ? parsed.data.status : 'awaiting_user',
+            needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+            // The projection's own builder, not a copy of its sentence: this first write IS one of
+            // the two messages `releasedAnswerAttentionOwnedBy` recognises, so a second literal here
+            // would be a fact with two owners — and the day they drifted, ownership would silently
+            // read false and the advisory would become undismissable.
+            needsHuman: firstWriteReleasedAnswerAttention(record.toolUseId),
+          };
+          if (parsed.data.pendingQuestion?.toolUseId === record.toolUseId) delete next.pendingQuestion;
+          return next as typeof current;
+        })
+        .catch(() => undefined);
+      await storage
+        .append(id, 'interaction.answer_unconfirmed', {
+          toolUseId: record.toolUseId,
+          requestId: record.requestId,
+          acceptedAt: record.acceptedAt,
+        })
+        .catch(() => undefined);
+    },
+  });
+  return {
+    answer: async (reference, request) => {
+      const id = require(reference);
+      return await coordinator
+        .answer({
+          id,
+          requestId: request.requestId,
+          request: {
+            toolUseId: request.toolUseId,
+            labels: request.labels,
+            ...(request.other === undefined ? {} : { other: request.other }),
+            ...(request.responses === undefined ? {} : { responses: request.responses }),
+            ...(request.answers === undefined ? {} : { answers: request.answers }),
+          },
+        })
+        .catch(error => {
+          // Three different next actions, so three different refusals: fix the request, use a fresh
+          // id, or go and look at the session. Collapsing them would tell a caller to retry in the
+          // one case where retrying is the thing that must not happen.
+          if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
+          if (error instanceof AnswerRequestConflict) throw new SessionAnswerError('conflict', error.message);
+          if (error instanceof AnswerToolAlreadyHandled) throw new SessionAnswerError('refused', error.message);
+          if (error instanceof AnswerUnconfirmed) throw new SessionAnswerError('unconfirmed', error.message);
+          if (
+            error instanceof AnswerAcknowledged ||
+            error instanceof AnswerReleased ||
+            error instanceof AnswerTerminalFailure
+          )
+            throw new SessionAnswerError('released', error.message);
+          if (error instanceof StructuredQuestionAttemptFailed) {
+            if (error.receipt === 'accepted') throw new SessionAnswerError('unconfirmed', error.message);
+            if (error.receipt === 'failed' || error.receipt === 'quarantined')
+              throw new SessionAnswerError('released', error.message);
+            throw new SessionAnswerError('failed', error.message);
+          }
+          if (error instanceof SessionAnswerError) throw error;
+          throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));
+        });
     },
   };
 }
@@ -3516,17 +3854,19 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
    *  subsystems must get the same one the world publishes rather than a second construction. */
-  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher) =>
+  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher, answerAttention, serial) =>
     new SessionResumeService(
       {
         repository: new StorageResumeRepository(storage),
         launcher,
+        answerAttention,
         turns: resumeTurns,
         monitors: new NoMonitorSupervision(),
         gate: launchGate,
-        // Its own queue: a revive must not serialize behind storage-wide work while it holds a
-        // half-replaced terminal.
-        serial: new KeyedSerialExecutor(),
+        // The session's OWN answer/monitor queue, not a private one: a dismissal must hold it from
+        // the old pane's release through the durable acknowledgement to the final clear, or a
+        // projection publishes a newer advisory into the middle of it. See the port's own field.
+        serial,
       },
       defaultSessionResumeSettings,
     );
@@ -3791,6 +4131,17 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       carriers,
       socketTickets,
     ) => {
+      // ONE durable ledger and ONE per-session queue for BOTH answer execution and monitor
+      // reprojection. Observation never waits behind a live drive: that drive owns the freshest
+      // state, and a later read/tick will project it after the key becomes idle. After a restart
+      // there is no holder, so stranded evidence honestly becomes quarantine.
+      const answerLedger = new FileAnswerLedger(id => createSessionPaths(paths, id).directory, clock);
+      // The answer, its monitor projection, released-advisory resume, and lifecycle mutation share
+      // one session key. In particular, a stop that starts after answer keys land must wait for the
+      // post-drive state commit; if the stop then records `kill_failed`, no later answer write can
+      // resurrect it. Storage keeps its own lower-level queue, so none of these operations re-enters
+      // this executor while holding it.
+      const answerSerial = sessionMutations;
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       //
@@ -3799,39 +4150,63 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // folding them into one patch is what keeps a session read at one transcript pass. Both are
       // additive over whatever the document already holds, so neither can erase the other's fields.
       const projectSessionEvidence = async (id: SessionId): Promise<void> => {
-        const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
-        // A transcript that cannot be proved belongs to this session is not a
-        // benign empty transcript.  Leave the durable state untouched: its own
-        // parser will make a damaged session read fail rather than inventing an
-        // answerable absence from missing evidence.
-        if (transcript.kind !== 'read') return;
-        const current = SessionStateSchema.safeParse(await storage.readState(id));
-        if (!current.success) return;
-        const question = structuredQuestionStatePatch(current.data, projectStructuredQuestion(transcript.events));
-        // The model the harness SAID it was using, never the one the session was launched with.
-        // Nothing else in the daemon writes these three fields, so every surface that shows a
-        // running model — the composer chips, the context window, `fy ls` — is reading this.
-        const patch = {
-          ...question,
-          ...observedRuntimeStatePatch(current.data, projectObservedRuntime(transcript.events)),
-        };
-        if (Object.keys(patch).length === 0) return;
-        await storage.updateState(id, raw => {
-          const verified = SessionStateSchema.safeParse(raw);
-          if (!verified.success) return raw;
-          const next = { ...(raw as Record<string, unknown>), ...patch };
-          // The two removals belong to the QUESTION projection alone, and are applied only when that
-          // projection had something to say. An observation says nothing about whether a question is
-          // still open — so letting a moved model erase `needsHumanKind` would clear the very
-          // quarantine a failed picker drive writes.
-          if (Object.keys(question).length > 0) {
-            if (question.pendingQuestion === undefined) delete next.pendingQuestion;
-            if (question.needsHumanKind === undefined) delete next.needsHumanKind;
-          }
-          return next as typeof raw;
+        await answerSerial.runIfIdle(id, async () => {
+          const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
+          // A transcript that cannot be proved belongs to this session is not a
+          // benign empty transcript.  Leave the durable state untouched: its own
+          // parser will make a damaged session read fail rather than inventing an
+          // answerable absence from missing evidence.
+          if (transcript.kind !== 'read') return;
+          const current = SessionStateSchema.safeParse(await storage.readState(id));
+          if (!current.success) return;
+          const projection = projectStructuredQuestion(transcript.events);
+          const answerEvidence = reconcileAnswerEvidence(await answerLedger.all(id), current.data, {
+            ...(projection.kind === 'pending' ? { activeToolUseId: projection.question.toolUseId } : {}),
+            ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
+          });
+          for (const settlement of answerEvidence.settlements) await answerLedger.append(id, settlement);
+          const answerRecords = [...answerEvidence.records.values()];
+          const observedRuntime = projectObservedRuntime(transcript.events);
+          const question = structuredQuestionStatePatch(current.data, projection, answerRecords);
+          // The model the harness SAID it was using, never the one the session was launched with.
+          // Nothing else in the daemon writes these three fields, so every surface that shows a
+          // running model — the composer chips, the context window, `fy ls` — is reading this.
+          const patch = {
+            ...question,
+            ...observedRuntimeStatePatch(current.data, observedRuntime),
+          };
+          if (Object.keys(patch).length === 0) return;
+          await storage.updateState(id, raw => {
+            const verified = SessionStateSchema.safeParse(raw);
+            if (!verified.success) return raw;
+            // Recompute under storage's session lock. A lifecycle stop can commit after the
+            // transcript read but before this transform; applying the stale patch would otherwise
+            // resurrect its `kill_failed` verdict as `awaiting_question`.
+            const currentQuestion = structuredQuestionStatePatch(verified.data, projection, answerRecords);
+            const currentPatch = {
+              ...currentQuestion,
+              ...observedRuntimeStatePatch(verified.data, observedRuntime),
+            };
+            if (Object.keys(currentPatch).length === 0) return raw;
+            const next = { ...(raw as Record<string, unknown>), ...currentPatch };
+            // Removals belong to the QUESTION projection alone and only when it explicitly names
+            // the field. A model observation must never erase a picker or answer quarantine.
+            if (Object.hasOwn(currentQuestion, 'pendingQuestion') && currentQuestion.pendingQuestion === undefined)
+              delete next.pendingQuestion;
+            if (Object.hasOwn(currentQuestion, 'needsHumanKind') && currentQuestion.needsHumanKind === undefined)
+              delete next.needsHumanKind;
+            if (Object.hasOwn(currentQuestion, 'needsHuman') && currentQuestion.needsHuman === undefined)
+              delete next.needsHuman;
+            return next as typeof raw;
+          });
         });
       };
-      const sessions = createSessionDirectorySubsystem(paths, storage, projectSessionEvidence);
+      // Ordinary reads contain projection damage per session: a broken answer ledger must not take
+      // the whole roster down. The monitor calls the raw projector below so it can report the exact
+      // failing session instead of silently flattening missing evidence.
+      const sessions = createSessionDirectorySubsystem(paths, storage, id =>
+        projectSessionEvidence(id).catch(() => undefined),
+      );
       // Originals are keyed by this daemon's durable pairing identity even
       // inside its private state home. A plaintext unlock is deliberately not a
       // storage operation: it remains in the store's process-local cache only.
@@ -3866,7 +4241,16 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // ONE resume service for this opened storage, shared by the revive and the migration: its
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
-      const resume = createSessionResume(storage, reviver);
+      const resume = createSessionResume(
+        storage,
+        reviver,
+        createResumeAnswerAttention(storage, answerLedger),
+        // THE ANSWER QUEUE ITSELF, not a private executor. Every writer of structured-answer
+        // attention already takes this key — the drives and the quarantine writer through the
+        // coordinator, the monitor's reprojection through `runIfIdle` — so handing it to resume is
+        // what makes a dismissal atomic against them from the old pane's release to the final clear.
+        answerSerial,
+      );
       // The session's own voice, over the SAME launcher the revive holds — see the subsystem's header
       // for why a second tmux adapter would misfile the final frame of every completed pane.
       // Hoisted, because the monitor loop below reads the same documents through the same narrowing:
@@ -3938,6 +4322,26 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
           nudge: new SendMonitorNudge(sends),
+          questions: {
+            reconcile: async () => {
+              const outcomes = await Promise.all(
+                storage.listSessions().map(async session => {
+                  let failure: string | undefined;
+                  try {
+                    await projectSessionEvidence(session.id);
+                  } catch (error) {
+                    failure = error instanceof Error ? error.message : String(error);
+                  }
+                  return [session.id, failure] as const;
+                }),
+              );
+              const failures = new Map<string, string>();
+              for (const [id, failure] of outcomes) {
+                if (failure !== undefined) failures.set(id, failure);
+              }
+              return failures;
+            },
+          },
           clock,
           wallClock: { nowMs: () => Date.now() },
           // A duration, so it is read off a clock that cannot step: a wall-clock jump would otherwise
@@ -4095,7 +4499,15 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
-        sessionAnswer: createSessionAnswerSubsystem(storage, sessions, launchTmux),
+        sessionAnswer: createSessionAnswerSubsystem(
+          storage,
+          sessions,
+          launchTmux,
+          clock,
+          answerLedger,
+          answerSerial,
+          lastSnapshots,
+        ),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRuntime: new SessionRuntimeControlService({

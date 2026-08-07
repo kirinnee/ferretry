@@ -1,13 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId, type ClockPort, type SessionId } from '../../../../src/lib/index.ts';
+import { type ClockPort, parseSessionId, type SessionId } from '../../../../src/lib/index.ts';
 import {
-  SessionMonitorService,
   defaultSessionMonitorSettings,
   type MonitorMonotonicClock,
   type MonitorNudge,
+  type MonitorQuestions,
   type MonitorWaits,
   type ParkedSession,
+  SessionMonitorService,
   type WaitExpiry,
   type WaitHeartbeat,
   type WaitHeartbeatSink,
@@ -85,6 +86,18 @@ class FakeNudge implements MonitorNudge {
   }
 }
 
+class FakeQuestions implements MonitorQuestions {
+  calls = 0;
+  failures = new Map<string, string>();
+  error: unknown;
+
+  async reconcile(): Promise<ReadonlyMap<string, string>> {
+    this.calls += 1;
+    if (this.error !== undefined) throw this.error;
+    return this.failures;
+  }
+}
+
 class StepClock implements MonitorMonotonicClock, ClockPort {
   constructor(private elapsed = 0) {}
 
@@ -105,13 +118,14 @@ function build(roster: readonly ParkedSession[], nowMs = SINCE_MS + 1_000) {
   const waits = new FakeWaits(roster);
   const heartbeats = new FakeHeartbeats();
   const nudge = new FakeNudge();
+  const questions = new FakeQuestions();
   const clock = new StepClock();
   const wall = { nowMs: () => nowMs };
   const service = new SessionMonitorService(
-    { waits, heartbeats, nudge, clock, wallClock: { nowMs: () => wall.nowMs() }, monotonic: clock },
+    { waits, heartbeats, nudge, questions, clock, wallClock: { nowMs: () => wall.nowMs() }, monotonic: clock },
     SETTINGS,
   );
-  return { service, waits, heartbeats, nudge, clock, wall };
+  return { service, waits, heartbeats, nudge, questions, clock, wall };
 }
 
 describe('one tick over the parks this daemon holds', () => {
@@ -182,6 +196,39 @@ describe('one tick over the parks this daemon holds', () => {
   it('reports no gap before its first tick, because there is nothing to measure from', async () => {
     const { service } = build([]);
     should((await service.tick()).sinceLastTickMs).be.undefined();
+  });
+
+  it('reconciles structured-question evidence on every tick even when nothing is parked', async () => {
+    const { service, questions } = build([]);
+
+    await service.tick();
+    await service.tick();
+
+    should(questions.calls).equal(2);
+  });
+
+  it('merges per-session question failures without overwriting an earlier wait failure', async () => {
+    const { service, heartbeats, questions } = build([parked(ONE), parked(TWO)]);
+    heartbeats.error = new Error('heartbeat failed');
+    questions.failures = new Map([
+      [ONE, 'question failure hidden by the earlier failure'],
+      ['session-3', 'answer ledger unreadable'],
+    ]);
+
+    const report = await service.tick();
+
+    should(report.failures.get(ONE)).equal('heartbeat failed');
+    should(report.failures.get('session-3')).equal('answer ledger unreadable');
+  });
+
+  it('treats a whole-planner question failure as a failed tick without fabricating a session id', async () => {
+    const { service, questions } = build([]);
+    service.arm();
+    questions.error = new Error('question planner unavailable');
+
+    await should(service.tick()).be.rejectedWith(/question planner unavailable/u);
+
+    should(service.health()).match({ ticks: 0, consecutiveFailures: 1, lastFailure: 'question planner unavailable' });
   });
 });
 

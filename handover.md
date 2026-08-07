@@ -165,6 +165,27 @@ paths are refused, escaping/in-tree/broken symlinks are not served, oversized fi
 read, tree swaps fail closed, and vanished entries do not crash enumeration. Attachments use their
 separate daemon-scoped path and retain their existing validation and composer behavior.
 
+**#20 stays open, and what is left is named rather than implied.** The flow is now real end to end:
+a transcript `AskUserQuestion` becomes a `pendingQuestion` on the session document, the browser
+renders it, `POST /v1/sessions/:id/answer` drives the exact rendered form, and the durable state is
+cleared only after the pane visibly advanced. What this pass added is that the answer is now
+performed **at most once per logical request**: one dedicated per-session queue is held across the
+pending re-read, the drive and the clear; an identical retry joins the operation already running
+instead of typing a second time; the same request id carrying a different answer is refused before
+any key; and the receipt is durable, so a lost response or a daemon restart replays the settled
+answer rather than re-driving the form. An answer that was admitted and cannot be proved either way
+is quarantined for a person, never retried — repeating arrow and `Enter` into a selector that has
+since moved would answer something nobody chose.
+
+Two things are still outstanding and neither is cosmetic. **Question discovery is a side effect of
+reading a session**, so the browser's poll is what materializes a question and a direct API client
+must happen to read first; making it a transcript reconciliation on the monitor tick is a mounted
+subsystem of its own. **A failed answer strands the session**: the original product snapshotted the
+pane, drove the form back out of the way and told the human to reply in prose, and none of that is
+ported — so a drive that fails leaves the question pending, and a pending question makes every
+subsequent send refuse. That needs the pane-matcher family the migration survey lists as GAP, which
+is also what the bound abandon on `interrupt` is waiting for.
+
 ## 🚨 Attention, notifications & warden
 
 Human intervention should be obvious, brief, and genuinely necessary.

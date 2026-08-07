@@ -98,13 +98,20 @@ describe('QuestionForm', () => {
     ]);
   });
 
-  test('keeps the form usable after a failed response', async () => {
+  // THE RETRY MUST CARRY THE SAME KEY, and that is not a cosmetic detail about this component: the
+  // daemon joins a retried answer to the attempt already in flight, and replays a settled one, by
+  // this exact string. A freshly minted id on the second submit would present the daemon with a
+  // second, unrelated answer and drive the live form a second time. So the id is asserted here, at
+  // the only place that decides it.
+  test('keeps the form usable after a failed response and retries under the identical request id', async () => {
     let attempts = 0;
+    const requestIds: unknown[] = [];
     const form = render(
       <QuestionForm
         api={{
-          answer: async () => {
+          answer: async (_daemon, _sessionId, _toolUseId, _labels, _other, _responses, _answers, requestId) => {
             attempts += 1;
+            requestIds.push(requestId);
             if (attempts === 1) throw new Error('offline');
           },
         }}
@@ -124,6 +131,8 @@ describe('QuestionForm', () => {
       await Promise.resolve();
     });
     expect(attempts).toBe(2);
+    expect(requestIds).toEqual(['question:daemon-a:retry-session:retry', 'question:daemon-a:retry-session:retry']);
+    expect(requestIds[0]).toBe(requestIds[1]);
   });
 
   test('makes Other exclusive, renders its text field, and submits its trimmed value', async () => {
