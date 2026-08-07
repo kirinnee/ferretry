@@ -33,9 +33,22 @@
         "harness/screenshot.ts",
         "harness/app-screenshot.ts",
         "harness/main.tsx",
-        "harness/tasks-pane-benchmark.tsx"
+        "harness/tasks-pane-benchmark.tsx",
+        "harness/fy-render-safari/probe.ts",
+        "harness/fy-render-safari/parent.ts",
+        "harness/fy-render-safari/probe-shell.ts",
+        "scripts/build-fy-render-libs.ts",
+        "scripts/fy-render-shell/bootstrap.ts",
+        "scripts/fy-render-shell/mermaid-entry.ts",
+        "scripts/fy-render-shell/lottie-entry.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "harness/**/*.{ts,tsx}", "vite.config.ts"]
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "tests/**/*.{ts,tsx}",
+        "harness/**/*.{ts,tsx}",
+        "scripts/**/*.ts",
+        "vite.config.ts"
+      ]
     }
   },
   "rules": {
