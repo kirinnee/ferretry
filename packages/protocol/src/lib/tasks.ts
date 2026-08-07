@@ -293,9 +293,10 @@ const StatusTaskActivitySchema = z
     const attestations = Number(approval) + Number(humanVerification) + Number(topAgentVerification);
     const statusAndPhaseAgree =
       (data.from === 'blocked' || TASK_STATUS_PHASE[data.from] === data.phaseFrom) &&
-      (data.to === 'blocked' || TASK_STATUS_PHASE[data.to] === data.phaseTo);
-    // `blocked` deliberately overlays a task's phase, so a blocked live task completes as
-    // `status: blocked → done` while its semantic transition remains `phase: live → done`.
+      (data.to === 'blocked' ? data.phaseTo === data.phaseFrom : TASK_STATUS_PHASE[data.to] === data.phaseTo);
+    // `blocked` deliberately overlays a task's source phase, so a blocked live task completes as
+    // `status: blocked → done` while its semantic transition remains `phase: live → done`. A
+    // blocked destination is an in-place manual block and therefore cannot advance the phase.
     const completion = statusAndPhaseAgree && data.phaseFrom === 'live' && data.phaseTo === 'done';
     const approvedWorkflowMove =
       (data.phaseFrom === 'research' && (data.phaseTo === 'design' || data.phaseTo === 'done')) ||

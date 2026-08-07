@@ -537,6 +537,59 @@ describe('task schemas', () => {
     for (const value of values) should(tasks.TaskActivitySchema.parse(value)).deepEqual(value);
   });
 
+  it('should preserve blocked completion overlays and reject blocked destinations that advance phase', () => {
+    const reason = 'completed while manually blocked';
+    const attestations = [
+      { name: 'human', actor: 'user', evidence: { verifiedByHuman: true } },
+      {
+        name: 'top-agent',
+        actor: 'peer:session-1',
+        evidence: {
+          verifiedByTopAgent: true,
+          authorization: {
+            boardId: 'board-1',
+            grantId: 'grant-1',
+            sessionId: 'session-1',
+            targetSessionId: 'session-1',
+            role: 'top_agent',
+            boardEpoch: 1,
+            coordinatorEpoch: 1,
+            runtimeGeneration: 1,
+            action: 'mark_done',
+            requestId: 'completion-1',
+            requestFingerprint: { action: 'phase', phase: 'done', reason },
+          },
+        },
+      },
+    ] as const;
+    const contradictoryCases: SchemaCase[] = [];
+
+    for (const { name, actor, evidence } of attestations) {
+      const completion = {
+        ...activityBase,
+        actor,
+        type: 'status',
+        data: {
+          from: 'blocked',
+          to: 'done',
+          phaseFrom: 'live',
+          phaseTo: 'done',
+          reason,
+          ...evidence,
+          attestationSemantics: tasks.ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+        },
+      };
+      should(tasks.TaskActivitySchema.parse(completion)).deepEqual(completion);
+      contradictoryCases.push({
+        name: `${name} blocked destination advancing phase`,
+        schema: tasks.TaskActivitySchema,
+        value: { ...completion, data: { ...completion.data, to: 'blocked' } },
+      });
+    }
+
+    assertRejects(contradictoryCases);
+  });
+
   it('should resolve every task action member', () => {
     // Arrange
     const values = [
