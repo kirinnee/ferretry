@@ -8,7 +8,9 @@
  *
  * WHAT ARRIVES HERE, IN ORDER OF HOW OFTEN IT HAPPENS. The design's pairing
  * flow (`docs/design/split-proposal.md` §5) puts the daemon's QR in the
- * terminal and on a loopback page, and the QR encodes a link to `/pair#v1;…`.
+ * terminal and on a loopback page, and the QR encodes a link to `/pair#v1;…` —
+ * one form, whether the device will reach the daemon at that address or fall back
+ * to the rendezvous this build discovers for itself (`docs/relay-protocol.md` §14).
  * So the common arrival is a phone's ORDINARY camera app opening this page
  * already carrying the code, and this screen's job there is a confirmation, not
  * a form. A cold open gets the camera button. Paste is the last-resort path and
@@ -31,6 +33,7 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
+import { RelayPairingRefusedError } from '../../lib/relay-session.ts';
 import { BrandMark } from '../../shell/brand-mark.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 
@@ -85,7 +88,26 @@ type Stage =
   | { readonly kind: 'confirm'; readonly seed: PairingSeed }
   | { readonly kind: 'pairing'; readonly seed: PairingSeed }
   | { readonly kind: 'paired'; readonly host: string }
-  | { readonly kind: 'failed'; readonly message: string };
+  | { readonly kind: 'failed'; readonly message: string; readonly cause: PairingFailureCause };
+
+/**
+ * WHY A REDEMPTION FAILED, AS THE ONLY TWO ANSWERS THAT LEAD ANYWHERE DIFFERENT.
+ *
+ * `docs/relay-protocol.md` §14 draws exactly this line and says how a client keeps it: "A sealed
+ * `pair-refused` is the opposite: the exchange happened, the answer is final for that attempt, and
+ * the remedy is the direct route's own sentence — the code is wrong, expired or spent; mint a fresh
+ * one. A client must keep the two apart, and it can do so structurally: one arrives as a close
+ * outside the channel, the other as a record inside it."
+ *
+ * `refusal` therefore means the DAEMON judged this code, and the remedy is a fresh code.
+ * `transport` means nothing reached the daemon at all, and telling that reader to mint a new code
+ * would send them to redo the one thing that was not the problem.
+ *
+ * There is deliberately no third value for "which refusal". §14 gives one machine reason for every
+ * cause because a pre-auth surface the whole internet can reach must not be an oracle, and a screen
+ * that branched further would be asking for a distinction the wire does not carry.
+ */
+export type PairingFailureCause = 'refusal' | 'transport';
 
 const BROWSE: Stage = { kind: 'browse' };
 
@@ -95,7 +117,7 @@ const connectionName = (connection: DaemonConnectionRecord): string => connectio
 const initialStage = (arrival: PairingArrival): Stage => {
   if (arrival.kind === 'seed') return { kind: 'confirm', seed: arrival.seed };
   if (arrival.kind === 'unreadable')
-    return { kind: 'failed', message: `This pairing link is damaged: ${arrival.reason}.` };
+    return { kind: 'failed', message: `This pairing link is damaged: ${arrival.reason}.`, cause: 'transport' };
   return BROWSE;
 };
 
@@ -131,7 +153,7 @@ export function PairingScreen({
     try {
       setStage({ kind: 'confirm', seed: pairingSeedFromUrl(text.trim()) });
     } catch {
-      setStage({ kind: 'failed', message: 'That is not a Ferretry pairing link.' });
+      setStage({ kind: 'failed', message: 'That is not a Ferretry pairing link.', cause: 'transport' });
     }
   }, []);
 
@@ -160,6 +182,11 @@ export function PairingScreen({
       setStage({
         kind: 'failed',
         message: reason instanceof Error ? reason.message : 'Could not pair with that daemon.',
+        // A sealed refusal arrives as its own class from the exchange, which is the structural
+        // distinction §14 asks for. Everything else — a rendezvous nobody holds, a busy one, a
+        // network that went away mid-attempt — is transport, and a reader whose real problem is
+        // their network must not be told to go and mint another code.
+        cause: reason instanceof RelayPairingRefusedError ? 'refusal' : 'transport',
       });
     }
   };
@@ -183,7 +210,7 @@ export function PairingScreen({
 
   const first = connections.length === 0;
   return (
-    <PairingFrame embedded={embedded}>
+    <PairingFrame embedded={embedded} stage="browse">
       {!embedded && (
         <header className="min-w-0">
           <div className="flex items-center gap-2 text-accent">
@@ -267,7 +294,7 @@ export function PairingScreen({
               autoComplete="off"
               className="h-control w-full rounded-control border border-border bg-surface-2 px-control-x font-mono text-meta text-fg placeholder:text-faint focus:border-accent"
               onChange={event => setLink(event.target.value)}
-              placeholder="https://…/pair#v1;…"
+              placeholder="https://…/pair#…"
               spellCheck={false}
               value={link}
             />
@@ -315,20 +342,29 @@ export function PairingScreen({
 
 interface PairingFrameProps {
   readonly embedded: boolean;
+  /**
+   * Where the reader is, as a machine-readable value on the housing.
+   *
+   * FOR TESTS AND FOR HARNESSES, NOT FOR STYLING. The compiled-binary browser proof has to know that
+   * a pairing SUCCEEDED — as durable product state, not a toast that disappears before an assertion
+   * can see it — and matching on copy or a class name makes every rewording a broken harness. One
+   * attribute, one vocabulary, and it is the `Stage` union's own `kind` so the two cannot drift.
+   */
+  readonly stage: Stage['kind'];
   readonly children: ReactNode;
 }
 
 /** The housing, and the only thing the embedded seam actually changes. */
-function PairingFrame({ embedded, children }: PairingFrameProps) {
+function PairingFrame({ embedded, stage, children }: PairingFrameProps) {
   if (embedded) {
     return (
-      <section className={EMBEDDED_SHELL} aria-label="Pair this device">
+      <section className={EMBEDDED_SHELL} aria-label="Pair this device" data-pairing-stage={stage}>
         {children}
       </section>
     );
   }
   return (
-    <main className={SHELL} aria-labelledby="pairing-title">
+    <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
       {children}
     </main>
   );
@@ -395,7 +431,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
     : 'm-0 font-display text-display font-bold tracking-display text-fg';
   if (stage.kind === 'paired') {
     return (
-      <PairingFrame embedded={embedded}>
+      <PairingFrame embedded={embedded} stage="paired">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <span
             className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-ok bg-ok-bg text-ok"
@@ -416,16 +452,31 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
 
   if (stage.kind === 'failed') {
     return (
-      <PairingFrame embedded={embedded}>
+      <PairingFrame embedded={embedded} stage="failed">
         <Title id="pairing-title" className={titleClass}>
           Pairing failed
         </Title>
-        <p className="m-0 text-ui leading-base text-err" role="alert">
+        <p className="m-0 text-ui leading-base text-err" role="alert" data-pairing-failure={stage.cause}>
           {stage.message}
         </p>
+        {/*
+          ONE REMEDY PER REASON, which is this repository's doctrine and here it is also §14's.
+          A daemon that judged the code wants a fresh code; a redemption that never reached one wants
+          the reader to look at their network, and telling them to mint again would send them to redo
+          the only step that was working.
+        */}
         <p className="m-0 text-meta leading-base text-muted">
-          Pairing codes are single-use and short-lived. Run <code className="font-mono">fy pair</code> again for a fresh
-          one.
+          {stage.cause === 'refusal' ? (
+            <>
+              Pairing codes are single-use and short-lived. Run <code className="font-mono">fy pair</code> again for a
+              fresh one.
+            </>
+          ) : (
+            <>
+              Nothing reached that daemon, so its code is probably still good. Check that the machine is awake and on a
+              network this device can reach, then try the same link again.
+            </>
+          )}
         </p>
         <button
           type="button"
@@ -442,7 +493,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
   const { seed } = stage;
   const busy = stage.kind === 'pairing';
   return (
-    <PairingFrame embedded={embedded}>
+    <PairingFrame embedded={embedded} stage={stage.kind}>
       <header className="min-w-0">
         {!embedded && (
           <div className="mb-2 flex items-center gap-2 text-accent">
@@ -466,10 +517,18 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocu
         </p>
       </section>
 
+      {/*
+        `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
+        by identity rather than by position or by a design-system attribute. Both fallbacks are
+        wrong for the same reason in different ways: the first structural button on this screen is a
+        NAVIGATION control, and `data-variant="primary"` is a styling choice a restyle may take away
+        while leaving a journey silently pressing nothing.
+      */}
       <button
         type="button"
         className="kt-btn min-h-[64px] w-full text-title"
         data-variant="primary"
+        data-pair-confirm=""
         onClick={() => onPair(seed)}
         disabled={busy}
       >

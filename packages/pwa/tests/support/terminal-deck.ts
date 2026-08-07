@@ -11,6 +11,7 @@
 
 import type { TerminalListView, TerminalView } from '@ferretry/protocol';
 import type { TerminalDeckDependencies } from '../../src/components/session-terminal-deck.tsx';
+import type { TerminalStream, TerminalStreamHandlers } from '../../src/lib/web-terminals.ts';
 
 export const terminalView = (id: string, patch: Partial<TerminalView> = {}, sessionId = 'shared'): TerminalView => ({
   id,
@@ -50,23 +51,23 @@ export interface FakeDeck {
   confirm: boolean;
 }
 
-/** Just enough WebSocket for the deck: listeners, a send log and a close. */
+/**
+ * One attached stream, on whichever carrier — a `TerminalStream` plus a way to drive its handlers.
+ *
+ * IT IS NOT A `WebSocket` ANY MORE, and keeping the `emit(type, event)` shape is deliberate: the
+ * deck's behaviour under open, output, close and refusal is the same question it always was, and
+ * only the transport underneath it changed. So the cases keep reading the way they did while the
+ * thing being driven is the carrier-neutral port both a socket and a §14 stream session satisfy.
+ */
 class FakeSocket {
   readyState = 0;
-  binaryType = 'blob';
   readonly sent: unknown[] = [];
   readonly closes: { code: number; reason: string }[] = [];
-  private readonly listeners = new Map<string, ((event: never) => void)[]>();
 
-  constructor(readonly url: string) {}
-
-  addEventListener(type: string, listener: (event: never) => void): void {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
-  }
-
-  removeEventListener(): void {
-    // The deck removes nothing from a socket; it closes the whole socket.
-  }
+  constructor(
+    readonly url: string,
+    private readonly handlers: TerminalStreamHandlers,
+  ) {}
 
   send(payload: unknown): void {
     this.sent.push(payload);
@@ -77,10 +78,38 @@ class FakeSocket {
     this.closes.push({ code, reason });
   }
 
-  /** Drives the socket as the daemon would. */
+  /** The port the deck holds. */
+  stream(): TerminalStream {
+    return {
+      write: bytes => this.send(bytes),
+      control: text => this.send(text),
+      close: (code, reason) => this.close(code, reason),
+    };
+  }
+
+  /** Drives the stream as the daemon would. */
   emit(type: string, event: unknown = {}): void {
-    if (type === 'open') this.readyState = 1;
-    for (const listener of this.listeners.get(type) ?? []) (listener as (value: unknown) => void)(event);
+    if (type === 'open') {
+      this.readyState = 1;
+      this.handlers.onOpen();
+      return;
+    }
+    if (type === 'message') {
+      const data = (event as { readonly data?: unknown }).data;
+      if (data instanceof ArrayBuffer) this.handlers.onBytes(new Uint8Array(data));
+      return;
+    }
+    if (type === 'close') {
+      const closed = event as { readonly code?: number; readonly reason?: string };
+      this.handlers.onClosed(closed.code ?? 1000, closed.reason ?? '');
+      return;
+    }
+    if (type === 'refused') {
+      const refused = event as { readonly status?: number; readonly body?: string };
+      this.handlers.onRefused(refused.status ?? 403, refused.body ?? '');
+    }
+    // `error` has no port equivalent on purpose: a socket's error is always followed by its close,
+    // and the close is what carries the taxonomy and owns the retry decision.
   }
 }
 
@@ -112,15 +141,12 @@ export const fakeDeck = (
       deck.closed.push(id);
       return { closed: true, id };
     },
-    streamUrl: async (daemon, scope, id) => {
+    attach: async (daemon, scope, id, handlers) => {
       const url = `wss://${daemon.daemonId}/v1/sessions/${scope.sessionId}/terminals/${id}/stream?ticket=t`;
       deck.urls.push(url);
-      return url;
-    },
-    openSocket: url => {
-      const socket = new FakeSocket(url);
+      const socket = new FakeSocket(url, handlers);
       deck.sockets.push(socket);
-      return socket as unknown as WebSocket;
+      return socket.stream();
     },
     // A real emulator in happy-dom is slow and unreliable, and none of these
     // tests are about xterm's rendering — they are about what the deck does

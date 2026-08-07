@@ -563,4 +563,233 @@ describe('file daemon snapshot store', () => {
     should(() => store({ root: 'relative' })).throw(/snapshot root must be a non-root absolute path/u);
     should(() => store({ root: '/' })).throw(/snapshot root must be a non-root absolute path/u);
   });
+
+  /**
+   * The cheap inventory the daemon lifecycle reconciles garbage-collection roots against.
+   *
+   * It answers a different question from `list()` and therefore makes different promises: it names
+   * snapshots rather than proving them, and one entry it cannot trust becomes a sentence rather than a
+   * throw. Both properties are load-bearing — a verifying, all-or-nothing listing on the critical path
+   * of every mutating verb meant one interrupted build disabled the whole lifecycle surface, and
+   * `restart` stopped the daemon before it discovered the problem.
+   */
+  describe('retained inventory', () => {
+    /** What an interrupted build leaves: the address reserved, the files not yet moved in. */
+    async function interruptedBuild(id: string): Promise<string> {
+      // A real build creates the complete managed container before it reserves an address. Tests for
+      // one bad entry must not accidentally be tests for a missing store-level staging directory.
+      await mkdir(join(root, 'staging'), { recursive: true, mode: 0o700 });
+      const path = join(root, 'snapshots', id);
+      await mkdir(path, { recursive: true, mode: 0o700 });
+      return path;
+    }
+
+    it('should name every retained snapshot and its source without proving any of them', async () => {
+      // Arrange
+      const subject = store();
+      const first = await subject.build();
+      await writeExecutable('#!/bin/sh\necho second\n');
+      const second = await subject.build();
+
+      // Act
+      const inventory = await subject.retained();
+
+      // Assert
+      should(inventory.complete).be.true();
+      should(inventory.unreadable).be.empty();
+      should([...inventory.snapshots].sort((left, right) => left.id.localeCompare(right.id))).deepEqual(
+        [
+          { id: first.id, sourceBinary: source },
+          { id: second.id, sourceBinary: source },
+        ].sort((left, right) => left.id.localeCompare(right.id)),
+      );
+    });
+
+    it('should not verify the executable, which is what makes it cheap enough to run every time', async () => {
+      // Arrange — the same snapshot the verifying listing refuses, because reconciliation needs a
+      // closure named, never an executable proven. Digesting every retained binary made `start` cost
+      // more the longer a host had been building snapshots.
+      const subject = store();
+      const built = await subject.build();
+      await makeWritable(join(built.binaryPath, '..'));
+      await writeFile(built.binaryPath, '#!/bin/sh\necho tampered\n');
+      await chmod(built.binaryPath, 0o555);
+      await chmod(join(built.binaryPath, '..', 'manifest.json'), 0o444);
+      await chmod(join(built.binaryPath, '..'), 0o555);
+
+      // Act
+      const inventory = await subject.retained();
+
+      // Assert — and `list()`, the operator report, still refuses it.
+      should(inventory.snapshots).deepEqual([{ id: built.id, sourceBinary: source }]);
+      should(inventory.complete).be.true();
+      await should(subject.list()).be.rejectedWith(/does not match its snapshot manifest/u);
+    });
+
+    it('should skip an interrupted build beside a healthy snapshot and say the set is incomplete', async () => {
+      // Arrange — `build` reserves the content address before it moves its files in, and no later
+      // build repairs what a kill in that window leaves. This is the entry that used to take the
+      // whole lifecycle down.
+      const subject = store();
+      const healthy = await subject.build();
+      const damaged = await interruptedBuild(`sha256-${'a'.repeat(64)}`);
+
+      // Act
+      const inventory = await subject.retained();
+
+      // Assert — the healthy snapshot is still named, so its closure is still held.
+      should(inventory.snapshots).deepEqual([{ id: healthy.id, sourceBinary: source }]);
+      should(inventory.complete).be.false();
+      should(inventory.unreadable).deepEqual([
+        {
+          path: damaged,
+          reason: `could not be trusted: ${damaged} is mutable; snapshots must be read-only`,
+        },
+      ]);
+      await should(subject.list()).be.rejectedWith(/is mutable/u);
+    });
+
+    it.each([
+      { name: 'a manifest that is not JSON', contents: 'not json at all', expected: /cannot parse/u },
+      {
+        name: 'a manifest of a shape this store never wrote',
+        contents: JSON.stringify({ version: 2, id: 'whatever' }),
+        expected: /invalid daemon snapshot manifest/u,
+      },
+      {
+        name: 'a manifest for a different snapshot',
+        contents: JSON.stringify({
+          version: 1,
+          daemon: DAEMON,
+          id: `sha256-${'c'.repeat(64)}`,
+          digest: 'c'.repeat(64),
+          bytes: 12,
+          sourceBinary: '/opt/fy/bin/fyd',
+          createdAt: '2026-08-04T12:00:00.000Z',
+        }),
+        expected: /does not identify snapshot/u,
+      },
+      {
+        name: 'a digest that disagrees with its content address',
+        contents: JSON.stringify({
+          version: 1,
+          daemon: DAEMON,
+          id: `sha256-${'b'.repeat(64)}`,
+          digest: 'c'.repeat(64),
+          bytes: 12,
+          sourceBinary: '/opt/fy/bin/fyd',
+          createdAt: '2026-08-04T12:00:00.000Z',
+        }),
+        expected: /does not identify snapshot/u,
+      },
+      {
+        name: 'a relative source executable',
+        contents: JSON.stringify({
+          version: 1,
+          daemon: DAEMON,
+          id: `sha256-${'b'.repeat(64)}`,
+          digest: 'b'.repeat(64),
+          bytes: 12,
+          sourceBinary: 'relative/fyd',
+          createdAt: '2026-08-04T12:00:00.000Z',
+        }),
+        expected: /does not identify snapshot/u,
+      },
+      { name: 'no manifest at all', contents: undefined, expected: /could not be trusted/u },
+    ])('should skip an entry with $name', async ({ contents, expected }) => {
+      // Arrange
+      const id = `sha256-${'b'.repeat(64)}`;
+      const path = await interruptedBuild(id);
+      if (contents !== undefined) await writeFile(join(path, 'manifest.json'), contents, { mode: 0o444 });
+      await chmod(path, 0o555);
+
+      // Act
+      const inventory = await store().retained();
+
+      // Assert
+      should(inventory.snapshots).be.empty();
+      should(inventory.complete).be.false();
+      should(inventory.unreadable[0]?.reason).match(expected);
+    });
+
+    it('should skip an entry whose name is not a content address, and a file among the directories', async () => {
+      // Arrange
+      await mkdir(join(root, 'snapshots'), { recursive: true, mode: 0o700 });
+      await mkdir(join(root, 'staging'), { mode: 0o700 });
+      await mkdir(join(root, 'snapshots', 'not-a-snapshot'), { mode: 0o555 });
+      await writeFile(join(root, 'snapshots', `sha256-${'d'.repeat(64)}`), 'a file, not a snapshot');
+
+      // Act
+      const inventory = await store().retained();
+
+      // Assert
+      should(inventory.snapshots).be.empty();
+      should(inventory.unreadable).have.length(2);
+      should(
+        inventory.unreadable.every(issue => issue.reason.includes('is not a daemon snapshot directory')),
+      ).be.true();
+    });
+
+    it('should report a store that has never been built as complete and empty', async () => {
+      // Arrange — the ordinary first-run state. Calling it incomplete would stop a fresh host from
+      // ever releasing a root, and there is nothing there to be wrong about.
+      await resetStore();
+
+      // Act
+      const inventory = await store().retained();
+
+      // Assert
+      should(inventory).deepEqual({ snapshots: [], complete: true, unreadable: [] });
+    });
+
+    it('should distrust a present store root whose snapshots child is missing', async () => {
+      // Arrange — only an absent managed root is genuinely fresh. Once the root exists, missing
+      // structure may be interrupted or damaged durable state and cannot authorize root release.
+      await resetStore();
+      await mkdir(join(root, 'staging'), { recursive: true, mode: 0o700 });
+
+      // Act
+      const inventory = await store().retained();
+
+      // Assert
+      should(inventory.snapshots).be.empty();
+      should(inventory.complete).be.false();
+      should(inventory.unreadable[0]?.reason).match(/exists without its snapshots directory/u);
+    });
+
+    it('should distrust a symlink standing where the managed snapshots directory belongs', async () => {
+      // Arrange — following this link could make an unrelated empty directory look like a complete
+      // empty inventory and release every root belonging to the real damaged store.
+      await resetStore();
+      const elsewhere = join(directory, 'unmanaged-snapshots');
+      await mkdir(root, { recursive: true, mode: 0o700 });
+      await mkdir(join(root, 'staging'), { mode: 0o700 });
+      await mkdir(elsewhere, { mode: 0o700 });
+      await symlink(elsewhere, join(root, 'snapshots'), 'dir');
+
+      // Act
+      const inventory = await store().retained();
+
+      // Assert
+      should(inventory.snapshots).be.empty();
+      should(inventory.complete).be.false();
+      should(inventory.unreadable[0]?.reason).match(/snapshots is not a real directory/u);
+    });
+
+    it('should report a store it cannot read at all as incomplete rather than throwing', async () => {
+      // Arrange — a FILE where the snapshots directory belongs. Reconciliation is a safety net for a
+      // rollback that might happen later; the daemon in front of the operator has to keep working.
+      await resetStore();
+      await mkdir(root, { recursive: true, mode: 0o700 });
+      await writeFile(join(root, 'snapshots'), 'not a directory');
+
+      // Act
+      const inventory = await store().retained();
+
+      // Assert
+      should(inventory.snapshots).be.empty();
+      should(inventory.complete).be.false();
+      should(inventory.unreadable[0]?.reason).match(/store structure could not be trusted/u);
+    });
+  });
 });

@@ -21,6 +21,7 @@ import {
 import { SessionDetails } from '../../components/session-details.tsx';
 import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
+import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
@@ -104,6 +105,14 @@ export interface SessionChatPageProps {
   readonly onRefresh?: () => void;
   /** Test seam for the read-only terminal fallback. */
   readonly readSnapshot?: PaneSnapshotReader;
+  /**
+   * The terminal deck's dependencies, bound to this daemon's carrier by the composition root.
+   *
+   * Threaded rather than defaulted inside the deck because the carrier lives in the app store, and a
+   * component that reached for the store itself could not be mounted by a test without one. Absent
+   * here means the deck's own browser default — direct-only, which is what a suite wants.
+   */
+  readonly deck?: TerminalDeckDependencies;
   /**
    * This daemon's own fleet slice, for proving `:callsign` references.
    * `undefined` means the fleet has not been read yet — deliberately NOT an
@@ -202,6 +211,14 @@ interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
   readonly daemonSessions?: readonly SessionView[];
   readonly onNavigate?: (to: string) => void;
   readonly readSnapshot?: PaneSnapshotReader;
+  /**
+   * The terminal deck's dependencies, bound to this daemon's carrier by the composition root.
+   *
+   * Threaded rather than defaulted inside the deck because the carrier lives in the app store, and a
+   * component that reached for the store itself could not be mounted by a test without one. Absent
+   * here means the deck's own browser default — direct-only, which is what a suite wants.
+   */
+  readonly deck?: TerminalDeckDependencies;
   /** The one reference surface this session reads with, files included. */
   readonly references: ReferenceSurface;
   /**
@@ -218,6 +235,7 @@ function WorkspaceSurface({
   daemonSessions,
   onNavigate,
   readSnapshot,
+  deck,
   references,
   skills,
   scope,
@@ -280,6 +298,7 @@ function WorkspaceSurface({
         connection={connection}
         scope={scope}
         {...(readSnapshot === undefined ? {} : { readSnapshot })}
+        {...(deck === undefined ? {} : { deck })}
         {...(tab.instance?.kind === 'terminal' ? { focusTerminalId: tab.instance.key } : {})}
       />
     );
@@ -342,6 +361,7 @@ export function SessionChatPage({
   onSessionChange,
   onRefresh,
   readSnapshot,
+  deck,
   daemonSessions,
   onNavigate,
 }: SessionChatPageProps) {
@@ -619,6 +639,7 @@ export function SessionChatPage({
           {...(daemonSessions === undefined ? {} : { daemonSessions })}
           {...(onNavigate === undefined ? {} : { onNavigate })}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
+          {...(deck === undefined ? {} : { deck })}
         />
       )}
     >

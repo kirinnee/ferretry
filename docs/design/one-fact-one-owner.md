@@ -345,23 +345,34 @@ directions.
 > becomes the rule.** `host` has three interesting values — loopback, wildcard, a real address — and a
 > rule checked against one of them is a third of a rule.
 
-### 2.6 The relay does not rescue this, and that is load-bearing
+### 2.6 The relay does not rescue the ADDRESS, and that is load-bearing
 
-cinthia's constraint, from the relay unit they shipped:
+cinthia's constraint, from the relay unit they shipped, as it stood when this was written:
 
 > **PAIRING CAN NEVER BE RELAYED.** A relayed session is opened with the device grant `POST /v1/pair`
 > has not issued yet, so first contact is always direct.
 
-So `reachableOffHost` and `decideAdvertisement` answer **different questions** and must stay separate:
+**That prohibition is superseded.** `docs/relay-protocol.md` §14 now specifies relay-mediated first
+pairing: a pre-auth session whose sequence-1 record is a sealed `pair` exchange, sent only after the
+daemon is proved against the QR-pinned fingerprint — the QR was the out-of-band enrolment path the
+old reasoning overlooked, and what was actually missing was a session mode, not a proof. What did
+NOT move is the point this section exists for: a rendezvous still does not make the daemon's
+**direct address** dialable, so `reachableOffHost` and `decideAdvertisement` still answer
+**different questions** and must stay separate:
 
-| question                                                     | who asks                    | does a relay count?            |
-| ------------------------------------------------------------ | --------------------------- | ------------------------------ |
-| can anything off this host reach me at all?                  | `fyd --check` grant posture | **yes** — the daemon dials out |
-| can a device dial me directly, right now, for first contact? | the pairing mint            | **no** — never                 |
+| question                                                     | who asks                    | does a relay count?                                                                    |
+| ------------------------------------------------------------ | --------------------------- | -------------------------------------------------------------------------------------- |
+| can anything off this host reach me at all?                  | `fyd --check` grant posture | **yes** — the daemon dials out                                                         |
+| can a device dial me directly, right now, for first contact? | the pairing mint            | **no** — a rendezvous is not a direct address; it is disclosed as `discoveredRelayUrl` |
 
 temperance offered to join them and I am declining the join. This is §4.5's rule in action: **two facts
 sharing one sub-fact**. Single-source the sub-fact (`isLoopbackHost`), keep the two questions distinct.
-Merging them would make the pairing mint accept a relay that cannot carry it.
+Merging them would have the pairing mint call a relay-reachable daemon directly dialable — and the
+supersession vindicates the split rather than weakening it: the relay answer joined the mint as its
+own field beside `reach`, not as a widening of it. That field is `discoveredRelayUrl`, and it is
+host-facing — it says whether a rendezvous a fresh device could **discover for itself** exists, so the
+host's screens know to draw a QR and what to disclose. It never enters the link, which keeps the two
+questions separate on the wire as well as in the code: the fragment answers only the direct one.
 
 ---
 
@@ -766,8 +777,11 @@ One sentence: **the daemon is authoritative; the client's copy is a cache.**
 
 Once the wire field exists the benefit is real and larger than redundancy: a self-hosted relay for a
 LAN plus the hosted one for elsewhere; and — with §2's advertisement split — a **direct LAN carrier up
-alongside the relays**, which is what pairing needs, since pairing can never be relayed. That last one
-is the strongest argument for the owner's instruction and it is worth recording as the reason.
+alongside the relays**. When this was written that last one was the strongest argument, because
+pairing then required a direct address; `docs/relay-protocol.md` §14 has since specified relay
+pairing, so the direct carrier's value is now the ordinary one — fewer hops and fewer observers, and
+the first thing every walk (pairing's included) still attempts — rather than the only way a daemon
+could be paired at all.
 
 Privilege stays **binary**, per §5. A relay carrier answers `false` unconditionally; a bound socket
 answers per connection. **Multiple relays do not weaken the rule — they instantiate it N times.**
@@ -1009,7 +1023,10 @@ If a step above appears to touch one of these, the step is wrong.
 - **Nothing derived is ever persisted.**
 - **An operator's `publicUrl` is never second-guessed** — `advertisesForeignAddress` exists because a
   proxy deployment is legitimate.
-- **Pairing is never relayed**, and the carrier chosen by trying rather than by a health check.
+- **Pairing attempts direct first and crosses a rendezvous only as §14's sealed pre-auth exchange**
+  — a typed record proved against the QR-pinned fingerprint, never an anonymous routed request (this
+  line said "never relayed" until the accepted relay-pairing design superseded it) — and the carrier
+  chosen by trying rather than by a health check.
 - **The two-name model, `@ferretry/protocol` as the single source, and every existing contract.**
 - **Client settings stay browser-local.** No `clientSettings` in the protocol, no sync.
 

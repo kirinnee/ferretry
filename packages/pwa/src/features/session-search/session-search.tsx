@@ -18,16 +18,31 @@ import {
   type TaskSummary,
 } from '@ferretry/protocol';
 import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { type FsListing, fsApi } from '../../components/files-api.ts';
 import { SessionTaskKanban, SessionTaskList } from '../../components/session-tasks.tsx';
 import { taskReference } from '../../features/tasks/task-board-model.ts';
 import { TaskQuickSummary } from '../../features/tasks/task-row.tsx';
+import { useInputModality } from '../../hooks/use-input-modality.ts';
 import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
+import { nextActiveIndex, paletteCountLabel } from '../../shell/palette-model.ts';
+import { type FuzzyField, scoreFields } from '../../shell/palette-ranking.ts';
+import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../shell/palette-shortcut.ts';
 
 export type SessionSearchResourceState = 'loading' | 'ready' | 'unavailable';
 
@@ -107,6 +122,72 @@ const taskText = (task: ScopedTaskView): string =>
 export const matchesSessionSearch = (value: string, query: string): boolean =>
   value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 
+/**
+ * How many rows the popup presents at once.
+ *
+ * The palette caps its session rows at eight for the reason stated in
+ * `palette-ranking.ts`: a surface that can show forty rows is a list view with a
+ * text box on top. This popup mixes two kinds, so it is a little taller — and
+ * the count it is hiding is always printed, because a silently truncated result
+ * set is indistinguishable from a complete one.
+ */
+export const MAX_SESSION_SEARCH_RESULTS = 12;
+
+/**
+ * What each field is worth when ordering matches.
+ *
+ * NOT `palette-ranking.ts`'s `FIELD_WEIGHTS`: that table is session-shaped
+ * (teammate, label, folder) and these are files and tasks. The ALGORITHM is
+ * single-sourced — `scoreFields` and its word-start/substring/subsequence ladder
+ * are imported, not re-derived — while the weights are this surface's own, which
+ * is the "two legitimate input domains need two named things" split rather than
+ * a second copy of one decision.
+ *
+ * A name outranks a path, and prose ranks below both: a reader typing `auth`
+ * wants `auth.ts` before a task whose description mentions authentication.
+ */
+const SESSION_SEARCH_WEIGHTS = {
+  fileName: 3,
+  taskTitle: 3,
+  filePath: 1.2,
+  /** Ids only answer to an anchored query; see `FuzzyField.anchored`. */
+  taskId: 1,
+  taskProse: 0.8,
+} as const;
+
+const taskFields = (task: ScopedTaskView): readonly FuzzyField[] => [
+  { value: task.title, weight: SESSION_SEARCH_WEIGHTS.taskTitle },
+  { value: task.id, weight: SESSION_SEARCH_WEIGHTS.taskId, anchored: true },
+  { value: task.description, weight: SESSION_SEARCH_WEIGHTS.taskProse },
+  { value: task.ask.text, weight: SESSION_SEARCH_WEIGHTS.taskProse },
+  ...task.clarifications.map(clarification => ({
+    value: clarification.text,
+    weight: SESSION_SEARCH_WEIGHTS.taskProse,
+  })),
+];
+
+const fileFields = (file: SessionSearchFile): readonly FuzzyField[] => [
+  { value: file.name, weight: SESSION_SEARCH_WEIGHTS.fileName },
+  { value: file.path, weight: SESSION_SEARCH_WEIGHTS.filePath },
+];
+
+const resultFields = (result: SessionSearchResult): readonly FuzzyField[] =>
+  result.kind === 'file' ? fileFields(result) : taskFields(result.task);
+
+/** Stable within one result set, and distinct across two mounts of one control. */
+export const sessionSearchResultKey = (result: SessionSearchResult): string =>
+  result.kind === 'file' ? `file:${result.path}` : `task:${result.task.id}`;
+
+/**
+ * Ranked, and with EXACTLY the membership the substring rule already produced.
+ *
+ * Ordering is layered on top of matching rather than replacing it: `scoreFields`
+ * answers 0 whenever a term matches no single field, and the membership rule
+ * matches across the joined haystack, so a scored-only list would silently drop
+ * rows that used to be found. A zero-scored member therefore keeps its place at
+ * the end in its original order, and the sort is stable, so two equal scores
+ * stay tasks-then-files exactly as before.
+ */
 export const filterSessionSearchResults = (
   tasks: readonly ScopedTaskView[],
   files: readonly SessionSearchFile[],
@@ -114,10 +195,14 @@ export const filterSessionSearchResults = (
 ): readonly SessionSearchResult[] => {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return [];
-  return [
+  const members: readonly SessionSearchResult[] = [
     ...tasks.filter(task => taskText(task).includes(normalized)).map(task => ({ kind: 'task' as const, task })),
     ...files.filter(file => matchesSessionSearch(`${file.name}\n${file.path}`, normalized)),
   ];
+  return members
+    .map((result, index) => ({ result, index, score: scoreFields(resultFields(result), query) }))
+    .sort((left, right) => (right.score === left.score ? left.index - right.index : right.score - left.score))
+    .map(entry => entry.result);
 };
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
@@ -197,11 +282,28 @@ interface SessionSearchContextValue extends SearchSnapshot {
   readonly active: boolean;
   readonly scope: DaemonSessionScope | null;
   readonly query: string;
+  /** Ranked and capped to {@link MAX_SESSION_SEARCH_RESULTS}. */
   readonly results: readonly SessionSearchResult[];
+  /** How many matched before the cap, so the popup can say what it is hiding. */
+  readonly resultTotal: number;
   readonly focusSignal: number;
   /** The task read already in flight for `scope`, or nothing once it settled. */
   readonly waitForTasks: () => Promise<void> | undefined;
+  /**
+   * Which mount currently PRESENTS the popup, or `null` for none.
+   *
+   * The query is shared by every mount, and it also drives the Tasks list's own
+   * filter. Two mounts rendering a popup from one query is what the app bar and
+   * the open Files pane did; dismissal therefore has to release PRESENTATION
+   * rather than clear the query, or dismissing the app bar's popup would
+   * silently unfilter the Tasks list nobody touched.
+   */
+  readonly presenting: string | null;
+  readonly activeIndex: number;
   readonly setQuery: (query: string) => void;
+  readonly setActiveIndex: (index: number) => void;
+  readonly present: (instanceId: string) => void;
+  readonly dismiss: (instanceId: string) => void;
   readonly setOpeners: (openers: SessionSearchOpeners | null) => void;
   readonly openResult: (result: SessionSearchResult) => void;
 }
@@ -226,7 +328,13 @@ export function SessionSearchProvider({
   readonly children: ReactNode;
 }) {
   const [stored, setStored] = useState<KeyedSnapshot>({ key: '', snapshot: INITIAL });
-  const [query, setQuery] = useState('');
+  const [query, setQueryState] = useState('');
+  const [presenting, setPresenting] = useState<string | null>(null);
+  // Identity, not position: task and file reads settle independently and a
+  // newly ranked row may be inserted before the reader's active result. An
+  // index would then make Enter open a different result than the one still
+  // highlighted a moment earlier.
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const openers = useRef<SessionSearchOpeners | null>(null);
   const key = snapshotKey(scope);
   const currentKey = useRef(key);
@@ -252,8 +360,21 @@ export function SessionSearchProvider({
     }));
   }, []);
 
+  // A new query is a new list; start at the top of it. Owned here rather than in
+  // the control, because every mount reads one query and they must agree on
+  // which row is active.
+  const setQuery = useCallback((next: string) => {
+    setQueryState(next);
+    setActiveKey(null);
+  }, []);
+
   useEffect(() => {
-    setQuery('');
+    setQueryState('');
+    // The popup and its active row belong to the query that opened them, so a
+    // session change closes both rather than pointing a live selection at
+    // another session's evidence.
+    setPresenting(null);
+    setActiveKey(null);
     if (scope === null) return;
     const controller = new AbortController();
     // No `setStored(INITIAL)` here: the loading state for a session this
@@ -308,7 +429,24 @@ export function SessionSearchProvider({
     if (result.kind === 'file') openers.current?.openFile(result.path);
     else openers.current?.openTasks();
   }, []);
-  const results = useMemo(() => filterSessionSearchResults(snapshot.tasks, snapshot.files, query), [query, snapshot]);
+  const present = useCallback((instanceId: string) => setPresenting(instanceId), []);
+  // Only the mount that is presenting may dismiss: a blur handler racing another
+  // mount's focus handler would otherwise close the popup that just opened.
+  const dismiss = useCallback(
+    (instanceId: string) => setPresenting(current => (current === instanceId ? null : current)),
+    [],
+  );
+  const ranked = useMemo(() => filterSessionSearchResults(snapshot.tasks, snapshot.files, query), [query, snapshot]);
+  const results = useMemo(() => ranked.slice(0, MAX_SESSION_SEARCH_RESULTS), [ranked]);
+  const activeIndex = useMemo(() => {
+    if (activeKey === null) return 0;
+    const preserved = results.findIndex(result => sessionSearchResultKey(result) === activeKey);
+    return preserved < 0 ? 0 : preserved;
+  }, [activeKey, results]);
+  const setActiveIndex = useCallback(
+    (index: number) => setActiveKey(results[index] === undefined ? null : sessionSearchResultKey(results[index])),
+    [results],
+  );
   const value = useMemo<SessionSearchContextValue>(
     () => ({
       ...snapshot,
@@ -317,85 +455,407 @@ export function SessionSearchProvider({
       scope,
       query,
       results,
+      resultTotal: ranked.length,
+      presenting,
+      activeIndex,
       focusSignal,
       waitForTasks,
       setQuery,
+      setActiveIndex,
+      present,
+      dismiss,
       setOpeners,
       openResult,
     }),
-    [connection, focusSignal, openResult, query, results, scope, setOpeners, snapshot, waitForTasks],
+    [
+      activeIndex,
+      connection,
+      dismiss,
+      focusSignal,
+      openResult,
+      present,
+      presenting,
+      query,
+      ranked.length,
+      results,
+      scope,
+      setActiveIndex,
+      setOpeners,
+      setQuery,
+      snapshot,
+      waitForTasks,
+    ],
   );
   return <SessionSearchContext.Provider value={value}>{children}</SessionSearchContext.Provider>;
 }
 
-const stateCopy = (state: SessionSearchResourceState, noun: string): string =>
-  state === 'loading' ? `Loading ${noun}…` : state === 'unavailable' ? `${noun} unavailable.` : '';
+/**
+ * What a resource that is not READY is called, in the reader's terms.
+ *
+ * "Indexing" rather than "searching": before a query is typed this control is
+ * walking the session's tree and reading its board, and calling that searching
+ * described an activity that had not started. An unavailable half is named as
+ * unavailable, never folded into the empty state — a failed index and a genuine
+ * no-match answer the same question with opposite meanings. Only the evidence
+ * still moving is named because the two reads settle independently.
+ */
+const indexingCopy = (taskState: SessionSearchResourceState, fileState: SessionSearchResourceState): string =>
+  taskState === 'loading'
+    ? fileState === 'loading'
+      ? "Indexing this session's files and tasks…"
+      : "Indexing this session's tasks…"
+    : "Indexing this session's files…";
 
-/** One component, three mounts: the app bar, Tasks, and Files share its query and results. */
-export function SessionSearchControl({ className = '' }: { readonly className?: string }) {
+/**
+ * Both halves' state, said in one sentence, with the ready half left out and
+ * the daemon's own reason carried through.
+ *
+ * A bare "Tasks unavailable." tells a reader that something is wrong and
+ * nothing about what — and the reason is the only part they can act on.
+ */
+const unavailableCopy = (
+  taskState: SessionSearchResourceState,
+  fileState: SessionSearchResourceState,
+  taskError: string | null,
+  fileError: string | null,
+): string =>
+  [
+    [taskState === 'unavailable' ? 'Tasks unavailable.' : '', taskError],
+    [fileState === 'unavailable' ? 'Files unavailable.' : '', fileError],
+  ]
+    .map(([copy, reason]) =>
+      copy ? (reason ? `${copy.slice(0, -1)}: ${reason.trim().replace(/[.!?]*$/u, '.')}` : copy) : '',
+    )
+    .filter(Boolean)
+    .join(' ');
+
+/**
+ * How long a settled result count waits before it is announced.
+ *
+ * The same 300ms the palette uses, and for the same reason its own constant
+ * states: a fast typist should hear one settled count, not a stream of
+ * intermediate ones.
+ */
+export const SESSION_SEARCH_ANNOUNCE_DEBOUNCE_MS = 300;
+
+/**
+ * The DOM id of one row, scoped to the mount that drew it.
+ *
+ * `aria-activedescendant` is an IDREF, so the value may not contain whitespace —
+ * and a session file path legitimately can. Percent-encoding the key keeps the
+ * id derived from the RESULT (two renders of one query agree) rather than from
+ * render order, while staying a legal IDREF.
+ */
+const resultDomId = (instanceId: string, result: SessionSearchResult): string =>
+  `${instanceId}-${encodeURIComponent(sessionSearchResultKey(result))}`;
+
+/**
+ * One component, three mounts: the app bar, Tasks, and Files share its query and results.
+ *
+ * COMBOBOX, NOT A LIST OF BUTTONS. Focus stays in the text box for the whole
+ * interaction and the active row is pointed at with `aria-activedescendant`,
+ * which is the pattern `shell/command-palette.tsx` already established here:
+ * typing and arrowing interleave constantly, and focus that jumps out of the
+ * input on every arrow key is what breaks IMEs and screen-reader typing echo.
+ * The row elements stay real buttons so a pointer reader keeps an ordinary
+ * click target, but they are removed from the tab order — two tab stops per
+ * result is not navigation.
+ */
+export function SessionSearchControl({
+  className = '',
+  shortcutTarget = false,
+  touchAffected,
+}: {
+  readonly className?: string;
+  /**
+   * The ONE mount a global Cmd/Ctrl+K focuses. Pane copies stay fully usable,
+   * but a shared focus signal may not make every mounted input race to claim
+   * focus and presentation; the app-bar copy owns that global entry point.
+   */
+  readonly shortcutTarget?: boolean;
+  /**
+   * Overrides the measured input modality. Every mount leaves it out; it exists
+   * so a test can state a device instead of the module-level modality store
+   * having to be reconfigured, and so the store's own conservative default
+   * (unknown ⇒ touch) is not the only branch this file can ever execute.
+   */
+  readonly touchAffected?: boolean;
+}) {
   const search = useSessionSearch();
+  const modality = useInputModality();
+  const touch = touchAffected ?? modality.touchAffected;
   const input = useRef<HTMLInputElement>(null);
+  // React spells a generated id with delimiters that are legal in an HTML id and
+  // awkward everywhere else (`:r0:` before 19, `«r0»` after). Reduced to word
+  // characters so the same value is safe in an id, an IDREF and a selector.
+  const instanceId = useId().replace(/[^\w-]/g, '');
+  const inputId = `current-session-search-${instanceId}`;
+  const listboxId = `current-session-search-results-${instanceId}`;
+  const [announcement, setAnnouncement] = useState('');
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const currentScopeKey = snapshotKey(search.scope);
+  const returnFocusScope = useRef(currentScopeKey);
+  // A focusSignal is an EDGE, not an "open forever" flag. Seeding from the
+  // mounted value consumes any old request left behind while the reader was on
+  // a non-session route; only a later increment is a new Cmd/Ctrl+K.
+  const consumedFocusSignal = useRef(search.focusSignal);
+
+  const presenting = search.presenting === instanceId;
+  const hasQuery = search.query.trim() !== '';
+  const results = search.results;
+  const activeResult = presenting ? results[search.activeIndex] : undefined;
+
+  /**
+   * AN EXPLICIT SHORTCUT ALWAYS TAKES FOCUS, on every device.
+   *
+   * `paletteFocusPolicy` deliberately withholds focus from a touch-affected
+   * reader, and that is right for a dialog the palette OPENS: autofocusing an
+   * input on a phone puts the on-screen keyboard over the results. This is the
+   * other input domain — the reader pressed a key chord, which is proof of a
+   * keyboard — so applying that policy here would ignore a deliberate keystroke
+   * on any tablet that reports a coarse pointer.
+   */
   useEffect(() => {
-    if (!search.active || search.focusSignal === 0) return;
+    const requested = consumedFocusSignal.current !== search.focusSignal;
+    consumedFocusSignal.current = search.focusSignal;
+    if (!requested || !shortcutTarget || !search.active) return;
+    if (typeof document !== 'undefined') {
+      const previous = document.activeElement;
+      if (previous instanceof HTMLElement && previous !== document.body && previous !== input.current) {
+        returnFocus.current = previous;
+        returnFocusScope.current = currentScopeKey;
+      }
+    }
     input.current?.focus();
     input.current?.select();
-  }, [search.active, search.focusSignal]);
+    search.present(instanceId);
+  }, [currentScopeKey, instanceId, search.active, search.focusSignal, search.present, shortcutTarget]);
+
+  // A focus return belongs to the scope that opened the palette. If navigation
+  // replaces that scope, no later Escape may focus a control from the old page.
+  useEffect(() => {
+    if (returnFocusScope.current === currentScopeKey) return;
+    returnFocusScope.current = currentScopeKey;
+    returnFocus.current = null;
+  }, [currentScopeKey]);
+
+  const dismiss = useCallback(() => {
+    returnFocus.current = null;
+    search.dismiss(instanceId);
+  }, [instanceId, search.dismiss]);
+
+  const dismissAndReturnFocus = useCallback(() => {
+    const previous = returnFocusScope.current === currentScopeKey ? returnFocus.current : null;
+    returnFocus.current = null;
+    search.dismiss(instanceId);
+    if (previous !== null && typeof document !== 'undefined' && document.contains(previous)) previous.focus();
+  }, [currentScopeKey, instanceId, search.dismiss]);
+
+  // Keep the active row inside the popup's own scroller. `block: 'nearest'`
+  // moves this list and nothing else.
+  //
+  // The document is reached through a guard rather than assumed: this component
+  // is rendered by a DOM-free renderer in its own tests, and scrolling a row
+  // into view is a nicety that has no meaning without a viewport anyway.
+  useEffect(() => {
+    if (!presenting || activeResult === undefined || typeof document === 'undefined') return;
+    document.getElementById(resultDomId(instanceId, activeResult))?.scrollIntoView({ block: 'nearest' });
+  }, [activeResult, instanceId, presenting]);
+
+  const resultCount = search.resultTotal;
+  useEffect(() => {
+    // A partial index cannot honestly announce an empty or complete count.
+    // Visible loading/refusal copy owns that interval; count only once both
+    // evidence sets are settled and complete.
+    if (!presenting || !hasQuery || search.taskState !== 'ready' || search.fileState !== 'ready') {
+      setAnnouncement('');
+      return;
+    }
+    const timer = setTimeout(
+      () => setAnnouncement(paletteCountLabel(resultCount)),
+      SESSION_SEARCH_ANNOUNCE_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [hasQuery, presenting, resultCount, search.fileState, search.taskState]);
+
+  // A pointer landing anywhere outside this control dismisses it, exactly like
+  // clicking off any other transient surface. Captured at the document so a
+  // handler that stops propagation cannot strand an open popup.
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!presenting || typeof document === 'undefined') return;
+    const onPointerDown = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof Node && container.current?.contains(target)) return;
+      dismiss();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [dismiss, presenting]);
+
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      // An IME candidate window owns the arrow and Enter keys while it is up.
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Escape') {
+        // Presentation only. The query is shared with the Tasks list's filter,
+        // so clearing it here would unfilter a surface nobody dismissed.
+        if (!presenting) return;
+        event.preventDefault();
+        dismissAndReturnFocus();
+        return;
+      }
+      if (!presenting) return;
+      if (event.key === 'Enter') {
+        if (activeResult === undefined) return;
+        event.preventDefault();
+        dismiss();
+        search.openResult(activeResult);
+        return;
+      }
+      const next = nextActiveIndex(search.activeIndex, results.length, event.key);
+      if (next === null) return;
+      event.preventDefault();
+      search.setActiveIndex(next);
+    },
+    [activeResult, dismiss, dismissAndReturnFocus, presenting, results.length, search],
+  );
+
   if (!search.active) return null;
   const loading = search.taskState === 'loading' || search.fileState === 'loading';
   const unavailable = search.taskState === 'unavailable' || search.fileState === 'unavailable';
+  const hidden = search.resultTotal - results.length;
   return (
-    <div className={`relative min-w-0 ${className}`} data-current-session-search="">
-      <label className="sr-only" htmlFor="current-session-search">
+    <div className={`relative min-w-0 ${className}`} data-current-session-search="" ref={container}>
+      <label className="sr-only" htmlFor={inputId}>
         Search current-session files and tasks
       </label>
-      <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-muted">
+      <span
+        className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-muted"
+        data-search-leading=""
+      >
         <Search aria-hidden="true" size={15} />
       </span>
       <input
-        className="kt-input h-control w-full min-w-0 pl-8 pr-14 text-ui"
-        id="current-session-search"
-        onChange={event => search.setQuery(event.target.value)}
+        aria-activedescendant={activeResult ? resultDomId(instanceId, activeResult) : undefined}
+        aria-autocomplete="list"
+        aria-controls={presenting ? listboxId : undefined}
+        aria-expanded={presenting}
+        aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
+        autoComplete="off"
+        className="kt-input h-control w-full min-w-0 text-ui"
+        id={inputId}
+        onBlur={event => {
+          const next = event.relatedTarget;
+          if (typeof Node !== 'undefined' && next instanceof Node && container.current?.contains(next)) return;
+          if (presenting) dismiss();
+        }}
+        onChange={event => {
+          search.setQuery(event.target.value);
+          // Typing is a claim on the popup as much as focusing is: a reader who
+          // types into the Files pane's copy expects THAT one to answer, and a
+          // keystroke cannot reach a control the reader is not in.
+          search.present(instanceId);
+        }}
+        onFocus={() => search.present(instanceId)}
+        onKeyDown={onKeyDown}
         placeholder="Search files & tasks"
         ref={input}
+        role="combobox"
+        spellCheck={false}
+        style={{
+          // `.kt-input` owns a later `padding` shorthand than the utility
+          // layer, so `pl-8 pr-14` looked right in JSX and lost in computed
+          // CSS. Inline logical padding is intentional here: it reserves both
+          // absolutely-positioned slots in LTR and RTL alike.
+          paddingInlineEnd: 'calc(var(--pad-control-x) + 2.75rem)',
+          paddingInlineStart: 'calc(var(--pad-control-x) + 1.5rem)',
+        }}
         value={search.query}
-        aria-keyshortcuts="Meta+K Control+K"
       />
-      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center mono text-2xs text-muted">
-        ⌘K
+      {/* THE TRAILING SLOT SAYS ONE TRUE THING. While the index is still being
+          built that fact outranks a shortcut hint, and on a device with no
+          keyboard the hint is a key the reader cannot press — which is the
+          exact mistake `palette-shortcut.ts` exists to prevent. */}
+      <span
+        className="pointer-events-none absolute inset-y-0 right-2 flex items-center mono text-2xs text-muted"
+        data-search-trailing=""
+      >
+        {loading ? (
+          <LoaderCircle aria-hidden="true" className="animate-spin" size={13} data-search-indexing="" />
+        ) : touch ? null : (
+          <span data-search-shortcut="">{paletteShortcutLabel()}</span>
+        )}
       </span>
-      {search.query.trim() && (
-        <div className="absolute left-0 right-0 z-[80] mt-1 max-h-72 overflow-y-auto rounded-panel border border-border bg-surface shadow-panel">
+      {/* Announced, never drawn: the popup below is visible, and a sighted
+          reader counting rows does not need the same sentence twice. */}
+      <p aria-live="polite" className="sr-only" role="status">
+        {announcement}
+      </p>
+      {presenting && (
+        <div
+          className="absolute left-0 right-0 z-[80] mt-1 max-h-72 overflow-y-auto rounded-panel border border-border bg-surface shadow-panel"
+          data-session-search-popup=""
+        >
           {loading && (
             <p className="m-0 flex items-center gap-2 px-3 py-2 text-ui text-muted" role="status">
-              <LoaderCircle className="animate-spin" size={14} /> Searching current-session data…
+              <LoaderCircle className="animate-spin" size={14} />
+              {indexingCopy(search.taskState, search.fileState)}
             </p>
           )}
           {unavailable && (
             <p className="m-0 flex items-start gap-2 px-3 py-2 text-ui text-warn" role="alert">
               <TriangleAlert className="mt-0.5 shrink-0" size={14} />
-              {stateCopy(search.taskState, 'Tasks')} {stateCopy(search.fileState, 'Files')}
+              {unavailableCopy(search.taskState, search.fileState, search.taskError, search.fileError)}
             </p>
           )}
-          {!loading && search.results.length === 0 && !unavailable && (
+          {!hasQuery && !loading && !unavailable && (
+            <p className="m-0 px-3 py-2 text-ui text-muted">Type to search this session's files and tasks.</p>
+          )}
+          {hasQuery && !loading && results.length === 0 && !unavailable && (
             <p className="m-0 px-3 py-2 text-ui text-muted">
               No current-session files or tasks match “{search.query}”.
             </p>
           )}
-          {search.results.map(result => (
-            <button
-              className="flex min-h-[44px] w-full flex-col gap-0.5 border-0 border-b border-border-soft bg-transparent px-3 py-2 text-left last:border-b-0 hover:bg-surface-2"
-              key={result.kind === 'file' ? `file:${result.path}` : `task:${result.task.id}`}
-              onClick={() => search.openResult(result)}
-              type="button"
-            >
-              <span className="text-row font-medium text-fg">
-                {result.kind === 'file' ? result.name : result.task.title}
-              </span>
-              <span className="mono text-2xs text-muted">
-                {result.kind === 'file' ? result.path : `#${result.task.id}`}
-              </span>
-            </button>
-          ))}
+          <div aria-label="Current-session results" id={listboxId} role="listbox">
+            {results.map((result, index) => (
+              <button
+                aria-selected={index === search.activeIndex}
+                className={`flex min-h-[44px] w-full flex-col gap-0.5 border-0 border-b border-border-soft px-3 py-2 text-left last:border-b-0 hover:bg-surface-2 ${
+                  index === search.activeIndex ? 'bg-surface-2' : 'bg-transparent'
+                }`}
+                // Which KIND this row is, stated on the row. Ranking mixes files
+                // and tasks by score, so neither a reader's eye nor a test can
+                // rely on position to tell them apart.
+                data-result-kind={result.kind}
+                id={resultDomId(instanceId, result)}
+                key={sessionSearchResultKey(result)}
+                onClick={() => {
+                  dismiss();
+                  search.openResult(result);
+                }}
+                onMouseEnter={() => search.setActiveIndex(index)}
+                role="option"
+                // The text box owns the tab stop; the rows are pointed at, not
+                // tabbed through.
+                tabIndex={-1}
+                type="button"
+              >
+                <span className="text-row font-medium text-fg">
+                  {result.kind === 'file' ? result.name : result.task.title}
+                </span>
+                <span className="mono text-2xs text-muted">
+                  {result.kind === 'file' ? result.path : `#${result.task.id}`}
+                </span>
+              </button>
+            ))}
+          </div>
+          {hidden > 0 && (
+            <p className="m-0 border-t border-border-soft px-3 py-2 text-2xs text-muted" data-search-capped="">
+              Showing the {results.length} closest matches. {hidden} more match{hidden === 1 ? '' : 'es'} — keep typing
+              to narrow them.
+            </p>
+          )}
         </div>
       )}
     </div>

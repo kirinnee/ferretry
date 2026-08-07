@@ -26,7 +26,14 @@
 
 import type { DaemonIdentity, RelayCrypto } from '@ferretry/relay';
 import { RELAY_CLOSE_CODES } from '@ferretry/relay';
-import type { RelayApiDispatch, RelayDeviceDirectory, RelayLinkSocket } from '../../lib/relay/index.ts';
+import type {
+  RelayApiDispatch,
+  RelayDeviceDirectory,
+  RelayLinkScheduler,
+  RelayLinkSocket,
+  RelayPairingRedeemer,
+  RelayStreamDispatch,
+} from '../../lib/relay/index.ts';
 import {
   decideRelayCarrier,
   RELAY_HEARTBEAT_MS,
@@ -54,8 +61,14 @@ export interface BunRelayCarrierDependencies {
   readonly crypto: RelayCrypto;
   readonly identity: DaemonIdentity;
   readonly dispatch: RelayApiDispatch;
+  /** The daemon's ALREADY MOUNTED socket dispatcher. Handed over rather than rebuilt, so a relayed
+   *  stream passes the same authorization boundary and capability guard a direct upgrade does. */
+  readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
+  readonly pairing: RelayPairingRedeemer;
   readonly socketFactory?: RelayWebSocketFactory;
+  /** A seam, so the pre-credential deadline can be proved without a test that waits ten seconds. */
+  readonly scheduler?: RelayLinkScheduler;
   readonly now?: () => number;
   /** How often this side pings. A seam, so the liveness sweep can be proved without a test that
    *  waits half a minute for one tick — production passes nothing and gets the protocol's cadence. */
@@ -75,6 +88,14 @@ export interface RelayCarrierStatus {
 
 const browserSocket: RelayWebSocketFactory = url => new WebSocket(url) as unknown as RelayWebSocket;
 
+/** The runtime's own timer, as the one thing the domain wants from one: fire later, or do not. */
+const runtimeScheduler: RelayLinkScheduler = {
+  after: (milliseconds, action) => {
+    const handle = setTimeout(action, milliseconds);
+    return { cancel: () => clearTimeout(handle) };
+  },
+};
+
 export class BunRelayCarrier {
   readonly #decision: RelayCarrierDecision;
   readonly #socketFactory: RelayWebSocketFactory;
@@ -87,6 +108,7 @@ export class BunRelayCarrier {
   #lastSeen = 0;
   #inbox: Promise<void> = Promise.resolve();
   #detail: string | undefined;
+  #stopped = false;
 
   constructor(private readonly deps: BunRelayCarrierDependencies) {
     this.#decision = decideRelayCarrier(deps.config, deps.identity.daemonId);
@@ -113,22 +135,31 @@ export class BunRelayCarrier {
 
   /** Begin dialling, or return having done nothing because there is nothing to dial. */
   start(): void {
-    if (this.#decision.kind === 'none' || this.#phase === 'stopped') return;
+    if (this.#decision.kind === 'none' || this.#stopped) return;
     this.#dial();
   }
 
   /** Stop for good. A carrier that has been stopped never redials: the daemon is going away. */
   stop(): void {
+    this.#stopped = true;
     this.#phase = 'stopped';
     this.#clearTimers();
     const socket = this.#socket;
+    const link = this.#link;
+    if (socket !== undefined) this.#detach(socket);
     this.#socket = undefined;
     this.#link = undefined;
+    // THE LINK IS TOLD BEFORE THE SOCKET GOES. A relayed stream's handler owns a redraw timer and a
+    // viewer slot armed against this link, and the API host's own `closeSockets` reaches only the
+    // sockets it accepted — never these. Dropping the socket first would leave both firing at a peer
+    // that is already gone, which is the exact failure the transport's own two-step shutdown exists
+    // to prevent, reproduced on the carrier this daemon dialled.
+    link?.close();
     socket?.close(1000, 'the daemon is shutting down');
   }
 
   #dial(): void {
-    if (this.#decision.kind !== 'dial') return;
+    if (this.#decision.kind !== 'dial' || this.#stopped) return;
     this.#phase = 'dialling';
     const socket = this.#socketFactory(this.#decision.socketUrl);
     socket.binaryType = 'arraybuffer';
@@ -140,16 +171,20 @@ export class BunRelayCarrier {
       relayHost: this.#decision.relayHost,
       socket: this.#linkSocket(socket),
       dispatch: this.deps.dispatch,
+      sockets: this.deps.sockets,
       devices: this.deps.devices,
+      pairing: this.deps.pairing,
+      scheduler: this.deps.scheduler ?? runtimeScheduler,
     });
     this.#link = link;
     socket.onopen = () => {
+      if (!this.#live(socket, link)) return;
       this.#lastSeen = this.#now();
-      this.#heartbeat = setInterval(() => this.#tick(link), this.deps.heartbeatMs ?? RELAY_HEARTBEAT_MS);
+      this.#heartbeat = setInterval(() => this.#tick(socket, link), this.deps.heartbeatMs ?? RELAY_HEARTBEAT_MS);
     };
-    socket.onmessage = event => this.#receive(link, event.data);
-    socket.onclose = () => this.#ended();
-    socket.onerror = () => this.#ended();
+    socket.onmessage = event => this.#receive(socket, link, event.data);
+    socket.onclose = () => this.#ended(socket, link);
+    socket.onerror = () => this.#ended(socket, link);
   }
 
   /**
@@ -160,7 +195,8 @@ export class BunRelayCarrier {
    * of a session cannot be opened before the first, because the receive sequence advances inside the
    * handler.
    */
-  #receive(link: RelayLink, data: unknown): void {
+  #receive(socket: RelayWebSocket, link: RelayLink, data: unknown): void {
+    if (!this.#live(socket, link)) return;
     this.#lastSeen = this.#now();
     if (typeof data === 'string') {
       link.receiveText(data);
@@ -174,38 +210,61 @@ export class BunRelayCarrier {
           : /* A carrier sending neither text nor bytes is not speaking this protocol. */ undefined;
     if (bytes === undefined) {
       this.#detail = 'the carrier sent a message that is neither text nor bytes';
-      this.#socket?.close(RELAY_CLOSE_CODES.protocolError, 'unsupported message type');
+      socket.close(RELAY_CLOSE_CODES.protocolError, 'unsupported message type');
       return;
     }
     this.#inbox = this.#inbox
       .then(async () => {
+        if (!this.#live(socket, link)) return;
         await link.receiveBinary(bytes);
+        if (!this.#live(socket, link)) return;
         if (link.report().claimed) this.#phase = 'carrying';
       })
       // A handler that threw has left this link in a state nobody can describe, so the socket goes
       // rather than carrying on: the redial below gets a fresh rendezvous slot and fresh keys.
       .catch((error: unknown) => {
+        if (!this.#live(socket, link)) return;
         this.#detail = `the relay link failed: ${error instanceof Error ? error.message : String(error)}`;
-        this.#socket?.close(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
+        socket.close(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
       });
   }
 
-  #tick(link: RelayLink): void {
+  #tick(socket: RelayWebSocket, link: RelayLink): void {
+    if (!this.#live(socket, link)) return;
     if (relaySocketIsStale(this.#lastSeen, this.#now())) {
       this.#detail = 'the rendezvous stopped answering, so the daemon dropped the socket';
-      this.#socket?.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no answer within the heartbeat grace window');
+      socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no answer within the heartbeat grace window');
       return;
     }
     link.heartbeat();
   }
 
-  #ended(): void {
-    if (this.#phase === 'stopped') return;
+  #ended(socket: RelayWebSocket, link: RelayLink): void {
+    if (!this.#live(socket, link)) return;
     this.#clearTimers();
+    this.#detach(socket);
     this.#socket = undefined;
+    this.#link = undefined;
+    // Every session on that socket died with it — §9 says so, and reconnection is a NEW session
+    // rather than a resumption — so whatever they were driving is released here rather than left
+    // holding timers against a link the redial below is about to replace.
+    link.close();
     this.#phase = 'dialling';
     if (this.#decision.kind !== 'dial') return;
     this.#redial = setTimeout(() => this.#dial(), this.#decision.reconnectMs);
+  }
+
+  /** Whether an asynchronous socket callback still belongs to the carrier that is alive now. */
+  #live(socket: RelayWebSocket, link: RelayLink): boolean {
+    return !this.#stopped && this.#socket === socket && this.#link === link;
+  }
+
+  /** A queued callback may still run, so detaching complements rather than replaces the live fence. */
+  #detach(socket: RelayWebSocket): void {
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onclose = null;
+    socket.onerror = null;
   }
 
   #clearTimers(): void {

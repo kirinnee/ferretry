@@ -50,10 +50,14 @@ export const daemonRequest = (daemon: DaemonConnection, path: string, init: Requ
  * intentionally absent: browsers cannot send WS headers and a durable token
  * in a query string would leak into logs.
  *
- * THIS ONE IS DIRECT-ONLY, and it is the exception the relay protocol names rather
- * than an oversight: §14 does not carry a protocol-switching surface, so a relayed
- * connection has no event stream at all. `event-transport.ts` refuses on a relay
- * carrier instead of handing this URL to a socket that would open on nothing.
+ * THIS URL IS THE DIRECT BRANCH, AND NOTHING MORE. It used to be described as the
+ * exception the relay protocol named — "§14 does not carry a protocol-switching
+ * surface, so a relayed connection has no event stream at all" — and §14 now gives
+ * every live feed a stream session of its own. So `event-transport.ts` no longer
+ * refuses on a relay carrier; it opens that session instead, and only asks for this
+ * URL when the measured carrier is direct. A ticket is still the direct path's own
+ * credential: a relayed stream presents the device token in its sealed credential
+ * record, and §14 refuses a second one.
  */
 export const daemonEventUrl = (daemon: DaemonConnection, ticket: string): string => {
   if (ticket.trim() === '') throw new Error('websocket ticket must not be empty');

@@ -11,6 +11,14 @@ import { TERMINAL_MAX_BUFFERED_OUTPUT_BYTES } from '../../../src/lib/index.ts';
 class FakeService implements TerminalStreamService {
   readonly calls: string[] = [];
   fail = false;
+  /** Suspends the next `capture`, so a test can decide what happens WHILE one is in flight. */
+  private held: (() => void) | undefined;
+  holding = false;
+  release(): void {
+    this.holding = false;
+    this.held?.();
+    this.held = undefined;
+  }
   async write(_sessionId: string, _terminalId: string, bytes: Uint8Array): Promise<void> {
     this.calls.push(`write:${[...bytes].join(',')}`);
     if (this.fail) throw new Error('no terminal');
@@ -21,6 +29,7 @@ class FakeService implements TerminalStreamService {
   }
   async capture(): Promise<Uint8Array> {
     this.calls.push('capture');
+    if (this.holding) await new Promise<void>(resolve => (this.held = resolve));
     if (this.fail) throw new Error('no terminal');
     return Uint8Array.of(27);
   }
@@ -132,6 +141,42 @@ describe('TerminalStreamBridge', () => {
 
     // Assert
     should(closed).deepEqual([[1011, 'terminal operation failed']]);
+  });
+
+  it('should not write a captured snapshot downstream when the viewer left during the capture', async () => {
+    // THE DEFECT THIS PINS, and its consequence is one package over. `redraw` checked `closed` once,
+    // at the top, and then AWAITED a pane capture — so a `close()` landing during that await did not
+    // stop the `downstream.send` that followed it. On a direct socket the write is inert. Over a
+    // relay it was not: the frame reached a §14 stream session the link had already concluded and
+    // deleted, and a daemon frame naming no live session makes the rendezvous close the DAEMON'S
+    // SOCKET, taking every other relayed session on that link with it.
+    //
+    // Arrange — a capture suspended mid-flight, exactly where a real tmux round-trip suspends.
+    const service = new FakeService();
+    const sent: Uint8Array[] = [];
+    const closed: Array<[number, string]> = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: bytes => sent.push(bytes), close: (code, reason) => closed.push([code, reason]) },
+      new FakeScheduler(),
+    );
+    service.holding = true;
+    const opening = bridge.open();
+    await Bun.sleep(1);
+
+    // Act — the viewer leaves while the pane is still being captured, and only then does it resolve.
+    bridge.close();
+    service.release();
+    await opening;
+
+    // Assert — the capture happened and its result went nowhere, which is the whole property. The
+    // bridge also says nothing more downstream: `close()` is the viewer's own departure, not a
+    // failure this end reports back to a transport that has gone.
+    should(service.calls).deepEqual(['capture']);
+    should(sent).be.empty();
+    should(closed).be.empty();
   });
 
   it('should drop a frame for a viewer that has stopped reading, and resume once it drains', async () => {

@@ -3,13 +3,17 @@ import type { DaemonEnvironmentInput, DaemonLayout } from '../../../src/lib/daem
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import type {
   CommandOutcome,
+  DaemonLifecycleClaimRequest,
   DaemonSnapshot,
   DaemonSnapshotBuild,
   DaemonStartHandle,
   DaemonSupervisorReport,
   DetachedLaunch,
+  HeldGcRoot,
   IClockPort,
   IDaemonHealthPort,
+  IDaemonLifecycleClaim,
+  IDaemonLifecycleLockPort,
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonProcessPort,
@@ -18,6 +22,7 @@ import type {
   IServiceDefinitionSupervisor,
   IServiceFilePort,
   IStateHomeClaimPort,
+  RetainedSnapshotInventory,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
 
@@ -203,6 +208,8 @@ export class FakeNixGcRoot implements INixGcRootPort {
   readonly realPaths: string[] = [];
   readonly pinned: Array<{ storePath: string; rootPath: string }> = [];
   readonly released: string[] = [];
+  /** Root entry names already in the root directory, as a real one would report them. */
+  heldNames: readonly string[] = [];
   failure: string | undefined;
   afterRealPath: (() => void) | undefined;
 
@@ -210,6 +217,10 @@ export class FakeNixGcRoot implements INixGcRootPort {
     this.realPaths.push(path);
     this.afterRealPath?.();
     return Promise.resolve(this.links.get(path) ?? path);
+  }
+
+  held(directory: string): Promise<readonly HeldGcRoot[]> {
+    return Promise.resolve(this.heldNames.map(name => ({ name, path: `${directory}/${name}` })));
   }
 
   pin(storePath: string, rootPath: string): Promise<string | undefined> {
@@ -220,6 +231,42 @@ export class FakeNixGcRoot implements INixGcRootPort {
   release(rootPath: string): Promise<void> {
     this.released.push(rootPath);
     return Promise.resolve();
+  }
+}
+
+/**
+ * Records the lifecycle claim a verb took, and the order it took and gave it up in.
+ *
+ * The trail is what proves serialization is a TRANSACTION rather than a decoration: the whole of a
+ * verb's work has to sit between `acquire` and `release`, so an assertion on the order these entries
+ * arrive in is an assertion that no root or definition write escaped the claim.
+ */
+export class FakeLifecycleLock implements IDaemonLifecycleLockPort {
+  readonly trail: string[] = [];
+  readonly requests: DaemonLifecycleClaimRequest[] = [];
+  /** Exact claim paths released, so multi-claim tests can prove reverse-order cleanup. */
+  readonly releasedPaths: string[] = [];
+  /** Set to refuse the way a claim held by a live peer does. */
+  refusal: Error | undefined;
+  /** One-based acquisition number that refuses; defaults to the first request. */
+  refusalAt = 1;
+  /** Reported from `release`, the way an unremovable claim directory is. */
+  residue: string | undefined;
+  /** Announced through the caller's own notice, the way a contended first attempt does. */
+  holder: string | undefined;
+
+  acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim> {
+    this.requests.push(request);
+    if (this.refusal !== undefined && this.requests.length === this.refusalAt) return Promise.reject(this.refusal);
+    this.trail.push(`acquire:${request.verb}`);
+    if (this.holder !== undefined) request.waiting(this.holder);
+    return Promise.resolve({
+      release: () => {
+        this.releasedPaths.push(request.lockPath);
+        this.trail.push(`release:${request.verb}`);
+        return Promise.resolve(this.residue);
+      },
+    });
   }
 }
 
@@ -260,6 +307,15 @@ export class FakeSnapshots implements IDaemonSnapshotPort {
   buildAnswer: DaemonSnapshotBuild = { ...daemonSnapshot(), created: true };
   listAnswer: readonly DaemonSnapshot[] = [daemonSnapshot()];
   currentError: Error | undefined;
+  /**
+   * The cheap inventory, which defaults to naming exactly what `listAnswer` holds.
+   *
+   * Overridable on its own because the two answers are allowed to disagree: a damaged sibling is
+   * precisely the case where the verifying listing fails and the inventory still names the healthy
+   * entries. A store that cannot be read at all is `retainedError`.
+   */
+  retainedAnswer: RetainedSnapshotInventory | undefined;
+  retainedError: Error | undefined;
 
   build(): Promise<DaemonSnapshotBuild> {
     this.calls.push('build');
@@ -281,6 +337,18 @@ export class FakeSnapshots implements IDaemonSnapshotPort {
   list(): Promise<readonly DaemonSnapshot[]> {
     this.calls.push('list');
     return Promise.resolve(this.listAnswer);
+  }
+
+  retained(): Promise<RetainedSnapshotInventory> {
+    this.calls.push('retained');
+    if (this.retainedError !== undefined) return Promise.reject(this.retainedError);
+    return Promise.resolve(
+      this.retainedAnswer ?? {
+        snapshots: this.listAnswer.map(snapshot => ({ id: snapshot.id, sourceBinary: snapshot.sourceBinary })),
+        complete: true,
+        unreadable: [],
+      },
+    );
   }
 }
 

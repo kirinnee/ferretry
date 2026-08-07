@@ -44,22 +44,58 @@ Keep agents alive, bounded, and recoverable without risking the daemon.
 |  67 |  ☐   | **Fork a conversation from any message** | Add a transcript action that lets the user choose an exact durable message and fork from there into a new independent session. Let the user select harness, account, model, and effort; both same-harness and cross-harness forks are required. Copy conversation context only through the selected message, preserve source-session/message provenance, attachments, and supported references, and visibly report anything that cannot cross harnesses. The source session, descendants, waiters, and pointers remain untouched. The fork gets a fresh identity plus a Lineage edge back to the source message; shared-board access is never inherited and needs an explicit grant or top-level invitation. Use an exact repository snapshot when one exists, otherwise warn that conversation time was rewound but filesystem state was not. | #48     | #16, #31, #49         |
 |  44 |  ☑   | **Reap terminal tmux sessions**          | A daemon-owned five-second sweep should safely remove exact registered panes and process trees after durable terminal states.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | #48     | #30, #31, #47         |
 |  30 |  ☐   | **Fleet cgroup controls and UI**         | Add configurable fleet-wide and per-agent CPU/RAM caps without starving the daemon. Include a Settings UI that shows effective limits, edits both levels, enables/disables enforcement, explains restart requirements, and reports apply failures.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | —       | #31, #44, #45         |
-|  31 |  ☐   | **Run the daemon from stable snapshots** | Run the daemon from a stable built snapshot instead of live source. This prevents half-written edits from taking down the daemon and fleet, and makes worktree parallelism, rollback, and controlled rollout safer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —       | #3, #4, #30, #44, #48 |
+|  31 |  ☑   | **Run the daemon from stable snapshots** | Run the daemon from a stable built snapshot instead of live source. This prevents half-written edits from taking down the daemon and fleet, and makes worktree parallelism, rollback, and controlled rollout safer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —       | #3, #4, #30, #44, #48 |
 |   7 |  ☐   | **Add task-done control**                | Expose a discoverable Mark Done action in aggregate List and Kanban views, enforce shared-board permissions, and update the UI immediately.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | —       | #35, #43              |
 
-**#31 is partially implemented.** Ferretry has a daemon-keyed, content-addressed snapshot store,
-strict verification, atomic promotion, rollback through the ordinary promotion path, explicit
-build/promote/list CLI commands, and install/start/restart capture the promoted snapshot and execute
-its exact canonical artifact path. kteam has no daemon artifact snapshot to port:
-`modules/kteam-ts/src/index.ts` resolves `kteamd` and passes that wrapper to `DaemonService`;
-`DaemonService.install/start` execute it, and the Home Manager `modules/default.nix` wrapper then runs
-live `daemon-entry.ts`. Its `kteam snapshot` command captures a session pane and is unrelated. The
-remaining GAPs are Nix rollback retention and cross-process lifecycle serialization. The single
-per-daemon GC root can protect only one Nix-backed snapshot source closure at a time, so older
-retained snapshots can lose runtime dependencies after garbage collection; simultaneous independent
-install/start/restart commands can also interleave that root update with a service-definition update.
-Keep this row open until roots follow snapshot lifetime (or snapshots materialize their complete
-runtime closure) and daemon-keyed lifecycle operations are serialized.
+**#31 is done.** Ferretry has a daemon-keyed, content-addressed snapshot store, strict verification,
+atomic promotion, rollback through the ordinary promotion path, explicit build/promote/list CLI
+commands, and install/start/restart capture the promoted snapshot and execute its exact canonical
+artifact path. kteam has no daemon artifact snapshot to port: `modules/kteam-ts/src/index.ts` resolves
+`kteamd` and passes that wrapper to `DaemonService`; `DaemonService.install/start` execute it, and the
+Home Manager `modules/default.nix` wrapper then runs live `daemon-entry.ts`. Its `kteam snapshot`
+command captures a session pane and is unrelated.
+
+The two remaining GAPs are closed. **A garbage-collection root's lifetime is now its snapshot's
+lifetime**: `nixGcRootDirectory` holds one root per retained snapshot, named by
+`daemonSnapshotGcRoot()` — the single owner of that mapping — so promoting a second Nix-built snapshot
+no longer re-points the one root and leaves the rollback candidate without the loader and libraries
+its executable needs. A root is released only when its snapshot is no longer retained; neither `stop`
+nor `uninstall` withdraws protection from a snapshot still sitting in the store, and `uninstall` says
+so. The one-per-daemon root earlier releases kept is retired as `supersededNixGcRoot`, but only once
+nothing that still needs a root failed to take one. Reconciliation reads a **cheap, per-entry-tolerant
+inventory** (`IDaemonSnapshotPort.retained()`) rather than the verifying `list()`, which stays the
+operator report: an interrupted build leaves a directory no later build repairs, and a verifying
+listing on the lifecycle's critical path let one such sibling disable every mutating verb. An entry
+that cannot be read or whose manifest identity cannot be trusted is warned about and skipped; the
+managed store structure is checked without reading or hashing an executable. An inventory that is not
+the whole truth releases **no roots at all**, because a root with no matching entry is
+indistinguishable from one whose snapshot merely could not be read.
+
+**Every mutating lifecycle verb is one serialized transaction**: install, uninstall, start, stop,
+restart and both snapshot mutations run inside exclusive claims, so no invocation can interleave a
+root update with another's service-definition write. Reporting verbs (`status`, `logs`,
+`snapshot list`) are deliberately unserialized. Service definitions are published with a
+same-directory private write, file fsync, atomic rename and parent-directory fsync, so a crash exposes
+the old complete unit/plist or the new complete one rather than a truncated target. Claims are keyed
+on every target those verbs may own: the logical systemd unit or launchd label, its definition file,
+the snapshot/root ownership derived from `XDG_STATE_HOME`, and the daemon-qualified state home used by
+the direct fallback. They are acquired by semantic role rather than unresolved path spelling, so
+aliases, locales and different state or config environments cannot reverse the order into a deadlock;
+two daemon names remain independent. A crashed command leaves every claim it acquired behind by
+design: the primitives would reclaim safely, but the `alive(pid)` verdict that would authorise it
+cannot be trusted across PID namespaces and containers, where a live owner reads as dead and
+reclaiming would delete a live holder's proof. The cost is stated rather than argued away — each claim
+is waited on for up to 140 seconds, and a manager-backed command can leave as many as four directories
+that block every mutating verb until a person independently verifies no holder is live and removes
+each one. A refusal names one directory; a retry may expose the next. It also names the verb, owner,
+whether that owner is visible from this PID namespace, and why absence is not proof of death.
+
+Two declared residues, neither reopening the row: **retention is unbounded** (nothing prunes
+snapshots, so the reconciliation's release path exists for a prune verb that has not been written),
+and the row's headline promise — that a running daemon cannot be taken down by a half-written source
+edit — **has no automated regression guard**, because the SIT tier is CLI-only and proving it needs a
+real service manager; the evidence for it is a manual compiled-binary journey. A killed acquisition
+can also leave a hidden staging directory beside the claim, which blocks nothing.
 
 ## 🔎 Search, navigation & surfaces
 

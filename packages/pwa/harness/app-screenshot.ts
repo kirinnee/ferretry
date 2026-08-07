@@ -143,6 +143,12 @@ mkdirSync(outDir, { recursive: true });
  * `.invalid` because the reserved TLD cannot resolve, and because this harness
  * aborts every off-origin request anyway. Nothing here may address a real
  * service, and the answers themselves come from request interception.
+ *
+ * THIS ONLY STARTED WORKING WHEN `vite.config.ts` LEARNED TO READ THE VARIABLE.
+ * Until then it read no environment at all and hard-defined the production origin,
+ * so this override was inert: the review bundle carried Ferretry's real directory
+ * and the frames below were reached — when they were reached — against an
+ * intercepted request to a live service's address rather than to this one.
  */
 const RELAY_DIRECTORY = 'https://relay-directory.example.invalid';
 

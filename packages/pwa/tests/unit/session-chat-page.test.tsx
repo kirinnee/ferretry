@@ -916,7 +916,9 @@ describe('SessionChatPage', () => {
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       const results = page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
       expect(results).toHaveLength(2);
-      run(() => results[1]?.props.onClick());
+      // By KIND, not by position: results are ranked, so a file and a task can
+      // trade places as the scoring changes.
+      run(() => results.find(row => row.props['data-result-kind'] === 'file')?.props.onClick());
 
       // ONE TAB PER FILE (#35): a file tab renders ITS file, not the picker.
       await runAsync(async () => await Promise.resolve());

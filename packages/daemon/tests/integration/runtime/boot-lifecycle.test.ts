@@ -113,6 +113,20 @@ function relaySocketProbe() {
   return { server, opened: () => opened, closed: () => closed };
 }
 
+/**
+ * The production composition with its one off-machine collaborator held offline by default.
+ *
+ * A boot test that means to prove discovery supplies its own directory below. Every other case must
+ * not register a throwaway daemon identity with the hosted control plane merely because its fixture
+ * omitted a relay block, nor make an integration result depend on that service being reachable.
+ */
+function buildIntegrationWorld(): DaemonWorld {
+  return {
+    ...buildWorld(),
+    relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
+  };
+}
+
 async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     if (predicate()) return;
@@ -130,7 +144,7 @@ async function waitUntil(predicate: () => boolean, what: string): Promise<void> 
  */
 async function seedHome(home: string, port: number): Promise<void> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildIntegrationWorld().storage.open();
   await opened.storage.close();
   await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
 }
@@ -156,7 +170,7 @@ async function seedSession(
   state: Readonly<Record<string, unknown>> = {},
 ): Promise<void> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildIntegrationWorld().storage.open();
   const id = parseSessionId(sessionId);
   await opened.storage.writeConfig(
     id,
@@ -203,7 +217,7 @@ async function seedSession(
  */
 async function seedEvents(home: string, sessionId: string, types: readonly string[]): Promise<void> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildIntegrationWorld().storage.open();
   const id = parseSessionId(sessionId);
   for (const type of types) await opened.storage.append(id, type, { seeded: type });
   await opened.storage.close();
@@ -607,7 +621,11 @@ class RecordingSttEnhancer {
 /** Boots the production world against a seeded temp home, with shutdown driven by the test. */
 async function worldAt(home: string, port: number, untilShutdown: () => Promise<void>): Promise<DaemonWorld> {
   await seedHome(home, port);
-  return { ...buildWorld(), untilShutdown };
+  // Arm the shutdown promise before the server can answer. `start` binds and serves `/healthz`
+  // before it reaches its final `await world.untilShutdown()`, so a test that releases after the
+  // health probe can otherwise call a still-empty resolver and leave the boot waiting forever.
+  const shutdown = untilShutdown();
+  return { ...buildIntegrationWorld(), untilShutdown: () => shutdown };
 }
 
 /**
@@ -636,7 +654,7 @@ function recordingNotices(): { readonly port: BootNoticePort; readonly steps: st
  */
 async function seedHomeWithoutPort(home: string): Promise<void> {
   process.env.FY_HOME = home;
-  const opened = await buildWorld().storage.open();
+  const opened = await buildIntegrationWorld().storage.open();
   await opened.storage.close();
   await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1' }), { mode: 0o600 });
 }
@@ -3311,7 +3329,7 @@ describe('daemon boot lifecycle', () => {
     const boot = async (): Promise<number> => {
       const cleanups: Array<() => void | Promise<void>> = [];
       process.env.FY_HOME = home;
-      const code = await start({ ...buildWorld(), untilShutdown: async () => {} }, cleanups);
+      const code = await start({ ...buildIntegrationWorld(), untilShutdown: async () => {} }, cleanups);
       await runCleanups(cleanups);
       return code;
     };
@@ -3331,12 +3349,15 @@ describe('daemon boot lifecycle', () => {
     const home = await tempDirectory('fyd-locked');
     const port = await freeLoopbackPort();
     await seedHome(home, port);
-    const incumbent = await buildWorld().storage.open();
+    const incumbent = await buildIntegrationWorld().storage.open();
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
 
     // Act
-    const code = await start({ ...buildWorld(), notices: said.port, untilShutdown: async () => {} }, cleanups);
+    const code = await start(
+      { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => {} },
+      cleanups,
+    );
     await incumbent.storage.close();
 
     // Assert
@@ -3449,7 +3470,7 @@ describe('daemon boot lifecycle', () => {
     const stopped = new Promise<void>(resolve => {
       release = resolve;
     });
-    const world = buildWorld();
+    const world = buildIntegrationWorld();
     const booting = start(
       {
         ...world,
@@ -3554,7 +3575,7 @@ describe('daemon boot lifecycle', () => {
     const stopped = new Promise<void>(resolve => {
       release = resolve;
     });
-    const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+    const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
     // Act
     const booting = start(world, cleanups);
@@ -3653,7 +3674,7 @@ describe('daemon boot lifecycle', () => {
           { mode: 0o600 },
         );
         const world = {
-          ...buildWorld(),
+          ...buildIntegrationWorld(),
           notices: said.port,
           untilShutdown: async () => await stopped,
           relayDirectory: {
@@ -3729,7 +3750,7 @@ describe('daemon boot lifecycle', () => {
       const doubles = relayUrls.map((url, index) => carrierDouble(url, index === 1));
       const cleanups: Array<() => void | Promise<void>> = [];
       const world = {
-        ...buildWorld(),
+        ...buildIntegrationWorld(),
         notices: recordingNotices().port,
         untilShutdown: async () => undefined,
         createRelayCarriers: async (sources: readonly RelayCarrierSource[]) => ({
@@ -3770,7 +3791,7 @@ describe('daemon boot lifecycle', () => {
       const said = recordingNotices();
       let reads = 0;
       const world = {
-        ...buildWorld(),
+        ...buildIntegrationWorld(),
         notices: said.port,
         untilShutdown: async () => undefined,
         relayDirectory: {
@@ -3814,7 +3835,7 @@ describe('daemon boot lifecycle', () => {
       const said = recordingNotices();
       let reads = 0;
       const world = {
-        ...buildWorld(),
+        ...buildIntegrationWorld(),
         notices: said.port,
         untilShutdown: async () => {
           throw new Error('a refused boot must not reach its shutdown wait');
@@ -3858,7 +3879,7 @@ describe('daemon boot lifecycle', () => {
       let advertised = discoveredUrl;
       let reads = 0;
       const world = {
-        ...buildWorld(),
+        ...buildIntegrationWorld(),
         relayDirectory: {
           read: async (): Promise<RelayAdvertisement> => {
             reads += 1;
@@ -3877,6 +3898,15 @@ describe('daemon boot lifecycle', () => {
       should(postures[2]).containEql('off.example');
       should(resolvedLines.join('\n')).not.match(/dials no relay|NO other device|nothing off this host can reach/u);
       should(resolvedLines.join('\n')).match(/reachable off this host/u);
+      // THE PAIRING LINE DOES NOT READ THE CARRIER ABOVE IT, and this asserts the declared gap rather
+      // than a capability. This daemon binds loopback, so its advertisement is `local-only`, and it
+      // dials a rendezvous of its own — which `docs/relay-protocol.md` §14 could carry a redemption
+      // over, except that a fresh device cannot DISCOVER a self-hosted rendezvous: the one a browser
+      // finds on its own is the hosted advertisement. So this line reports the address alone and names
+      // no rendezvous, which is honest about reach and UNDER-reports for this document. §13 records it.
+      const pairing = resolvedLines.filter(line => line.startsWith('pairing'));
+      should(pairing).have.length(1);
+      should(pairing[0]).not.containEql(configuredUrl);
 
       advertised = configuredUrl;
       const refusedLines: string[] = [];
@@ -3921,7 +3951,7 @@ describe('daemon boot lifecycle', () => {
       const stopped = new Promise<void>(resolve => {
         release = resolve;
       });
-      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+      const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
       const booting = start(world, cleanups);
       const base = `http://127.0.0.1:${String(port)}`;
@@ -3982,7 +4012,7 @@ describe('daemon boot lifecycle', () => {
       const stopped = new Promise<void>(resolve => {
         release = resolve;
       });
-      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+      const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
       const booting = start(world, cleanups);
       const base = `http://127.0.0.1:${String(port)}`;
@@ -3999,7 +4029,7 @@ describe('daemon boot lifecycle', () => {
       if (bootNotice === undefined) throw new Error('the boot did not explain why its direct carrier was omitted');
 
       const checkLines: string[] = [];
-      const checkCode = await checkConfiguration(buildWorld(), line => checkLines.push(line));
+      const checkCode = await checkConfiguration(buildIntegrationWorld(), line => checkLines.push(line));
 
       should(bootCode).equal(0);
       should(response.status).equal(200);
@@ -4041,7 +4071,7 @@ describe('daemon boot lifecycle', () => {
       const stopped = new Promise<void>(resolve => {
         release = resolve;
       });
-      const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+      const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
       const booting = start(world, cleanups);
       const base = `http://127.0.0.1:${String(port)}`;
@@ -4082,7 +4112,10 @@ describe('daemon boot lifecycle', () => {
       const cleanups: Array<() => void | Promise<void>> = [];
       const said = recordingNotices();
 
-      const code = await start({ ...buildWorld(), notices: said.port, untilShutdown: async () => undefined }, cleanups);
+      const code = await start(
+        { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => undefined },
+        cleanups,
+      );
       await runCleanups(cleanups);
 
       should(code).equal(0);
@@ -4167,9 +4200,12 @@ describe('daemon boot lifecycle', () => {
       const notice = said.stated.filter(message => /relay|pair/u.test(message));
       should(notice).have.length(4);
       should(notice[0]).match(/^no relay carrier — no relay could be discovered/u);
-      // A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE, and the notice says the whole of it:
-      // pairing is always direct, so this daemon cannot be paired with from another device at all
-      // — a remedy that named only the relay would leave the reader exactly as stuck.
+      // A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE, and the notice says the whole of it: this
+      // daemon cannot be paired with from another device at all — a remedy that named only the relay
+      // would leave the reader exactly as stuck. The CONCLUSION is unchanged and its reason is not: it
+      // used to be "pairing is always direct", which `docs/relay-protocol.md` §14 retired. What holds
+      // is narrower — a device redeems over a rendezvous only through one THIS daemon holds, and this
+      // one holds none, so there is no room the two could meet in either.
       should(notice[1]).match(/bound to 127\.0\.0\.1 and dials no relay/u);
       should(notice[1]).match(/nothing can pair with it either/u);
       should(notice[2]).match(/^to pair: set "host" in/u);
@@ -4197,7 +4233,7 @@ describe('daemon boot lifecycle', () => {
       });
       const asked: number[] = [];
       const world = {
-        ...buildWorld(),
+        ...buildIntegrationWorld(),
         notices: said.port,
         untilShutdown: async () => await stopped,
         relayDirectory: {
