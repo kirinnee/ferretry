@@ -20,22 +20,47 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 
 ## What renders today
 
-Two of the five types render as pictures. **The other three are shown as their own escaped source,
-with the limitation printed on screen.** That is the current build, not a bug to work around:
+Four of the five types render. **`html` alone is shown as its own escaped source, with the limitation
+printed on screen.** That is the current build, not a bug to work around:
 
-| `type:`   | Today                                       |
-| --------- | ------------------------------------------- |
-| `svg`     | renders as a picture                        |
-| `image`   | renders as a picture (raster only)          |
-| `html`    | shown as source — **nothing executes**      |
-| `mermaid` | shown as source — no renderer in this build |
-| `lottie`  | shown as source — no player in this build   |
+| `type:`   | Today                                                         |
+| --------- | ------------------------------------------------------------- |
+| `svg`     | renders as a picture                                          |
+| `image`   | renders as a picture (raster only)                            |
+| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture |
+| `lottie`  | plays as an animation, with Pause and Play                    |
+| `html`    | shown as source — **nothing executes**                        |
 
-So: reach for `svg` when you want a diagram someone will actually see. Writing `mermaid` today gets
-your reader a code listing, which is sometimes still the right call — just choose it knowingly.
+So write `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
+to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, and `lottie`
+when motion genuinely helps.
 
 **Do not write `type: html` expecting interactivity.** No JavaScript in it will ever run. If you need
 to show HTML, an ordinary `html` code fence says the same thing with less ceremony.
+
+### What "renders in a sandbox" means for you
+
+`mermaid` and `lottie` are handed to a trusted library running in an isolated frame that has no
+access to the app, no storage, and no ability to fetch anything for itself. **Your payload is data,
+never code.** Two consequences you should design around:
+
+- **A Lottie expression is refused.** A string-valued `"x"` key anywhere in the animation — the field
+  a full player would compile and run as JavaScript — makes the whole block fail to parse. Bezier
+  easing handles (`{"x":[0.833]}`) and separated-dimension positions are numbers and objects, not
+  code, and are perfectly fine. Export without expressions.
+- **A Lottie animation cannot load remote assets.** Embed images as `data:` URIs or leave them out;
+  anything fetched from a URL will silently not appear.
+
+### Nothing renders until the reader asks
+
+Every picture, diagram and animation starts as an **offer**, not a render. The reader presses
+_Render illustration_ and only then does anything decode, download or draw. For `mermaid` and
+`lottie` that first press may also download the renderer, which is why the offer says so.
+
+Two things follow for you as an author. **Assume the reader may never press it** — so the `alt:`
+description has to carry the point on its own, because for some readers it is the only thing there.
+And **a rewritten message starts the decision over**: consent belongs to the exact bytes, so editing
+a streamed illustration withdraws it.
 
 ## The shape
 
@@ -95,8 +120,11 @@ in total**. The two limits are independent, so 4096 × 4096 and 8192 × 2048 are
 8192 × 8192 is not. For a raster that is read from the file's own header; for an SVG it is
 the `width`, `height` and `viewBox` you declare.
 
-**No animation.** An animated PNG, GIF or WebP is refused, because this build has no pause control
-and will not show you a loop nobody can stop. Use a still frame.
+**No animated raster.** An animated PNG, GIF or WebP is refused, because an `<img>` has no pause
+control and the build will not show you a loop nobody can stop. Use a still frame — or `lottie`,
+which is the one animated type here and does have Pause and Play. A Lottie animation starts paused
+for a reader who has asked for reduced motion, and stops on its own after two minutes of playback,
+with Reload to start it again.
 
 An SVG is also refused if it declares a `<!DOCTYPE>` or `<!ENTITY>`, contains `<script>`,
 `<foreignObject>` or `<use>`, uses more than 32 filter primitives, has an unterminated comment or
@@ -138,9 +166,15 @@ blank or incomplete, an external reference is the first thing to check.
 ## What the reader gets
 
 A caption (your `alt`), a **Render illustration** control, a **Source** button that shows exactly
-what you wrote, and a **Fullscreen** button; once rendered, **Reload** takes the Render control's
-place. If the browser cannot decode your payload, the block says so and opens the source instead of
-showing an empty frame.
+what you wrote, and a **Fullscreen** button; once the render has **started**, **Reload** takes the
+Render control's place. "Started" rather than "rendered" is exact for `mermaid` and `lottie`: pressing
+Render also fetches a renderer, so both controls appear while the frame may still be working, and the
+block says `Preparing the Mermaid renderer…` until it is ready.
+
+If the browser cannot decode your payload, the block says so and opens the source instead of showing
+an empty frame. For `mermaid` and `lottie` a failure is one plain sentence with the library's own
+wording folded under a **Why** disclosure — so a parse error quoting your source is available to you
+without being shown to the reader as the app's own words.
 
 ## Before you paste one
 

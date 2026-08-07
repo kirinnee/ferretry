@@ -222,16 +222,18 @@ describe('fy-render fence language', () => {
 });
 
 describe('fy-render presentation', () => {
-  test('should render only the two static types as a visual in this build', () => {
+  test('should route each type to the surface that can actually render it', () => {
     // Act
     const presentation = FY_RENDER_TYPES.map(type => [type, fyRenderPresentation(type)]);
 
-    // Assert
+    // Assert — `html` is the ONE type still shown as source, and that is the
+    // declared gap rather than a missing case. A type moving out of `source`
+    // means a new execution surface and wants the threat model re-read.
     should(presentation).eql([
       ['html', 'source'],
       ['svg', 'visual'],
-      ['lottie', 'source'],
-      ['mermaid', 'source'],
+      ['lottie', 'sandbox'],
+      ['mermaid', 'sandbox'],
       ['image', 'visual'],
     ]);
   });

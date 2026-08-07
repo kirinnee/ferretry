@@ -7,11 +7,18 @@
  * timer, no network call, and no side effect, which is why it can be the one
  * place both the renderer and the documentation read their numbers from.
  *
- * THIS BUILD RENDERS TWO TYPES AND SHOWS THE REST AS SOURCE. `svg` and `image`
- * become an `<img>`; `html`, `mermaid` and `lottie` are parsed, bounded, and
- * then rendered as their own escaped text. That is a deliberate, declared
- * limitation rather than an oversight — see `docs/fy-render.md`, which records
- * the evidence for why executable rendering is not in this build.
+ * THIS BUILD RENDERS FOUR TYPES AND SHOWS ONE AS SOURCE. `svg` and `image`
+ * become an `<img>` directly. `mermaid` and `lottie` are handed as DATA to a
+ * trusted library running inside an opaque-origin sandbox frame — Mermaid
+ * compiles to an SVG which is re-admitted through `fyRenderMermaidSvg` and then
+ * reaches the same `<img>` sink, Lottie plays live inside the frame. `html` is
+ * parsed, bounded, and rendered as its own escaped text.
+ *
+ * THAT LAST ONE IS THE DECLARED GAP, and it is not a missing case. Executing
+ * author JavaScript under an enforceable CPU and memory bound is NOT what this
+ * build does; `docs/fy-render.md` records the evidence for why. Nothing in the
+ * sandbox path weakens the statement above: no author-supplied code executes
+ * anywhere, because a library interpreting data is not a payload running code.
  *
  * THE VALIDATION HERE IS A BOUND, NOT A SANITISER, and not a promise of a
  * precise refusal either. It rejects a few obviously unsupported constructs and
@@ -162,19 +169,25 @@ export type FyRenderParseResult =
 /**
  * How a block is presented in THIS build.
  *
- * `visual` types reach an `<img>`; `source` types are printed as escaped text
- * with the limitation stated on screen. The switch is exhaustive on purpose: a
- * sixth type is a compile error here rather than a silent fallthrough into
- * whichever branch happens to be last.
+ * `visual` types reach an `<img>` directly. `sandbox` types are interpreted by a
+ * trusted library inside the opaque sandbox frame — Mermaid compiles to an SVG
+ * that then reaches the same `<img>` sink, Lottie plays live inside the frame.
+ * `source` types are printed as escaped text with the limitation stated on
+ * screen. The switch is exhaustive on purpose: a sixth type is a compile error
+ * here rather than a silent fallthrough into whichever branch happens to be last.
+ *
+ * `html` is the one that stays `source`, and that is the declared gap rather
+ * than a missing case — see `docs/fy-render.md`.
  */
-export function fyRenderPresentation(type: FyRenderType): 'visual' | 'source' {
+export function fyRenderPresentation(type: FyRenderType): 'visual' | 'sandbox' | 'source' {
   switch (type) {
     case 'svg':
     case 'image':
       return 'visual';
-    case 'html':
     case 'mermaid':
     case 'lottie':
+      return 'sandbox';
+    case 'html':
       return 'source';
   }
 }
@@ -551,13 +564,38 @@ interface LottieScan {
 }
 
 /**
+ * An `"x"` that carries CODE rather than a number.
+ *
+ * Lottie overloads the key badly. As a JavaScript expression it is a STRING that
+ * a full player compiles and runs — that is the thing this grammar exists to
+ * refuse. Its other uses are not one shape but several: a bezier easing handle
+ * is a number or an array of numbers (`{"i":{"x":[0.833],"y":[0.833]}}`), and a
+ * separated-dimension position carries a whole animated property OBJECT under
+ * `x` alongside its `y`. What they share is only that none of them is source
+ * text.
+ *
+ * Slice A refused the key outright, which was safe and cost nothing while no
+ * player existed. Measured against a real animation once one did, it rejected a
+ * plain two-keyframe ease with "Lottie expression keys are not accepted" — so
+ * the blunt rule would have shipped a Lottie type that refuses most real Lottie.
+ * Refusing only string-valued `x` keeps every expression refused, because an
+ * expression is always source text, and does not soften the defence: nothing
+ * that is not a string can be compiled, and `lottie_light` registers no
+ * evaluator to compile it with even if it were.
+ *
+ * An array is checked member-wise rather than by its first element: an
+ * expression hidden at any index is still an expression.
+ */
+const isLottieExpression = (value: unknown): boolean =>
+  typeof value === 'string' || (Array.isArray(value) && value.some(item => typeof item === 'string'));
+
+/**
  * Counts layers and refuses expression keys at any depth.
  *
- * Lottie's `"x"` key carries a JavaScript expression that a full player will
- * evaluate. Nothing in this build hands a payload to a player, so this is a
- * forward guarantee rather than a live defence: the grammar refuses the shape
- * now, so a later build that does render Lottie cannot inherit an accepted
- * corpus containing it.
+ * This is one of two independent refusals. The other is the shipped player: the
+ * `lottie_light` build registers no expression plugin at all, so even a payload
+ * that slipped past this scan would find nothing to evaluate it. Either alone
+ * would be a single point of failure.
  */
 function scanLottie(value: unknown, depth: number): LottieScan {
   if (value === null || typeof value !== 'object') return { layers: 0, expression: false, tooDeep: false };
@@ -572,7 +610,7 @@ function scanLottie(value: unknown, depth: number): LottieScan {
     return { layers, expression: false, tooDeep: false };
   }
   for (const [key, child] of Object.entries(value)) {
-    if (key === 'x') return { layers, expression: true, tooDeep: false };
+    if (key === 'x' && isLottieExpression(child)) return { layers, expression: true, tooDeep: false };
     if (key === 'layers' && Array.isArray(child)) layers += child.length;
     const scan = scanLottie(child, depth + 1);
     layers += scan.layers;
@@ -979,4 +1017,247 @@ export function parseFyRender(source: string): FyRenderParseResult {
 export function fyRenderPayloadBytes(block: FyRenderBlock): number {
   if (block.type !== 'image') return byteLength(block.payload);
   return decodedBase64Bytes(block.payload) ?? 0;
+}
+
+/**
+ * The bounds on the sandbox frame — every number the parent and the shell must
+ * agree on, in one place, for the same reason `FY_RENDER_LIMITS` exists.
+ *
+ * The two deadlines are NOT the same kind of thing and the difference is the
+ * whole point. `readyDeadlineMs` bounds a handshake and is stood down when the
+ * handshake completes. The lifetime bounds are the HARD watchdog: they are armed
+ * when the frame mounts and no message the frame sends can clear them, because
+ * the frame is exactly the thing they exist to bound. A `rendered` message that
+ * could stop the timer would be a hostile payload's first move.
+ */
+export const FY_RENDER_SANDBOX_LIMITS = {
+  /** How long the shell has to announce itself before the parent gives up. */
+  readyDeadlineMs: 5_000,
+  /**
+   * Mermaid is a one-shot compile: the frame is destroyed as soon as it hands
+   * back an SVG, so this bounds the whole of its life.
+   */
+  mermaidDeadlineMs: 15_000,
+  /**
+   * Lottie has to stay alive to keep playing, so its bound is a total frame
+   * lifetime rather than a render deadline. It bounds how LONG a payload may
+   * compute, never how hard — see the declared gap in `docs/fy-render.md`.
+   */
+  lottieLifetimeMs: 120_000,
+  /** Every string the frame puts on the wire is cut to this. */
+  messageCharacters: 300,
+  /** The compiled diagram the frame hands back, which is generated, not authored. */
+  mermaidSvgBytes: 512 * 1024,
+  mermaidSvgElements: 4_000,
+  /** Filters are the cheapest route to expensive rasterising, generated or not. */
+  mermaidSvgFilterPrimitives: 64,
+} as const;
+
+/**
+ * The two trusted bundles, each with its own closed size cap.
+ *
+ * THE CAP IS NOT ABOUT TRUST, IT IS ABOUT ALLOCATION. A wrong-hash bundle can
+ * never execute — the shell's `script-src` sees to that — but CSP only refuses
+ * the bytes AFTER the parent has fetched them, held them in memory and
+ * structured-cloned them across a port. A truncated deploy, a captive-portal
+ * login page or a mis-routed response would otherwise be read to completion
+ * whatever its size. These caps make the read fail before the allocation, which
+ * is the only place a size bound does any work.
+ *
+ * The numbers are the built size plus headroom, not round guesses: Mermaid
+ * builds to ~3.4 MiB and Lottie light to ~168 KiB.
+ */
+export const FY_RENDER_SANDBOX_LIBRARIES = {
+  lottie: { maxBytes: 1024 * 1024, url: '/fy-render-lottie.js' },
+  mermaid: { maxBytes: 6 * 1024 * 1024, url: '/fy-render-mermaid.js' },
+} as const;
+
+export type FyRenderSandboxLibrary = keyof typeof FY_RENDER_SANDBOX_LIBRARIES;
+
+/**
+ * Reads a response body to text, refusing at the cap rather than after it.
+ *
+ * A declared `Content-Length` over the cap is refused without reading a byte;
+ * an absent or lying one is caught by the running total, which stops at the
+ * first chunk that crosses the line and cancels the stream. Both paths matter:
+ * the header is the cheap check and the counter is the honest one.
+ */
+export type FyRenderBoundedTextResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly reason: string };
+
+export async function fyRenderReadBoundedText(
+  response: Response,
+  maxBytes: number,
+): Promise<FyRenderBoundedTextResult> {
+  const declared = response.headers.get('content-length');
+  if (declared !== null) {
+    const length = Number(declared);
+    if (Number.isFinite(length) && length > maxBytes) return { ok: false, reason: 'The library response is too large' };
+  }
+  const body = response.body;
+  if (body === null) return { ok: false, reason: 'The library response was empty' };
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { ok: false, reason: 'The library response is too large' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, reason: 'The library response could not be read' };
+  }
+
+  const joined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, text: new TextDecoder().decode(joined) };
+}
+
+/**
+ * Everything the frame is allowed to say, as a closed set.
+ *
+ * A message from an opaque-origin frame is untrusted input even when the code
+ * inside it is ours, so this is a parser and not a cast.
+ *
+ * IT REFUSES; IT DOES NOT REPAIR. An over-long error string is rejected rather
+ * than truncated, an unknown `kind` is rejected rather than ignored, and a
+ * message carrying ANY key the arm does not name is rejected whole. Clamping
+ * looks defensive and is the opposite: it turns a message the sender should
+ * never have been able to build into one that passes, which is how a bound
+ * stops being evidence of anything. The shell already clips its own strings, so
+ * an over-cap arrival means the shell is not the thing that sent it.
+ */
+export type FyRenderSandboxMessage =
+  | { readonly kind: 'shell-ready' }
+  | { readonly kind: 'mermaid-svg'; readonly svg: string }
+  | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
+  | { readonly kind: 'playing'; readonly playing: boolean }
+  | { readonly kind: 'error'; readonly message: string };
+
+const boundedDimension = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
+  if (value < 1 || value > FY_RENDER_LIMITS.maxDimension) return null;
+  return value;
+};
+
+/** Exactly these keys, no more and no fewer. */
+const hasExactKeys = (message: Record<string, unknown>, keys: readonly string[]): boolean => {
+  const present = Object.keys(message);
+  return present.length === keys.length && keys.every(key => Object.hasOwn(message, key));
+};
+
+export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMessage | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const message = value as Record<string, unknown>;
+  switch (message.kind) {
+    case 'shell-ready':
+      return hasExactKeys(message, ['kind']) ? { kind: 'shell-ready' } : null;
+    case 'mermaid-svg': {
+      if (!hasExactKeys(message, ['kind', 'svg'])) return null;
+      const { svg } = message;
+      if (typeof svg !== 'string') return null;
+      if (byteLength(svg) > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes) return null;
+      return { kind: 'mermaid-svg', svg };
+    }
+    case 'rendered': {
+      if (!hasExactKeys(message, ['kind', 'width', 'height'])) return null;
+      const width = boundedDimension(message.width);
+      const height = boundedDimension(message.height);
+      if (width === null || height === null) return null;
+      return { height, kind: 'rendered', width };
+    }
+    case 'playing': {
+      if (!hasExactKeys(message, ['kind', 'playing'])) return null;
+      if (typeof message.playing !== 'boolean') return null;
+      return { kind: 'playing', playing: message.playing };
+    }
+    case 'error': {
+      if (!hasExactKeys(message, ['kind', 'message'])) return null;
+      const { message: text } = message;
+      if (typeof text !== 'string') return null;
+      // Refused, not clipped. See the note above.
+      if ([...text].length > FY_RENDER_SANDBOX_LIMITS.messageCharacters) return null;
+      return { kind: 'error', message: text };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Re-admits a compiled Mermaid diagram through the same gate an authored SVG
+ * passes, before it reaches the `<img>` sink.
+ *
+ * WHY A GENERATED DOCUMENT IS CHECKED AT ALL. It is the cheap second gate behind
+ * the measured `<img>` sink, and for the `<foreignObject>` property it is the
+ * FAIL-CLOSED guard behind the shell's config. Mermaid protects only a fixed list
+ * of config keys from an in-diagram `%%{init: …}%%` directive, and
+ * `flowchart.htmlLabels` is not protectable without blocking every benign
+ * flowchart directive, so on paper an author can ask for HTML labels.
+ *
+ * MEASURED, THEY CANNOT — TODAY. Against the shipped shell config in real
+ * Chromium, both spellings of that directive and the plain equivalent diagram
+ * compiled to byte-identical SVG carrying no `<foreignObject>`. So the refusal
+ * below is untriggered rather than load-bearing, and it stays exactly because the
+ * day a Mermaid release changes that, this says so instead of quietly widening
+ * what reaches the page.
+ *
+ * The SIZE caps are looser than the authored ones and deliberately so. A
+ * hand-written SVG is bounded because a person wrote it; a compiled one is a
+ * machine's expansion of a bounded source, and holding it to 100 KiB would
+ * reject diagrams whose Mermaid text was well inside its own cap.
+ *
+ * THE STRUCTURAL REFUSALS ARE NOT RELAXED, including `<use>`. Measured Mermaid
+ * output contains none, so refusing it costs nothing real and keeps this gate
+ * fail-closed: the day a Mermaid release starts emitting one, this says so
+ * instead of quietly widening what reaches the page. An exemption would need a
+ * required generated case and its own no-egress evidence, and neither exists.
+ *
+ * EVERY AUTHORED RESOURCE CHECK STILL RUNS — bytes, surrogates, DOCTYPE/ENTITY,
+ * script, foreignObject, use, root element, unterminated tag, element count,
+ * filter primitives and the root canvas bound. Only the three COUNTS get bigger
+ * numbers. Dropping a resource check because the producer is trusted would be
+ * trusting the producer about the one thing it has no idea about: how much work
+ * the reader's browser is about to do. Measured Mermaid output passes the canvas
+ * bound as it stands — it declares `width="100%"` against a real `viewBox` and
+ * omits `height`, which resolves to the viewBox extent.
+ */
+export type FyRenderMermaidSvgResult =
+  | { readonly ok: true; readonly svg: string }
+  | { readonly ok: false; readonly reason: string };
+
+const refuse = (reason: string): FyRenderMermaidSvgResult => ({ ok: false, reason });
+
+export function fyRenderMermaidSvg(svg: string): FyRenderMermaidSvgResult {
+  if (byteLength(svg) > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes) return refuse('The compiled diagram is too large');
+  if (LONE_SURROGATE.test(svg)) return refuse('The compiled diagram contains an unpaired UTF-16 surrogate');
+  if (/<!DOCTYPE|<!ENTITY/iu.test(svg)) return refuse('The compiled diagram declares a document type or entity');
+  if (/<script[\s/>]/iu.test(svg)) return refuse('The compiled diagram contains a <script> element');
+  if (/<foreignObject[\s/>]/iu.test(svg)) return refuse('The compiled diagram contains a <foreignObject> element');
+  if (/<use[\s/>]/iu.test(svg)) return refuse('The compiled diagram contains a <use> element');
+  const body = svg.replace(SVG_PROLOGUE, '');
+  if (!/^<svg[\s/>]/u.test(body)) return refuse('The compiled diagram is not an <svg> element');
+  const scan = scanSvg(svg);
+  if (scan === null) return refuse('The compiled diagram has an unterminated tag');
+  if (scan.elements > FY_RENDER_SANDBOX_LIMITS.mermaidSvgElements)
+    return refuse(`The compiled diagram exceeds ${FY_RENDER_SANDBOX_LIMITS.mermaidSvgElements} elements`);
+  if (scan.filterPrimitives > FY_RENDER_SANDBOX_LIMITS.mermaidSvgFilterPrimitives)
+    return refuse(
+      `The compiled diagram exceeds ${FY_RENDER_SANDBOX_LIMITS.mermaidSvgFilterPrimitives} filter primitives`,
+    );
+  if (scan.rootTag === null) return refuse('The compiled diagram root element could not be read');
+  const canvas = svgCanvasRefusal(scan.rootTag);
+  return canvas === null ? { ok: true, svg } : refuse(canvas);
 }

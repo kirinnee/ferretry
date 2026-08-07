@@ -67,3 +67,10 @@ invalidate DaemonAttachmentBlobCache # a per-mount useRef in attachment-gallery.
 # it, and add the store to the `caches:` array in lib/store.tsx in the same change.
 invalidate DaemonAttentionClient # unmounted: no construction site in packages/pwa/src. The attention surface is reached only from tests and the harness.
 invalidate DaemonRuntimeModelCatalogStore # unmounted: no construction site in packages/pwa/src. runtime-controls.tsx names the type as the port it wants; nothing supplies one.
+
+# The `fy-render` sandbox frame, whose WHOLE SECURITY PROPERTY is that it carries no daemon identity.
+# It fetches exactly one fixed, build-pinned static asset — the trusted renderer bundle — with
+# `credentials: 'omit'` and `redirect: 'error'`, and hands the bytes to an opaque-origin frame. There
+# is no daemon, no session, no token and no daemon URL anywhere in its props or its request; giving it
+# a `DaemonConnection` to satisfy this rule would ADD the credential the design exists to withhold.
+access packages/pwa/src/components/fy-render-sandbox.tsx # a fixed same-origin static asset, deliberately unscoped: see docs/fy-render.md
