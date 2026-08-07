@@ -52,7 +52,9 @@
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
 import { sharedChromium } from './support/chromium.ts';
@@ -383,6 +385,191 @@ beforeAll(async () => {
  */
 afterAll(async () => {
   await server?.stop(true);
+});
+
+/**
+ * A stub builder written OUTSIDE the repository, run instead of the real CLI.
+ *
+ * These prove the manifest gate itself — the checks the tier's freshness guarantee
+ * actually rests on. Until now the only loader test planted a builder that could not
+ * run, so `parseManifest` had no direct coverage at all: an edit from `.at(-1)` to
+ * `.at(0)`, or from exact path equality to a `startsWith` prefix test, would have
+ * broken the guarantee with nothing failing.
+ *
+ * `stdout` is a TEMPLATE, not a function: the loader picks the private directory, so
+ * the case cannot know it in advance, and the stub substitutes `__OUT__` for the real
+ * path at run time. A serialised closure would not work — the child is a separate
+ * process and would not have this file's helpers in scope, which is exactly how the
+ * first attempt failed.
+ *
+ * `files` decides whether the five artifacts exist, because a case that must fail on
+ * its PATHS must not also fail for want of bytes.
+ */
+const OUT = '__OUT__';
+
+const withStubBuilder = async (
+  stdout: string,
+  run: () => Promise<void>,
+  options: { files?: boolean } = {},
+): Promise<void> => {
+  const directory = await mkdtemp(join(tmpdir(), 'fy-render-stub-'));
+  const stub = join(directory, 'stub-builder.ts');
+  const names = ['fy-render-sandbox.html', 'fy-render-mermaid.js', 'fy-render-lottie.js', 'app.css', 'app.js'];
+  await writeFile(
+    stub,
+    `import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const at = Bun.argv.indexOf('--out');
+const out = Bun.argv[at + 1];
+${options.files === false ? '' : `for (const name of ${JSON.stringify(names)}) await writeFile(join(out, name), '/* stub */', 'utf8');`}
+console.log(${JSON.stringify(stdout)}.replaceAll(${JSON.stringify(OUT)}, out));
+`,
+    'utf8',
+  );
+
+  const savedMemo = fyRenderFixtureTestSeam.takeMemo();
+  fyRenderFixtureTestSeam.useBuilder(stub);
+  try {
+    await run();
+  } finally {
+    // The seam goes back on EVERY path, so a planted case cannot leak into the rest
+    // of the run, and the stub directory goes with it — nothing generated lives in
+    // the repository.
+    fyRenderFixtureTestSeam.useBuilder(null);
+    fyRenderFixtureTestSeam.restoreMemo(savedMemo);
+    await rm(directory, { force: true, recursive: true });
+  }
+};
+
+/** The manifest a healthy builder would print, with the directory left as `__OUT__`. */
+const GOOD_MANIFEST = JSON.stringify({
+  appCss: `${OUT}/app.css`,
+  appJs: `${OUT}/app.js`,
+  directory: OUT,
+  lottie: `${OUT}/fy-render-lottie.js`,
+  mermaid: `${OUT}/fy-render-mermaid.js`,
+  shell: `${OUT}/fy-render-sandbox.html`,
+  version: 1,
+});
+
+/** Runs the loader and returns the rejection, or `null` when it resolved. */
+const loaderRejection = async (): Promise<unknown> =>
+  await fyRenderIntegrationFixture().then(
+    () => null,
+    (error: unknown) => error,
+  );
+
+describe('fy-render fixture loader — the manifest gate', () => {
+  test('should accept a manifest surrounded by runtime noise', async () => {
+    // The tolerant half, stated honestly: a runtime can print warnings the builder
+    // does not control, and the LAST `{`-line is the manifest. Failing the tier for a
+    // deprecation notice would be brittle; freshness is carried by the checks below,
+    // not by line discipline.
+    await withStubBuilder(
+      `[warn] a runtime notice\n{ not json but starts with a brace\n${GOOD_MANIFEST}\ntrailing noise`,
+      async () => {
+        const fixture = await fyRenderIntegrationFixture();
+        should(fixture.shell).equal('/* stub */');
+      },
+    );
+  }, 60_000);
+
+  test('should refuse stdout carrying no manifest at all', async () => {
+    await withStubBuilder('built everything, honest', async () => {
+      should(String(await loaderRejection())).match(/printed no manifest/u);
+    });
+  }, 60_000);
+
+  test('should refuse a manifest naming a directory this process did not create', async () => {
+    await withStubBuilder(
+      GOOD_MANIFEST.replace(`"directory":"${OUT}"`, '"directory":"/tmp/somewhere-else"'),
+      async () => {
+        should(String(await loaderRejection())).match(/names \/tmp\/somewhere-else/u);
+      },
+    );
+  }, 60_000);
+
+  test('should refuse a sibling directory whose name merely extends the private one', async () => {
+    // THE `join`-NOT-`startsWith` PROPERTY. `…-abc-evil` shares a prefix with `…-abc`
+    // and is a different directory; a prefix test would have served its bytes while
+    // claiming freshness.
+    await withStubBuilder(GOOD_MANIFEST.replace(`"shell":"${OUT}/`, `"shell":"${OUT}-evil/`), async () => {
+      should(String(await loaderRejection())).match(/shell path is .*-evil/u);
+    });
+  }, 60_000);
+
+  test('should refuse a manifest carrying a key the contract does not name', async () => {
+    await withStubBuilder(GOOD_MANIFEST.replace('"version":1', '"version":1,"extra":"x"'), async () => {
+      should(String(await loaderRejection())).match(/manifest keys are/u);
+    });
+  }, 60_000);
+
+  test('should refuse a manifest missing a key the contract requires', async () => {
+    await withStubBuilder(GOOD_MANIFEST.replace(`"appCss":"${OUT}/app.css",`, ''), async () => {
+      should(String(await loaderRejection())).match(/manifest keys are/u);
+    });
+  }, 60_000);
+
+  test('should refuse a manifest whose artifacts are absent or empty', async () => {
+    // The last check, and the reason it exists: a builder that reordered its writes
+    // would otherwise hand back a manifest pointing at nothing.
+    await withStubBuilder(
+      GOOD_MANIFEST,
+      async () => {
+        should(await loaderRejection()).be.an.Error();
+      },
+      { files: false },
+    );
+  }, 60_000);
+
+  test('should reject when the child outlives its bound, even ignoring SIGTERM', async () => {
+    /**
+     * THE BOUND IS ON THE WAIT, not merely on the child. The first version sent a
+     * default SIGTERM and then went on awaiting `Promise.all([stdout, stderr,
+     * exited])` — so a child that ignores SIGTERM or holds a pipe would never settle
+     * that aggregate and the loader would have waited forever, which is the unbounded
+     * wait this whole design exists to remove.
+     *
+     * This stub installs a SIGTERM handler that does nothing and never exits, so only
+     * the raced deadline plus SIGKILL can end it. The bound is shortened through the
+     * seam: nothing here waits anywhere near the shipped 240 seconds.
+     */
+    const directory = await mkdtemp(join(tmpdir(), 'fy-render-stub-'));
+    const stub = join(directory, 'wedged-builder.ts');
+    await writeFile(stub, "process.on('SIGTERM', () => {});\nsetInterval(() => {}, 1000);\n", 'utf8');
+
+    const savedMemo = fyRenderFixtureTestSeam.takeMemo();
+    fyRenderFixtureTestSeam.useBuilder(stub);
+    fyRenderFixtureTestSeam.useTimeout(750);
+    try {
+      const started = Date.now();
+      const rejection = await loaderRejection();
+      const elapsed = Date.now() - started;
+      const wedgedDirectory = fyRenderFixtureTestSeam.lastDirectory();
+
+      // Assert — it rejected, promptly, naming the bound.
+      should(rejection).be.an.Error();
+      should(String(rejection)).match(/did not finish within 750ms/u);
+      should(elapsed).be.below(30_000);
+
+      // Assert — the exact private directory is gone, and the rejection was not
+      // remembered: the next call builds again rather than replaying the failure.
+      should(wedgedDirectory).be.a.String();
+      should(existsSync(wedgedDirectory as string)).be.false();
+      const second = await loaderRejection();
+      should(second).be.an.Error();
+      should(fyRenderFixtureTestSeam.lastDirectory()).not.equal(wedgedDirectory);
+    } finally {
+      fyRenderFixtureTestSeam.useTimeout(null);
+      fyRenderFixtureTestSeam.useBuilder(null);
+      fyRenderFixtureTestSeam.restoreMemo(savedMemo);
+      await rm(directory, { force: true, recursive: true });
+    }
+
+    // Assert — and the real fixture still works afterwards.
+    const fixture = await fyRenderIntegrationFixture();
+    should(fixture.shell).containEql('Content-Security-Policy');
+  }, 120_000);
 });
 
 describe('fy-render fixture loader — the failure path', () => {

@@ -51,7 +51,9 @@ const builder = resolve(packageRoot, 'scripts/build-fy-render-integration-fixtur
  * finite, because the failure this whole design removes was an unbounded wait. A
  * wedge must be a loud failure with a reaped child, never a consumed job timeout.
  */
-const BUILD_TIMEOUT_MS = 240_000;
+const DEFAULT_BUILD_TIMEOUT_MS = 240_000;
+
+let buildTimeoutMs = DEFAULT_BUILD_TIMEOUT_MS;
 
 /**
  * The exact filename each artifact must have, directly under the private directory.
@@ -81,11 +83,23 @@ export type FyRenderFixtureBytes = Readonly<Record<ArtifactKey, string>>;
 /**
  * Parses and VALIDATES, rather than casts.
  *
- * The child's stdout is input like any other. A builder that half-failed, a Bun
- * warning printed ahead of the JSON, a stale loader reading a newer manifest shape,
- * or a path pointing anywhere but the directory this process created must all fail
- * here with a sentence naming the problem — never surface later as a server serving
- * `undefined` or, worse, serving somebody else's bytes while claiming freshness.
+ * NOISE IS TOLERATED; THE MANIFEST IS THE LAST `{`-LINE. A runtime can print
+ * warnings the builder does not control, and failing the whole tier because Bun
+ * emitted a deprecation notice would be brittle — so leading AND trailing non-JSON
+ * lines are skipped, and the last line that looks like a JSON object is taken as the
+ * candidate. An earlier version of this comment claimed a warning ahead of the JSON
+ * "must fail"; that was never what the code did, and the code is the behaviour worth
+ * keeping.
+ *
+ * THE FAIL-CLOSED GUARANTEE IS NOT LINE DISCIPLINE. It is carried entirely by the
+ * checks below: exact keys, the exact `version`, `directory` identical to the one
+ * THIS process created, every artifact path `join`-equal to the expected filename
+ * directly under it, and every artifact non-empty. Those are what stop a stale
+ * fixture, a `public/` artifact, or a sibling directory whose name merely extends
+ * ours from ever being served while claiming freshness — never the number of lines
+ * on stdout. Weakening any of them (`.at(-1)` → `.at(0)`, or exact equality → a
+ * `startsWith` prefix test) would break the guarantee, which is why each has its own
+ * planted case in `fy-render-sandbox.security.test.ts`.
  */
 const parseManifest = (stdout: string, expectedDirectory: string): Readonly<Record<ArtifactKey, string>> => {
   const line = stdout
@@ -159,6 +173,13 @@ export const fyRenderFixtureTestSeam = {
   useBuilder: (path: string | null): void => {
     builderOverride = path;
   },
+  /**
+   * Shorten the child bound so the timeout path can be proven in a second rather
+   * than in four minutes. `null` restores the shipped value.
+   */
+  useTimeout: (ms: number | null): void => {
+    buildTimeoutMs = ms ?? DEFAULT_BUILD_TIMEOUT_MS;
+  },
   /** Take the memo away and return it, so the next call really builds. */
   takeMemo: (): Promise<FyRenderFixtureBytes> | null => {
     const memo = pending;
@@ -187,27 +208,50 @@ const buildFyRenderFixtureOnce = async (): Promise<FyRenderFixtureBytes> => {
 
     /**
      * THE CHILD IS BOUNDED AND REAPED, which is half the point of moving the compile
-     * out here. A hook timeout kills the test, not the process the test spawned — so
-     * a builder that wedged the way the in-process compile used to would be left
-     * holding CPU while the tier reported a failure. This races the exit against a
-     * bound and kills the child either way, so a wedge becomes a loud, attributable
-     * failure with nothing lingering.
+     * out here — and the bound has to be a bound on THE WAIT, not merely on the child.
+     *
+     * A hook timeout kills the test, not the process the test spawned, so a builder
+     * that wedged the way the in-process compile used to would be left holding CPU
+     * while the tier reported a failure. The first version of this got that half
+     * right and the other half wrong: it sent a default SIGTERM and then went on
+     * awaiting `Promise.all([stdout, stderr, exited])`. A child that ignores SIGTERM,
+     * or that leaves a pipe held open, never settles that aggregate — so the loader
+     * would have waited forever, which is exactly the unbounded wait this whole
+     * design exists to remove.
+     *
+     * So the deadline now RACES the aggregate rather than merely firing beside it,
+     * and it kills with SIGKILL immediately. No grace period: by the time the bound
+     * has expired the child has had the whole budget to finish, there is nothing to
+     * flush that anybody reads, and a grace that the surrounding `finally` would
+     * cancel a microtask later — which is what an earlier draft of this did — is a
+     * comment describing something that never happens. SIGKILL is the only signal a
+     * wedged child cannot decline, which is the entire point.
+     *
+     * `deadline` rejects on its own, so the loser of the race can never leave an
+     * unhandled rejection: the aggregate's own rejection is swallowed by a no-op
+     * catch attached BEFORE the race begins.
      */
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, BUILD_TIMEOUT_MS);
+    let expiry: ReturnType<typeof setTimeout> | undefined;
+
+    const finished = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    // Attached BEFORE the race: whichever branch loses, its rejection is already
+    // handled, so a losing pipe read cannot surface as an unhandled rejection.
+    finished.catch(() => undefined);
+
+    const deadline = new Promise<never>((_resolve, reject) => {
+      expiry = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+        reject(new Error(`the fy-render fixture builder did not finish within ${buildTimeoutMs}ms and was killed`));
+      }, buildTimeoutMs);
+    });
 
     try {
-      const [stdout, stderr, code] = await Promise.all([
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-        child.exited,
-      ]);
+      const [stdout, stderr, code] = await Promise.race([finished, deadline]);
       if (timedOut)
         throw new Error(
-          `the fy-render fixture builder did not finish within ${BUILD_TIMEOUT_MS}ms and was killed\n--- stderr ---\n${stderr}`,
+          `the fy-render fixture builder did not finish within ${buildTimeoutMs}ms and was killed\n--- stderr ---\n${stderr}`,
         );
       if (code !== 0)
         throw new Error(
@@ -227,10 +271,11 @@ const buildFyRenderFixtureOnce = async (): Promise<FyRenderFixtureBytes> => {
       );
       return Object.fromEntries(entries) as FyRenderFixtureBytes;
     } finally {
-      clearTimeout(timer);
-      // Belt and braces: if we are leaving by an exception before `exited` resolved,
-      // the child must not outlive us.
-      child.kill();
+      if (expiry !== undefined) clearTimeout(expiry);
+      // Belt and braces on EVERY exit: if we are leaving by an exception before the
+      // child settled, it must not outlive us, and SIGKILL is the only signal that
+      // cannot be declined. Killing an already-dead child is a no-op.
+      child.kill('SIGKILL');
     }
   } finally {
     /**

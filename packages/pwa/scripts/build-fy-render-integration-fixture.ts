@@ -36,7 +36,12 @@
  *
  *     bun packages/pwa/scripts/build-fy-render-integration-fixture.ts --out <absolute-dir>
  *
- * stdout on success is exactly one line of JSON: the manifest.
+ * On success this prints the manifest as one line of JSON. It is deliberately NOT a
+ * promise that stdout contains nothing else: a runtime can emit warnings this script
+ * does not control, so the loader skips non-JSON lines and takes the LAST
+ * `{`-line as the manifest. The fail-closed guarantee lives in the loader's exact
+ * key/version/directory/path checks, never in line discipline — see
+ * `tests/integration/support/fy-render-integration-fixture.ts`.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
