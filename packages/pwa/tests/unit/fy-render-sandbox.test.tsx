@@ -616,6 +616,61 @@ describe('FyRenderSandbox success acknowledgement', () => {
   });
 });
 
+describe('FyRenderSandbox compiled diagram', () => {
+  test('should hand the compiled SVG and its theme over ONCE, and ignore a second', async () => {
+    await withStubbedLibrary(async () => {
+      /**
+       * Arrange — over the REAL transferred port, never by calling the prop. The arm
+       * under test is the one that consumes a `mermaid-svg` reply: it must pass the
+       * svg and the theme the SHELL reported straight through, and it must be
+       * one-shot. A prop call would exercise the caller's callback and none of the
+       * parsing, the `done` latch or the ordering that sit in front of it.
+       */
+      const node = frameMock();
+      const compiled: { svg: string; theme: string }[] = [];
+      const failures: FyRenderSandboxFailure[] = [];
+      const tree = render(
+        <FyRenderSandbox
+          block={mermaidBlock()}
+          deadlines={{ hardMs: 60_000, readyMs: 60_000 }}
+          onCompiled={(svg, theme) => compiled.push({ svg, theme })}
+          onFailed={failure => failures.push(failure)}
+          onRendered={() => {}}
+          playing={false}
+          theme="dark"
+        />,
+        node,
+      );
+
+      // Act — the shell's own reply, on the channel the parent transferred to it.
+      const port = handshake(node);
+      run(() => port.postMessage({ kind: 'mermaid-svg', svg: MERMAID_SVG, theme: 'light' }));
+      await settle(40);
+
+      // Assert — exactly once, with the exact bytes and the theme the shell used.
+      // `light` while the PROP says `dark` is the point: the parent must not
+      // substitute what it thinks the page looks like for what the diagram was drawn
+      // for, which is the race the echo closes.
+      should(compiled).have.length(1);
+      should(compiled[0]?.svg).equal(MERMAID_SVG);
+      should(compiled[0]?.theme).equal('light');
+
+      // Act — a second reply on the same live port.
+      run(() => port.postMessage({ kind: 'mermaid-svg', svg: '<svg id="second"/>', theme: 'dark' }));
+      await settle(40);
+
+      // Assert — DROPPED. One render per frame: Reload is a fresh frame, never a
+      // second command, so a frame that answered twice would be replacing a diagram
+      // the reader already has with bytes nobody asked for.
+      should(compiled).have.length(1);
+      should(compiled[0]?.svg).equal(MERMAID_SVG);
+      should(failures).be.empty();
+
+      run(() => tree.unmount());
+    });
+  });
+});
+
 describe('FyRenderBlock sandbox consent', () => {
   test('should create no frame and fetch nothing until a reader asks', async () => {
     // Arrange — the property the whole consent gate exists to deliver, and the
@@ -998,6 +1053,97 @@ describe('FyRenderBlock sandbox failure copy', () => {
       .filter(node => typeof node.type === 'string');
     should(sentences.length).equal(1);
     should(sentences[0]?.props['data-fy-render-sandbox-status']).equal('failed');
+  });
+});
+
+describe('FyRenderBlock reduced motion and playback controls', () => {
+  test('should fall back to normal playback when matchMedia throws at consent', async () => {
+    /**
+     * Arrange — a `matchMedia` that THROWS. This is not hypothetical defensiveness:
+     * the preference is read at the gesture rather than at mount, so it runs inside a
+     * reader's click handler, and an engine that refuses an unsupported media string
+     * would otherwise take a transcript row down with it. The safe answer is "no
+     * preference expressed", which means ordinary playback.
+     */
+    const realMatchMedia = window.matchMedia;
+    let asked = 0;
+    (window as unknown as { matchMedia: unknown }).matchMedia = () => {
+      asked += 1;
+      throw new Error('matchMedia is not supported here');
+    };
+
+    try {
+      const { tree } = mountBlock(lottieBlock());
+
+      // Act — the consent gesture, which is where the preference is read.
+      approve(tree);
+      await settle(20);
+
+      // Assert — it was really asked, and the block survived and chose to play.
+      // Asserting `asked` matters: without it this passes on an engine where
+      // `matchMedia` was never consulted at all, which is a different story.
+      should(asked).be.above(0);
+      should(marked(tree, { 'data-fy-render-playing': 'true' })).be.above(0);
+      should(frames(tree)).equal(1);
+    } finally {
+      (window as unknown as { matchMedia: unknown }).matchMedia = realMatchMedia;
+    }
+  });
+
+  test('should carry a reader’s Pause and Play to the frame, and keep it across a Reload', async () => {
+    await withStubbedLibrary(async () => {
+      /**
+       * Arrange — the REAL rendered control, not a prop. Play/Pause is the one place
+       * the reader overrides the motion preference, and the override has to reach the
+       * live frame as a command rather than as a remount: remounting would restart
+       * the animation, which is the opposite of pausing it.
+       */
+      const { frame, tree } = mountBlock(lottieBlock());
+      approve(tree);
+      await settle(20);
+      const port = handshake(frame);
+      const commands: unknown[] = [];
+      port.onmessage = event => commands.push(event.data);
+      await settle(20);
+      // It starts playing: no reduce preference is in force in this environment.
+      should(marked(tree, { 'data-fy-render-playing': 'true' })).be.above(0);
+      const srcBefore = [...frame.assigned];
+
+      // Act — press the rendered button, through its own handler.
+      press(tree, 'Pause');
+      await settle(20);
+
+      // Assert — the state flipped AND the frame was told, on the live port.
+      should(marked(tree, { 'data-fy-render-playing': 'false' })).be.above(0);
+      should(commands).containDeep([{ kind: 'set-playing', playing: false }]);
+      // A COMMAND, NEVER A REMOUNT: no new `src` was assigned, so the animation was
+      // not restarted out from under the reader.
+      should(frame.assigned).eql(srcBefore);
+
+      // Act — and back again.
+      press(tree, 'Play');
+      await settle(20);
+
+      // Assert
+      should(marked(tree, { 'data-fy-render-playing': 'true' })).be.above(0);
+      should(commands).containDeep([{ kind: 'set-playing', playing: true }]);
+
+      /**
+       * Act / Assert — THE CHOICE SURVIVES A RELOAD. Pause, then Reload. Reload
+       * re-reads the motion preference ONLY when the reader has not already decided;
+       * `chosen` is what records that they have. Without it a Reload would quietly
+       * put the preference's answer back and start playing again.
+       */
+      press(tree, 'Pause');
+      await settle(20);
+      should(marked(tree, { 'data-fy-render-playing': 'false' })).be.above(0);
+
+      press(tree, 'Reload');
+      await settle(30);
+      should(marked(tree, { 'data-fy-render-playing': 'false' })).be.above(0);
+      // A fresh frame really was mounted, so this is the reload seam and not a no-op.
+      should(frame.assigned.length).be.above(srcBefore.length);
+    });
   });
 });
 
