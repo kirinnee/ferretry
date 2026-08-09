@@ -49,11 +49,11 @@
 # as a blind spot rather than as an empty observation, a relaunch that did not happen being reportable
 # as a completed move, and a migration able to launch an argv the start's own authorization refuses.
 #
-# THREE REMAIN. Each was re-checked against this head, and each blocker below is a FACT ABOUT THIS
-# REPOSITORY that can be verified with one search rather than a judgement about design:
+# TWO REMAIN — `browserTransport` was the third and is SPENT: a production `BrowserViewerHost` exists
+# now (`BrowserSessionService`), composition names the worker entry point, and
+# `/v1/sessions/:id/browser` is served for real rather than as a stated 501. Each blocker below is a
+# FACT ABOUT THIS REPOSITORY that can be verified with one search rather than a judgement about design:
 #
-#     the worker program and `BrowserViewerHost` are both absent, and neither is downstream of the
-#     display. `/v1/sessions/:id/browser` is served as a stated 501 naming exactly these two.
 #   * `transcripts` — SPENT. A session now records its transcript provenance at creation
 #     (`SessionConfigSchema.transcript`), so `TranscriptSource.read` can be given an exact file:
 #     Claude's is DECIDED — the daemon mints the harness session id, puts it on the launch argv and
@@ -85,7 +85,7 @@
 #
 # WHY THEY ARE STILL FIELDS. Deleting a blocked field makes its modules unreachable, and the only
 # home this repo has for "ported, correct, and not mountable yet" is an entry on THIS list — which
-# the unit that wrote the gate ruled out for them. So the invocation gate reports three known
+# the unit that wrote the gate ruled out for them. So the invocation gate reports two known
 # blockers until that call is made; it is not a gate that has been weakened to pass.
 #
 # ═══════════════════════════════════════════════════════════════════════════════════════════════

@@ -57,17 +57,20 @@ export interface BrowserMountedSubsystem extends BrowserSubsystem {
  * The split is the domain's call and it is passed through rather than re-decided here — a mount that
  * reclassified a refusal would be a second, quieter opinion about the same failure.
  *
- * THE PER-SESSION BROWSER IS NOT SERVED, and it is mounted as a stated refusal rather than left off
- * the table for the same reason `/v1/learning/run` is: `fy browser open` is a shipped command, and a
- * 404 is indistinguishable from version skew while a 501 naming the missing piece is actionable. What
- * is missing is NOT the worker program: `packages/daemon/bin/browser-worker.ts` is the browser worker,
- * and `bin/fyd.ts` already wires a `browserTransport` — `BrowserWorkerClient.connect` and
- * `BrowserViewerStream.connect` — that can launch one and stream its frames. What is missing is the
- * per-session runtime that would turn a session id into a launched worker and a production
- * `BrowserViewerHost`: nothing builds that object, so `browserLoginRoutes` below is called, at its one
- * call site in `mounts/index.ts`, with only the login window and never with the transport. Composing
- * that runtime, and wiring it into this mount, belongs to the unit that ports the browser session
- * runtime.
+ * THE PER-SESSION BROWSER IS SERVED NOW, and the shape of this file still records what it took. The
+ * worker program was never the missing half — `packages/daemon/bin/browser-worker.ts` is the browser
+ * worker and `bin/fyd.ts` has long wired a transport that can drive one. What was missing was the
+ * per-session runtime that turns a session id into a launched worker and a production
+ * `BrowserViewerHost`. `BrowserSessionService` is that object, so the one call site in
+ * `mounts/index.ts` now hands this function a browser host and the socket-ticket broker as well as
+ * the login window.
+ *
+ * THE HOST STAYS OPTIONAL because the refusal it replaces has to remain expressible. A daemon
+ * composed without one answers the stated 501 below rather than a 404, for the same reason
+ * `/v1/learning/run` does: `fy browser open` is a shipped command, and a 404 is indistinguishable
+ * from version skew while a 501 naming the missing piece is actionable. The ticket counter is
+ * separately optional, because a counter that could mint nothing would answer 500 where a 404 is the
+ * truth.
  */
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */

@@ -86,12 +86,13 @@ export interface AttentionReference {
 /**
  * The addressable live surfaces of a session.
  *
- * `terminal` is real today. `browser` is declared here on purpose: the browser
- * worker is unbuilt and `/v1/sessions/:id/browser` answers 501, so nothing can
- * prove a page yet — but the grammar, the envelope, the identity and the
- * tombstone are all key-agnostic, so a page slots in by teaching one resolver
- * about it. Declaring the kind now is what stops a second surface grammar being
- * invented next to this one.
+ * `terminal` is real today. `browser` is declared here on purpose: the daemon
+ * serves `/v1/sessions/:id/browser` for real now, but no resolver has been
+ * taught to read the page list it answers with, so nothing proves a page yet —
+ * and the grammar, the envelope, the identity and the tombstone are all
+ * key-agnostic, so a page slots in by teaching one resolver about it. Declaring
+ * the kind now is what stops a second surface grammar being invented next to
+ * this one.
  */
 export const SURFACE_KINDS = ['terminal', 'browser'] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];

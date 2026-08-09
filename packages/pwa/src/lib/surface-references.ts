@@ -26,12 +26,13 @@
  * enumeration, not a page of one — so an id that is missing from it is missing,
  * full stop.
  *
- * BROWSER PAGES ARE DELIBERATELY UNPROVABLE HERE. There is no browser worker;
- * `/v1/sessions/:id/browser` answers 501. So a `%browser:…` token resolves to
+ * BROWSER PAGES ARE DELIBERATELY UNPROVABLE HERE. The daemon serves
+ * `/v1/sessions/:id/browser` for real now and its status carries a page list, but
+ * nothing hands that list to this module. So a `%browser:…` token resolves to
  * NOTHING — not to a link, and not to a tombstone either, because this module has
  * no authoritative page list and must not report a page as closed on no evidence.
- * When the worker lands, teaching this resolver about pages is the whole change:
- * the token, the envelope, the identity, the picker row and the tombstone are all
+ * Teaching this resolver to read that status is the whole remaining change: the
+ * token, the envelope, the identity, the picker row and the tombstone are all
  * key-agnostic already.
  */
 
