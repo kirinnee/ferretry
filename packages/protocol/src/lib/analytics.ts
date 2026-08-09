@@ -78,12 +78,13 @@ export const AnalyticsAggregateResultSchema = z.object({
   /**
    * Reasoning tokens, which are billed at their own rate.
    *
-   * OPTIONAL BECAUSE NOTHING FOLDS IT YET. The rate slot exists in `AnalyticsPricingRatesSchema`, and
-   * a build that has not learned to count these must report their absence rather than a zero an
-   * operator would read as "this model does no reasoning". A responder that omits the key is saying
-   * exactly that; it is not the same as `{ value: null }`, which is a measure that was attempted.
+   * REQUIRED, because this is now a fact the contract OWNS. It was optional while nothing folded the
+   * figure and a responder had to be able to say "I cannot count these at all" — but a build that
+   * counts them and still admits omission leaves every reader writing a fallback for a case that can
+   * no longer happen. Unknown is said with `{ value: null }`, a measure that was attempted and came
+   * back empty, which is what a session whose harness names no reasoning figure produces.
    */
-  reasoningTokens: AnalyticsMeasureSchema.optional(),
+  reasoningTokens: AnalyticsMeasureSchema,
   equivalentApiCostUsdMicros: AnalyticsMeasureSchema,
   turns: AnalyticsMeasureSchema,
   durationMs: AnalyticsMeasureSchema,
@@ -116,8 +117,14 @@ export const AnalyticsRawSessionSchema = z.object({
   cacheWriteInputTokens: z.number().finite().nonnegative().nullable(),
   cacheWrite5mInputTokens: z.number().finite().nonnegative().nullable(),
   cacheWrite1hInputTokens: z.number().finite().nonnegative().nullable(),
-  /** Reasoning tokens; see the aggregate measure for why an omitted key is not a zero. */
-  reasoningTokens: z.number().finite().nonnegative().nullable().optional(),
+  /**
+   * The part of `outputTokens` a harness named as reasoning, or null when it named none.
+   *
+   * A SUBSET, NOT AN ADDITION: it is already counted in `outputTokens` and in `tokens`, exactly as
+   * `cachedInputTokens` is already counted in `inputTokens`. Null is not zero — a harness that
+   * reports no reasoning figure has said nothing, and a stated zero says the session did none.
+   */
+  reasoningTokens: z.number().finite().nonnegative().nullable(),
   turns: z.number().finite().nonnegative().nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
   timeToFirstOutputMs: z.number().finite().nonnegative().nullable(),

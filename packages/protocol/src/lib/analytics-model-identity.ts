@@ -40,7 +40,14 @@ function parseModelSpelling(value: string): ParsedModelSpelling {
   const folded = value.trim().toLowerCase();
   const variantMatch = folded.match(SELECTOR_VARIANT);
   const variant = variantMatch?.[1] === undefined ? null : `${variantMatch[1]}m`;
-  const contextWindow = variantMatch?.[1] === undefined ? null : Number(variantMatch[1]) * 1_000_000;
+  const derivedContextWindow = variantMatch?.[1] === undefined ? null : Number(variantMatch[1]) * 1_000_000;
+  // A selector spelling is evidence even when its numeric suffix is not usable as an analytics
+  // count. Keep the variant, but never let an overflow or fractional token count escape this shared
+  // decision and fail a stricter boundary later.
+  const contextWindow =
+    derivedContextWindow !== null && Number.isSafeInteger(derivedContextWindow) && derivedContextWindow >= 0
+      ? derivedContextWindow
+      : null;
   const withoutVariant = variantMatch === null ? folded : folded.slice(0, variantMatch.index).trimEnd();
   const revisionMatch = withoutVariant.match(MODEL_REVISION);
 

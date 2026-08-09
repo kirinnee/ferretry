@@ -118,6 +118,7 @@ export * from '../features/settings/grants-api.ts';
 export * from '../features/settings/grants-settings.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/settings/notification-settings.tsx';
+export * from '../features/settings/pricing-settings.tsx';
 export * from '../features/settings/settings-catalog.ts';
 export * from '../features/settings/settings-page.tsx';
 export * from '../features/skills/session-skills-store.ts';

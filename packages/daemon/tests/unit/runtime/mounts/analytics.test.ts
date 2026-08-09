@@ -113,7 +113,7 @@ describe('the analytics mount', () => {
 
       // Assert
       should(response.index).deepEqual({
-        schemaVersion: 2,
+        schemaVersion: 3,
         sessions: 1,
         tokenSessions: 0,
         transcriptSources: 1,

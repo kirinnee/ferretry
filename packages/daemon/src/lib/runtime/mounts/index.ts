@@ -17,6 +17,7 @@ import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
+import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { type DirectNotificationSubsystem, attentionRoutes } from './attention.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
@@ -189,6 +190,8 @@ export interface MountedSubsystems {
   readonly taskBoards: TaskBoardSubsystem;
   /** The fleet-wide analytics read over every finished session the daemon has ingested. */
   readonly analytics: AnalyticsSubsystem;
+  /** Operator-owned future pricing plus exact-preview synchronization from configured feeds. */
+  readonly analyticsPricing: AnalyticsPricingSubsystem;
   /** The other half of analytics: the pass that PUTS a finished session in the store, folding its
    *  transcript once and pricing it at the rates in force when the row was written. It serves no route
    *  — nobody asks for an ingestion — and it is a mounted subsystem for the reason `monitor` and
@@ -361,6 +364,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // and its own fixed literals are registered before its deeper patterns.
     ...taskBoardRoutes(subsystems.taskBoards),
     ...analyticsRoutes(subsystems.analytics),
+    ...analyticsPricingRoutes(subsystems.analyticsPricing),
     ...terminalRoutes(subsystems.terminals),
     ...terminalTicketRoutes(subsystems.terminals, subsystems.socketTickets),
     // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it

@@ -52,6 +52,7 @@ const aggregateResult = {
   cacheWriteInputTokens: measure,
   cacheWrite5mInputTokens: measure,
   cacheWrite1hInputTokens: unknownMeasure,
+  reasoningTokens: unknownMeasure,
   equivalentApiCostUsdMicros: measure,
   turns: measure,
   durationMs: measure,
@@ -83,6 +84,7 @@ const rawSession = {
   cacheWriteInputTokens: 8_000,
   cacheWrite5mInputTokens: 6_000,
   cacheWrite1hInputTokens: 2_000,
+  reasoningTokens: 4_096,
   turns: 12,
   durationMs: 900_000,
   timeToFirstOutputMs: 1_500,
@@ -228,29 +230,32 @@ describe('analytics schemas', () => {
     // Assert
     should(parsedQueryValue.aggregation).be.undefined();
     should(parsedSession).not.have.property('tree');
-    should(parsedSession).not.have.property('reasoningTokens');
     should(parsedIndex).not.have.property('lastTokenRefreshAt');
   });
 
-  it('should carry reasoning tokens when a build counts them, and omit the key when none does', () => {
-    // An omitted key says this build does not fold reasoning tokens at all. A `{ value: null }`
-    // measure says it tried and could not, and a zero would say the model did no reasoning — three
-    // different claims that a single optional field keeps distinguishable.
+  it('should require reasoning tokens now that the daemon folds them', () => {
+    // THE KEY IS NO LONGER OPTIONAL. It was, while nothing counted the figure and a responder had to
+    // be able to say "I cannot state this at all". The daemon now folds it on every path that builds
+    // a row, so omitting it is not a claim anyone is entitled to make — a reader would keep a
+    // fallback for a case that can no longer occur. Unknown is `null`, and a stated zero is the
+    // separate claim that this session did no reasoning.
     // Arrange
-    const countedSession = { ...rawSession, reasoningTokens: 4_096 };
-    const countedAggregate = { ...aggregateResult, reasoningTokens: unknownMeasure };
+    const { reasoningTokens: _sessionCount, ...sessionWithoutCount } = rawSession;
+    const { reasoningTokens: _aggregateMeasure, ...aggregateWithoutMeasure } = aggregateResult;
 
     // Act
-    const parsedSession = analytics.AnalyticsRawSessionSchema.parse(countedSession);
-    const parsedAggregate = analytics.AnalyticsAggregateResultSchema.parse(countedAggregate);
+    const parsedSession = analytics.AnalyticsRawSessionSchema.parse(rawSession);
+    const parsedAggregate = analytics.AnalyticsAggregateResultSchema.parse(aggregateResult);
 
     // Assert
     should(parsedSession.reasoningTokens).equal(4_096);
     should(
       analytics.AnalyticsRawSessionSchema.parse({ ...rawSession, reasoningTokens: null }).reasoningTokens,
     ).be.null();
+    should(analytics.AnalyticsRawSessionSchema.parse({ ...rawSession, reasoningTokens: 0 }).reasoningTokens).equal(0);
     should(parsedAggregate.reasoningTokens).deepEqual(unknownMeasure);
-    should(analytics.AnalyticsAggregateResultSchema.parse(aggregateResult)).not.have.property('reasoningTokens');
+    should(analytics.AnalyticsRawSessionSchema.safeParse(sessionWithoutCount).success).be.false();
+    should(analytics.AnalyticsAggregateResultSchema.safeParse(aggregateWithoutMeasure).success).be.false();
   });
 
   it('should accept the inclusive bounds of every percentage and known-count constraint', () => {

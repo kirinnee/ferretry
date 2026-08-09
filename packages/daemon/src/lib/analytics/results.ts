@@ -18,20 +18,36 @@ export interface AnalyticsQueryRecordsOptions {
 const DEFAULT_RAW_LIMIT = 100;
 const DEFAULT_GROUP_LIMIT = 100;
 
-const metrics = [
-  ['tokens', 'tokens'],
-  ['inputTokens', 'inputTokens'],
-  ['outputTokens', 'outputTokens'],
-  ['cachedInputTokens', 'cachedInputTokens'],
-  ['cacheWriteInputTokens', 'cacheWriteInputTokens'],
-  ['cacheWrite5mInputTokens', 'cacheWrite5mInputTokens'],
-  ['cacheWrite1hInputTokens', 'cacheWrite1hInputTokens'],
-  ['equivalentApiCostUsdMicros', 'equivalentApiCostUsdMicros'],
-  ['turns', 'turns'],
-  ['durationMs', 'durationMs'],
-  ['timeToFirstOutputMs', 'timeToFirstOutputMs'],
-  ['contextEndPercent', 'contextEndPercent'],
-] as const satisfies ReadonlyArray<readonly [keyof AnalyticsAggregateResult, keyof AnalyticsRawSession]>;
+/** Every field of an aggregate result that is a measure, so the table below cannot miss one. */
+type AnalyticsMeasureKey = {
+  [K in keyof AnalyticsAggregateResult]-?: NonNullable<AnalyticsAggregateResult[K]> extends AnalyticsMeasure
+    ? K
+    : never;
+}[keyof AnalyticsAggregateResult];
+
+/**
+ * Which stored column answers each measure.
+ *
+ * A MAPPED TYPE, not a list of pairs. A list satisfies its constraint while missing entries — the
+ * check proves every pair present is well-typed and says nothing about the ones nobody wrote. Keyed
+ * on `AnalyticsMeasureKey`, a measure the protocol grows and this file does not answer is a compile
+ * error here, rather than a column that silently aggregates to nothing in front of an operator.
+ */
+const metrics = {
+  tokens: 'tokens',
+  inputTokens: 'inputTokens',
+  outputTokens: 'outputTokens',
+  cachedInputTokens: 'cachedInputTokens',
+  cacheWriteInputTokens: 'cacheWriteInputTokens',
+  cacheWrite5mInputTokens: 'cacheWrite5mInputTokens',
+  cacheWrite1hInputTokens: 'cacheWrite1hInputTokens',
+  reasoningTokens: 'reasoningTokens',
+  equivalentApiCostUsdMicros: 'equivalentApiCostUsdMicros',
+  turns: 'turns',
+  durationMs: 'durationMs',
+  timeToFirstOutputMs: 'timeToFirstOutputMs',
+  contextEndPercent: 'contextEndPercent',
+} as const satisfies { readonly [K in AnalyticsMeasureKey]: keyof AnalyticsRawSession };
 
 type LabelValues = Record<AnalyticsLabel, string | null>;
 
@@ -120,7 +136,18 @@ function aggregate(
     throw new Error(`analytics query produces more than ${groupLimit} groups; add a matcher`);
   return groups.map(group => {
     const sessions = group.rows.length;
-    const result: AnalyticsAggregateResult = {
+    // Built FROM the table rather than beside it: a hand-written set of placeholder measures is a
+    // second enumeration of the same list, and the two drift the moment a measure is added to one.
+    const measures = Object.fromEntries(
+      Object.entries(metrics).map(([resultKey, recordKey]) => [
+        resultKey,
+        measure(
+          group.rows.map(row => (row[recordKey as keyof AnalyticsRawSession] as number | null | undefined) ?? null),
+          parsed.aggregation!,
+        ),
+      ]),
+    ) as { readonly [K in AnalyticsMeasureKey]: AnalyticsMeasure };
+    return {
       labels: group.labels,
       sessions,
       rates: {
@@ -128,26 +155,8 @@ function aggregate(
         failure: (100 * group.rows.filter(row => row.failed).length) / sessions,
         completion: (100 * group.rows.filter(row => row.status === 'completed').length) / sessions,
       },
-      tokens: { value: null, known: 0, total: 0 },
-      inputTokens: { value: null, known: 0, total: 0 },
-      outputTokens: { value: null, known: 0, total: 0 },
-      cachedInputTokens: { value: null, known: 0, total: 0 },
-      cacheWriteInputTokens: { value: null, known: 0, total: 0 },
-      cacheWrite5mInputTokens: { value: null, known: 0, total: 0 },
-      cacheWrite1hInputTokens: { value: null, known: 0, total: 0 },
-      equivalentApiCostUsdMicros: { value: null, known: 0, total: 0 },
-      turns: { value: null, known: 0, total: 0 },
-      durationMs: { value: null, known: 0, total: 0 },
-      timeToFirstOutputMs: { value: null, known: 0, total: 0 },
-      contextEndPercent: { value: null, known: 0, total: 0 },
+      ...measures,
     };
-    for (const [resultKey, recordKey] of metrics) {
-      result[resultKey] = measure(
-        group.rows.map(row => row[recordKey] as number | null),
-        parsed.aggregation!,
-      );
-    }
-    return result;
   });
 }
 

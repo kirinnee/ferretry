@@ -72,6 +72,9 @@ describe('analytics session usage fold', () => {
         cacheWriteInputTokens: 3,
         cacheWrite5mInputTokens: 3,
         cacheWrite1hInputTokens: 0,
+        // Anthropic bills extended thinking as ordinary output tokens and names no separate figure,
+        // so no part of this session's output is reclassified as reasoning.
+        reasoningTokens: null,
       },
     });
   });
@@ -102,6 +105,8 @@ describe('analytics session usage fold', () => {
         cacheWriteInputTokens: 0,
         cacheWrite5mInputTokens: 0,
         cacheWrite1hInputTokens: 0,
+        // This record states no reasoning figure at all, which is not the same as stating zero.
+        reasoningTokens: null,
       },
     });
   });
@@ -126,8 +131,115 @@ describe('analytics session usage fold', () => {
         cacheWriteInputTokens: 0,
         cacheWrite5mInputTokens: 0,
         cacheWrite1hInputTokens: 0,
+        reasoningTokens: null,
       },
     });
+  });
+
+  it('should read two catalog-aliased spellings in one session as one pricing model', () => {
+    // THE DEFECT THIS CLOSES. A session addressed by both of a model's configured spellings is one
+    // model, and folding it without the operator's alias groups made it look like a mixed-model run —
+    // so `pricingModel` came back null and a perfectly priceable session was reported unpriced. The
+    // refusal happened HERE, and nothing downstream could undo it: by then the second spelling was
+    // already gone.
+    // Arrange
+    const evidence = read([
+      usageEvent({ inputTokens: 4, outputTokens: 1, model: 'gpt-5.6-codex' }, 'codex'),
+      usageEvent({ inputTokens: 6, outputTokens: 2, model: 'gpt-5.6-codex-preview' }, 'codex'),
+    ]);
+
+    // Act
+    const aliased = foldAnalyticsSessionUsage(evidence, [
+      { modelId: 'gpt-5.6-codex', aliases: ['gpt-5.6-codex-preview'] },
+    ]);
+    const unaliased = foldAnalyticsSessionUsage(evidence);
+
+    // Assert
+    should(aliased).containDeep({ kind: 'usage', usage: { pricingModel: 'gpt-5.6-codex', inputTokens: 10 } });
+    // Without the catalog saying so, the two spellings genuinely are two models to this daemon.
+    should(unaliased).containDeep({ kind: 'usage', usage: { pricingModel: null, inputTokens: 10 } });
+  });
+
+  it('should still refuse a pricing model when the alias groups do not join the spellings', () => {
+    // Aliases make one model addressable twice; they do not make two models one. A session that
+    // really did run under two must stay unpriced rather than be charged wholly at either rate.
+    const actual = foldAnalyticsSessionUsage(
+      read([
+        usageEvent({ inputTokens: 4, outputTokens: 1, model: 'claude-opus-5' }),
+        usageEvent({ inputTokens: 6, outputTokens: 2, model: 'claude-sonnet-5' }),
+      ]),
+      [
+        { modelId: 'claude-opus-5', aliases: ['claude-opus-5-preview'] },
+        { modelId: 'claude-sonnet-5', aliases: [] },
+      ],
+    );
+
+    should(actual).containDeep({ kind: 'usage', usage: { pricingModel: null, inputTokens: 10 } });
+  });
+
+  it('should sum Codex reasoning tokens and leave Claude output unreclassified', () => {
+    // Codex names a reasoning subset of its output total, so the figure is carried for pricing to
+    // subtract. Claude states none, and inventing one from its output would hand pricing a second
+    // rate to apply to tokens the provider already billed as output.
+    // Arrange / Act
+    const codex = foldAnalyticsSessionUsage(
+      read(
+        [
+          usageEvent({ inputTokens: 20, outputTokens: 5, reasoningTokens: 2, model: 'gpt-5.6-codex' }, 'codex'),
+          usageEvent({ inputTokens: 30, outputTokens: 9, reasoningTokens: 4, model: 'gpt-5.6-codex' }, 'codex'),
+        ],
+        { harness: 'codex' },
+      ),
+    );
+    // The same figure on a Claude read, which no Claude parser produces: even then it is not folded.
+    const claude = foldAnalyticsSessionUsage(
+      read([usageEvent({ inputTokens: 20, outputTokens: 5, reasoningTokens: 2, model: 'claude-opus-5' })]),
+    );
+
+    // Assert
+    should(codex).containDeep({ kind: 'usage', usage: { outputTokens: 14, reasoningTokens: 6 } });
+    should(claude).containDeep({ kind: 'usage', usage: { outputTokens: 5, reasoningTokens: null } });
+  });
+
+  it('should distinguish a stated zero of reasoning from a transcript that names none', () => {
+    // A harness that reported `0` has said this turn did no reasoning. One that reported nothing has
+    // said nothing, and folding that to zero would put a claim on the board nobody made.
+    const stated = foldAnalyticsSessionUsage(
+      read([usageEvent({ inputTokens: 4, outputTokens: 1, reasoningTokens: 0 }, 'codex')], { harness: 'codex' }),
+    );
+    const silent = foldAnalyticsSessionUsage(
+      read([usageEvent({ inputTokens: 4, outputTokens: 1 }, 'codex')], { harness: 'codex' }),
+    );
+
+    should(stated).containDeep({ kind: 'usage', usage: { reasoningTokens: 0 } });
+    should(silent).containDeep({ kind: 'usage', usage: { reasoningTokens: null } });
+  });
+
+  it('should mark mixed present and missing Codex reasoning evidence as incomplete', () => {
+    // One reported subset cannot stand in for the whole session. Keep the ordinary token totals so
+    // the usage remains visible, but make the separate reasoning total unknown and pricing refuse it.
+    const actual = foldAnalyticsSessionUsage(
+      read(
+        [
+          usageEvent({ inputTokens: 4, outputTokens: 2, reasoningTokens: 1 }, 'codex'),
+          usageEvent({ inputTokens: 6, outputTokens: 3 }, 'codex'),
+        ],
+        { harness: 'codex' },
+      ),
+    );
+
+    should(actual).containDeep({
+      kind: 'usage',
+      usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: null, reasoningTokensIncomplete: true },
+    });
+  });
+
+  it('should refuse a reasoning figure whose accounting it cannot state', () => {
+    should(
+      foldAnalyticsSessionUsage(
+        read([usageEvent({ inputTokens: 4, outputTokens: 1, reasoningTokens: -1 }, 'codex')], { harness: 'codex' }),
+      ),
+    ).deepEqual({ kind: 'refused', reason: 'ambiguous_token_accounting' });
   });
 
   it('should claim no pricing model when no record names one', () => {

@@ -66,6 +66,18 @@ export const sessionAnalyticsStarterQueries = (sessionId: string): readonly Anal
     { id: 'min', label: 'min', query: `min by (model) ${scope}`, hint: 'Minimum known measures.' },
     { id: 'max', label: 'max', query: `max by (model) ${scope}`, hint: 'Maximum known measures.' },
     {
+      id: 'pricing-coverage',
+      label: 'pricing coverage',
+      query: `sum by (token_data) ${scope}`,
+      hint: 'Shows whether token evidence is complete; equivalent-cost coverage remains unknown when this session is unpriced.',
+    },
+    {
+      id: 'identity-check',
+      label: 'identity check',
+      query: `count by (model, pricing_model) ${scope}`,
+      hint: 'Selected model beside transcript pricing model; different values expose attribution disagreement.',
+    },
+    {
       id: 'count',
       label: 'count',
       query: `count by (status) ${scope}`,

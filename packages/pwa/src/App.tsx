@@ -39,6 +39,7 @@ import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
+import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
@@ -826,7 +827,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
     [store.clients],
   );
-  const readGrantClient = useCallback(
+  const createDaemonClient = useCallback(
     async (daemon: DaemonConnection) => await store.clients.client(daemon),
     [store.clients],
   );
@@ -852,9 +853,10 @@ function SettingsRoute({ connection }: DaemonPageProps) {
           />
         ),
       },
+      pricingSettingsTab(createDaemonClient),
       fleetSettingsTab(async daemon => await store.clients.client(daemon)),
     ],
-    [store.clients],
+    [createDaemonClient, store.clients],
   );
   return (
     <SettingsPage
@@ -868,7 +870,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // as the automatic fallback — as every other daemon call. The surface's own default would dial
       // the daemon address directly, which is how a screen ends up reporting a limit it could not read
       // on a daemon that is only reachable through the rendezvous.
-      createGrantClient={readGrantClient}
+      createGrantClient={createDaemonClient}
       daemonSettingsTabs={daemonSettingsTabs}
       onSelectDaemon={daemonId => {
         store.connections.select(daemonId);

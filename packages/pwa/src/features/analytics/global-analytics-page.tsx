@@ -1,7 +1,8 @@
 /** Fleet-wide analytics, scoped to the paired daemon selected by the route. */
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChartNoAxesCombined, Loader2 } from 'lucide-react';
+
 import type { AnalyticsResponse } from '@ferretry/protocol';
+import { ChartNoAxesCombined, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
@@ -25,6 +26,18 @@ export const GLOBAL_ANALYTICS_STARTERS: readonly AnalyticsStarter[] = [
   },
   { id: 'weekly', label: 'Weekly', query: 'sum by (week)', hint: 'The same ledger rolled up by ISO week.' },
   { id: 'models', label: 'By model', query: 'sum by (model)', hint: 'Fleet totals by attributed model.' },
+  {
+    id: 'pricing-coverage',
+    label: 'Pricing coverage',
+    query: 'sum by (token_data)',
+    hint: 'Groups known and unknown token evidence. Equivalent-cost coverage on each row exposes unpriced sessions without treating them as zero.',
+  },
+  {
+    id: 'identity-check',
+    label: 'Identity check',
+    query: 'count by (model, pricing_model)',
+    hint: 'Selected model beside transcript pricing model; different values expose attribution disagreement.',
+  },
   { id: 'average', label: 'Average', query: 'avg by (model)', hint: 'Average measures per grouped model.' },
   { id: 'maximum', label: 'Maximum', query: 'max by (model)', hint: 'Largest per-session measures by model.' },
   {

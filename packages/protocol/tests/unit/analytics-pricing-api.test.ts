@@ -83,7 +83,11 @@ const preview = {
   baseCatalogFingerprint: BASE,
   resultCatalogFingerprint: RESULT,
   changes: [
-    { kind: 'added', pricingKey: 'operator:model-b:2026-08', after: { ...rate, modelId: 'model-b' } },
+    {
+      kind: 'added',
+      pricingKey: 'operator:model-b:2026-08',
+      after: { ...rate, pricingKey: 'operator:model-b:2026-08', modelId: 'model-b' },
+    },
     { kind: 'updated', pricingKey: rate.pricingKey, before: rate, after: dearer },
     { kind: 'unchanged', pricingKey: rate.pricingKey, before: rate },
   ],
@@ -194,17 +198,33 @@ describe('analytics pricing API contract', () => {
     ]);
   });
 
-  it('should refuse a change describing two different prices as one update', () => {
+  it('should refuse every change whose named key disagrees with an embedded rate', () => {
     // Act
-    const actual = AnalyticsPricingSyncChangeSchema.safeParse({
+    const updatedAfter = AnalyticsPricingSyncChangeSchema.safeParse({
       kind: 'updated',
       pricingKey: rate.pricingKey,
       before: rate,
       after: { ...dearer, pricingKey: 'operator:model-other:2026-07' },
     });
+    const updatedBefore = AnalyticsPricingSyncChangeSchema.safeParse({
+      kind: 'updated',
+      pricingKey: rate.pricingKey,
+      before: { ...rate, pricingKey: 'operator:model-other:2026-07' },
+      after: dearer,
+    });
+    const added = AnalyticsPricingSyncChangeSchema.safeParse({
+      kind: 'added',
+      pricingKey: rate.pricingKey,
+      after: { ...rate, pricingKey: 'operator:model-other:2026-07' },
+    });
+    const unchanged = AnalyticsPricingSyncChangeSchema.safeParse({
+      kind: 'unchanged',
+      pricingKey: rate.pricingKey,
+      before: { ...rate, pricingKey: 'operator:model-other:2026-07' },
+    });
 
     // Assert
-    should(actual.success).be.false();
+    for (const actual of [updatedAfter, updatedBefore, added, unchanged]) should(actual.success).be.false();
   });
 
   it('should apply only the rows a person reviewed, out of the preview they were shown', () => {

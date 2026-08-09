@@ -63,14 +63,134 @@ describe('snapshotAnalyticsUsagePricing', () => {
       pricingKey: 'openai:model-a@2026-07-01',
       modelId: 'model-a',
       provider: 'openai',
+      // What the amounts are money IN and money PER, recorded on the row rather than left to the
+      // reader's convention. Image and tool are catalog facts nothing here multiplies, so they are
+      // absent rather than snapshotted as if they had been applied.
+      currency: 'USD',
+      rateUnit: 'million_tokens',
       // The stored projection: the slots this build multiplies, with an unstated charge left off
       // rather than written down as a zero.
       ratesUsdMicrosPerMillion: { input: 2_000_000, cachedRead: 200_000, output: 10_000_000, cacheWrite: 2_500_000 },
+      source: { kind: 'manual' },
+      lastSyncedAt: null,
       verifiedAt: '2026-07-01T00:00:00Z',
       validFrom: '2026-07-01T00:00:00Z',
       validThrough: null,
     });
     should(actual.equivalentApiCostUsdMicros).equal(3_870_000);
+  });
+
+  it('should snapshot provider-sync provenance and its sync instant', () => {
+    // Arrange: where a price came from is READ off the row, not inferred. A synced rate carries the
+    // feed and the address it came from; a manual one carries neither, and the two are different
+    // shapes rather than a boolean beside an optional URL.
+    const synced: AnalyticsPricingRate = {
+      ...openAiRate,
+      source: { kind: 'provider_sync', provider: 'openai', sourceUrl: 'https://prices.example/openai.json' },
+      lastSyncedAt: '2026-07-20T09:30:00.000Z',
+    };
+
+    // Act
+    const actual = snapshotAnalyticsUsagePricing(usage, [synced]);
+
+    // Assert
+    should(actual).have.property('kind', 'priced');
+    if (actual.kind !== 'priced') throw new Error('expected priced usage');
+    should(actual.rate.source).deepEqual({
+      kind: 'provider_sync',
+      provider: 'openai',
+      sourceUrl: 'https://prices.example/openai.json',
+    });
+    should(actual.rate.lastSyncedAt).equal('2026-07-20T09:30:00.000Z');
+  });
+
+  it('should copy provenance onto the snapshot rather than sharing the catalog entry', () => {
+    // A stored row is a FROZEN record of what priced it. `readonly` binds one reference at compile
+    // time; it does not stop the caller who still owns the catalog object from editing the thing both
+    // point at, which would let a later edit reach backwards into a snapshot taken months earlier.
+    // Arrange
+    const mutable: AnalyticsPricingRate = {
+      ...openAiRate,
+      source: { kind: 'provider_sync', provider: 'openai', sourceUrl: 'https://prices.example/openai.json' },
+      lastSyncedAt: '2026-07-20T09:30:00.000Z',
+    };
+
+    // Act
+    const actual = snapshotAnalyticsUsagePricing(usage, [mutable]);
+    (mutable.source as { sourceUrl: string }).sourceUrl = 'https://attacker.example/prices.json';
+
+    // Assert
+    should(actual).have.property('kind', 'priced');
+    if (actual.kind !== 'priced') throw new Error('expected priced usage');
+    should(actual.rate.source).deepEqual({
+      kind: 'provider_sync',
+      provider: 'openai',
+      sourceUrl: 'https://prices.example/openai.json',
+    });
+  });
+
+  it('should charge reasoning tokens as a subset of output rather than in addition to it', () => {
+    // THE ARITHMETIC DISTINGUISHES THE TWO READINGS. Codex reports `reasoning_output_tokens` as a
+    // named part of its output total, so the output rate applies to what is LEFT after it:
+    //   (1_000_000 - 100_000 - 100_000) uncached @ 2   =  1_600_000
+    //   100_000 cached                            @ 0.2 =     20_000
+    //   100_000 cache write                       @ 2.5 =    250_000
+    //   (200_000 - 50_000) plain output           @ 10  =  1_500_000
+    //   50_000 reasoning                          @ 30  =  1_500_000  (all figures USD micros/million)
+    // Totalling 4_870_000. Treating reasoning as an ADDITIONAL 50_000 tokens beside the full output
+    // would give 5_370_000, and charging it at the output rate would give 3_870_000; neither number
+    // can be reached by this assertion.
+    // Arrange
+    const withReasoning: AnalyticsPricingRate = {
+      ...openAiRate,
+      rates: { ...openAiRate.rates, reasoning: 30_000_000 },
+    };
+
+    // Act
+    const actual = snapshotAnalyticsUsagePricing({ ...usage, reasoningTokens: 50_000 }, [withReasoning]);
+
+    // Assert
+    should(actual).have.property('kind', 'priced');
+    if (actual.kind !== 'priced') throw new Error('expected priced usage');
+    should(actual.equivalentApiCostUsdMicros).equal(4_870_000);
+    should(actual.rate.ratesUsdMicrosPerMillion.reasoning).equal(30_000_000);
+  });
+
+  it('should price the whole output at the output rate when no reasoning was reported', () => {
+    // Null is not zero and it is not evidence: a harness that named no reasoning figure leaves the
+    // output charged exactly as it was before this build learned the word.
+    const withReasoningRate = { ...openAiRate, rates: { ...openAiRate.rates, reasoning: 30_000_000 } };
+
+    should(snapshotAnalyticsUsagePricing({ ...usage, reasoningTokens: null }, [withReasoningRate])).have.property(
+      'equivalentApiCostUsdMicros',
+      3_870_000,
+    );
+    // A stated zero prices identically — the difference between the two is what may be REPORTED, not
+    // what is charged — and it must not trip the missing-rate refusal on a catalog that states none.
+    should(snapshotAnalyticsUsagePricing({ ...usage, reasoningTokens: 0 }, [openAiRate])).have.property(
+      'equivalentApiCostUsdMicros',
+      3_870_000,
+    );
+  });
+
+  it('should refuse to price reasoning usage the catalog states no rate for', () => {
+    // Charging reasoning at the output rate would be this build deciding a price the operator never
+    // gave. An explicit refusal names the fact they can supply; a quiet fallback understates the bill.
+    const actual = snapshotAnalyticsUsagePricing({ ...usage, reasoningTokens: 50_000 }, [openAiRate]);
+
+    should(actual).have.property('kind', 'unpriced');
+    should(actual).have.property('reason', 'missing_reasoning_rate');
+  });
+
+  it('should refuse a partial reasoning total without discarding the ordinary token evidence', () => {
+    const withReasoning = { ...openAiRate, rates: { ...openAiRate.rates, reasoning: 30_000_000 } };
+
+    const actual = snapshotAnalyticsUsagePricing({ ...usage, reasoningTokens: null, reasoningTokensIncomplete: true }, [
+      withReasoning,
+    ]);
+
+    should(actual).have.property('kind', 'unpriced');
+    should(actual).have.property('reason', 'incomplete_reasoning_counts');
   });
 
   it('should select the newest rate valid at the session instant', () => {
@@ -134,6 +254,10 @@ describe('snapshotAnalyticsUsagePricing', () => {
     { patch: { inputTokens: null }, catalog: [openAiRate], reason: 'incomplete_token_counts' },
     { patch: { outputTokens: -1 }, catalog: [openAiRate], reason: 'invalid_token_counts' },
     { patch: { inputTokens: 1 }, catalog: [openAiRate], reason: 'negative_uncached_input' },
+    // Reasoning is a subset of output, so a figure larger than the output it sits inside is evidence
+    // this daemon cannot reconcile — not a licence to charge the difference at some other rate.
+    { patch: { reasoningTokens: 200_001 }, catalog: [openAiRate], reason: 'negative_non_reasoning_output' },
+    { patch: { reasoningTokens: 1.5 }, catalog: [openAiRate], reason: 'invalid_token_counts' },
   ])('should report $reason instead of guessing a zero cost', ({ patch, catalog, reason }) => {
     // Act
     const actual = snapshotAnalyticsUsagePricing({ ...usage, ...patch }, catalog);

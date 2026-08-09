@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '@ferretry/protocol';
-
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
-  GlobalAnalyticsPage,
   GLOBAL_ANALYTICS_DEFAULT_QUERY,
   GLOBAL_ANALYTICS_STARTERS,
+  GlobalAnalyticsPage,
 } from '../../../src/features/analytics/global-analytics-page.tsx';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
@@ -41,6 +40,7 @@ const aggregate = (query = GLOBAL_ANALYTICS_DEFAULT_QUERY): AnalyticsResponse =>
         cacheWriteInputTokens: { value: 0, known: 1, total: 1 },
         cacheWrite5mInputTokens: { value: 0, known: 1, total: 1 },
         cacheWrite1hInputTokens: { value: 0, known: 1, total: 1 },
+        reasoningTokens: { value: null, known: 0, total: 1 },
         equivalentApiCostUsdMicros: { value: 1_250_000, known: 1, total: 1 },
         turns: { value: 1, known: 1, total: 1 },
         durationMs: { value: 1, known: 1, total: 1 },
@@ -63,6 +63,35 @@ const raw = (query: string): AnalyticsResponse =>
   }) as AnalyticsResponse;
 
 describe('GlobalAnalyticsPage', () => {
+  it('keeps the curated starter roster exact and names pricing coverage and identity disagreement honestly', () => {
+    expect(GLOBAL_ANALYTICS_STARTERS.map(starter => starter.id)).toEqual([
+      'daily',
+      'weekly',
+      'models',
+      'pricing-coverage',
+      'identity-check',
+      'average',
+      'maximum',
+      'status',
+    ]);
+    expect(GLOBAL_ANALYTICS_STARTERS.map(starter => starter.query)).toEqual([
+      'sum by (day)',
+      'sum by (week)',
+      'sum by (model)',
+      'sum by (token_data)',
+      'count by (model, pricing_model)',
+      'avg by (model)',
+      'max by (model)',
+      'count by (status)',
+    ]);
+    expect(GLOBAL_ANALYTICS_STARTERS.find(starter => starter.id === 'pricing-coverage')?.hint).toContain(
+      'unpriced sessions without treating them as zero',
+    );
+    expect(GLOBAL_ANALYTICS_STARTERS.find(starter => starter.id === 'identity-check')?.hint).toContain(
+      'attribution disagreement',
+    );
+  });
+
   it('renders paired-daemon results, starter requests, and an honest index status', async () => {
     const calls: Array<{ daemon: string; query: string | undefined }> = [];
     const renderer = render(

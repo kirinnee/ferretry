@@ -73,6 +73,7 @@ function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): Analyti
       cacheWriteInputTokens: 0,
       cacheWrite5mInputTokens: 0,
       cacheWrite1hInputTokens: 0,
+      reasoningTokens: null,
       turns: 3,
       durationMs: 3_600_000,
       timeToFirstOutputMs: null,
@@ -98,6 +99,8 @@ function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): Analyti
         pricingKey: 'operator:claude-opus-5:2026-08',
         modelId: 'claude-opus-5',
         provider: 'anthropic',
+        currency: 'USD',
+        rateUnit: 'million_tokens',
         ratesUsdMicrosPerMillion: {
           input: 15_000_000,
           cachedRead: 1_500_000,
@@ -105,6 +108,8 @@ function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): Analyti
           cacheWrite1h: 30_000_000,
           output: 75_000_000,
         },
+        source: { kind: 'manual' },
+        lastSyncedAt: null,
         verifiedAt: '2026-08-01T00:00:00.000Z',
         validFrom: '2026-08-01T00:00:00.000Z',
         validThrough: null,
@@ -114,6 +119,25 @@ function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): Analyti
     signature: 'signature-1',
     ingestedAt: '2026-08-02T00:00:00.000Z',
     ...overrides,
+  };
+}
+
+/** The same row priced from a provider feed rather than by hand, with a reasoning rate applied. */
+function syncedSession(): AnalyticsStoredSession {
+  const base = storedSession();
+  if (base.pricing?.kind !== 'priced') throw new Error('expected a priced fixture');
+  return {
+    ...base,
+    raw: { ...base.raw, reasoningTokens: 120 },
+    pricing: {
+      ...base.pricing,
+      rate: {
+        ...base.pricing.rate,
+        ratesUsdMicrosPerMillion: { ...base.pricing.rate.ratesUsdMicrosPerMillion, reasoning: 30_000_000 },
+        source: { kind: 'provider_sync', provider: 'anthropic', sourceUrl: 'https://prices.example/anthropic.json' },
+        lastSyncedAt: '2026-08-01T12:00:00.000Z',
+      },
+    },
   };
 }
 
@@ -132,6 +156,7 @@ function refusedSession(id: string): AnalyticsStoredSession {
       cacheWriteInputTokens: null,
       cacheWrite5mInputTokens: null,
       cacheWrite1hInputTokens: null,
+      reasoningTokens: null,
       equivalentApiCostUsdMicros: null,
       pricingModel: null,
     },
@@ -281,6 +306,95 @@ describe('the analytics store on disk', () => {
 
     // Assert
     should(store.rows().map(row => row.raw.id)).deepEqual(['newer', 'older']);
+  });
+
+  it('should round-trip the reasoning measure and provider-sync provenance', async () => {
+    // The row has to survive a restart carrying WHERE its price came from and WHAT its numbers are
+    // denominated in, not just the amounts. A rate that round-trips without its provenance is a
+    // number an operator cannot check against anything.
+    // Arrange
+    const paths = await temporaryPaths();
+    const first = await open(paths);
+    first.store.upsert([syncedSession()]);
+    closeStore(first.store);
+
+    // Act — a SECOND open of the same file, as a restarted daemon would do.
+    const second = await open(paths);
+
+    // Assert
+    should(second.store.rows()).deepEqual([syncedSession()]);
+  });
+
+  it('should drop a priced row whose stored provenance is not a fact the protocol allows', async () => {
+    // A CAST IS NOT A READ. These columns are bytes another process, a restore or a half-finished
+    // write could have left in any state, and a row claiming EUR, a unit nothing multiplies, or a
+    // provider feed it cannot name is not a price — it is a number that would total up regardless.
+    // Arrange
+    const paths = await temporaryPaths();
+    const corruptions = [
+      { column: 'pricing_currency', value: 'EUR', synced: false },
+      { column: 'pricing_rate_unit', value: 'per_word', synced: false },
+      // A unit the CATALOG may legitimately use, but a stored snapshot never can: this table only
+      // holds slots multiplied by a token count, so amounts denominated per image or per tool call
+      // would be summed into a per-million-token total by everything downstream.
+      { column: 'pricing_rate_unit', value: 'image', synced: false },
+      { column: 'pricing_rate_unit', value: 'tool_call', synced: false },
+      { column: 'pricing_provider', value: 'somebody-else', synced: false },
+      { column: 'pricing_source_kind', value: 'guessed', synced: false },
+      // A manual branch carries neither provider nor URL. Stray feed columns must not be silently
+      // discarded while reconstructing it and thereby relabelled as clean manual provenance.
+      { column: 'pricing_source_provider', value: 'openai', synced: false },
+      { column: 'pricing_source_url', value: 'https://prices.example/openai.json', synced: false },
+      // A manual entry carrying a sync instant names a sync that never happened.
+      { column: 'pricing_last_synced_at', value: '2026-08-01T12:00:00.000Z', synced: false },
+      // Provenance whose own evidence contradicts it: a feed with no address, a feed with no instant
+      // saying when it ran, and a feed naming a different provider than the rate it priced.
+      { column: 'pricing_source_url', value: null, synced: true },
+      { column: 'pricing_last_synced_at', value: null, synced: true },
+      { column: 'pricing_source_provider', value: 'openai', synced: true },
+      // "Not null" is not "a time anyone can read": a sync instant nobody can parse cannot support
+      // the freshness claim an operator would read off it.
+      { column: 'pricing_last_synced_at', value: 'last thursday', synced: true },
+    ] as const;
+
+    for (const { column, value, synced } of corruptions) {
+      const { store } = await open(paths);
+      store.upsert([synced ? syncedSession() : storedSession()]);
+      closeStore(store);
+      const database = new Database(paths.analyticsIndex, { strict: true });
+      database.query(`UPDATE analytics_sessions SET ${column} = ?`).run(value);
+      database.close();
+
+      // Act
+      const reopened = await open(paths);
+
+      // Assert — the row survives, its unexplainable price does not.
+      const [row] = reopened.store.rows();
+      should(row?.raw.id).equal('s1');
+      should(row?.pricing).be.null();
+      reopened.store.drop();
+      closeStore(reopened.store);
+    }
+  });
+
+  it('should discard an index whose rows predate the columns this build writes', async () => {
+    // The real upgrade path for a disposable index: no migration is written for it, the file is
+    // thrown away and one re-ingestion pass reproduces every row from the durable session documents.
+    // Arrange
+    const paths = await temporaryPaths();
+    const first = await open(paths);
+    first.store.upsert([storedSession()]);
+    closeStore(first.store);
+    const database = new Database(paths.analyticsIndex, { strict: true });
+    database.exec('ALTER TABLE analytics_sessions DROP COLUMN reasoning_tokens');
+    database.close();
+
+    // Act
+    const second = await open(paths);
+
+    // Assert
+    should(second.rebuildRequired).be.true();
+    should(second.store.rows()).be.empty();
   });
 
   it('should discard an index written under another schema version', async () => {

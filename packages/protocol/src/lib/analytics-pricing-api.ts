@@ -134,11 +134,18 @@ export const AnalyticsPricingSyncChangeSchema = z
     }),
   ])
   .superRefine((change, context) => {
-    if (change.kind === 'updated' && change.before.pricingKey !== change.after.pricingKey) {
+    if ('before' in change && change.before.pricingKey !== change.pricingKey) {
+      context.addIssue({
+        code: 'custom',
+        path: ['before', 'pricingKey'],
+        message: 'must match the pricing key named by this change',
+      });
+    }
+    if ('after' in change && change.after.pricingKey !== change.pricingKey) {
       context.addIssue({
         code: 'custom',
         path: ['after', 'pricingKey'],
-        message: 'an updated change describes one pricing key on both sides',
+        message: 'must match the pricing key named by this change',
       });
     }
   });

@@ -83,6 +83,25 @@ describe('deriveAnalyticsSessionRecord', () => {
     should(actual.raw.equivalentApiCostUsdMicros).equal(1_923);
   });
 
+  it('should carry a reasoning total without counting it a second time in the token total', () => {
+    // Reasoning is already INSIDE `outputTokens`, so `tokens` — what the session billed — must not
+    // grow by it. Adding it would inflate every Codex row by however much the model thought.
+    // Act
+    const counted = deriveAnalyticsSessionRecord(
+      { ...finished, usage: { ...finished.usage!, reasoningTokens: 60 } },
+      catalog,
+    );
+    const silent = deriveAnalyticsSessionRecord(finished, catalog);
+
+    // Assert
+    should(counted.raw.reasoningTokens).equal(60);
+    should(counted.raw.outputTokens).equal(200);
+    should(counted.raw.tokens).equal(1_200);
+    // A transcript that named no reasoning figure leaves the column unknown, never zero: "this
+    // session did no reasoning" is a claim, and nobody made it.
+    should(silent.raw.reasoningTokens).be.null();
+  });
+
   it('should honor an explicit context window and persist an effective rate snapshot', () => {
     // Act
     const actual = deriveAnalyticsSessionRecord({ ...finished, contextWindow: 200_000 }, catalog);

@@ -32,6 +32,18 @@ describe('normalizeAnalyticsModelIdentity', () => {
     should(fractional?.contextWindow).equal(200_000);
   });
 
+  it('should retain unusable selector variants without emitting an invalid context-window count', () => {
+    // Act
+    const fractionalToken = normalizeAnalyticsModelIdentity('model-a[0.0000001m]');
+    const overflowing = normalizeAnalyticsModelIdentity('model-a[999999999999999999999999m]');
+
+    // Assert
+    should(fractionalToken?.variant).equal('0.0000001m');
+    should(fractionalToken?.contextWindow).be.null();
+    should(overflowing?.variant).equal('999999999999999999999999m');
+    should(overflowing?.contextWindow).be.null();
+  });
+
   it('should normalize case and configured aliases to one stable identity', () => {
     // Arrange
     const aliases = [{ modelId: 'claude-opus-5', aliases: ['Claude-Opus-4-8'] }];

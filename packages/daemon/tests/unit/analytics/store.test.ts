@@ -130,6 +130,16 @@ describe('analyticsPricingCatalogFingerprint', () => {
     should(analyticsPricingCatalogFingerprint([{ ...RATE, aliases: ['opus-5', 'opus'] }])).not.equal(base);
     should(analyticsPricingCatalogFingerprint([])).not.equal(base);
   });
+
+  it('should not collide two catalogs whose aliases only differ across a comma', () => {
+    // ['a,b','c'] and ['a','b,c'] are different alias sets, but a comma-joined encoding hashed both as
+    // "a,b,c" — and a fingerprint that cannot tell them apart would not re-price a session when an
+    // alias containing a comma was split or joined. Each alias is its own encoded part now.
+    // Arrange / Act / Assert
+    should(analyticsPricingCatalogFingerprint([{ ...RATE, aliases: ['a,b', 'c'] }])).not.equal(
+      analyticsPricingCatalogFingerprint([{ ...RATE, aliases: ['a', 'b,c'] }]),
+    );
+  });
 });
 
 describe('analyticsIngestSignature', () => {
@@ -191,6 +201,20 @@ describe('analyticsIngestSignature', () => {
     );
     should(analyticsIngestSignature({ ...EVIDENCE, label: 'a', cwd: 'b' }, fingerprint)).not.equal(
       analyticsIngestSignature({ ...EVIDENCE, label: 'ab', cwd: '' }, fingerprint),
+    );
+  });
+
+  it('should not let a control byte in a value impersonate a field boundary', () => {
+    // NonEmptyStringSchema trims whitespace but admits control bytes, so a separator-join encoding
+    // hashed a label of "a<NUL>b" the same as label "a" plus cwd "b": the separator was itself a NUL.
+    // JSON-encoding each part means a value's bytes can never be read as structure.
+    // Arrange
+    const nul = String.fromCharCode(0);
+    const fingerprint = analyticsPricingCatalogFingerprint([]);
+
+    // Act / Assert
+    should(analyticsIngestSignature({ ...EVIDENCE, label: `a${nul}b`, cwd: 'c' }, fingerprint)).not.equal(
+      analyticsIngestSignature({ ...EVIDENCE, label: 'a', cwd: `b${nul}c` }, fingerprint),
     );
   });
 });

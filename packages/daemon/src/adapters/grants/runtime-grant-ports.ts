@@ -7,6 +7,7 @@ import type {
   GrantAuditReading,
   GrantClock,
   GrantDocumentPort,
+  SerialExecutor,
   UnlockTokenFactory,
 } from '../../lib/index.ts';
 
@@ -27,7 +28,10 @@ export interface GrantConfigStore {
  * `FoundationPaths.operatorPassword` for why those two belong apart.
  */
 export class ConfigGrantDocument implements GrantDocumentPort {
-  constructor(private readonly config: GrantConfigStore) {}
+  constructor(
+    private readonly config: GrantConfigStore,
+    private readonly mutations: Pick<SerialExecutor, 'runExclusive'>,
+  ) {}
 
   async read(): Promise<CapabilityGrants> {
     return await this.config.readGrants();
@@ -38,7 +42,11 @@ export class ConfigGrantDocument implements GrantDocumentPort {
   }
 
   async write(grants: CapabilityGrants): Promise<void> {
-    await this.config.writeGrants(grants);
+    // Pricing patch/apply holds this SAME barrier across its read, decision, and raw-document write.
+    // Joining it here makes the grant adapter's own read-modify-write one transaction relative to
+    // pricing, so two atomic renames cannot each preserve the same stale copy and erase the other's
+    // key. The grant service's authorization and audit semantics remain outside this file adapter.
+    await this.mutations.runExclusive(() => this.config.writeGrants(grants));
   }
 }
 

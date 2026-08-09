@@ -2798,6 +2798,7 @@ const ANALYTICS_RAW: AnalyticsResponse = {
       cacheWriteInputTokens: 0,
       cacheWrite5mInputTokens: 0,
       cacheWrite1hInputTokens: 0,
+      reasoningTokens: null,
       turns: 4,
       durationMs: null,
       timeToFirstOutputMs: null,

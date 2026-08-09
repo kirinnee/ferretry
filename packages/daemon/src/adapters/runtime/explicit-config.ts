@@ -1,4 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import type {
+  AnalyticsPricingConfigurationPort,
+  AnalyticsPricingConfigurationRead,
+  AnalyticsPricingConfigurationWrite,
+  AnalyticsPricingConfigurationWriteResult,
+} from '../../lib/analytics/pricing-service.ts';
 import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
@@ -7,6 +13,7 @@ import {
   parseDaemonConfig,
   recordedPortDocument,
 } from '../../lib/index.ts';
+import { prepareAnalyticsPricingWrite, readAnalyticsPricingConfiguration } from './daemon-config.ts';
 
 /**
  * The configuration document an operator named on the command line.
@@ -21,7 +28,7 @@ import {
  * the address a machine is administered on. And it still never persists a derived value, for the
  * reason the state-home adapter does not: a derived value on disk stops tracking what it came from.
  */
-export class ExplicitDaemonConfig implements DaemonConfigStore {
+export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricingConfigurationPort {
   constructor(readonly path: string) {}
 
   async peek(): Promise<{ readonly document: Record<string, unknown> | undefined; readonly config: DaemonConfig }> {
@@ -58,6 +65,19 @@ export class ExplicitDaemonConfig implements DaemonConfigStore {
     await this.write(recordedPortDocument(raw, port));
   }
 
+  /** Reads the same pricing slice as the state-home adapter, from the exact file `--config` named. */
+  async readPricing(): Promise<AnalyticsPricingConfigurationRead> {
+    return readAnalyticsPricingConfiguration(this.path, await this.read());
+  }
+
+  /** Writes only pricing intent into the exact file `--config` named, preserving every other key. */
+  async writePricing(input: AnalyticsPricingConfigurationWrite): Promise<AnalyticsPricingConfigurationWriteResult> {
+    const prepared = prepareAnalyticsPricingWrite(this.path, await this.read(), input);
+    if (prepared.kind === 'refuse') return prepared.result;
+    await this.writeText(prepared.text);
+    return prepared.result;
+  }
+
   /** A document that is not there is not an error: the operator names where it SHOULD live. */
   private async read(): Promise<string | undefined> {
     try {
@@ -69,6 +89,10 @@ export class ExplicitDaemonConfig implements DaemonConfigStore {
   }
 
   private async write(document: unknown): Promise<void> {
-    await writeFile(this.path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 });
+    await this.writeText(`${JSON.stringify(document, null, 2)}\n`);
+  }
+
+  private async writeText(text: string): Promise<void> {
+    await writeFile(this.path, text, { mode: 0o600 });
   }
 }
