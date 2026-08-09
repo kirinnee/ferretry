@@ -12,7 +12,9 @@ import type { BrowserSessionLauncher } from '../../../lib/browser/runtime/index.
 import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/worker-client.ts';
 
 /** Launches the private Chrome that one session's worker drives. The profile lease is held until both
- * Chrome and the worker are gone, so a login window can never open over a live automation browser. */
+ * Chrome and the worker are gone, so a login window can never open over a live automation browser —
+ * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
+ * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it. */
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   constructor(
     private readonly profile: BrowserProfilePort,
@@ -60,7 +62,9 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       // holding this profile, so the lease is released only once that Chrome is CONFIRMED gone — and
       // never on the strength of a signal alone. SIGKILL first because a Chrome that never reached its
       // debugging endpoint has no clean shutdown left to perform. Retaining the lease is the safe
-      // outcome and never the reported one: the caller still gets the error that failed the launch.
+      // outcome and never the reported one: the caller still gets the error that failed the launch —
+      // and the obvious retry of that same session is refused by the store like anyone else, because
+      // the Chrome this record still names may be the one that would not die.
       if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL'))) await lease.release().catch(() => undefined);
       throw error;
     }
@@ -135,8 +139,11 @@ class LeasedBrowser implements BrowserAutomation {
     // Released LAST and only on BOTH confirmations: a lease that outlives either child by even a
     // moment lets a login window or the next session open a second Chrome over a profile the first one
     // is still writing to. A survivor therefore KEEPS the lease — an unreleased lease costs this
-    // daemon one shared profile until it exits, while a released one costs a live browser's profile
-    // its integrity.
+    // daemon its one shared profile, while a released one costs a live browser's profile its
+    // integrity. Kept means kept against EVERYONE: the store refuses every later acquirer,
+    // including this same session restarting, and no retry ever clears it. A later daemon re-derives
+    // the verdict from the pids the record names and reclaims only once they are confirmed gone — a
+    // Chrome that survived is refused across a restart too, which is the point rather than a defect.
     if (workerGone && chromeGone) await this.lease.release().catch(() => undefined);
   }
 }

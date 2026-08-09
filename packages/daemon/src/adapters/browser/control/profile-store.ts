@@ -104,8 +104,14 @@ export class BrowserProfileStore implements BrowserProfilePort {
       }
       const current = await this.readLease();
       if (!current) continue;
-      if (current.sessionId === options.sessionId && current.daemonPid === this.daemonPid)
-        return this.lease(current, false);
+      // There is deliberately NO same-session shortcut here, and its absence is load-bearing. A lease
+      // that still exists while this daemon holds no live browser is one the session launcher could
+      // not prove safe to release, and the session it names is the FIRST caller to come back. Handing
+      // it back would give a quarantined profile to exactly the retry the quarantine exists to stop,
+      // and would alias one record to two holders that can release each other's lease. An extant
+      // lease is exclusive against everyone, its own holder included: it is freed by its holder
+      // releasing it, or reclaimed below once the owners it names are confirmed dead — never by
+      // asking again.
       if (this.isProcessAlive(current.daemonPid)) {
         throw new BrowserProfileBusyError(
           current.daemonPid === this.daemonPid ? 'lease' : 'unknown',

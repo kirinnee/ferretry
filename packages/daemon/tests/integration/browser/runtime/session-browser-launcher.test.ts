@@ -345,4 +345,44 @@ describe('NodeSessionBrowserLauncher', () => {
       /leased by session s1/u,
     );
   });
+
+  it('should refuse the SAME session a second launch while its uncertain lease is retained', async () => {
+    // The quarantine is only worth the name if it holds against the caller most likely to come back:
+    // the session whose own cleanup could not be proved. `BrowserSessionService.stop()` drops the run
+    // before it awaits the close and swallows the outcome, so the very next `start` for this session
+    // arrives here with nothing to say a browser was ever in doubt. A retry that is handed the
+    // retained lease opens a second Chrome over the quarantined profile AND overwrites the recorded
+    // Chrome pid — which is the one fact a later daemon reads to refuse a reclaim.
+    // Arrange
+    const chrome = await fakeChrome();
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const worker = {
+      unexpectedExit: new Promise<number>(() => undefined),
+      close: async () => {
+        throw new BrowserTransportError('upstream_failed', 'browser worker could not be terminated', 504);
+      },
+    };
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      '/worker.ts',
+      process.execPath,
+      environment(chrome),
+      async () => worker as never,
+    );
+    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    opened.push(browser);
+    const first = await leasedChromePid(root);
+    await browser.close();
+
+    // Act — the same launcher, the same external session id, exactly as `ensure()` would retry it.
+    const retry = launcher.launch('s1', { width: 800, height: 600 });
+    // Registered BEFORE it is judged: a red run must not leak the Chrome an unexpected success starts.
+    await retry.then(opened.push.bind(opened), () => undefined);
+
+    // Assert — refused, and the retained record still names the ORIGINAL Chrome. A retry that got
+    // through would report a different, live pid here even where the refusal assertion was loosened.
+    await should(retry).be.rejectedWith(/leased by session s1/u);
+    should(await leasedChromePid(root)).equal(first);
+  });
 });

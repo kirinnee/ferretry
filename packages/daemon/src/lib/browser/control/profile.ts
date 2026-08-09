@@ -39,6 +39,16 @@ export interface BrowserProfileLease {
 }
 
 export interface BrowserProfilePort {
+  /**
+   * Takes the one shared profile. Acquisition is EXCLUSIVE per daemon and the session id is an owner
+   * label, not a key: an extant lease blocks every later acquirer including the session already named
+   * on it. That is what makes a retained lease a quarantine — when a browser's cleanup could not be
+   * confirmed, the lease is deliberately kept, and it must then block the retry as firmly as it
+   * blocks a stranger. Asking again never clears a retained lease: it is freed by its holder
+   * releasing it, or reclaimed by a later daemon that re-derives the verdict from the pids the record
+   * names — and only once those are confirmed gone, so a lease whose Chrome is still alive stays
+   * refused across a restart.
+   */
   acquire(options: { readonly sessionId: string; readonly chromeVersion?: string }): Promise<BrowserProfileLease>;
   isPrimed(): Promise<boolean>;
   assertChromeVersionCompatible(runningChromeVersion: string): Promise<void>;
