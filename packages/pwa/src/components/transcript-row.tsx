@@ -110,9 +110,17 @@ function speakerOf(entry: TranscriptEntry): 'user' | 'assistant' | undefined {
  * end up proving references differently. Outside a session workspace the context
  * is empty and reference-shaped text stays prose, which is correct: nothing there
  * can prove a callsign or a path.
+ *
+ * THE SINGLE `fy-render` OPT-IN. This is the one call site in the product that
+ * passes `enableFyRender`, and that is the whole mechanism keeping inline
+ * illustrations to an assistant's own message: every other `<Markdown>` surface
+ * is inert by not naming the capability, so a `fy-render` fence pasted into a
+ * file preview, a report or the composer renders as an escaped code fence with
+ * no code on those surfaces at all. `tests/unit/fy-render-opt-in.test.ts` holds
+ * the count at one. See `docs/fy-render.md`.
  */
 function AssistantProse({ text }: { readonly text: string }) {
-  return <Markdown text={text} {...useReferenceSurface()} />;
+  return <Markdown enableFyRender text={text} {...useReferenceSurface()} />;
 }
 
 const defaultLabel = (kind: TranscriptEntry['kind']): string => {

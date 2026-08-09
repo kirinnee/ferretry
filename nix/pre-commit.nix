@@ -206,6 +206,22 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # An `fy-render` block renders an illustration in ONE surface — an assistant's own transcript
+    # message — and is inert everywhere else in the app by a defaulted-off prop. In a durable file it
+    # is not inert, it is wrong: a diagram in a document is an ordinary fenced block in that
+    # document's own format. Runs on EVERY file and scans the whole tree, for the same reason the
+    # conflict-markers gate does — the opener reaches `main` through the file nobody was looking at.
+    # The two files that must SHOW the syntax to teach it are exempt by exact path; see
+    # scripts/validate/no-fy-render-in-docs.sh and docs/fy-render.md.
+    a-no-fy-render-in-docs = {
+      enable = true;
+      name = "No fy-render fences in durable files";
+      entry = validator "scripts/validate/no-fy-render-in-docs.sh";
+      files = ".*";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-enforce-exec = {
       enable = true;
       name = "Executable shell scripts";

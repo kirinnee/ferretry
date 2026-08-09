@@ -40,6 +40,7 @@ import { type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } f
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.ts';
+import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender, remarkFyRenderFences } from '../lib/fy-render.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
@@ -62,6 +63,7 @@ import {
   type TaskReferenceResolver,
 } from '../lib/references.ts';
 import { remarkTableLabels } from '../lib/remark-table-labels.ts';
+import { FyRenderBlock } from './fy-render-block.tsx';
 
 /**
  * Resolves authored file candidates to canonical session-relative paths. Injected
@@ -84,6 +86,48 @@ interface MarkdownAstLinkNode {
   properties?: Readonly<Record<string, unknown>>;
 }
 
+interface MarkdownAstChildNode {
+  readonly type?: string;
+  readonly tagName?: string;
+  readonly properties?: Readonly<Record<string, unknown>>;
+  // `value` is `unknown` rather than `string` because this is a structural read
+  // of a foreign AST, and the `typeof` guard that consumes it is a runtime
+  // check on a runtime shape — not a restatement of a type we were handed.
+  readonly children?: readonly { readonly type?: string; readonly value?: unknown }[];
+}
+
+interface MarkdownAstFenceNode {
+  readonly children?: readonly MarkdownAstChildNode[];
+}
+
+/**
+ * The authored body of a fence `remarkFyRenderFences` marked, or null for every
+ * other `<pre>`.
+ *
+ * TRUSTS THE MARK, NOT THE CLASS NAME. `class="language-fy-render"` is also what
+ * a fence opened as `fy-render notes` arrives wearing, because hast keeps the
+ * language and drops the metadata. The exact-token decision is made in the
+ * remark plugin, where both halves are still visible, and this reads its answer.
+ *
+ * Read off the `<pre>` rather than the `<code>` because the block replaces the
+ * whole fence, and `<figure>` inside `<pre>` is not a tree a browser will keep.
+ * When this answers null the `<pre>` renders untouched, which is what makes the
+ * failure path free: an unparseable `fy-render` fence, an empty one, and a fence
+ * in any other language all take the pre-existing highlight-or-escape branch
+ * with no code of their own.
+ *
+ * @internal Exported so the mark has a focused regression of its own.
+ */
+export function fyRenderFenceBody(node: MarkdownAstFenceNode | null | undefined): string | null {
+  const code = node?.children?.[0];
+  if (code?.type !== 'element' || code.tagName !== 'code') return null;
+  if (code.properties?.[FY_RENDER_FENCE_ATTRIBUTE] !== 'true') return null;
+  const body = code.children?.[0];
+  if (body?.type !== 'text' || typeof body.value !== 'string') return null;
+  // mdast-to-hast terminates a fence body with a newline the author did not type.
+  return body.value.replace(/\n$/u, '');
+}
+
 /**
  * @internal Exported so the forged-link policy has a focused regression: a link
  * whose origin mark does not match its payload is never re-proved at all.
@@ -100,6 +144,17 @@ export function referenceHasTrustedOrigin(
 export interface MarkdownProps {
   readonly text: string;
   readonly className?: string;
+  /**
+   * Opts this surface into rendering `fy-render` fences, and DEFAULTS TO FALSE.
+   *
+   * This prop is the whole answer to "how does an illustration stay
+   * conversation-only": not a documented rule but a defaulted-off capability
+   * that a surface has to name deliberately. Every other `<Markdown>` consumer —
+   * file previews, reports, and the composer's preview when it lands — gets the
+   * inert escaped fence automatically by not passing it, with no code of its own.
+   * Exactly one production call site sets it, and a unit test holds it to one.
+   */
+  readonly enableFyRender?: boolean;
   /** Proves `:callsign` against one daemon's live fleet. Without it, prose. */
   readonly agentReferenceResolver?: AgentReferenceResolver;
   /** Proves `&task` against the daemon's board. Syntax alone never links. */
@@ -129,6 +184,7 @@ export interface MarkdownProps {
 export const Markdown = memo(function Markdown({
   text,
   className,
+  enableFyRender = false,
   agentReferenceResolver,
   taskReferenceResolver,
   attentionReferenceResolver,
@@ -377,6 +433,21 @@ export const Markdown = memo(function Markdown({
               <code className={`hljs language-${language}`} dangerouslySetInnerHTML={{ __html: html }} />
             );
           },
+          // THE ONE PLACE AN ILLUSTRATION CAN APPEAR, and it is a replacement
+          // rather than an addition: a matched fence renders as the block INSTEAD
+          // of the `<pre>`, because `<figure>` inside `<pre>` is not a tree a
+          // browser keeps and `white-space: pre` is not a layout an illustration
+          // survives. Everything else — the opt-in off, a different info string,
+          // an unparseable body — falls through to the ordinary fence below,
+          // where `code` still highlights or escapes it exactly as before. There
+          // is no partial state: a bad block is indistinguishable from a plain
+          // fence, which is the same rule an unknown fence language already has.
+          pre: ({ node, children, ...rest }) => {
+            const body = enableFyRender ? fyRenderFenceBody(node) : null;
+            const parsed = body === null ? null : parseFyRender(body);
+            if (parsed?.ok === true) return <FyRenderBlock block={parsed.block} />;
+            return <pre {...rest}>{children}</pre>;
+          },
           table: ({ node: _node, ...rest }) => (
             <div className="md-table-scroll scroll-thin">
               <table {...rest} />
@@ -394,7 +465,17 @@ export const Markdown = memo(function Markdown({
         // remarkTableLabels stamps each body cell with its column header as
         // `data-label`, which the mobile stacked-card layout prints. It must run
         // after remark-gfm has produced the table nodes.
-        remarkPlugins={[remarkGfm, remarkTableLabels, [remarkReferences, { resolvers: transformResolvers }]]}
+        // remarkFyRenderFences marks fences whose info string is EXACTLY the
+        // token — the one place mdast still holds the metadata hast drops.
+        // Marking unconditionally rather than behind `enableFyRender` keeps the
+        // mark a statement about the DOCUMENT; whether it is acted on is the
+        // surface's decision, made in `pre` below.
+        remarkPlugins={[
+          remarkGfm,
+          remarkTableLabels,
+          remarkFyRenderFences,
+          [remarkReferences, { resolvers: transformResolvers }],
+        ]}
       >
         {text}
       </ReactMarkdown>
