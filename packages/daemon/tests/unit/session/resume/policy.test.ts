@@ -35,8 +35,13 @@ function target(overrides: Partial<ResumeTarget> = {}): ResumeTarget {
   };
 }
 
-const EXPLICIT: ResumePolicy = { automatic: false, dedupeSharedRecoveryScope: false };
-const AUTOMATIC: ResumePolicy = { automatic: true, dedupeSharedRecoveryScope: true };
+/** The advisory a bare operator resume may dismiss, and the blocking kind nothing here may touch. */
+const RELEASED = 'structured-answer-released-unconfirmed';
+const UNCONFIRMED = 'structured-answer-unconfirmed';
+
+const OPERATOR: ResumePolicy = { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: true };
+const EXPLICIT: ResumePolicy = { automatic: false, dedupeSharedRecoveryScope: false, humanOperator: false };
+const AUTOMATIC: ResumePolicy = { automatic: true, dedupeSharedRecoveryScope: true, humanOperator: false };
 
 describe('resume policy resolution', () => {
   it('should treat operator and peer calls as explicit', () => {
@@ -44,7 +49,19 @@ describe('resume policy resolution', () => {
     const actual = (['admin-cli', 'admin-ui', 'peer'] as const).map(actor => resolveResumePolicy(actor));
 
     // Assert
-    should(actual).deepEqual([EXPLICIT, EXPLICIT, EXPLICIT]);
+    should(actual).deepEqual([OPERATOR, OPERATOR, EXPLICIT]);
+  });
+
+  it('should give operator standing to the two admin actors and to nothing else', () => {
+    // Arrange — `peer` is the one that matters: it is explicit, so `!automatic` would have handed a
+    // relaying daemon the right to dismiss a warning meant for the person at the terminal.
+    const actors = ['admin-cli', 'admin-ui', 'peer', 'warden', 'daemon', 'unknown'] as const;
+
+    // Act
+    const actual = actors.map(actor => resolveResumePolicy(actor).humanOperator);
+
+    // Assert
+    should(actual).deepEqual([true, true, false, false, false, false]);
   });
 
   it('should treat automated and unrecognised callers as automatic, never as operators', () => {
@@ -265,6 +282,14 @@ describe('resume plan', () => {
     should(actual.kind).equal('relaunch');
   });
 
+  it('should send through a positively released answer advisory without replacing the live pane', () => {
+    const released = target({ needsHumanKind: 'structured-answer-released-unconfirmed' });
+
+    const actual = planResume(released, LIVE, 'reply in prose', EXPLICIT, SETTINGS);
+
+    should(actual).deepEqual({ kind: 'send', message: 'reply in prose' });
+  });
+
   it('should clean a dead pane quietly, with no composer to preserve', () => {
     // Act
     const actual = planResume(target({ status: 'failed' }), DEAD_PANE, 'again', EXPLICIT, SETTINGS);
@@ -286,6 +311,7 @@ describe('resume plan', () => {
       prompt: SETTINGS.defaultResumePrompt,
       cancelPendingQuestion: false,
       clearNeedsHuman: true,
+      acknowledgeAnswerAttention: false,
       resetRetryAttempt: true,
     });
   });
@@ -410,6 +436,118 @@ describe('terminal classification', () => {
 
     // Assert
     should(actual).deepEqual([false, false, false, false, false, false, false, false, true]);
+  });
+});
+
+describe('resume plan for a released structured-answer advisory', () => {
+  const advisory = (overrides: Partial<ResumeTarget> = {}): ResumeTarget =>
+    target({ needsHumanKind: RELEASED, ...overrides });
+
+  it('should let a bare operator resume reach a relaunch on a live pane', () => {
+    // Arrange — the advisory is not an input modal, so this pane kept the send shortcut and a
+    // message-free resume met `already running`: the one action allowed to dismiss the warning was
+    // unreachable on exactly the sessions that carry it.
+    // Act
+    const actual = planResume(advisory(), LIVE, undefined, OPERATOR, SETTINGS);
+
+    // Assert
+    should(actual.kind).equal('relaunch');
+    should(actual).have.property('acknowledgeAnswerAttention', true);
+    should(actual).have.property('clearNeedsHuman', true);
+    should(actual).have.property('pane', 'snapshot-and-kill');
+  });
+
+  it('should dismiss from an auto-mode session, whose relaunch is never a bare one', () => {
+    // Arrange — the trap: `ResumeAction.bare` also means "interactive, so invent no turn". An auto
+    // session with no message synthesises the default prompt and is NOT bare by that field, yet it
+    // is still the operator's message-free dismissal. Reading the action's field instead of the
+    // request would leave every auto session unable to clear its advisory.
+    // Act
+    const actual = planResume(advisory({ status: 'stopped', mode: 'auto' }), NO_PANE, undefined, OPERATOR, SETTINGS);
+
+    // Assert
+    should(actual).have.property('bare', false);
+    should(actual).have.property('prompt', SETTINGS.defaultResumePrompt);
+    should(actual).have.property('acknowledgeAnswerAttention', true);
+  });
+
+  it('should treat any caller-supplied message as prose that dismisses nothing', () => {
+    // Act
+    const live = planResume(advisory(), LIVE, 'reply in prose', OPERATOR, SETTINGS);
+    const relaunched = planResume(advisory({ status: 'stopped' }), NO_PANE, 'pick this up', OPERATOR, SETTINGS);
+
+    // Assert — one stays a send, one is a relaunch, and neither closes the warning.
+    should(live).deepEqual({ kind: 'send', message: 'reply in prose' });
+    should(relaunched).have.property('acknowledgeAnswerAttention', false);
+    should(relaunched).have.property('clearNeedsHuman', false);
+  });
+
+  it('should not let a whitespace message buy the dismissal', () => {
+    // Arrange — `ResumeSessionRequest` only requires a non-empty string, so `"   "` is a message the
+    // caller supplied. Testing the TRIMMED value would hand the one privileged action to any payload
+    // willing to send a space, which is the cheapest possible way to launder prose into a dismissal.
+    // Act
+    const stopped = planResume(advisory({ status: 'stopped' }), NO_PANE, '   ', OPERATOR, SETTINGS);
+
+    // Assert — it still relaunches, and it still dismisses nothing.
+    should(stopped.kind).equal('relaunch');
+    should(stopped).have.property('acknowledgeAnswerAttention', false);
+    should(stopped).have.property('clearNeedsHuman', false);
+    // And on a live pane it keeps the ordinary refusal rather than gaining the relaunch path.
+    should(() => planResume(advisory(), LIVE, '   ', OPERATOR, SETTINGS)).throw(/already running/u);
+  });
+
+  it('should refuse a peer and an automatic reviver the dismissal', () => {
+    // Act
+    const peer = planResume(advisory({ status: 'stopped' }), NO_PANE, undefined, EXPLICIT, SETTINGS);
+    const automatic = planResume(advisory({ status: 'stopped' }), NO_PANE, undefined, AUTOMATIC, SETTINGS);
+
+    // Assert
+    should(peer).have.property('acknowledgeAnswerAttention', false);
+    should(peer).have.property('clearNeedsHuman', false);
+    should(automatic).have.property('acknowledgeAnswerAttention', false);
+    should(automatic).have.property('clearNeedsHuman', false);
+  });
+
+  it('should still refuse a bare peer resume of a live session as already running', () => {
+    // Arrange — giving up the send shortcut is the dismissal's privilege, not everyone's.
+    // Act / Assert
+    should(() => planResume(advisory(), LIVE, undefined, EXPLICIT, SETTINGS)).throw(/already running/u);
+  });
+
+  it('should never dismiss or clear the blocking unconfirmed kind', () => {
+    // Arrange — a possibly-live form is an unknown native modal; no relaunch can reason about it.
+    const blocked = target({ status: 'stopped', needsHumanKind: UNCONFIRMED });
+
+    // Act
+    const actual = planResume(blocked, NO_PANE, undefined, OPERATOR, SETTINGS);
+
+    // Assert
+    should(actual).have.property('acknowledgeAnswerAttention', false);
+    should(actual).have.property('clearNeedsHuman', false);
+  });
+
+  it('should leave every other attention kind clearing exactly as it did', () => {
+    // Arrange — the narrowing is for the two answer kinds only.
+    const other = target({ status: 'failed', needsHumanKind: 'picker_cleanup' });
+
+    // Act
+    const operator = planResume(other, NO_PANE, undefined, OPERATOR, SETTINGS);
+    const peer = planResume(other, NO_PANE, undefined, EXPLICIT, SETTINGS);
+    const automatic = planResume(other, NO_PANE, undefined, AUTOMATIC, SETTINGS);
+
+    // Assert
+    should(operator).have.property('clearNeedsHuman', true);
+    should(peer).have.property('clearNeedsHuman', true);
+    should(automatic).have.property('clearNeedsHuman', false);
+  });
+
+  it('should still refuse a live session holding a newer question', () => {
+    // Arrange — the advisory does not license replacing a pane that is mid-conversation.
+    const asking = advisory({ pendingQuestion: { toolUseId: 'tool-2' } });
+
+    // Act / Assert
+    should(() => authorizeResume(asking, LIVE, OPERATOR, [])).throw(/answer or abandon/u);
   });
 });
 

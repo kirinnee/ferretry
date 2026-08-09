@@ -1,4 +1,8 @@
 import { resolve } from 'node:path';
+import {
+  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+} from '../question/answer-ledger.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
   ResumeCancelled,
@@ -14,16 +18,23 @@ import {
 /**
  * The policy an actor implies when the caller did not state one.
  *
- * Admin and peer calls are a person acting deliberately; a warden call is automated recovery even
- * though it reaches the same method. The ancestor expressed "explicit" by returning NO policy, so
+ * Admin and peer calls are EXPLICIT — someone or something asked for this exact resume — while a
+ * warden call is automated recovery even though it reaches the same method. Explicit is not the same
+ * as human: a peer is another daemon relaying a request, which is why the second axis exists. The ancestor expressed "explicit" by returning NO policy, so
  * every downstream check became `policy?.automatic` and an absent policy silently meant explicit —
  * which made adding a new automated caller a one-line way to grant it operator privileges by
  * accident. Here every actor resolves to a real policy, and an unrecognised one gets the SAFER
  * automatic path rather than the more powerful explicit one.
+ *
+ * `humanOperator` is a SECOND axis rather than a rename of `!automatic`, because `peer` sits on the
+ * explicit side of the first one and must sit on the unprivileged side of this one: a relaying
+ * daemon is not the person who looked at the terminal. Every actor states the field, so no reader
+ * has to decide what its absence meant.
  */
 export function resolveResumePolicy(actor: ResumeActor): ResumePolicy {
   const explicit = actor === 'admin-cli' || actor === 'admin-ui' || actor === 'peer';
-  return { automatic: !explicit, dedupeSharedRecoveryScope: !explicit };
+  const humanOperator = actor === 'admin-cli' || actor === 'admin-ui';
+  return { automatic: !explicit, dedupeSharedRecoveryScope: !explicit, humanOperator };
 }
 
 /** True for a session that will never run again on its own. */
@@ -110,6 +121,16 @@ export type ResumeAction =
       readonly cancelPendingQuestion: boolean;
       /** Whether a successful relaunch clears the human-attention quarantine. */
       readonly clearNeedsHuman: boolean;
+      /**
+       * Whether this relaunch is the deliberate human dismissal of the released structured-answer
+       * advisory, and must therefore record it durably and clear that exact warning.
+       *
+       * It rides on the action rather than being recomputed downstream so that ONE function decides
+       * it. When it is true, `clearNeedsHuman` is true for the same reason and by the same test —
+       * they can never disagree, which is what stops an answer advisory clearing without a durable
+       * record of who dismissed it.
+       */
+      readonly acknowledgeAnswerAttention: boolean;
       /** Whether the retry counter resets; an automatic retry must keep counting its own attempts. */
       readonly resetRetryAttempt: boolean;
     };
@@ -135,12 +156,48 @@ export function planResume(
   const usable = pane.alive && !pane.dead;
   // A quarantined session may be sitting in an unknown native modal, so its pane cannot be trusted
   // to receive input even while it looks alive.
-  const quarantined = target.needsHumanKind !== undefined;
-  if (usable && !isTerminalForResume(target) && !quarantined && policy.replaceLiveTerminal !== true) {
+  const quarantined =
+    target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND;
+  // "Bare" is a property of the REQUEST — the caller supplied no message at all — and deliberately
+  // not `ResumeAction.bare`, which is the narrower "and this is an interactive session, so no turn
+  // is invented". An auto-mode session resumed with no message synthesises the default prompt and is
+  // still the operator's explicit, message-free dismissal; reading the action's field instead would
+  // silently make the advisory unclearable for every auto session.
+  //
+  // ABSENT, not empty-after-trimming. `ResumeSessionRequest` only requires a non-empty string, so
+  // `"   "` is a message the caller supplied — and testing the trimmed value would let a payload
+  // that carries prose-shaped whitespace buy the dismissal that no other message can. Any supplied
+  // message is prose, and prose never dismisses the warning.
+  const bareRequest = message === undefined;
+  const acknowledgeAnswerAttention =
+    target.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND && policy.humanOperator === true && bareRequest;
+  // The released advisory is not an input modal, so a live pane normally keeps the send shortcut —
+  // but then a bare operator resume met `already running` and the one action that may dismiss the
+  // warning was unreachable on exactly the sessions that carry it. A dismissal therefore gives up
+  // the shortcut and takes the relaunch path; a message-bearing resume still types into the pane.
+  if (
+    usable &&
+    !isTerminalForResume(target) &&
+    !quarantined &&
+    !acknowledgeAnswerAttention &&
+    policy.replaceLiveTerminal !== true
+  ) {
     if (!trimmed) throw new ResumeRefused(`session ${target.id} is already running`);
     return { kind: 'send', message: trimmed };
   }
   const bare = target.mode === 'interactive' && !trimmed;
+  // Both structured-answer kinds are held back from the generic explicit clear. The blocking
+  // `structured-answer-unconfirmed` kind never clears through resume at all — a possibly-live form
+  // is not something a relaunch can reason about — and the released advisory clears only on the
+  // dismissal above, which is also the only thing that records why. Every other attention kind
+  // keeps the behaviour it had: any non-automatic resume clears it.
+  //
+  // What makes clearing safe is not this flag but the QUEUE: the service holds the answer/monitor
+  // executor across release, relaunch, acknowledgement and clear, so no projection can publish a
+  // newer advisory into the middle of a dismissal. See `SessionResumePorts.serial`.
+  const answerAttention =
+    target.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND ||
+    target.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND;
   return {
     kind: 'relaunch',
     pane: usable ? 'snapshot-and-kill' : pane.alive ? 'quiet-cleanup' : 'none',
@@ -148,7 +205,8 @@ export function planResume(
     turn: bare ? target.turn : target.turn + 1,
     prompt: bare ? undefined : (trimmed ?? settings.defaultResumePrompt),
     cancelPendingQuestion: target.pendingQuestion !== undefined,
-    clearNeedsHuman: !policy.automatic,
+    clearNeedsHuman: answerAttention ? acknowledgeAnswerAttention : !policy.automatic,
+    acknowledgeAnswerAttention,
     resetRetryAttempt: !(policy.automatic && policy.expectedStatus === 'retrying'),
   };
 }

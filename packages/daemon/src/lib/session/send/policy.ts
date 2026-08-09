@@ -1,4 +1,5 @@
 import type { SessionSendSettings } from './settings.ts';
+import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
 import {
   IDLE_SEND_STATUSES,
   type SendPaneObservation,
@@ -34,7 +35,7 @@ export function authorizeSend(target: SendTarget, attachmentIds: readonly string
     throw new SendUnavailable(
       `the previous terminal shutdown for ${target.id} was not confirmed; stop it successfully before sending`,
     );
-  if (target.needsHumanKind !== undefined)
+  if (target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND)
     throw new SendUnavailable(
       `session ${target.id} is quarantined awaiting a person (${target.needsHumanKind}); clear it before sending`,
     );

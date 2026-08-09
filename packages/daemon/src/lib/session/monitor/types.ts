@@ -144,6 +144,16 @@ export interface MonitorNudge {
   deliver(id: SessionId, sendId: string, message: string): Promise<void>;
 }
 
+/**
+ * The structured-question planner carried by the daemon monitor tick.
+ *
+ * It observes transcript + durable answer evidence under the answer domain's own per-session queue;
+ * it never drives a form. Failures are per session so one damaged ledger cannot abandon the roster.
+ */
+export interface MonitorQuestions {
+  reconcile(): Promise<ReadonlyMap<string, string>>;
+}
+
 /** The tick's own lateness, measured on a clock that cannot jump. */
 export interface MonitorMonotonicClock {
   elapsedMs(): number;

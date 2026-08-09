@@ -56,10 +56,32 @@ describe('authorizeSend', () => {
     });
   });
 
+  it('refuses an unknown future attention kind fail-closed', () => {
+    should(() => authorizeSend(target({ needsHumanKind: 'future-input-modal' }), [])).throw(SendUnavailable, {
+      message: /future-input-modal/u,
+    });
+  });
+
+  it('allows prose after a structured form was positively released while keeping its advisory', () => {
+    should(() => authorizeSend(target({ needsHumanKind: 'structured-answer-released-unconfirmed' }), [])).not.throw();
+  });
+
   it('refuses prose while a structured question is on screen', () => {
     should(() => authorizeSend(target({ pendingQuestion: { toolUseId: 'tool-7' } }), [])).throw(SendUnavailable, {
       message: /tool-7/u,
     });
+  });
+
+  it('still refuses an unreleased answer even if its advisory spelling is present', () => {
+    should(() =>
+      authorizeSend(
+        target({
+          needsHumanKind: 'structured-answer-unconfirmed',
+          pendingQuestion: { toolUseId: 'tool-8' },
+        }),
+        [],
+      ),
+    ).throw(SendUnavailable, { message: /structured-answer-unconfirmed/u });
   });
 
   it('allows attachment ids once the durable attachment routes are mounted', () => {
