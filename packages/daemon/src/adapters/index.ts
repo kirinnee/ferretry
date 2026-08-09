@@ -3,6 +3,7 @@ export * from './attachments/index.ts';
 export * from './browser/control/index.ts';
 export * from './browser/transport/index.ts';
 export * from './catalog/index.ts';
+export * from './cgroups/index.ts';
 export * from './core/index.ts';
 export * from './filesystem/state-file-system.ts';
 export * from './grants/index.ts';

@@ -149,13 +149,30 @@ export function CgroupConfigCard({
       </p>
 
       {!editable ? (
-        <p
-          role="status"
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-        >
-          Resource enforcement is unavailable on this platform. Ferretry is showing the daemon’s declared limits only;
-          it does not render controls that would silently do nothing.
-        </p>
+        <div className="grid gap-2">
+          <p
+            role="status"
+            className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+          >
+            Resource enforcement is unavailable on this platform. Ferretry is showing the daemon’s declared limits only;
+            it does not render limit controls that would silently do nothing.
+          </p>
+          {view.config.enabled ? (
+            <button
+              type="button"
+              className="kt-btn min-h-[44px] self-start"
+              disabled={saving}
+              onClick={() => void onSave({ enabled: false })}
+            >
+              {saving ? (
+                <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              ) : (
+                <ShieldCheck size={15} aria-hidden="true" />
+              )}
+              Disable saved enforcement
+            </button>
+          ) : null}
+        </div>
       ) : (
         <>
           <label className="flex min-h-[44px] items-center justify-between gap-3 rounded-control border border-border bg-surface-2 px-control-x py-2 text-ui text-fg">
@@ -175,7 +192,7 @@ export function CgroupConfigCard({
           </label>
           <fieldset disabled={saving} className="grid min-w-0 gap-3 border-0 p-0">
             <legend className="text-ui font-semibold text-fg">Fleet-wide aggregate cap</legend>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2">
               <LimitInput
                 label="CPU"
                 value={draft.fleetCpuPercent}
@@ -194,7 +211,7 @@ export function CgroupConfigCard({
           </fieldset>
           <fieldset disabled={saving} className="grid min-w-0 gap-3 border-0 p-0">
             <legend className="text-ui font-semibold text-fg">Per-agent cap</legend>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2">
               <LimitInput
                 label="CPU"
                 value={draft.agentCpuPercent}
@@ -247,7 +264,7 @@ export function CgroupConfigCard({
           className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-meta leading-base text-warn"
         >
           <CircleAlert size={14} className="mr-1 inline" aria-hidden="true" />
-          Apply state unknown: {warning}
+          Resource-limit warning: {warning}
         </p>
       ))}
       {error ? (

@@ -138,6 +138,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  cgroups: {
+    config: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    updateConfig: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
   fleetRefresh: { run: async () => undefined },
@@ -285,7 +293,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 106, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 108, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -347,6 +355,11 @@ describe('the mounted daemon surface', () => {
       // one at all.
       'POST /v1/fleet/proposals/:proposalId/authorize',
       'POST /v1/fleet/proposals/:proposalId/apply',
+      // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
+      // DELETE — an operator narrows or widens one saved document, and nothing here creates or
+      // destroys a slice, because the units are transient and belong to the launches that made them.
+      'GET /v1/cgroups/config',
+      'PATCH /v1/cgroups/config',
       // Imported harness history is deliberately not a session route: it can be read but has no
       // daemon journal, lifecycle, pane, or resume/send control.
       'GET /v1/imports/history',

@@ -15,6 +15,7 @@ export * from './attachments/index.ts';
 export * from './attention/index.ts';
 export * from './browser/control/index.ts';
 export * from './browser/transport/index.ts';
+export * from './cgroups/index.ts';
 export * from './core/index.ts';
 export * from './fleet-refresh/index.ts';
 export * from './grants/index.ts';

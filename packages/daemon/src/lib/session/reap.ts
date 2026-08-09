@@ -82,7 +82,17 @@ export function terminalPaneIdentityMatches(
   );
 }
 
-function hasDurableTerminalEvidence(session: DurableTerminalSession): boolean {
+/**
+ * Whether this daemon's own documents PROVE the session is over.
+ *
+ * Exported because the reap is no longer the only reader: the resource-limit surface asks the same
+ * question to decide which registered panes are still live enough to reconfigure, and a second copy
+ * of the terminal-status set is exactly how two subsystems come to disagree about whether a session
+ * has finished. Absent or unrecognised evidence answers `false` in both callers, which is the
+ * conservative direction for each: the reap declines to kill, and the limits surface declines to
+ * pass over a pane it cannot prove is gone.
+ */
+export function hasDurableTerminalEvidence(session: DurableTerminalSession): boolean {
   if (!TERMINAL_STATUSES.has(session.status as ReapTerminalStatus) || session.finishedAt === undefined) return false;
   return Number.isFinite(Date.parse(session.finishedAt));
 }
