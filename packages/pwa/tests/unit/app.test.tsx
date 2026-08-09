@@ -326,6 +326,17 @@ const appStore = async (
     fetcher: async input => {
       const url = String(input);
       carrierRequests.push(url);
+      const attention = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
+      if (attention?.[1])
+        return Response.json({
+          v: 1,
+          sessionId: decodeURIComponent(attention[1]),
+          items: [],
+          resolved: [],
+          count: 0,
+          parseErrors: 0,
+          updatedAt: '2026-08-01T10:00:00.000Z',
+        });
       if (url.endsWith('/v1/pair'))
         return Response.json({
           daemonId: GAMMA_ID,
@@ -829,7 +840,10 @@ describe('AppShell', () => {
     await settle();
 
     const session = view.container.querySelector('[data-session="shared"]');
-    expect(session?.getAttribute('data-carrier-kind')).toBe('none');
+    // The session's scoped Attention ledger is now hydrated with the same
+    // carrier router. That first successful daemon read is a real direct
+    // measurement, so the route need not wait for another unrelated action.
+    expect(session?.getAttribute('data-carrier-kind')).toBe('direct');
     expect(session?.getAttribute('data-live-events')).toBe('0');
     await view.unmount();
   });
@@ -852,7 +866,9 @@ describe('AppShell', () => {
       alpha.daemonId,
     ]);
     await settle();
-    expect(liveFeeds).toEqual([]);
+    // Attention hydration is the first carrier-routed daemon request, so the
+    // route can start its feed without a synthetic health probe.
+    expect(liveFeeds).toHaveLength(1);
 
     await interact(async () => {
       await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`);
