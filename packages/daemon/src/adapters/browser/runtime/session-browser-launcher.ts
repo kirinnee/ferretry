@@ -56,23 +56,42 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       });
       return new LeasedBrowser(worker, chrome, lease);
     } catch (error) {
-      chrome?.kill('SIGKILL');
-      await lease.release().catch(() => undefined);
+      // A failed launch owns the same ordering obligation as a close: the browser it started is still
+      // holding this profile, so the lease is released only once that Chrome is CONFIRMED gone — and
+      // never on the strength of a signal alone. SIGKILL first because a Chrome that never reached its
+      // debugging endpoint has no clean shutdown left to perform. Retaining the lease is the safe
+      // outcome and never the reported one: the caller still gets the error that failed the launch.
+      if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL'))) await lease.release().catch(() => undefined);
       throw error;
     }
   }
 }
 
 class LeasedBrowser implements BrowserAutomation {
+  /**
+   * Resolves only once teardown has finished, never before it. The delay is the contract: an owner
+   * that learns the browser died reacts by starting another one or opening a login window, and either
+   * would race this teardown for the profile if the news arrived first.
+   *
+   * What teardown finished HAVING DONE is the honest part. On the verified path both children are
+   * reaped and the lease is released. When a child could not be confirmed dead the lease is
+   * deliberately kept, and this still resolves — the promise reports that cleanup has run its course,
+   * not that the profile is free.
+   */
   readonly unexpectedExit: Promise<number>;
-  private closed = false;
+  private teardown?: Promise<void>;
   constructor(
     private readonly worker: BrowserWorkerClient,
     private readonly chrome: ReturnType<typeof Bun.spawn>,
     private readonly lease: Awaited<ReturnType<BrowserProfilePort['acquire']>>,
   ) {
-    this.unexpectedExit = Promise.race([worker.unexpectedExit, chrome.exited]);
-    void this.unexpectedExit.then(() => this.release());
+    // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
+    // Chrome without its worker is an unreachable window still holding the profile. So both mean the
+    // same teardown, and the one that survived is what teardown exists to kill.
+    this.unexpectedExit = Promise.race([worker.unexpectedExit, chrome.exited]).then(async code => {
+      await this.stop();
+      return code;
+    });
   }
   navigate = (url: string) => this.worker.navigate(url);
   click = (selector: string) => this.worker.click(selector);
@@ -94,14 +113,82 @@ class LeasedBrowser implements BrowserAutomation {
   stopScreencast = () => this.worker.stopScreencast();
   dispatchInput = (input: Parameters<BrowserAutomation['dispatchInput']>[0]) => this.worker.dispatchInput(input);
   async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    await this.worker.close().catch(() => undefined);
-    this.chrome.kill('SIGTERM');
-    await this.release();
+    await this.stop();
   }
-  private async release(): Promise<void> {
-    await this.lease.release().catch(() => undefined);
+  /**
+   * Single-flight: a normal close and either child's unexpected exit converge on ONE teardown. A
+   * second attempt joins the first rather than repeating it, so no signal is ever aimed at a pid the
+   * kernel has already recycled and no lease a later session now holds is released out from under it.
+   */
+  private stop(): Promise<void> {
+    this.teardown ??= this.teardownOnce();
+    return this.teardown;
+  }
+  private async teardownOnce(): Promise<void> {
+    // The worker first: it owns the CDP connection and closes Chrome cleanly when it still can. Its
+    // own close already escalates until the worker process is really gone and FAILS ONLY when it could
+    // not confirm that, so the answer is kept rather than swallowed: a worker still standing is a
+    // browser still reachable, whatever happened to Chrome.
+    const workerGone = await this.worker.close().then(succeeded, failed);
+    // Chrome is reaped either way — a worker that would not die is no reason to leave a browser up.
+    const chromeGone = await reapChrome(this.chrome, 'SIGTERM');
+    // Released LAST and only on BOTH confirmations: a lease that outlives either child by even a
+    // moment lets a login window or the next session open a second Chrome over a profile the first one
+    // is still writing to. A survivor therefore KEEPS the lease — an unreleased lease costs this
+    // daemon one shared profile until it exits, while a released one costs a live browser's profile
+    // its integrity.
+    if (workerGone && chromeGone) await this.lease.release().catch(() => undefined);
+  }
+}
+
+/**
+ * Bounded shutdown budget for the private Chrome — the same one the worker transport gives its own
+ * child. Long enough for a browser to flush a profile it was told to close, short enough that one
+ * wedged process cannot hold a session's teardown, or daemon shutdown, open indefinitely.
+ */
+const CHROME_SHUTDOWN_TIMEOUT_MS = 2_000;
+
+/**
+ * Escalates until Chrome is gone and reports WHETHER IT ACTUALLY WENT. A signal is a request, not an
+ * outcome: a browser routinely traps SIGTERM so it can close its profile cleanly, so releasing a
+ * profile lease on the strength of having sent one is how a second Chrome opens over a live one.
+ *
+ * Bounded, so this can never become a shutdown hang — but a bound that expires is a failure to reap,
+ * not a licence to proceed, which is why the answer is returned rather than swallowed. Nothing else
+ * can stand in for it: Chrome's own SingletonLock would warn the next acquirer, but a browser killed
+ * before it finished starting has not written one yet.
+ */
+async function reapChrome(chrome: ReturnType<typeof Bun.spawn>, first: 'SIGTERM' | 'SIGKILL'): Promise<boolean> {
+  signalChrome(chrome, first);
+  if (await exitedWithin(chrome, CHROME_SHUTDOWN_TIMEOUT_MS)) return true;
+  signalChrome(chrome, 'SIGKILL');
+  return await exitedWithin(chrome, CHROME_SHUTDOWN_TIMEOUT_MS);
+}
+
+/** Named so a shutdown reads as the two-outcome question it is, rather than as a swallowed rejection. */
+const succeeded = (): boolean => true;
+const failed = (): boolean => false;
+
+function signalChrome(chrome: ReturnType<typeof Bun.spawn>, signal: 'SIGTERM' | 'SIGKILL'): void {
+  try {
+    chrome.kill(signal);
+  } catch {
+    // Already exited between the last wait and this signal, which is the outcome we wanted.
+  }
+}
+
+/** A wait that is always cleared, so a reaped child leaves no timer holding the runtime alive. */
+async function exitedWithin(chrome: ReturnType<typeof Bun.spawn>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      chrome.exited.then(() => true),
+      new Promise<boolean>(resolve => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
