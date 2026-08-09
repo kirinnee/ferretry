@@ -6,6 +6,7 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   decodeRemoteBrowserFrame,
   fetchRemoteBrowserStatus,
+  fetchRemoteBrowserStreamTicket,
   isLocalPasteChord,
   nextRemoteClickRun,
   REMOTE_MAX_CLICK_COUNT,
@@ -267,6 +268,41 @@ describe('remote browser input translation', () => {
     });
     // Only key events are ever retained, so nothing else can be released.
     expect(remoteKeyRelease({ kind: 'insertText', text: 'hi' })).toBeNull();
+  });
+
+  it('buys a stream ticket for the paired daemon and refuses every answer that is not one', async () => {
+    // The viewer's WebSocket cannot carry the device token, so this exchange is the ONLY thing
+    // standing between a paired browser and an unauthenticated stream. An answer that is missing or
+    // blank must fail here rather than downstream, where an empty ticket would become a socket URL.
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return response({ ticket: 'fy_ticket_abc', ttlSeconds: 30 }, 201);
+    };
+
+    expect(await fetchRemoteBrowserStreamTicket(daemon, scope, fetcher)).toBe('fy_ticket_abc');
+    expect(calls[0]?.url).toBe('https://daemon.example.test/v1/sessions/same%2Fsession/browser/stream/ticket');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer secret-token');
+    // The counter's own refusal is preserved, so a caller can tell "no such browser" from a defect.
+    await expect(
+      fetchRemoteBrowserStreamTicket(daemon, scope, async () =>
+        response({ error: 'no browser', code: 'not_found' }, 404),
+      ),
+    ).rejects.toMatchObject({ status: 404, code: 'not_found' });
+    // A 200 that carries no usable ticket is the daemon failing, not the caller.
+    await expect(fetchRemoteBrowserStreamTicket(daemon, scope, async () => response({}))).rejects.toMatchObject({
+      status: 502,
+    });
+    await expect(
+      fetchRemoteBrowserStreamTicket(daemon, scope, async () => response({ ticket: '   ' })),
+    ).rejects.toMatchObject({ status: 502 });
+    // And it is bound to the daemon the scope names, exactly like the status and action calls.
+    const other = daemonSessionScope(
+      daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' }),
+      'same/session',
+    );
+    await expect(fetchRemoteBrowserStreamTicket(daemon, other, fetcher)).rejects.toThrow('browser scope must belong');
   });
 
   it('labels a page from the real title, then its host, then its url', () => {

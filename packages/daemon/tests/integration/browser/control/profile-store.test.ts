@@ -48,6 +48,45 @@ describe('BrowserProfileStore', () => {
     should(await lease.release()).be.false();
   });
 
+  it('should refuse a second acquisition by the session that already holds the lease', async () => {
+    // A lease is exclusive against EVERYONE, and the owner is not an exception. The launcher keeps a
+    // lease it could not prove safe to release, so the session named on that record is the first
+    // caller to come back — and handing it straight back would give a quarantined profile to exactly
+    // the retry the quarantine exists to stop, with two lease objects then aliasing one record and
+    // able to release each other.
+    // Arrange — this daemon must read as ALIVE, or a same-session retry would reach the dead-owner
+    // reclaim and pass for entirely the wrong reason.
+    const subject = await profile(pid => pid === 1001);
+    await subject.acquire({ sessionId: 'first' });
+
+    // Act
+    let refusal: unknown;
+    try {
+      await subject.acquire({ sessionId: 'first' });
+    } catch (error) {
+      refusal = error;
+    }
+
+    // Assert — the ordinary live-owner refusal, not a special case: one lease at a time, and only its
+    // holder releases it.
+    should(refusal).instanceOf(BrowserProfileBusyError);
+    should(refusal).have.property('reason', 'lease');
+  });
+
+  it('should let the same session acquire again once it has released its lease', async () => {
+    // The over-blocking guard. Exclusivity must quarantine a RETAINED lease, never a legitimate
+    // restart: a session that closed cleanly has released, and its next launch is ordinary business.
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+    const held = await subject.acquire({ sessionId: 'first' });
+
+    // Act
+    should(await held.release()).be.true();
+
+    // Assert
+    should(await subject.acquire({ sessionId: 'first' })).have.property('sessionId', 'first');
+  });
+
   it('should use the production process inspector to retain a lease owned by this daemon', async () => {
     // Arrange
     const root = await mkdtemp(path.join(os.tmpdir(), 'ferretry-browser-profile-production-'));

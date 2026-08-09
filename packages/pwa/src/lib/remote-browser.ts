@@ -112,6 +112,22 @@ export const runRemoteBrowserAction = async (
   return parseBrowserActionResult(scope, await response.json());
 };
 
+/** Buys the short-lived credential the browser WebSocket must carry instead of a durable device token. */
+export const fetchRemoteBrowserStreamTicket = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<string> => {
+  assertScopeDaemon(daemon, scope);
+  const request = daemonRequest(daemon, `${browserPath(scope)}/stream/ticket`, { method: 'POST' });
+  const response = await fetcher(request.url, request.init);
+  if (!response.ok) throw await responseError(response);
+  const body = (await response.json()) as { readonly ticket?: unknown };
+  if (typeof body.ticket !== 'string' || body.ticket.trim() === '')
+    throw new DaemonResponseError(502, 'daemon returned no browser stream ticket');
+  return body.ticket;
+};
+
 /**
  * Builds a viewer URL from a per-connection ticket. Device credentials are
  * deliberately absent: WebSocket URLs are routinely retained in diagnostics.

@@ -261,6 +261,30 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   terminals: new FakeTerminals(),
   browserLogin: new FakeBrowserLogin(),
+  browser: {
+    status: async sessionId => ({
+      state: 'stopped',
+      sessionId,
+      viewport: { width: 1280, height: 800 },
+      viewers: 0,
+      persistentProfile: true,
+      profileKind: 'shared',
+      idleTimeoutSeconds: 0,
+      pages: [],
+      capacity: { running: 0, maximum: 3 },
+    }),
+    act: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    attachViewer: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    dispatchHumanInput: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    closeAll: async () => undefined,
+    stream: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
+  },
   names: nameSubsystem(),
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
@@ -293,7 +317,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 108, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 110, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -419,14 +443,14 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
-      // The human login window, and the per-session automation that is deliberately a stated refusal
-      // rather than a 404: the browser worker and its transport are both here, but nothing composes
-      // them into a per-session runtime and a production `BrowserViewerHost`. See the mount's own
-      // header.
+      // The human login window, and the per-session automation that is now genuinely served: the
+      // browser session runtime composes the worker and its transport into a production
+      // `BrowserViewerHost`, so the read, the action and the viewer's ticket counter are all real.
       'GET /v1/browser/login',
       'POST /v1/browser/login',
       'GET /v1/sessions/:sessionId/browser',
       'POST /v1/sessions/:sessionId/browser',
+      'POST /v1/sessions/:sessionId/browser/stream/ticket',
       'GET /v1/names',
       'GET /v1/learning/status',
       'GET /v1/learning/config',
@@ -637,7 +661,11 @@ describe('the mounted daemon surface', () => {
 
     // Assert — the fixed literal is registered FIRST, which is what keeps the deeper terminal pattern
     // reachable: the router matches in registration order and neither path can shadow the other.
-    should(routes).deepEqual(['GET /v1/events', 'GET /v1/sessions/:sessionId/terminals/:terminalId/stream']);
+    should(routes).deepEqual([
+      'GET /v1/events',
+      'GET /v1/sessions/:sessionId/terminals/:terminalId/stream',
+      'GET /v1/sessions/:sessionId/browser/stream',
+    ]);
   });
 
   // THERE IS NO THIRD TABLE. A route that answered with the transport's own `Response` existed for

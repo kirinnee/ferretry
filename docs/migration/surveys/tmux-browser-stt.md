@@ -122,7 +122,7 @@ is nothing to mount it behind.
 
 ---
 
-## 2. `browser-service.ts` — NOT PORTED, blocker already declared
+## 2. `browser-service.ts` — PORTED-AS daemon session host
 
 `BrowserService` is the per-session browser lifecycle: launch a Chrome per session over a leased
 profile, hold agent and human viewers on it, arbitrate who is driving, sweep idle browsers, and
@@ -139,10 +139,10 @@ close everything for the human login window.
 | `browser-playwright-worker.mjs` persistent CDP worker          | `packages/daemon/bin/browser-worker.ts`             |
 | profile lease + Chrome version checks                          | `lib/browser/control/profile.ts`                    |
 | Chrome argv, viewport normalisation, VNC login window          | `lib/browser/control/policy.ts`, `control/login.ts` |
-| `start`/`stop`/`status`/`act`/`attachViewer`/`sweepIdle`       | **GAP** — no per-session browser service            |
-| `closeForLoginWindow` (close agents' browsers to free profile) | **GAP**                                             |
-| `resolveSession`, `BrowserSessionRegistry`                     | **GAP**                                             |
-| unexpected-exit handling, failure memory                       | **GAP**                                             |
+| `start`/`stop`/`status`/`act`/`attachViewer`                   | `lib/browser/runtime/service.ts`                    |
+| `closeForLoginWindow` (close agents' browsers to free profile) | login callback → `closeAll()`                       |
+| `resolveSession`, `BrowserSessionRegistry`                     | mounted session directory + service registry        |
+| unexpected-exit handling                                       | worker exit closes viewers and removes the host     |
 
 The pieces are all real and tested; the thing that would own them is not. `DaemonWorld.browserTransport`
 carries the blocker in `scripts/validate/invocation-blocked.txt`: `connectWorker` spawns a worker
@@ -158,10 +158,8 @@ per-session `BrowserService` / `BrowserViewerHost` remains the mount gap: until 
 lease and starts this executable, `/v1/sessions/:id/browser` must continue to answer
 `501 browser_automation_not_mounted` rather than pretending a partner browser exists.
 
-The Linux VNC login window must stay in place until that mount gap closes. Removing it immediately
-would leave no reachable browser-drive surface despite the worker executable existing. Once the
-host is mounted, remove the VNC route and update the doctor verdict that currently describes the
-macOS login window as unavailable by design.
+The Linux VNC login window remains the explicit human sign-in flow. Before it opens, it invokes the
+session host's `closeAll()` callback, releasing the shared profile rather than racing Chrome locks.
 
 ---
 
