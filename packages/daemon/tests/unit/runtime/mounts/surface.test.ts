@@ -317,7 +317,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 108, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 6, operator: 110, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -443,10 +443,9 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
-      // The human login window, and the per-session automation that is deliberately a stated refusal
-      // rather than a 404: the browser worker and its transport are both here, but nothing composes
-      // them into a per-session runtime and a production `BrowserViewerHost`. See the mount's own
-      // header.
+      // The human login window, and the per-session automation that is now genuinely served: the
+      // browser session runtime composes the worker and its transport into a production
+      // `BrowserViewerHost`, so the read, the action and the viewer's ticket counter are all real.
       'GET /v1/browser/login',
       'POST /v1/browser/login',
       'GET /v1/sessions/:sessionId/browser',
