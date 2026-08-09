@@ -5,9 +5,16 @@ import {
   defaultWardenConfig,
   UNSUPERVISED_FLEET_KEY,
   WARDEN_LABEL,
+  wardenEscalationSourceRef,
   WardenSweepService,
   type WardenAnomaly,
+  type WardenAnomalyKind,
+  type WardenAttentionWrite,
   type WardenConfig,
+  type WardenEscalationBoardItem,
+  type WardenEscalationBoardResolution,
+  type WardenEscalationRaise,
+  type WardenEscalationVerdict,
   type WardenFleetSession,
   type WardenRuntimeState,
   type WardenSpawnFacts,
@@ -70,11 +77,25 @@ interface Harness {
   readonly journal: { readonly type: string; readonly data: Record<string, unknown> }[];
   readonly spawns: WardenSpawnRequest[];
   readonly provenance: Map<string, WardenSpawnProvenance>;
+  /** Every escalation write the sweep attempted, in order. */
+  readonly raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[];
+  readonly resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[];
+  /** The live rows of one node's board, as the fake store now holds them. */
+  board(sessionId: string): readonly WardenEscalationBoardItem[];
+  seedBoard(sessionId: string, items: readonly WardenEscalationBoardItem[]): void;
+  seedResolved(sessionId: string, entries: readonly WardenEscalationBoardResolution[]): void;
   state(): WardenRuntimeState;
   setState(value: unknown): void;
   setFleet(fleet: readonly WardenFleetSession[]): void;
   storedConfig(): unknown;
 }
+
+/** A live warden escalation already on a node's board. */
+const escalated = (kind: WardenAnomalyKind): WardenEscalationBoardItem => ({
+  source: 'agent-raised',
+  sourceRef: wardenEscalationSourceRef(kind),
+  raisedBy: 'daemon',
+});
 
 function harness(
   options: {
@@ -88,6 +109,11 @@ function harness(
     readonly reports?: Readonly<Record<string, string | undefined>>;
     readonly latest?: () => Promise<{ readonly reportId: string; readonly head: string } | undefined>;
     readonly writeProvenance?: () => Promise<void>;
+    readonly verdicts?: () => Promise<readonly WardenEscalationVerdict[] | undefined>;
+    /** Nodes whose attention board cannot be read this sweep. */
+    readonly unreadableBoards?: readonly string[];
+    /** Force every raise to one outcome, for the paths a real store reaches rarely. */
+    readonly raiseWrite?: WardenAttentionWrite;
   } = {},
 ): Harness {
   let configDocument: unknown = options.config ?? defaultWardenConfig;
@@ -96,6 +122,10 @@ function harness(
   const journal: { readonly type: string; readonly data: Record<string, unknown> }[] = [];
   const spawns: WardenSpawnRequest[] = [];
   const provenance = new Map<string, WardenSpawnProvenance>();
+  const boards = new Map<string, readonly WardenEscalationBoardItem[]>();
+  const resolutions = new Map<string, readonly WardenEscalationBoardResolution[]>();
+  const raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[] = [];
+  const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
   let spawnCall = 0;
   let capability = 0;
 
@@ -141,6 +171,31 @@ function harness(
     },
     agents: { installed: async () => await (options.installed?.() ?? Promise.resolve(['claude-auto-glm52a'])) },
     usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
+    verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
+    attention: {
+      board: async sessionId => {
+        if (options.unreadableBoards?.includes(sessionId) === true) return undefined;
+        return { sessionId, items: boards.get(sessionId) ?? [], resolved: resolutions.get(sessionId) ?? [] };
+      },
+      raise: async (sessionId, request) => {
+        raises.push({ sessionId, request });
+        if (options.raiseWrite !== undefined) return options.raiseWrite;
+        const existing = boards.get(sessionId) ?? [];
+        if (existing.some(item => item.sourceRef === request.sourceRef)) return 'unchanged';
+        boards.set(sessionId, [
+          ...existing,
+          { source: request.source, sourceRef: request.sourceRef, raisedBy: 'daemon' as const },
+        ]);
+        return 'created';
+      },
+      resolveSource: async (sessionId, _source, sourceRef, note) => {
+        resolved.push({ sessionId, sourceRef, note });
+        const existing = boards.get(sessionId) ?? [];
+        const remaining = existing.filter(item => item.sourceRef !== sourceRef);
+        boards.set(sessionId, remaining);
+        return remaining.length !== existing.length;
+      },
+    },
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
     nowMs: () => NOW,
     capabilities: () => {
@@ -154,6 +209,11 @@ function harness(
     journal,
     spawns,
     provenance,
+    raises,
+    resolved,
+    board: sessionId => boards.get(sessionId) ?? [],
+    seedBoard: (sessionId, items) => void boards.set(sessionId, items),
+    seedResolved: (sessionId, entries) => void resolutions.set(sessionId, entries),
     state: () => stateDocument as WardenRuntimeState,
     setState: value => {
       stateDocument = value;
@@ -1283,5 +1343,229 @@ describe('what the daemon asks the sweep about itself', () => {
     should(await subject.service.mayStop('secret', 's1')).be.true();
     should(await subject.service.mayStop('secret', 's2')).be.false();
     should(await subject.service.mayStop('guessed', 's1')).be.false();
+  });
+});
+
+describe('escalating to a human, and clearing it again', () => {
+  /** A verdict the sweep will accept: an explicit marker, for this exact node and class. */
+  const needsHuman = (overrides: Partial<WardenEscalationVerdict> = {}): WardenEscalationVerdict => ({
+    at: at(-5),
+    targetSession: 's1',
+    anomalyKind: 'unattended_question',
+    verdict: 'needs_human',
+    explicitNeedsHuman: true,
+    reason: 'Answering could commit work nobody has reviewed.',
+    reportPath: '/state/warden/reports/r1.md',
+    ...overrides,
+  });
+
+  const escalating = (options: Parameters<typeof harness>[0] = {}): Harness =>
+    harness({
+      config: enabled(),
+      fleet: [unattended('s1')],
+      verdicts: async () => [needsHuman()],
+      ...options,
+    });
+
+  it('should write one node-scoped item for an explicit needs-human verdict', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(subject.raises[0]?.sessionId).eql('s1');
+    should(subject.raises[0]?.request.sourceRef).eql(wardenEscalationSourceRef('unattended_question'));
+  });
+
+  it('should record the escalation for an operator to read', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_escalated');
+  });
+
+  it('should refresh the one item rather than growing a second across sweeps', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.board('s1')).have.length(1);
+    should(subject.journal.filter(entry => entry.type === 'fleet.warden_escalated')).have.length(1);
+  });
+
+  it('should never escalate from prose that carried no explicit marker', async () => {
+    // Arrange
+    const subject = escalating({ verdicts: async () => [needsHuman({ explicitNeedsHuman: undefined })] });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).be.empty();
+  });
+
+  it('should clear the item once the node stops being flagged', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+
+    // Act — the node answered its question and is working again.
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).have.length(1);
+    should(subject.board('s1')).be.empty();
+    should(journalTypes(subject)).containEql('fleet.warden_escalation_resolved');
+  });
+
+  it('should keep clearing recovered items even while escalation is switched off', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+
+    // Act
+    await subject.service.updateConfig({ enabled: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).have.length(1);
+  });
+
+  it('should stay blind rather than clear items it could not read the reports for', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+
+    // Act
+    const blind = escalating({ verdicts: async () => undefined });
+    blind.seedBoard('s1', [escalated('unattended_question')]);
+    blind.setFleet([session({ id: 's1', status: 'running' })]);
+    await blind.service.run({ force: false });
+
+    // Assert
+    should(blind.resolved).be.empty();
+    should(blind.raises).be.empty();
+    should(journalTypes(blind)).containEql('fleet.warden_escalation_blind');
+  });
+
+  it('should neither raise nor clear for a node whose own board could not be read', async () => {
+    // Arrange — the board is unreadable, so its addressed history is invisible too.
+    const subject = escalating({ unreadableBoards: ['s1'] });
+    subject.seedBoard('s1', [escalated('unattended_question')]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).be.empty();
+    should(subject.resolved).be.empty();
+    should(journalTypes(subject)).containEql('fleet.warden_escalation_blind_node');
+  });
+
+  it('should report a write the board refused rather than swallow it', async () => {
+    // Arrange
+    const subject = escalating({ raiseWrite: 'rejected' });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_escalation_failed');
+    should(journalTypes(subject)).not.containEql('fleet.warden_escalated');
+  });
+
+  it('should stay quiet about an item that already said the same thing', async () => {
+    // Arrange
+    const subject = escalating({ raiseWrite: 'unchanged' });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(journalTypes(subject)).not.containEql('fleet.warden_escalated');
+  });
+
+  it('should record a refreshed item as the change it is', async () => {
+    // Arrange
+    const subject = escalating({ raiseWrite: 'refreshed' });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.journal.find(entry => entry.type === 'fleet.warden_escalated')?.data.change).eql('refreshed');
+  });
+
+  it('should not resurrect an escalation a person already addressed', async () => {
+    // Arrange
+    const subject = escalating();
+    subject.seedResolved('s1', [
+      { source: 'agent-raised', sourceRef: wardenEscalationSourceRef('unattended_question'), resolvedAt: at(-1) },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).be.empty();
+  });
+
+  it('should let a newer verdict raise again after a person addressed the last one', async () => {
+    // Arrange
+    const subject = escalating({ verdicts: async () => [needsHuman({ at: at(-1) })] });
+    subject.seedResolved('s1', [
+      { source: 'agent-raised', sourceRef: wardenEscalationSourceRef('unattended_question'), resolvedAt: at(-10) },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+  });
+
+  it('should tell a person the prohibition that stopped a repair being tried', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises[0]?.request.context).match(/holds no credential over any session/u);
+  });
+
+  it('should read every board only AFTER the anomaly set is already decided', async () => {
+    // Arrange — a board full of ordinary Attention, and a warden that judged nothing.
+    const subject = harness({ config: enabled(), fleet: [unattended('s1')] });
+    subject.seedBoard('s1', [
+      { source: 'task', sourceRef: 'task:T1', raisedBy: 'agent' },
+      { source: 'question', sourceRef: null, raisedBy: 'agent' },
+    ]);
+    const clean = harness({ config: enabled(), fleet: [unattended('s1')] });
+
+    // Act
+    const withBoard = await subject.service.run({ force: false });
+    const withoutBoard = await clean.service.run({ force: false });
+
+    // Assert — the same anomalies, the same prompt, and nothing raised.
+    should(withBoard.anomalies).eql(withoutBoard.anomalies);
+    should(subject.spawns.map(request => request.prompt)).eql(clean.spawns.map(request => request.prompt));
+    should(subject.raises).be.empty();
   });
 });

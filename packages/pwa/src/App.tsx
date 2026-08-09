@@ -48,6 +48,7 @@ import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
 import { useActiveCarrier } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
+import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
@@ -574,6 +575,15 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
   const { daemonId, sessionId } = scope;
+  // The session's Attention, read through the ONE daemon-scoped client the app
+  // store owns — same carrier as every generated call, and invalidated with the
+  // pairing rather than outliving it.
+  const attentionStatus = useAttentionSession(store.attention, connection, scope);
+  const attentionSnapshot = useAttentionSnapshot(store.attention, scope);
+  const attention = useMemo(
+    () => ({ client: store.attention, snapshot: attentionSnapshot, status: attentionStatus }),
+    [store.attention, attentionSnapshot, attentionStatus],
+  );
   const subscribe = useCallback((listener: () => void) => store.fleet.subscribe(listener), [store.fleet]);
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribe, snapshot);
@@ -718,6 +728,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         <SessionChatPage
           accountPicker={store.accountPicker}
           browserLogin={store.browserLogin}
+          attention={attention}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,

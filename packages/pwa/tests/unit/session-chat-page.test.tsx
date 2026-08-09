@@ -15,13 +15,18 @@ import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
+import { AttentionActionModal, AttentionActionTrigger } from '../../src/features/attention/attention-action-modal.tsx';
 import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { type SessionChatClient, SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
+import {
+  type SessionAttentionModel,
+  type SessionChatClient,
+  SessionChatPage,
+} from '../../src/lib/pages/session-chat-page.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
@@ -782,5 +787,209 @@ describe('SessionChatPage', () => {
     } finally {
       run(() => page.unmount());
     }
+  });
+
+  /**
+   * ROW 17's SURFACE, IN THE SHIPPED WORKSPACE — not in a fixture.
+   *
+   * The Attention board had no host at all before this: `DaemonAttentionClient`,
+   * the hooks and the board were constructed only by tests. These cases assert
+   * the production journey, because "the component renders in isolation" is
+   * exactly the evidence that was mistaken for a shipped feature before.
+   */
+  describe('Attention', () => {
+    const attentionItem = {
+      id: 'A3',
+      source: 'agent-raised',
+      sourceRef: null,
+      sourceSeq: 1,
+      subject: 'Approve the pairing request',
+      why: 'The device needs a signed pairing record.',
+      waitingSince: '2026-07-31T11:30:00.000Z',
+      howToResolve: 'Approve to let this browser reach the daemon.',
+      ask: { kind: 'permission' },
+      raisedBy: 'agent',
+      raisedBySession: 'shared',
+      raisedByName: 'zoe',
+    };
+    const attentionModel = (items = [attentionItem]): SessionAttentionModel =>
+      ({
+        client: {
+          respond: async () => undefined,
+          resolve: async () => undefined,
+          dismiss: async () => undefined,
+        },
+        snapshot: {
+          v: 1,
+          sessionId: 'shared',
+          items,
+          resolved: [],
+          count: items.length,
+          parseErrors: 0,
+          updatedAt: '2026-07-31T12:00:00.000Z',
+        },
+        status: 'ready',
+      }) as unknown as SessionAttentionModel;
+
+    const chatPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) => (
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+        {...props}
+      />
+    );
+
+    test('puts a counted Attention entry point and its focused modal in the mounted workspace', () => {
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+
+      try {
+        const trigger = page.root.findByType(AttentionActionTrigger);
+        const sheet = page.root.findByType(AttentionActionModal);
+        expect(trigger.props.count).toBe(1);
+        expect(trigger.props.expanded).toBe(false);
+        // The trigger names the sheet it controls, and the sheet answers to it.
+        expect(trigger.props.controls).toBe(sheet.props.id);
+        expect(sheet.props.open).toBe(false);
+
+        run(() => trigger.props.onOpen(null));
+
+        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
+        expect(page.root.findByType(AttentionActionTrigger).props.expanded).toBe(true);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('renders no Attention surface at all for a host that has not subscribed', () => {
+      const page = renderSessionChatPage(chatPage());
+
+      try {
+        // Absence, not an empty badge: a "0" here would be a claim this build
+        // cannot make, because nothing has read the ledger.
+        expect(page.root.findAllByType(AttentionActionTrigger)).toHaveLength(0);
+        expect(page.root.findAllByType(AttentionActionModal)).toHaveLength(0);
+        const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
+        expect(surface.attentionReferenceResolver).toBeUndefined();
+        expect(surface.onAttentionOpen).toBeUndefined();
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('proves only the ids on this session’s ledger, and opens that exact item', () => {
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+
+      try {
+        const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
+        // Proved: unresolved and on THIS board.
+        expect(surface.attentionReferenceResolver('A3')).toBe(true);
+        // Unproved: resolved, absent, or another session's. Markdown leaves it
+        // as prose — the honest state, never a dead link.
+        expect(surface.attentionReferenceResolver('A9')).toBe(false);
+
+        run(() => surface.onAttentionOpen('A3', null));
+
+        const sheet = page.root.findByType(AttentionActionModal);
+        expect(sheet.props.open).toBe(true);
+        expect(sheet.props.targetId).toBe('A3');
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('never carries one session’s open Attention into another session', () => {
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+
+      try {
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
+        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
+
+        // Navigate. The ask belongs to the session that raised it, so offering
+        // it over another session's board would be offering the wrong decision.
+        run(() =>
+          page.update(
+            withSessionSearch(
+              chatPage({ attention: attentionModel(), session: sessionView('other') }) as ReactElement<
+                ComponentProps<typeof SessionChatPage>
+              >,
+            ),
+          ),
+        );
+
+        const sheet = page.root.findByType(AttentionActionModal);
+        expect(sheet.props.open).toBe(false);
+        expect(sheet.props.targetId).toBeNull();
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('returns focus to the reference that opened the sheet', () => {
+      // A real, connected element: the reader pressed a `!A3` link in the
+      // transcript, and closing must put them back on it rather than at the top
+      // of the document.
+      const link = document.createElement('button');
+      document.body.appendChild(link);
+      // Counted rather than read back off `document.activeElement`: this asserts
+      // that the PAGE restored focus, not that the DOM emulation honoured it.
+      let focused = 0;
+      link.focus = () => {
+        focused += 1;
+      };
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+
+      try {
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', link));
+        run(() => page.root.findByType(AttentionActionModal).props.onClose());
+
+        const sheet = page.root.findByType(AttentionActionModal);
+        expect(sheet.props.open).toBe(false);
+        expect(sheet.props.targetId).toBeNull();
+        expect(focused).toBe(1);
+      } finally {
+        run(() => page.unmount());
+        link.remove();
+      }
+    });
+
+    test('falls back to the trigger when the opener is gone, without failing', () => {
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+
+      try {
+        // Opened from the trigger itself, which this renderer never puts in the
+        // document — so the fallback lookup finds nothing and must simply do
+        // nothing. A close path that can throw would trap the reader in a sheet.
+        run(() => page.root.findByType(AttentionActionTrigger).props.onOpen(null));
+        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
+
+        run(() => page.root.findByType(AttentionActionModal).props.onClose());
+
+        expect(page.root.findByType(AttentionActionModal).props.open).toBe(false);
+        expect(page.root.findByType(AttentionActionTrigger).props.expanded).toBe(false);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('offers the swipe answers on a phone and the plain ones on a desktop', () => {
+      const phone = renderSessionChatPage(chatPage({ attention: attentionModel(), presentation: 'sheet' }));
+      try {
+        expect(phone.root.findByType(AttentionActionModal).props.swipeEnabled).toBe(true);
+      } finally {
+        run(() => phone.unmount());
+      }
+
+      const desktop = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+      try {
+        expect(desktop.root.findByType(AttentionActionModal).props.swipeEnabled).toBe(false);
+      } finally {
+        run(() => desktop.unmount());
+      }
+    });
   });
 });

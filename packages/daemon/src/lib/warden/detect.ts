@@ -51,6 +51,31 @@ export interface WardenAnomaly {
   readonly ledger?: WardenLivenessLedger;
 }
 
+/**
+ * Outcome-first, short human name for each anomaly class.
+ *
+ * ONE OWNER. The fleet attention projection titles a synthetic row with it and
+ * the escalation titles the durable Attention item with it; two spellings of
+ * "what this class is called" would let the same fault reach a human under two
+ * different names. Declared as a total record over the kind union, so adding a
+ * kind without naming it is a compile error rather than an empty heading.
+ */
+const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
+  dead_monitor: 'Session lost its monitor',
+  unattended_question: 'A question is waiting',
+  abandoned_wreckage: 'A finished session looks abandoned',
+  quota_reset_passed: 'Quota reset — session can resume',
+  declared_wait_overdue: 'A declared wait is overdue',
+  peer_wait_unanswerable: 'A peer wait cannot be answered',
+  sus_thinking: 'Session may be stuck thinking',
+  sus_subprocess: 'Session stuck in a subprocess',
+  provider_unavailable: 'Provider is unavailable',
+};
+
+export function wardenAnomalySubject(kind: WardenAnomalyKind): string {
+  return ANOMALY_SUBJECT[kind];
+}
+
 export interface WardenDetectResult {
   readonly anomalies: readonly WardenAnomaly[];
   /** Stable identity of the anomaly SET (kind + session, order-independent) —

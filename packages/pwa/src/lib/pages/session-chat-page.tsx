@@ -1,4 +1,4 @@
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { AttentionId, AttentionItem, AttentionSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { Composer } from '../../components/composer.tsx';
@@ -24,6 +24,11 @@ import type { TerminalDeckDependencies } from '../../components/session-terminal
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
+import {
+  type AttentionActionClient,
+  AttentionActionModal,
+  AttentionActionTrigger,
+} from '../../features/attention/attention-action-modal.tsx';
 import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
@@ -40,6 +45,7 @@ import {
 } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
+import type { AttentionLoadStatus } from '../attention-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
@@ -61,6 +67,24 @@ export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'res
  * outside the page also avoids re-reading a live account catalog whenever the
  * transcript refreshes. */
 const runtimeModelCatalogs = new DaemonRuntimeModelCatalogStore();
+
+/** One array for "this host passed no Attention model", so the memos below hold. */
+const NO_ATTENTION_ITEMS: readonly AttentionItem[] = [];
+
+/**
+ * What this workspace needs to show and answer its session's Attention.
+ *
+ * It is OPTIONAL, and its absence is honest rather than empty: a host that has
+ * not subscribed supplies no ledger, so no `!A3` in the transcript is proved and
+ * no trigger is rendered. That is also what keeps every existing caller — the
+ * harness, the page-host tests — working unchanged.
+ */
+export interface SessionAttentionModel {
+  /** The one canonical client; the page never opens its own transport. */
+  readonly client: AttentionActionClient;
+  readonly snapshot: AttentionSnapshot | null;
+  readonly status: AttentionLoadStatus;
+}
 
 export interface SessionChatPageProps {
   readonly connection: DaemonConnection;
@@ -111,6 +135,8 @@ export interface SessionChatPageProps {
   readonly daemonSessions?: readonly SessionView[];
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
+  /** This session's live Attention, when the host has subscribed to it. */
+  readonly attention?: SessionAttentionModel;
 }
 
 const actionFailureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
@@ -332,6 +358,7 @@ export function SessionChatPage({
   deck,
   daemonSessions,
   onNavigate,
+  attention,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const search = useSessionSearch();
@@ -346,13 +373,41 @@ export function SessionChatPage({
   // would be two owners that disagree after a refresh. `names` is undefined
   // until a catalog has actually been read — unread, never "no skills".
   const skills = useSessionSkills(connection, scope);
+  const attentionId = useId();
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [attentionTarget, setAttentionTarget] = useState<AttentionId | null>(null);
+  const attentionOpener = useRef<HTMLElement | null>(null);
+  const attentionItems = attention?.snapshot?.items ?? NO_ATTENTION_ITEMS;
+  const attentionIds = useMemo(() => attentionItems.map(item => item.id), [attentionItems]);
+  // The ledger's IDENTITY, not its array identity: a re-hydration that returns
+  // the same unresolved ids must not rebuild the reference surface and re-parse
+  // every Markdown block in the transcript.
+  const attentionKey = attentionIds.join(',');
+  const openAttention = useCallback((id: AttentionId | null, opener?: HTMLElement | null): void => {
+    attentionOpener.current = opener ?? null;
+    setAttentionTarget(id);
+    setAttentionOpen(true);
+  }, []);
+  const closeAttention = useCallback((): void => {
+    setAttentionOpen(false);
+    setAttentionTarget(null);
+    // A reference link can be scrolled out of the transcript, or re-rendered
+    // into a different node, while the sheet is open — so the element that
+    // opened it may simply not be there to return to. The trigger always is.
+    const opener = attentionOpener.current;
+    attentionOpener.current = null;
+    if (opener?.isConnected) opener.focus();
+    // No document at all in a renderer or SSR pass: there is nothing to focus
+    // and nothing to fail about, so the fallback simply does not apply.
+    else if (typeof document !== 'undefined') document.getElementById(`${attentionId}-trigger`)?.focus();
+  }, [attentionId]);
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
   // churn cannot rebuild the surface and re-parse every rendered Markdown block
   // in the transcript (`agentReferenceIdentityKey`).
   const fleetIdentity =
     daemonSessions === undefined ? null : agentReferenceIdentityKey(connection.daemonId, daemonSessions);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetIdentity is the stable memo key for daemonSessions
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetIdentity and attentionKey are the stable memo keys for daemonSessions and the attention ledger
   const references = useMemo(
     () =>
       sessionReferenceSurface({
@@ -363,8 +418,24 @@ export function SessionChatPage({
         ...(referenceTasks === undefined ? {} : { tasks: referenceTasks }),
         ...(skills.names === undefined ? {} : { skills: skills.names }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
+        // Both halves or neither. The ledger alone proves `!A3` without giving
+        // it anywhere to go, and an opener alone would link an unproved id — so
+        // a host that has not subscribed leaves the token as prose, which the
+        // reference standard calls the only honest state.
+        ...(attention === undefined ? {} : { attentionIds, onAttentionOpen: openAttention }),
       }),
-    [connection, scope, session.config.cwd, fleetIdentity, referenceTasks, skills.names, onNavigate],
+    [
+      connection,
+      scope,
+      session.config.cwd,
+      fleetIdentity,
+      referenceTasks,
+      skills.names,
+      onNavigate,
+      attention === undefined,
+      attentionKey,
+      openAttention,
+    ],
   );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -384,6 +455,13 @@ export function SessionChatPage({
     setConfirmStop(false);
     setPendingAction(null);
     setActionError(null);
+    // Attention belongs to the session that raised it. Carrying an open modal —
+    // or worse, a requested `!A3` — across a navigation would offer one
+    // session's ask over another session's board, so the whole trio resets with
+    // the pairing and the session id.
+    setAttentionOpen(false);
+    setAttentionTarget(null);
+    attentionOpener.current = null;
   }, [connection, session.config.id]);
 
   const publish = useCallback(
@@ -557,6 +635,19 @@ export function SessionChatPage({
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-soft px-2 py-1">
             {compact ? null : lifecycleActions}
             <PaneLaunchers />
+            {/* THE Attention entry point, in the one row that exists on a phone
+                as well as a desktop. It is deliberately NOT a side-pane tab
+                (#35): an item opens the focused modal below. */}
+            {attention === undefined ? null : (
+              <AttentionActionTrigger
+                id={`${attentionId}-trigger`}
+                controls={attentionId}
+                count={attentionItems.length}
+                expanded={attentionOpen}
+                loading={attention.snapshot === null && attention.status !== 'error'}
+                onOpen={opener => openAttention(null, opener)}
+              />
+            )}
           </div>
           {/* NOT a live region. App.tsx owns the single announcement for a refresh
             failure and hands down a finished sentence; a second `role=status`
@@ -669,6 +760,23 @@ export function SessionChatPage({
               </div>
             ) : null}
           </BottomSheet>
+          {/* Inside the reference provider, so Attention prose reads the SAME
+              grammar the transcript does — including a `!A3` that re-targets
+              this very sheet. */}
+          {attention === undefined ? null : (
+            <AttentionActionModal
+              client={attention.client}
+              connection={connection}
+              id={attentionId}
+              onClose={closeAttention}
+              open={attentionOpen}
+              scope={scope}
+              snapshot={attention.snapshot}
+              status={attention.status}
+              swipeEnabled={compact}
+              targetId={attentionTarget}
+            />
+          )}
           <MigrateSheet
             {...(accountPicker === undefined ? {} : { accountPicker })}
             canMutate={canControl}

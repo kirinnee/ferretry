@@ -21,7 +21,10 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --resolve    the concrete action that clears it
 
 Every field renders as markdown: short bullets, bold the key point, no walls of
-text. Attention items never expire and never auto-clear.`;
+text. Attention items never expire on a timer. Answering or dismissing on the board already
+resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
+longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
+whose reason is gone but is still open is a bug, not a safe default.`;
 
 const ASK_KINDS = `--kind says what the human DOES:
   permission   approve or reject

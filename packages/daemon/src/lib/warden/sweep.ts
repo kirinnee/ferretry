@@ -48,14 +48,18 @@
  *   none, because no candidate ranker exists in this daemon yet. The prompt
  *   forbids migrating to an account outside the list, so an absent list means no
  *   migration rather than a guessed one — the safe direction.
- * - ATTENTION SUPPRESSION. kteam dropped an anomaly whose session already had a
- *   durable needs-human flag of the same class. That reconciliation belongs to
- *   the monitor loop, which does not exist; without it a flagged session is
- *   re-reported each sweep, which is noise rather than a wrong decision.
+ * - ATTENTION SUPPRESSION OF AN ANOMALY. A flagged session is re-reported each
+ *   sweep even while it already carries a durable escalation of the same class.
+ *   That is noise rather than a wrong decision, and the alternative is worse:
+ *   letting a board row remove an anomaly would make Attention an input to
+ *   detection, which is precisely what this sweep must never allow. See
+ *   `reconcileEscalations`, which reads boards only AFTER detection and writes
+ *   only to them.
  */
 
 import type { WardenAnomaly, WardenDetectResult } from './detect.ts';
 import type {
+  AttentionSource,
   WardenAnomaly as WireWardenAnomaly,
   WardenConfigView,
   WardenFailoverStatus,
@@ -77,6 +81,13 @@ import {
 import { blessingTtlMs, isAnomalyBlessed, reconcileBlessings, recordBlessing, type BlessingStore } from './bless.ts';
 import { decideAssignedWardens, wardenSlotsFree, type LiveWarden } from './concurrency.ts';
 import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from './detect.ts';
+import {
+  planWardenEscalations,
+  planWardenRemedy,
+  type WardenEscalationBoard,
+  type WardenEscalationRaise,
+  type WardenEscalationVerdict,
+} from './escalation.ts';
 import {
   classifyWardenFailure,
   effectiveFailoverConfig,
@@ -186,6 +197,35 @@ export interface WardenJournal {
   record(type: string, data: Readonly<Record<string, unknown>>): void;
 }
 
+/**
+ * The warden's own finished reports, parsed into verdicts.
+ *
+ * TOTAL BY CONTRACT: `undefined` means the reports could not be read, which is
+ * NOT the same as "no warden asked for a human". A short list read from a
+ * partially unreadable directory would silently resolve live escalations, so the
+ * sweep is told it is blind and reconciles nothing that pass.
+ */
+export interface WardenVerdictReader {
+  recent(): Promise<readonly WardenEscalationVerdict[] | undefined>;
+}
+
+/** How the daemon's raise or refresh landed. */
+export type WardenAttentionWrite = 'created' | 'refreshed' | 'unchanged' | 'rejected';
+
+/**
+ * The ONE attention store, reached through the same service every other caller
+ * uses — never a second board of the warden's own.
+ *
+ * Every method is total: a board that cannot be read is `undefined`, a write
+ * that the state machine refuses is `rejected`. A throw here would abort a sweep
+ * that has already completed its real work.
+ */
+export interface WardenAttentionPort {
+  board(sessionId: string): Promise<WardenEscalationBoard | undefined>;
+  raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAttentionWrite>;
+  resolveSource(sessionId: string, source: AttentionSource, sourceRef: string, note: string): Promise<boolean>;
+}
+
 export interface WardenSweepPorts {
   readonly fleet: WardenFleetReader;
   readonly spawner: WardenSpawner;
@@ -194,6 +234,10 @@ export interface WardenSweepPorts {
   readonly config: WardenConfigStore;
   readonly agents: WardenAgentInventory;
   readonly usage: WardenUsageReader;
+  /** Read AFTER detection, for the escalation reconciliation only. */
+  readonly verdicts: WardenVerdictReader;
+  /** Written AFTER detection, for the escalation reconciliation only. */
+  readonly attention: WardenAttentionPort;
   readonly journal: WardenJournal;
   /** Wall-clock milliseconds. */
   readonly nowMs: () => number;
@@ -410,6 +454,13 @@ export class WardenSweepService {
       force: options.force,
     });
     await this.ports.state.write(escalated.state);
+
+    // LAST, and deliberately so. Everything above — detection, the report
+    // prompts, the spawn gates — has already been decided and persisted before
+    // a single attention board is opened, which is what makes "ordinary
+    // Attention cannot affect the scan" a property of the ORDER rather than a
+    // promise. Moving this call earlier would break it.
+    await this.reconcileEscalations(detected.anomalies, fleet);
 
     return {
       sweptAt: at,
@@ -762,6 +813,111 @@ export class WardenSweepService {
       reportPath,
     });
     return { state, outcome: { spawned: result.facts.sessionId } };
+  }
+
+  // ─── escalation to a human ──────────────────────────────────────────────────
+
+  /**
+   * Raise, refresh and clear the node-scoped Attention a warden's explicit
+   * NEEDS_HUMAN verdict earns.
+   *
+   * RUNS ON EVERY SWEEP, INCLUDING A DISABLED ONE. `enabled: false` stops the
+   * daemon SPENDING sessions on new investigations; it does not mean a person
+   * should keep staring at an escalation whose node recovered an hour ago. The
+   * raise side is inert on a disabled warden anyway, because a disabled warden
+   * writes no new reports to be judged from.
+   *
+   * BOARDS ARE READ FOR THE WHOLE FLEET, one read per session, which is the same
+   * order the sweep already pays for the done markers. A durable pointer list of
+   * "where we raised something" would be cheaper and would be a second account
+   * of a fact the board owns — the failure this reconciliation exists to avoid.
+   */
+  private async reconcileEscalations(
+    anomalies: readonly WardenAnomaly[],
+    fleet: readonly WardenFleetSession[],
+  ): Promise<void> {
+    const verdicts = await this.ports.verdicts.recent();
+    if (verdicts === undefined) {
+      // Blind, and said out loud. Reconciling from a partial verdict list would
+      // clear live escalations on the strength of reports nobody could read.
+      this.ports.journal.record('fleet.warden_escalation_blind', {
+        reason: 'the warden reports could not be read, so no escalation was raised or cleared this sweep',
+      });
+      return;
+    }
+
+    const read = await Promise.all(
+      fleet.map(async session => ({ session, board: await this.ports.attention.board(session.config.id) })),
+    );
+    const boards: WardenEscalationBoard[] = [];
+    const nodes: WardenFleetSession[] = [];
+    for (const { session, board } of read) {
+      if (board === undefined) {
+        // FAIL CLOSED, PER NODE. A board we could not open is a board whose
+        // addressed history we cannot see, and that history is the only thing
+        // standing between a verdict a person already answered and the same
+        // interruption arriving again. Dropping the node from the plan costs one
+        // late escalation; raising without the watermark costs their trust in
+        // the board.
+        this.ports.journal.record('fleet.warden_escalation_blind_node', {
+          sessionId: session.config.id,
+          reason: 'this node’s attention board could not be read, so it was neither escalated nor cleared this sweep',
+        });
+        continue;
+      }
+      boards.push(board);
+      nodes.push(session);
+    }
+
+    const plan = planWardenEscalations({
+      anomalies,
+      nodes,
+      verdicts,
+      boards,
+      remedy: planWardenRemedy({ mayAct: this.settings.mayAct }),
+      clientName: this.settings.clientName,
+    });
+
+    // Clearing first: a node may recover one class in the same sweep another is
+    // raised on, and the two must not race for the board's active capacity.
+    for (const resolution of plan.resolve) {
+      const cleared = await this.ports.attention.resolveSource(
+        resolution.sessionId,
+        resolution.source,
+        resolution.sourceRef,
+        resolution.note,
+      );
+      if (cleared)
+        this.ports.journal.record('fleet.warden_escalation_resolved', {
+          sessionId: resolution.sessionId,
+          anomalyKind: resolution.anomalyKind,
+          sourceRef: resolution.sourceRef,
+          reason: resolution.note,
+        });
+    }
+
+    for (const request of plan.raise) {
+      const write = await this.ports.attention.raise(request.sessionId, request);
+      if (write === 'rejected') {
+        this.ports.journal.record('fleet.warden_escalation_failed', {
+          sessionId: request.sessionId,
+          anomalyKind: request.anomalyKind,
+          sourceRef: request.sourceRef,
+        });
+        continue;
+      }
+      // `unchanged` is the steady state of a situation nobody has fixed yet: the
+      // item is already there and says the same thing. Recording it every sweep
+      // would bury the transitions that mean something.
+      if (write === 'unchanged') continue;
+      this.ports.journal.record('fleet.warden_escalated', {
+        sessionId: request.sessionId,
+        anomalyKind: request.anomalyKind,
+        sourceRef: request.sourceRef,
+        reportPath: request.reportPath,
+        change: write,
+      });
+    }
   }
 
   // ─── accounts ───────────────────────────────────────────────────────────────

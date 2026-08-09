@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, type AttentionSnapshot } from '@ferretry/protocol';
+import type { AttentionSnapshot } from '@ferretry/protocol';
 
-import { actOnAttention, fetchAttention } from '../../../src/features/attention/attention-api.ts';
 import {
   AttentionBoard,
-  AttentionPage,
   attentionAge,
   attentionReference,
   collapsesByDefault,
@@ -13,7 +11,6 @@ import {
 } from '../../../src/features/attention/attention-board.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../../support/dom.ts';
-import { render, runAsync } from '../../support/react.ts';
 
 const connection = daemonConnection({
   daemonId: 'daemon/a',
@@ -135,9 +132,12 @@ describe('AttentionBoard', () => {
     expect(row?.getAttribute('data-oldest')).toBe('true');
     expect(container.textContent).toContain('waiting 30m');
     expect(container.textContent).toContain('raised by agent zoe');
+    // The shared answer control labels each action with its own description and
+    // gesture hint, so the button is matched on containing its label rather than
+    // on being exactly it.
     await interact(() =>
       Array.from(container.querySelectorAll('button'))
-        .find(button => button.textContent === 'Approve')
+        .find(button => button.textContent?.includes('Approve'))
         ?.click(),
     );
     expect(calls).toEqual([['A3', { kind: 'permission', decision: 'approve' }]]);
@@ -176,7 +176,9 @@ describe('AttentionBoard', () => {
           onAction={(...call) => calls.push(call)}
         />,
       );
-      const first = Array.from(container.querySelectorAll('button')).find(button => button.textContent === click);
+      const first = Array.from(container.querySelectorAll('button')).find(button =>
+        button.textContent?.includes(click),
+      );
       await interact(() => first?.click());
       if (text) {
         const textarea = container.querySelector('textarea');
@@ -185,7 +187,11 @@ describe('AttentionBoard', () => {
         await interact(() => textarea?.dispatchEvent(new Event('input', { bubbles: true })));
         await interact(() =>
           Array.from(container.querySelectorAll('button'))
-            .find(button => button.textContent === 'Ask to clarify' || button.textContent === 'Send answer')
+            .find(
+              button =>
+                button.textContent?.includes('Ask to clarify') === true ||
+                button.textContent?.includes('Send answer') === true,
+            )
             ?.click(),
         );
       }
@@ -391,67 +397,9 @@ describe('attention helpers and transport', () => {
     ).toContain('Cite the source.');
   });
 
-  it('fetches and mutates only against the supplied paired daemon', async () => {
-    const seen: Request[] = [];
-    const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      seen.push(new Request(input, init));
-      return new Response(JSON.stringify(snapshot()), { headers: { 'content-type': 'application/json' } });
-    };
-    await fetchAttention(connection, 'sess-1', fetcher);
-    await actOnAttention(connection, 'sess-1', { action: 'dismiss', id: 'A3' }, fetcher);
-    expect(seen.map(request => request.url)).toEqual([
-      'https://a.example.test/v1/sessions/sess-1/attention',
-      'https://a.example.test/v1/sessions/sess-1/attention',
-    ]);
-    expect(seen[0]?.headers.get('authorization')).toBe('Bearer token-a');
-    expect(seen[1]?.method).toBe('POST');
-    expect(seen[1]?.headers.get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
-    expect(seen[1]?.headers.get('x-kteam-request-id')).toBeNull();
-    expect(await seen[1]?.json()).toEqual({ action: 'dismiss', id: 'A3' });
-  });
-
-  it('clears the prior daemon ledger during a live page load and shows a request failure', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ error: 'offline' }), { status: 503 })) as unknown as typeof fetch;
-    try {
-      const page = render(<AttentionPage connection={connection} sessionId="sess-1" />);
-      await runAsync(async () => await Promise.resolve());
-      expect(JSON.stringify(page.toJSON())).toContain('offline');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it('loads and mutates the live page through the selected daemon, surfacing a mutation refusal', async () => {
-    const originalFetch = globalThis.fetch;
-    const requests: Request[] = [];
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const request = new Request(input, init);
-      requests.push(request);
-      return request.method === 'POST'
-        ? new Response(JSON.stringify({ error: 'mutation refused' }), { status: 503 })
-        : new Response(JSON.stringify(snapshot()), { headers: { 'content-type': 'application/json' } });
-    }) as unknown as typeof fetch;
-    try {
-      const page = await mount(<AttentionPage connection={connection} sessionId="sess-1" />);
-      await interact(async () => await Promise.resolve());
-      await interact(async () => await Promise.resolve());
-      await interact(() =>
-        Array.from(page.container.querySelectorAll('button'))
-          .find(button => button.textContent === 'Approve')
-          ?.click(),
-      );
-      await interact(async () => await Promise.resolve());
-      expect(requests.map(request => request.method)).toEqual(['GET', 'POST']);
-      expect(await requests[1]?.json()).toEqual({
-        action: 'resolve',
-        id: 'A3',
-        response: { kind: 'permission', decision: 'approve' },
-      });
-      expect(page.container.textContent).toContain('mutation refused');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
+  // The live-page cases that used to sit here went with `AttentionPage` and
+  // `attention-api.ts`. They asserted a SECOND transport for the same fact; the
+  // one that remains is `lib/attention-client.ts`, proved in
+  // `tests/unit/attention-client.test.ts` and driven for real by the focused
+  // action modal. The board keeps what it actually is: a pure render.
 });

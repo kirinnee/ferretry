@@ -76,6 +76,8 @@ export interface SessionReferenceSurfaceOptions {
   readonly tasks?: readonly { readonly id: string }[];
   /** This session's unresolved Attention ledger, when the host already holds it. */
   readonly attentionIds?: readonly AttentionId[];
+  /** Opens one proved unresolved item in the session's focused action modal. */
+  readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
   /** This session's skills catalog names, when the host already holds it. */
   readonly skills?: readonly string[];
   /**
@@ -107,7 +109,8 @@ const fileSelection = (line?: number, endLine?: number): SidePaneFileSelection |
  * second half-built detail view.
  */
 export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions): ReferenceSurface {
-  const { connection, scope, cwd, sessions, tasks, attentionIds, skills, terminals, onNavigate } = options;
+  const { connection, scope, cwd, sessions, tasks, attentionIds, onAttentionOpen, skills, terminals, onNavigate } =
+    options;
   const attention = attentionIds === undefined ? undefined : new Set<string>(attentionIds);
   // EXACT names, never case-folded. The catalog accepts any nonempty trimmed
   // name, while the reference grammar accepts lowercase ones only — so folding a
@@ -135,12 +138,11 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       openSidePaneFileTab(scope, reference.path, fileSelection(reference.line, reference.endLine));
     },
     onTaskOpen: () => openSidePaneTab(scope, 'tasks'),
-    // No `onAttentionOpen`. Attention is deliberately NOT a side-pane tab
-    // (handover #35); its home is the focused action modal of #17, which does
-    // not exist yet. Omitting the opener makes a proved `!A3` render as text
-    // rather than as a link into a surface that is not there — `hasOpener` in
-    // markdown.tsx reads the omission, so this is the honest state, not a gap
-    // dressed as a dead link.
+    // Attention is deliberately NOT a side-pane tab (handover #35). A proved
+    // unresolved id now opens the focused action modal; when either the ledger
+    // or opener is absent Markdown still leaves `!A3` as prose rather than
+    // manufacturing a dead link.
+    ...(attention === undefined || onAttentionOpen === undefined ? {} : { onAttentionOpen }),
     onSkillOpen: () => openSidePaneTab(scope, 'skills'),
     ...(onNavigate === undefined ? {} : { onNavigate }),
     onSurfaceOpen: reference => {

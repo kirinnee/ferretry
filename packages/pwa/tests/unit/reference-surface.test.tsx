@@ -197,21 +197,53 @@ describe('sessionReferenceSurface', () => {
     should([afterTask, readSidePaneTabsState(scope).active]).deepEqual(['tasks', 'skills']);
   });
 
-  // Attention is deliberately NOT a side-pane tab (handover #35) and #17's
-  // focused modal does not exist yet. Omitting the opener is what makes a proved
-  // `!A3` render as text instead of a link into nothing — asserted here so the
-  // omission cannot be "fixed" back into a dead link by accident.
-  test('should offer no Attention opener while Attention has no surface to open', () => {
-    // Arrange
-    const surface = sessionReferenceSurface({ connection, scope });
+  // Attention is deliberately NOT a side-pane tab (handover #35); its home is
+  // #17's focused action modal. The opener therefore comes from the host that
+  // OWNS that modal, and a host without one must not manufacture a dead link.
+  test('should offer no Attention opener when the host owns no action modal', () => {
+    // Arrange — a ledger, but nowhere to open it.
+    const surface = sessionReferenceSurface({ connection, scope, attentionIds: ['A3' as AttentionId] });
     const before = readSidePaneTabsState(scope).active;
 
     // Act
     surface.onAttentionOpen?.('A3' as AttentionId);
 
-    // Assert
+    // Assert — proved, and still prose, because `hasOpener` reads the omission.
+    should(surface.attentionReferenceResolver?.('A3' as AttentionId)).be.true();
     should(surface.onAttentionOpen).be.undefined();
     should(readSidePaneTabsState(scope).active).equal(before);
+  });
+
+  test('should never open Attention as a side-pane tab even when the host supplies a modal', () => {
+    // Arrange
+    const opened: [AttentionId, HTMLElement | null | undefined][] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      attentionIds: ['A3' as AttentionId],
+      onAttentionOpen: (id, opener) => opened.push([id, opener]),
+    });
+    const before = readSidePaneTabsState(scope).active;
+
+    // Act
+    surface.onAttentionOpen?.('A3' as AttentionId, null);
+
+    // Assert — the request reaches the modal, and the bento box stays untouched.
+    should(opened).deepEqual([['A3' as AttentionId, null]]);
+    should(readSidePaneTabsState(scope).active).equal(before);
+  });
+
+  test('should refuse an opener that has no ledger to prove the id against', () => {
+    // Arrange — an opener alone would link an id nothing proved.
+    const opened: AttentionId[] = [];
+
+    // Act
+    const surface = sessionReferenceSurface({ connection, scope, onAttentionOpen: id => opened.push(id) });
+
+    // Assert
+    should(surface.attentionReferenceResolver).be.undefined();
+    should(surface.onAttentionOpen).be.undefined();
+    should(opened).be.empty();
   });
 
   test('should open a proved terminal surface as that exact terminal instance', () => {
