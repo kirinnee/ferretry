@@ -8,7 +8,7 @@ import {
   worktreeRemovalCheckPath,
 } from '../../../src/lib/worktrees/gateway';
 import type { WorktreeApiClient } from '../../../src/lib/worktrees/ports';
-import { decision, listResponse, removed, WORKTREE_PATH } from './fixtures';
+import { CALLER_CWD, created, decision, listResponse, removed, WORKTREE_PATH } from './fixtures';
 
 interface Call {
   path: string;
@@ -53,6 +53,8 @@ describe('protocol worktree gateway', () => {
           path: WORKTREE_PATH,
           branch: 'main',
           repositoryRoot: '/repos/ferretry',
+          commonDirectory: '/repos/ferretry/.git',
+          relativeCwd: '',
           createdAt: '2026-07-31T09:00:00.000Z',
           initialHead: 'a'.repeat(40),
           branchPreexisted: false,
@@ -130,5 +132,53 @@ describe('protocol worktree gateway', () => {
 
     // Act + Assert
     await should(gateway.list()).be.rejected();
+  });
+
+  it('should carry the caller directory beside the path, since only the caller knows it', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolWorktreeGateway(fakeClient(decision(), calls));
+
+    // Act
+    await gateway.check(WORKTREE_PATH, CALLER_CWD);
+
+    // Assert
+    should(calls[0]?.path).equal(worktreeRemovalCheckPath(WORKTREE_PATH, CALLER_CWD));
+    should(calls[0]?.path).containEql('cwd=%2Frepos%2Fferretry');
+  });
+
+  it('should post a fork as validated JSON', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolWorktreeGateway(fakeClient(created(), calls));
+
+    // Act
+    const actual = await gateway.create({
+      sourcePath: '/repos/ferretry',
+      branch: 'feat/new',
+      base: { kind: 'default-branch' },
+    });
+
+    // Assert
+    should(calls[0]).match({ path: WORKTREES_PATH });
+    should(calls[0]?.init?.method).equal('POST');
+    should(JSON.parse(String(calls[0]?.init?.body))).eql({
+      sourcePath: '/repos/ferretry',
+      branch: 'feat/new',
+      base: { kind: 'default-branch' },
+    });
+    should(actual.cwd).equal('/managed/ferretry-new/packages/cli');
+  });
+
+  it('should refuse a base the wire contract does not define', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolWorktreeGateway(fakeClient(created(), calls));
+
+    // Act + Assert
+    await should(
+      gateway.create({ sourcePath: '/repos/ferretry', branch: 'feat/new', base: { kind: 'yesterday' } as never }),
+    ).be.rejected();
+    should(calls).be.empty();
   });
 });

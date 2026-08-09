@@ -36,3 +36,4 @@ export * from './task-boards.ts';
 export * from './tasks.ts';
 export * from './terminal.ts';
 export * from './version-skew.ts';
+export * from './worktrees.ts';

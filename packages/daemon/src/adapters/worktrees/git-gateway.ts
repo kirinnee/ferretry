@@ -1,18 +1,18 @@
-import path from 'node:path';
-import type { GitRunner, WorktreeClock, WorktreeFileSystem } from '../../lib/worktrees/ports.ts';
+import type { GitRunner, GitWorkingDirectory, WorktreeClock, WorktreeFileSystem } from '../../lib/worktrees/ports.ts';
 import { parseWorktreeList, parseWorktreeStatus } from '../../lib/worktrees/parser.ts';
 import type {
   GitCheckoutSnapshot,
+  WorktreeDivergence,
   WorktreeListEntry,
   WorktreePushState,
   WorktreeStatusSummary,
 } from '../../lib/worktrees/types.ts';
 import { decodeGitOutput, requireGitExit, stripFinalLineFeed } from '../git/result.ts';
-import { WorktreeAdapterError } from './errors.ts';
+import { WorktreeError } from '../../lib/worktrees/errors.ts';
 
 async function runGit(
   runner: GitRunner,
-  cwd: string,
+  cwd: GitWorkingDirectory,
   args: readonly string[],
   action: string,
   acceptedExitCodes: readonly number[] = [0],
@@ -48,7 +48,7 @@ export class GitWorktreeGateway {
   async list(cwd: string): Promise<readonly WorktreeListEntry[]> {
     const execution = await runGit(this.runner, cwd, ['worktree', 'list', '--porcelain', '-z'], 'git worktree list');
     if (execution.stdoutTruncated) {
-      throw new WorktreeAdapterError('verification_failed', 'git worktree list output was truncated');
+      throw new WorktreeError('verification_failed', 'git worktree list output was truncated');
     }
     return parseWorktreeList(decodeGitOutput(execution));
   }
@@ -89,7 +89,7 @@ export class GitWorktreeGateway {
     const records = await this.list(canonicalCwd);
     const current = await canonicalRecord(this.fileSystem, records, worktreeRoot);
     if (current === undefined) {
-      throw new WorktreeAdapterError('verification_failed', 'Git did not list the current checkout');
+      throw new WorktreeError('verification_failed', 'Git did not list the current checkout');
     }
     const main = records[0];
     const repositoryRoot = main === undefined ? worktreeRoot : await this.fileSystem.realPath(main.path);
@@ -112,23 +112,23 @@ export class GitWorktreeGateway {
   async validateBranch(cwd: string, requested: string): Promise<string> {
     const branch = requested.trim();
     if (branch.length === 0 || branch.startsWith('-') || branch.includes('\0')) {
-      throw new WorktreeAdapterError('invalid_branch', `invalid branch ${JSON.stringify(requested)}`);
+      throw new WorktreeError('invalid_branch', `invalid branch ${JSON.stringify(requested)}`);
     }
     const execution = await this.runner.run({ cwd, args: ['check-ref-format', '--branch', branch] });
     if (execution.timedOut || execution.exitCode !== 0) {
-      throw new WorktreeAdapterError(
+      throw new WorktreeError(
         'invalid_branch',
         `invalid branch ${JSON.stringify(requested)}: ${execution.stderr.trim() || `exit ${execution.exitCode}`}`,
       );
     }
     const normalized = stripFinalLineFeed(decodeGitOutput(execution));
     if (normalized !== branch) {
-      throw new WorktreeAdapterError('invalid_branch', `branch ${JSON.stringify(requested)} is not literal`);
+      throw new WorktreeError('invalid_branch', `branch ${JSON.stringify(requested)} is not literal`);
     }
     return branch;
   }
 
-  async localBranchExists(cwd: string, branch: string): Promise<boolean> {
+  async localBranchExists(cwd: GitWorkingDirectory, branch: string): Promise<boolean> {
     const execution = await this.runner.run({
       cwd,
       args: ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`],
@@ -161,23 +161,37 @@ export class GitWorktreeGateway {
     );
     const oid = stripFinalLineFeed(decodeGitOutput(execution));
     if (!/^[0-9a-fA-F]{40,64}$/.test(oid)) {
-      throw new WorktreeAdapterError('verification_failed', 'Git returned an invalid commit identifier');
+      throw new WorktreeError('verification_failed', 'Git returned an invalid commit identifier');
     }
     return oid;
   }
 
-  async assertCheckoutFiltersSafe(cwd: string): Promise<void> {
+  /**
+   * Refuses a checkout that could run a configured filter during `worktree add`.
+   *
+   * IT MUST READ THE CONFIGURATION THE MUTATION WILL HONOUR, not a narrower one. This used to ask
+   * `--local --no-includes`, and both halves of that were wrong: `include.path` and `includeIf`
+   * directives are followed by the checkout, and a per-worktree `config.worktree` is another file
+   * `--local` never opens. A filter reached through either would have executed with the daemon's
+   * privileges while this gate reported the repository clean — a gate that reads a different file
+   * than the operation it guards is not a gate.
+   *
+   * The listing is the full effective set precisely because the runner has already neutralized what
+   * this must not consider: `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1` mean "every
+   * scope" is exactly the repository's own configuration and whatever it includes.
+   */
+  async assertCheckoutFiltersSafe(cwd: GitWorkingDirectory): Promise<void> {
     const execution = await this.runner.run({
       cwd,
-      args: ['config', '--local', '--no-includes', '--name-only', '--get-regexp', '^filter\\..*\\.(smudge|process)$'],
+      args: ['config', '--list', '--includes', '--name-only', '-z'],
     });
     if (!execution.timedOut && execution.exitCode === 1) return;
     requireGitExit('git filter inspection', execution);
     const names = decodeGitOutput(execution)
-      .split('\n')
-      .filter(value => value.length > 0);
+      .split('\0')
+      .filter(value => /^filter\..*\.(smudge|process)$/u.test(value));
     if (names.length > 0) {
-      throw new WorktreeAdapterError(
+      throw new WorktreeError(
         'unsafe_checkout_filter',
         `refusing a checkout that could execute configured filters: ${names.join(', ')}`,
       );
@@ -185,7 +199,7 @@ export class GitWorktreeGateway {
   }
 
   async add(
-    cwd: string,
+    cwd: GitWorkingDirectory,
     destination: string,
     branch: string,
     startOid: string,
@@ -253,11 +267,87 @@ export class GitWorktreeGateway {
       : { kind: 'unpushed', reason: 'HEAD is not contained in a fetched remote-tracking ref' };
   }
 
-  async remove(commonDir: string, target: string): Promise<void> {
+  /**
+   * How far the branch has diverged from its upstream, or nothing when Git would not say.
+   *
+   * `--left-right --count A...B` prints the two counts Git itself computed, so "behind" is not
+   * derived from "ahead" by arithmetic this side could get backwards. An answer that is not two
+   * safe non-negative integers is NO answer: reporting a zero the repository did not state would
+   * make a diverged branch read as up to date.
+   */
+  async divergence(cwd: string, upstream: string): Promise<WorktreeDivergence | undefined> {
+    const execution = await this.runner.run({
+      cwd,
+      args: ['rev-list', '--left-right', '--count', '--end-of-options', `${upstream}...HEAD`],
+    });
+    if (execution.timedOut || execution.exitCode !== 0) return undefined;
+    const counts = stripFinalLineFeed(decodeGitOutput(execution)).split(/\s+/u).map(Number);
+    const [behind, ahead] = counts;
+    if (counts.length !== 2 || behind === undefined || ahead === undefined) return undefined;
+    if (!Number.isSafeInteger(behind) || !Number.isSafeInteger(ahead) || behind < 0 || ahead < 0) return undefined;
+    return { ahead, behind };
+  }
+
+  /**
+   * The repository's default branch as LOCAL data knows it, or nothing.
+   *
+   * `refs/remotes/origin/HEAD` is a local symbolic ref; reading it fetches nothing and contacts
+   * nobody. A repository that never had it set — a fresh `git init`, or a clone made with
+   * `--no-checkout` — has no default branch this side may invent, and says so.
+   */
+  async defaultBranch(cwd: string): Promise<string | undefined> {
+    const execution = await this.runner.run({
+      cwd,
+      args: ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
+    });
+    if (execution.timedOut || execution.exitCode !== 0) return undefined;
+    const reference = stripFinalLineFeed(decodeGitOutput(execution));
+    return reference.length === 0 ? undefined : reference;
+  }
+
+  /**
+   * Whether the branch is already contained in its integration target.
+   *
+   * THREE ANSWERS, NOT TWO. Yes, no, and "Git could not tell me" — and the third is why this returns
+   * an optional rather than a boolean. A missing target read as "integrated" would delete unmerged
+   * work; read as "not integrated" it merely demands an explicit confirmation, which is the
+   * direction a caller can recover from.
+   */
+  async isIntegrated(cwd: string, branch: string, target: string): Promise<boolean | undefined> {
+    const execution = await this.runner.run({
+      cwd,
+      args: ['merge-base', '--is-ancestor', '--end-of-options', `refs/heads/${branch}`, target],
+    });
+    if (execution.timedOut) return undefined;
+    if (execution.exitCode === 0) return true;
+    return execution.exitCode === 1 ? false : undefined;
+  }
+
+  /**
+   * Deletes a branch through the repository's own Git directory.
+   *
+   * `force` is `git branch -D`, and it is reached only after the branch-deletion policy has already
+   * accepted an explicit confirmation for every reason deletion would lose work. Git's own `-d`
+   * refusal is a second opinion this side keeps rather than routes around.
+   */
+  async deleteBranch(cwd: GitWorkingDirectory, branch: string, force: boolean): Promise<void> {
+    await runGit(this.runner, cwd, ['branch', force ? '-D' : '-d', '--', branch], 'git branch delete');
+  }
+
+  /**
+   * Removes the checkout.
+   *
+   * `force` is Git's own, and it is NOT a blanket force: the caller reaches it only by having
+   * consented to the exact class of loss — uncommitted content — that makes Git refuse, and every
+   * other blocker has already been decided separately. Without it a consented
+   * `discard_worktree_changes` would be accepted by the daemon and then refused by Git, which is a
+   * removal that says yes and does nothing.
+   */
+  async remove(cwd: GitWorkingDirectory, force = false): Promise<void> {
     await runGit(
       this.runner,
-      path.dirname(commonDir),
-      [`--git-dir=${commonDir}`, 'worktree', 'remove', '--', target],
+      cwd,
+      ['worktree', 'remove', ...(force ? ['--force'] : []), '--', '.'],
       'git worktree remove',
       [0],
       { timeoutMs: 120_000 },

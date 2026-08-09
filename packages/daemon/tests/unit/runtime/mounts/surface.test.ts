@@ -208,6 +208,18 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
     skills: async session => ({ harness: session.config.harness, skills: [] }),
   },
+  worktrees: {
+    list: async () => ({ worktrees: [] }),
+    checkRemoval: async () => {
+      throw new Error('not used by this surface fixture');
+    },
+    remove: async () => {
+      throw new Error('not used by this surface fixture');
+    },
+    create: async () => {
+      throw new Error('not used by this surface fixture');
+    },
+  },
   sessionControl: new FakeSessionControl(),
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
@@ -372,8 +384,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // Pricing adds four operator routes to this promoted surface.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 121, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 125, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -457,6 +468,10 @@ describe('the mounted daemon surface', () => {
       'GET /v1/projects',
       'POST /v1/projects',
       'GET /v1/sessions/:sessionId/skills',
+      'GET /v1/worktrees/removal',
+      'POST /v1/worktrees/remove',
+      'GET /v1/worktrees',
+      'POST /v1/worktrees',
       'POST /v1/sessions',
       'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/by-request/:requestId',

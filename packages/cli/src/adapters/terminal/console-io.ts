@@ -5,6 +5,8 @@ export interface ICliIo {
   success(message: string): void;
   warn(message: string): void;
   error(message: string): void;
+  /** Machine-readable diagnostic on stderr, deliberately without presentation colour. */
+  diagnostic(message: string): void;
   setExitCode(code: number): void;
   interactive(): boolean;
 }
@@ -20,6 +22,10 @@ export class ConsoleIo implements ICliIo {
 
   error(message: string): void {
     console.error(chalk.red(message));
+  }
+
+  diagnostic(message: string): void {
+    console.error(message);
   }
 
   setExitCode(code: number): void {

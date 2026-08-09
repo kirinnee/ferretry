@@ -7,8 +7,8 @@ import {
   GitWorktreeGateway,
   NodeWorktreeFileSystem,
   SystemWorktreeClock,
-  WorktreeAdapterError,
 } from '../../../src/adapters/worktrees/index.ts';
+import { WorktreeError } from '../../../src/lib/worktrees/index.ts';
 import type { GitExecution, GitInvocation, GitRunner } from '../../../src/lib/worktrees/ports.ts';
 import { cleanupTempDirectories, setupGit, tempDirectory, tempRemote, tempRepository } from '../support/repository.ts';
 
@@ -81,9 +81,9 @@ describe('GitWorktreeGateway list and inspect', () => {
     const actual = await error(gateway(runner).list(repository.root));
 
     // Assert
-    should(actual).be.instanceof(WorktreeAdapterError);
-    should((actual as WorktreeAdapterError).code).equal('verification_failed');
-    should((actual as WorktreeAdapterError).message).containEql('truncated');
+    should(actual).be.instanceof(WorktreeError);
+    should((actual as WorktreeError).code).equal('verification_failed');
+    should((actual as WorktreeError).message).containEql('truncated');
   });
 
   it('should report a path that does not exist as missing without running Git', async () => {
@@ -219,8 +219,8 @@ describe('GitWorktreeGateway list and inspect', () => {
     const actual = await error(gateway(runner).inspect(repository.root));
 
     // Assert
-    should((actual as WorktreeAdapterError).code).equal('verification_failed');
-    should((actual as WorktreeAdapterError).message).containEql('did not list the current checkout');
+    should((actual as WorktreeError).code).equal('verification_failed');
+    should((actual as WorktreeError).message).containEql('did not list the current checkout');
   });
 });
 
@@ -255,8 +255,8 @@ describe('GitWorktreeGateway branch and commit resolution', () => {
     const actual = await error(gateway().validateBranch(repository.root, branch));
 
     // Assert
-    should(actual).be.instanceof(WorktreeAdapterError);
-    should((actual as WorktreeAdapterError).code).equal('invalid_branch');
+    should(actual).be.instanceof(WorktreeError);
+    should((actual as WorktreeError).code).equal('invalid_branch');
   });
 
   it('should refuse a branch name Git rewrites into something else', async () => {
@@ -270,8 +270,8 @@ describe('GitWorktreeGateway branch and commit resolution', () => {
     const actual = await error(gateway(runner).validateBranch(repository.root, 'feature/ok'));
 
     // Assert
-    should((actual as WorktreeAdapterError).code).equal('invalid_branch');
-    should((actual as WorktreeAdapterError).message).containEql('is not literal');
+    should((actual as WorktreeError).code).equal('invalid_branch');
+    should((actual as WorktreeError).message).containEql('is not literal');
   });
 
   it('should distinguish an existing local branch from an absent one', async () => {
@@ -351,8 +351,8 @@ describe('GitWorktreeGateway branch and commit resolution', () => {
     const actual = await error(gateway(runner).resolveCommit(repository.root, 'HEAD'));
 
     // Assert
-    should((actual as WorktreeAdapterError).code).equal('verification_failed');
-    should((actual as WorktreeAdapterError).message).containEql('invalid commit identifier');
+    should((actual as WorktreeError).code).equal('verification_failed');
+    should((actual as WorktreeError).message).containEql('invalid commit identifier');
   });
 });
 
@@ -381,9 +381,53 @@ describe('GitWorktreeGateway checkout safety', () => {
     const actual = await error(gateway().assertCheckoutFiltersSafe(repository.root));
 
     // Assert
-    should(actual).be.instanceof(WorktreeAdapterError);
-    should((actual as WorktreeAdapterError).code).equal('unsafe_checkout_filter');
-    should((actual as WorktreeAdapterError).message).containEql('filter.evil.smudge');
+    should(actual).be.instanceof(WorktreeError);
+    should((actual as WorktreeError).code).equal('unsafe_checkout_filter');
+    should((actual as WorktreeError).message).containEql('filter.evil.smudge');
+  });
+
+  it('should refuse a filter reached through an included config file, which the checkout honours', async () => {
+    // Arrange — the hazard: `git worktree add` follows `include.path`, so a filter hidden behind one
+    // executes on checkout. An inspection that passed `--no-includes` never opened this file and
+    // reported the repository clean.
+    const repository = await tempRepository('gw-filters-included');
+    await Bun.write(
+      path.join(repository.root, '.git', 'hostile.config'),
+      '[filter "sneaky"]\n\tsmudge = touch pwned\n',
+    );
+    await setupGit(repository.root, 'config', '--local', 'include.path', 'hostile.config');
+
+    // Act
+    const actual = await error(gateway().assertCheckoutFiltersSafe(repository.root));
+
+    // Assert
+    should(actual).be.instanceof(WorktreeError);
+    should((actual as WorktreeError).code).equal('unsafe_checkout_filter');
+    should((actual as WorktreeError).message).containEql('filter.sneaky.smudge');
+  });
+
+  it('should refuse a filter written into the per-worktree config the checkout also honours', async () => {
+    // Arrange — `--local` never opens `config.worktree`; the effective listing does.
+    const repository = await tempRepository('gw-filters-worktree-scope');
+    await setupGit(repository.root, 'config', '--local', 'extensions.worktreeConfig', 'true');
+    await setupGit(repository.root, 'config', '--worktree', 'filter.local.process', 'sh -c pwned');
+
+    // Act
+    const actual = await error(gateway().assertCheckoutFiltersSafe(repository.root));
+
+    // Assert
+    should((actual as WorktreeError).code).equal('unsafe_checkout_filter');
+    should((actual as WorktreeError).message).containEql('filter.local.process');
+  });
+
+  it('should leave an ordinary configuration alone, filter-shaped keys included', async () => {
+    // Arrange — only `smudge` and `process` run a command on checkout
+    const repository = await tempRepository('gw-filters-benign');
+    await setupGit(repository.root, 'config', '--local', 'filter.lfs.clean', 'git-lfs clean -- %f');
+    await setupGit(repository.root, 'config', '--local', 'filter.lfs.required', 'true');
+
+    // Act + Assert
+    should(await error(gateway().assertCheckoutFiltersSafe(repository.root))).be.undefined();
   });
 
   it('should raise a config failure that is not a plain "no match"', async () => {
@@ -478,10 +522,8 @@ describe('GitWorktreeGateway worktree lifecycle', () => {
     const repository = await tempRepository('gw-remove');
     const linked = path.join(await tempDirectory('gw-remove-child'), 'wt');
     await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/remove', '--', linked);
-    const commonDir = path.join(repository.root, '.git');
-
     // Act
-    await gateway().remove(commonDir, linked);
+    await gateway().remove(linked);
 
     // Assert
     should(await files.type(linked)).equal('missing');
@@ -497,7 +539,7 @@ describe('GitWorktreeGateway worktree lifecycle', () => {
     await Bun.write(path.join(linked, 'README.md'), '# changed\n');
 
     // Act
-    const actual = await error(gateway().remove(path.join(repository.root, '.git'), linked));
+    const actual = await error(gateway().remove(linked));
 
     // Assert
     should((actual as Error).message).containEql('git worktree remove failed');
@@ -653,5 +695,138 @@ describe('GitWorktreeGateway status and push state', () => {
 
     // Assert
     should(actual).deepEqual({ kind: 'unknown', reason: 'Git returned an invalid ahead count' });
+  });
+});
+
+describe('GitWorktreeGateway divergence, default branch and integration', () => {
+  afterAll(async () => {
+    await cleanupTempDirectories();
+  });
+
+  it('should report both counts Git computed, in the direction Git computed them', async () => {
+    // Arrange — one commit only on the remote, two only here. No clone: the remote is advanced and
+    // the local branch is then rewound, which diverges the two without a second working tree.
+    const repository = await tempRepository('gw-divergence');
+    await tempRemote(repository.root, 'origin', 'main');
+    await setupGit(repository.root, 'branch', '--set-upstream-to', 'origin/main', 'main');
+    await setupGit(repository.root, 'commit', '--quiet', '--allow-empty', '-m', 'feat: theirs');
+    await setupGit(repository.root, 'push', '--quiet', 'origin', 'main');
+    await setupGit(repository.root, 'reset', '--hard', '--quiet', repository.head);
+    await setupGit(repository.root, 'commit', '--quiet', '--allow-empty', '-m', 'feat: mine one');
+    await setupGit(repository.root, 'commit', '--quiet', '--allow-empty', '-m', 'feat: mine two');
+
+    // Act
+    const actual = await gateway().divergence(repository.root, 'refs/remotes/origin/main');
+
+    // Assert
+    should(actual).deepEqual({ ahead: 2, behind: 1 });
+  });
+
+  it('should answer nothing rather than a zero when Git will not say', async () => {
+    // Arrange
+    const repository = await tempRepository('gw-divergence-unknown');
+    const garbage = new ScriptedGitRunner(invocation =>
+      invocation.args[0] === 'rev-list' ? execution({ stdout: encode('lots\tmore\n') }) : undefined,
+    );
+    const negative = new ScriptedGitRunner(invocation =>
+      invocation.args[0] === 'rev-list' ? execution({ stdout: encode('-1\t2\n') }) : undefined,
+    );
+    const short = new ScriptedGitRunner(invocation =>
+      invocation.args[0] === 'rev-list' ? execution({ stdout: encode('3\n') }) : undefined,
+    );
+
+    // Act + Assert — a made-up zero would read as "up to date" for a diverged branch
+    should(await gateway().divergence(repository.root, 'refs/remotes/origin/nope')).be.undefined();
+    should(await gateway(garbage).divergence(repository.root, 'refs/heads/main')).be.undefined();
+    should(await gateway(negative).divergence(repository.root, 'refs/heads/main')).be.undefined();
+    should(await gateway(short).divergence(repository.root, 'refs/heads/main')).be.undefined();
+  });
+
+  it('should read the default branch from local data, and admit when there is none', async () => {
+    // Arrange
+    const repository = await tempRepository('gw-default-branch');
+    const before = await gateway().defaultBranch(repository.root);
+    await tempRemote(repository.root, 'origin', 'main');
+    await setupGit(repository.root, 'remote', 'set-head', 'origin', 'main');
+
+    // Act
+    const after = await gateway().defaultBranch(repository.root);
+
+    // Assert — reading `origin/HEAD` fetches nothing and contacts nobody
+    should(before).be.undefined();
+    should(after).equal('origin/main');
+  });
+
+  it('should treat an empty symbolic ref as no default branch at all', async () => {
+    // Arrange
+    const repository = await tempRepository('gw-default-blank');
+    const runner = new ScriptedGitRunner(invocation =>
+      invocation.args[0] === 'symbolic-ref' ? execution({ stdout: encode('\n') }) : undefined,
+    );
+
+    // Act + Assert
+    should(await gateway(runner).defaultBranch(repository.root)).be.undefined();
+  });
+
+  it('should give three answers about integration, never two', async () => {
+    // Arrange
+    const repository = await tempRepository('gw-integrated');
+    await setupGit(repository.root, 'branch', '--', 'merged');
+    await setupGit(repository.root, 'branch', '--', 'diverged');
+    await setupGit(repository.root, 'commit', '--quiet', '--allow-empty', '-m', 'feat: only on main');
+    await setupGit(repository.root, 'update-ref', 'refs/heads/diverged', 'HEAD');
+    await setupGit(repository.root, 'update-ref', 'refs/heads/main', `${repository.head}`);
+    const broken = new ScriptedGitRunner(invocation =>
+      invocation.args[0] === 'merge-base' ? execution({ exitCode: 128, stderr: 'fatal: bad object' }) : undefined,
+    );
+
+    // Act
+    const merged = await gateway().isIntegrated(repository.root, 'merged', 'refs/heads/diverged');
+    const notMerged = await gateway().isIntegrated(repository.root, 'diverged', 'refs/heads/merged');
+    const unknown = await gateway(broken).isIntegrated(repository.root, 'merged', 'refs/heads/diverged');
+
+    // Assert — an unknown answer must not read as "integrated", or unmerged work gets deleted
+    should(merged).be.true();
+    should(notMerged).be.false();
+    should(unknown).be.undefined();
+  });
+});
+
+describe('GitWorktreeGateway destructive operations', () => {
+  afterAll(async () => {
+    await cleanupTempDirectories();
+  });
+
+  it('should delete a branch, and reach for the forceful form only when told to', async () => {
+    // Arrange
+    const repository = await tempRepository('gw-delete-branch');
+    await setupGit(repository.root, 'branch', '--', 'merged');
+    await setupGit(repository.root, 'branch', '--', 'unmerged');
+    await setupGit(repository.root, 'commit', '--quiet', '--allow-empty', '-m', 'feat: later');
+    await setupGit(repository.root, 'update-ref', 'refs/heads/unmerged', 'HEAD');
+    await setupGit(repository.root, 'update-ref', 'refs/heads/main', repository.head);
+    // Act
+    await gateway().deleteBranch(repository.root, 'merged', false);
+    const refusal = await error(gateway().deleteBranch(repository.root, 'unmerged', false));
+    await gateway().deleteBranch(repository.root, 'unmerged', true);
+
+    // Assert — Git's own `-d` refusal is a second opinion this side keeps
+    should(refusal).be.instanceof(Error);
+    should(await setupGit(repository.root, 'branch', '--list', '--format=%(refname:short)')).equal('main\n');
+  });
+
+  it('should remove a dirty checkout only when the consent that covers it was given', async () => {
+    // Arrange
+    const repository = await tempRepository('gw-remove-force');
+    const destination = path.join(await tempDirectory('gw-remove-force-dest'), 'checkout');
+    await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/dirty', '--', destination, repository.head);
+    await Bun.write(path.join(destination, 'README.md'), '# edited\n');
+    // Act
+    const refusal = await error(gateway().remove(destination));
+    await gateway().remove(destination, true);
+
+    // Assert — without the forceful form a consented discard says yes and does nothing
+    should(refusal).be.instanceof(Error);
+    should(await files.type(destination)).equal('missing');
   });
 });

@@ -57,6 +57,7 @@ import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes, terminalTicketRoutes } from './terminals.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
+import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -129,6 +130,11 @@ export interface MountedSubsystems {
   readonly sessions: SessionDirectorySubsystem;
   /** Daemon-local project and per-session skill catalogs. */
   readonly catalogs: CatalogSubsystem;
+  /** The checkouts this daemon made: the durable registry, the live Git refresh over it, forking a
+   *  new one and destroying one. It is mounted with the catalogs because it is the same subject seen
+   *  from the other end — a managed worktree is joined to its Project by the repository identity the
+   *  catalog already records, never by where the two happen to sit on disk. */
+  readonly worktrees: WorktreeSubsystem;
   /** The session write: starting one agent and stopping it. */
   readonly sessionControl: SessionControlSubsystem;
   /** Talking to a session that is already running: handing it a later turn, and stopping the turn it
@@ -317,6 +323,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // deeper per-session routes that follow.
     ...sessionRoutes(subsystems.sessions),
     ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
+    // The worktree surface registers beside the catalogs for the reason its subsystem field states.
+    // Every path is under `/v1/worktrees`, which no other subsystem uses, so it can neither shadow
+    // nor be shadowed — and its own two deeper literals are registered before the collection they
+    // sit under, which would otherwise match them first.
+    ...worktreeRoutes(subsystems.worktrees),
     // The write surface registers AFTER the read for the same reason the read comes first: `POST
     // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
     // other and both sit above every per-session subsystem that follows.

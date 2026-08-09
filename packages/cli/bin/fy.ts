@@ -537,7 +537,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client }) =>
     registerWorktreeCommands(
       program,
-      new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive),
+      // The INVOCATION cwd, for the same reason the marker probe below takes one: a fork defaults to
+      // the checkout the human is standing in, and a removal must be refused when that is the very
+      // checkout being destroyed.
+      new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive, world.cwd),
     ),
   ({ program, world, client }) => registerFleetCommands(program, buildFleetController(world, client)),
   // The operator reads. The marker probe takes the INVOCATION cwd rather than reading `process.cwd()`,

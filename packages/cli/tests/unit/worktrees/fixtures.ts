@@ -1,20 +1,25 @@
-import type { IWorktreePrompt } from '../../../src/lib/worktrees/controller';
-import type { IWorktreeGateway, IWorktreeOutput } from '../../../src/lib/worktrees/ports';
 import type {
+  CreatedWorktree,
+  CreateWorktreeRequest,
   ManagedWorktreeView,
   RemovedWorktree,
   WorktreeListResponse,
+  WorktreeLiveState,
   WorktreeRemovalBlocker,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
-} from '../../../src/lib/worktrees/wire';
+} from '@ferretry/protocol';
+import type { IWorktreePrompt } from '../../../src/lib/worktrees/controller';
+import type { IWorktreeGateway, IWorktreeOutput } from '../../../src/lib/worktrees/ports';
 
 export const WORKTREE_PATH = '/managed/ferretry-wt-cli6';
+export const CALLER_CWD = '/repos/ferretry';
 
 /** Captures what a controller printed, keeping stdout and warnings apart. */
 export class CapturingOutput implements IWorktreeOutput {
   readonly lines: string[] = [];
   readonly warnings: string[] = [];
+  readonly diagnostics: string[] = [];
 
   success(message: string): void {
     this.lines.push(message);
@@ -24,9 +29,36 @@ export class CapturingOutput implements IWorktreeOutput {
     this.warnings.push(message);
   }
 
+  diagnostic(message: string): void {
+    this.diagnostics.push(message);
+  }
+
   get text(): string {
     return this.lines.join('\n');
   }
+}
+
+export function live(overrides: Partial<WorktreeLiveState> = {}): WorktreeLiveState {
+  return {
+    head: 'b'.repeat(40),
+    branch: 'port/cli-remaining',
+    detached: false,
+    status: {
+      staged: false,
+      unstaged: false,
+      untracked: false,
+      ignored: false,
+      conflicted: false,
+      dirtySubmodule: false,
+      truncated: false,
+    },
+    upstream: 'origin/port/cli-remaining',
+    ahead: 2,
+    behind: 1,
+    integrated: false,
+    undetermined: [],
+    ...overrides,
+  };
 }
 
 export function worktree(overrides: Partial<ManagedWorktreeView> = {}): ManagedWorktreeView {
@@ -34,12 +66,16 @@ export function worktree(overrides: Partial<ManagedWorktreeView> = {}): ManagedW
     path: WORKTREE_PATH,
     branch: 'port/cli-remaining',
     repositoryRoot: '/repos/ferretry',
+    commonDirectory: '/repos/ferretry/.git',
+    relativeCwd: '',
     createdAt: '2026-07-31T09:00:00.000Z',
     initialHead: 'a'.repeat(40),
     branchPreexisted: false,
     ownerSessionId: 'ms8ucu18-1eb5331d',
     ownerActive: true,
     sharedWith: [],
+    live: live(),
+    removal: decision(),
     ...overrides,
   };
 }
@@ -69,6 +105,7 @@ export function decision(overrides: Partial<WorktreeRemovalDecision> = {}): Work
     head: 'b'.repeat(40),
     upstream: 'origin/port/cli-remaining',
     blockers: [],
+    branchDeletion: { deletable: true, blockers: [] },
     ...overrides,
   };
 }
@@ -79,6 +116,15 @@ export function removed(overrides: Partial<RemovedWorktree> = {}): RemovedWorktr
     branch: 'port/cli-remaining',
     branchRetained: true,
     removedAt: '2026-07-31T10:00:00.000Z',
+    branchBlockers: [],
+    ...overrides,
+  };
+}
+
+export function created(overrides: Partial<CreatedWorktree> = {}): CreatedWorktree {
+  return {
+    worktree: worktree({ path: '/managed/ferretry-new', branch: 'feat/new' }),
+    cwd: '/managed/ferretry-new/packages/cli',
     ...overrides,
   };
 }
@@ -97,14 +143,16 @@ export class ScriptedPrompt implements IWorktreePrompt {
 
 /** A gateway answering from fixed views and recording what was asked of it. */
 export class RecordingWorktreeGateway implements IWorktreeGateway {
-  readonly checked: string[] = [];
+  readonly checked: { path: string; cwd?: string }[] = [];
   readonly removals: WorktreeRemovalRequest[] = [];
+  readonly creations: CreateWorktreeRequest[] = [];
 
   constructor(
     private readonly views: {
       list?: WorktreeListResponse;
       decision?: WorktreeRemovalDecision;
       removed?: RemovedWorktree;
+      created?: CreatedWorktree;
     } = {},
   ) {}
 
@@ -112,13 +160,18 @@ export class RecordingWorktreeGateway implements IWorktreeGateway {
     return Promise.resolve(this.views.list ?? listResponse());
   }
 
-  check(path: string): Promise<WorktreeRemovalDecision> {
-    this.checked.push(path);
+  check(path: string, cwd?: string): Promise<WorktreeRemovalDecision> {
+    this.checked.push({ path, ...(cwd === undefined ? {} : { cwd }) });
     return Promise.resolve(this.views.decision ?? decision());
   }
 
   remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree> {
     this.removals.push(request);
     return Promise.resolve(this.views.removed ?? removed());
+  }
+
+  create(request: CreateWorktreeRequest): Promise<CreatedWorktree> {
+    this.creations.push(request);
+    return Promise.resolve(this.views.created ?? created());
   }
 }

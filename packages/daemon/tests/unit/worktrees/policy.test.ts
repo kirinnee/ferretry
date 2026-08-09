@@ -4,7 +4,6 @@ import {
   assessBranchDeletion,
   assessWorktreeRemoval,
   defaultManagedWorktreeRoot,
-  hasDirtyWorktree,
   isCheckoutLocked,
   isCurrentCheckout,
   isWithinDirectory,
@@ -103,15 +102,6 @@ describe('worktree safety predicates', () => {
     // Act + Assert
     should(isCheckoutLocked('')).be.true();
     should(isCheckoutLocked(undefined)).be.false();
-  });
-
-  it('should keep clean and dirty summaries distinct', () => {
-    // Arrange
-    const input = { ...cleanStatus, ignored: true };
-
-    // Act + Assert
-    should(hasDirtyWorktree(cleanStatus)).be.false();
-    should(hasDirtyWorktree(input)).be.true();
   });
 
   it.each([
@@ -332,5 +322,26 @@ describe('assessBranchDeletion', () => {
       'live_terminal',
     ]);
     should(actual.blockers.every(item => item.confirmation === undefined)).be.true();
+  });
+});
+
+describe('evidence that could not be established', () => {
+  it('should refuse on each unreadable fact, and let nothing override it', () => {
+    // Act
+    const actual = assessWorktreeRemoval(
+      safeEvidence({
+        undeterminedEvidence: [
+          "the host's terminals could not be listed, so a live shell cannot be ruled out",
+          'the session directory could not be read',
+        ],
+      }),
+    );
+
+    // Assert — a caller cannot consent to losing something nobody could name
+    should(actual.removable).be.false();
+    const undetermined = actual.blockers.filter(item => item.code === 'undetermined_evidence');
+    should(undetermined).have.length(2);
+    should(undetermined.every(item => item.override === undefined)).be.true();
+    should(requiredRemovalOverride('undetermined_evidence')).be.undefined();
   });
 });
