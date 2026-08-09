@@ -136,6 +136,7 @@ import {
 } from '../../../../src/lib/task-boards/types.ts';
 import {
   applyTaskAction,
+  assertActorCanWriteSession,
   createTask,
   emptyTaskSnapshot,
   requireTaskEntry,
@@ -286,8 +287,7 @@ export class FakeTaskBoard implements TaskBoardPort {
     actor: TaskActor,
     reduce: (snapshot: TaskSnapshot) => { snapshot: TaskSnapshot; entry: TaskEntry },
   ): TaskEntry {
-    if (actor.kind === 'agent' && actor.sessionId !== this.sessionId)
-      throw new TaskError('forbidden', `agent ${actor.id} may only write tasks in its own session`);
+    assertActorCanWriteSession(actor, this.sessionId);
     const outcome = reduce(this.snapshot);
     this.snapshot = outcome.snapshot;
     return outcome.entry;

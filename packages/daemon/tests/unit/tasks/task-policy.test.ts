@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { Task, TaskPhase, TaskStatus, TaskWorkflow } from '@ferretry/protocol';
 import should from 'should';
 import { TaskError } from '../../../src/lib/tasks/task-error.ts';
+import { MARK_DONE_GRANT } from './fixtures.ts';
 import {
   TASK_WORKFLOW_PATHS,
   assertActorCanWriteSession,
@@ -14,6 +15,8 @@ import {
   hasRequiredCreationReason,
   hasTransitionReason,
   isForwardPhaseSkip,
+  isHumanActor,
+  canActorVerifyTaskDone,
   requiresHumanLiveVerification,
   requiresHumanWorkflowApproval,
   requiresReopenAction,
@@ -65,6 +68,20 @@ const actor = (kind: TaskActor['kind'], sessionId: string | null): TaskActor => 
   name: null,
   sessionId,
 });
+
+/** An actor as the task mount leaves it after a shared-board `mark_done` authorization. */
+const granted = (base: TaskActor): TaskActor => {
+  const targetSessionId = base.boardAuthorizedForSession ?? base.sessionId ?? 'session-a';
+  return {
+    ...base,
+    boardAuthorizedForSession: targetSessionId,
+    markDoneAuthorization: base.markDoneAuthorization ?? {
+      ...MARK_DONE_GRANT,
+      sessionId: base.sessionId ?? targetSessionId,
+      targetSessionId,
+    },
+  };
+};
 
 const thrownTaskError = (operation: () => void): TaskError => {
   try {
@@ -164,8 +181,12 @@ describe('reopen predicates', () => {
 
     // Act + Assert
     should(requiresReopenAction(input, 'build')).be.true();
-    should(() => assertTaskPhaseTransition(input, 'build', { human: true, reopen: false })).throw(/must use reopen/u);
-    should(() => assertTaskPhaseTransition(input, 'build', { human: true, reopen: true })).not.throw();
+    should(() => assertTaskPhaseTransition(input, 'build', { human: true, verifiesDone: true, reopen: false })).throw(
+      /must use reopen/u,
+    );
+    should(() =>
+      assertTaskPhaseTransition(input, 'build', { human: true, verifiesDone: true, reopen: true }),
+    ).not.throw();
   });
 
   it('should require a human actor to reopen human-verified done', () => {
@@ -173,10 +194,91 @@ describe('reopen predicates', () => {
     const input = task('quick', 'done');
 
     // Act
-    const actual = thrownTaskError(() => assertTaskPhaseTransition(input, 'build', { human: false, reopen: true }));
+    const actual = thrownTaskError(() =>
+      assertTaskPhaseTransition(input, 'build', { human: false, verifiesDone: false, reopen: true }),
+    );
 
     // Assert
     should(actual.code).equal('approval-required');
+  });
+});
+
+describe('identity versus board authorization', () => {
+  it.each([
+    { name: 'a human', input: actor('human', null), human: true, verifies: true },
+    { name: 'the daemon', input: actor('daemon', null), human: false, verifies: false },
+    { name: 'a plain agent', input: actor('agent', 'session-a'), human: false, verifies: false },
+    { name: 'a granted agent', input: granted(actor('agent', 'session-a')), human: false, verifies: true },
+    {
+      name: 'an agent authorized for a session without the grant',
+      input: { ...actor('agent', 'session-a'), boardAuthorizedForSession: 'session-b' },
+      human: false,
+      verifies: false,
+    },
+  ])('should read $name as human=$human, verifies=$verifies', ({ input, human, verifies }) => {
+    // Act + Assert
+    should(isHumanActor(input)).equal(human);
+    should(canActorVerifyTaskDone(input)).equal(verifies);
+  });
+
+  it('should let a board grant sign off live → done and nothing else', () => {
+    // Arrange — the granted actor's two gate answers, as `movePhase` computes them.
+    const options = { human: false, verifiesDone: true, reopen: false } as const;
+
+    // Act + Assert — the one authorized move.
+    should(() => assertTaskPhaseTransition(task('quick', 'live'), 'done', options)).not.throw();
+    // …and every human-only gate the widened predicate used to satisfy.
+    should(
+      thrownTaskError(() => assertTaskPhaseTransition(task('research-first', 'research'), 'design', options)).code,
+    ).equal('approval-required');
+    should(
+      thrownTaskError(() => assertTaskPhaseTransition(task('design-first', 'design'), 'build', options)).code,
+    ).equal('approval-required');
+    should(
+      thrownTaskError(() => assertTaskPhaseTransition(task('quick', 'done'), 'build', { ...options, reopen: true }))
+        .code,
+    ).equal('approval-required');
+  });
+
+  it('should still refuse live → done to an agent holding no grant', () => {
+    // Act
+    const actual = thrownTaskError(() =>
+      assertTaskPhaseTransition(task('quick', 'live'), 'done', {
+        human: false,
+        verifiesDone: false,
+        reopen: false,
+      }),
+    );
+
+    // Assert
+    should(actual.code).equal('approval-required');
+  });
+
+  it('should fail closed for malformed or mismatched completion evidence', () => {
+    // Arrange — direct reducer callers are ordinary objects, so a type-shaped but wrong receipt
+    // must not become the trusted top-agent attestation the mount normally constructs.
+    const malformed = granted({
+      ...actor('agent', 'session-a'),
+      markDoneAuthorization: { ...MARK_DONE_GRANT, role: 'read', action: 'note' },
+    });
+    const blankDurableIds = granted({
+      ...actor('agent', 'session-a'),
+      markDoneAuthorization: { ...MARK_DONE_GRANT, grantId: '   ', requestId: '   ' },
+    });
+    const mismatchedRetryId = granted({
+      ...actor('agent', 'session-a'),
+      doneRequestIdentity: {
+        requestId: 'another-click',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' },
+      },
+    });
+    const valid = granted(actor('agent', 'session-a'));
+
+    // Act + Assert
+    should(canActorVerifyTaskDone(malformed)).be.false();
+    should(canActorVerifyTaskDone(blankDurableIds)).be.false();
+    should(canActorVerifyTaskDone(mismatchedRetryId)).be.false();
+    should(canActorVerifyTaskDone(valid, { action: 'status', status: 'done', reason: 'a different click' })).be.false();
   });
 });
 
@@ -231,11 +333,15 @@ describe('data-driven phase transitions', () => {
     const input = task(workflow, from);
 
     // Act + Assert
-    should(() => assertTaskPhaseTransition(input, to, { human: true, reopen: false })).not.throw();
+    should(() => assertTaskPhaseTransition(input, to, { human: true, verifiesDone: true, reopen: false })).not.throw();
     if (gated) {
-      should(() => assertTaskPhaseTransition(input, to, { human: false, reopen: false })).throw(TaskError);
+      should(() => assertTaskPhaseTransition(input, to, { human: false, verifiesDone: false, reopen: false })).throw(
+        TaskError,
+      );
     } else {
-      should(() => assertTaskPhaseTransition(input, to, { human: false, reopen: false })).not.throw();
+      should(() =>
+        assertTaskPhaseTransition(input, to, { human: false, verifiesDone: false, reopen: false }),
+      ).not.throw();
     }
   });
 
@@ -249,7 +355,9 @@ describe('data-driven phase transitions', () => {
     const input = task(workflow, 'todo');
 
     // Act
-    const actual = thrownTaskError(() => assertTaskPhaseTransition(input, to, { human: true, reopen: false }));
+    const actual = thrownTaskError(() =>
+      assertTaskPhaseTransition(input, to, { human: true, verifiesDone: true, reopen: false }),
+    );
 
     // Assert
     should(isForwardPhaseSkip(input, to)).be.true();
@@ -275,7 +383,9 @@ describe('data-driven phase transitions', () => {
 
     // Act + Assert
     should(taskPhaseMovesBackward(input, 'todo')).be.true();
-    should(() => assertTaskPhaseTransition(input, 'todo', { human: false, reopen: false })).not.throw();
+    should(() =>
+      assertTaskPhaseTransition(input, 'todo', { human: false, verifiesDone: false, reopen: false }),
+    ).not.throw();
   });
 
   it('should reject same-phase, foreign-workflow, and dropped-terminal moves', () => {
@@ -284,8 +394,14 @@ describe('data-driven phase transitions', () => {
     const dropped = task('quick', 'dropped');
 
     // Act + Assert
-    should(() => assertTaskPhaseTransition(quick, 'build', { human: true, reopen: false })).throw(/already/u);
-    should(() => assertTaskPhaseTransition(quick, 'design', { human: true, reopen: false })).throw(/not part/u);
-    should(() => assertTaskPhaseTransition(dropped, 'todo', { human: true, reopen: false })).throw(/cannot move/u);
+    should(() => assertTaskPhaseTransition(quick, 'build', { human: true, verifiesDone: true, reopen: false })).throw(
+      /already/u,
+    );
+    should(() => assertTaskPhaseTransition(quick, 'design', { human: true, verifiesDone: true, reopen: false })).throw(
+      /not part/u,
+    );
+    should(() => assertTaskPhaseTransition(dropped, 'todo', { human: true, verifiesDone: true, reopen: false })).throw(
+      /cannot move/u,
+    );
   });
 });

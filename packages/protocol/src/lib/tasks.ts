@@ -146,14 +146,43 @@ const refineTaskCoherence = (value: TaskCoherence, context: z.RefinementCtx): vo
 export const TaskSchema = TaskBaseSchema.superRefine(refineTaskCoherence);
 export type Task = z.infer<typeof TaskSchema>;
 
-export const TaskAuthorizationProvenanceSchema = z.object({
+/**
+ * The parsed, semantic shape of the one task action a board grant may authorize today.
+ *
+ * It travels with the authorization receipt so a client retry can prove it is repeating the
+ * same decision, rather than reusing a request id to perform a different completion. Keeping the
+ * parsed fields instead of a hash makes the durable evidence independently inspectable.
+ */
+export const TaskDoneRequestFingerprintSchema = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('phase'),
+    phase: z.literal('done'),
+    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
+  }),
+  z.strictObject({
+    action: z.literal('status'),
+    status: z.literal('done'),
+    reason: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH),
+    note: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
+  }),
+]);
+export type TaskDoneRequestFingerprint = z.infer<typeof TaskDoneRequestFingerprintSchema>;
+
+export const TaskAuthorizationProvenanceSchema = z.strictObject({
   boardId: z.string().optional(),
+  grantId: z.string().min(1).optional(),
+  /** The peer session the board resolved from the presented capability. */
+  sessionId: z.string().min(1).optional(),
+  /** The task-board session this one authorization was spent against. */
+  targetSessionId: z.string().min(1).optional(),
   role: z.enum(['read', 'worker', 'coordinator', 'top_agent', 'human_admin', 'daemon']),
   boardEpoch: NonNegativeIntegerSchema,
   coordinatorEpoch: NonNegativeIntegerSchema,
   runtimeGeneration: PositiveIntegerSchema.nullable(),
   action: z.string().min(1),
   requestId: z.string().min(1),
+  /** Present on the durable receipt for a top-agent completion; generic task authorization may omit it. */
+  requestFingerprint: TaskDoneRequestFingerprintSchema.optional(),
 });
 export type TaskAuthorizationProvenance = z.infer<typeof TaskAuthorizationProvenanceSchema>;
 
@@ -201,25 +230,215 @@ const CreatedTaskActivitySchema = z.object({
   }),
 });
 
-const StatusTaskActivitySchema = z.object({
-  ...TaskActivityBaseShape,
-  type: z.literal('status'),
-  data: z.object({
-    from: TaskStatusSchema,
-    to: TaskStatusSchema,
-    phaseFrom: TaskPhaseSchema,
-    phaseTo: TaskPhaseSchema,
-    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
-    note: z.string().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
-    backward: z.literal(true).optional(),
-    reopened: z.literal(true).optional(),
-    approvedByHuman: z.literal(true).optional(),
-    verifiedByHuman: z.literal(true).optional(),
-    verifiedByTopAgent: z.literal(true).optional(),
-    completionClaim: z.literal(true).optional(),
-    ...TaskActivityAuthorizationShape,
-  }),
+/**
+ * The writer's positive declaration that it kept WHO acted apart from WHAT authorized it.
+ *
+ * Stamped on every human and top-agent attestation written by code that draws the distinction.
+ * It proves that the writer kept the normalized API actor classification separate from board-grant
+ * authorization when it made this record. It is not cryptographic proof that an `admin-cli` or
+ * `admin-ui` classification belongs to a particular person: those classifications remain the
+ * documented honest-client operational boundary of the shared admin bearer.
+ *
+ * Its absence — not its date — is what marks a human attestation unreliable, because the instant a
+ * fix reaches any given daemon cannot be known when the fix is written, and old code goes on
+ * writing conflated records until its host is upgraded. Trust in the writer's separation is
+ * therefore granted on positive evidence only, which fails closed.
+ */
+export const ACTOR_AUTHORITY_SPLIT_SEMANTICS = 'actor-authority-split';
+
+/**
+ * Attached at READ time to an attestation the daemon cannot vouch for, never stored.
+ *
+ * `approvedByHuman` and `verifiedByHuman` were once written for an agent holding a shared-board
+ * `mark_done` grant, because identity and authority were one predicate. An entry carrying no
+ * `attestationSemantics` was written by that code — whatever its clock said — so it asserts something
+ * that may not be true, and the flag alone gives a reader no way to notice. This says so on the entry
+ * itself. `splitLandedAt` orients a reader on when the defect was fixed; it is not a test anything
+ * applies. It never reclassifies: a marked entry is UNKNOWN, not "an agent".
+ */
+export const LegacyAttestationSchema = z.strictObject({
+  reason: z.literal('predates-actor-authority-split'),
+  splitLandedAt: InstantSchema,
 });
+export type LegacyAttestation = z.infer<typeof LegacyAttestationSchema>;
+
+const StatusTaskActivitySchema = z
+  .object({
+    ...TaskActivityBaseShape,
+    type: z.literal('status'),
+    data: z.object({
+      from: TaskStatusSchema,
+      to: TaskStatusSchema,
+      phaseFrom: TaskPhaseSchema,
+      phaseTo: TaskPhaseSchema,
+      reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
+      note: z.string().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
+      backward: z.literal(true).optional(),
+      reopened: z.literal(true).optional(),
+      approvedByHuman: z.literal(true).optional(),
+      verifiedByHuman: z.literal(true).optional(),
+      verifiedByTopAgent: z.literal(true).optional(),
+      completionClaim: z.literal(true).optional(),
+      /** Optional because pre-split records cannot have it — that absence is exactly the signal. */
+      attestationSemantics: z.literal(ACTOR_AUTHORITY_SPLIT_SEMANTICS).optional(),
+      legacyAttestation: LegacyAttestationSchema.optional(),
+      ...TaskActivityAuthorizationShape,
+    }),
+  })
+  .superRefine((entry, context) => {
+    const { data } = entry;
+    const approval = data.approvedByHuman === true;
+    const humanVerification = data.verifiedByHuman === true;
+    const topAgentVerification = data.verifiedByTopAgent === true;
+    const attestations = Number(approval) + Number(humanVerification) + Number(topAgentVerification);
+    const statusAndPhaseAgree =
+      (data.from === 'blocked' || TASK_STATUS_PHASE[data.from] === data.phaseFrom) &&
+      (data.to === 'blocked' ? data.phaseTo === data.phaseFrom : TASK_STATUS_PHASE[data.to] === data.phaseTo);
+    // `blocked` deliberately overlays a task's source phase, so a blocked live task completes as
+    // `status: blocked → done` while its semantic transition remains `phase: live → done`. A
+    // blocked destination is an in-place manual block and therefore cannot advance the phase.
+    const completion = statusAndPhaseAgree && data.phaseFrom === 'live' && data.phaseTo === 'done';
+    const approvedWorkflowMove =
+      (data.phaseFrom === 'research' && (data.phaseTo === 'design' || data.phaseTo === 'done')) ||
+      (data.phaseFrom === 'design' && data.phaseTo === 'build');
+    const usesCurrentSemantics = data.attestationSemantics === ACTOR_AUTHORITY_SPLIT_SEMANTICS;
+
+    // The semantic coherence rules below describe the positive promise made by the new writer.
+    // They cannot retroactively invalidate a v1 history that an earlier daemon really wrote: the
+    // decoder must retain those entries so the read path can label their human attestations legacy
+    // rather than turning the whole board unavailable. Top-agent receipts are not historical human
+    // attestations, though; a record making that new claim must carry its positive semantics stamp.
+    if (!usesCurrentSemantics) {
+      if (topAgentVerification) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification must declare actor-authority-split semantics',
+          path: ['data', 'attestationSemantics'],
+        });
+      }
+      if (data.legacyAttestation !== undefined && !approval && !humanVerification) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a legacy marker is only valid for an unstamped human attestation',
+          path: ['data', 'legacyAttestation'],
+        });
+      }
+      return;
+    }
+
+    if (attestations > 1) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a status entry may carry exactly one attestation kind',
+        path: ['data'],
+      });
+    }
+    if (attestations > 0 && !statusAndPhaseAgree) {
+      context.addIssue({
+        code: 'custom',
+        message: 'an attestation status and phase transition must describe the same move',
+        path: ['data'],
+      });
+    }
+    if (humanVerification && !completion) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a human verification must attest a live to done completion',
+        path: ['data', 'verifiedByHuman'],
+      });
+    }
+    if (approval && !approvedWorkflowMove) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a human approval must advance out of research or design',
+        path: ['data', 'approvedByHuman'],
+      });
+    }
+    if (topAgentVerification) {
+      const authorization = data.authorization;
+      if (!completion) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification must attest a live to done completion',
+          path: ['data', 'verifiedByTopAgent'],
+        });
+      }
+      if (
+        authorization === undefined ||
+        authorization.boardId === undefined ||
+        authorization.boardId.trim() === '' ||
+        authorization.grantId === undefined ||
+        authorization.grantId.trim() === '' ||
+        authorization.sessionId === undefined ||
+        authorization.sessionId.trim() === '' ||
+        authorization.targetSessionId === undefined ||
+        authorization.targetSessionId.trim() === '' ||
+        authorization.role !== 'top_agent' ||
+        authorization.action !== 'mark_done' ||
+        authorization.requestId.trim() === '' ||
+        authorization.requestFingerprint === undefined
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification needs its exact mark_done board authorization receipt',
+          path: ['data', 'authorization'],
+        });
+      }
+      if (
+        authorization !== undefined &&
+        (!entry.actor.startsWith('peer:') || entry.actor !== `peer:${authorization.sessionId}`)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent verification actor must match the authorized peer session',
+          path: ['actor'],
+        });
+      }
+      const fingerprint = authorization?.requestFingerprint;
+      if (
+        fingerprint !== undefined &&
+        (fingerprint.reason !== data.reason ||
+          (fingerprint.action === 'phase' ? data.note !== undefined : fingerprint.note !== data.note))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a top-agent authorization receipt must describe this exact completion request',
+          path: ['data', 'authorization', 'requestFingerprint'],
+        });
+      }
+    }
+    if ((approval || humanVerification) && data.authorization !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a human attestation cannot carry board authorization evidence',
+        path: ['data', 'authorization'],
+      });
+    }
+    if ((approval || humanVerification) && entry.actor.startsWith('peer:')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a current human attestation cannot be attributed to a peer actor',
+        path: ['actor'],
+      });
+    }
+    if (attestations === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'attestation semantics require an attestation claim',
+        path: ['data', 'attestationSemantics'],
+      });
+    }
+    if (
+      data.legacyAttestation !== undefined &&
+      ((!approval && !humanVerification) || data.attestationSemantics !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a legacy marker is only valid for an unstamped human attestation',
+        path: ['data', 'legacyAttestation'],
+      });
+    }
+  });
 
 const NoteTaskActivityDataSchema = z.object({
   text: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),

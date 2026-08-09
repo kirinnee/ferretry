@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  ACTOR_AUTHORITY_SPLIT_SEMANTICS,
   MAX_TASK_CLARIFICATIONS,
   MAX_TASK_DEPENDENCIES,
   MAX_TASK_FILES,
@@ -11,10 +12,22 @@ import {
   type TaskLinks,
 } from '@ferretry/protocol';
 import should from 'should';
+import { markLegacyAttestations } from '../../../src/lib/tasks/task-attestation.ts';
 import { applyTaskAction, applyLink, createTask, requireTaskEntry } from '../../../src/lib/tasks/task-reducer.ts';
 import type { TaskEntry, TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 import { emptyTaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
-import { LATER_INSTANT, SESSION_ID, agent, context, human, shouldRefuse, snapshotOf, task } from './fixtures.ts';
+import {
+  LATER_INSTANT,
+  MARK_DONE_GRANT,
+  SESSION_ID,
+  agent,
+  context,
+  human,
+  shouldRefuse,
+  snapshotOf,
+  task,
+  topAgent,
+} from './fixtures.ts';
 
 const id = (value: string): TaskId => value as TaskId;
 
@@ -284,6 +297,135 @@ describe('applyTaskAction — status and phase', () => {
     // Assert
     should(outcome.entry.task.phase).equal('done');
     should(lastActivity(outcome.entry).data).have.property('verifiedByHuman', true);
+    should(lastActivity(outcome.entry).data).not.have.property('verifiedByTopAgent');
+    // The positive stamp is what earns this record its trust on read; a human attestation without
+    // it reads as unreliable no matter when it was written.
+    should(lastActivity(outcome.entry).data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
+    should(markLegacyAttestations([lastActivity(outcome.entry)])[0]?.data).not.have.property('legacyAttestation');
+  });
+
+  it('should let a human complete a blocked live task and attest the phase transition', () => {
+    // A manual block overlays status only. The workflow is still live, so clearing it directly by
+    // completing the task must validate and journal `phase: live → done`, not insist that status
+    // had already been separately restored to live.
+    // Arrange
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'blocked', statusReason: 'waiting on validation' }));
+
+    // Act
+    const outcome = act(
+      snapshot,
+      'F1',
+      { action: 'status', status: 'done', reason: 'validated after unblock' },
+      human(),
+    );
+
+    // Assert
+    const recorded = lastActivity(outcome.entry);
+    should(outcome.entry.task).containEql({ phase: 'done', status: 'done' });
+    should(recorded.data).containEql({
+      from: 'blocked',
+      to: 'done',
+      phaseFrom: 'live',
+      phaseTo: 'done',
+      verifiedByHuman: true,
+      attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+    });
+  });
+
+  it('should record a board-granted agent as the top agent, with the grant it acted under', () => {
+    // Arrange — the actor shape the task mount produces after a `mark_done` authorization.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+
+    // Act
+    const outcome = act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, topAgent());
+
+    // Assert
+    should(outcome.entry.task.phase).equal('done');
+    const recorded = lastActivity(outcome.entry);
+    // POSITIVE on both halves: which kind of attestation, and which grant produced it. A reader
+    // never has to infer either from the absence of the other flag.
+    should(recorded.data).have.property('verifiedByTopAgent', true);
+    should(recorded.data).have.property('authorization', MARK_DONE_GRANT);
+    should(recorded.data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
+    // The whole defect: a peer completion journalled as a human verification.
+    should(recorded.data).not.have.property('verifiedByHuman');
+    should(recorded.actor).equal(`peer:${SESSION_ID}`);
+  });
+
+  it('should let a top agent complete a blocked live task with its exact receipt', () => {
+    // Arrange
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'blocked', statusReason: 'awaiting final check' }));
+
+    // Act
+    const outcome = act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, topAgent());
+
+    // Assert
+    const recorded = lastActivity(outcome.entry);
+    should(outcome.entry.task).containEql({ phase: 'done', status: 'done' });
+    should(recorded.data).containEql({
+      from: 'blocked',
+      to: 'done',
+      phaseFrom: 'live',
+      phaseTo: 'done',
+      verifiedByTopAgent: true,
+      authorization: MARK_DONE_GRANT,
+      attestationSemantics: ACTOR_AUTHORITY_SPLIT_SEMANTICS,
+    });
+  });
+
+  it('should refuse malformed or mismatched top-agent evidence without writing a completion', () => {
+    // Arrange — this is the reducer boundary, so a caller can hand it an object that never travelled
+    // through the task-board mount. It must validate the receipt rather than trusting its presence.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+    const malformed = agent({
+      boardAuthorizedForSession: SESSION_ID,
+      markDoneAuthorization: { ...MARK_DONE_GRANT, role: 'read', action: 'note' },
+    });
+
+    // Act + Assert
+    shouldRefuse('approval-required', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, malformed),
+    );
+    shouldRefuse('approval-required', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'a different click' }, topAgent()),
+    );
+    should(snapshot.tasks[0]?.task.phase).equal('live');
+    should(snapshot.tasks[0]?.activity).have.length(1);
+  });
+
+  it('should refuse live to done to an agent whose grant did not name this session', () => {
+    // Arrange — authorized for a DIFFERENT session, so the grant proves nothing here.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+    const elsewhere = agent({ boardAuthorizedForSession: 'session-beta' });
+
+    // Act + Assert
+    shouldRefuse('approval-required', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'not mine to close' }, elsewhere),
+    );
+  });
+
+  it.each([
+    {
+      name: 'reopening shipped work',
+      seed: { phase: 'done', status: 'done' },
+      action: { action: 'reopen', reason: 'regressed', ask: 'fix it', source: 'human:cli' },
+    },
+    {
+      name: 'advancing past design',
+      seed: { workflow: 'design-first', phase: 'design', status: 'designed' },
+      action: { action: 'phase', phase: 'build', reason: 'design is settled' },
+    },
+    {
+      name: 'advancing past research',
+      seed: { workflow: 'research-first', phase: 'research', status: 'researched' },
+      action: { action: 'phase', phase: 'design', reason: 'research is done' },
+    },
+  ] as const)('should refuse $name to a mark-done grant', ({ seed, action }) => {
+    // Arrange
+    const snapshot = snapshotOf(task(seed));
+
+    // Act + Assert — the grant authorizes live → done, and that is the whole of it.
+    shouldRefuse('approval-required', () => act(snapshot, 'F1', action, topAgent()));
   });
 
   it('should require human approval to leave a design phase', () => {
@@ -305,6 +447,124 @@ describe('applyTaskAction — status and phase', () => {
 
     // Assert
     should(lastActivity(outcome.entry).data).have.property('approvedByHuman', true);
+    // The other attestation the old predicate could falsify, so it carries the stamp too.
+    should(lastActivity(outcome.entry).data).have.property('attestationSemantics', ACTOR_AUTHORITY_SPLIT_SEMANTICS);
+  });
+
+  it.each([
+    { workflow: 'research-first' as const, phase: 'research' as const, status: 'researched' as const },
+    { workflow: 'design-first' as const, phase: 'design' as const, status: 'designed' as const },
+  ])(
+    'should not mistake clearing a blocked $phase phase for human workflow approval',
+    ({ workflow, phase, status }) => {
+      // Arrange — a same-phase status action only clears the manual block; it does not move through a
+      // human gate, so it must not mint the durable approval attestation.
+      const snapshot = snapshotOf(task({ workflow, phase, status: 'blocked', statusReason: 'waiting on input' }));
+
+      // Act
+      const outcome = act(snapshot, 'F1', { action: 'status', status, reason: 'input arrived' }, human());
+
+      // Assert
+      const recorded = lastActivity(outcome.entry);
+      should(recorded.data).not.have.property('approvedByHuman');
+      should(recorded.data).not.have.property('attestationSemantics');
+    },
+  );
+
+  it('should replay the exact latest peer completion without another activity', () => {
+    // Arrange
+    const action = { action: 'status', status: 'done', reason: 'shipped it' } as const;
+    const completed = act(snapshotOf(task({ phase: 'live', status: 'live' })), 'F1', action, topAgent());
+    const retryingActor = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' } as const,
+      },
+    };
+
+    // Act
+    const replayed = act(completed.snapshot, 'F1', action, retryingActor);
+
+    // Assert — the exact same snapshot object returns from the reducer transaction; no history is appended.
+    should(replayed.snapshot).equal(completed.snapshot);
+    should(replayed.entry).equal(completed.entry);
+    should(replayed.entry.activity).have.length(completed.entry.activity.length);
+  });
+
+  it('should refuse an incoherent peer replay identity before applying any transition', () => {
+    // Arrange — direct reducer callers must not turn a mismatched identity/body pair into an
+    // ordinary completion attempt, even before a durable receipt exists to compare it against.
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+    const malformedIdentity = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'a different click' } as const,
+      },
+    };
+
+    // Act + Assert
+    shouldRefuse('invalid', () =>
+      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, malformedIdentity),
+    );
+    should(snapshot.tasks[0]?.task.phase).equal('live');
+    should(snapshot.tasks[0]?.activity).have.length(1);
+  });
+
+  it('should refuse a reused peer completion id when its body or lifecycle no longer matches', () => {
+    // Arrange
+    const completion = act(
+      snapshotOf(task({ phase: 'live', status: 'live' })),
+      'F1',
+      { action: 'status', status: 'done', reason: 'shipped it' },
+      topAgent(),
+    );
+    const sameIdDifferentBody = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'changed body' } as const,
+      },
+    };
+    const reopened = act(
+      completion.snapshot,
+      'F1',
+      { action: 'reopen', reason: 'regressed', ask: 'fix it', source: 'human:cli' },
+      human(),
+    );
+    const staleRetry = {
+      ...topAgent(),
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' } as const,
+      },
+    };
+    const otherActorSameId = {
+      ...topAgent(),
+      id: 'another-peer',
+      sessionId: 'session-beta',
+      boardAuthorizedForSession: SESSION_ID,
+      doneRequestIdentity: {
+        requestId: 'click-1',
+        fingerprint: { action: 'status', status: 'done', reason: 'shipped it' } as const,
+      },
+    };
+
+    // Act + Assert
+    shouldRefuse('transition', () =>
+      act(completion.snapshot, 'F1', { action: 'status', status: 'done', reason: 'changed body' }, sameIdDifferentBody),
+    );
+    shouldRefuse('transition', () =>
+      act(reopened.snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, staleRetry),
+    );
+    shouldRefuse('transition', () =>
+      act(completion.snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, otherActorSameId),
+    );
+    should(completion.entry.task.phase).equal('done');
+    should(completion.entry.activity).have.length(2);
+    should(reopened.entry.task.phase).equal('build');
+    should(reopened.entry.activity).have.length(4);
   });
 
   it('should allow a rewind and flag it as backward', () => {

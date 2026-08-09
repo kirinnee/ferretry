@@ -1,9 +1,9 @@
-import type { Task, TaskErrorCode, TaskId } from '@ferretry/protocol';
+import type { Task, TaskAuthorizationProvenance, TaskErrorCode, TaskId } from '@ferretry/protocol';
 import should from 'should';
 import { TaskError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskActor } from '../../../src/lib/tasks/task-policy.ts';
 import type { TaskMutationContext } from '../../../src/lib/tasks/task-reducer.ts';
-import type { TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
+import { TASK_SNAPSHOT_SCHEMA_VERSION, type TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 
 const INSTANT = '2026-07-30T12:00:00Z';
 export const LATER_INSTANT = '2026-07-30T12:05:00Z';
@@ -35,7 +35,7 @@ export const task = (overrides: Partial<Task> = {}): Task => ({
 
 /** A board holding exactly these tasks, each with the minimum history the schema accepts. */
 export const snapshotOf = (...tasks: readonly Task[]): TaskSnapshot => ({
-  v: 1,
+  v: TASK_SNAPSHOT_SCHEMA_VERSION,
   tasks: tasks.map(record => ({
     task: record,
     activity: [
@@ -70,6 +70,29 @@ export const agent = (overrides: Partial<TaskActor> = {}): TaskActor => ({
 });
 
 export const human = (): TaskActor => ({ kind: 'human', id: 'operator', name: 'Operator', sessionId: null });
+
+/** The grant a board resolves for a top agent, exactly as the task mount hands it to the reducer. */
+export const MARK_DONE_GRANT: TaskAuthorizationProvenance = {
+  boardId: 'board-1',
+  grantId: 'grant-1',
+  sessionId: SESSION_ID,
+  targetSessionId: SESSION_ID,
+  role: 'top_agent',
+  boardEpoch: 4,
+  coordinatorEpoch: 2,
+  runtimeGeneration: 7,
+  action: 'mark_done',
+  requestId: 'click-1',
+  requestFingerprint: { action: 'status', status: 'done', reason: 'shipped it' },
+};
+
+/** An actor as the task mount leaves it once a shared-board `mark_done` grant is resolved. */
+export const topAgent = (sessionId: string = SESSION_ID): TaskActor => ({
+  ...agent({ id: `peer:${sessionId}`, sessionId }),
+  boardAuthorizedForSession: sessionId,
+  markDoneAuthorization:
+    sessionId === SESSION_ID ? MARK_DONE_GRANT : { ...MARK_DONE_GRANT, sessionId, targetSessionId: sessionId },
+});
 
 export const context = (actor: TaskActor = agent(), at = LATER_INSTANT): TaskMutationContext => ({
   actor,

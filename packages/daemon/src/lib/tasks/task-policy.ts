@@ -1,5 +1,13 @@
+import { TaskAuthorizationProvenanceSchema } from '@ferretry/protocol';
 import type { Task, TaskId, TaskPhase, TaskStatus, TaskWorkflow } from '@ferretry/protocol';
+import type { TaskActionRequest, TaskAuthorizationProvenance, TaskDoneRequestFingerprint } from '@ferretry/protocol';
 import { TaskError } from './task-error.ts';
+
+/** The actor-scoped identity a peer presents when retrying one `live → done` decision. */
+export interface TaskDoneRequestIdentity {
+  readonly requestId: string;
+  readonly fingerprint: TaskDoneRequestFingerprint;
+}
 
 export interface TaskActor {
   readonly kind: 'agent' | 'human' | 'daemon';
@@ -8,9 +16,111 @@ export interface TaskActor {
   readonly sessionId: string | null;
   /** Set only after daemon-side task-board authorization for this target. */
   readonly boardAuthorizedForSession?: string;
-  /** A task-board grant explicitly authorized this live → done transition. */
-  readonly mayMarkDone?: boolean;
+  /** Present for a peer completion carrying a nonblank request id, including a retry after it is done. */
+  readonly doneRequestIdentity?: TaskDoneRequestIdentity;
+  /**
+   * The grant that authorized this actor's `live → done`, as the board resolved it.
+   *
+   * The whole record, never a boolean. A flag can say a permission existed and can never say WHICH,
+   * so a completion journalled from a flag is an attestation nobody can audit against the board it
+   * came from. This carries the board, the role, the epoch triple and the caller's own request id,
+   * which is exactly the provenance the activity record persists — so the fact written down and the
+   * fact the authorizer established are the same object rather than two things that agree until
+   * they do not.
+   */
+  readonly markDoneAuthorization?: TaskAuthorizationProvenance;
 }
+
+/** The canonical, parsed shape of a completion request that may be retried under one request id. */
+export const taskDoneRequestFingerprint = (request: TaskActionRequest): TaskDoneRequestFingerprint | undefined => {
+  if (request.action === 'phase' && request.phase === 'done') {
+    return { action: 'phase', phase: 'done', reason: request.reason };
+  }
+  if (request.action === 'status' && request.status === 'done') {
+    return {
+      action: 'status',
+      status: 'done',
+      reason: request.reason,
+      ...(request.note === undefined ? {} : { note: request.note }),
+    };
+  }
+  return undefined;
+};
+
+/** Equal parsed requests are the same logical completion even when their original JSON bytes differed. */
+export const sameTaskDoneRequestFingerprint = (
+  left: TaskDoneRequestFingerprint,
+  right: TaskDoneRequestFingerprint,
+): boolean => {
+  if (left.action !== right.action || left.reason !== right.reason) return false;
+  if (left.action === 'phase' && right.action === 'phase') return left.phase === right.phase;
+  if (left.action === 'status' && right.action === 'status')
+    return left.status === right.status && left.note === right.note;
+  return false;
+};
+
+/**
+ * The one structurally complete authorization receipt a peer may use for `live → done`.
+ *
+ * This is deliberately runtime validation rather than a type-only check: reducer callers receive
+ * ordinary objects, so a malformed direct context must fail closed just like a malformed wire record.
+ */
+export const markDoneAuthorizationFor = (
+  actor: TaskActor,
+  expectedRequest?: TaskDoneRequestFingerprint,
+  expectedTargetSession?: string,
+): TaskAuthorizationProvenance | undefined => {
+  const actorSession = actor.sessionId?.trim();
+  const authorizedSession = actor.boardAuthorizedForSession?.trim();
+  const targetSession = expectedTargetSession?.trim();
+  const suppliedRequestId = actor.doneRequestIdentity?.requestId;
+  if (
+    actor.kind !== 'agent' ||
+    actorSession === undefined ||
+    actorSession === '' ||
+    authorizedSession === undefined ||
+    authorizedSession === ''
+  ) {
+    return undefined;
+  }
+  const parsed = TaskAuthorizationProvenanceSchema.safeParse(actor.markDoneAuthorization);
+  if (!parsed.success) return undefined;
+  const authorization = parsed.data;
+  if (
+    authorization.boardId === undefined ||
+    authorization.boardId.trim() === '' ||
+    authorization.grantId === undefined ||
+    authorization.grantId.trim() === '' ||
+    authorization.sessionId === undefined ||
+    authorization.sessionId.trim() === '' ||
+    authorization.targetSessionId === undefined ||
+    authorization.targetSessionId.trim() === '' ||
+    authorization.role !== 'top_agent' ||
+    authorization.action !== 'mark_done' ||
+    authorization.requestId.trim() === '' ||
+    authorization.requestFingerprint === undefined ||
+    authorization.sessionId !== actorSession ||
+    authorization.targetSessionId !== authorizedSession ||
+    (targetSession !== undefined && authorization.targetSessionId !== targetSession)
+  ) {
+    return undefined;
+  }
+  if (
+    suppliedRequestId !== undefined &&
+    (typeof suppliedRequestId !== 'string' ||
+      suppliedRequestId.trim() === '' ||
+      authorization.requestId !== suppliedRequestId.trim())
+  ) {
+    return undefined;
+  }
+  if (
+    expectedRequest !== undefined &&
+    !sameTaskDoneRequestFingerprint(authorization.requestFingerprint, expectedRequest)
+  ) {
+    return undefined;
+  }
+  return authorization;
+};
 
 const freezePath = (phases: readonly TaskPhase[]): readonly TaskPhase[] => Object.freeze([...phases]);
 
@@ -64,7 +174,23 @@ export const hasReopenContext = (ask: string, source: string): boolean =>
 export const canActorWriteSession = (actor: TaskActor, sessionId: string): boolean =>
   actor.kind !== 'agent' || actor.sessionId === sessionId || actor.boardAuthorizedForSession === sessionId;
 
-export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human' || actor.mayMarkDone === true;
+/**
+ * WHO the actor is. A board grant is authorization, never identity, so it is deliberately not read
+ * here: an agent holding `mark_done` is still an agent, and a record that called it human would be
+ * answering "did a human verify this?" with a fact nobody established.
+ */
+export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human';
+
+/**
+ * WHAT the actor may do to a live task, which is a different question from who it is.
+ *
+ * A `mark_done` grant authorizes exactly one move — `live → done` — and this is the only gate that
+ * consults it. Every other human-only gate keeps asking `isHumanActor`, so a grant can never reopen
+ * shipped work and never approve its way past research or design, whatever else has changed about
+ * the phase a request finds by the time the board applies it.
+ */
+export const canActorVerifyTaskDone = (actor: TaskActor, expectedRequest?: TaskDoneRequestFingerprint): boolean =>
+  isHumanActor(actor) || markDoneAuthorizationFor(actor, expectedRequest) !== undefined;
 
 /** Claims document coordination intent; another task claiming the same path never locks a write. */
 export const canAddAdvisoryFileClaim = (_graph: readonly Task[], _taskId: TaskId, _path: string): boolean => true;
@@ -109,6 +235,8 @@ export const assertTransitionReason = (reason: string | undefined): asserts reas
 
 export interface PhaseTransitionOptions {
   readonly human: boolean;
+  /** Whether this actor may sign off `live → done`: a human, or an agent holding a board grant. */
+  readonly verifiesDone: boolean;
   readonly reopen: boolean;
 }
 
@@ -137,7 +265,7 @@ export const assertTaskPhaseTransition = (task: Task, to: TaskPhase, options: Ph
     }
     return;
   }
-  if (requiresHumanLiveVerification(task, to) && !options.human) {
+  if (requiresHumanLiveVerification(task, to) && !options.verifiesDone) {
     throw new TaskError('approval-required', `${task.id} cannot move live → done without human verification`);
   }
   if (requiresHumanWorkflowApproval(task, to) && !options.human) {

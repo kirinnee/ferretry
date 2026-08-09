@@ -1,4 +1,5 @@
 import {
+  FY_REQUEST_ID_HEADER,
   type FleetTaskListResponse,
   type ScopedTaskDetailResponse,
   type ScopedTaskSummary,
@@ -22,11 +23,13 @@ import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from 
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  markLegacyAttestations,
   type TaskActor,
   type TaskEntry,
   TaskError,
   TaskStateUnavailableError,
   taskBlockedBy,
+  taskDoneRequestFingerprint,
 } from '../../tasks/index.ts';
 import { readTaskBoardFleet } from '../../task-boards/fleet-read.ts';
 import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError, type TaskBoardTaskActionAuthorizer } from './task-boards.ts';
@@ -434,7 +437,9 @@ async function detail(subsystem: TaskSubsystem, context: RouteContext): Promise<
   const board = boardFor(subsystem, sessionId);
   const read = await board.list().catch(reraise);
   const entry = await board.detail(taskId).catch(reraise);
-  const activity: readonly TaskActivity[] = entry.activity.filter(event => event.seq > after);
+  // Marked on the way OUT, so a reader of an old attestation learns from the entry that the daemon
+  // could not tell a human from a granted agent when it was written. Nothing on disk is touched.
+  const activity: readonly TaskActivity[] = markLegacyAttestations(entry.activity.filter(event => event.seq > after));
   const response: ScopedTaskDetailResponse = {
     sessionId,
     task: scopedView(
@@ -501,6 +506,36 @@ async function create(subsystem: TaskSubsystem, context: RouteContext): Promise<
   );
 }
 
+/**
+ * The caller's own id for this completion, which the authorization record is keyed by.
+ *
+ * Required, and only here. A provenance record whose request id the daemon invented would identify
+ * nothing: the point of the field is that the SAME click, retried, names the same logical decision,
+ * so an auditor can tell one completion from two. Every other actor on this route is unaffected —
+ * a human's `live → done` writes no authorization record and is asked for nothing.
+ */
+function markDoneRequestId(context: RouteContext): string {
+  const value = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+  if (value === '')
+    throw new ApiError(
+      400,
+      `marking a shared-board task done must carry ${FY_REQUEST_ID_HEADER}: the authorization record is keyed by the caller's own id for this completion`,
+      'missing_request_id',
+    );
+  return value;
+}
+
+/** Whether this exact peer and caller-owned id already have a durable top-agent completion receipt. */
+function hasPeerCompletionReceipt(entry: TaskEntry, actorId: string, requestId: string): boolean {
+  return entry.activity.some(
+    activity =>
+      activity.type === 'status' &&
+      activity.actor === actorId &&
+      activity.data.verifiedByTopAgent === true &&
+      activity.data.authorization?.requestId === requestId,
+  );
+}
+
 /** Applies one action to one task. */
 async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
@@ -508,11 +543,26 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
   const request = await parseBody(context.request, TaskActionRequestSchema);
   const board = boardFor(subsystem, sessionId);
   let actor = taskActor(context.actor);
-  const requestedDone =
-    request.action === 'phase' ? request.phase === 'done' : request.action === 'status' && request.status === 'done';
-  if (actor.kind === 'agent' && requestedDone) {
+  const completionFingerprint = taskDoneRequestFingerprint(request);
+  if (actor.kind === 'agent' && completionFingerprint !== undefined) {
+    const requestId = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+    if (requestId !== '') {
+      // The reducer reads this identity inside the board transaction. It is deliberately separate
+      // from a fresh board grant: an exact response-loss retry must compare to its durable receipt,
+      // not re-authorize a decision that already committed.
+      actor = { ...actor, doneRequestIdentity: { requestId, fingerprint: completionFingerprint } };
+    }
     const current = await board.detail(taskId).catch(reraise);
-    if (current.task.phase === 'live') {
+    // A peer can retry a response it lost only after the durable completion has made this task
+    // `done`. Its own board writes are already allowed, but the peer named by that exact durable
+    // receipt must reacquire scope to another member's board before the reducer can replay it.
+    // Looking up the receipt first also preserves the ordinary 403 for a different peer recycling
+    // someone else's request id. A live request always needs the grant; only that path spends it
+    // into a new authorization record.
+    const needsBoardScope =
+      current.task.phase === 'live' ||
+      (requestId !== '' && actor.sessionId !== sessionId && hasPeerCompletionReceipt(current, actor.id, requestId));
+    if (needsBoardScope) {
       const capability = headerValue(context.request, BOARD_CAPABILITY_HEADER)?.trim();
       if (capability === undefined || capability === '')
         throw new ApiError(
@@ -526,10 +576,40 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
           'task-board authorization is unavailable; refusing to mark the task done',
           'unavailable',
         );
-      await subsystem.boardActions
+      const grant = await subsystem.boardActions
         .authorize({ targetSessionId: sessionId, capability, action: 'mark_done' })
         .catch(reraiseTaskBoardError);
-      actor = { ...actor, boardAuthorizedForSession: sessionId, mayMarkDone: true };
+      // The session header says WHO the caller claims to be, while the capability resolves the
+      // peer the board actually authorized. They must agree: otherwise a holder of one peer's
+      // capability could complete work under a different peer's journal identity, leaving the
+      // durable actor and the authorization evidence contradicting each other.
+      if (grant.sessionId !== actor.sessionId)
+        throw new ApiError(
+          403,
+          'the task-board capability belongs to a different peer than the completion actor',
+          'forbidden',
+        );
+      actor = {
+        ...actor,
+        boardAuthorizedForSession: sessionId,
+        ...(current.task.phase === 'live'
+          ? {
+              markDoneAuthorization: {
+                boardId: grant.boardId,
+                grantId: grant.grantId,
+                sessionId: grant.sessionId,
+                targetSessionId: sessionId,
+                role: grant.role,
+                boardEpoch: grant.boardEpoch,
+                coordinatorEpoch: grant.coordinatorEpoch,
+                runtimeGeneration: grant.runtimeGeneration,
+                action: 'mark_done',
+                requestId: markDoneRequestId(context),
+                requestFingerprint: completionFingerprint,
+              },
+            }
+          : {}),
+      };
     }
   }
   const entry = await board.act(taskId, request, actor).catch(reraise);

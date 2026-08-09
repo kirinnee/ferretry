@@ -7,6 +7,7 @@ import {
   emptyTaskSnapshot,
   parseTaskSnapshot,
   serializeTaskSnapshot,
+  TASK_SNAPSHOT_SCHEMA_VERSION,
   validateTaskEntry,
   validateTaskSnapshot,
   type TaskEntry,
@@ -63,7 +64,7 @@ describe('task snapshot decoding', () => {
     // Assert
     should(actual.fatal).be.false();
     should(actual.parseErrors).deepEqual([]);
-    should(actual.snapshot).deepEqual(input);
+    should(actual.snapshot).deepEqual({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry()] });
     should(actual.snapshot).not.equal(input);
     should(actual.snapshot.tasks[0]).not.equal(input.tasks[0]);
   });
@@ -113,6 +114,73 @@ describe('task snapshot decoding', () => {
     should(actual.parseErrors[0]?.detail).containEql('expected gap-free seq 2');
   });
 
+  it('should decode prior-release blocked human attestations without dropping later history', () => {
+    // Previous daemons wrote both of these truthful-to-their-model shapes without the new positive
+    // semantics stamp. They are evidence, not corruption: dropping the first would also make the
+    // following sequence look gapped and turn a readable board into an unavailable one.
+    // Arrange
+    const blockedClear = {
+      v: 1,
+      seq: 2,
+      time: '2026-07-30T18:00:00.000Z',
+      actor: 'admin-cli',
+      actorName: null,
+      type: 'status',
+      data: {
+        from: 'blocked',
+        to: 'researched',
+        phaseFrom: 'research',
+        phaseTo: 'research',
+        reason: 'unblocked',
+        approvedByHuman: true,
+      },
+    };
+    const blockedCompletion = {
+      v: 1,
+      seq: 2,
+      time: '2026-07-30T18:00:00.000Z',
+      actor: 'admin-cli',
+      actorName: null,
+      type: 'status',
+      data: {
+        from: 'blocked',
+        to: 'done',
+        phaseFrom: 'live',
+        phaseTo: 'done',
+        reason: 'validated after unblock',
+        verifiedByHuman: true,
+      },
+    };
+    const input = {
+      v: 1,
+      tasks: [
+        {
+          task: task({ workflow: 'research-first', phase: 'research', status: 'blocked', statusReason: 'waiting' }),
+          activity: [activity(1), blockedClear],
+        },
+        {
+          task: task({
+            id: 'F2' as Task['id'],
+            phase: 'done',
+            status: 'done',
+            statusReason: 'validated after unblock',
+          }),
+          activity: [activity(1), blockedCompletion],
+        },
+      ],
+    };
+
+    // Act
+    const actual = decodeTaskSnapshot(input);
+
+    // Assert — v1 remains a readable migration input; the current reader normalizes the outer
+    // container to v2 only after preserving every actual history entry.
+    should(actual).containEql({ fatal: false, parseErrors: [] });
+    should(actual.snapshot.v).equal(TASK_SNAPSHOT_SCHEMA_VERSION);
+    should(actual.snapshot.tasks[0]?.activity[1]).deepEqual(blockedClear);
+    should(actual.snapshot.tasks[1]?.activity[1]).deepEqual(blockedCompletion);
+  });
+
   it('should keep a task whose history is not a list at all, reporting the loss', () => {
     // Arrange
     const input = { v: 1, tasks: [{ task: task(), activity: 'gone' }] };
@@ -155,7 +223,7 @@ describe('task snapshot decoding', () => {
 describe('task snapshot validation and serialization', () => {
   it('should round-trip the pure snapshot without session or board placement fields', () => {
     // Arrange
-    const input: TaskSnapshot = { v: 1, tasks: [entry()] };
+    const input: TaskSnapshot = { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry()] };
 
     // Act
     const serialized = serializeTaskSnapshot(input);
@@ -193,10 +261,18 @@ describe('task snapshot validation and serialization', () => {
 
   it('should reject duplicate task IDs in an outgoing snapshot', () => {
     // Arrange
-    const input: TaskSnapshot = { v: 1, tasks: [entry(), entry()] };
+    const input: TaskSnapshot = { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry(), entry()] };
 
     // Act + Assert
     should(() => validateTaskSnapshot(input)).throw(TaskError);
     should(() => validateTaskSnapshot(input)).throw(/exists more than once/u);
+  });
+
+  it('should refuse to serialize the legacy outer version after migration', () => {
+    // The v1 reader is a migration input only. Letting a current writer preserve it would reopen
+    // the rollback path that strips a receipt an older Zod schema does not know.
+    const legacy = { v: 1, tasks: [] } as unknown as TaskSnapshot;
+
+    should(() => validateTaskSnapshot(legacy)).throw(/schema version is unknown/u);
   });
 });
