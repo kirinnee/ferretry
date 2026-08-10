@@ -307,6 +307,9 @@ describe('session transcript message tokens', () => {
     const unsafe = Buffer.alloc(24);
     unsafe.writeBigUInt64BE(1n, 0);
     unsafe.writeBigUInt64BE(2n ** 63n, 8);
+    const unsafeBlock = Buffer.alloc(24);
+    unsafeBlock.writeBigUInt64BE(1n, 0);
+    unsafeBlock.writeBigUInt64BE(2n ** 63n, 16);
     const versionTwo = Buffer.alloc(24);
     versionTwo.writeBigUInt64BE(2n, 0);
 
@@ -318,6 +321,7 @@ describe('session transcript message tokens', () => {
     should(readSessionTranscriptMessageCursor(`c1.${'*'.repeat(32)}.${tag}`)).be.undefined();
     should(readSessionTranscriptMessageCursor(`c1.${'A'.repeat(32)}.${'*'.repeat(43)}`)).be.undefined();
     should(readSessionTranscriptMessageCursor(`c1.${unsafe.toString('base64url')}.${tag}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c1.${unsafeBlock.toString('base64url')}.${tag}`)).be.undefined();
     should(readSessionTranscriptMessageCursor(`c1.${versionTwo.toString('base64url')}.${tag}`)).be.undefined();
   });
 });
