@@ -26,6 +26,7 @@ import type {
   ProjectInfo,
   ProposalView,
   SecretList,
+  SessionSearchTask,
   SessionView,
   TaskLive,
   TaskStatus,
@@ -34,7 +35,14 @@ import type {
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
-import { DAEMON_CAPABILITIES, SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
+import {
+  DAEMON_CAPABILITIES,
+  matchesSessionSearchQuery,
+  SECRET_SCHEMA_VERSION,
+  SESSION_FILE_INDEX_VERSION,
+  sessionSearchTaskHaystack,
+  TASK_SCHEMA_VERSION,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -1884,7 +1892,22 @@ const HARNESS_ATTACHMENTS = [
  * real fetch (which the screenshot pass aborts if it leaves the loopback
  * origin). Harness-only — nothing in `src/` patches a global.
  */
-const HARNESS_FS_LISTINGS: Readonly<Record<string, unknown>> = {
+interface HarnessFsEntry {
+  readonly name: string;
+  readonly type: 'dir' | 'file' | 'symlink';
+  readonly size?: number;
+  readonly ignored?: boolean;
+  readonly denied?: boolean;
+  readonly escapes?: boolean;
+}
+
+/**
+ * Typed rather than `unknown` because the search FILE INDEX is derived from this
+ * same tree (`HARNESS_SEARCH_FILE_INDEX`). Two hand-written fixtures would let
+ * the Files tab and the search index disagree about what this session contains,
+ * and a capture of a disagreement proves nothing about the product.
+ */
+const HARNESS_FS_LISTINGS: Readonly<Record<string, { readonly entries: readonly HarnessFsEntry[] }>> = {
   '': {
     entries: [
       { name: 'docs', type: 'dir' },
@@ -2038,68 +2061,146 @@ const HARNESS_FLEET_ENVIRONMENT = {
  * harness's own aborted request, reviewed as if the product had produced it.
  */
 /**
- * The task board the current-session search reads, as its two routes.
+ * The task board the current-session search reads — ONE list of FULL tasks.
  *
- * Its own record rather than more lines inside `HARNESS_DAEMON_READS`: the
- * search reads a LIST and then one DETAIL per row, and the detail carries the
- * description, original ask and clarifications a summary deliberately drops —
- * which is precisely what item #6 searches and therefore what a capture of it
- * has to contain. Built from the existing `TASKS` so the rows a screenshot
- * shows are the same rows every other task card in this harness shows.
+ * The prose (description, original ask, clarifications) never reaches a client:
+ * `/tasks` answers SUMMARIES, and the daemon decides matching. So this fixture
+ * holds the whole task and PROJECTS the summary from it, exactly as the daemon
+ * does, and answers `?q=` with the protocol's own haystack and matcher rather
+ * than a second rule invented here.
+ *
+ * C3 is the load-bearing row. Its summary contains no `port` anywhere — not its
+ * title, not its number — and only its original ask says `ported`. If a reader
+ * ever went back to matching locally against summaries, C3 disappears from the
+ * `port` capture, so the results assertion fails instead of passing for the
+ * wrong reason. F12's title matches `port` outright, which is why C3 rather
+ * than F12 is the proof that server-side prose matching is what answered.
+ *
+ * Built from the existing `TASKS` so the rows a screenshot shows are the same
+ * rows every other task card in this harness shows.
  */
-const HARNESS_SEARCH_PROSE: Readonly<Record<string, { readonly ask: string; readonly clarification: string }>> = {
+const HARNESS_SEARCH_PROSE: Readonly<
+  Record<string, { readonly ask: string; readonly clarifications: readonly string[] }>
+> = {
   F12: {
     ask: 'Finish porting the PWA feature components so the workspace stops falling back.',
-    clarification: 'Include the side-pane surfaces, not just the transcript.',
+    clarifications: ['Include the side-pane surfaces, not just the transcript.'],
   },
   B7: {
     ask: 'The transcript jumps to the bottom whenever older messages are prepended.',
-    clarification: 'Only reproducible with the composer focused.',
+    clarifications: ['Only reproducible with the composer focused.'],
   },
   C3: {
-    ask: 'Retire the legacy state path now that every reader is on the new home.',
-    clarification: 'Leave the migration command in place for one more release.',
+    ask: 'Retire the legacy state path once the last reader is ported onto the new home.',
+    clarifications: ['Leave the migration command in place for one more release.'],
   },
 };
 
-const harnessTaskDetail = (summary: TaskSummary): unknown => {
-  const prose = HARNESS_SEARCH_PROSE[summary.id] ?? { ask: summary.title, clarification: '' };
+/** The searchable task, plus the summary the wire is allowed to carry. */
+type HarnessSearchTask = SessionSearchTask & { readonly summary: TaskSummary };
+
+const HARNESS_SEARCH_TASKS: readonly HarnessSearchTask[] = TASKS.map(summary => {
+  const prose = HARNESS_SEARCH_PROSE[summary.id] ?? { ask: summary.title, clarifications: [] };
   return {
-    sessionId: 'harness-session',
-    activity: [],
-    task: {
-      ...summary,
-      sessionId: 'harness-session',
-      description: `${summary.title}. Tracked on the tree board and searchable by its number, ${summary.id}.`,
-      ask: { text: prose.ask, source: summary.askSource },
-      clarifications: prose.clarification
-        ? [
-            {
-              text: prose.clarification,
-              source: 'human-message',
-              at: '2026-08-05T00:00:00.000Z',
-              by: 'user',
-              byName: null,
-            },
-          ]
-        : [],
-    },
+    summary,
+    id: summary.id,
+    title: summary.title,
+    description: `${summary.title}. Tracked on the tree board and searchable by its number, ${summary.id}.`,
+    ask: { text: prose.ask },
+    clarifications: prose.clarifications.map(text => ({ text })),
+  };
+});
+
+/**
+ * `GET /v1/sessions/:id/tasks[?q=]`, shaped as `SessionTaskListResponseSchema`.
+ *
+ * The whole-response schema is what carries `parseErrors` and `updatedAt`, and a
+ * fixture that answered a bare `{ tasks: [...] }` would fail to parse the moment
+ * the reader adopts it — silently, as an unavailable half rather than as a test
+ * failure. A blank or absent `q` is the board itself; a present one is filtered
+ * with `matchesSessionSearchQuery`, so `no-match` is a genuine empty answer.
+ */
+const harnessTaskListResponse = (sessionId: string, query: string | null): unknown => {
+  const matched =
+    query === null
+      ? HARNESS_SEARCH_TASKS
+      : HARNESS_SEARCH_TASKS.filter(task => matchesSessionSearchQuery(sessionSearchTaskHaystack(task), query));
+  return {
+    v: TASK_SCHEMA_VERSION,
+    sessionId,
+    tasks: matched.map(task => ({ ...task.summary, sessionId })),
+    parseErrors: 0,
+    updatedAt: new Date(HARNESS_NOW).toISOString(),
   };
 };
 
-const HARNESS_SEARCH_TASK_READS: Readonly<Record<string, unknown>> = {
-  '/v1/sessions/harness-session/tasks': {
-    tasks: TASKS.map(summary => ({ ...summary, sessionId: 'harness-session' })),
-  },
-  ...Object.fromEntries(
-    TASKS.map(summary => [`/v1/sessions/harness-session/tasks/${summary.id}`, harnessTaskDetail(summary)]),
-  ),
+/**
+ * `GET /v1/sessions/:id/fs/index`, derived from `HARNESS_FS_LISTINGS`.
+ *
+ * Directories are not indexed files, and the three non-file entries map exactly
+ * onto the three skip reasons that do NOT make a walk partial: `.env` is
+ * `denied`, `node_modules` is `excluded`, and the `result` symlink is
+ * `unsupported`. `SessionFileIndexResponseSchema` refuses a `complete` document
+ * that also reports `unreadable`/`truncated` work, so those three are the only
+ * skips a complete index here may carry.
+ */
+const HARNESS_FILE_INDEX_ROOT = '/home/pilot/work/ferretry';
+
+const harnessIndexPath = (directory: string, name: string): string =>
+  directory === '' ? name : `${directory}/${name}`;
+
+const HARNESS_FILE_INDEX_FILES = Object.entries(HARNESS_FS_LISTINGS).flatMap(([directory, listing]) =>
+  listing.entries
+    .filter(entry => entry.type === 'file' && entry.denied !== true)
+    .map(entry => ({ path: harnessIndexPath(directory, entry.name), name: entry.name })),
+);
+
+const harnessSkipCount = (matches: (entry: HarnessFsEntry) => boolean): number =>
+  Object.values(HARNESS_FS_LISTINGS).reduce((total, listing) => total + listing.entries.filter(matches).length, 0);
+
+const HARNESS_FILE_INDEX_SKIPPED = [
+  { reason: 'denied', count: harnessSkipCount(entry => entry.denied === true) },
+  { reason: 'excluded', count: harnessSkipCount(entry => entry.ignored === true) },
+  { reason: 'unsupported', count: harnessSkipCount(entry => entry.type === 'symlink') },
+].filter(skip => skip.count > 0);
+
+/**
+ * The session whose index stopped early.
+ *
+ * Its OWN session id rather than a flag on the healthy one, for two reasons: the
+ * `results` card must keep a complete index to be able to say "no match" without
+ * qualification, and the compiled `#session-workspace` request ledger is filtered
+ * by `harness-session`, so a second scope cannot contaminate its counts.
+ */
+const HARNESS_PARTIAL_SESSION_ID = 'harness-partial-session';
+
+/** How many indexed files the truncated walk never reached. */
+const HARNESS_PARTIAL_INDEX_KEPT = 2;
+
+const harnessFileIndexResponse = (sessionId: string): unknown => {
+  const partial = sessionId === HARNESS_PARTIAL_SESSION_ID;
+  const files = partial ? HARNESS_FILE_INDEX_FILES.slice(0, HARNESS_PARTIAL_INDEX_KEPT) : HARNESS_FILE_INDEX_FILES;
+  const truncated = HARNESS_FILE_INDEX_FILES.length - files.length;
+  return {
+    v: SESSION_FILE_INDEX_VERSION,
+    sessionId,
+    root: HARNESS_FILE_INDEX_ROOT,
+    files,
+    coverage: partial ? 'partial' : 'complete',
+    skipped: partial
+      ? [...HARNESS_FILE_INDEX_SKIPPED, { reason: 'truncated', count: truncated }]
+      : HARNESS_FILE_INDEX_SKIPPED,
+  };
 };
+
+/** The sessions whose task board this fixture answers for. Deliberately NOT
+ *  every session: `harness-workspace` is a scope of its own, and answering its
+ *  board here would change surfaces this unit is not measuring. */
+const HARNESS_SEARCH_SESSION_IDS: readonly string[] = ['harness-session', HARNESS_PARTIAL_SESSION_ID];
 
 const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
   '/v1/fleet/environment': HARNESS_FLEET_ENVIRONMENT,
-  ...HARNESS_SEARCH_TASK_READS,
 };
 
 /** Which pairing a request is addressed to, taken from the fixtures themselves. */
@@ -2112,6 +2213,31 @@ const HARNESS_DAEMON_HOSTS = {
 const harnessJson = (body: unknown): Response =>
   new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
 
+/**
+ * Every read this fixture answers, in order, as `METHOD /path?query`.
+ *
+ * WHY A GLOBAL AND NOT `page.on('request')`. An answered route never leaves the
+ * page: `harnessJson()` returns synchronously and the network layer is never
+ * touched, so the driver's request events see NOTHING. A request ledger has to
+ * be kept where the requests actually are, which is here. Same shape as
+ * `window.__harnessKeyboard`, and read back the same way.
+ *
+ * Only the ANSWERING host is recorded. The offline and checking daemons are
+ * states rather than data, and their reads are not what a count of "how many
+ * times did this surface dial the daemon" is asking about.
+ */
+const harnessRequests: string[] = [];
+(window as unknown as { __harnessRequests: readonly string[] }).__harnessRequests = harnessRequests;
+
+/** `/v1/sessions/:id/<rest>` split into its session and its route, or null. */
+const harnessSessionRoute = (pathname: string): { readonly sessionId: string; readonly rest: string } | null => {
+  const match = /^\/v1\/sessions\/([^/]+)\/(.+)$/.exec(pathname);
+  const sessionId = match?.[1];
+  const rest = match?.[2];
+  if (sessionId === undefined || rest === undefined) return null;
+  return { sessionId: decodeURIComponent(sessionId), rest };
+};
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
@@ -2122,6 +2248,22 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.hostname === HARNESS_DAEMON_HOSTS.offline) throw new TypeError('Failed to fetch');
   if (url.hostname === HARNESS_DAEMON_HOSTS.checking) return await new Promise<Response>(() => undefined);
   if (url.hostname !== HARNESS_DAEMON_HOSTS.answering) return await harnessFetch(input, init);
+  harnessRequests.push(`${method} ${url.pathname}${url.search}`);
+  const sessionRoute = harnessSessionRoute(url.pathname);
+  // `/fs/index` BEFORE the broad `/fs` branch, and this ladder is order-sensitive
+  // for exactly the reason `mounts/session-filesystem.ts` registers `fs/index`
+  // before `fs`: `/fs/index` INCLUDES `/fs`, matches none of the inner cases, and
+  // would otherwise be answered with the root directory listing — a body that
+  // fails `SessionFileIndexResponseSchema` and paints every card `unavailable`.
+  if (method === 'GET' && sessionRoute !== null && sessionRoute.rest === 'fs/index')
+    return harnessJson(harnessFileIndexResponse(sessionRoute.sessionId));
+  // The board and the query are ONE route. A `q` present is filtered by the
+  // daemon-owned matcher; absent, the whole board is the answer. There is
+  // deliberately no `/tasks/:id` route: the reader that used to dial one per row
+  // is the design this change deletes, so a fixture for it would let the old
+  // fan-out come back green.
+  if (method === 'GET' && sessionRoute?.rest === 'tasks' && HARNESS_SEARCH_SESSION_IDS.includes(sessionRoute.sessionId))
+    return harnessJson(harnessTaskListResponse(sessionRoute.sessionId, url.searchParams.get('q')));
   if (url.pathname.includes('/fs')) {
     const path = url.searchParams.get('path') ?? '';
     if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
@@ -6758,6 +6900,16 @@ function SessionSearchHarness() {
           note="A half that could not be read is named, and never rendered as an empty result."
           searchScope={daemonSessionScope(unreachableDaemon, 'harness-session')}
           title="unavailable"
+        />
+        {/* Ready but INCOMPLETE, which is neither of the two states above: the
+            walk stopped early, so the rows it did index are real answers and a
+            name it never reached is not an absence. Its own session id keeps the
+            healthy card's index complete. */}
+        <SessionSearchStateCard
+          connection={daemon}
+          note="The index stopped early. Rows still answer, and the part that was never walked is said out loud rather than counted as nothing."
+          searchScope={daemonSessionScope(daemon, HARNESS_PARTIAL_SESSION_ID)}
+          title="partial-coverage"
         />
       </div>
     </div>

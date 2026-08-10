@@ -1,9 +1,10 @@
+import type { SessionFileIndexResponse } from '@ferretry/protocol';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../lib/grants.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
-import { browserFetch, DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
+import { grantRefusalNotice } from '../lib/grants.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
 import { baseName, isOpenableName, isOpenablePath, parentRel } from './files-model.ts';
 
 export type FsEntryType = 'file' | 'dir' | 'symlink';
@@ -64,6 +65,7 @@ export const fileUrl = (scope: DaemonSessionScope, path: string, rev?: 'head') =
   `${root(scope)}/file${query(path, rev ? { rev } : undefined)}`;
 export const previewUrl = (scope: DaemonSessionScope, path: string) =>
   `${root(scope)}/file${query(path, { format: 'base64' })}`;
+export const indexUrl = (scope: DaemonSessionScope) => `${root(scope)}/index`;
 export const changesUrl = (scope: DaemonSessionScope) => `${root(scope)}/changes`;
 export const diffUrl = (scope: DaemonSessionScope, path: string) => `${root(scope)}/diff${query(path)}`;
 const failure = async (response: Response): Promise<DaemonResponseError> => {
@@ -121,6 +123,10 @@ export const fsApi = {
   ) => {
     assertScopeDaemon(daemon, scope);
     return request<FsFile>(daemon, previewUrl(scope, path), fetcher, signal);
+  },
+  index: (daemon: DaemonConnection, scope: DaemonSessionScope, signal?: AbortSignal, fetcher?: DaemonFetch) => {
+    assertScopeDaemon(daemon, scope);
+    return request<SessionFileIndexResponse>(daemon, indexUrl(scope), fetcher, signal);
   },
   changes: (daemon: DaemonConnection, scope: DaemonSessionScope, signal?: AbortSignal, fetcher?: DaemonFetch) => {
     assertScopeDaemon(daemon, scope);
