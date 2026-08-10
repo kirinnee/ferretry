@@ -67,6 +67,25 @@ describe('route path builders', () => {
   it('should reject a blank project ID instead of treating a path as identity', () => {
     should(() => daemonProjectPath(daemonA, ' ')).throw('projectId must not be empty');
   });
+
+  it('should refuse to mint a project link for anything that is not a record UUID', () => {
+    // Arrange — every one of these is a non-empty string somebody could plausibly
+    // reach the builder with: a path, a folder name, a session id, a near-miss.
+    const impostors = [
+      '/work/ferretry',
+      'ferretry',
+      'project id',
+      'session-one',
+      '11111111-1111-4111-8111-11111111111',
+      '11111111111141118111111111111111',
+      'ZZZZZZZZ-1111-4111-8111-111111111111',
+    ];
+
+    // Act / Assert — the protocol says a path is not an identity, so the builder
+    // refuses rather than minting a link that merely LOOKS like a project address.
+    for (const impostor of impostors)
+      should(() => daemonProjectPath(daemonA, impostor)).throw('projectId must be a registered project UUID');
+  });
 });
 
 describe('route parsing', () => {
@@ -120,6 +139,43 @@ describe('route parsing', () => {
       { kind: 'sessions', daemonId: daemonB },
       { kind: 'sessions', daemonId: daemonB },
     ]);
+  });
+
+  it('should send a project segment that is not a record UUID to the registry, not to a detail screen', () => {
+    // Act — a bookmark to a folder path, a typo, a truncated id, and the shape a
+    // future sibling route would take.
+    const actual = [
+      parseRoute('/d/daemon-b/projects/project%20id'),
+      parseRoute('/d/daemon-b/projects/%2Fwork%2Fferretry'),
+      parseRoute('/d/daemon-b/projects/11111111-1111-4111-8111-11111111111'),
+      parseRoute('/d/daemon-b/projects/new'),
+      parseRoute('/d/daemon-b/projects/%20'),
+    ];
+
+    // Assert — the path names the projects destination and only the identity is
+    // unusable, so the reader lands on the registry rather than on a screen
+    // reporting a project that never existed as merely missing. It also keeps
+    // `/projects/new` free to become its own route later instead of resolving to
+    // a detail screen for a project called "new".
+    should(actual).deepEqual([
+      { kind: 'projects', daemonId: daemonB },
+      { kind: 'projects', daemonId: daemonB },
+      { kind: 'projects', daemonId: daemonB },
+      { kind: 'projects', daemonId: daemonB },
+      { kind: 'projects', daemonId: daemonB },
+    ]);
+  });
+
+  it('should keep a valid record UUID reaching the detail screen', () => {
+    // Act
+    const actual = parseRoute('/d/daemon-b/projects/22222222-2222-4222-8222-222222222222');
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'project-detail',
+      daemonId: daemonB,
+      projectId: '22222222-2222-4222-8222-222222222222',
+    });
   });
 
   it('should redirect the legacy daemon tasks route to canonical sessions', () => {
@@ -179,7 +235,7 @@ describe('route identity', () => {
       parseRoute('/setup'),
       parseRoute('/d/daemon-b'),
       parseRoute('/d/daemon-b/new'),
-      parseRoute('/d/daemon-b/projects/project%20id'),
+      parseRoute('/d/daemon-b/projects/22222222-2222-4222-8222-222222222222'),
       daemonBSession,
       daemonASession,
       parseRoute('/d/daemon-b/settings'),
@@ -198,7 +254,10 @@ describe('route identity', () => {
       ['/setup', 'setup'],
       ['/d/daemon-b', 'sessions:"daemon-b"'],
       ['/d/daemon-b/new', 'new-session:"daemon-b"'],
-      ['/d/daemon-b/projects/project%20id', 'project-detail:["daemon-b","project id"]'],
+      [
+        '/d/daemon-b/projects/22222222-2222-4222-8222-222222222222',
+        'project-detail:["daemon-b","22222222-2222-4222-8222-222222222222"]',
+      ],
       ['/d/daemon-b/session/same', 'session:["daemon-b","same"]'],
       ['/d/daemon%2Fa/session/same', 'session:["daemon/a","same"]'],
       ['/d/daemon-b/settings', 'settings:"daemon-b"'],

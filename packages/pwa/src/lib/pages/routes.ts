@@ -1,5 +1,19 @@
+import { ProjectInfoSchema } from '@ferretry/protocol';
+
 import { type DaemonId, daemonId } from '../daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../daemon-scope.ts';
+
+/**
+ * WHAT A PROJECT ID IS HAS ONE OWNER, and it is not this file.
+ *
+ * `ProjectInfoSchema` declares `id` a UUID and says in as many words that a path
+ * is not an identity. Restating that here as a regex would be a second
+ * declaration free to drift from the one the daemon and the registry agree on,
+ * so the router borrows the protocol's own field schema instead.
+ */
+const ProjectIdSchema = ProjectInfoSchema.shape.id;
+
+const isProjectId = (value: string): boolean => ProjectIdSchema.safeParse(value).success;
 
 /** The route shown before a browser has selected one of its paired daemons. */
 export interface ConnectionPickerRoute {
@@ -140,6 +154,10 @@ export const daemonProjectsPath = (id: DaemonId): string => `${daemonSessionsPat
 export const daemonProjectPath = (id: DaemonId, projectId: string): string => {
   const value = projectId.trim();
   if (value === '') throw new Error('projectId must not be empty');
+  // A path, a name or a folder somebody typed all reach here as a non-empty
+  // string. Refusing them at the builder is what stops a link that LOOKS like a
+  // project address from being minted at all.
+  if (!isProjectId(value)) throw new Error('projectId must be a registered project UUID');
   return `${daemonProjectsPath(id)}/${encodeURIComponent(value)}`;
 };
 
@@ -184,9 +202,15 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
   }
 
-  if (destination === 'projects' && remainder.length === 0) {
-    const projectId = parsedSessionId(sessionSegment);
-    if (projectId !== undefined) return { kind: 'project-detail', daemonId: id, projectId };
+  if (destination === 'projects' && sessionSegment !== undefined && remainder.length === 0) {
+    const candidate = decodeRouteSegment(sessionSegment);
+    if (isProjectId(candidate)) return { kind: 'project-detail', daemonId: id, projectId: candidate };
+    // A segment under `/projects` that is NOT a record id resolves to the hub,
+    // not to the daemon's catch-all: the path names the projects destination and
+    // only the identity is unusable. This is also what keeps the segment from
+    // swallowing the namespace — a later `/projects/new` is free to become its
+    // own route instead of a detail screen for a project called "new".
+    return { kind: 'projects', daemonId: id };
   }
 
   if (remainder.length === 0) {
