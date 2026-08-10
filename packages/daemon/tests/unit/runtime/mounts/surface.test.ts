@@ -353,8 +353,8 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // The focused route inventory determines the operator total after all independent additions.
-    should(minima).deepEqual({ none: 5, authenticated: 7, 'admin-token': 1 });
+    // Direct notification delivery joins the handover and runtime additions on the operator surface.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 117, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
