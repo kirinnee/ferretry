@@ -208,6 +208,13 @@ export const SessionTransferPlanSchema = z
         path: ['facets', 'conversation'],
       });
     }
+    if (carriesConversation && value.facets.conversation?.messages.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a fork cut must carry the message it names',
+        path: ['facets', 'conversation', 'messages'],
+      });
+    }
     if (carriesConversation && value.source.transcriptProvenance === null) {
       context.addIssue({
         code: 'custom',

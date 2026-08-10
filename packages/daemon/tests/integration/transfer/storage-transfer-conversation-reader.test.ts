@@ -190,6 +190,7 @@ describe('StorageTransferConversationReader', () => {
         recordingSource('codex', () => [], opened),
       ],
       journal(),
+      identityRedactor,
     );
 
     // Act: the contributor can pass only the already-read source snapshot to the digest adapter.
@@ -232,6 +233,7 @@ describe('StorageTransferConversationReader', () => {
         recordingSource('codex', () => [message(0, 'somebody else conversation')], opened),
       ],
       journal(),
+      identityRedactor,
     );
 
     // Act
@@ -260,6 +262,7 @@ describe('StorageTransferConversationReader', () => {
         ),
       ],
       journal(),
+      identityRedactor,
     );
 
     // Act
@@ -279,6 +282,7 @@ describe('StorageTransferConversationReader', () => {
     const reader = new StorageTransferConversationReader(
       [recordingSource('claude', () => [message(0, 'the only record left')], [])],
       journal(),
+      identityRedactor,
     );
 
     // Act
@@ -305,6 +309,7 @@ describe('StorageTransferConversationReader', () => {
     const reader = new StorageTransferConversationReader(
       [recordingSource('claude', () => conversation, opened)],
       journal(),
+      identityRedactor,
     );
 
     // Act
@@ -326,6 +331,7 @@ describe('StorageTransferConversationReader', () => {
     const reader = new StorageTransferConversationReader(
       [recordingSource('claude', () => conversation, opened)],
       journal(),
+      identityRedactor,
     );
 
     // Act
@@ -346,6 +352,7 @@ describe('StorageTransferConversationReader', () => {
     const reader = new StorageTransferConversationReader(
       [recordingSource('claude', () => conversation, [])],
       journal(),
+      identityRedactor,
     );
 
     // Act
@@ -367,11 +374,15 @@ describe('StorageTransferConversationReader', () => {
 
   it('should not make a cut a session has no daemon journal to prove', async () => {
     // Arrange: the digest primitive owns that rule; the adapter must not route around it.
-    const reader = new StorageTransferConversationReader([recordingSource('claude', () => conversation, [])], {
-      assertReadable: async sessionId => {
-        throw new ConversationDigestError('incomplete_transcript', `${sessionId} has no readable journal`);
+    const reader = new StorageTransferConversationReader(
+      [recordingSource('claude', () => conversation, [])],
+      {
+        assertReadable: async sessionId => {
+          throw new ConversationDigestError('incomplete_transcript', `${sessionId} has no readable journal`);
+        },
       },
-    });
+      identityRedactor,
+    );
 
     // Act
     const failure = await reader

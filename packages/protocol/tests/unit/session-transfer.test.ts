@@ -271,6 +271,11 @@ describe('session transfer protocol', () => {
         schema: transfer.SessionTransferEdgeSchema,
         value: { ...edge, kind: 'handover' },
       },
+      {
+        name: 'empty conversation for an exact fork cut',
+        schema: transfer.SessionTransferPlanSchema,
+        value: { ...plan, facets: { ...plan.facets, conversation: { messages: [] } } },
+      },
     ]);
   });
 });

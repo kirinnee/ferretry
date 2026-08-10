@@ -12,6 +12,8 @@ import type { HarnessRuntimeSwitchRequest } from '../harness/runtime-switch.ts';
 import { TERMINAL_SEND_STATUSES } from '../send/types.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
 
+const PUBLIC_REFUSED_STATUSES = new Set(['starting', 'kill_failed'] as const);
+
 /**
  * Why this session cannot take a control right now, or nothing.
  *
@@ -31,7 +33,7 @@ export function documentRefusal(
   // session that is actually busy.
   const admitted =
     admits === 'public'
-      ? !TERMINAL_SEND_STATUSES.has(view.state.status) && !['starting', 'kill_failed'].includes(view.state.status)
+      ? !TERMINAL_SEND_STATUSES.has(view.state.status) && !PUBLIC_REFUSED_STATUSES.has(view.state.status as never)
       : view.state.status === 'starting';
   if (!admitted)
     return new SessionRuntimeError(

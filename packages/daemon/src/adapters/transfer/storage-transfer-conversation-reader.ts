@@ -48,7 +48,7 @@ export class StorageTransferConversationReader implements TransferConversationRe
   constructor(
     private readonly sources: readonly TranscriptSource[],
     private readonly journal: TranscriptDigestJournal,
-    private readonly redactor: Pick<TextRedactor, 'redact'> = { redact: async text => text },
+    private readonly redactor: Pick<TextRedactor, 'redact'>,
   ) {}
 
   /**

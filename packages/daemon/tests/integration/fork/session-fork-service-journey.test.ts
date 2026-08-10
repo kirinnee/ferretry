@@ -1356,6 +1356,7 @@ describe('the fork journey over real storage', () => {
     const outcome = await subject.fork(key('redacted'), command(subject));
     const held = await subject.target(outcome.targetSessionId);
     const receipt = await subject.receipt('redacted');
+    should(receipt.phase).equal('completed');
     const serialized = `${JSON.stringify(outcome.plan)}${held.plan}${JSON.stringify(receipt)}${held.brief}`;
 
     should(serialized).not.containEql(CARRIED);
