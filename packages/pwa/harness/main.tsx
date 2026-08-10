@@ -23,6 +23,7 @@ import type {
   PairedDevicesView,
   PairingCodeMintResponse,
   PinSnapshot,
+  ProjectInfo,
   ProposalView,
   SecretList,
   SessionView,
@@ -49,6 +50,7 @@ import {
   type AccountUsageRow,
   accountPickerOptions,
   projectPickerOptions,
+  type RecentProjectOption,
 } from '../src/components/daemon-picker-model.ts';
 import {
   AccountPickerField,
@@ -137,6 +139,8 @@ import type { SetupSharePort } from '../src/features/onboarding/setup-handoff-pa
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
+import type { ProjectRegistrationStatus } from '../src/features/projects/project-registration-model.ts';
+import { ProjectsHub } from '../src/features/projects/projects-hub.tsx';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
@@ -193,7 +197,7 @@ import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
-import { type DaemonProjectsPort, DaemonProjectsStore } from '../src/lib/projects-store.ts';
+import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import {
@@ -3276,6 +3280,138 @@ function HarnessProjectPicker() {
         )}
       />
     </HarnessPickerLabel>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Projects hub
+// ---------------------------------------------------------------------------
+
+/**
+ * ONE GIT PROJECT AND ONE NON-GIT PROJECT, because the provenance rail's whole
+ * job is telling them apart: a cloned checkout carries a common directory and a
+ * folder somebody created does not, and a review that only ever sees the first
+ * cannot notice that the second reads as an empty space.
+ */
+const HARNESS_PROJECT_REGISTRY: readonly FleetProject[] = [
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    name: 'ferretry',
+    path: '/home/pilot/work/ferretry',
+    source: 'clone',
+    createdAt: '2026-07-14T09:12:00.000Z',
+    git: { commonDirectory: '/home/pilot/work/ferretry/.git' },
+  },
+  {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+    name: 'operator-notes',
+    path: '/home/pilot/notes/operator',
+    source: 'new-folder',
+    createdAt: '2026-08-02T16:40:00.000Z',
+  },
+];
+
+/** Two unregistered folders sessions have used, newest first. */
+const HARNESS_PROJECT_DISCOVERIES: readonly RecentProjectOption[] = [
+  {
+    kind: 'recent',
+    key: '/home/pilot/scratch/spike',
+    name: 'spike',
+    path: '/home/pilot/scratch/spike',
+    lastActivity: '2026-08-06T09:40:00.000Z',
+    searchText: '/home/pilot/scratch/spike recent',
+  },
+  {
+    kind: 'recent',
+    key: '/home/pilot/work/nitroso',
+    name: 'nitroso',
+    path: '/home/pilot/work/nitroso',
+    lastActivity: '2026-08-04T18:05:00.000Z',
+    searchText: '/home/pilot/work/nitroso recent',
+  },
+];
+
+const HARNESS_PROJECT_NOW = Date.parse('2026-08-06T12:00:00.000Z');
+
+/** Which hub state a standalone page is showing. */
+type HarnessProjectsFrame = 'hub' | 'empty' | 'loading' | 'error' | 'refused' | 'registered' | 'already-registered';
+
+const harnessProjectsSlice = (frame: HarnessProjectsFrame): DaemonProjectsSlice => {
+  if (frame === 'loading') return { projects: null, status: 'loading', error: null };
+  if (frame === 'empty') return { projects: [], status: 'ready', error: null };
+  // A failed refresh keeps the folders it already had. Capturing the failure
+  // WITH a good list is the point: a blanked list reads as "nothing registered".
+  if (frame === 'error')
+    return {
+      projects: HARNESS_PROJECT_REGISTRY,
+      status: 'error',
+      error: 'the daemon closed the connection before answering',
+    };
+  return { projects: HARNESS_PROJECT_REGISTRY, status: 'ready', error: null };
+};
+
+const HARNESS_REGISTERED_RECORD: ProjectInfo = {
+  id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',
+  name: 'spike',
+  path: '/home/pilot/scratch/spike',
+  source: 'confirmed-discovery',
+  createdAt: '2026-08-06T11:58:00.000Z',
+};
+
+const harnessProjectsStatus = (frame: HarnessProjectsFrame): ProjectRegistrationStatus | null => {
+  if (frame === 'refused')
+    return {
+      phase: 'refused',
+      request: { kind: 'new-folder', path: '/home/pilot/work/deep/nested', initializeGit: true },
+      message: 'ENOENT: no such file or directory, mkdir ’/home/pilot/work/deep/nested’',
+    };
+  if (frame === 'registered')
+    return {
+      phase: 'registered',
+      request: { kind: 'confirmed-discovery', path: '/home/pilot/scratch/spike' },
+      project: HARNESS_REGISTERED_RECORD,
+      alreadyRegistered: false,
+    };
+  if (frame === 'already-registered')
+    return {
+      phase: 'registered',
+      request: { kind: 'existing-folder', path: '/home/pilot/scratch/spike' },
+      project: HARNESS_REGISTERED_RECORD,
+      alreadyRegistered: true,
+    };
+  return null;
+};
+
+/**
+ * The hub on a page of its own.
+ *
+ * `ProjectsHub` is the shipped presentational half, so this frame renders exactly
+ * what production renders and every state below is a state the component can
+ * really be in. The form's own states are reached by DRIVING it — the disclosure,
+ * the mode radios, the git checkbox — for the same reason the picker frames do:
+ * a posed form proves nothing about the one a reader has to operate.
+ */
+function ProjectsFrameHarness({ frame }: { readonly frame: HarnessProjectsFrame }) {
+  useAppViewport();
+  return (
+    <main
+      aria-label={`Projects ${frame}`}
+      className="min-h-dvh bg-bg"
+      id={`harness-projects-${frame}-page`}
+      data-harness-projects={frame}
+    >
+      <div className="mx-auto w-full max-w-[1100px]">
+        <ProjectsHub
+          slice={harnessProjectsSlice(frame)}
+          discoveries={frame === 'empty' ? [] : HARNESS_PROJECT_DISCOVERIES}
+          sessionsError={null}
+          status={harnessProjectsStatus(frame)}
+          onRegister={async () => true}
+          onDismiss={() => undefined}
+          now={HARNESS_PROJECT_NOW}
+        />
+      </div>
+    </main>
   );
 }
 
@@ -6547,11 +6683,27 @@ const PICKER_FRAGMENTS: Readonly<Record<string, HarnessPickerFrame>> = {
   '#picker-project': 'project',
 };
 
+/**
+ * One Projects hub state per page. Its own map for the same reason the picker
+ * frames have one: two units appending to a shared object is the conflict this
+ * file keeps teaching.
+ */
+const PROJECTS_FRAGMENTS: Readonly<Record<string, HarnessProjectsFrame>> = {
+  '#projects-hub': 'hub',
+  '#projects-empty': 'empty',
+  '#projects-loading': 'loading',
+  '#projects-error': 'error',
+  '#projects-refused': 'refused',
+  '#projects-registered': 'registered',
+  '#projects-already-registered': 'already-registered',
+};
+
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
   const fleetFrame = FLEET_FRAGMENTS[window.location.hash];
   const pickerFrame = PICKER_FRAGMENTS[window.location.hash];
+  const projectsFrame = PROJECTS_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
     <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
@@ -6567,6 +6719,8 @@ if (host) {
         <FleetCockpitHarness frame={fleetFrame} />
       ) : pickerFrame !== undefined ? (
         <PickerFrameHarness frame={pickerFrame} />
+      ) : projectsFrame !== undefined ? (
+        <ProjectsFrameHarness frame={projectsFrame} />
       ) : screen === undefined ? (
         <Shell />
       ) : (
