@@ -179,10 +179,25 @@ async function submits(log: string): Promise<string[]> {
   return (await readFile(log, 'utf8').catch(() => '')).split('\n').filter(line => line !== '');
 }
 
-/** A live pane on the daemon's own private socket, rendering the exact question it will be asked. */
-async function livePane(home: string, scratch: string): Promise<string> {
+/**
+ * The daemon's own private tmux socket, with pane `%0` already spent.
+ *
+ * `%0` is deliberately outside the domain's safe pane-id grammar, and tmux hands it to the FIRST
+ * pane a server ever creates. A journey that kills the session also ends that server, so the
+ * replacement a resume launches would come back as `%0` and could never have its identity
+ * registered — a resume failure invented by the fixture rather than by the code under test. This
+ * bootstrap session spends `%0` and keeps the server alive across a kill.
+ */
+async function paneSocket(home: string): Promise<string> {
   const socket = join(home, 'tmux.sock');
   sockets.add(socket);
+  should(await tmuxCommand(socket, 'new-session', '-d', '-s', 'answer-journey-bootstrap', 'exec sleep 600')).equal(0);
+  return socket;
+}
+
+/** A live pane on the daemon's own private socket, rendering the exact question it will be asked. */
+async function livePane(home: string, scratch: string): Promise<string> {
+  const socket = await paneSocket(home);
   const script = join(scratch, 'form.sh');
   const log = join(scratch, 'submits.log');
   await writeFile(script, FORM_SCRIPT, { mode: 0o700 });
@@ -207,8 +222,7 @@ async function livePane(home: string, scratch: string): Promise<string> {
 
 /** A real form that records submit immediately and advances only after the test releases its gate. */
 async function gatedPane(home: string, scratch: string): Promise<{ readonly gate: string; readonly log: string }> {
-  const socket = join(home, 'tmux.sock');
-  sockets.add(socket);
+  const socket = await paneSocket(home);
   const script = join(scratch, 'gated-form.sh');
   const log = join(scratch, 'gated-input.log');
   const gate = join(scratch, 'allow-advance');
@@ -232,8 +246,7 @@ async function gatedPane(home: string, scratch: string): Promise<{ readonly gate
 
 /** A real form that visibly refuses the answer but responds to recovery's single Escape. */
 async function failingPane(home: string, scratch: string): Promise<string> {
-  const socket = join(home, 'tmux.sock');
-  sockets.add(socket);
+  const socket = await paneSocket(home);
   const script = join(scratch, 'failing-form.sh');
   const log = join(scratch, 'failure-input.log');
   await writeFile(script, FAILURE_SCRIPT, { mode: 0o700 });
@@ -1189,7 +1202,9 @@ describe('the structured answer journey', () => {
     );
     // The relaunch below starts a REAL tmux server on this home's own socket; registering it is what
     // lets `afterEach` kill it, rather than leaving a server behind for the rest of the machine.
-    sockets.add(join(home, 'tmux.sock'));
+    // It is opened here rather than by a pane fixture so that `%0` is spent before the replacement
+    // asks for a pane id the domain would refuse — see `paneSocket`.
+    await paneSocket(home);
     const daemon = await boot(home, port);
 
     // Arrange — the daemon's OWN projection mints the advisory from the quarantined row, so the
