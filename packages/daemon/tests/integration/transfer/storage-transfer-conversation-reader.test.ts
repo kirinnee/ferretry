@@ -28,8 +28,9 @@ import type {
   TranscriptSource,
 } from '../../../src/lib/transcript/types.ts';
 import { ConversationFacetContributor } from '../../../src/lib/transfer/facets/conversation.ts';
+import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
 
-const identityRedactor = { redact: async (text: string) => text };
+const identityRedactor = NO_REDACTION;
 
 /**
  * The one conversation cut, over the file a plan PINS rather than the file a session currently
@@ -233,7 +234,7 @@ describe('StorageTransferConversationReader', () => {
         recordingSource('codex', () => [message(0, 'somebody else conversation')], opened),
       ],
       journal(),
-      identityRedactor,
+      { redact: async text => text.replace('the message the fork is cut at', '[redacted:cut]') },
     );
 
     // Act
@@ -248,6 +249,7 @@ describe('StorageTransferConversationReader', () => {
     should(opened).eql(['claude:/home/agent/.claude/projects/source.jsonl']);
     should(digest?.messages).have.length(2);
     should(digest?.through).eql(point(120));
+    should(digest?.messages.at(-1)?.text).equal('[redacted:cut]');
   });
 
   it('should still validate a pinned cut after the source has been appended to', async () => {
