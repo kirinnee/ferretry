@@ -15,9 +15,16 @@
  *
  * A file that cannot be read renders as a failure with retry. It never renders
  * as an empty file: a damaged read is not an empty one.
+ *
+ * Reload (handover #37) is a LABELLED action, and it never costs the reader
+ * what they were already reading: the previously loaded bytes stay mounted —
+ * same nodes, same scroll offset, same raw/diff choice — while the reread runs
+ * and after it fails, with one live notice saying which copy is on screen. Only
+ * a successful reread replaces them, and only then does `file.revision` move,
+ * which is what tells the rich preview that new bytes actually landed.
  */
 
-import { Code2, GitCompareArrows, RefreshCw, X } from 'lucide-react';
+import { Code2, GitCompareArrows, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
@@ -25,6 +32,7 @@ import { formatCodeReference } from '../lib/references.ts';
 import type { SidePaneTabInstance } from '../shell/side-pane-tab-model.ts';
 import { fsApi, useFsProbe, type FsFile } from './files-api.ts';
 import { baseName, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
+import { ReloadAction, StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import { type FileLineSelection, type FileView, scrollFileLineIntoView } from './files-tab-model.ts';
 import { DiffBody, Failed, FileBody, type FilesMarkdownContext, Loading, Note, Unavailable } from './files-views.tsx';
@@ -101,6 +109,14 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
 
   const title = formatCodeReference({ path, ...selection });
   const rawActive = view === 'raw';
+  // ONE resource is on screen at a time, so one decision — the hook's own —
+  // says whether what is shown is the newest, and both the control and the
+  // notice read it rather than each working it out again.
+  const shown = diffActive ? diff : file;
+  const reload = () => {
+    probe.refresh();
+    shown.reload();
+  };
 
   return (
     <div className="kt-fs rounded-md border border-border bg-surface">
@@ -144,34 +160,33 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
               <GitCompareArrows size={17} aria-hidden="true" />
             </button>
           )}
-          <button
-            type="button"
-            className="kt-fs-icon-button"
-            onClick={() => {
-              probe.refresh();
-              if (diffActive) diff.reload();
-              else file.reload();
-            }}
-            aria-label={probe.refreshing ? `Refreshing ${path}` : `Refresh ${path}`}
-            title="Re-read this file from the session host"
-          >
-            <RefreshCw size={16} className={probe.refreshing ? 'animate-spin' : undefined} aria-hidden="true" />
-          </button>
+          <ReloadAction what={path} busy={shown.refreshing || probe.refreshing} onReload={reload} />
         </span>
       </div>
 
+      <StaleNotice dismissible what={diffActive ? 'the diff' : baseName(path)} status={shown} onRetry={reload} />
+
       <div className="kt-fs-body">
         <div ref={paneRef} tabIndex={-1} className="kt-fs-scroll scroll-thin outline-none">
+          {/* Retained content is checked FIRST: a reload that is in flight, or one
+              that failed, still has the bytes the reader was looking at, and
+              swapping them for a spinner is what loses the reading position. */}
           {diffActive ? (
-            diff.loading ? (
-              <Loading what="the diff" />
-            ) : diff.error ? (
-              <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
-            ) : parsedDiff?.binary ? (
+            // No third answer for a diff with nothing retained: `fsApi.diff`
+            // resolves a string (`''` included), so a settled successful read
+            // whose value is null cannot happen, and a branch for it would read
+            // as a state the surface can reach.
+            parsedDiff === null ? (
+              diff.error === null ? (
+                <Loading what="the diff" />
+              ) : (
+                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
+              )
+            ) : parsedDiff.binary ? (
               <Note tone="warn" role="status">
                 git reports this pair as binary — there is no textual diff to show.
               </Note>
-            ) : parsedDiff && diffHasBody ? (
+            ) : diffHasBody ? (
               <>
                 <DiffBody parsed={parsedDiff} />
                 {parsedDiff.truncated && (
@@ -184,10 +199,6 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
             ) : (
               <Note role="status">No textual changes in this file.</Note>
             )
-          ) : file.loading ? (
-            <Loading what={baseName(path)} />
-          ) : file.error ? (
-            <Failed what={baseName(path)} error={file.error} onRetry={file.reload} />
           ) : file.data ? (
             <FileBody
               file={file.data}
@@ -198,6 +209,10 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
               markdown={markdown}
               preview={{ daemon, scope, revision: file.revision }}
             />
+          ) : file.loading ? (
+            <Loading what={baseName(path)} />
+          ) : file.error ? (
+            <Failed what={baseName(path)} error={file.error} onRetry={file.reload} />
           ) : (
             <Note role="status">Nothing to show.</Note>
           )}

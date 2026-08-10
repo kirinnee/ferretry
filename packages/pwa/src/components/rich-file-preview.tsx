@@ -8,13 +8,23 @@
  * scripts, same-origin, forms, popups, or top-navigation privileges. SVG stays
  * in an image element (rather than an iframe), so script-capable SVG never
  * joins the app DOM or gets a document execution context.
+ *
+ * It follows the SAME reload path as the file around it (handover #37/#62). The
+ * parent's `revision` counts SUCCESSFUL file reads, so a bumped revision means
+ * new bytes genuinely landed and the preview refetches its own bounded bytes;
+ * a failed parent reload leaves it untouched. The key deliberately excludes the
+ * revision: a new key hides the old value synchronously, which is right for a
+ * new PATH and wrong for a reread of the same one. While the refetch runs — and
+ * if it fails — the previous document stays on screen, marked as the earlier
+ * copy, and its object URL is replaced and revoked only when new bytes arrive.
  */
 
 import { Download, ExternalLink } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { fsApi } from './files-api.ts';
+import { StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 
 const CSV_PREVIEW_BYTES = 512 * 1024;
@@ -156,15 +166,24 @@ export interface RichFilePreviewProps {
   readonly daemon: DaemonConnection;
   readonly scope: DaemonSessionScope;
   readonly path: string;
-  /** The parent increments this for an explicit file reload. */
+  /** The snapshot of the parent file currently on screen; it moves only on a successful reload. */
   readonly revision: number;
 }
 
 export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePreviewProps) => {
   const kind = richFileKind(path);
-  const key = kind === null ? null : `preview:${daemonSessionKey(scope)}:${path}:${revision}`;
+  const key = kind === null ? null : `preview:${daemonSessionKey(scope)}:${path}`;
   const preview = useFsResource(key, signal => fsApi.preview(daemon, scope, path, signal));
   const [url, setUrl] = useState<string | null>(null);
+  // The revision this preview's bytes were fetched against. Seeded from the
+  // mounting revision so the first read is not immediately re-run.
+  const fetchedFor = useRef(revision);
+  const reloadPreview = preview.reload;
+  useEffect(() => {
+    if (fetchedFor.current === revision) return;
+    fetchedFor.current = revision;
+    reloadPreview();
+  }, [revision, reloadPreview]);
   const bytes = useMemo(() => {
     if (!preview.data?.base64) return null;
     try {
@@ -185,22 +204,30 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
   }, [bytes, kind, path]);
 
   if (kind === null) return null;
-  if (preview.loading)
+  // Nothing retained: the ordinary first-read pair. A refetch over a document
+  // already on screen never reaches here — it is the notice below instead.
+  if (preview.data === null) {
+    if (preview.error !== null)
+      return (
+        <div className="kt-fs-note" data-tone="err" role="alert">
+          Could not load a safe preview: {preview.error}
+          <button type="button" className="kt-btn kt-btn--sm" onClick={preview.reload}>
+            Retry
+          </button>
+        </div>
+      );
     return (
       <div className="kt-fs-note" role="status">
         Loading safe preview…
       </div>
     );
-  if (preview.error)
-    return (
-      <div className="kt-fs-note" data-tone="err" role="alert">
-        Could not load a safe preview: {preview.error}
-        <button type="button" className="kt-btn kt-btn--sm" onClick={preview.reload}>
-          Retry
-        </button>
-      </div>
-    );
-  if (!preview.data?.base64 || bytes === null)
+  }
+  // THE SAME notice the surfaces show, retrying the preview's own byte read.
+  // Not dismissible here: this sits inside a small document rather than above a
+  // scroller, so it costs no reading position, and a dismiss would only be a
+  // second way to lose the only report the preview gets.
+  const stale = <StaleNotice what="this preview" status={preview} onRetry={preview.reload} />;
+  if (!preview.data.base64 || bytes === null)
     return (
       <div className="kt-fs-note" data-tone="warn" role="status">
         Preview bytes are unavailable. The file may have changed or exceeded the daemon’s 1 MB view limit; use Raw or
@@ -223,6 +250,7 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
       );
     return (
       <div className="kt-rich-file">
+        {stale}
         <div className="kt-rich-file-table scroll-thin">
           <table>
             <tbody>
@@ -259,6 +287,7 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
   const filename = path.split('/').at(-1) ?? 'file';
   return (
     <div className="kt-rich-file">
+      {stale}
       {kind === 'html' && (
         <iframe
           className="kt-rich-file-frame"

@@ -380,7 +380,15 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
   const lang = file.lang ?? langFromPath(path);
   const renderedMarkdown = isMarkdownPath(path) && selection === undefined;
   const richKind = richFileKind(path);
-  const showRichPreview = !raw && selection === undefined && richKind !== null && preview !== undefined;
+  // `file.binary || content` is what stops a rich preview from swallowing the
+  // empty-file answer: a PDF legitimately arrives with no text, an actually
+  // empty `.csv` is still an empty file and says so.
+  const showRichPreview =
+    !raw &&
+    selection === undefined &&
+    richKind !== null &&
+    preview !== undefined &&
+    (file.binary === true || !!content);
   const html = useMemo(
     () => (refusal || raw || renderedMarkdown ? null : highlightToHtml(content, lang)),
     [refusal, raw, renderedMarkdown, content, lang],
@@ -403,6 +411,12 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         {refusal}
       </Note>
     );
+  // BEFORE the empty-text answer: a recognised rich type is served from its own
+  // bounded byte read, so a binary response with no `content` is not an empty
+  // file — announcing it as one is how a PDF used to render as "This file is
+  // empty." instead of as a document.
+  if (showRichPreview && preview)
+    return <RichFilePreview daemon={preview.daemon} scope={preview.scope} path={path} revision={preview.revision} />;
   if (!content) return <Note role="status">This file is empty.</Note>;
   if (!raw && renderedMarkdown)
     return (
@@ -410,8 +424,6 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         <Markdown text={content} {...markdown} />
       </div>
     );
-  if (showRichPreview && preview)
-    return <RichFilePreview daemon={preview.daemon} scope={preview.scope} path={path} revision={preview.revision} />;
   if (selection)
     return (
       <>
