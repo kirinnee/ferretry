@@ -1,7 +1,14 @@
 import { describe, it } from 'bun:test';
-import { FY_DEFAULT_DAEMON_URL } from '@ferretry/protocol';
+import { type AnalyticsPricingRate, FY_DEFAULT_DAEMON_URL, ManualAnalyticsPricingRateSchema } from '@ferretry/protocol';
 import should from 'should';
+import { ConfigGrantDocument } from '../../../src/adapters/grants/index.ts';
 import { DaemonConfigDocumentError, FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
+import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
+import {
+  analyticsPricingFingerprint,
+  analyticsPricingSourcesFingerprint,
+} from '../../../src/lib/analytics/pricing-catalog.ts';
+import { AnalyticsPricingService } from '../../../src/lib/analytics/pricing-service.ts';
 import {
   DEFAULT_CAPABILITY_GRANTS,
   type FileSystemPort,
@@ -10,6 +17,46 @@ import {
 } from '../../../src/lib/index.ts';
 
 const paths = { daemonConfig: '/state/config/daemon.json' } as FoundationPaths;
+const SYNCED_AT = '2026-08-06T12:00:00.000Z';
+
+const manualRate = (pricingKey = 'manual:gpt-5:2026-08'): AnalyticsPricingRate => ({
+  pricingKey,
+  modelId: 'gpt-5',
+  aliases: [],
+  provider: 'openai',
+  currency: 'USD',
+  rates: {
+    input: 1,
+    output: 2,
+    cachedInput: 1,
+    cacheWrite: null,
+    cacheWrite5m: null,
+    cacheWrite1h: null,
+    reasoning: 3,
+    image: null,
+    tool: null,
+  },
+  source: { kind: 'manual' },
+  validFrom: '2026-08-01T00:00:00.000Z',
+  validThrough: null,
+  verifiedAt: '2026-08-01T00:00:00.000Z',
+  lastSyncedAt: null,
+});
+
+const legacyRate = {
+  pricingKey: 'legacy:claude-opus:2026-08',
+  modelId: 'claude-opus-5',
+  provider: 'anthropic',
+  ratesUsdMicrosPerMillion: { input: 1, cachedRead: 1, output: 2 },
+  verifiedAt: '2026-08-01',
+  validFrom: '2026-08-01',
+} as const;
+
+const configuredSource = {
+  id: 'openai-feed',
+  provider: 'openai',
+  url: 'https://pricing.example.test/openai.json',
+} as const;
 
 /** One in-memory document, so what actually reaches the disk is what the assertions read. */
 function documentStore(initial?: string): {
@@ -167,6 +214,218 @@ describe('FileDaemonConfig', () => {
     should(await documents.store.writtenGrants()).containEql('warden');
   });
 
+  it('should preserve both pricing and grants when their raw document writes interleave', async () => {
+    // This is the production race in miniature. Pricing enters its read/decide/write transaction and
+    // is held at the atomic rename. A grant write starts while that first writer is suspended. The
+    // grant adapter must join the SAME executor, so it cannot read the stale document and later erase
+    // the pricing key (or have its own key erased by the pricing rename).
+    // Arrange
+    let text = JSON.stringify({ projectRoots: ['~/Code'] });
+    let reads = 0;
+    let writes = 0;
+    const firstWriteEntered = Promise.withResolvers<void>();
+    const releaseFirstWrite = Promise.withResolvers<void>();
+    const files = {
+      readText: async () => {
+        reads += 1;
+        return text;
+      },
+      writeTextAtomic: async (_path: string, next: string) => {
+        const position = writes;
+        writes += 1;
+        if (position === 0) {
+          firstWriteEntered.resolve();
+          await releaseFirstWrite.promise;
+        }
+        text = next;
+      },
+    } as Pick<FileSystemPort, 'readText' | 'writeTextAtomic'> as FileSystemPort;
+    const mutations = new KeyedSerialExecutor();
+    const store = new FileDaemonConfig(paths, files);
+    const pricing = new AnalyticsPricingService(
+      store,
+      { read: async () => ({ kind: 'unreachable' }) },
+      mutations,
+      { now: () => SYNCED_AT },
+      { next: () => 'preview-not-used' },
+    );
+    const grants = new ConfigGrantDocument(store, mutations);
+    const rate = ManualAnalyticsPricingRateSchema.parse(manualRate());
+
+    // Act: pricing has read twice (view + fresh write check) and is paused at its first write.
+    const pricingWrite = pricing.patch({
+      expectedCatalogFingerprint: analyticsPricingFingerprint([]),
+      operations: [{ op: 'upsert', rate }],
+    });
+    await firstWriteEntered.promise;
+    const grantWrite = grants.write({
+      ...DEFAULT_CAPABILITY_GRANTS,
+      warden: { use: false, configure: false },
+    });
+    const readsBeforePricingSettled = reads;
+    releaseFirstWrite.resolve();
+    const [view] = await Promise.all([pricingWrite, grantWrite]);
+    const written = JSON.parse(text) as Record<string, unknown>;
+
+    // Assert: without the shared barrier the grant call synchronously performs a third raw read here,
+    // and the two delayed renames finish with one of these keys missing. Once pricing settles, grants
+    // re-reads its result and both operator decisions survive in the exact raw document.
+    should(readsBeforePricingSettled).equal(2);
+    should(writes).equal(2);
+    should(view.catalog).deepEqual([rate]);
+    should(written.analyticsPricing).deepEqual([rate]);
+    should((written.grants as Record<string, unknown>).warden).deepEqual({ use: false, configure: false });
+    should(written.projectRoots).deepEqual(['~/Code']);
+  });
+
+  it('should read pricing defaults and provenance without writing them into the raw document', async () => {
+    // Arrange — `enabled` and last-sync are omitted intentionally: their absence is provenance.
+    const raw = { analyticsPricingSources: [configuredSource], projectRoots: ['~/Code'] };
+    const documents = documentStore(JSON.stringify(raw));
+
+    // Act
+    const actual = await documents.store.readPricing();
+
+    // Assert
+    should(actual.kind).equal('read');
+    if (actual.kind !== 'read') throw new Error('expected a readable pricing document');
+    should(actual.configuration.catalog).deepEqual([]);
+    should(actual.configuration.sources[0]).containDeep({
+      ...configuredSource,
+      enabled: true,
+      lastSyncedAt: null,
+    });
+    should(JSON.parse(documents.text() ?? '{}')).deepEqual(raw);
+  });
+
+  it('should preserve untouched raw pricing rows and every unrelated explicit/default decision', async () => {
+    // Arrange — the old rate spelling and omitted source defaults must survive an edit elsewhere.
+    const removed = manualRate('remove');
+    const raw = {
+      carriers: [{ kind: 'bind', host: 'box.lan' }],
+      analyticsPricing: [legacyRate, removed],
+      analyticsPricingSources: [configuredSource],
+    };
+    const documents = documentStore(JSON.stringify(raw));
+    const read = await documents.store.readPricing();
+    if (read.kind !== 'read') throw new Error('expected a readable pricing document');
+    const added = manualRate();
+
+    // Act
+    const actual = await documents.store.writePricing({
+      catalog: [...read.configuration.catalog.filter(rate => rate.pricingKey !== removed.pricingKey), added],
+      expectedCatalogFingerprint: analyticsPricingFingerprint(read.configuration.catalog),
+      touchedPricingKeys: [removed.pricingKey, added.pricingKey],
+    });
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+
+    // Assert
+    should(actual.kind).equal('written');
+    should(written.analyticsPricing).deepEqual([legacyRate, added]);
+    should(written.analyticsPricingSources).deepEqual([configuredSource]);
+    should(written.carriers).deepEqual(raw.carriers);
+    should(written).not.have.property('host');
+    should(Object.keys(written)).deepEqual(['carriers', 'analyticsPricing', 'analyticsPricingSources']);
+  });
+
+  it('should reject a stale catalog without overwriting the concurrently authored document', async () => {
+    // Arrange
+    const documents = documentStore(JSON.stringify({ analyticsPricing: [] }));
+    const before = await documents.store.readPricing();
+    if (before.kind !== 'read') throw new Error('expected a readable pricing document');
+    const concurrent = { analyticsPricing: [manualRate('concurrent')], projectRoots: ['~/New'] };
+    documents.set(JSON.stringify(concurrent));
+
+    // Act
+    const actual = await documents.store.writePricing({
+      catalog: [manualRate('mine')],
+      expectedCatalogFingerprint: analyticsPricingFingerprint(before.configuration.catalog),
+      touchedPricingKeys: ['mine'],
+    });
+
+    // Assert
+    should(actual.kind).equal('stale_catalog');
+    should(JSON.parse(documents.text() ?? '{}')).deepEqual(concurrent);
+  });
+
+  it('should reject changed source authority and an unknown source-sync target without writing', async () => {
+    // Arrange
+    const original = { analyticsPricingSources: [configuredSource], projectRoots: ['~/Original'] };
+    const documents = documentStore(JSON.stringify(original));
+    const before = await documents.store.readPricing();
+    if (before.kind !== 'read') throw new Error('expected a readable pricing document');
+    const changed = {
+      analyticsPricingSources: [{ ...configuredSource, url: 'https://pricing.example.test/replaced.json' }],
+      projectRoots: ['~/Concurrent'],
+    };
+    documents.set(JSON.stringify(changed));
+
+    // Act
+    const stale = await documents.store.writePricing({
+      catalog: before.configuration.catalog,
+      expectedCatalogFingerprint: analyticsPricingFingerprint(before.configuration.catalog),
+      touchedPricingKeys: [],
+      expectedSourcesFingerprint: analyticsPricingSourcesFingerprint(before.configuration.sources),
+      syncedSource: { sourceId: configuredSource.id, lastSyncedAt: SYNCED_AT },
+    });
+    documents.set(JSON.stringify(original));
+    const missing = await documents.store.writePricing({
+      catalog: before.configuration.catalog,
+      expectedCatalogFingerprint: analyticsPricingFingerprint(before.configuration.catalog),
+      touchedPricingKeys: [],
+      expectedSourcesFingerprint: analyticsPricingSourcesFingerprint(before.configuration.sources),
+      syncedSource: { sourceId: 'not-configured', lastSyncedAt: SYNCED_AT },
+    });
+
+    // Assert
+    should(stale.kind).equal('stale_sources');
+    should(missing.kind).equal('stale_sources');
+    should(JSON.parse(documents.text() ?? '{}')).deepEqual(original);
+  });
+
+  it('should stamp only the applied configured source and only the selected pricing rows', async () => {
+    // Arrange
+    const otherSource = {
+      id: 'anthropic-feed',
+      provider: 'anthropic',
+      url: 'https://pricing.example.test/anthropic.json',
+    } as const;
+    const untouched = manualRate('untouched');
+    const raw = {
+      analyticsPricing: [untouched],
+      analyticsPricingSources: [configuredSource, otherSource],
+      projectRoots: ['~/Code'],
+    };
+    const documents = documentStore(JSON.stringify(raw));
+    const before = await documents.store.readPricing();
+    if (before.kind !== 'read') throw new Error('expected a readable pricing document');
+    const synced: AnalyticsPricingRate = {
+      ...manualRate('synced'),
+      modelId: 'gpt-5-synced',
+      source: { kind: 'provider_sync', provider: 'openai', sourceUrl: configuredSource.url },
+      verifiedAt: SYNCED_AT,
+      lastSyncedAt: SYNCED_AT,
+    };
+
+    // Act
+    const actual = await documents.store.writePricing({
+      catalog: [...before.configuration.catalog, synced],
+      expectedCatalogFingerprint: analyticsPricingFingerprint(before.configuration.catalog),
+      touchedPricingKeys: [synced.pricingKey],
+      expectedSourcesFingerprint: analyticsPricingSourcesFingerprint(before.configuration.sources),
+      syncedSource: { sourceId: configuredSource.id, lastSyncedAt: SYNCED_AT },
+    });
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+
+    // Assert
+    should(actual.kind).equal('written');
+    should(written.analyticsPricing).deepEqual([untouched, synced]);
+    should(written.analyticsPricingSources).deepEqual([{ ...configuredSource, lastSyncedAt: SYNCED_AT }, otherSource]);
+    should(written.projectRoots).deepEqual(['~/Code']);
+    if (actual.kind !== 'written') throw new Error('expected a successful pricing write');
+    should(actual.configuration.sources[0]).containDeep({ lastSyncedAt: SYNCED_AT });
+  });
+
   it('should answer what is on disk without writing anything', async () => {
     // Arrange
     const fresh = documentStore();
@@ -241,5 +500,24 @@ describe('a configuration document this daemon will not act on', () => {
     // Assert
     should(raised).be.instanceof(DaemonConfigDocumentError);
     should(documents.text()).equal(JSON.stringify({ port: 'not a number' }));
+  });
+
+  it('should return narrow pricing unavailability without overwriting the damaged evidence', async () => {
+    // Arrange
+    const original = JSON.stringify({ analyticsPricing: 'not a catalog' });
+    const documents = documentStore(original);
+
+    // Act
+    const read = await documents.store.readPricing();
+    const write = await documents.store.writePricing({
+      catalog: [],
+      expectedCatalogFingerprint: 'cannot-match',
+      touchedPricingKeys: [],
+    });
+
+    // Assert
+    should(read.kind).equal('unavailable');
+    should(write.kind).equal('unavailable');
+    should(documents.text()).equal(original);
   });
 });

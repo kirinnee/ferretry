@@ -1,5 +1,15 @@
 import { type CapabilityGrants, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import {
+  analyticsPricingFingerprint,
+  analyticsPricingSourcesFingerprint,
+} from '../../lib/analytics/pricing-catalog.ts';
+import type {
+  AnalyticsPricingConfiguration,
+  AnalyticsPricingConfigurationRead,
+  AnalyticsPricingConfigurationWrite,
+  AnalyticsPricingConfigurationWriteResult,
+} from '../../lib/analytics/pricing-service.ts';
+import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   defaultDaemonConfigDocument,
@@ -28,6 +38,148 @@ export class DaemonConfigDocumentError extends Error {
     );
     this.name = 'DaemonConfigDocumentError';
     this.cause = cause;
+  }
+}
+
+type ParsedDaemonConfigDocument = ReturnType<typeof DaemonConfigDocumentSchema.parse>;
+
+export type PreparedAnalyticsPricingWrite =
+  | { readonly kind: 'write'; readonly text: string; readonly result: AnalyticsPricingConfigurationWriteResult }
+  | { readonly kind: 'refuse'; readonly result: AnalyticsPricingConfigurationWriteResult };
+
+function pricingConfiguration(document: ParsedDaemonConfigDocument): AnalyticsPricingConfiguration {
+  return { catalog: document.analyticsPricing, sources: document.analyticsPricingSources };
+}
+
+function rawDocument(path: string, text: string | undefined): Record<string, unknown> {
+  if (text === undefined) return {};
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch (error) {
+    throw new DaemonConfigDocumentError(path, error);
+  }
+}
+
+function checkedDocument(path: string, raw: unknown): ParsedDaemonConfigDocument {
+  const parsed = DaemonConfigDocumentSchema.safeParse(raw);
+  if (!parsed.success) throw new DaemonConfigDocumentError(path, parsed.error);
+  return parsed.data;
+}
+
+/**
+ * The pricing slice of either daemon configuration adapter.
+ *
+ * The state-home and explicit-path adapters have different filesystem authority but one answer to
+ * what the document means. Sharing this decision is what keeps `--config` from serving a different
+ * Settings catalog than the ordinary state-home path.
+ */
+export function readAnalyticsPricingConfiguration(
+  path: string,
+  text: string | undefined,
+): AnalyticsPricingConfigurationRead {
+  try {
+    return {
+      kind: 'read',
+      configuration: pricingConfiguration(checkedDocument(path, rawDocument(path, text))),
+    };
+  } catch (error) {
+    if (error instanceof DaemonConfigDocumentError) {
+      return { kind: 'unavailable', message: 'the daemon configuration document cannot be read as pricing' };
+    }
+    throw error;
+  }
+}
+
+function catalogDocument(raw: Record<string, unknown>, input: AnalyticsPricingConfigurationWrite): readonly unknown[] {
+  const desired = new Map(input.catalog.map(rate => [rate.pricingKey, rate]));
+  const touched = new Set(input.touchedPricingKeys);
+  const written = new Set<string>();
+  const current = Array.isArray(raw.analyticsPricing) ? raw.analyticsPricing : [];
+  const next: unknown[] = [];
+
+  for (const rawRate of current) {
+    // `checkedDocument` already parsed this exact array, so the raw spelling may be legacy but the
+    // stable key is present and a string in both accepted input domains.
+    const pricingKey = (rawRate as { readonly pricingKey: string }).pricingKey;
+    if (!touched.has(pricingKey)) {
+      next.push(rawRate);
+      continue;
+    }
+    written.add(pricingKey);
+    const replacement = desired.get(pricingKey);
+    if (replacement !== undefined) next.push(replacement);
+  }
+  for (const rate of input.catalog) {
+    if (touched.has(rate.pricingKey) && !written.has(rate.pricingKey)) next.push(rate);
+  }
+  return next;
+}
+
+function sourceDocument(
+  raw: Record<string, unknown>,
+  syncedSource: NonNullable<AnalyticsPricingConfigurationWrite['syncedSource']>,
+): readonly unknown[] | undefined {
+  if (!Array.isArray(raw.analyticsPricingSources)) return undefined;
+  let found = false;
+  const sources = raw.analyticsPricingSources.map(source => {
+    if (typeof source !== 'object' || source === null || !('id' in source) || source.id !== syncedSource.sourceId) {
+      return source;
+    }
+    found = true;
+    return { ...source, lastSyncedAt: syncedSource.lastSyncedAt };
+  });
+  return found ? sources : undefined;
+}
+
+/**
+ * Prepares one pricing write while preserving every raw field and every untouched rate spelling.
+ *
+ * The complete canonical catalog is used to validate the requested result, but only the pricing keys
+ * named by `touchedPricingKeys` replace raw rows. That distinction preserves an untouched legacy
+ * entry's explicit/default provenance instead of turning a Settings edit elsewhere into a rewrite of
+ * it. A sync similarly stamps only the configured source it actually applied.
+ */
+export function prepareAnalyticsPricingWrite(
+  path: string,
+  text: string | undefined,
+  input: AnalyticsPricingConfigurationWrite,
+): PreparedAnalyticsPricingWrite {
+  try {
+    const raw = rawDocument(path, text);
+    const current = pricingConfiguration(checkedDocument(path, raw));
+    if (analyticsPricingFingerprint(current.catalog) !== input.expectedCatalogFingerprint) {
+      return { kind: 'refuse', result: { kind: 'stale_catalog', configuration: current } };
+    }
+    if (
+      input.expectedSourcesFingerprint !== undefined &&
+      analyticsPricingSourcesFingerprint(current.sources) !== input.expectedSourcesFingerprint
+    ) {
+      return { kind: 'refuse', result: { kind: 'stale_sources', configuration: current } };
+    }
+
+    const syncedSources = input.syncedSource === undefined ? undefined : sourceDocument(raw, input.syncedSource);
+    if (input.syncedSource !== undefined && syncedSources === undefined) {
+      return { kind: 'refuse', result: { kind: 'stale_sources', configuration: current } };
+    }
+    const nextRaw = {
+      ...raw,
+      analyticsPricing: catalogDocument(raw, input),
+      ...(syncedSources === undefined ? {} : { analyticsPricingSources: syncedSources }),
+    };
+    const next = pricingConfiguration(checkedDocument(path, nextRaw));
+    return {
+      kind: 'write',
+      text: `${JSON.stringify(nextRaw, null, 2)}\n`,
+      result: { kind: 'written', configuration: next },
+    };
+  } catch (error) {
+    if (error instanceof DaemonConfigDocumentError) {
+      return {
+        kind: 'refuse',
+        result: { kind: 'unavailable', message: 'the daemon configuration document cannot be written as pricing' },
+      };
+    }
+    throw error;
   }
 }
 
@@ -160,6 +312,40 @@ export class FileDaemonConfig {
     const raw = this.raw(text);
     this.checked(raw);
     await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...raw, grants }, null, 2)}\n`);
+  }
+
+  /**
+   * The current catalog and the configured sources it is allowed to fetch from.
+   *
+   * Read on every request rather than captured at boot: an operator editing the document and a
+   * Settings client reading it must see the same current answer. The absent keys still parse to the
+   * protocol's empty defaults, and asking never writes those defaults into the operator's file.
+   */
+  async readPricing(): Promise<AnalyticsPricingConfigurationRead> {
+    return readAnalyticsPricingConfiguration(
+      this.paths.daemonConfig,
+      await this.files.readText(this.paths.daemonConfig),
+    );
+  }
+
+  /**
+   * Records one canonical pricing catalog without materialising any unrelated default.
+   *
+   * THE RAW DOCUMENT IS RE-READ AT THE WRITE, just as it is for grants and the selected port. This
+   * preserves a field an operator authored after the caller's earlier read instead of replacing the
+   * document with a boot-time snapshot. The catalog fingerprint is then checked against that fresh
+   * parse; sync apply additionally checks the configured-source fingerprint it reviewed. Only after
+   * both identities agree is the single `analyticsPricing` key replaced atomically.
+   */
+  async writePricing(input: AnalyticsPricingConfigurationWrite): Promise<AnalyticsPricingConfigurationWriteResult> {
+    const prepared = prepareAnalyticsPricingWrite(
+      this.paths.daemonConfig,
+      await this.files.readText(this.paths.daemonConfig),
+      input,
+    );
+    if (prepared.kind === 'refuse') return prepared.result;
+    await this.files.writeTextAtomic(this.paths.daemonConfig, prepared.text);
+    return prepared.result;
   }
 
   /**

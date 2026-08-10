@@ -1,5 +1,5 @@
+import { type AnalyticsModelAliasGroup, normalizeAnalyticsModelIdentity } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptHarness, TranscriptIssueCode } from '../transcript/types.ts';
-import { normalizeAnalyticsModelIdentity } from './model-identity.ts';
 import type { AnalyticsTokenUsage } from './pricing.ts';
 
 /** A session's token total, as this daemon can prove it from that session's own transcript. */
@@ -84,10 +84,11 @@ interface UsageTotals {
   cacheWrite: number;
   cacheWrite5m: number;
   cacheWrite1h: number;
+  reasoning: number;
 }
 
 function emptyTotals(): UsageTotals {
-  return { input: 0, output: 0, cachedRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+  return { input: 0, output: 0, cachedRead: 0, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0, reasoning: 0 };
 }
 
 /**
@@ -116,6 +117,23 @@ function cacheWriteIsPlaceable(harness: TranscriptHarness, cacheWrite: number): 
   return harness === 'claude' || cacheWrite === 0;
 }
 
+/**
+ * Whether a harness's reasoning tokens are a SEPARATELY BILLED part of its output.
+ *
+ * Codex reports `reasoning_output_tokens` as a named subset of the output total, and a provider may
+ * charge that subset at its own rate — so it has to be visible to pricing rather than summed away.
+ * Claude does not: extended thinking is billed as ordinary output tokens and no transcript figure
+ * distinguishes it, so calling any part of a Claude session's output "reasoning" would invent a
+ * distinction the provider never made and hand pricing a second rate to apply to it.
+ *
+ * NAMED POSITIVELY, one harness at a time. `!== 'claude'` would enrol every harness added later into
+ * Codex's billing semantics by default, silently, on the strength of not being Anthropic's — and the
+ * first anyone would learn of it is a bill. A harness earns this by being listed.
+ */
+function reasoningIsBilledApart(harness: TranscriptHarness): boolean {
+  return harness === 'codex';
+}
+
 function isCountable(value: number | undefined): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0;
 }
@@ -131,8 +149,17 @@ function isCountable(value: number | undefined): value is number {
  * still reported — a token count does not depend on which model produced it — but no single pricing
  * model is claimed, so the cost comes back unpriced instead of charging one model's whole run at
  * another model's rate.
+ *
+ * WHY THE CATALOG'S ALIASES REACH THIS FAR. "More than one model" is a question about identity, and
+ * only the operator's catalog knows that two spellings name one model. Deciding it here without the
+ * alias groups made a session addressed by both spellings look like a mixed-model run and come back
+ * unpriced — a false refusal, and one no downstream step could undo, because by then the second
+ * spelling had already been thrown away.
  */
-export function foldAnalyticsSessionUsage(evidence: AnalyticsTranscriptEvidence): AnalyticsSessionUsageFold {
+export function foldAnalyticsSessionUsage(
+  evidence: AnalyticsTranscriptEvidence,
+  aliasGroups: readonly AnalyticsModelAliasGroup[] = [],
+): AnalyticsSessionUsageFold {
   if (evidence.kind === 'unresolved') return { kind: 'refused', reason: 'transcript_unresolved' };
   if (evidence.kind === 'unreadable') return { kind: 'refused', reason: 'transcript_unreadable' };
   if (evidence.issues.some(code => EVIDENCE_LOSING_ISSUES.includes(code))) {
@@ -144,6 +171,10 @@ export function foldAnalyticsSessionUsage(evidence: AnalyticsTranscriptEvidence)
   const models = new Set<string>();
   let turnModel: string | undefined;
   let sawUsage = false;
+  // Tracked apart from the total, because a harness that never states a reasoning figure and one that
+  // states zero are different claims: the first cannot be reported as "this session did no reasoning".
+  let sawReasoning = false;
+  let sawMissingReasoning = false;
 
   for (const event of evidence.events) {
     if (event.kind === 'settings') {
@@ -161,9 +192,10 @@ export function foldAnalyticsSessionUsage(evidence: AnalyticsTranscriptEvidence)
     const cacheWrite = usage.cacheCreationInputTokens ?? 0;
     const cacheWrite5m = usage.cacheWrite5mInputTokens ?? 0;
     const cacheWrite1h = usage.cacheWrite1hInputTokens ?? 0;
+    const reasoning = usage.reasoningTokens ?? 0;
     // A negative or fractional token count is not a small error, it is a record this daemon does
     // not understand; one of them makes the whole session's total unstateable.
-    if (![input, output, cachedRead, cacheWrite, cacheWrite5m, cacheWrite1h].every(isCountable)) {
+    if (![input, output, cachedRead, cacheWrite, cacheWrite5m, cacheWrite1h, reasoning].every(isCountable)) {
       return { kind: 'refused', reason: 'ambiguous_token_accounting' };
     }
     if (!cacheWriteIsPlaceable(evidence.harness, cacheWrite)) {
@@ -171,6 +203,13 @@ export function foldAnalyticsSessionUsage(evidence: AnalyticsTranscriptEvidence)
     }
 
     sawUsage = true;
+    if (reasoningIsBilledApart(evidence.harness)) {
+      if (usage.reasoningTokens === undefined) sawMissingReasoning = true;
+      else {
+        sawReasoning = true;
+        totals.reasoning += reasoning;
+      }
+    }
     totals.input += grossInput(evidence.harness, input, cachedRead, cacheWrite);
     totals.output += output;
     totals.cachedRead += cachedRead;
@@ -179,7 +218,7 @@ export function foldAnalyticsSessionUsage(evidence: AnalyticsTranscriptEvidence)
     totals.cacheWrite1h += cacheWrite1h;
 
     const spelling = usage.model ?? turnModel;
-    const identity = normalizeAnalyticsModelIdentity(spelling);
+    const identity = normalizeAnalyticsModelIdentity(spelling, aliasGroups);
     if (identity !== null) models.add(identity.modelId);
   }
 
@@ -203,6 +242,12 @@ export function foldAnalyticsSessionUsage(evidence: AnalyticsTranscriptEvidence)
       cacheWriteInputTokens: totals.cacheWrite,
       cacheWrite5mInputTokens: splitIsComplete ? totals.cacheWrite5m : null,
       cacheWrite1hInputTokens: splitIsComplete ? totals.cacheWrite1h : null,
+      // Null where the transcript stated no reasoning figure at all, so pricing charges the whole
+      // output at the output rate rather than being told a zero it would read as evidence.
+      reasoningTokens: sawReasoning && !sawMissingReasoning ? totals.reasoning : null,
+      // A partial total is not a total. Preserve the ordinary token evidence, but tell pricing to
+      // refuse the cost rather than charge the known reasoning subset as though it were complete.
+      ...(sawReasoning && sawMissingReasoning ? { reasoningTokensIncomplete: true } : {}),
     },
   };
 }

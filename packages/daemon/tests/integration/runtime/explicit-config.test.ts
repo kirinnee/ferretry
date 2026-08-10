@@ -1,8 +1,13 @@
 import { afterEach, describe, it } from 'bun:test';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { AnalyticsPricingRate } from '@ferretry/protocol';
 import should from 'should';
 import { ExplicitDaemonConfig } from '../../../src/adapters/runtime/explicit-config.ts';
+import {
+  analyticsPricingFingerprint,
+  analyticsPricingSourcesFingerprint,
+} from '../../../src/lib/analytics/pricing-catalog.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 describe('ExplicitDaemonConfig', () => {
@@ -105,5 +110,71 @@ describe('ExplicitDaemonConfig', () => {
     should(Object.keys(recorded)).deepEqual([...Object.keys(seeded), 'port']);
     // A daemon configuration can name a secrets file and the address a machine is administered on.
     should(information.mode & 0o077).equal(0);
+  });
+
+  it('should read and write pricing at the exact --config path without touching the state home', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-pricing');
+    const path = join(directory, 'operator-daemon.json');
+    const homePath = join(directory, 'fy-home', 'config', 'daemon.json');
+    await mkdir(join(directory, 'fy-home', 'config'), { recursive: true });
+    const configuredSource = {
+      id: 'openai-feed',
+      provider: 'openai',
+      url: 'https://pricing.example.test/openai.json',
+    } as const;
+    const explicit = {
+      port: 9_100,
+      projectRoots: ['~/Explicit'],
+      analyticsPricingSources: [configuredSource],
+    };
+    const home = { port: 9_200, projectRoots: ['~/StateHome'] };
+    await writeFile(path, JSON.stringify(explicit));
+    await writeFile(homePath, JSON.stringify(home));
+    const store = new ExplicitDaemonConfig(path);
+    const before = await store.readPricing();
+    if (before.kind !== 'read') throw new Error('expected an explicit pricing document');
+    const syncedAt = '2026-08-06T12:00:00.000Z';
+    const synced: AnalyticsPricingRate = {
+      pricingKey: 'openai:gpt-5:2026-08',
+      modelId: 'gpt-5',
+      aliases: [],
+      provider: 'openai',
+      currency: 'USD',
+      rates: {
+        input: 1,
+        output: 2,
+        cachedInput: 1,
+        cacheWrite: null,
+        cacheWrite5m: null,
+        cacheWrite1h: null,
+        reasoning: 3,
+        image: null,
+        tool: null,
+      },
+      source: { kind: 'provider_sync', provider: 'openai', sourceUrl: configuredSource.url },
+      validFrom: '2026-08-01T00:00:00.000Z',
+      validThrough: null,
+      verifiedAt: syncedAt,
+      lastSyncedAt: syncedAt,
+    };
+
+    // Act
+    const actual = await store.writePricing({
+      catalog: [synced],
+      expectedCatalogFingerprint: analyticsPricingFingerprint(before.configuration.catalog),
+      touchedPricingKeys: [synced.pricingKey],
+      expectedSourcesFingerprint: analyticsPricingSourcesFingerprint(before.configuration.sources),
+      syncedSource: { sourceId: configuredSource.id, lastSyncedAt: syncedAt },
+    });
+    const written = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+
+    // Assert
+    should(actual.kind).equal('written');
+    should(written.port).equal(9_100);
+    should(written.projectRoots).deepEqual(['~/Explicit']);
+    should(written.analyticsPricing).deepEqual([synced]);
+    should(written.analyticsPricingSources).deepEqual([{ ...configuredSource, lastSyncedAt: syncedAt }]);
+    should(JSON.parse(await readFile(homePath, 'utf8'))).deepEqual(home);
   });
 });

@@ -99,8 +99,24 @@ describe('sessionAnalyticsStarterQueries', () => {
     const starters = sessionAnalyticsStarterQueries('ms59');
 
     // Assert
-    expect(starters.map(starter => starter.label)).toEqual(['sum', 'avg', 'min', 'max', 'count']);
-    expect(starters.map(starter => starter.id)).toEqual(['sum', 'avg', 'min', 'max', 'count']);
+    expect(starters.map(starter => starter.label)).toEqual([
+      'sum',
+      'avg',
+      'min',
+      'max',
+      'pricing coverage',
+      'identity check',
+      'count',
+    ]);
+    expect(starters.map(starter => starter.id)).toEqual([
+      'sum',
+      'avg',
+      'min',
+      'max',
+      'pricing-coverage',
+      'identity-check',
+      'count',
+    ]);
   });
 
   it('writes a real, runnable query for each aggregation', () => {
@@ -113,8 +129,21 @@ describe('sessionAnalyticsStarterQueries', () => {
       'avg by (model) {id="ms59"}',
       'min by (model) {id="ms59"}',
       'max by (model) {id="ms59"}',
+      'sum by (token_data) {id="ms59"}',
+      'count by (model, pricing_model) {id="ms59"}',
       'count by (status) {id="ms59"}',
     ]);
+  });
+
+  it('adds honest pricing-coverage and model-identity checks through the same safe session scope', () => {
+    const starters = sessionAnalyticsStarterQueries('session-*');
+    const pricingCoverage = starters.find(starter => starter.id === 'pricing-coverage');
+    const identityCheck = starters.find(starter => starter.id === 'identity-check');
+
+    expect(pricingCoverage?.query).toBe('sum by (token_data) {id=="session-*"}');
+    expect(pricingCoverage?.hint).toContain('equivalent-cost coverage');
+    expect(identityCheck?.query).toBe('count by (model, pricing_model) {id=="session-*"}');
+    expect(identityCheck?.hint).toContain('different values');
   });
 
   it('groups count by status, because count deliberately has no measures to attribute to a model', () => {

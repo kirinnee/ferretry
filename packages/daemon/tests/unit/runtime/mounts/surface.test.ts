@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
@@ -283,6 +284,24 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   tasks: taskSubsystem(),
   taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),
+  analyticsPricing: {
+    view: async () => ({
+      catalog: [],
+      catalogFingerprint: 'catalog-empty',
+      sources: [],
+      sourcesFingerprint: 'sources-empty',
+      rateApplicability: ANALYTICS_PRICING_RATE_APPLICABILITY,
+    }),
+    patch: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    preview: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    apply: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   // The ingestion loop serves no route, so the surface inventory never calls it. It is present because
   // `MountedSubsystems` is the list of what production constructs, and a loop absent from that list is
   // a store nothing writes to.
@@ -353,8 +372,8 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // Direct notification delivery joins the handover and runtime additions on the operator surface.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 117, 'admin-token': 1 });
+    // Pricing adds four operator routes to this promoted surface.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 121, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -482,6 +501,10 @@ describe('the mounted daemon surface', () => {
       'POST /v1/task-boards/membership/relinquish',
       'POST /v1/task-boards/coordinator/replace',
       'GET /v1/analytics',
+      'GET /v1/analytics/pricing',
+      'PATCH /v1/analytics/pricing',
+      'POST /v1/analytics/pricing/sync/preview',
+      'POST /v1/analytics/pricing/sync/apply',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',

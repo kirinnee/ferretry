@@ -30,15 +30,23 @@ const RATES: readonly AnalyticsPricingRate[] = [
     modelId: 'claude-opus-5',
     aliases: [],
     provider: 'anthropic',
-    ratesUsdMicrosPerMillion: {
+    currency: 'USD',
+    rates: {
       input: 15_000_000,
-      cachedRead: 1_500_000,
+      output: 75_000_000,
+      cachedInput: 1_500_000,
+      cacheWrite: null,
       cacheWrite5m: 18_750_000,
       cacheWrite1h: 30_000_000,
-      output: 75_000_000,
+      reasoning: null,
+      image: null,
+      tool: null,
     },
+    source: { kind: 'manual' },
     verifiedAt: '2026-08-01T00:00:00.000Z',
     validFrom: '2026-08-01T00:00:00.000Z',
+    validThrough: null,
+    lastSyncedAt: null,
   },
 ];
 
@@ -167,7 +175,7 @@ function harness(
       },
     },
     store,
-    pricing: () => pricing,
+    pricing: async () => pricing,
     clock: {
       now: () => {
         tick += 1;
@@ -192,6 +200,46 @@ function harness(
 }
 
 describe('AnalyticsIngestionService.ingest', () => {
+  it('should price a session addressed by two spellings the catalog calls one model', async () => {
+    // THE WHOLE PATH, not just the pricing step. The catalog's alias groups have to reach the FOLD:
+    // that is where two spellings become one identity or a mixed-model refusal, and a refusal decided
+    // without them leaves the session permanently unpriced no matter what the catalog says next.
+    // Arrange
+    const aliased: readonly AnalyticsPricingRate[] = [{ ...RATES[0]!, aliases: ['claude-opus-5-preview'] }];
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () =>
+        readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-opus-5-preview', 1_000, 500)]),
+      { pricing: async () => aliased },
+    );
+
+    // Act
+    await test.service.ingest();
+
+    // Assert
+    const [row] = test.store.rows();
+    should(row?.raw.pricingModel).equal('claude-opus-5');
+    should(row?.pricing).have.property('kind', 'priced');
+    // 2000 input at 15 USD/M and 1000 output at 75 USD/M, in whole micros.
+    should(row?.raw.equivalentApiCostUsdMicros).equal(105_000);
+  });
+
+  it('should leave a genuinely mixed-model session unpriced with the catalog in hand', async () => {
+    // Aliases make one model addressable twice; they do not make two models one.
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-sonnet-5', 1_000, 500)]),
+    );
+
+    await test.service.ingest();
+
+    const [row] = test.store.rows();
+    // The token total still stands — a count does not depend on which model produced it.
+    should(row?.raw.tokens).equal(3_000);
+    should(row?.raw.pricingModel).be.null();
+    should(row?.pricing).containDeep({ kind: 'unpriced', reason: 'missing_pricing_model' });
+    should(row?.raw.equivalentApiCostUsdMicros).be.null();
+  });
+
   it('should store a finished session with the total folded from its own transcript', async () => {
     // Arrange
     const test = harness([candidate({ id: 's1' })], async () =>
@@ -326,21 +374,63 @@ describe('AnalyticsIngestionService.ingest', () => {
   });
 
   it('should re-ingest when the operator edits the rate catalog', async () => {
+    // THE CATALOG IS READ PER PASS, NEVER HELD. `parts.pricing` is a function the composition root
+    // supplies, called at the top of every sweep, so an operator editing prices while the daemon runs
+    // is reflected by the NEXT pass — no restart, and no rebuilt ingestion service. The catalog's
+    // fingerprint is part of each session's signature, which is what makes the edit re-price rows
+    // that were otherwise unchanged.
     // Arrange
     const test = harness([candidate({ id: 's1' })], async () =>
       readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
     );
     await test.service.ingest();
+    const service = test.service;
 
-    // Act
-    test.setPricing([
-      { ...RATES[0]!, ratesUsdMicrosPerMillion: { ...RATES[0]!.ratesUsdMicrosPerMillion, output: 150_000_000 } },
-    ]);
-    const second = await test.service.ingest();
+    // Act — the same service instance, a different catalog.
+    test.setPricing([{ ...RATES[0]!, rates: { ...RATES[0]!.rates, output: 150_000_000 } }]);
+    const second = await service.ingest();
 
     // Assert
     should(second.ingested).equal(1);
+    should(second.unchanged).equal(0);
     should(test.store.rows()[0]?.raw.equivalentApiCostUsdMicros).equal(90_000);
+  });
+
+  it('should re-price a mixed-model refusal when a later catalog edit joins the spellings', async () => {
+    // The alias groups reach the fold, and the fold runs per pass — so an operator who adds the
+    // missing alias fixes the session that was reported unpriced, on the next pass, without a
+    // restart. If the aliases had been read once at construction this row would stay wrong forever.
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-opus-5-preview', 1_000, 500)]),
+    );
+    await test.service.ingest();
+    should(test.store.rows()[0]?.raw.pricingModel).be.null();
+
+    // Act — the same service instance, a catalog that now says the two spellings are one model.
+    test.setPricing([{ ...RATES[0]!, aliases: ['claude-opus-5-preview'] }]);
+    await test.service.ingest();
+
+    // Assert
+    should(test.store.rows()[0]?.raw.pricingModel).equal('claude-opus-5');
+    should(test.store.rows()[0]?.raw.equivalentApiCostUsdMicros).equal(105_000);
+  });
+
+  it('should refuse the pass when the catalog cannot be read, not substitute an empty one', async () => {
+    // A pricing provider that REJECTS — the config document unreadable, the provider feed down — refuses
+    // the WHOLE pass. With no catalog no row could be priced, and the alternative, reading the rejection
+    // as an empty catalog, would store every session as unpriced and report a fleet that spent nothing.
+    // The rejection propagates out of the pass, and nothing is written behind it.
+    // Arrange
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () => readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+      { pricing: async () => Promise.reject(new Error('catalog unavailable')) },
+    );
+
+    // Act / Assert
+    await should(test.service.ingest()).be.rejectedWith(/catalog unavailable/);
+    should(test.store.rows()).be.empty();
   });
 
   it('should replace rather than accumulate when the same session is ingested twice', async () => {

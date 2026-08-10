@@ -98,6 +98,7 @@ const aggregate = (
         cacheWriteInputTokens: measure(0),
         cacheWrite5mInputTokens: measure(0),
         cacheWrite1hInputTokens: measure(0),
+        reasoningTokens: measure(0),
         equivalentApiCostUsdMicros: measure(costValue),
         turns: measure(1),
         durationMs: measure(1),

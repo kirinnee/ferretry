@@ -8,6 +8,10 @@ export const AnalyticsLabelSchema = z.enum([
   'id',
   'agent',
   'model',
+  // The model a transcript was PRICED against, which is not always the model a person selected: a
+  // selector spelling and a transcript spelling disagree often enough that grouping cost by `model`
+  // silently attributes it to the wrong row.
+  'pricing_model',
   'context_window',
   'harness',
   'mode',
@@ -71,6 +75,16 @@ export const AnalyticsAggregateResultSchema = z.object({
   cacheWriteInputTokens: AnalyticsMeasureSchema,
   cacheWrite5mInputTokens: AnalyticsMeasureSchema,
   cacheWrite1hInputTokens: AnalyticsMeasureSchema,
+  /**
+   * Reasoning tokens, which are billed at their own rate.
+   *
+   * REQUIRED, because this is now a fact the contract OWNS. It was optional while nothing folded the
+   * figure and a responder had to be able to say "I cannot count these at all" — but a build that
+   * counts them and still admits omission leaves every reader writing a fallback for a case that can
+   * no longer happen. Unknown is said with `{ value: null }`, a measure that was attempted and came
+   * back empty, which is what a session whose harness names no reasoning figure produces.
+   */
+  reasoningTokens: AnalyticsMeasureSchema,
   equivalentApiCostUsdMicros: AnalyticsMeasureSchema,
   turns: AnalyticsMeasureSchema,
   durationMs: AnalyticsMeasureSchema,
@@ -103,6 +117,14 @@ export const AnalyticsRawSessionSchema = z.object({
   cacheWriteInputTokens: z.number().finite().nonnegative().nullable(),
   cacheWrite5mInputTokens: z.number().finite().nonnegative().nullable(),
   cacheWrite1hInputTokens: z.number().finite().nonnegative().nullable(),
+  /**
+   * The part of `outputTokens` a harness named as reasoning, or null when it named none.
+   *
+   * A SUBSET, NOT AN ADDITION: it is already counted in `outputTokens` and in `tokens`, exactly as
+   * `cachedInputTokens` is already counted in `inputTokens`. Null is not zero — a harness that
+   * reports no reasoning figure has said nothing, and a stated zero says the session did none.
+   */
+  reasoningTokens: z.number().finite().nonnegative().nullable(),
   turns: z.number().finite().nonnegative().nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
   timeToFirstOutputMs: z.number().finite().nonnegative().nullable(),

@@ -2026,6 +2026,22 @@ describe('browserPushEnrolment', () => {
 /* ---------- the picker, the settings host, and the public root ------------ */
 
 describe('the settings route composition', () => {
+  it('mounts the iconless Model pricing tab through the production Settings composition', async () => {
+    const { view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId]);
+    await settle();
+
+    const tab = must(
+      [...view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(candidate =>
+        candidate.textContent?.includes('Model pricing'),
+      ),
+      'Model pricing tab',
+    );
+
+    expect(tab.getAttribute('aria-controls')).toBe('daemon-settings-tab-model-pricing');
+    expect(tab.querySelector('svg')).toBeNull();
+    await view.unmount();
+  });
+
   /**
    * Opens the Carrier panel with a measured answer already on it.
    *

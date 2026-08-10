@@ -28,7 +28,7 @@ import {
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
-import { BunSqliteAnalyticsStoreFactory } from '../src/adapters/analytics/index.ts';
+import { BunSqliteAnalyticsStoreFactory, HttpAnalyticsPricingFeed } from '../src/adapters/analytics/index.ts';
 import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
@@ -222,12 +222,15 @@ import {
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
 import {
+  type AnalyticsPricingConfigurationPort,
+  AnalyticsPricingService,
+} from '../src/lib/analytics/pricing-service.ts';
+import {
   type AccountInventoryPort,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
   AnalyticsIngestionService,
-  type AnalyticsPricingRate,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
   AnswerAcknowledged,
@@ -885,7 +888,6 @@ export interface DaemonWorld {
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
     /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
-    pricingCatalog: readonly AnalyticsPricingRate[],
     /**
      * The analytics materialization, passed IN because opening it touches the disk: it walks its own
      * paths through the confined filesystem port, may discard an index it cannot reuse, and must be
@@ -3216,7 +3218,7 @@ function createAnalyticsCandidateSource(storage: DaemonStorage): AnalyticsIngest
 function createAnalyticsIngestion(
   storage: DaemonStorage,
   opened: OpenedAnalyticsIndexStore,
-  pricingCatalog: readonly AnalyticsPricingRate[],
+  pricingConfiguration: AnalyticsPricingConfigurationPort,
   evidence: AnalyticsTranscriptEvidenceSource,
   clock: ClockPort,
 ): AnalyticsIngestionService {
@@ -3224,7 +3226,11 @@ function createAnalyticsIngestion(
     candidates: createAnalyticsCandidateSource(storage),
     evidence,
     store: opened.store,
-    pricing: () => pricingCatalog,
+    pricing: async () => {
+      const read = await pricingConfiguration.readPricing();
+      if (read.kind === 'unavailable') throw new Error(`analytics ingestion refused because ${read.message}`);
+      return read.configuration.catalog;
+    },
     clock,
     concurrency: ANALYTICS_FOLD_CONCURRENCY,
     rebuildRequired: opened.rebuildRequired,
@@ -3788,6 +3794,8 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // from that opened home. Keep the callback live so a human login always closes the real workers
   // that currently hold the shared profile rather than racing their lease.
   let closeAgentBrowsers: () => Promise<void> = async () => undefined;
+  const daemonConfigMutations = new KeyedSerialExecutor();
+  const stateHomeDaemonConfigStore = new FileDaemonConfig(paths, stateFiles);
   // An operator's own document when they named one, and the state home's otherwise. The confined
   // filesystem port refuses every path outside the home, which is right for the daemon's own state
   // and wrong for a file a person named, so the two are different adapters.
@@ -3796,9 +3804,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // `secretEnvironment` recipes. Two stores over one file would be two opinions about what the
   // operator wrote — and the one the UI showed would not be the one a spawned child got.
   const daemonConfigStore =
-    overrides.configFile === undefined
-      ? new FileDaemonConfig(paths, stateFiles)
-      : new ExplicitDaemonConfig(overrides.configFile);
+    overrides.configFile === undefined ? stateHomeDaemonConfigStore : new ExplicitDaemonConfig(overrides.configFile);
   // Read per call, not captured: an operator editing `config/daemon.json` sees the effect on the
   // next use rather than after a restart, and a document that has become unreadable answers no
   // recipes rather than the last good ones — a stale recipe is a reference resolved against a rule
@@ -4491,7 +4497,6 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       browserLogin,
       sttEnhancement,
       catalogs,
-      pricingCatalog,
       analyticsStore,
       pairing,
       push,
@@ -4818,9 +4823,16 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       const analyticsIngestion = createAnalyticsIngestion(
         storage,
         analyticsStore,
-        pricingCatalog,
+        daemonConfigStore,
         createAnalyticsTranscriptEvidence(storage),
         clock,
+      );
+      const analyticsPricing = new AnalyticsPricingService(
+        daemonConfigStore,
+        new HttpAnalyticsPricingFeed(),
+        daemonConfigMutations,
+        clock,
+        { next: () => crypto.randomUUID() },
       );
       // Hoisted, because the quota-failover loop below moves sessions THROUGH this exact subsystem
       // rather than through a second, ungated path of its own.
@@ -5041,6 +5053,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion),
+        analyticsPricing,
         analyticsIngest: analyticsIngestion,
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
@@ -5213,7 +5226,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
          * into backups and screen shares.
          */
         grants: new CapabilityGrantService({
-          document: new ConfigGrantDocument(new FileDaemonConfig(paths, stateFiles)),
+          document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
           passwords: new FileOperatorPassword(paths.operatorPassword, stateFiles),
           tokens: new RandomUnlockTokens(),
           clock: new SystemGrantClock(),
@@ -5406,7 +5419,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.browserLogin.window,
     world.sttEnhancement,
     catalogs,
-    config.analyticsPricing,
     analyticsStore,
     pairing.subsystem,
     pairing.push,

@@ -1,15 +1,15 @@
 import type { AnalyticsIndexStatus, AnalyticsRawSession } from '@ferretry/protocol';
 import type { TranscriptHarness } from '../transcript/types.ts';
-import { gateAnalyticsIngest, type AnalyticsIngestRefusal } from './ingest.ts';
-import type { AnalyticsPricingRate } from './pricing.ts';
+import { type AnalyticsIngestRefusal, gateAnalyticsIngest } from './ingest.ts';
+import { type AnalyticsPricingRate, analyticsCatalogAliasGroups } from './pricing.ts';
 import { deriveAnalyticsSessionRecord, type FinishedAnalyticsSession } from './session-record.ts';
 import {
-  analyticsIngestSignature,
-  analyticsPricingCatalogFingerprint,
   type AnalyticsIndexStore,
   type AnalyticsStoredSession,
+  analyticsIngestSignature,
+  analyticsPricingCatalogFingerprint,
 } from './store.ts';
-import { foldAnalyticsSessionUsage, type AnalyticsTranscriptEvidenceSource } from './usage-fold.ts';
+import { type AnalyticsTranscriptEvidenceSource, foldAnalyticsSessionUsage } from './usage-fold.ts';
 
 /**
  * One session as its durable documents describe it, BEFORE anything has judged whether it ended.
@@ -41,8 +41,19 @@ export interface AnalyticsIngestionParts {
   readonly candidates: AnalyticsIngestCandidateSource;
   readonly evidence: AnalyticsTranscriptEvidenceSource;
   readonly store: AnalyticsIndexStore;
-  /** Read per pass, never held: an operator may edit the catalog while the daemon runs. */
-  readonly pricing: () => readonly AnalyticsPricingRate[];
+  /**
+   * The rate catalog, read once at the start of every pass and held for that pass only, so an operator
+   * editing prices while the daemon runs is reflected by the next pass — never a restart.
+   *
+   * ASYNC ON PURPOSE. The composition root's real provider reads a config document that may not be in
+   * memory, and a synchronous callback could not represent that read; making the seam async here is what
+   * lets the daemon price from a live catalog without the ingestion service knowing how it is stored.
+   *
+   * A provider that REJECTS refuses the whole pass. With no catalog, no row could be priced, and
+   * substituting an empty one would silently store a fleet's worth of unpriced rows — so the rejection
+   * propagates out of the pass rather than being caught and counted the way a single transcript read is.
+   */
+  readonly pricing: () => Promise<readonly AnalyticsPricingRate[]>;
   readonly clock: AnalyticsIngestClock;
   /** How many transcripts may be folded at once. Each read is bounded on its own; this bounds how
    *  many of those bounds are resident at the same instant. */
@@ -209,7 +220,7 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   }
 
   private async sweep(): Promise<AnalyticsIngestSummary> {
-    const catalog = this.parts.pricing();
+    const catalog = await this.parts.pricing();
     const pricingFingerprint = analyticsPricingCatalogFingerprint(catalog);
     const candidates = await this.parts.candidates.listCandidates();
     const stored = this.parts.store.ingested();
@@ -302,7 +313,10 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     const evidence = await this.parts.evidence
       .evidenceFor(entry.session.id, entry.candidate.transcriptHarness)
       .catch(() => undefined);
-    const fold = foldAnalyticsSessionUsage(evidence ?? { kind: 'unreadable' });
+    // The catalog's alias groups have to reach the FOLD, not just the pricing step after it: the fold
+    // is where two spellings become one identity or a mixed-model refusal, and a refusal decided
+    // without them is one nothing downstream can reverse.
+    const fold = foldAnalyticsSessionUsage(evidence ?? { kind: 'unreadable' }, analyticsCatalogAliasGroups(catalog));
     const derived = deriveAnalyticsSessionRecord(
       { ...entry.session, usage: fold.kind === 'usage' ? fold.usage : null },
       catalog,

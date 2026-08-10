@@ -1,28 +1,22 @@
-import type { AnalyticsAggregation, AnalyticsLabel, AnalyticsMatcher, ParsedAnalyticsQuery } from './analytics.ts';
+import {
+  AnalyticsAggregationSchema,
+  AnalyticsLabelSchema,
+  type AnalyticsAggregation,
+  type AnalyticsLabel,
+  type AnalyticsMatcher,
+  type ParsedAnalyticsQuery,
+} from './analytics.ts';
 
 export const DEFAULT_ANALYTICS_QUERY = 'sum by (day)';
 export const DEFAULT_SESSION_ANALYTICS_QUERY = 'sum by (model)';
 export const MAX_ANALYTICS_QUERY_CHARS = 2_048;
 export const MAX_ANALYTICS_GROUP_LABELS = 4;
 
-const ANALYTICS_AGGREGATIONS = ['sum', 'avg', 'min', 'max', 'count'] as const satisfies readonly AnalyticsAggregation[];
-const ANALYTICS_LABELS = [
-  'id',
-  'agent',
-  'model',
-  'context_window',
-  'harness',
-  'mode',
-  'status',
-  'label',
-  'cwd',
-  'repo',
-  'parent',
-  'tree',
-  'day',
-  'week',
-  'token_data',
-] as const satisfies readonly AnalyticsLabel[];
+// DERIVED, never respelled. A second copy of either list proves soundness — no wrong member — and
+// says nothing about completeness, so a label added to the schema would parse everywhere except in
+// the query grammar, and the only symptom would be a query an operator was told does not exist.
+const ANALYTICS_AGGREGATIONS: readonly AnalyticsAggregation[] = AnalyticsAggregationSchema.options;
+const ANALYTICS_LABELS: readonly AnalyticsLabel[] = AnalyticsLabelSchema.options;
 const aggregations = new Set<string>(ANALYTICS_AGGREGATIONS);
 const labels = new Set<string>(ANALYTICS_LABELS);
 

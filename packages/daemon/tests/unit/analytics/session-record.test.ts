@@ -14,14 +14,23 @@ const catalog: readonly AnalyticsPricingRate[] = [
     modelId: 'transcript-model',
     aliases: ['TRANSCRIPT-MODEL-preview'],
     provider: 'openai',
-    ratesUsdMicrosPerMillion: {
+    currency: 'USD',
+    rates: {
       input: 1_000_000,
-      cachedRead: 100_000,
-      cacheWrite: 1_250_000,
       output: 5_000_000,
+      cachedInput: 100_000,
+      cacheWrite: 1_250_000,
+      cacheWrite5m: null,
+      cacheWrite1h: null,
+      reasoning: null,
+      image: null,
+      tool: null,
     },
-    verifiedAt: '2026-01-01',
+    source: { kind: 'manual' },
+    verifiedAt: '2026-01-01T00:00:00Z',
     validFrom: '2026-01-01T00:00:00Z',
+    validThrough: null,
+    lastSyncedAt: null,
   },
 ];
 
@@ -74,6 +83,25 @@ describe('deriveAnalyticsSessionRecord', () => {
     should(actual.raw.equivalentApiCostUsdMicros).equal(1_923);
   });
 
+  it('should carry a reasoning total without counting it a second time in the token total', () => {
+    // Reasoning is already INSIDE `outputTokens`, so `tokens` — what the session billed — must not
+    // grow by it. Adding it would inflate every Codex row by however much the model thought.
+    // Act
+    const counted = deriveAnalyticsSessionRecord(
+      { ...finished, usage: { ...finished.usage!, reasoningTokens: 60 } },
+      catalog,
+    );
+    const silent = deriveAnalyticsSessionRecord(finished, catalog);
+
+    // Assert
+    should(counted.raw.reasoningTokens).equal(60);
+    should(counted.raw.outputTokens).equal(200);
+    should(counted.raw.tokens).equal(1_200);
+    // A transcript that named no reasoning figure leaves the column unknown, never zero: "this
+    // session did no reasoning" is a claim, and nobody made it.
+    should(silent.raw.reasoningTokens).be.null();
+  });
+
   it('should honor an explicit context window and persist an effective rate snapshot', () => {
     // Act
     const actual = deriveAnalyticsSessionRecord({ ...finished, contextWindow: 200_000 }, catalog);
@@ -82,7 +110,12 @@ describe('deriveAnalyticsSessionRecord', () => {
     should(actual.raw.contextWindow).equal(200_000);
     should(actual.pricing).have.property('kind', 'priced');
     if (actual.pricing?.kind === 'priced') {
-      should(actual.pricing.rate.ratesUsdMicrosPerMillion).deepEqual(catalog[0]!.ratesUsdMicrosPerMillion);
+      should(actual.pricing.rate.ratesUsdMicrosPerMillion).deepEqual({
+        input: 1_000_000,
+        cachedRead: 100_000,
+        output: 5_000_000,
+        cacheWrite: 1_250_000,
+      });
     }
   });
 

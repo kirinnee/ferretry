@@ -119,6 +119,18 @@ describe('analytics query language', () => {
     );
   });
 
+  it('should accept every label the schema names, including one added after the grammar was written', () => {
+    // The grammar derives its label set from `AnalyticsLabelSchema`. A respelled copy would prove no
+    // wrong member and still leave a new one unqueryable, with "unknown analytics label" as the only
+    // symptom — so `pricing_model` working here is the derivation being exercised, not a spelling.
+    // Act
+    const actual = parseAnalyticsQuery('sum by (pricing_model) {pricing_model=~claude-*}');
+
+    // Assert
+    should(actual.groupBy).deepEqual(['pricing_model']);
+    should(actual.matchers).deepEqual([{ label: 'pricing_model', op: '=~', value: 'claude-*', wildcard: true }]);
+  });
+
   it('should decode quoted escapes and omit empty matcher segments', () => {
     // Act
     const actual = parseAnalyticsQuery(

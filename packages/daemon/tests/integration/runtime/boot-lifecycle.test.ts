@@ -1,9 +1,10 @@
 import { afterEach, describe, it } from 'bun:test';
-import { buildFleetManifest } from '@ferretry/fleet';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { buildFleetManifest } from '@ferretry/fleet';
 import {
+  AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
   BrowserLoginStatusSchema,
   DaemonCarriersViewSchema,
@@ -15,12 +16,12 @@ import {
   LearningStatusSchema,
   NameSuggestionsSchema,
   PairingCodeMintResponseSchema,
-  pairingMintOutcome,
   PairingCodeStatusResponseSchema,
   PairingResponseSchema,
   ProposalViewSchema,
-  refusalNotice,
+  pairingMintOutcome,
   RunManifestSchema,
+  refusalNotice,
   SendResultSchema,
   SessionConfigSchema,
   SessionListSchema,
@@ -58,10 +59,10 @@ import {
   type RelayCarrierSource,
   type ResumeLauncher,
   SESSION_ID_VARIABLE,
-  sessionPaneEnvironment,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   SocketTicketRegistry,
+  sessionPaneEnvironment,
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
@@ -2466,12 +2467,177 @@ describe('daemon boot lifecycle', () => {
     // The rows came out of a real materialisation in this daemon's own state home, not a per-request
     // derivation: the file the boot pass wrote is on disk under the index directory.
     should(await Bun.file(join(home, 'state', 'index', 'analytics.sqlite')).exists()).be.true();
-    should(groupedBody.index.schemaVersion).equal(2);
+    should(groupedBody.index.schemaVersion).equal(3);
     // A malformed query is the caller's mistake, not a 500 from the daemon.
     should(refused.status).equal(400);
     should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');
     // Longer than the suite default because this case waits for a background pass rather than for a
     // request: it boots a real daemon, lets the ingestion sweep catch up, and only then asks.
+  }, 30_000);
+
+  /**
+   * Pricing configuration stays live for the lifetime of one daemon.
+   *
+   * This journey starts with a finished session whose real Claude transcript proves token usage but
+   * whose daemon has no applicable rate. It then PATCHes the mounted pricing route and asks the exact
+   * ingestion instance that boot mounted to sweep again. The same stored row becoming priced proves
+   * that a pass reads the current configuration document rather than a catalog captured at startup.
+   */
+  it('should apply a pricing PATCH to a later analytics ingest without restarting', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-analytics-live-pricing');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const sessionId = 'wire-priced-later';
+    let release = (): void => {};
+    let mounted: ReturnType<DaemonWorld['createSubsystems']> | undefined;
+    const baseWorld = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const createSubsystems = baseWorld.createSubsystems;
+    const world: DaemonWorld = {
+      ...baseWorld,
+      createSubsystems: (...args: Parameters<DaemonWorld['createSubsystems']>) => {
+        const subsystems = createSubsystems(...args);
+        mounted = subsystems;
+        return subsystems;
+      },
+    };
+    await seedSession(home, '2026-07-30T09:00:00.000Z', sessionId, {
+      status: 'completed',
+      turn: 1,
+      startedAt: '2026-07-30T09:00:00.000Z',
+      finishedAt: '2026-07-30T09:01:00.000Z',
+    });
+    const harnessHome = join(home, 'harness');
+    const transcriptDirectory = join(harnessHome, 'projects', 'analytics-pricing');
+    const transcriptFile = join(transcriptDirectory, 'session.jsonl');
+    await mkdir(transcriptDirectory, { recursive: true });
+    await writeFile(
+      transcriptFile,
+      `${JSON.stringify({
+        type: 'assistant',
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        uuid: 'pricing-usage-1',
+        timestamp: '2026-07-30T09:00:30.000Z',
+        message: {
+          id: 'pricing-message-1',
+          role: 'assistant',
+          model: 'claude-opus-5',
+          usage: {
+            input_tokens: 100,
+            output_tokens: 10,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          content: [{ type: 'text', text: 'priced after configuration changes' }],
+        },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    const configFile = join(home, 'state', 'sessions', sessionId, 'config.json');
+    await writeFile(
+      configFile,
+      JSON.stringify({
+        ...(JSON.parse(await readFile(configFile, 'utf8')) as object),
+        transcript: {
+          v: 1,
+          home: harnessHome,
+          harnessSessionId: '11111111-1111-4111-8111-111111111111',
+          identity: 'minted',
+          file: transcriptFile,
+          resolvedAt: '2026-07-30T09:00:05.000Z',
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const exit = start(world, cleanups);
+    const base = `http://127.0.0.1:${String(port)}`;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const analytics = `${base}/v1/analytics?q=${encodeURIComponent('sum by (id)')}`;
+    const settledAnalytics = async () => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const current = AnalyticsResponseSchema.parse(
+          await fetch(analytics, { headers }).then(async response => await response.json()),
+        );
+        if (current.index.sessions === 1 && !current.index.refreshing) return current;
+        await Bun.sleep(50);
+      }
+      throw new Error('the analytics index did not settle on the finished transcript');
+    };
+
+    // Act
+    const before = await settledAnalytics();
+    const pricingResponse = await fetch(`${base}/v1/analytics/pricing`, { headers });
+    const pricing = AnalyticsPricingViewSchema.parse(await pricingResponse.json());
+    const patchResponse = await fetch(`${base}/v1/analytics/pricing`, {
+      method: 'PATCH',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        expectedCatalogFingerprint: pricing.catalogFingerprint,
+        operations: [
+          {
+            op: 'upsert',
+            rate: {
+              pricingKey: 'manual:claude-opus-5:2026-07',
+              modelId: 'claude-opus-5',
+              aliases: [],
+              provider: 'anthropic',
+              currency: 'USD',
+              rates: {
+                input: 1_000_000,
+                output: 2_000_000,
+                cachedInput: 100_000,
+                cacheWrite: null,
+                cacheWrite5m: null,
+                cacheWrite1h: null,
+                reasoning: null,
+                image: null,
+                tool: null,
+              },
+              source: { kind: 'manual' },
+              validFrom: '2026-07-01T00:00:00.000Z',
+              validThrough: null,
+              verifiedAt: '2026-08-06T00:00:00.000Z',
+              lastSyncedAt: null,
+            },
+          },
+        ],
+      }),
+    });
+    const patched = AnalyticsPricingViewSchema.parse(await patchResponse.json());
+    if (mounted === undefined) throw new Error('boot did not construct the mounted subsystems');
+    const sweep = await mounted.analyticsIngest.ingest();
+    const after = AnalyticsResponseSchema.parse(
+      await fetch(analytics, { headers }).then(async response => await response.json()),
+    );
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(pricingResponse.status).equal(200);
+    should(pricing.catalog).be.empty();
+    should(before.index.tokenSessions).equal(1);
+    should(
+      before.kind === 'aggregate' ? before.results.map(row => row.equivalentApiCostUsdMicros.value) : [],
+    ).deepEqual([null]);
+    should(patchResponse.status).equal(200);
+    should(patched.catalog.map(rate => rate.pricingKey)).deepEqual(['manual:claude-opus-5:2026-07']);
+    should(sweep.ingested).equal(1);
+    should(after.index.tokenSessions).equal(1);
+    // 100 input tokens at $1/M plus 10 output tokens at $2/M = 120 USD micros.
+    should(after.kind === 'aggregate' ? after.results.map(row => row.equivalentApiCostUsdMicros.value) : []).deepEqual([
+      120,
+    ]);
   }, 30_000);
 
   /**

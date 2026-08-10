@@ -1,10 +1,14 @@
-import type { AnalyticsRawSession } from '@ferretry/protocol';
-import { normalizeAnalyticsModelIdentity, type AnalyticsModelIdentity } from './model-identity.ts';
 import {
-  snapshotAnalyticsUsagePricing,
+  type AnalyticsModelIdentity,
+  type AnalyticsRawSession,
+  normalizeAnalyticsModelIdentity,
+} from '@ferretry/protocol';
+import {
   type AnalyticsPricingRate,
   type AnalyticsTokenUsage,
   type AnalyticsUsagePricingSnapshot,
+  analyticsCatalogAliasGroups,
+  snapshotAnalyticsUsagePricing,
 } from './pricing.ts';
 
 export interface FinishedAnalyticsSession {
@@ -83,9 +87,7 @@ function utcWeek(value: string): string | null {
   return date.toISOString().slice(0, 10);
 }
 
-function tokenFields(
-  usage: FinishedAnalyticsSession['usage'],
-): Pick<
+type AnalyticsTokenFields = Pick<
   AnalyticsRawSession,
   | 'tokens'
   | 'inputTokens'
@@ -94,18 +96,23 @@ function tokenFields(
   | 'cacheWriteInputTokens'
   | 'cacheWrite5mInputTokens'
   | 'cacheWrite1hInputTokens'
-> {
-  if (usage === null || usage === undefined) {
-    return {
-      tokens: null,
-      inputTokens: null,
-      outputTokens: null,
-      cachedInputTokens: null,
-      cacheWriteInputTokens: null,
-      cacheWrite5mInputTokens: null,
-      cacheWrite1hInputTokens: null,
-    };
-  }
+  | 'reasoningTokens'
+>;
+
+/** Nothing this daemon could prove. Every column null, and never a zero standing in for one. */
+const UNKNOWN_TOKEN_FIELDS: AnalyticsTokenFields = {
+  tokens: null,
+  inputTokens: null,
+  outputTokens: null,
+  cachedInputTokens: null,
+  cacheWriteInputTokens: null,
+  cacheWrite5mInputTokens: null,
+  cacheWrite1hInputTokens: null,
+  reasoningTokens: null,
+};
+
+function tokenFields(usage: FinishedAnalyticsSession['usage']): AnalyticsTokenFields {
+  if (usage === null || usage === undefined) return UNKNOWN_TOKEN_FIELDS;
 
   const inputTokens = nonNegativeInteger(usage.inputTokens);
   const outputTokens = nonNegativeInteger(usage.outputTokens);
@@ -114,32 +121,14 @@ function tokenFields(
   const requiredKnown = [inputTokens, outputTokens, cachedInputTokens, cacheWriteInputTokens].every(
     value => value !== null,
   );
-  if (!requiredKnown) {
-    return {
-      tokens: null,
-      inputTokens: null,
-      outputTokens: null,
-      cachedInputTokens: null,
-      cacheWriteInputTokens: null,
-      cacheWrite5mInputTokens: null,
-      cacheWrite1hInputTokens: null,
-    };
-  }
+  if (!requiredKnown) return UNKNOWN_TOKEN_FIELDS;
 
   const tokens = inputTokens! + outputTokens!;
-  if (!Number.isSafeInteger(tokens)) {
-    return {
-      tokens: null,
-      inputTokens: null,
-      outputTokens: null,
-      cachedInputTokens: null,
-      cacheWriteInputTokens: null,
-      cacheWrite5mInputTokens: null,
-      cacheWrite1hInputTokens: null,
-    };
-  }
+  if (!Number.isSafeInteger(tokens)) return UNKNOWN_TOKEN_FIELDS;
 
   return {
+    // Reasoning is already inside `outputTokens`, so it is NOT added again here: `tokens` is what the
+    // session billed, and counting the reasoning subset twice would inflate every Codex row.
     tokens,
     inputTokens,
     outputTokens,
@@ -147,6 +136,7 @@ function tokenFields(
     cacheWriteInputTokens,
     cacheWrite5mInputTokens: nonNegativeInteger(usage.cacheWrite5mInputTokens),
     cacheWrite1hInputTokens: nonNegativeInteger(usage.cacheWrite1hInputTokens),
+    reasoningTokens: nonNegativeInteger(usage.reasoningTokens),
   };
 }
 
@@ -157,7 +147,7 @@ export function deriveAnalyticsSessionRecord(
 ): AnalyticsSessionIndexRecord {
   const displayModelIdentity = normalizeAnalyticsModelIdentity(
     session.selectedModel,
-    pricingCatalog.map(entry => ({ modelId: entry.modelId, aliases: entry.aliases })),
+    analyticsCatalogAliasGroups(pricingCatalog),
   );
   const pricing =
     session.usage === null || session.usage === undefined

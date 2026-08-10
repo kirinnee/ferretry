@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AnalyticsRawSession } from '@ferretry/protocol';
+import { ANALYTICS_PRICING_RATE_SLOTS, type AnalyticsRawSession } from '@ferretry/protocol';
 import type { FoundationPaths } from '../paths.ts';
 import type { FileSystemPort } from '../ports.ts';
 import type { AnalyticsPricingRate, AnalyticsUsagePricingSnapshot } from './pricing.ts';
@@ -8,13 +8,19 @@ import type { AnalyticsUsageRefusal } from './usage-fold.ts';
 /**
  * The stored analytics schema this daemon materializes.
  *
- * It is `2` because the shape CHANGED: version 1 was a derivation held in memory for the length of one
- * request, and this one is a durable table of ingested rows carrying an ingest-time price. A client
- * that reads the version can therefore tell a daemon whose costs were computed when the row was
- * written from one that computed them when the query ran, which are different numbers the moment an
- * operator edits the rate catalog.
+ * Version 1 was a derivation held in memory for the length of one request; 2 was the first durable
+ * table of ingested rows carrying an ingest-time price. A client that reads the version can therefore
+ * tell a daemon whose costs were computed when the row was written from one that computed them when
+ * the query ran, which are different numbers the moment an operator edits the rate catalog.
+ *
+ * It is `3` because the row grew columns: a reasoning-token measure, the rate that prices it, and the
+ * currency, unit, provenance and last-sync instant a stored price is now explained by. NO MIGRATION
+ * IS WRITTEN FOR IT, deliberately — this index is disposable by contract, every row is derivable from
+ * the session's own durable documents, and `decideAnalyticsIndexSchema` already drops an index whose
+ * version it does not recognise and rebuilds it. A migration here would be a second, hand-maintained
+ * definition of a shape that one re-ingestion pass reproduces exactly.
  */
-export const ANALYTICS_INDEX_SCHEMA_VERSION = 2;
+export const ANALYTICS_INDEX_SCHEMA_VERSION = 3;
 
 /**
  * One session as the analytics index holds it.
@@ -138,20 +144,18 @@ export function decideAnalyticsIndexSchema(shape: AnalyticsIndexShape, home: str
 }
 
 /**
- * A hash over a list of values, where ABSENT AND EMPTY ARE DIFFERENT VALUES.
+ * A hash over a list of values whose encoding is unambiguous by construction.
  *
- * An absent part is spelled with a byte no value can contain, and the separator is another, so two
- * different lists can never hash the same. Joining on a space instead would make a cleared label and an
- * empty one the same evidence, and the row for a session whose label was removed would never be
- * rewritten.
+ * Each part is serialized as a JSON token — strings quoted and escaped, numbers and booleans bare,
+ * null for an absent one — so no value's CONTENT can be read as structure. That matters because a
+ * catalog or session field can hold bytes a hand-rolled separator would treat as a boundary:
+ * `NonEmptyStringSchema` trims whitespace but admits control characters, so a NUL inside a model id used
+ * to hash the same as a value split across two fields, and an alias containing a comma hashed the same as
+ * two aliases. JSON escapes both to literals, so two different lists can never encode the same bytes, and
+ * an absent value (null) stays distinct from an empty string ("").
  */
 function fingerprint(parts: readonly (string | number | boolean | null | undefined)[]): string {
-  const absent = '\u0001';
-  const separator = '\u0000';
-  return createHash('sha256')
-    .update(parts.map(part => (part === null || part === undefined ? absent : String(part))).join(separator))
-    .digest('hex')
-    .slice(0, 32);
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32);
 }
 
 /**
@@ -172,17 +176,20 @@ export function analyticsPricingCatalogFingerprint(catalog: readonly AnalyticsPr
       fingerprint([
         rate.pricingKey,
         rate.modelId,
-        [...rate.aliases].sort().join(','),
+        // Each alias is its own encoded part, not a comma-joined blob: ['a,b','c'] and ['a','b,c']
+        // are different alias sets that a comma join hashed identically.
+        ...[...rate.aliases].sort(),
         rate.provider,
-        rate.ratesUsdMicrosPerMillion.input,
-        rate.ratesUsdMicrosPerMillion.cachedRead,
-        rate.ratesUsdMicrosPerMillion.cacheWrite,
-        rate.ratesUsdMicrosPerMillion.cacheWrite5m,
-        rate.ratesUsdMicrosPerMillion.cacheWrite1h,
-        rate.ratesUsdMicrosPerMillion.output,
+        rate.currency,
+        // Every slot, read through the protocol's own list: a rate the catalog grows must change the
+        // fingerprint, and a hand-written field list is exactly how one would silently stop doing so.
+        ...ANALYTICS_PRICING_RATE_SLOTS.map(slot => rate.rates[slot]),
+        rate.source.kind,
+        rate.source.kind === 'provider_sync' ? rate.source.sourceUrl : null,
         rate.verifiedAt,
         rate.validFrom,
         rate.validThrough,
+        rate.lastSyncedAt,
       ]),
     )
     .sort();

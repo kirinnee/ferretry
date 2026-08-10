@@ -60,21 +60,32 @@ describe('daemon configuration', () => {
           },
         ],
       }).analyticsPricing,
+      // The document an operator already has on disk is read into the canonical shape rather than
+      // refused: the currency it always meant, `manual` provenance because nothing synced it, and an
+      // explicit null for every charge the old spelling had no way to state.
     ).deepEqual([
       {
         pricingKey: 'operator:claude-opus-5:2026-08',
         modelId: 'claude-opus-5',
         aliases: ['opus-5'],
         provider: 'anthropic',
-        ratesUsdMicrosPerMillion: {
+        currency: 'USD',
+        rates: {
           input: 15_000_000,
-          cachedRead: 1_500_000,
+          output: 75_000_000,
+          cachedInput: 1_500_000,
+          cacheWrite: null,
           cacheWrite5m: 18_750_000,
           cacheWrite1h: 30_000_000,
-          output: 75_000_000,
+          reasoning: null,
+          image: null,
+          tool: null,
         },
+        source: { kind: 'manual' },
         verifiedAt: '2026-08-01T00:00:00.000Z',
         validFrom: '2026-08-01T00:00:00.000Z',
+        validThrough: null,
+        lastSyncedAt: null,
       },
     ]);
     should(parseDaemonConfig({ corsOrigins: ['https://example.test/'] }).corsOrigins).deepEqual([

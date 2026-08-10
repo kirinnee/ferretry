@@ -9,6 +9,7 @@ import {
   SystemGrantClock,
 } from '../../../src/adapters/grants/index.ts';
 import { FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
+import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import { DEFAULT_CAPABILITY_GRANTS, type FileSystemPort, type FoundationPaths } from '../../../src/lib/index.ts';
 
 const paths = {
@@ -39,13 +40,18 @@ function tree(initial: Readonly<Record<string, string>> = {}) {
   return { port, files, modes, appended };
 }
 
+/** Each direct adapter world owns the same transaction boundary production supplies at composition. */
+function grantDocument(config: FileDaemonConfig): ConfigGrantDocument {
+  return new ConfigGrantDocument(config, new KeyedSerialExecutor());
+}
+
 describe('the grants in the operator configuration document', () => {
   it('should answer a document that never mentions grants with the product defaults', async () => {
     // Silence is a complete answer: an operator who has never thought about this gets the permissive
     // behaviour the product promises, and the report says the value came from the default.
     // Arrange
     const world = tree();
-    const document = new ConfigGrantDocument(new FileDaemonConfig(paths, world.port));
+    const document = grantDocument(new FileDaemonConfig(paths, world.port));
 
     // Act
     const grants = await document.read();
@@ -63,7 +69,7 @@ describe('the grants in the operator configuration document', () => {
     const world = tree({
       [paths.daemonConfig]: JSON.stringify({ grants: { warden: { configure: false }, fleet: { use: true } } }),
     });
-    const document = new ConfigGrantDocument(new FileDaemonConfig(paths, world.port));
+    const document = grantDocument(new FileDaemonConfig(paths, world.port));
 
     // Act
     const written = await document.written();
@@ -79,10 +85,10 @@ describe('the grants in the operator configuration document', () => {
     // Silence and damage are different things. A document naming a capability this daemon does not
     // have, or a string where a boolean belongs, is damage — and unknown is never permitted.
     // Arrange
-    const unknown = new ConfigGrantDocument(
+    const unknown = grantDocument(
       new FileDaemonConfig(paths, tree({ [paths.daemonConfig]: JSON.stringify({ grants: { kubernetes: {} } }) }).port),
     );
-    const wrongType = new ConfigGrantDocument(
+    const wrongType = grantDocument(
       new FileDaemonConfig(
         paths,
         tree({ [paths.daemonConfig]: JSON.stringify({ grants: { warden: { use: 'yes' } } }) }).port,
@@ -102,7 +108,7 @@ describe('the grants in the operator configuration document', () => {
     const world = tree({
       [paths.daemonConfig]: JSON.stringify({ host: '0.0.0.0', port: 9_000, projectRoots: ['~/w'] }),
     });
-    const document = new ConfigGrantDocument(new FileDaemonConfig(paths, world.port));
+    const document = grantDocument(new FileDaemonConfig(paths, world.port));
 
     // Act
     await document.write({ ...DEFAULT_CAPABILITY_GRANTS, warden: { use: false, configure: false } });
@@ -270,7 +276,7 @@ describe('the remaining grant ports', () => {
     // shape the enforcement path is built to make unrepresentable.
     // Arrange
     const world = tree();
-    const document = new ConfigGrantDocument(new FileDaemonConfig(paths, world.port));
+    const document = grantDocument(new FileDaemonConfig(paths, world.port));
 
     // Act
     await document.write(DEFAULT_CAPABILITY_GRANTS);

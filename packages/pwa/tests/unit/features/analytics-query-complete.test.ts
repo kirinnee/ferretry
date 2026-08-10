@@ -22,9 +22,11 @@ describe('analytics query completion', () => {
       'id',
       'agent',
       'model',
+      // Derived from the protocol label set, so a label added there shows up here and pushes the
+      // last candidate off the bounded list rather than quietly going unofferable.
+      'pricing_model',
       'context_window',
       'harness',
-      'mode',
     ]);
     expect(analyticsCompletions('su', 2)).toMatchObject({ context: 'aggregation', replaceRange: { start: 0, end: 2 } });
     expect(analyticsCompletions('summary', 3).replaceRange).toEqual({ start: 0, end: 7 });
