@@ -2160,6 +2160,124 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * The cross-harness handover, driven through the production composition root over a real socket.
+   *
+   * WHAT THIS TIER ADDS, and why the handover's own integration file does not already cover it. That
+   * file builds the route table, the receipt store and the reconcile loop by hand and proves they agree
+   * with each other. It cannot prove the thing this migration keeps losing: that `buildWorld` actually
+   * CONSTRUCTS the handover service and hands its routes to the dispatcher a booted daemon serves. A
+   * subsystem built, tested and never mounted answers 404 to every caller while every unit test stays
+   * green, so the only honest proof is a request that leaves the socket.
+   *
+   * The refusals are the assertions on purpose. A begin that succeeded would create a real replacement
+   * session and change board membership, which is not a thing a boot test may do; a refusal that comes
+   * from the DOMAIN — `harness_same`, decided after the real fleet manifest resolved a real account
+   * against a real session's harness — proves the route reached a working service rather than a stub,
+   * and proves it without performing the destruction.
+   */
+  it('should serve, refuse and read a cross-harness handover through the mounted composition root', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-handover');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    await seedMigrationFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startResponse = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-handover-start' },
+      body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'wire the handover', cwd: home }),
+    });
+    const startedRaw: unknown = await startResponse.json();
+    if (startResponse.status !== 201) throw new Error(`the fixture start failed: ${JSON.stringify(startedRaw)}`);
+    const id = SessionViewSchema.parse(startedRaw).config.id;
+    const handover = `${sessions}/${id}/handover`;
+
+    // Act
+    // Nothing has been handed over, so the durable receipt does not exist. This is the read half of the
+    // surface reaching the real `FileHandoverReceiptStore` this boot opened over its own state home.
+    const noReceipt = await fetch(handover, { headers: cli });
+    const noReceiptBody = (await noReceipt.json()) as { code: string };
+    // A begin with no request id never reaches the service: a retried POST that could not be recognised
+    // would create a second replacement.
+    const unidentified = await fetch(handover, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ agent: CROSS_FAMILY_WRAPPER, coordinator: null, reason: 'no id' }),
+    });
+    const unidentifiedBody = (await unidentified.json()) as { code: string };
+    // A claude session handed to another CLAUDE account. The account is published, available and
+    // runnable — it is refused for the one thing a handover exists to do, which the operator's remedy
+    // (`fy migrate`) does without throwing the conversation away.
+    const sameFamily = await fetch(handover, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-handover-same' },
+      body: JSON.stringify({ agent: TARGET_WRAPPER, coordinator: null, reason: 'wrong tool for the job' }),
+    });
+    const sameFamilyBody = (await sameFamily.json()) as { error: string; code: string };
+    // The cancel half is mounted too, and its empty-body contract is enforced before the service is
+    // reached — so a caller cannot come to believe `force` overrides the no-force gate.
+    const forcedCancel = await fetch(`${handover}/cancel`, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-handover-force' },
+      body: JSON.stringify({ force: true }),
+    });
+    const forcedCancelBody = (await forcedCancel.json()) as { code: string };
+    // ...and an honest cancel of a session that has no handover is answered by the service, not by the
+    // route: there is no receipt to cancel.
+    const nothingToCancel = await fetch(`${handover}/cancel`, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-handover-cancel' },
+      body: '{}',
+    });
+    const nothingToCancelBody = (await nothingToCancel.json()) as { code: string };
+    // The GET is `authenticated` rather than operator-scoped, but it is still governed: an unauthenticated
+    // reader gets nothing at all.
+    const unauthenticated = await fetch(handover);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // THE ROUTES ARE MOUNTED. Every status below is a handover answer rather than the 404 an unmounted
+    // subsystem serves, and `not-found` here is the receipt's absence rather than the route's.
+    should(noReceipt.status).equal(404);
+    should(noReceiptBody.code).equal('not-found');
+    should(unauthenticated.status).equal(401);
+    should(unidentified.status).equal(400);
+    should(unidentifiedBody.code).equal('missing_request_id');
+    // THE SERVICE IS REAL. This refusal is only reachable after the boot's own fleet manifest resolved
+    // `claude-auto-target` into an account and the domain compared its family with the live session's,
+    // so it cannot be produced by a route table wired to a stub.
+    should(sameFamily.status).equal(409);
+    should(sameFamilyBody.code).equal('harness_same');
+    should(forcedCancel.status).equal(400);
+    should(forcedCancelBody.code).equal('invalid_body');
+    should(nothingToCancel.status).equal(404);
+    should(nothingToCancelBody.code).equal('not-found');
+    // NOTHING WAS HANDED OVER. Every call above was a refusal, so the daemon launched exactly the one
+    // session this case started and no replacement beside it.
+    should(launcher.launched).have.length(1);
+  });
+
+  /**
    * The recommender, driven through the production composition root over a real socket.
    *
    * It proves the mount DOES ITS JOB rather than merely existing: the fleet comes from the manifest
