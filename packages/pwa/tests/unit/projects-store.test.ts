@@ -29,7 +29,7 @@ const project = (name: string, path: string, extras: Record<string, unknown> = {
   id: name === 'ferretry' ? '00000000-0000-4000-8000-000000000001' : '00000000-0000-4000-8000-000000000002',
   name,
   path,
-  source: 'existing-folder',
+  source: 'existing-folder' as const,
   createdAt: '2026-08-01T09:00:00.000Z',
   ...extras,
 });
@@ -46,21 +46,29 @@ const portFor = (answers: Map<string, () => Promise<readonly FleetProject[]>>): 
 });
 
 describe('fetchDaemonProjects', () => {
-  it('reads /v1/projects from the paired daemon and narrows it to name and path', async () => {
+  it('reads /v1/projects from the paired daemon and keeps every field of the record', async () => {
     let seen = '';
     let authorization = '';
+    const rows = [
+      project('ferretry', '/home/k/ferretry', {
+        lastActivity: '2026-08-01T09:00:00.000Z',
+        git: { commonDirectory: '/home/k/ferretry/.git' },
+        source: 'clone',
+      }),
+      project('ferretry-wt', '/home/k/ferretry/wt'),
+    ];
     const projects = await fetchDaemonProjects(laptop, async (url, init) => {
       seen = String(url);
       authorization = new Headers(init?.headers).get('authorization') ?? '';
-      return json([
-        project('ferretry', '/home/k/ferretry', { lastActivity: '2026-08-01T09:00:00.000Z' }),
-        project('ferretry-wt', '/home/k/ferretry/wt'),
-      ]);
+      return json(rows);
     });
 
     expect(seen).toBe('https://laptop.example.test/v1/projects');
     expect(authorization).toBe('Bearer token-laptop');
-    expect(projects).toEqual([ferretry, worktree]);
+    // Nothing is narrowed away. The earlier version mapped each row down to
+    // `{ name, path }`, which made `source` unsearchable in the folder picker
+    // and left every provenance surface with nothing to render.
+    expect(projects).toEqual(rows);
   });
 
   it('raises the daemon error body, and the status when there is none', async () => {
@@ -83,8 +91,9 @@ describe('fetchDaemonProjects', () => {
 
 describe('daemonProjectsPort', () => {
   it('is the browser port over one fetch', async () => {
-    const port = daemonProjectsPort(async () => json([project('ferretry', '/home/k/ferretry')]));
-    expect(await port.projects(laptop)).toEqual([ferretry]);
+    const row = project('ferretry', '/home/k/ferretry');
+    const port = daemonProjectsPort(async () => json([row]));
+    expect(await port.projects(laptop)).toEqual([row]);
   });
 });
 
@@ -144,6 +153,141 @@ describe('DaemonProjectsStore', () => {
     // The coalescing window closes with the request, so a later caller reads again.
     await store.hydrate(laptop);
     expect(calls).toBe(2);
+  });
+
+  it('refreshes past the coalescing slot, because a read in flight predates the write', async () => {
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const store = new DaemonProjectsStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              calls += 1;
+              if (calls === 1) await gate;
+              return calls === 1 ? [ferretry] : [ferretry, worktree];
+            },
+          ],
+        ]),
+      ),
+    );
+
+    const first = store.hydrate(laptop);
+    // `hydrate` would hand back the read already in flight; that answer was
+    // computed before the folder existed, which is the whole reason `refresh`
+    // exists.
+    const refreshed = store.refresh(laptop);
+    expect(refreshed).not.toBe(first);
+    expect(await refreshed).toEqual([ferretry, worktree]);
+    expect(calls).toBe(2);
+
+    release();
+    await first;
+    // The list stays on screen through the re-read rather than blanking.
+    expect(store.projects(laptop.daemonId)).toEqual([ferretry, worktree]);
+  });
+
+  it('discards the abandoned read when it settles AFTER the refresh it was replaced by', async () => {
+    // The race the fence exists for: the pre-write read still holds the current
+    // credential, so a credential check alone lets it publish its stale list on
+    // top of the post-write one whenever it answers second.
+    let releaseStale!: () => void;
+    const stale = new Promise<void>(resolve => {
+      releaseStale = resolve;
+    });
+    let calls = 0;
+    const store = new DaemonProjectsStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              calls += 1;
+              if (calls === 1) {
+                await stale;
+                return [ferretry];
+              }
+              return [ferretry, worktree];
+            },
+          ],
+        ]),
+      ),
+    );
+
+    const abandoned = store.hydrate(laptop);
+    await store.refresh(laptop);
+    expect(store.projects(laptop.daemonId)).toEqual([ferretry, worktree]);
+
+    releaseStale();
+    expect(await abandoned).toEqual([ferretry]);
+    expect(store.projects(laptop.daemonId)).toEqual([ferretry, worktree]);
+    expect(store.slice(laptop.daemonId).status).toBe('ready');
+  });
+
+  it('discards an abandoned read’s FAILURE, so a stale error cannot mark a good refresh errored', async () => {
+    let rejectStale!: (reason: unknown) => void;
+    const stale = new Promise<readonly FleetProject[]>((_resolve, onReject) => {
+      rejectStale = onReject;
+    });
+    let calls = 0;
+    const store = new DaemonProjectsStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              calls += 1;
+              return calls === 1 ? await stale : [ferretry, worktree];
+            },
+          ],
+        ]),
+      ),
+    );
+
+    const abandoned = store.hydrate(laptop);
+    await store.refresh(laptop);
+
+    rejectStale(new DaemonResponseError(503, 'the catalog is unavailable'));
+    await expect(abandoned).rejects.toThrow('the catalog is unavailable');
+    expect(store.slice(laptop.daemonId)).toMatchObject({
+      status: 'ready',
+      error: null,
+      projects: [ferretry, worktree],
+    });
+  });
+
+  it('refreshes exactly one daemon and leaves every other daemon unread', async () => {
+    const reads: string[] = [];
+    const store = new DaemonProjectsStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              reads.push('laptop');
+              return [ferretry];
+            },
+          ],
+          [
+            workstation.daemonId,
+            async () => {
+              reads.push('workstation');
+              return [worktree];
+            },
+          ],
+        ]),
+      ),
+    );
+
+    await store.hydrate(laptop);
+    await store.hydrate(workstation);
+    await store.refresh(laptop);
+
+    expect(reads).toEqual(['laptop', 'workstation', 'laptop']);
   });
 
   it('keeps a good list when a later read fails, and reports the failure', async () => {
