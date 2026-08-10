@@ -1,4 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
+import { rmSync } from 'node:fs';
 import { mkdir, rename, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
@@ -908,6 +909,30 @@ describe('ManagedWorktreeAdapter live refresh', () => {
     should(actual.branchEvidence).be.undefined();
   });
 
+  it('should still answer when the checkout is deleted midway through one refresh', async () => {
+    // Arrange — a real `rm -rf` lands between two reads of the SAME refresh, which is the race the
+    // uncached refresh exists for. Nothing here is stubbed: the runner is only the clock, and every
+    // failure below is the real Git runner refusing to start in a directory that is genuinely gone.
+    const base = await scenario('svc-live-vanished');
+    const created = await adapter().create(request(base));
+    const runner = new ScriptedGitRunner(invocation => {
+      if (invocation.args[0] === 'symbolic-ref') rmSync(created.managed.path, { recursive: true, force: true });
+      return undefined;
+    });
+
+    // Act — the checkout is read, and disappears before its integration target and its siblings are
+    const actual = await adapter(runner).examine(context(base, created.managed));
+
+    // Assert — every read it could not complete is NAMED, and the document fails closed on all of them
+    const undetermined = actual.live.undetermined.join('\n');
+    should(undetermined).match(/default-branch inspection failed:/u);
+    should(undetermined).match(/checkout enumeration failed:/u);
+    should(actual.live.undetermined).containEql('no integration target could be resolved, so integration is unproven');
+    should(actual.live.integrated).be.undefined();
+    should(actual.branchEvidence).match({ protectedBranch: false, checkedOut: false, integrated: false });
+    should(actual.decision.removable).be.false();
+  });
+
   it('should price the branch deletion on the CHECK, before anything is authorized', async () => {
     // Arrange
     const base = await scenario('svc-live-branch-price');
@@ -1304,6 +1329,31 @@ describe('ManagedWorktreeAdapter recovery from an interrupted creation', () => {
     should(notARepository.kind).equal('unverified');
     should(wrongToken).match({ kind: 'unverified', reason: /ownership marker/u });
     should(await files.type(created.managed.path)).equal('directory');
+  });
+
+  it('should contain an inspection that fails outright rather than let it escape', async () => {
+    // Arrange — two occupants Git cannot even be STARTED in: a plain file, and a symlink pointing at
+    // nothing. Both exist, so the `absent` answer above does not cover either of them.
+    const base = await scenario('svc-adopt-uninspectable');
+    const planned: ManagedWorktreePlan[] = [];
+    await adapter().create(request(base, { onPlanned: async plan => void planned.push(plan) }));
+    const plan = planned[0]!;
+    const occupied = await tempDirectory('svc-adopt-uninspectable-path');
+    const asFile = path.join(occupied, 'checkout');
+    const dangling = path.join(occupied, 'dangling');
+    await Bun.write(asFile, 'not a checkout\n');
+    await symlink(path.join(occupied, 'gone'), dangling, 'dir');
+
+    // Act
+    const file = await adapter().adopt(intentFor({ ...plan, path: asFile }));
+    const broken = await adapter().adopt(intentFor({ ...plan, path: dangling }));
+
+    // Assert — a failed inspection is REPORTED as unverified, not thrown and not silently adopted,
+    // and whatever holds the path is left exactly where it was
+    should(file).match({ kind: 'unverified', reason: /is not a linked worktree of/u });
+    should(broken).match({ kind: 'unverified', reason: /is not a linked worktree of/u });
+    should(await files.type(asFile)).equal('file');
+    should(await files.type(dangling)).equal('symlink');
   });
 
   it('should answer whether the exact recorded checkout incarnation is still at its path', async () => {
