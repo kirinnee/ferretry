@@ -10,6 +10,7 @@ import type { RuntimeControlRequest, SessionView } from '@ferretry/protocol';
 import { isPickerQuarantined, pickerInputRefusal } from '../harness/quarantine.ts';
 import type { HarnessRuntimeSwitchRequest } from '../harness/runtime-switch.ts';
 import type { LifecycleSessionStatus } from '../lifecycle/types.ts';
+import { TERMINAL_SEND_STATUSES } from '../send/types.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
 
 /**
@@ -24,10 +25,16 @@ export function documentRefusal(
   clientName: string,
   admits: LifecycleSessionStatus,
 ): SessionRuntimeError | undefined {
-  // EXACTLY ONE STATUS PER CALLER. Public controls may drive only a running session; fork startup
-  // may drive only a starting one. A broader "non-terminal" gate lets the mounted route enter a
-  // fork's startup window and race the picker from a different caller.
-  if (view.state.status !== admits)
+  // The public route shares the send window: an idle, rate-limited or declared-wait session may
+  // still be at a prompt where a person can switch its runtime. Startup is different: it belongs
+  // only to the lifecycle's private before-first-turn seam, so a public request cannot race that
+  // picker. The pane check below is the second half of public admission and refuses a nonterminal
+  // session that is actually busy.
+  const admitted =
+    admits === 'running'
+      ? !TERMINAL_SEND_STATUSES.has(view.state.status) && view.state.status !== 'starting'
+      : view.state.status === 'starting';
+  if (!admitted)
     return new SessionRuntimeError(
       'refused',
       admits === 'running'

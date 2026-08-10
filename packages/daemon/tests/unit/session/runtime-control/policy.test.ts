@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';
+import { IDLE_SEND_STATUSES } from '../../../../src/lib/session/send/types.ts';
 import {
   documentRefusal,
   needsLiveCatalog,
@@ -33,6 +34,20 @@ describe('what a session document alone refuses', () => {
     should(refusals[0]).match({ message: /requires a running session/u });
   });
 
+  it('should admit every durable idle status through the public window', () => {
+    // A declared wait is the canonical point to change a model or compact, and each of these is
+    // already idle by the send domain's definition. The later pane check still requires a prompt.
+    const refusals = [...IDLE_SEND_STATUSES].map(status => documentRefusal(CLAUDE_VIEW({ status }), 'fy', 'running'));
+
+    should(refusals).deepEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('should admit retrying through the public window', () => {
+    // Retry is not one of the send domain's named idle statuses, but its durable state is still
+    // nonterminal; the pane check decides whether its harness is ready for this control right now.
+    should(documentRefusal(CLAUDE_VIEW({ status: 'retrying' }), 'fy', 'running')).be.undefined();
+  });
+
   it('should refuse a picker quarantine and name the CLI a human actually types', () => {
     // Act
     const refusal = documentRefusal(
@@ -52,15 +67,17 @@ describe('what a session document alone refuses', () => {
     ).be.undefined();
   });
 
-  it('should keep the public running window and private startup window disjoint', () => {
+  it('should keep the private startup window exact', () => {
     // Act
     const publicOnStarting = documentRefusal(CLAUDE_VIEW({ status: 'starting' }), 'fy', 'running');
     const startupOnRunning = documentRefusal(CLAUDE_VIEW(), 'fy', 'starting');
+    const startupOnWaiting = documentRefusal(CLAUDE_VIEW({ status: 'waiting' }), 'fy', 'starting');
     const startupOnStarting = documentRefusal(CLAUDE_VIEW({ status: 'starting' }), 'fy', 'starting');
 
     // Assert
     should(publicOnStarting).match({ failure: 'refused', message: /requires a running session/u });
     should(startupOnRunning).match({ failure: 'refused', message: /still starting/u });
+    should(startupOnWaiting).match({ failure: 'refused', message: /still starting/u });
     should(startupOnStarting).be.undefined();
   });
 });
