@@ -410,8 +410,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // PROMOTION SENTINEL: deliberately impossible; replace only from this focused test's failure.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: -1, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 127, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
