@@ -707,11 +707,6 @@ function PricingEditor({
             );
           })}
         </fieldset>
-        {errors.form ? (
-          <p className="m-0 text-meta text-err lg:col-span-2" role="alert">
-            {errors.form}
-          </p>
-        ) : null}
         {failure ? (
           <p className="m-0 text-meta leading-base text-err lg:col-span-2" role="alert">
             {failure}
