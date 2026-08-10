@@ -1,6 +1,10 @@
 [test]
 root = "packages"
 pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**"]
+# This is a global multi-file hook, not a per-file teardown. The shared Chromium
+# support closes its one process only after every integration file has completed;
+# putting the hook in an importing test file would close a sibling's browser.
+preload = ["./packages/pwa/tests/integration/support/chromium.ts"]
 # THE PER-TEST TIMEOUT IS NOT SET HERE, and it is not an omission.
 #
 # `timeout` under `[test]` is IGNORED by Bun 1.3.13: this file used to carry
@@ -32,4 +36,13 @@ coveragePathIgnorePatterns = [
   "packages/pwa/src/features/**",
   "packages/pwa/src/hooks/**",
   "packages/pwa/src/shell/**",
+  # BUILD-TIME GENERATORS, not adapters. `scripts/build-fy-render-libs.ts` emits the `fy-render`
+  # sandbox shell and its two pinned library bundles; the Chromium security tier imports it so that
+  # it measures a FRESHLY BUILT shell rather than whatever artifact happened to be on disk, which is
+  # the difference between testing the design and testing a stale file.
+  #
+  # Without this line the int ledger records a `packages/pwa/scripts/…` path, `scripts/ci/test.sh`'s
+  # awk gate refuses it as "coverage path outside src/adapters", and the tier fails on a PATH rather
+  # than on a test — which looks like nothing to do with the file that caused it.
+  "packages/pwa/scripts/**",
 ]

@@ -25,9 +25,31 @@
 
 import { type KeyboardEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 
-/** Everything focusable an overlay in this app can contain. */
+/**
+ * Everything focusable an overlay in this app can contain.
+ *
+ * `summary` IS ONE OF THEM, and its absence was a real hole rather than a style
+ * choice. A `<details>` summary is focusable natively and carries no `tabindex`, so
+ * it matched no arm here — and the trap does not merely fail to REACH such an
+ * element, it actively `preventDefault()`s Tab past it while the container claims
+ * `aria-modal="true"`. Measured on the `fy-render` failure fold: the focusable list
+ * was [Source, Reload, Exit], the summary preceded all three in DOM order, and the
+ * wrap from Exit landed on Source — so the fold was skipped in both directions and
+ * the only way to open it was a pointer.
+ *
+ * Every dialog in this app that contains a `<details>` had the identical hole, which
+ * is why the repair belongs here and not in one component.
+ *
+ * NO `iframe` ENTRY, and that one IS a decision — `fy-render-sandbox.tsx` states it:
+ * that frame is a separate document with nothing focusable in it, and focus resting
+ * there is what stopped Escape reaching the parent. A scrollport, by contrast, needs
+ * an explicit `tabIndex={0}` from its own component, because it carries no attribute
+ * or tag name any arm here could match. Chromium 127+ focuses such scrollers
+ * natively, which is exactly why a browser test would keep looking correct while
+ * this list went on skipping them.
+ */
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 /**
  * OPEN OVERLAYS, OLDEST FIRST. Exactly one of them — the last — owns Escape.

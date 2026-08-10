@@ -40,7 +40,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
-import { chromium, type Browser } from 'playwright-core';
+import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
@@ -52,6 +52,7 @@ import {
 } from '../../../src/lib/theme-preferences.ts';
 import { THEME_FAMILY_CARD_CLASS, ThemeSettings } from '../../../src/shell/theme-toggle.tsx';
 import type { ThemeState } from '../../../src/hooks/use-theme.ts';
+import { sharedChromium } from '../support/chromium.ts';
 
 const packageDir = resolve(import.meta.dir, '../../..');
 
@@ -249,7 +250,7 @@ const VIEWPORTS = [
 ] as const;
 
 let workspace = '';
-let browser: Browser | undefined;
+let browser: Browser;
 let css = '';
 
 const buildCss = (outFile: string): void => {
@@ -272,17 +273,14 @@ const buildCss = (outFile: string): void => {
 
 describe('ported theme picker visual contract', () => {
   beforeAll(async () => {
+    browser = await sharedChromium();
     workspace = await mkdtemp(join(tmpdir(), 'fy-visual-theme-'));
     const outFile = join(workspace, 'app.css');
     buildCss(outFile);
     css = await readFile(outFile, 'utf8');
-    const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-    should(chrome).be.type('string');
-    browser = await chromium.launch({ executablePath: chrome as string, headless: true });
   }, 120_000);
 
   afterAll(async () => {
-    await browser?.close();
     if (workspace !== '') await rm(workspace, { recursive: true, force: true });
   });
 
@@ -296,35 +294,38 @@ describe('ported theme picker visual contract', () => {
 
     try {
       for (const viewport of VIEWPORTS) {
-        const context = await (browser as Browser).newContext({
+        const context = await browser.newContext({
           viewport: { width: viewport.width, height: viewport.height },
           colorScheme: 'dark',
           reducedMotion: 'reduce',
         });
-        // A public static bundle must never reach the network, and a live daemon
-        // runs on the machine that executes this suite.
-        await context.route('**/*', async route => {
-          if (new URL(route.request().url()).origin !== server.url.origin) {
-            await route.abort();
-            return;
-          }
-          await route.continue();
-        });
-        const tab = await context.newPage();
-        await tab.goto(server.url.toString());
+        try {
+          // A public static bundle must never reach the network, and a live daemon
+          // runs on the machine that executes this suite.
+          await context.route('**/*', async route => {
+            if (new URL(route.request().url()).origin !== server.url.origin) {
+              await route.abort();
+              return;
+            }
+            await route.continue();
+          });
+          const tab = await context.newPage();
+          await tab.goto(server.url.toString());
 
-        await tab.evaluate<boolean>(REVEAL('port'));
-        const overflow = await tab.evaluate<{ inner: number; scroll: number }>(
-          `({ inner: window.innerWidth, scroll: document.documentElement.scrollWidth })`,
-        );
-        should(overflow.scroll).be.belowOrEqual(overflow.inner);
-        const ported = await tab.locator('#port').screenshot({ animations: 'disabled' });
+          await tab.evaluate<boolean>(REVEAL('port'));
+          const overflow = await tab.evaluate<{ inner: number; scroll: number }>(
+            `({ inner: window.innerWidth, scroll: document.documentElement.scrollWidth })`,
+          );
+          should(overflow.scroll).be.belowOrEqual(overflow.inner);
+          const ported = await tab.locator('#port').screenshot({ animations: 'disabled' });
 
-        await tab.evaluate<boolean>(REVEAL('reference'));
-        const original = await tab.locator('#reference').screenshot({ animations: 'disabled' });
+          await tab.evaluate<boolean>(REVEAL('reference'));
+          const original = await tab.locator('#reference').screenshot({ animations: 'disabled' });
 
-        should(ported.equals(original)).be.true();
-        await context.close();
+          should(ported.equals(original)).be.true();
+        } finally {
+          await context.close();
+        }
       }
     } finally {
       server.stop(true);

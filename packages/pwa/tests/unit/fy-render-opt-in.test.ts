@@ -55,12 +55,39 @@ describe('fy-render opt-in', () => {
     // renderer that mounts it, and the package barrel.
     const files = mentioning('FyRenderBlock');
 
-    // Assert — a fourth mounting site is a fourth thing to threat-model.
+    // Assert — a further mounting site is a further thing to threat-model.
+    // `fy-render-sandbox.tsx` is on this list because it names the parsed-block
+    // TYPE in its props, not because it mounts the component: the frame is a
+    // child of the renderer and has no second route into a transcript.
     should(files).eql([
       'src/components/fy-render-block.tsx',
+      'src/components/fy-render-sandbox.tsx',
       'src/components/markdown.tsx',
       'src/lib/fy-render.ts',
       'src/lib/index.ts',
+    ]);
+  });
+
+  test('should reach the sandbox frame from exactly one component', () => {
+    // Act
+    const files = mentioning('FyRenderSandbox');
+
+    // Assert — one mount site. `src/lib/fy-render.ts` is on the list for a
+    // naming reason rather than a structural one: the shared wire types
+    // (`FyRenderSandboxMessage`, the library descriptors) start with the
+    // component's name. It mounts nothing.
+    //
+    // The `sandbox` attribute itself is NOT asserted here, and deliberately.
+    // This file's closing note is right: grepping the source for
+    // `allow-same-origin` cannot tell the attribute from the paragraph
+    // explaining why it is absent — and `fy-render-sandbox.tsx` carries that
+    // paragraph, so a source-level absence check would fail on its own comment.
+    // The honest form is against the rendered tree, in
+    // `fy-render-sandbox.test.tsx`.
+    should(files).eql([
+      'src/components/fy-render-block.tsx',
+      'src/components/fy-render-sandbox.tsx',
+      'src/lib/fy-render.ts',
     ]);
   });
 });

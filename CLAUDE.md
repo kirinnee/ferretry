@@ -107,12 +107,22 @@ renderer and one click behaviour. The authoring and implementation contract is
 extend the grammar there rather than adding a second one.
 
 A fenced `fy-render` block renders an illustration inline in an assistant's own transcript message,
-and **nothing in it executes** — `svg` and `image` become an `<img>`, and `html`, `mermaid` and
-`lottie` are shown as escaped source with the limitation stated on screen, because no browser-only
-execution boundary survived measurement. The grammar, the measured `<img>` security result and its
-scope, and the declared gaps that keep handover row 65 open are
-[docs/fy-render.md](docs/fy-render.md). It is **conversation-only**: a fence opener in any durable
-file fails `scripts/validate/no-fy-render-in-docs.sh`.
+and **no author-supplied code executes** — `svg` and `image` become an `<img>`; `mermaid` and
+`lottie` are handed as **data** to a trusted library inside an opaque-origin sandbox frame, which is
+a narrower claim than "author code is sandboxed" and the difference is the point. A compiled Mermaid
+diagram returns as SVG text and re-enters through that same measured `<img>` sink; Lottie stays live
+because an animation must. `html` is still shown as escaped source with the limitation stated on
+screen, because no browser-only boundary for executing author JavaScript survived measurement — so
+**handover row 65 stays open**. The frame is denied every ordinary **subresource** — which is not the
+same as having no network, since self-navigation, prerender and WebRTC egress were all measured from
+that frame shape and remain a declared residual: the parent fetches the one pinned library and
+transfers the bytes over a capability port, and the shell's `script-src` lists nothing but build-time
+hashes, so author bytes cannot become code. The watchdogs bound
+**wall-clock lifetime only**, never CPU or memory. Chromium evidence is not Safari evidence, and a
+real `macos-15` `safaridriver` job is a release gate. The grammar, the measured `<img>` result and
+its scope, and the declared gaps are [docs/fy-render.md](docs/fy-render.md). It is
+**conversation-only**: a fence opener in any durable file fails
+`scripts/validate/no-fy-render-in-docs.sh`.
 
 `packages/daemon` owns a secret store whose contract is **use, never read**: an agent names a secret
 and Ferretry runs a command with the value in _that child's_ environment, so the agent never holds a

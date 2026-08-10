@@ -3,11 +3,18 @@
 A fenced block an assistant can put in its own chat message so a diagram, a drawing or a screenshot
 renders where the explanation is, instead of as a wall of markup the reader has to imagine.
 
-**Read this first: nothing in this build executes an author's code.** Two of the five declared types
-render as pictures. The other three are parsed, bounded, and then shown as their own escaped source
-with the limitation printed on screen. That is a deliberate, evidenced decision, not an unfinished
-one — [Declared gaps](#declared-gaps) says exactly what is missing and why, and
-[handover.md](../handover.md) row 65 stays open because of it.
+**Read this first: nothing in this build executes an author's code.** Four of the five declared types
+render. `svg` and `image` become an `<img>` directly. `mermaid` and `lottie` are handed as **data** to
+a trusted library running inside an opaque-origin sandbox frame — which is a different claim from
+"author code is sandboxed", and the difference is the whole point: a library interpreting data is not
+a payload running code. `html` is parsed, bounded, and shown as its own escaped source with the
+limitation printed on screen.
+
+That last one is a deliberate, evidenced decision, not an unfinished one —
+[Declared gaps](#declared-gaps) says exactly what is missing and why, and
+[handover.md](../handover.md) row 65 stays open because of it. **Row 65 is not closed by this build**:
+it asks for arbitrary author JavaScript executing under an enforceable CPU and memory bound, and that
+is not what ships.
 
 **`fy-render` is conversation-only.** It exists for live explanation between an agent and a person in
 a transcript. **NEVER use `fy-render` when writing or editing documentation, handovers, READMEs,
@@ -81,7 +88,7 @@ numbers.
 | `html`    | 200 KiB                          | —                                                                                                                                                                                                                                                                                          |
 | `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element opening tags; more than 32 filter primitives; a declared canvas over 8192 per axis or 16,777,216 pixels; an unterminated comment, CDATA section or tag; a payload that does not begin with `<svg>` |
 | `mermaid` | 20,000 characters                | —                                                                                                                                                                                                                                                                                          |
-| `lottie`  | 1 MiB                            | invalid JSON; a non-object root; any `"x"` expression key at any depth; more than 500 layers; deeper than 64 levels                                                                                                                                                                        |
+| `lottie`  | 1 MiB                            | invalid JSON; a non-object root; a **string-valued** `"x"` expression key at any depth, or an array containing one at any index; more than 500 layers; deeper than 64 levels                                                                                                               |
 | `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a container that fails the selected admission checks below                                                                          |
 
 **The selected pre-decode admission checks, exactly.** The parser reads a format signature, walks the
@@ -141,13 +148,83 @@ Two properties this feature must never change, and does not:
 
 ## Per type, in this build
 
-| Type      | Renders as                                 | Why                                                                              |
-| --------- | ------------------------------------------ | -------------------------------------------------------------------------------- |
-| `svg`     | `<img src="data:image/svg+xml,…">`         | The measured boundary — see below                                                |
-| `image`   | `<img src="data:{mime};base64,…">`         | No script surface exists in a raster decode                                      |
-| `html`    | escaped source, with the limitation stated | Executing it needs a boundary this build does not have ([gap 1](#declared-gaps)) |
-| `mermaid` | escaped source, with the limitation stated | Needs a renderer library not in this build ([gap 2](#declared-gaps))             |
-| `lottie`  | escaped source, with the limitation stated | Needs a player library not in this build ([gap 2](#declared-gaps))               |
+| Type      | Renders as                                 | Why                                                                                                 |
+| --------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `svg`     | `<img src="data:image/svg+xml,…">`         | The measured boundary — see below                                                                   |
+| `image`   | `<img src="data:{mime};base64,…">`         | No script surface exists in a raster decode                                                         |
+| `html`    | escaped source, with the limitation stated | Executing it needs a boundary this build does not have ([gap 1](#declared-gaps))                    |
+| `mermaid` | `<img src="data:image/svg+xml,…">`         | Compiled to SVG in the sandbox frame, then re-admitted through the same gate an authored SVG passes |
+| `lottie`  | live player inside the sandbox frame       | An animation has to keep running to animate, so this one stays live                                 |
+
+**Why the two sandbox types end up in different places.** A Mermaid diagram is static, so the frame
+that drew it has no further job: it hands back SVG text, is destroyed, and the text goes to the `<img>`
+sink measured below — which means the measured result covers Mermaid too, and no live opaque-origin
+document is left in the transcript for every diagram a reader scrolls past. Lottie cannot do that.
+
+### The sandbox frame, and exactly what it is worth
+
+A `mermaid` or `lottie` block mounts `/fy-render-sandbox.html` in an
+`<iframe sandbox="allow-scripts">` — **no `allow-same-origin`**, so the frame's origin is opaque and
+it has no storage, no cookies, no reach into this document, and no useful `event.origin` (it is the
+literal string `"null"`, so the parent trusts `event.source` identity and nothing else).
+
+- **The frame fetches no subresource, which is narrower than "the frame has no network".** Its own
+  policy is `default-src 'none'` and it carries no `<script src>`, so every ordinary subresource —
+  `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, worker, nested frame, font, remote image — is
+  refused, measured in real Chromium and corroborated by a server-side request ledger. What that does
+  **not** cover: self-navigation, `<link rel=prerender>` and WebRTC STUN/TURN were all measured
+  egressing from this exact frame shape under this exact policy, because CSP's fetch directives do not
+  govern navigation and Chromium does not recognise `webrtc 'block'`. Reaching any of them needs
+  script execution inside the frame, which the hash-pinned `script-src` denies — so the honest claim
+  is "no code that CAN run there issues a request", never "the frame cannot". Gap 2 below.
+  The parent fetches the one library the block needs with `credentials: 'omit'`, `redirect: 'error'`
+  and a per-library byte cap, and transfers the bytes over a `MessageChannel` port.
+- **Author bytes cannot become code, and CSP is what enforces that.** The shell's `script-src` lists
+  nothing but the build-time SHA-256 of the bootstrap and the two bundles — no `'self'`, no
+  `'unsafe-inline'`, no `'unsafe-eval'`. Measured in real Chromium inside the opaque frame: a
+  dynamically created inline script whose text matches a pinned hash runs, and the identical
+  primitive with any other text does not. The shell does hold a code-install primitive, and saying
+  otherwise would be dishonest — what makes it safe is that it is cryptographically incapable of
+  running anything not fixed at build time.
+- **A split deploy fails closed and visibly.** If the shell and the bundles are ever served from
+  different releases, the hash will not match, the library global never appears, the frame reports an
+  error, and the block returns to its escaped source. That is correct behaviour, not a bug to chase.
+- **Lottie's remote-asset loaders are unreachable rather than absent.** The light bundle still ships
+  its `path`-based `XMLHttpRequest` and `img.src` asset loader. The bootstrap passes no `path`, and
+  the shell CSP allows only `img-src data:`, so an animation's `assets[].u`/`.p` cannot egress. The
+  accurate claim is inability, not absence.
+- **Two independent refusals of Lottie expressions, and they are not the same strength.**
+  `lottie_light` genuinely registers no expression evaluator — that is an ABSENCE, and the build
+  fails if a bump reintroduces a statically named `Function`, `eval`, constructor or expression-plugin
+  execution target through a call, `new` or tagged template, including member, computed, optional and
+  static `call`/`apply`/`bind` receiver spellings. Runtime-built property names, aliases and other value
+  handoffs need data flow and remain outside that syntactic check. Mermaid is a weaker claim and is kept
+  separate on purpose: its bundle carries four
+  `Function("return this")` global-lookup fallbacks inherited from lodash, which never evaluate because
+  `self` is defined in a browser and the `||` chain short-circuits, and which CSP would refuse anyway
+  because `'unsafe-eval'` is absent. Short-circuit plus policy is not the same as absence, and the two
+  must not be merged.
+- **The `<foreignObject>` refusal is a fail-closed guard, and measurement says it is untriggered
+  today.** Mermaid protects only a fixed list of config keys from an in-diagram `%%{init: …}%%`
+  directive; the shell extends that list, but `flowchart` is deliberately left out because protecting
+  it would block every benign flowchart directive — so on paper an author can ask for HTML labels and
+  the parent's `<foreignObject>` refusal is what would catch it.
+
+  Measured in real Chromium against the shipped shell and the pinned bundle, three sources —
+  `%%{init: {"flowchart": {"htmlLabels": true}}}%%`, `%%{init: {"htmlLabels": true}}%%` and the plain
+  equivalent diagram — compiled to **byte-identical** 12,359-byte SVG with **no `<foreignObject>`**.
+  With `securityLevel: 'strict'` and the extended `secure` list, the directive does not defeat the
+  option. So the refusal is a guard against a future Mermaid release changing that, not a fallback
+  path any reader reaches; the reachable failure route for a `mermaid` block is a **parse error**,
+  which arrives as the `render` class with the library's own wording folded away. Do not describe the
+  `<foreignObject>` refusal as the flagship fallback — that overstates what it currently does, and
+  understates why it should stay.
+
+**The watchdogs bound WALL-CLOCK LIFETIME ONLY — never CPU, never memory.** A Mermaid compile gets 15
+seconds and a Lottie frame gets 120 seconds of life, armed when the frame mounts and clearable by
+nothing the frame says. That is deliberate: a watchdog stood down by a `rendered` message is exactly
+the defect this design exists to avoid, since reporting success is the first thing a runaway payload
+would do. But it bounds how LONG a payload may compute, not how hard. See [gap 3](#declared-gaps).
 
 ### The `<img>` sink is the security boundary
 
@@ -190,8 +267,10 @@ consumer outside the measured one fails review even if the grammar is untouched.
 ### The grammar is a bound, not a sanitiser
 
 The per-type checks reject a few obviously unsupported constructs and cap how much work a parser can
-be made to do. They are plain string scans, they are bypassable, and **they are not what makes a
-payload safe**.
+be made to do. They are bounded lexical and header checks, not a complete parser or sanitiser: the
+three forbidden SVG element names are read by QName local name, while several other refusals remain
+simple string scans. They deliberately admit constructs outside that short refusal list, and **they
+are not what makes a payload safe**.
 
 This is measured too: 15 of the 25 hostile payloads above passed `parseFyRender` unchanged —
 including external image, font, stylesheet and paint references, `xml-stylesheet`, SMIL external
@@ -206,14 +285,103 @@ unsafe". Read an acceptance as "this is within the caps", never as "this will re
 
 ## Controls
 
-| Control             |  `svg` / `image`   | `html` / `mermaid` / `lottie` |
-| ------------------- | :----------------: | :---------------------------: |
-| Render illustration |        yes         |          **hidden**           |
-| Source              |        yes         |     yes (open by default)     |
-| Fullscreen          |        yes         |              yes              |
-| Caption             |        yes         |              yes              |
-| Reload              | yes, once rendered |          **hidden**           |
-| Pause / Play        |     **absent**     |          **absent**           |
+| Control             |  `svg` / `image`   |           `mermaid` / `lottie`           |        `html`         |
+| ------------------- | :----------------: | :--------------------------------------: | :-------------------: |
+| Render illustration |        yes         |                   yes                    |      **hidden**       |
+| Source              |        yes         |                   yes                    | yes (open by default) |
+| Fullscreen          |        yes         |            yes, once started             |          yes          |
+| Caption             |        yes         |                   yes                    |          yes          |
+| Reload              | yes, once rendered |            yes, once started             |      **hidden**       |
+| Pause / Play        |     **hidden**     | `lottie` only — **hidden** for `mermaid` |      **hidden**       |
+
+**"Once started", not "once rendered", and the difference is up to fifteen seconds.** For a sandbox
+type the reader's consent is what reveals Fullscreen and Reload, and the frame behind them may still
+be fetching a multi-megabyte renderer. That is deliberate — both controls can act on a frame that has
+not drawn yet, Reload most of all — but the earlier wording claimed the stricter thing the rule
+underneath this table states, and it was not true for these two types.
+
+**Pause is hidden, never shown disabled**, and only `lottie` has it. A Mermaid diagram is static and
+has nothing to pause, so it gets no control rather than a dead one — the same rule Reload and
+Fullscreen already follow.
+
+**`prefers-reduced-motion: reduce` covers `lottie` and nothing else.** It starts an animation paused
+and never removes Play. The preference is read at the moment the reader presses Render, not when the
+transcript row mounted: a row can sit unread for an hour, and the setting that matters is the one in
+force when somebody actually asks. Once the reader has pressed Play or Pause, that choice wins and a
+Reload will not undo it — but it is a choice about THOSE bytes, so a rewritten message starts the
+decision over.
+
+**An authored `svg` carrying SMIL or CSS animation is outside that**, and there is no Pause control
+for it: the preference gates Lottie autoplay, and nothing in this build claims declarative SVG
+animation is inert. Reading the paragraph above as blanket reduced-motion support would be reading it
+as covering a type it does not reach.
+
+**A consented sandbox render says so while it is happening.** One sandbox-only `role="status"` region
+carries `Preparing the Mermaid renderer…`, then the ready outcome, then a failure — visible and spoken
+(WCAG 4.1.3), because the frame is transparent until its library has been fetched, installed and run.
+The streamed `svg`/`image` decode path is deliberately NOT in a live region: those bytes may still be
+arriving, so a half-written payload fails for real and an announcement would report an error that is
+not one yet.
+
+**A failure is one fixed sentence per class, with the machine's wording folded away.** The five
+classes are startup, library, render, deadline and lifetime; a Mermaid or Lottie library message and
+the compiled-SVG gate's own refusal go inside a collapsed `Why` fold rather than into the sentence a
+reader is shown, because a jison parse dump quoting the author's own source is not the app's voice. A
+Lottie `lifetime` stop is not presented as a failure at all — no error tone, no source panel — because
+nothing went wrong: a healthy animation reached its permitted life. A **stale** theme takes `warn`,
+the tone this app reserves for a stated limitation, because it is neither a failure nor nothing.
+
+**The folded diagnostic is monospaced, and that is asserted rather than photographed.** A jison dump's
+caret rule only points at the right column in a fixed-pitch face, so `.fy-render-why-body` carries
+`var(--font-mono)` and the code size, matching `.kt-fs-pre`. **The evidence host has no fixed-pitch
+font installed** — measured, `iiii` and `mmmm` render at different widths under generic `monospace`,
+and the only user font present is DejaVu Sans — so the capture still looks proportional and no pixel
+claim is made from it. The browser test asserts the _computed_ `font-family` and that the line breaks
+survive; the alignment itself is what the rule delivers on a machine with fonts. This is the same
+shape of caveat `fy-render.css` already carries for `env()` resolving to zero under headless Chrome.
+
+**A compiled Mermaid diagram belongs to the theme that compiled it, and a theme change MARKS IT STALE
+rather than redrawing it.** Mermaid cannot see the page, so it is told which way it is painted and
+bakes that into the SVG, which then lives on as an `<img>`. Switching between a dark and a light theme
+therefore leaves the diagram on screen and puts `The theme changed. Reload to redraw this diagram.` in
+the status region; the reader's Reload is what redraws it. Switching back before reloading clears the
+note by itself.
+
+**Nothing is created or fetched by that transition** — zero frames and zero requests, measured with
+three rendered diagrams on screen. Redrawing automatically was the first repair and it was wrong twice
+over: the work was unbounded in N (every compiled block remounted its frame at once, each refetching a
+multi-megabyte renderer, from a gesture that was not aimed at rendering anything), and recording the
+theme at callback time meant a switch DURING a compile was recorded as the theme the diagram was drawn
+for, which pinned a mismatched diagram silently. The shell now echoes the theme it actually compiled
+with, and the parent never re-reads the document to learn it. Consent is untouched throughout, because
+the reader approved those bytes and a repaint does not change that.
+
+**The fold and the source panel are both keyboard-reachable in fullscreen.** `<summary>` is focusable
+natively but carries no `tabindex`, so it matched none of `useDialogFocus`'s selector arms — and the
+trap does not merely fail to reach such an element, it `preventDefault()`s the Tab that would have,
+inside a container claiming `aria-modal="true"`. `summary` is now in that shared selector, which fixes
+every dialog in the app containing a `<details>`. The authored-source panel is a horizontal scrollport
+that no selector arm could match either, so it is a named `<section>` — which carries the region role
+implicitly — with an explicit `tabIndex={0}`, making it reachable inline and not only in fullscreen.
+Measured in
+real Chromium, the fullscreen failure state's tab order is
+`summary → source panel → Source → Reload → Exit fullscreen`, and the wrap from Exit lands on the
+summary.
+
+**The frame is deliberately unreachable by keyboard and pointer** (`tabIndex={-1}` plus
+`pointer-events: none`), which is why `useDialogFocus`'s focusable-element list has no `iframe` entry.
+It holds no reader control — Play/Pause is a parent button that speaks over the capability port — and
+it is a separate document, so a keydown inside it never reaches the parent where the app's Escape
+listener lives. Focus resting there used to kill Escape for the one fullscreen state that has a frame
+in it. The fullscreen host is itself focusable while open, so a control removed under the reader — the
+Lottie watchdog takes Pause away with no action of theirs — hands focus back to the overlay instead of
+to `<body>` outside it.
+
+**No renderer-library fetch is initiated and no sandbox frame is created before consent.** Both live
+in the frame's mount effect, and the frame is not mounted until the reader presses Render — asserted
+by `should create no frame and fetch nothing until a reader asks`, which counts the requests this
+component made. So a transcript full of unopened `mermaid` blocks costs no renderer download and no
+renderer work. That is a statement about what this component initiates, not about the page it sits in.
 
 A control that cannot act is hidden, not shown disabled — a disabled Reload on a block that is only
 ever text is a promise the build does not keep.
@@ -223,8 +391,18 @@ ever text is a promise the build does not keep.
 **No browser decoder mounts automatically.** A payload's size is bounded; the work of drawing it is
 not, and a transcript is written by an assistant rather than by the reader. So the stage states the
 resource risk in one sentence — rendering starts only when the reader chooses, and may use
-substantial browser resources — and one control starts the render. That control's accessible name
-carries the type and the bounded payload size, _Render illustration (SVG, 4 KB)_, while its visible
+substantial browser resources — and one control starts the render. For `svg` and `image` that
+control's accessible name carries the type and the bounded payload size, _Render illustration
+(SVG, 4 KB)_, because there the source bytes ARE the whole cost.
+
+**For `mermaid` and `lottie` it deliberately carries the type alone**, _Render illustration
+(Mermaid)_. The source figure would be the wrong number: pressing Render on a 20 KB diagram may also
+download a multi-megabyte renderer, so quoting the source would understate the action by two orders
+of magnitude, while quoting the renderer would overstate every block after the first, since the
+bundle revalidates to a 304. A figure meaning one thing for two types and something else for the
+other two is worse than no figure, so the renderer download is named in the consent sentence — "may
+download the … renderer on first use — cached bytes are revalidated" — where it can be stated
+conditionally instead of pretending to a precision it does not have. The visible
 label stays the short _Render illustration_ so the control row still fits one line at 390px. Neither
 the note nor the name predicts what drawing will actually cost; that is not knowable before the
 decode, which is the whole reason the decision belongs to the reader.
@@ -246,8 +424,12 @@ decode, which is the whole reason the decision belongs to the reader.
   capped at `50dvh` and scrolls inside itself, so one long block cannot push the rest of the message
   off screen. Its label is stable and its state is carried by `aria-expanded` plus `aria-controls`,
   rather than by a label and an attribute that could disagree.
-- **Reload** discards the `<img>` and decodes the payload again. It is the recovery path from a
-  decode failure, and it is meaningless for a type that never reaches an `<img>`.
+- **Reload** starts the whole render again from the authored bytes. For `svg`/`image` it discards the
+  `<img>` and decodes again; for `mermaid`/`lottie` it discards the compiled diagram or the running
+  player and mounts a **fresh frame** under a new key, because removing the element from the DOM is
+  the only reliable way to stop a frame's scripts — there is no `iframe.terminate()`. It is the
+  recovery path from a decode failure, a compile failure and a stopped animation alike, and it is
+  hidden for `html`, which never renders.
 - **Fullscreen** is an in-app overlay (`role="dialog"`, `aria-modal`), not the Fullscreen API:
   `Element.requestFullscreen` is unavailable on iOS Safari, a first-class target for this PWA, and an
   overlay keeps Escape and the focus trap in the app's single `useDialogFocus` stack rather than
@@ -260,9 +442,15 @@ decode, which is the whole reason the decision belongs to the reader.
 - **The caption** carries the required description once. The `<img>` is `alt=""` on purpose: the
   caption already names the figure and the fullscreen dialog, so repeating it would make a screen
   reader say the same sentence three times, four in fullscreen.
-- **Pause** is absent because nothing in this build animates under the app's control — which is also
-  why an animated PNG, GIF or WebP is refused outright rather than shown as a loop nobody can stop.
-  Both return with the runtime types ([gap 2](#declared-gaps)).
+- **Pause / Play** exists for `lottie` and nothing else, because `lottie` is the only thing in this
+  build that animates under the app's control. It is a command on the live capability port, not a
+  remount, so pausing does not restart the animation. A Mermaid diagram is static and gets no control
+  rather than a dead one. An animated PNG, GIF or WebP is still refused outright, because the `<img>`
+  sink has no pause and a loop nobody can stop is worse than a refusal.
+- **A frame that has run out of time** stops and says so, and Reload starts it again. A Lottie frame
+  is torn down after 120 seconds of wall-clock life whatever it is doing, because that bound cannot
+  be cleared by anything the frame reports — see [gap 3](#declared-gaps) for what it does and does
+  not bound.
 
 ### Error fallback
 
@@ -270,6 +458,52 @@ A payload the browser refuses to decode fires the `<img>` `error` event, and the
 picture with a note naming the type (`[data-fy-render-error]`) and opens the source panel. This is
 where a malformed SVG is caught: the grammar deliberately does not parse XML, so the browser's own
 parser is the well-formedness check, and it is a far better one than a hand-written scan.
+
+**The sandbox types reach a sentence by more routes, and one of them is not a failure.** A Mermaid
+source Mermaid itself refuses, a compiled diagram the re-admission gate rejects (a `<script>`, an
+over-cap element or filter count, or a `<foreignObject>` a future Mermaid release started emitting —
+measured, no directive produces one today), a Lottie payload the player cannot load, a library
+response that is missing or over its cap, a shell that never announced itself within its readiness
+deadline, and a frame that ran out of wall-clock life. The first five are the classes `startup`,
+`library` and `render`: one fixed sentence in the sandbox status region, error-toned, the library or
+gate wording folded under `Why`, and the source panel opened as scaffolding. The last two are
+`deadline` and `lifetime`, and `lifetime` — a healthy Lottie frame reaching its permitted life — is
+**not** presented as a failure: neutral tone, no fold, no source panel, because nothing went wrong.
+**There is no partial-render state**: a block either shows its illustration or shows its source with
+the reason said out loud, and
+a failed one is visually indistinguishable from an ordinary fence with a note above it.
+
+That last route is worth stating plainly because it will be seen in the field and misdiagnosed: if the
+shell and the library bundles are ever served from two different deploys, the CSP hash will not match
+and the library will not run. **The reader sees exactly this:**
+
+> The Mermaid renderer could not be loaded. The authored source is shown below.
+
+with **"The Mermaid library did not load."** inside the collapsed **Why** fold. That is the design
+failing closed, not a bug — and the sentence names the RENDERER rather than the illustration, because
+the illustration is fine and the deployment is not. The shell classifies its own failures as
+`library` or `render` on the wire so the parent never has to infer which happened from a sentence; a
+copy edit must not be able to change behaviour. Before that field existed, every shell error was
+classed as a render failure and this path told the reader their diagram could not be drawn.
+
+**A TAB LEFT OPEN ACROSS A DEPLOY IS THE OTHER SKEW, and it is quieter.** The two ends have different
+lifetimes: `/fy-render-sandbox.html` is `Cache-Control: no-cache`, so a frame mounted after a deploy
+revalidates and loads the **new** shell, while the parent ships under `/assets/*` as
+`max-age=31536000, immutable` and stays the **old** build inside a long-lived tab's module graph until
+the page is reloaded.
+
+The wire parse refuses whole messages rather than tolerating unknown shapes — `error` requires `class`
+and `mermaid-svg` requires `theme`, both under exact-key parsing — and a message that fails to parse is
+dropped in silence, because answering it would be answering whoever sent it. **That refusal is
+deliberate and stays.** Its cost is that a version-skewed pairing (new shell, old parent, or the
+reverse) drops the reply instead of showing it: no diagram appears, the status region reads
+`Preparing the … renderer…`, and the block eventually reports its watchdog outcome — the `deadline`
+sentence after fifteen seconds for Mermaid, or `lifetime` after two minutes for Lottie. The cause is
+version skew and the sentence names a timer, so **reloading the page is the remedy**, and a field
+diagnosis that sees a deadline on a freshly deployed build should suspect an open tab before it
+suspects the diagram. Permissive compatibility parsing is not the fix and is not offered: it would
+reintroduce exactly the "accept a shape the sender should not have been able to build" hole that
+exact-key parsing exists to close.
 
 **That note is deliberately not a live region** — not `role="alert"`, not `role="status"`, not
 `aria-live`. A transcript row re-renders while the assistant is still emitting it, and the grammar
@@ -335,8 +569,9 @@ terms and no others:
    selected admission checks fails closed. Those checks are a signature, record ordering, a terminal
    shape and the declared dimensions — **not** CRCs and not compressed content, which stay the
    browser decoder's business.
-2. It is **user-triggered**: no decoder mounts without a gesture, and the control that starts one
-   names the type and the bounded payload size in its accessible name.
+2. It is **user-triggered**: no decoder and no sandbox frame mounts without a gesture, and the
+   control that starts one names the type — plus, for the two static types, the bounded payload
+   size — in its accessible name.
 3. It is **recorded prominently**, here and in the authoring skill, rather than left implicit.
 
 **This is not resource isolation.** It does not satisfy row #65's executable, resource-bounded
@@ -367,19 +602,51 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    stream, so the block would render on a laptop and not on the phone beside it, and a streamed
    render has no accessible tree — it would spend an entire container runtime to arrive back at the
    `alt` string this build already provides for free.
-2. **`type: mermaid` and `type: lottie` do not render.** Both need a trusted library executing
-   against untrusted data, which needs the shell of gap 1. Their grammar, caps and the `"x"`
-   expression-key rejection ship now so a later build inherits a bounded corpus rather than an
-   accepted one.
+2. **`type: mermaid` and `type: lottie` carry a residual risk that is not eliminated.** No
+   attacker-authored code runs — but a trusted LIBRARY compromised by its own untrusted data would
+   execute inside the opaque frame, and the proven `<link rel=prerender>` and WebRTC STUN/TURN egress
+   channels would then be reachable, because CSP does not close either. Mitigated by: the shell
+   holding no primitive that can run unpinned bytes, `securityLevel: 'strict'`, the `lottie_light`
+   build with no expression evaluator, the parse-time refusal of string-valued `"x"` keys, the
+   structure and size caps, and the re-admission of compiled Mermaid output through the SVG gate.
+   **Not eliminated.** Anyone who considers this unacceptable should ship `svg`/`image` alone, which
+   is a coherent product.
 3. **No CPU or memory bound on anything, in any form.** The caps bound **input size and declared
-   dimensions, and nothing else**. There is no decode timeout, no watchdog and no compute quota
-   anywhere in this build, so a payload that is inside every limit and still expensive to rasterise
-   is bounded neither in what the machine spends nor in how long the reader waits. Do not describe
-   the caps as bounding either, and do not describe the trust gate as isolation — it decides WHO
-   starts the work and WHEN, not how much of it there can be. See [Accepted risk](#accepted-risk).
-4. **Cross-browser coverage is one engine.** The `<img>` result is Chrome 150, headless, on Linux.
-   Firefox and WebKit were not installed and are unmeasured; Safari — the more consequential one for
-   a PWA — has had no run at all. This is a release-evidence gap, not a known failure.
+   dimensions, and nothing else**. The sandbox watchdogs bound **wall-clock lifetime only** — 15
+   seconds for a Mermaid compile, 120 seconds for a Lottie frame — so they bound how long a payload
+   may compute and say nothing about how hard. Browsers offer no per-frame CPU or memory quota at
+   all. A payload inside every limit and still expensive to rasterise is bounded in neither what the
+   machine spends nor, for the non-sandbox types, how long the reader waits. Do not describe the caps
+   as bounding compute, do not describe the watchdogs as a quota, and do not describe the trust gate
+   as isolation — it decides WHO starts the work and WHEN, not how much of it there can be.
+
+   **NEITHER WATCHDOG HAS A BROWSER CAPTURE, and both are unit-proven only.** The 15-second Mermaid
+   deadline and the 120-second Lottie lifetime are wall-clock by design, so a browser test would have
+   to wait that long to see one fire; the real-component Chromium journey therefore does not capture
+   either. What is proven, in `tests/unit/fy-render-sandbox.test.tsx` against shortened deadlines, is
+   that each timer fires with the right class (`deadline` for Mermaid, `lifetime` for Lottie), that no
+   message from the frame clears it, and how the block presents each. Nothing anywhere may describe
+   either bound as browser-measured. See
+   [Accepted risk](#accepted-risk).
+
+4. **Cross-browser coverage is one engine, and Chromium proof is not Safari proof.** Every measured
+   result in this document — the `<img>` sink, the CSP hash pinning, the zero-request ledger — is
+   Chrome 150, headless, on Linux. Firefox is unmeasured. Safari is the consequential one for a PWA,
+   and CSP inheritance into a sandboxed local-scheme document is exactly the behaviour that has
+   differed between engines, so the sandbox types depend on it more than the static ones do.
+
+   **This is a RELEASE GATE, not a footnote.** Safari coverage is a real `macos-15` `safaridriver`
+   job that runs the same journey against the same generated shell, and the load-bearing assertion it
+   must carry is the hash-gated dynamic inline install: that a script whose text matches a pinned
+   `script-src` hash runs, and that the identical primitive with any other text does not. Playwright's
+   bundled WebKit is **not** accepted as a substitute — it is not Safari, and the question here is
+   about a specific engine's CSP behaviour.
+
+   Honest residuals even once that job is green: the **iOS Simulator**, a **physical iOS device**, and
+   the **real Cloudflare Pages `_headers` precedence** (the `!` detachment and `frame-ancestors`
+   behaviour can only be confirmed against an actual Pages preview deploy, never locally). None of
+   those are covered by a macOS runner, and none should be described as covered.
+
 5. **SVG admission is prefix-only, a deliberate deviation from the approved plan.** The plan asked
    for a structural "exactly one well-formed `<svg>` root". The grammar checks that a payload
    _begins_ with an `<svg>` element and does not parse the document, because the alternative is a

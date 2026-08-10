@@ -11,6 +11,10 @@
     // one line that puts the design system in the bundle.
     "types": ["bun", "vite/client"]
   },
-  "include": ["src", "tests", "harness", "vite.config.ts"],
+  // `scripts` is here so the `fy-render` shell generator and its bundled entry
+  // shims are typechecked. They are browser code that ends up inside the sandbox
+  // frame, so an untyped one would be the least reviewed and most security-
+  // sensitive code in the package.
+  "include": ["src", "tests", "harness", "scripts", "vite.config.ts"],
   "exclude": []
 }

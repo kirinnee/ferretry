@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { ShieldCheck } from 'lucide-react';
-import { chromium } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
@@ -13,6 +12,7 @@ import {
   type WardenPageSlots,
   type WardenSurfaceProps,
 } from '../../../src/lib/pages/warden-page.tsx';
+import { sharedChromium } from '../support/chromium.ts';
 
 const fixtureCss = String.raw`
   :root {
@@ -217,10 +217,9 @@ const referenceDocument = documentFor(renderToStaticMarkup(<OriginalWardenRefere
 
 describe('Warden page visual contract', () => {
   it('should match the original shell at mobile and desktop viewports', async () => {
-    const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-    should(chrome).be.type('string');
     const artifactDirectory = resolve(import.meta.dir, '../../../.artifacts/visual');
     await mkdir(artifactDirectory, { recursive: true });
+    const browser = await sharedChromium();
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -230,8 +229,6 @@ describe('Warden page visual contract', () => {
         return new Response(body, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       },
     });
-    const browser = await chromium.launch({ executablePath: chrome as string, headless: true });
-
     try {
       for (const viewport of [
         { name: 'mobile', width: 390, height: 844 },
@@ -242,72 +239,74 @@ describe('Warden page visual contract', () => {
           colorScheme: 'dark',
           reducedMotion: 'reduce',
         });
-        await context.route('**/*', async route => {
-          const requested = new URL(route.request().url());
-          if (requested.origin !== server.url.origin) {
-            await route.abort();
-            return;
+        try {
+          await context.route('**/*', async route => {
+            const requested = new URL(route.request().url());
+            if (requested.origin !== server.url.origin) {
+              await route.abort();
+              return;
+            }
+            await route.continue();
+          });
+          const page = await context.newPage();
+          await page.goto(new URL('/target', server.url).toString());
+          const metrics = await page.evaluate<{
+            innerWidth: number;
+            scrollWidth: number;
+            bodyOverflow: string;
+            pageOverflowY: string;
+          }>(
+            `({
+              innerWidth: window.innerWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              bodyOverflow: getComputedStyle(document.body).overflow,
+              pageOverflowY: getComputedStyle(document.querySelector('#root > div')).overflowY,
+            })`,
+          );
+          should(metrics.scrollWidth).be.belowOrEqual(metrics.innerWidth);
+          should(metrics.bodyOverflow).equal('hidden');
+          should(metrics.pageOverflowY).equal('auto');
+
+          const target = await page.screenshot({
+            path: resolve(artifactDirectory, `warden-target-${viewport.name}.png`),
+            animations: 'disabled',
+          });
+
+          const focusOrder: Array<string | null> = [];
+          for (let index = 0; index < 5; index += 1) {
+            await page.keyboard.press('Tab');
+            focusOrder.push(await page.locator(':focus').getAttribute('data-focus'));
           }
-          await route.continue();
-        });
-        const page = await context.newPage();
-        await page.goto(new URL('/target', server.url).toString());
-        const metrics = await page.evaluate<{
-          innerWidth: number;
-          scrollWidth: number;
-          bodyOverflow: string;
-          pageOverflowY: string;
-        }>(
-          `({
-            innerWidth: window.innerWidth,
-            scrollWidth: document.documentElement.scrollWidth,
-            bodyOverflow: getComputedStyle(document.body).overflow,
-            pageOverflowY: getComputedStyle(document.querySelector('#root > div')).overflowY,
-          })`,
-        );
-        should(metrics.scrollWidth).be.belowOrEqual(metrics.innerWidth);
-        should(metrics.bodyOverflow).equal('hidden');
-        should(metrics.pageOverflowY).equal('auto');
+          should(focusOrder).deepEqual(['attention', 'refresh', 'account', 'save', 'verdict']);
 
-        const target = await page.screenshot({
-          path: resolve(artifactDirectory, `warden-target-${viewport.name}.png`),
-          animations: 'disabled',
-        });
-
-        const focusOrder: Array<string | null> = [];
-        for (let index = 0; index < 5; index += 1) {
-          await page.keyboard.press('Tab');
-          focusOrder.push(await page.locator(':focus').getAttribute('data-focus'));
-        }
-        should(focusOrder).deepEqual(['attention', 'refresh', 'account', 'save', 'verdict']);
-
-        if (viewport.name === 'mobile') {
-          const controls = page.locator('button, input, a[data-focus]');
-          for (let index = 0; index < (await controls.count()); index += 1) {
-            const box = await controls.nth(index).boundingBox();
-            if (box === null) throw new Error('a mobile control is not visible');
-            should(box.height).be.aboveOrEqual(44);
+          if (viewport.name === 'mobile') {
+            const controls = page.locator('button, input, a[data-focus]');
+            for (let index = 0; index < (await controls.count()); index += 1) {
+              const box = await controls.nth(index).boundingBox();
+              if (box === null) throw new Error('a mobile control is not visible');
+              should(box.height).be.aboveOrEqual(44);
+            }
+          } else {
+            const save = page.locator('[data-focus="save"]');
+            const saveBackground = `getComputedStyle(document.querySelector('[data-focus="save"]')).backgroundColor`;
+            const before = await page.evaluate<string>(saveBackground);
+            await save.hover();
+            await page.waitForFunction(`${saveBackground} !== ${JSON.stringify(before)}`);
+            const after = await page.evaluate<string>(saveBackground);
+            should(after).not.equal(before);
           }
-        } else {
-          const save = page.locator('[data-focus="save"]');
-          const saveBackground = `getComputedStyle(document.querySelector('[data-focus="save"]')).backgroundColor`;
-          const before = await page.evaluate<string>(saveBackground);
-          await save.hover();
-          await page.waitForFunction(`${saveBackground} !== ${JSON.stringify(before)}`);
-          const after = await page.evaluate<string>(saveBackground);
-          should(after).not.equal(before);
-        }
 
-        await page.goto(new URL('/reference', server.url).toString());
-        const reference = await page.screenshot({
-          path: resolve(artifactDirectory, `warden-reference-${viewport.name}.png`),
-          animations: 'disabled',
-        });
-        should(target.equals(reference)).be.true();
-        await context.close();
+          await page.goto(new URL('/reference', server.url).toString());
+          const reference = await page.screenshot({
+            path: resolve(artifactDirectory, `warden-reference-${viewport.name}.png`),
+            animations: 'disabled',
+          });
+          should(target.equals(reference)).be.true();
+        } finally {
+          await context.close();
+        }
       }
     } finally {
-      await browser.close();
       server.stop(true);
     }
   }, 20_000);
