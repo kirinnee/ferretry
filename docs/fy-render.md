@@ -195,11 +195,15 @@ literal string `"null"`, so the parent trusts `event.source` identity and nothin
   accurate claim is inability, not absence.
 - **Two independent refusals of Lottie expressions, and they are not the same strength.**
   `lottie_light` genuinely registers no expression evaluator — that is an ABSENCE, and the build
-  fails if a bump reintroduces a direct `Function`/`eval`/constructor call. Mermaid is a weaker claim
-  and is kept separate on purpose: its bundle carries four `Function("return this")` global-lookup
-  fallbacks inherited from lodash, which never evaluate because `self` is defined in a browser and
-  the `||` chain short-circuits, and which CSP would refuse anyway because `'unsafe-eval'` is absent.
-  Short-circuit plus policy is not the same as absence, and the two must not be merged.
+  fails if a bump reintroduces a statically named `Function`, `eval`, constructor or expression-plugin
+  execution target through a call, `new` or tagged template, including member, computed, optional and
+  static `call`/`apply`/`bind` receiver spellings. Runtime-built property names, aliases and other value
+  handoffs need data flow and remain outside that syntactic check. Mermaid is a weaker claim and is kept
+  separate on purpose: its bundle carries four
+  `Function("return this")` global-lookup fallbacks inherited from lodash, which never evaluate because
+  `self` is defined in a browser and the `||` chain short-circuits, and which CSP would refuse anyway
+  because `'unsafe-eval'` is absent. Short-circuit plus policy is not the same as absence, and the two
+  must not be merged.
 - **The `<foreignObject>` refusal is a fail-closed guard, and measurement says it is untriggered
   today.** Mermaid protects only a fixed list of config keys from an in-diagram `%%{init: …}%%`
   directive; the shell extends that list, but `flowchart` is deliberately left out because protecting
@@ -263,8 +267,10 @@ consumer outside the measured one fails review even if the grammar is untouched.
 ### The grammar is a bound, not a sanitiser
 
 The per-type checks reject a few obviously unsupported constructs and cap how much work a parser can
-be made to do. They are plain string scans, they are bypassable, and **they are not what makes a
-payload safe**.
+be made to do. They are bounded lexical and header checks, not a complete parser or sanitiser: the
+three forbidden SVG element names are read by QName local name, while several other refusals remain
+simple string scans. They deliberately admit constructs outside that short refusal list, and **they
+are not what makes a payload safe**.
 
 This is measured too: 15 of the 25 hostile payloads above passed `parseFyRender` unchanged —
 including external image, font, stylesheet and paint references, `xml-stylesheet`, SMIL external

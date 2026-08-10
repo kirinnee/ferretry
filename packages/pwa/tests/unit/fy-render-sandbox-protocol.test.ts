@@ -180,6 +180,27 @@ describe('fy-render compiled diagram admission', () => {
     should(reasonOf(fyRenderMermaidSvg('<!ENTITY a "b"><svg/>'))).match(/document type or entity/);
   });
 
+  test('should refuse those constructs when a namespace prefix spells them', () => {
+    // Arrange — each fixture BINDS the prefix it uses, so it is a document a
+    // parser accepts. The lowercase local-name cases resolve to the same SVG
+    // elements as their unprefixed spellings; the mixed-case cases separately
+    // pin the conservative case-insensitive policy. A malformed fixture would
+    // prove nothing here: a valid qualified diagram used to walk straight past
+    // a refusal written for the unprefixed spelling.
+    const qualified = (prefix: string, body: string): string =>
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:${prefix}="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
+
+    // Assert — the same fail-closed rule, decided by the scanned LOCAL name and
+    // reported under the canonical spelling, so both paths refuse under one name.
+    should(reasonOf(fyRenderMermaidSvg(qualified('svg', '<svg:script>alert(1)</svg:script>')))).match(/<script>/);
+    should(reasonOf(fyRenderMermaidSvg(qualified('svg', '<svg:foreignObject><b>hi</b></svg:foreignObject>')))).match(
+      /<foreignObject>/,
+    );
+    should(reasonOf(fyRenderMermaidSvg(qualified('svg', '<svg:use href="#a"/>')))).match(/<use>/);
+    should(reasonOf(fyRenderMermaidSvg(qualified('SVG', '<SVG:SCRIPT/>')))).match(/<script>/);
+    should(reasonOf(fyRenderMermaidSvg(qualified('ns', '<ns:ForeignObject/>')))).match(/<foreignObject>/);
+  });
+
   test('should refuse a diagram that is not an svg element at all', () => {
     // Assert — the sink builds a `data:image/svg+xml` URL, so a non-SVG document
     // would simply fail to decode and show an empty frame instead of a reason.

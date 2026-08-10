@@ -271,9 +271,41 @@ const isNameChar = (code: number): boolean =>
   (code >= 0x300 && code <= 0x36f) ||
   (code >= 0x203f && code <= 0x2040);
 
+/**
+ * The element local names an SVG payload may not carry, in their canonical
+ * spelling — which is the spelling every refusal message uses, whatever the
+ * author wrote.
+ *
+ * `<use>` is on the list bluntly on purpose: a real answer is a reference-cycle
+ * detector, and one is not worth building for a chat illustration.
+ * `docs/fy-render.md` records that.
+ */
+const SVG_FORBIDDEN_ELEMENTS = ['script', 'foreignObject', 'use'] as const;
+
+type SvgForbiddenElement = (typeof SVG_FORBIDDEN_ELEMENTS)[number];
+
+/** The canonical forbidden name a scanned element name is, or null. */
+function forbiddenElement(local: string): SvgForbiddenElement | null {
+  const lowered = local.toLowerCase();
+  return SVG_FORBIDDEN_ELEMENTS.find(name => name.toLowerCase() === lowered) ?? null;
+}
+
 interface SvgScan {
   readonly elements: number;
   readonly filterPrimitives: number;
+  /**
+   * The FIRST forbidden element in document order, canonically spelled, or null
+   * when there is none.
+   *
+   * BY LOCAL NAME AND CASE-INSENSITIVELY, for the same reason the filter
+   * primitives are counted that way: when `svg` is bound to the SVG namespace,
+   * a browser resolves `<svg:script>` as the element `script`, while an
+   * unqualified `/<script[\s/>]/` regex reads it as ordinary text. This lexical
+   * scan does not interpret namespace declarations; it conservatively applies
+   * the local-name policy to every prefix. A prefix must not buy an author an
+   * element the unprefixed spelling is refused for.
+   */
+  readonly forbidden: SvgForbiddenElement | null;
   /** The root `<svg …>` start tag, verbatim, quotes honoured. */
   readonly rootTag: string | null;
 }
@@ -289,6 +321,10 @@ interface SvgScan {
  * closing tags, and reads quoted attribute bodies properly, so a count is a
  * count of elements and the root tag is the whole root tag.
  *
+ * The FORBIDDEN ELEMENTS are read here for the same reason: this walk already
+ * resolves a QName to its local name, so `<svg:script>` is seen for what it is,
+ * while the regex that used to decide it saw ordinary text.
+ *
  * Returns null for an unterminated construct: a document whose comment never
  * closes has not been scanned, and an unscanned document is refused rather than
  * assumed small.
@@ -297,6 +333,7 @@ function scanSvg(source: string): SvgScan | null {
   let at = 0;
   let elements = 0;
   let filterPrimitives = 0;
+  let forbidden: SvgForbiddenElement | null = null;
   let rootTag: string | null = null;
 
   /** The index just past `token`, or null when it never closes. */
@@ -372,14 +409,16 @@ function scanSvg(source: string): SvgScan | null {
 
     elements += 1;
     // BY LOCAL NAME. `<svg:feGaussianBlur>` is the same primitive as
-    // `<feGaussianBlur>`, and a prefix must not buy an author extra ones.
+    // `<feGaussianBlur>`, and a prefix must not buy an author extra ones — nor,
+    // below, an element the unprefixed spelling is refused for.
     const local = name.slice(name.lastIndexOf(':') + 1);
     if (/^fe[A-Z]/u.test(local)) filterPrimitives += 1;
+    forbidden ??= forbiddenElement(local);
     if (rootTag === null && local === 'svg') rootTag = source.slice(open, end + 1);
     at = end + 1;
   }
 
-  return { elements, filterPrimitives, rootTag };
+  return { elements, filterPrimitives, forbidden, rootTag };
 }
 
 /**
@@ -440,12 +479,17 @@ function rootAttribute(tag: string, name: string): string | null {
  * block renders its error fallback with the source. Do not describe this
  * function as validating a single well-formed root.
  *
- * The four rejections below are authoring policy and defence in depth. They are
- * a plain string scan, they are bypassable, and they are NOT what makes a
- * payload safe — a probe confirmed the `<img>` sink neutralises `<use>`,
- * `<foreignObject>` and `<script>` on its own, and equally neutralises a dozen
- * constructs this function waves straight through. Read a refusal here as "this
- * will not do what you think", never as "this would otherwise have been unsafe".
+ * The rejections below are authoring policy and defence in depth. They are
+ * bypassable, and they are NOT what makes a payload safe — a probe confirmed the
+ * `<img>` sink neutralises `<use>`, `<foreignObject>` and `<script>` on its own,
+ * and equally neutralises a dozen constructs this function waves straight
+ * through. Read a refusal here as "this will not do what you think", never as
+ * "this would otherwise have been unsafe".
+ *
+ * The forbidden elements are nonetheless decided by the LEXICAL SCAN rather than
+ * by a `/<script[\s/>]/` regex, because a policy that reads `<script>` as a
+ * script and `<svg:script>` as text is not stating a policy at all. See
+ * `SvgScan.forbidden`.
  */
 function validateSvg(payload: string): string | null {
   if (byteLength(payload) > FY_RENDER_LIMITS.svgBytes) return 'SVG payload exceeds 100 KiB';
@@ -457,14 +501,10 @@ function validateSvg(payload: string): string | null {
   if (/<!DOCTYPE|<!ENTITY/iu.test(payload)) return 'SVG document type and entity declarations are not accepted';
   const body = payload.replace(SVG_PROLOGUE, '');
   if (!/^<svg[\s/>]/u.test(body)) return 'SVG payload must begin with an <svg> element';
-  if (/<script[\s/>]/iu.test(payload)) return 'SVG <script> elements are not accepted';
-  if (/<foreignObject[\s/>]/iu.test(payload)) return 'SVG <foreignObject> elements are not accepted';
-  // Blunt on purpose: a real answer is a reference-cycle detector, and one is
-  // not worth building for a chat illustration. `docs/fy-render.md` records it.
-  if (/<use[\s/>]/iu.test(payload)) return 'SVG <use> elements are not accepted';
 
   const scan = scanSvg(payload);
   if (scan === null) return 'SVG payload has an unterminated comment, CDATA section or tag';
+  if (scan.forbidden !== null) return `SVG <${scan.forbidden}> elements are not accepted`;
   if (scan.elements > FY_RENDER_LIMITS.svgElements)
     return `SVG payload exceeds ${FY_RENDER_LIMITS.svgElements} elements`;
   if (scan.filterPrimitives > FY_RENDER_LIMITS.svgFilterPrimitives)
@@ -1289,13 +1329,14 @@ export function fyRenderMermaidSvg(svg: string): FyRenderMermaidSvgResult {
   if (byteLength(svg) > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes) return refuse('The compiled diagram is too large');
   if (LONE_SURROGATE.test(svg)) return refuse('The compiled diagram contains an unpaired UTF-16 surrogate');
   if (/<!DOCTYPE|<!ENTITY/iu.test(svg)) return refuse('The compiled diagram declares a document type or entity');
-  if (/<script[\s/>]/iu.test(svg)) return refuse('The compiled diagram contains a <script> element');
-  if (/<foreignObject[\s/>]/iu.test(svg)) return refuse('The compiled diagram contains a <foreignObject> element');
-  if (/<use[\s/>]/iu.test(svg)) return refuse('The compiled diagram contains a <use> element');
   const body = svg.replace(SVG_PROLOGUE, '');
   if (!/^<svg[\s/>]/u.test(body)) return refuse('The compiled diagram is not an <svg> element');
   const scan = scanSvg(svg);
   if (scan === null) return refuse('The compiled diagram has an unterminated tag');
+  // BY LOCAL NAME, exactly as the authored path decides it: a compiler that
+  // started emitting `<svg:foreignObject>` would otherwise walk straight past a
+  // refusal written for the unprefixed spelling.
+  if (scan.forbidden !== null) return refuse(`The compiled diagram contains a <${scan.forbidden}> element`);
   if (scan.elements > FY_RENDER_SANDBOX_LIMITS.mermaidSvgElements)
     return refuse(`The compiled diagram exceeds ${FY_RENDER_SANDBOX_LIMITS.mermaidSvgElements} elements`);
   if (scan.filterPrimitives > FY_RENDER_SANDBOX_LIMITS.mermaidSvgFilterPrimitives)

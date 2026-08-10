@@ -395,6 +395,50 @@ describe('fy-render svg payloads', () => {
     );
   });
 
+  test('should refuse a forbidden element a namespace prefix was hiding, in any case', () => {
+    // Arrange — lowercase `<svg:script>` IS `<script>`: the prefix is bound to
+    // the SVG namespace and a browser resolves the two to the same element.
+    // EVERY fixture binds the prefix it uses, so each is a document a parser
+    // would accept rather than a malformed string that would have failed anyway
+    // — the bypass being proved has to be a real one. XML local names are
+    // case-sensitive; the mixed-case cases separately pin the existing,
+    // conservative case-insensitive policy. The reported spelling is canonical
+    // whatever the author wrote, so one message states one policy.
+    const bind = (prefix: string, element: string): string =>
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:${prefix}="http://www.w3.org/2000/svg">${element}</svg>`;
+    const qualified: readonly (readonly [string, string, string])[] = [
+      ['svg', '<svg:script>alert(1)</svg:script>', 'SVG <script> elements are not accepted'],
+      ['svg', '<svg:foreignObject><b>hi</b></svg:foreignObject>', 'SVG <foreignObject> elements are not accepted'],
+      ['svg', '<svg:use href="#a"/>', 'SVG <use> elements are not accepted'],
+      ['SVG', '<SVG:SCRIPT>alert(1)</SVG:SCRIPT>', 'SVG <script> elements are not accepted'],
+      ['x', '<x:FOREIGNOBJECT/>', 'SVG <foreignObject> elements are not accepted'],
+      ['ns', '<ns:Use href="#a"/>', 'SVG <use> elements are not accepted'],
+    ];
+
+    // Act / Assert
+    for (const [prefix, element, reason] of qualified) should(reasonOf(svg(bind(prefix, element)))).equal(reason);
+  });
+
+  test('should report the first forbidden element in document order', () => {
+    // Assert — the scan stops recording at the first one, so a payload carrying
+    // several is named for the one that comes first rather than for whichever
+    // check happens to be listed first.
+    const payload =
+      '<svg xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"><svg:use href="#a"/><script/></svg>';
+    should(reasonOf(svg(payload))).equal('SVG <use> elements are not accepted');
+  });
+
+  test('should read a forbidden element as markup rather than as text', () => {
+    // Assert — the flip side of resolving QNames: the check is a lexical scan
+    // now, not a substring search, so a mention of one inside a comment or a
+    // CDATA section is character data and stays character data. Neither can
+    // become an element, and the element cap already reads both this way.
+    should(svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><!-- <script/> --></svg>').ok).be.true();
+    should(
+      svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><![CDATA[<use href="#a"/>]]></svg>').ok,
+    ).be.true();
+  });
+
   test('should refuse an unpaired UTF-16 surrogate, because the renderer cannot encode one', () => {
     // Arrange — `encodeURIComponent` throws `URIError` on a lone surrogate, and
     // the renderer builds the `data:` URL with it. A payload the grammar accepts

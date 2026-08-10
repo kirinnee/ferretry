@@ -57,6 +57,24 @@ jobs:
             wrangler deploy --dry-run --config wrangler.hosted.json
           '
 
+  pwa-bundle:
+    name: PWA Static Bundle
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # The same gate the Pages deploy runs — but that workflow only fires on a push to `main`, so
+      # until now the first thing to notice that the generated `fy-render` sandbox shell and its two
+      # library bundles never reached `dist` was the production deploy. The build asserts all three
+      # are present and non-empty; running it pre-merge makes a lost generation step a red PR instead
+      # of a shipped 404 shell that silently degrades every diagram and animation.
+      - name: Build static PWA bundle
+        run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+
   test:
     name: ${{ matrix.mode == 'int' && 'Integration Tests' || 'Unit Tests' }}
     permissions:
