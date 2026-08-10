@@ -497,6 +497,30 @@ describe('OperatorReadService.messages', () => {
     should(first.messages[0]?.selectionBinding).not.equal(second.messages[0]?.selectionBinding);
   });
 
+  it('should refuse a row without an exact block point before minting a binding', async () => {
+    // Arrange — the digest normally supplies block zero for single-message records, but this
+    // boundary still receives the optional durable point type and must fail closed if a caller
+    // hands it a legacy-shaped row directly.
+    let minted = 0;
+    const legacy = service({
+      rows: [row(10, { point: { v: 1, byteOffset: 10 } })],
+      codec: {
+        tag: async input => {
+          minted += 1;
+          return messageCodec().tag(input);
+        },
+        matches: messageCodec().matches,
+      },
+    });
+
+    // Act
+    const refusal = await legacy.messages('s1', undefined, 1).catch((error: unknown) => error);
+
+    // Assert — no partial token or redacted row escapes the exact-point refusal.
+    should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'transcript_unreadable');
+    should(minted).equal(0);
+  });
+
   it("should refuse a blank or malformed cursor as the caller's own query", async () => {
     // Arrange
     const reads = service({ rows: five });

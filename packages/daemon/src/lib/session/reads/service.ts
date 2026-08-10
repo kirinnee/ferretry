@@ -621,8 +621,9 @@ export class OperatorReadService {
     context: SessionTranscriptMessageTokenContext,
     row: PortableConversationRow,
   ): Promise<SessionTranscriptMessage> {
-    // Legacy durable rows may omit the block index, but the addressable read surface cannot
-    // honestly issue a token for one: two blocks in the same record would otherwise share it.
+    // The digest's portable row type remains optional for compatibility, but the addressable read
+    // surface cannot honestly issue a token without an exact block: two blocks in one record would
+    // otherwise share it.
     const point = ExactConversationMessagePointSchema.safeParse(row.point);
     if (!point.success) throw new OperatorReadError('transcript_unreadable', 'transcript row has no exact block point');
     const [selectionBinding, text] = await Promise.all([

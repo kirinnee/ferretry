@@ -36,6 +36,7 @@
 import { createHash } from 'node:crypto';
 import {
   type ConversationMessagePoint,
+  type ExactConversationMessagePoint,
   ExactConversationMessagePointSchema,
   type TranscriptProvenance,
   TranscriptProvenanceSchema,
@@ -279,11 +280,11 @@ function messageTokenFraming(
 }
 
 /** The point as three fixed-width unsigned fields — the only part of a cursor that is recoverable. */
-function canonicalMessagePointBytes(point: ConversationMessagePoint): Uint8Array {
+function canonicalMessagePointBytes(point: ExactConversationMessagePoint): Uint8Array {
   return Buffer.concat([
     sessionTranscriptUnsigned64(point.v),
     sessionTranscriptUnsigned64(point.byteOffset),
-    sessionTranscriptUnsigned64(point.blockIndex ?? 0),
+    sessionTranscriptUnsigned64(point.blockIndex),
   ]);
 }
 
