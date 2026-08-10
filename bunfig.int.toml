@@ -1,6 +1,10 @@
 [test]
 root = "packages"
 pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**"]
+# This is a global multi-file hook, not a per-file teardown. The shared Chromium
+# support closes its one process only after every integration file has completed;
+# putting the hook in an importing test file would close a sibling's browser.
+preload = ["./packages/pwa/tests/integration/support/chromium.ts"]
 # THE PER-TEST TIMEOUT IS NOT SET HERE, and it is not an omission.
 #
 # `timeout` under `[test]` is IGNORED by Bun 1.3.13: this file used to carry

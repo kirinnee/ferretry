@@ -3,12 +3,12 @@
  * ONLY thing in the test process that arranges for a compile.
  *
  * WHY A CHILD PROCESS. Both integration files used to call `Bun.build` in their own
- * `beforeAll`. Run together in ONE Bun process — an unisolated/direct combined run —
- * the pair wedged rather than failed, and the operation that never returned was the
- * compile traversing the real component graph. Two reviewers reproduced it
- * independently. Moving every `Bun.build` out of the test runner is the repair; a
- * lock or an in-process cache could not be, because the shell build had already
- * completed when the wedge happened.
+ * `beforeAll`. Run the way `scripts/ci/test.sh int` runs them — every integration
+ * file in ONE Bun process — the pair wedged rather than failed, and the operation
+ * that never returned was the compile traversing the real component graph. Two
+ * reviewers reproduced it independently. Moving every `Bun.build` out of the test
+ * runner is the repair; a lock or an in-process cache could not be, because the
+ * shell build had already completed when the wedge happened.
  *
  * WHAT IT RETURNS: BYTES, NOT PATHS, and that is what makes cleanup deterministic.
  * Both files only ever wanted strings — they load each artifact into memory during
@@ -24,22 +24,20 @@
  * `/tmp` across three runs. A `finally` inside the operation that created the
  * directory is the only seam that always runs, including on failure.
  *
- * WHAT IS MEMOISED: the whole load, per global. Two files sharing one process — a
- * DIRECT same-process invocation — start ONE child and share its bytes; a focused
- * single-file run still builds its own fresh fixture with no remembered preflight
- * command. The compiler function itself is not cached — it is pure per output
- * directory, which is what makes a per-worker private build safe.
+ * WHAT IS MEMOISED: the whole load, per test process. Two files in one process start
+ * ONE child and share its bytes; a focused single-file run still builds its own fresh
+ * fixture with no remembered preflight command. The compiler function itself is not
+ * cached — it is pure per output directory, which is what makes a per-worker private
+ * build safe.
  *
- * THE ISOLATE/PARALLEL BOUNDARY, NOW THE OFFICIAL PATH RATHER THAN A FUTURE ONE.
- * The integration entrypoints run with one isolated worker (`--parallel=1`), which
- * implies `--isolate` — a fresh global per file — so each file builds its OWN fixture
- * into its OWN `mkdtemp` directory. That is safe — no shared writes and no stale
- * inputs — but it is a duplicate COMPILE per file, and deliberately not a claim of
- * cross-file de-duplication. A JavaScript module singleton cannot supply that; doing
- * it properly would need a cross-process coordinator with atomic publish and
- * stale-owner recovery, which nothing here pretends to be. The process-level memo
- * above is what still deduplicates a DIRECT same-process run, where several files DO
- * share one global.
+ * THE ISOLATE/PARALLEL BOUNDARY, STATED RATHER THAN IMPLIED. This memo is per test
+ * process. Under a future `--isolate` or `--parallel`, each worker has its own module
+ * registry, so each worker builds its OWN fixture into its OWN `mkdtemp` directory.
+ * That is safe — no shared writes and no stale inputs — but it is a duplicate COMPILE
+ * per worker, and deliberately not a claim of cross-worker de-duplication. A
+ * JavaScript module singleton cannot supply that; doing it properly would need a
+ * cross-process coordinator with atomic publish and stale-owner recovery, which
+ * nothing here pretends to be.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

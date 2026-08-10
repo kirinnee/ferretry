@@ -140,17 +140,14 @@ beforeAll(async () => {
    * stylesheet, and a scene entry it first WROTE into `.artifacts/`. That last one
    * traverses the real component graph, and two reviewers independently pinned it
    * as the operation that never returned when this file runs together with
-   * `fy-render-sandbox.security.test.ts` in ONE Bun process — an unisolated/direct
-   * combined run. It did not fail; it wedged, asleep with no Chromium alive,
-   * consuming the job timeout.
+   * `fy-render-sandbox.security.test.ts` — which is how `scripts/ci/test.sh int`
+   * runs them, one Bun process for every integration file. It did not fail; it
+   * wedged, asleep with no Chromium alive, consuming the job timeout.
    *
    * The loader spawns the builder instead. Everything below is read from a private
    * `mkdtemp` directory that was freshly built for this run: no `public/`, no
    * `dist/`, no repository scratch write, and nothing in this process that a
-   * compiler can hang. The official entrypoints now isolate each file
-   * (`--parallel=1` implies `--isolate`, a fresh global per file), so each file
-   * builds its own; the child builder is still the seam a direct same-process run
-   * keeps safe.
+   * compiler can hang.
    */
   // THE BROWSER FIRST — see `support/chromium.ts` and the sibling file's identical
   // ordering. One memoised launch, reached the same way from both files.

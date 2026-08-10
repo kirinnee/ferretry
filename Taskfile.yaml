@@ -31,12 +31,6 @@ includes:
       # An adapter test boots a real daemon, binds a loopback port and waits for it.
       # Five seconds is not that budget, and a bunfig cannot supply this one.
       TIMEOUT: --timeout 120000
-      # One test-FILE worker for the integration tier, which is file parallelism
-      # (not in-test concurrency). Its files each open a real browser, and an
-      # unisolated combined run wedges on overlapping launch/fixture lifecycles;
-      # `--parallel=1` implies `--isolate`, so each file owns a fresh global and
-      # therefore a fresh browser and fixture. Empty for unit and SIT.
-      PARALLEL_FLAG: --parallel=1
 
 tasks:
   setup:

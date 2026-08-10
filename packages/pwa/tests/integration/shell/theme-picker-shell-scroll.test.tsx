@@ -48,7 +48,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { type Browser, chromium } from 'playwright-core';
+import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 import type { ThemeState } from '../../../src/hooks/use-theme.ts';
@@ -59,6 +59,7 @@ import {
   type ThemeMode,
 } from '../../../src/lib/theme-preferences.ts';
 import { ThemeSettings } from '../../../src/shell/theme-toggle.tsx';
+import { sharedChromium } from '../support/chromium.ts';
 
 const packageDir = resolve(import.meta.dir, '../../..');
 
@@ -198,7 +199,7 @@ const VIEWPORTS = [
 ] as const;
 
 let workspace = '';
-let browser: Browser | undefined;
+let browser: Browser;
 let css = '';
 
 const buildCss = (outFile: string): void => {
@@ -221,17 +222,14 @@ const buildCss = (outFile: string): void => {
 
 describe('the theme picker inside the fixed shell', () => {
   beforeAll(async () => {
+    browser = await sharedChromium();
     workspace = await mkdtemp(join(tmpdir(), 'fy-shell-scroll-'));
     const outFile = join(workspace, 'app.css');
     buildCss(outFile);
     css = await readFile(outFile, 'utf8');
-    const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-    should(chrome).be.type('string');
-    browser = await chromium.launch({ executablePath: chrome as string, headless: true });
   }, 120_000);
 
   afterAll(async () => {
-    await browser?.close();
     if (workspace !== '') await rm(workspace, { recursive: true, force: true });
   });
 
@@ -245,7 +243,7 @@ describe('the theme picker inside the fixed shell', () => {
           fetch: () => new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
         });
         try {
-          const context = await (browser as Browser).newContext({
+          const context = await browser.newContext({
             viewport: { width: viewport.width, height: viewport.height },
             colorScheme: 'dark',
             reducedMotion: 'reduce',

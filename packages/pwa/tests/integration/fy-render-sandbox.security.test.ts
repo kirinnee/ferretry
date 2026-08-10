@@ -42,11 +42,8 @@
  * `mkdtemp` directory and hands back the bytes; nothing here reads `public/` or
  * `dist/`. A stale shell would otherwise let this file pass against bytes nobody
  * ships. The compile is OUT of this process on purpose: run together with
- * `fy-render-component.visual.test.tsx` in ONE Bun process — an unisolated/direct
- * combined run — an in-process `Bun.build` wedged the tier. The official
- * integration entrypoints now isolate each file (`--parallel=1` implies `--isolate`,
- * a fresh global per file), so each file builds its own; the child builder is still
- * the seam a direct same-process invocation keeps safe.
+ * `fy-render-component.visual.test.tsx`, which is how `scripts/ci/test.sh int`
+ * runs every integration file, an in-process `Bun.build` wedged the tier.
  *
  * CHROMIUM ONLY, AND THAT IS A STATED LIMIT. Playwright's bundled WebKit is not
  * Safari and is not accepted as evidence for it; the real macOS `safaridriver`
@@ -307,12 +304,10 @@ beforeAll(async () => {
    * Freshness still matters for the same reason it always did: a stale shell would
    * let this file pass against a policy that no longer ships. What changed is where
    * the compile happens. Running this file together with
-   * `fy-render-component.visual.test.tsx` in ONE Bun process — an unisolated/direct
-   * combined run — used to WEDGE, and the operation that never returned was a
-   * `Bun.build` inside the test runner. The loader spawns the builder instead, so
-   * nothing here can hang on a compiler. The official entrypoints now isolate each
-   * file (`--parallel=1`), so each builds its own; the child builder is still the
-   * seam a direct same-process run keeps safe.
+   * `fy-render-component.visual.test.tsx` — which is how `scripts/ci/test.sh int`
+   * runs them, one Bun process for every integration file — used to WEDGE, and the
+   * operation that never returned was a `Bun.build` inside the test runner. The
+   * loader spawns the builder instead, so nothing here can hang on a compiler.
    *
    * `packages/pwa/scripts/**` stays in `bunfig.int.toml`'s
    * `coveragePathIgnorePatterns` regardless: the builder is a build-time generator

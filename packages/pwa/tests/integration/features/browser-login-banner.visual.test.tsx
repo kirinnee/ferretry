@@ -5,11 +5,12 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ChevronDown, Copy, KeyRound } from 'lucide-react';
-import { chromium, type Browser } from 'playwright-core';
+import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { BrowserLoginBanner, type BrowserLoginView } from '../../../src/features/browser/browser-login-banner.tsx';
+import { sharedChromium } from '../support/chromium.ts';
 
 const packageDir = resolve(import.meta.dir, '../../..');
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -80,12 +81,13 @@ const viewports = [
   { width: 1_440, height: 900 },
 ] as const;
 
-let browser: Browser | undefined;
+let browser: Browser;
 let workspace = '';
 let css = '';
 
 describe('BrowserLoginBanner visual contract', () => {
   beforeAll(async () => {
+    browser = await sharedChromium();
     workspace = await mkdtemp(join(tmpdir(), 'fy-browser-login-visual-'));
     const stylesheet = join(workspace, 'app.css');
     const result = spawnSync(
@@ -104,13 +106,9 @@ describe('BrowserLoginBanner visual contract', () => {
     );
     if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
     css = await readFile(stylesheet, 'utf8');
-    const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
-    should(chrome).be.type('string');
-    browser = await chromium.launch({ executablePath: chrome as string, headless: true });
   }, 120_000);
 
   afterAll(async () => {
-    await browser?.close();
     if (workspace !== '') await rm(workspace, { recursive: true, force: true });
   });
 
@@ -133,27 +131,30 @@ describe('BrowserLoginBanner visual contract', () => {
     });
     try {
       for (const viewport of viewports) {
-        const context = await (browser as Browser).newContext({
+        const context = await browser.newContext({
           viewport,
           colorScheme: 'dark',
           reducedMotion: 'reduce',
         });
-        await context.route('**/*', async route => {
-          if (new URL(route.request().url()).origin !== server.url.origin) return route.abort();
-          return route.continue();
-        });
-        const page = await context.newPage();
-        await page.goto(server.url.toString());
-        await page.evaluate<boolean>(reveal('port'));
-        const metrics = await page.evaluate<{ inner: number; scroll: number }>(
-          '({ inner: innerWidth, scroll: document.documentElement.scrollWidth })',
-        );
-        should(metrics.scroll).be.belowOrEqual(metrics.inner);
-        const port = await page.locator('#port').screenshot({ animations: 'disabled' });
-        await page.evaluate<boolean>(reveal('reference'));
-        const reference = await page.locator('#reference').screenshot({ animations: 'disabled' });
-        should(port.equals(reference)).be.true();
-        await context.close();
+        try {
+          await context.route('**/*', async route => {
+            if (new URL(route.request().url()).origin !== server.url.origin) return route.abort();
+            return route.continue();
+          });
+          const page = await context.newPage();
+          await page.goto(server.url.toString());
+          await page.evaluate<boolean>(reveal('port'));
+          const metrics = await page.evaluate<{ inner: number; scroll: number }>(
+            '({ inner: innerWidth, scroll: document.documentElement.scrollWidth })',
+          );
+          should(metrics.scroll).be.belowOrEqual(metrics.inner);
+          const port = await page.locator('#port').screenshot({ animations: 'disabled' });
+          await page.evaluate<boolean>(reveal('reference'));
+          const reference = await page.locator('#reference').screenshot({ animations: 'disabled' });
+          should(port.equals(reference)).be.true();
+        } finally {
+          await context.close();
+        }
       }
     } finally {
       server.stop(true);
