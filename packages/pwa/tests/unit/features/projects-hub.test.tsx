@@ -44,6 +44,7 @@ const slice = (patch: Partial<DaemonProjectsSlice> = {}): DaemonProjectsSlice =>
 });
 
 interface HubOptions {
+  readonly onNavigate?: (to: string) => void;
   readonly projectHref?: (projectId: string) => string;
   readonly slice?: DaemonProjectsSlice;
   readonly discoveries?: readonly RecentProjectOption[] | null;
@@ -62,6 +63,7 @@ const hub = (options: HubOptions = {}) => (
     onRegister={options.onRegister ?? (async () => true)}
     onDismiss={options.onDismiss ?? (() => undefined)}
     {...(options.projectHref === undefined ? {} : { projectHref: options.projectHref })}
+    {...(options.onNavigate === undefined ? {} : { onNavigate: options.onNavigate })}
     now={NOW}
   />
 );
@@ -334,6 +336,53 @@ describe('ProjectsHub', () => {
     expect(must(rows[1], 'the bare row').querySelector('a')).toBeNull();
     expect(must(rows[1], 'the bare row').textContent).toContain('bare');
     await mounted.unmount();
+  });
+
+  it('navigates in-app on a primary click instead of reloading the document', async () => {
+    // Arrange
+    const navigated: string[] = [];
+    const mounted = await mount(
+      hub({
+        projectHref: id => `/d/workstation/projects/${id}`,
+        onNavigate: to => navigated.push(to),
+      }),
+    );
+    const link = must(mounted.container.querySelector('[data-registered-project] a'), 'the project link');
+
+    // Act
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    await interact(() => link.dispatchEvent(event));
+
+    // Assert — the router is asked to navigate AND the browser is stopped from
+    // leaving. Without the second half the document reloads, every store
+    // remounts, and the hub's own draft is discarded.
+    expect(navigated).toEqual(['/d/workstation/projects/11111111-1111-4111-8111-111111111111']);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('lets a modifier click through to the browser so open-in-new-tab still works', async () => {
+    // Arrange
+    const navigated: string[] = [];
+    const mounted = await mount(
+      hub({
+        projectHref: id => `/d/workstation/projects/${id}`,
+        onNavigate: to => navigated.push(to),
+      }),
+    );
+    const link = must(mounted.container.querySelector('[data-registered-project] a'), 'the project link');
+
+    // Act — a cmd/ctrl click, and a middle click.
+    const meta = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, metaKey: true });
+    const middle = new MouseEvent('click', { bubbles: true, cancelable: true, button: 1 });
+    await interact(() => link.dispatchEvent(meta));
+    await interact(() => link.dispatchEvent(middle));
+
+    // Assert — the anchor stays a real href precisely so these keep working, so
+    // neither is intercepted and neither is turned into an in-app navigation.
+    expect(navigated).toEqual([]);
+    expect(meta.defaultPrevented).toBe(false);
+    expect(middle.defaultPrevented).toBe(false);
+    expect(link.getAttribute('href')).toBe('/d/workstation/projects/11111111-1111-4111-8111-111111111111');
   });
 
   it('keeps a registered row unlinked when the caller mounted no detail route', async () => {

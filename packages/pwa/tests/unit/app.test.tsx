@@ -686,6 +686,39 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('walks from the registry to one project without leaving the app', async () => {
+    // Arrange
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    const { view } = await renderShell('/d/alpha/projects', [alpha.daemonId], {
+      projects: [
+        {
+          id: projectId,
+          name: 'ferretry',
+          path: '/work/ferretry',
+          source: 'existing-folder',
+          createdAt: '2026-08-01T10:00:00.000Z',
+        },
+      ],
+    });
+    await settle();
+    const link = view.container.querySelector<HTMLAnchorElement>('[data-registered-project] a');
+    expect(link?.getAttribute('href')).toBe(`/d/alpha/projects/${projectId}`);
+
+    // Act — an ordinary primary click.
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    await interact(() => link?.dispatchEvent(click));
+    await settle();
+
+    // Assert — the SAME mounted tree is now the detail screen. A raw anchor
+    // would have left through the document instead, which in this environment
+    // means the tree would still be showing the registry.
+    expect(click.defaultPrevented).toBe(true);
+    expect(window.location.pathname).toBe(`/d/alpha/projects/${projectId}`);
+    expect(view.container.querySelector(`[data-project-detail="${projectId}"]`)).not.toBeNull();
+    expect(view.container.querySelector('#projects-heading')).toBeNull();
+    await view.unmount();
+  });
+
   it('replays the whole thing when a paired browser adds another machine', async () => {
     // This browser finished setup — for a DIFFERENT host. Every new machine is a
     // first-time setup for that machine, so "set up another machine" must not

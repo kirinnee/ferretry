@@ -28,6 +28,7 @@ import { projectPickerOptions } from '../../components/daemon-picker-model.ts';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonProjectPath } from '../../lib/pages/routes.ts';
+import { useRouter } from '../../lib/router.tsx';
 import { useAppStore } from '../../lib/store.tsx';
 import type { ProjectRegistrationStatus } from './project-registration-model.ts';
 import { alreadyRegistered, registerProject } from './projects-api.ts';
@@ -53,6 +54,7 @@ const credentialKey = (connection: DaemonConnection): string =>
 
 export function ProjectsPage({ connection }: { readonly connection: DaemonConnection }) {
   const { projects, fleet } = useAppStore();
+  const { navigate } = useRouter();
   const slice = useProjectsSlice(projects, connection);
   const subscribeFleet = useCallback((listener: () => void) => fleet.subscribe(listener), [fleet]);
   const fleetSnapshot = useCallback(() => fleet.getSnapshot(), [fleet]);
@@ -145,6 +147,7 @@ export function ProjectsPage({ connection }: { readonly connection: DaemonConnec
       onRegister={register}
       onDismiss={() => setStatus(null)}
       projectHref={projectId => daemonProjectPath(connection.daemonId, projectId)}
+      onNavigate={navigate}
       now={Date.now()}
     />
   );

@@ -33,6 +33,7 @@ import type { DaemonProjectsSlice } from '../../lib/projects-store.ts';
 import { AddProjectForm } from './add-project-form.tsx';
 import { ProjectDiscoveries } from './project-discoveries.tsx';
 import { ProjectProvenance } from './project-provenance.tsx';
+import { RouteLink } from '../../shell/route-link.tsx';
 import {
   confirmDiscoveryRequest,
   emptyProjectRegistrationDraft,
@@ -56,6 +57,14 @@ interface ProjectsHubProps {
   readonly onDismiss: () => void;
   /** The daemon-scoped UUID route for a registered project. */
   readonly projectHref?: (projectId: string) => string;
+  /**
+   * In-app navigation for that route. Without it the row is still a real
+   * `<a href>` — the deep link resolves — but a primary click leaves through the
+   * document, remounting every store and discarding the hub's own draft. The
+   * router is not reached for here on purpose: the hub is rendered by suites and
+   * harness frames that have none.
+   */
+  readonly onNavigate?: (to: string) => void;
   readonly now: number;
 }
 
@@ -102,6 +111,7 @@ export function ProjectsHub({
   onRegister,
   onDismiss,
   projectHref,
+  onNavigate,
   now,
 }: ProjectsHubProps) {
   const [draft, setDraft] = useState<ProjectRegistrationDraft>(emptyProjectRegistrationDraft);
@@ -205,12 +215,13 @@ export function ProjectsHub({
                     <h3 className="m-0 text-ui font-semibold text-fg">{project.name}</h3>
                   ) : (
                     <h3 className="m-0">
-                      <a
-                        href={projectHref(project.id)}
+                      <RouteLink
+                        to={projectHref(project.id)}
+                        {...(onNavigate === undefined ? {} : { onNavigate })}
                         className="inline-flex min-h-control items-center text-left text-ui font-semibold text-fg underline-offset-4 hover:text-accent hover:underline"
                       >
                         {project.name}
-                      </a>
+                      </RouteLink>
                     </h3>
                   )}
                   <ProjectProvenance project={project} />

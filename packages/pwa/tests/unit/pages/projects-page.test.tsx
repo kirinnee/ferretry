@@ -6,6 +6,7 @@ import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon
 import type { FleetProject } from '../../../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../../../src/lib/fleet-store.ts';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
+import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, mount, must, type Mounted } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -65,9 +66,14 @@ const storeFor = ({ projectsPort, sessions = [] }: StoreShape): AppStore =>
     fleet: new DaemonFleetStore(fleetPort(sessions)),
   }) as AppStore;
 
+// The hub's registry rows are in-app links now, so the page reads the router.
+// The shell always provides one; these suites provide the real thing rather
+// than a fake, so a navigation assertion would exercise production code.
 const page = (store: AppStore) => (
   <StoreProvider store={store}>
-    <ProjectsPage connection={daemon} />
+    <RouterProvider>
+      <ProjectsPage connection={daemon} />
+    </RouterProvider>
   </StoreProvider>
 );
 
@@ -326,7 +332,9 @@ describe('ProjectsPage', () => {
 
     const element = (connection: DaemonConnection) => (
       <StoreProvider store={store}>
-        <ProjectsPage connection={connection} />
+        <RouterProvider>
+          <ProjectsPage connection={connection} />
+        </RouterProvider>
       </StoreProvider>
     );
     const mounted = await mount(element(daemon));
@@ -367,7 +375,9 @@ describe('ProjectsPage', () => {
 
     const element = (connection: DaemonConnection) => (
       <StoreProvider store={store}>
-        <ProjectsPage connection={connection} />
+        <RouterProvider>
+          <ProjectsPage connection={connection} />
+        </RouterProvider>
       </StoreProvider>
     );
     const mounted = await mount(element(daemon));
