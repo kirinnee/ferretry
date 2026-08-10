@@ -282,39 +282,6 @@
 # authorization path.
 
 
-# PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
-# The callsign POOL and the ALLOCATOR are both mounted now. The allocator's blocker was recorded as
-# "an atomic claim store and a mounted session start", and the unit that mounted session start built
-# the store it needed: `FileNameClaimStore` keeps the reservation ledger in the state home, serialized
-# through one executor keyed on that file, which is atomic across concurrent requests because only one
-# daemon can hold the state home at all — the lifetime lock is what stops a second one serving.
-# `POST /v1/sessions` claims the callsign BEFORE it writes the session document, so `--teammate` on a
-# name another session answers to is a 409 rather than two sessions one callsign resolves to.
-#
-# The WORKTREE barrel is a different shape of gap, and worth stating exactly: every module beneath it
-# — parser, policy, ports, types — is already reachable, because the Git adapters import them
-# directly. The barrel has no importer because no MOUNT exists to be the one caller that wants the
-# domain as a whole. There cannot be one yet: `ManagedWorktreeAdapter` is constructed in the world but
-# nothing calls it, and the routes the CLI already speaks (`/v1/worktrees`, `/v1/worktrees/remove`)
-# need a registry of managed worktrees to serve. A `ManagedWorktree` record carries an ownership
-# token, a creation instant and whether its branch pre-existed — none of it derivable from Git — so it
-# must be PERSISTED when the worktree is created, by a session start that is not mounted either. The
-# barrel is left rather than deleted because it is the import the mount will take, not dead weight.
-#
-# RE-CHECKED by the second wiring unit against the wire shapes the CLI parses, because a READ-ONLY
-# worktree mount looked like a way in. It is not. `ManagedWorktreeView` demands createdAt, initialHead,
-# branchPreexisted, ownerSessionId, ownerActive and sharedWith, and Git knows none of them. Even the
-# cheapest route, the removal CHECK at `/v1/worktrees/removal`, takes a `CheckManagedWorktreeRemovalInput`
-# whose first field is the persisted `ManagedWorktree` itself — so there is no subset of this surface
-# that the registry does not gate.
-#
-# RE-CHECKED AGAIN by the fourth wiring unit, because "awaits a session start" is no longer a blocker
-# on its own. The start is mounted and it still cannot write this registry: `StartSessionRequest` has
-# NO worktree or branch field of any kind, and neither does the CLI's own start. So there is nothing a
-# start could persist, and giving it something means DESIGNING a wire contract rather than wiring an
-# existing one — which is why this line is still here after the start landed.
-packages/daemon/src/lib/worktrees/index.ts # PR #9 GAP: kteam's worktrees.ts defines ManagedWorktree creation/removal but SessionManager never imports it or persists one; it records only each session's cwd. Ferretry's StartSessionRequest and fy start likewise carry no worktree/branch intent, so no per-daemon, session-owned record can be created or verified. Mounting /v1/worktrees would therefore report an empty registry as healthy, which is false.
-
 # PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
 # bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per session and the task routes serve
 # it. `task-title.ts` was DELETED rather than wired: it duplicated packages/cli/src/lib/tasks/

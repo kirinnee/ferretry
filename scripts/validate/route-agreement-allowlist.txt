@@ -47,9 +47,6 @@
 # ── unserved: the client dials, nothing answers ───────────────────────────────────────────────
 
 # Whole surfaces the client half of which shipped without the daemon half.
-unserved GET /v1/worktrees # DEFECT: packages/daemon serves no worktree route at all
-unserved POST /v1/worktrees/remove # DEFECT: packages/daemon serves no worktree route at all
-unserved GET /v1/worktrees/removal # DEFECT: packages/daemon serves no worktree route at all
 unserved GET /v1/pwa/config # DEFECT: IFyApiClient.pwaConfig() dials a route nothing serves
 unserved PATCH /v1/pwa/config # DEFECT: IFyApiClient.updatePwaConfig() dials a route nothing serves
 unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session; mounts/sessions.ts serves only GET on that path

@@ -1,5 +1,10 @@
 import type { Command } from 'commander';
-import type { WorktreeCommandOptions, WorktreeController, WorktreeRemoveOptions } from './controller.ts';
+import type {
+  WorktreeCommandOptions,
+  WorktreeController,
+  WorktreeForkOptions,
+  WorktreeRemoveOptions,
+} from './controller.ts';
 
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
@@ -66,5 +71,20 @@ export function registerWorktreeCommands(program: Command, controller: WorktreeC
       .option('-y, --yes', 'skip the typed confirmation; required when not on a terminal'),
   ).action(async (path: string, _flags: unknown, command: Command) => {
     await controller.remove(path, merged<WorktreeRemoveOptions>(command));
+  });
+
+  scoped(
+    worktree
+      .command('fork')
+      .alias('add')
+      .description('fork a new checkout for a branch, and say where to start work in it')
+      .argument('<branch>', 'the branch to check out; created when it does not exist yet')
+      .option('--base <ref>', 'start a new branch at this commit-ish')
+      .option('--from-default', "start a new branch at the repository's default branch")
+      .option('--from-head', "start a new branch at the source checkout's current commit")
+      .option('--from <path>', 'the checkout to fork from; the current directory otherwise')
+      .option('--session <id>', 'the session that will own the new checkout'),
+  ).action(async (branch: string, _flags: unknown, command: Command) => {
+    await controller.fork(branch, merged<WorktreeForkOptions>(command));
   });
 }

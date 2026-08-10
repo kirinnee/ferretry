@@ -215,6 +215,7 @@ import {
   WardenReportReader,
 } from '../src/adapters/warden/index.ts';
 import {
+  FileManagedWorktreeRegistry,
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
   NodeWorktreeFileSystem,
@@ -323,6 +324,10 @@ import {
   type LogLevel,
   MigrationPreflight,
   type MigrationReportStore,
+  defaultManagedWorktreeRoot,
+  ManagedWorktreeService,
+  type ManagedWorktreeOperations,
+  type ManagedWorktreeRegistry,
   type MillisecondClockPort,
   type MountedSubsystems,
   type NameAllocationErrorCode,
@@ -539,6 +544,21 @@ function resolveTmuxExecutable(): string {
  *  name so no lookup can ever land on the machine's default socket, and an absent binary surfaces
  *  as a failed inspection, which the migration gate then refuses. */
 const FALLBACK_TMUX = '/usr/bin/tmux';
+
+/**
+ * The three things the managed-worktree surface cannot decide for itself.
+ *
+ * Each is a fact about THIS boot rather than about worktrees: the registry is a document inside the
+ * state home that was just opened, the managed root is derived from that home's name, and the Git
+ * operations are the one collaborator whose real behaviour means creating and destroying checkouts
+ * on the machine running the test. Grouping them keeps the composition seam one parameter wide.
+ */
+export interface WorktreeComposition {
+  readonly operations: ManagedWorktreeOperations;
+  readonly registry: ManagedWorktreeRegistry;
+  /** Absent means this daemon hosts no managed checkouts, which every route then says plainly. */
+  readonly managedRoot: string | undefined;
+}
 
 /**
  * The adapters a daemon process needs. Subsystem units add their ports here as they land; this is
@@ -888,6 +908,13 @@ export interface DaemonWorld {
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
     /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
+    /**
+     * The managed-worktree durable half, passed IN because both members are decided by the state home
+     * this boot opened: the registry is a document inside it, and the managed root is derived from
+     * its name. The Git operations come with them so a test can drive every route of this surface
+     * against a scratch repository without the composition root reaching for a second seam.
+     */
+    worktrees: WorktreeComposition,
     /**
      * The analytics materialization, passed IN because opening it touches the disk: it walks its own
      * paths through the confined filesystem port, may discard an index it cannot reuse, and must be
@@ -4254,7 +4281,13 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       () => new KeyedSerialExecutor(),
     ),
     analyticsIndexes: new BunSqliteAnalyticsStoreFactory(),
-    worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
+    worktrees: new ManagedWorktreeAdapter(
+      gateway,
+      files,
+      worktreeClock,
+      new WorktreeOperationQueue(),
+      sessionRootPinner(),
+    ),
     boot: {
       probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
@@ -4497,6 +4530,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       browserLogin,
       sttEnhancement,
       catalogs,
+      worktrees,
       analyticsStore,
       pairing,
       push,
@@ -4954,6 +4988,47 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         ),
         sessions,
         catalogs,
+        // The evidence is read through the SAME collaborators the rest of the daemon serves from —
+        // the session directory, the terminal runtime and the project catalog — so a refusal to
+        // remove a checkout because a session or a shell is still in it cites the very records the
+        // client would see if it asked. Collecting any of it separately is how a safety gate ends up
+        // refusing on evidence nobody else can reproduce, or worse, never firing at all.
+        worktrees: new ManagedWorktreeService(
+          worktrees.registry,
+          worktrees.operations,
+          // BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: a
+          // host whose tmux server will not answer used to take the whole worktree surface down with
+          // a 500, and the only thing worse than that is the version that reports zero live shells
+          // and lets a removal proceed. The domain turns an absent answer into an un-forceable
+          // refusal, so a read still succeeds and a destructive write still refuses.
+          {
+            sessions: async () =>
+              await sessions
+                .list()
+                .then(views =>
+                  views.map(session => ({
+                    id: session.config.id,
+                    cwd: session.config.cwd,
+                    status: session.state.status,
+                    ...(session.state.finishedAt === undefined ? {} : { finishedAt: session.state.finishedAt }),
+                  })),
+                )
+                .catch(() => undefined),
+          },
+          {
+            roots: async () =>
+              await terminals
+                .list()
+                .then(records => records.map(record => record.root))
+                .catch(() => undefined),
+          },
+          { projects: async () => await catalogs.projects() },
+          // The SAME clock the Git adapter stamps records with, so an intent this daemon writes
+          // before a mutation and the record it writes after cannot disagree about when.
+          worktreeClock,
+          { next: () => crypto.randomUUID() },
+          worktrees.managedRoot,
+        ),
         sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
@@ -5419,6 +5494,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.browserLogin.window,
     world.sttEnhancement,
     catalogs,
+    {
+      operations: world.worktrees,
+      registry: new FileManagedWorktreeRegistry(join(opened.paths.state, 'worktrees.json')),
+      // Derived from the state home's own name rather than configured, so two daemons on one host
+      // keep two managed roots for the same reason they keep two state homes. A home whose name
+      // yields nothing to derive from means this daemon hosts no managed checkouts at all, and the
+      // surface says so instead of inventing a directory.
+      managedRoot: defaultManagedWorktreeRoot(opened.paths.home) ?? undefined,
+    },
     analyticsStore,
     pairing.subsystem,
     pairing.push,

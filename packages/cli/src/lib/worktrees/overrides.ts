@@ -1,9 +1,10 @@
-import type {
-  BranchDeletionConfirmation,
-  WorktreeRemovalBlocker,
-  WorktreeRemovalDecision,
-  WorktreeRemovalOverride,
-} from './wire.ts';
+import {
+  type BranchDeletionConfirmation,
+  unclearedRemovalBlockers,
+  type WorktreeRemovalBlocker,
+  type WorktreeRemovalDecision,
+  type WorktreeRemovalOverride,
+} from '@ferretry/protocol';
 
 /** The flags that authorize one class of destructive removal. */
 export interface RemovalConsentFlags {
@@ -23,7 +24,6 @@ export interface RemovalConsentFlags {
 const CONSENT: ReadonlyArray<readonly [keyof RemovalConsentFlags, WorktreeRemovalOverride]> = [
   ['discardChanges', 'discard_worktree_changes'],
   ['acceptUnpushed', 'accept_unpushed_commits'],
-  ['deleteUnmerged', 'delete_unmerged_branch'],
 ];
 
 /**
@@ -57,26 +57,22 @@ export interface UnclearedBlocker extends WorktreeRemovalBlocker {
 const FLAG_FOR: Readonly<Record<WorktreeRemovalOverride, string>> = {
   discard_worktree_changes: '--discard-changes',
   accept_unpushed_commits: '--accept-unpushed',
-  delete_unmerged_branch: '--delete-unmerged',
 };
 
 /**
- * Which blockers survive the consent given.
+ * Which blockers survive the consent given, each labelled with the flag that would clear it.
  *
- * This is the whole safety decision, and it is made locally so the answer can name the missing flag
- * before anything is sent. The daemon still re-decides — this never becomes the only check.
+ * THE DECISION IS THE PROTOCOL'S; ONLY THE LABEL IS THIS CLIENT'S. Which blockers survive is asked
+ * by the daemon too, and a client answering it under its own rule would either promise a removal the
+ * daemon then refuses or refuse one the daemon would have allowed. What the CLI adds is the part
+ * nothing else can know: the name of its own flag, so a refusal says what to type next.
  */
 export function unclearedBlockers(
   decision: WorktreeRemovalDecision,
   granted: readonly WorktreeRemovalOverride[],
 ): readonly UnclearedBlocker[] {
-  const consented = new Set(granted);
-  return decision.blockers
-    .filter(blocker => blocker.override === undefined || !consented.has(blocker.override))
-    .map(blocker => ({ ...blocker, flag: blocker.override === undefined ? undefined : FLAG_FOR[blocker.override] }));
-}
-
-/** Whether the removal may proceed: the daemon said so, or every blocker it named is consented to. */
-export function mayRemove(decision: WorktreeRemovalDecision, granted: readonly WorktreeRemovalOverride[]): boolean {
-  return decision.removable || unclearedBlockers(decision, granted).length === 0;
+  return unclearedRemovalBlockers(decision.blockers, granted).map(blocker => ({
+    ...blocker,
+    flag: blocker.override === undefined ? undefined : FLAG_FOR[blocker.override],
+  }));
 }

@@ -130,6 +130,29 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
     }
   });
 
+  it('offers a fork verb that names every way of choosing where to start', async () => {
+    // Act
+    const group = await cli(['worktree', '--help']);
+    const fork = await cli(['worktree', 'fork', '--help']);
+
+    // Assert — the composition root really mounts the verb, in the shipped binary
+    should(group.code).equal(0);
+    should(group.out).containEql('fork');
+    should(fork.code).equal(0);
+    for (const flag of ['--base', '--from-default', '--from-head', '--from', '--session']) {
+      should(fork.out).containEql(flag);
+    }
+  });
+
+  it('refuses two answers to the one question of where a fork starts', async () => {
+    // Act
+    const actual = await cli(['worktree', 'fork', 'feat/x', '--base', 'v1', '--from-head']);
+
+    // Assert — picking either silently would start the work at a commit nobody named
+    should(actual.code).not.equal(0);
+    should(actual.err).containEql('pass only one of');
+  });
+
   it('lists the fleet verbs in its help', async () => {
     // Act
     const actual = await cli(['fleet', '--help']);

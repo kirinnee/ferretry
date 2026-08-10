@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  grantedConfirmations,
-  grantedOverrides,
-  mayRemove,
-  unclearedBlockers,
-} from '../../../src/lib/worktrees/overrides';
+import { grantedConfirmations, grantedOverrides, unclearedBlockers } from '../../../src/lib/worktrees/overrides';
 import { blocker, decision } from './fixtures';
 
 describe('removal consent', () => {
@@ -19,7 +14,7 @@ describe('removal consent', () => {
     // Act + Assert
     should(grantedOverrides({ discardChanges: true })).eql(['discard_worktree_changes']);
     should(grantedOverrides({ acceptUnpushed: true })).eql(['accept_unpushed_commits']);
-    should(grantedOverrides({ deleteUnmerged: true })).eql(['delete_unmerged_branch']);
+    should(grantedOverrides({ deleteUnmerged: true })).eql([]);
   });
 
   it('should grant several overrides when several flags were passed', () => {
@@ -27,7 +22,7 @@ describe('removal consent', () => {
     const granted = grantedOverrides({ discardChanges: true, acceptUnpushed: true, deleteUnmerged: true });
 
     // Assert
-    should(granted).eql(['discard_worktree_changes', 'accept_unpushed_commits', 'delete_unmerged_branch']);
+    should(granted).eql(['discard_worktree_changes', 'accept_unpushed_commits']);
   });
 });
 
@@ -60,7 +55,6 @@ describe('blockers that survive the consent given', () => {
   it('should leave nothing uncleared when the daemon reported none', () => {
     // Act + Assert
     should(unclearedBlockers(decision(), [])).eql([]);
-    should(mayRemove(decision(), [])).be.true();
   });
 
   it('should clear a blocker the caller consented to', () => {
@@ -69,7 +63,6 @@ describe('blockers that survive the consent given', () => {
 
     // Act + Assert
     should(unclearedBlockers(verdict, ['discard_worktree_changes'])).be.empty();
-    should(mayRemove(verdict, ['discard_worktree_changes'])).be.true();
   });
 
   it('should keep a blocker whose override was not granted, naming the flag that would', () => {
@@ -82,7 +75,6 @@ describe('blockers that survive the consent given', () => {
     // Assert
     should(uncleared).have.length(1);
     should(uncleared[0]?.flag).equal('--discard-changes');
-    should(mayRemove(verdict, ['accept_unpushed_commits'])).be.false();
   });
 
   it('should keep a blocker nothing can override, and say so', () => {
@@ -93,16 +85,11 @@ describe('blockers that survive the consent given', () => {
     });
 
     // Act
-    const uncleared = unclearedBlockers(verdict, [
-      'discard_worktree_changes',
-      'accept_unpushed_commits',
-      'delete_unmerged_branch',
-    ]);
+    const uncleared = unclearedBlockers(verdict, ['discard_worktree_changes', 'accept_unpushed_commits']);
 
     // Assert
     should(uncleared).have.length(1);
     should(uncleared[0]?.flag).be.undefined();
-    should(mayRemove(verdict, ['discard_worktree_changes'])).be.false();
   });
 
   it('should name every flag that is still missing, not just the first', () => {
@@ -117,9 +104,9 @@ describe('blockers that survive the consent given', () => {
           override: 'accept_unpushed_commits',
         }),
         blocker({
-          code: 'unmerged_branch',
-          message: 'the branch was never merged',
-          override: 'delete_unmerged_branch',
+          code: 'conflicted_worktree',
+          message: 'the checkout has unresolved conflicts',
+          override: 'discard_worktree_changes',
         }),
       ],
     });
@@ -128,15 +115,14 @@ describe('blockers that survive the consent given', () => {
     const flags = unclearedBlockers(verdict, []).map(entry => entry.flag);
 
     // Assert
-    should(flags).eql(['--discard-changes', '--accept-unpushed', '--delete-unmerged']);
+    should(flags).eql(['--discard-changes', '--accept-unpushed', '--discard-changes']);
   });
 
-  it('should trust a daemon that already declared the removal safe', () => {
-    // Arrange — the daemon may report advisory blockers alongside removable: true
+  it('should still list a blocker the daemon reported beside a removable verdict', () => {
+    // Arrange — `removable` is the daemon's own answer; the blockers are what it saw
     const verdict = decision({ removable: true, blockers: [blocker({ override: undefined })] });
 
     // Act + Assert
-    should(mayRemove(verdict, [])).be.true();
     should(unclearedBlockers(verdict, [])).have.length(1);
   });
 });

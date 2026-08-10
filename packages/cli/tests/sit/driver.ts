@@ -51,6 +51,9 @@ export class InProcessCliDriver implements CliDriver {
       error: message => {
         err += `${message}\n`;
       },
+      diagnostic: message => {
+        err += `${message}\n`;
+      },
       setExitCode: code => {
         process.exitCode = code;
       },

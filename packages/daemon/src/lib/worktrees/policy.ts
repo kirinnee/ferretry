@@ -9,7 +9,6 @@ import type {
   WorktreeRemovalDecision,
   WorktreeRemovalEvidence,
   WorktreeRemovalOverride,
-  WorktreeStatusSummary,
 } from './types.ts';
 
 export function isWithinDirectory(parent: string, child: string): boolean {
@@ -36,18 +35,6 @@ export function sharingSessionIds(
 
 export function isCheckoutLocked(locked: string | undefined): boolean {
   return locked !== undefined;
-}
-
-export function hasDirtyWorktree(status: WorktreeStatusSummary): boolean {
-  return (
-    status.staged ||
-    status.unstaged ||
-    status.untracked ||
-    status.ignored ||
-    status.conflicted ||
-    status.dirtySubmodule ||
-    status.truncated
-  );
 }
 
 export function requiredRemovalOverride(code: WorktreeRemovalBlockerCode): WorktreeRemovalOverride | undefined {
@@ -100,6 +87,9 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
   if (evidence.liveTerminals > 0) {
     blockers.push(blocker('live_terminal', `${evidence.liveTerminals} live terminal(s) still use the checkout`));
   }
+  // Evidence that could not be read is a refusal, not a zero. Nothing overrides it, because the
+  // caller cannot consent to losing something nobody could name.
+  for (const reason of evidence.undeterminedEvidence ?? []) blockers.push(blocker('undetermined_evidence', reason));
   if (!evidence.ownershipMarkerMatches) {
     blockers.push(blocker('ownership_mismatch', 'the checkout ownership marker is missing or does not match'));
   }
@@ -143,6 +133,14 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
   if (pushState?.kind === 'unknown') blockers.push(blocker('git_error', pushState.reason));
   for (const message of evidence.gitErrors) blockers.push(blocker('git_error', message));
 
+  // Priced on the CHECK rather than only at the moment of deletion, so a caller sees what deleting
+  // the branch would cost before authorizing anything. Undetermined evidence yields no decision at
+  // all rather than a permissive one — see the field's own note on the wire schema.
+  const branchDeletion =
+    evidence.branchEvidence === undefined
+      ? undefined
+      : assessBranchDeletion(evidence.branchEvidence, evidence.branchConfirmations ?? []);
+
   return {
     removable: blockers.length === 0,
     path: recordedPath,
@@ -150,6 +148,7 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
     head: checkout?.head,
     upstream: pushState?.kind === 'unknown' ? undefined : pushState?.upstream,
     blockers,
+    ...(branchDeletion === undefined ? {} : { branchDeletion }),
   };
 }
 

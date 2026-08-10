@@ -20,13 +20,25 @@ export interface PinnedWorkingDirectory {
 /**
  * Where a Git child runs: a NAME, or a directory held open.
  *
- * Worktree orchestration passes names because a name is all it has — it creates and inspects
- * directories rather than confining reads to one. The working-tree viewer passes a pin, because a name
- * is only a claim about the past: renamed away and replaced with a symlink between validation and
- * spawn, it makes Git read a different tree than the one whose paths passed containment and the
- * secrets gates.
+ * Worktree orchestration may use names while gathering non-destructive evidence, but every final
+ * create/remove spawn uses a pin. The working-tree viewer uses pins for every Git read for the same
+ * reason: a name is only a claim about the past.
  */
 export type GitWorkingDirectory = string | PinnedWorkingDirectory;
+
+/** The minimal held-directory capability a worktree mutation needs. */
+export interface PinnedWorktreeDirectory {
+  /** Realpath of the object that was actually opened, for identity comparison only. */
+  readonly rootReal: string;
+  /** The held object in the form the Git runner can inherit. */
+  readonly policyCwd: GitWorkingDirectory;
+  close(): Promise<void>;
+}
+
+/** Opens and holds the exact directory a final Git mutation will run against. */
+export interface WorktreeDirectoryPinner {
+  pin(cwd: string): Promise<PinnedWorktreeDirectory>;
+}
 
 export interface GitInvocation {
   readonly args: readonly string[];

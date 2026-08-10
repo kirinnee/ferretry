@@ -19,10 +19,12 @@ describe('terminal and system adapters', () => {
     subject.success('saved');
     subject.warn('careful');
     subject.error('failed');
+    subject.diagnostic('{"phase":"preflight"}');
     subject.setExitCode(7);
 
     expect(log).toHaveBeenCalledTimes(2);
-    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledTimes(2);
+    expect(error.mock.calls[1]?.[0]).toBe('{"phase":"preflight"}');
     expect(process.exitCode).toBe(7);
     expect(typeof subject.interactive()).toBe('boolean');
   });
