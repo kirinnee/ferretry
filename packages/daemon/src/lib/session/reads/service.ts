@@ -41,6 +41,7 @@ import type {
   SessionTranscriptMessage,
   SessionTranscriptPage,
 } from '@ferretry/protocol';
+import { ExactConversationMessagePointSchema } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import type { LastSnapshotReader } from '../snapshot/index.ts';
 import { type PortableConversationRow, sameConversationMessagePoint } from '../transcript/digest.ts';
@@ -620,18 +621,22 @@ export class OperatorReadService {
     context: SessionTranscriptMessageTokenContext,
     row: PortableConversationRow,
   ): Promise<SessionTranscriptMessage> {
+    // Legacy durable rows may omit the block index, but the addressable read surface cannot
+    // honestly issue a token for one: two blocks in the same record would otherwise share it.
+    const point = ExactConversationMessagePointSchema.safeParse(row.point);
+    if (!point.success) throw new OperatorReadError('transcript_unreadable', 'transcript row has no exact block point');
     const [selectionBinding, text] = await Promise.all([
       issueSessionTranscriptMessageToken(
         this.messageTokens,
         SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
         context,
-        row.point,
+        point.data,
         row.rawPrefix,
       ),
       this.redactor.redact(row.text),
     ]);
     return {
-      point: row.point,
+      point: point.data,
       role: row.role,
       text,
       // Omitted rather than sent as null: a row the harness stamped no time on has no time, and

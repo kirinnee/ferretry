@@ -15,6 +15,7 @@
  */
 import { z } from 'zod';
 import { ConversationTransferMessageSchema } from './session-transfer.ts';
+import { ExactConversationMessagePointSchema } from './session-transfer-edge.ts';
 
 /**
  * One durable message a caller may fork through.
@@ -48,6 +49,7 @@ import { ConversationTransferMessageSchema } from './session-transfer.ts';
  * reason — a schema that rewrote the value would hand back evidence the issuer never issued.
  */
 export const SessionTranscriptMessageSchema = ConversationTransferMessageSchema.extend({
+  point: ExactConversationMessagePointSchema,
   /** Opaque daemon-issued evidence that this row's raw content is unchanged. Echo it verbatim. */
   selectionBinding: z.string().min(1),
 });

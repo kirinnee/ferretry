@@ -36,7 +36,7 @@
 import { createHash } from 'node:crypto';
 import {
   type ConversationMessagePoint,
-  ConversationMessagePointSchema,
+  ExactConversationMessagePointSchema,
   type TranscriptProvenance,
   TranscriptProvenanceSchema,
 } from '@ferretry/protocol';
@@ -259,7 +259,7 @@ function messageTokenFraming(
   // unsafe number — while the durable contract is narrower: `v` is exactly 1 and both fields are
   // non-negative integers. An internally miswired coordinate that slipped through would be issued
   // and verified under a coordinate version this release does not define.
-  const parsedPoint = ConversationMessagePointSchema.safeParse(point);
+  const parsedPoint = ExactConversationMessagePointSchema.safeParse(point);
   if (!parsedPoint.success) return undefined;
   const provenance = frameProvenance(context.provenance);
   if (provenance === undefined) return undefined;
@@ -384,7 +384,7 @@ export function readSessionTranscriptMessageCursor(cursor: string): Conversation
   const v = unsigned64At(bytes, 0);
   const byteOffset = unsigned64At(bytes, UNSIGNED_64_BYTES);
   const blockIndex = unsigned64At(bytes, UNSIGNED_64_BYTES * 2);
-  const parsed = ConversationMessagePointSchema.safeParse({ v, byteOffset, blockIndex });
+  const parsed = ExactConversationMessagePointSchema.safeParse({ v, byteOffset, blockIndex });
   return parsed.success ? parsed.data : undefined;
 }
 
