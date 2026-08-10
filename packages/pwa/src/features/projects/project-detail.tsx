@@ -78,7 +78,15 @@ function ProjectDetailView({
             icon={<Bot className="text-muted" size={16} aria-hidden="true" />}
             title="Active agents and sessions"
           >
-            {sessions === null ? (
+            {sessions === null && fleetStatus === 'error' ? (
+              // A FAILED FIRST READ IS NOT A SLOW ONE. The fleet store keeps
+              // `sessions` null until a read succeeds, so treating null as
+              // "still loading" left a failed read spinning forever with the
+              // daemon's own reason held and never said.
+              <p className="m-0 text-meta text-warn" role="status">
+                Could not read this daemon’s sessions: {fleetError ?? 'the read failed'}.
+              </p>
+            ) : sessions === null ? (
               <p className="m-0 text-meta text-muted" aria-busy="true">
                 Loading this daemon’s sessions…
               </p>
