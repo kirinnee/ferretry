@@ -288,13 +288,25 @@ describe('ProjectDetailPage', () => {
       ),
     );
 
-    // Assert
-    expect(view.container.textContent).toContain('Loading this daemon’s sessions…');
-    expect(view.container.textContent).not.toContain('No active agents');
+    // Assert — and every panel says "unknown", not "none". Files and Boards are
+    // drawn from the same unread list, so a collapsed empty set would turn "not
+    // read yet" into "this project has no session" and "nothing exposes a board".
+    expect(view.container.querySelector('[data-project-agents="unread"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-project-agents="empty"]')).toBeNull();
+    expect(must(view.container.querySelector('[data-project-files="unread"]'), 'the files note').textContent).toContain(
+      'Files are unknown until this daemon’s session list is read',
+    );
+    expect(
+      must(view.container.querySelector('[data-project-boards="unread"]'), 'the boards note').textContent,
+    ).toContain('Boards are unknown until this daemon’s session list is read');
+    expect(view.container.querySelector('[data-project-files="unavailable"]')).toBeNull();
+    expect(view.container.querySelector('[data-project-boards="empty"]')).toBeNull();
 
     release([]);
     await settle();
-    expect(view.container.textContent).toContain('No active agents are working in this project.');
+    expect(view.container.querySelector('[data-project-agents="empty"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-project-files="unavailable"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-project-boards="empty"]')).not.toBeNull();
   });
 
   it('names a failed session read instead of spinning on it forever', async () => {
@@ -316,9 +328,20 @@ describe('ProjectDetailPage', () => {
 
     // Assert — the store keeps `sessions` null until a read succeeds, so this
     // is the branch a first failure lands in.
-    const status = must(view.container.querySelector('[role="status"]'), 'the status');
+    const status = must(view.container.querySelector('[data-project-agents="failed"]'), 'the agent status');
     expect(status.textContent).toContain('Could not read this daemon’s sessions: daemon is offline');
     expect(view.container.textContent).not.toContain('Loading this daemon’s sessions…');
+
+    // Files and Boards read the same failed list, so neither may conclude that
+    // the project has no session or no board. Both name the failure instead.
+    expect(must(view.container.querySelector('[data-project-files="failed"]'), 'the files note').textContent).toContain(
+      'Could not read this daemon’s sessions, so this project’s files are unknown: daemon is offline',
+    );
+    expect(
+      must(view.container.querySelector('[data-project-boards="failed"]'), 'the boards note').textContent,
+    ).toContain('Could not read this daemon’s sessions, so this project’s boards are unknown: daemon is offline');
+    expect(view.container.querySelector('[data-project-files="unavailable"]')).toBeNull();
+    expect(view.container.querySelector('[data-project-boards="empty"]')).toBeNull();
   });
 
   it('calls a list it already showed stale rather than deleting it on a failed refresh', async () => {
@@ -347,8 +370,21 @@ describe('ProjectDetailPage', () => {
     });
     await settle();
 
-    // Assert
-    expect(view.container.textContent).toContain('The session list is stale: the connection dropped');
+    // Assert — the warning is shown AND the rows the fleet store deliberately
+    // preserved are still on screen. Asserting the name alone would pass on the
+    // Files caption, which renders the same session name, so this asserts the
+    // agent rail itself.
+    expect(
+      must(view.container.querySelector('[data-project-agents="stale"]'), 'the stale notice').textContent,
+    ).toContain('The session list is stale: the connection dropped');
+    const rail = must(view.container.querySelector('[data-project-agents="ready"]'), 'the agent rail');
+    const rows = [...rail.querySelectorAll('li')];
+    expect(rows).toHaveLength(1);
+    expect(must(rows[0], 'the agent row').textContent).toContain('Still here');
+    expect(must(rows[0], 'the agent row').querySelector('button')?.textContent).toBe('Open');
+    // Files and Boards are drawn from that same stale set, so the screen agrees
+    // with itself rather than showing rows in one panel and nothing in another.
+    expect(view.container.querySelector('[data-project-files="s-1"]')).not.toBeNull();
   });
 
   it('opens a listed agent on this daemon and no other', async () => {
