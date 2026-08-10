@@ -1,4 +1,5 @@
 import {
+  ProjectPathMustBeAbsoluteMessage,
   RegisterProjectRequestSchema,
   type ProjectInfo,
   type ProjectList,
@@ -24,6 +25,19 @@ async function registerProject(catalogs: CatalogSubsystem, context: RouteContext
   try {
     return jsonResponse(await catalogs.registerProject(await parseBody(context.request, RegisterProjectRequestSchema)));
   } catch (error) {
+    // A sole `path` policy failure is a parseable request the daemon refuses (422), unlike a
+    // malformed registration body (400). Retain parseBody's structured issues long enough to
+    // make that distinction without treating every schema-invalid JSON value as policy-refused.
+    const relativePathOnly =
+      error instanceof ApiError &&
+      error.code === 'invalid_request' &&
+      error.validationIssues?.length === 1 &&
+      error.validationIssues[0]?.path.length === 1 &&
+      error.validationIssues[0].path[0] === 'path' &&
+      error.validationIssues[0].message === ProjectPathMustBeAbsoluteMessage;
+    if (relativePathOnly) {
+      throw new ApiError(422, error.message, 'project_registration_failed');
+    }
     if (error instanceof ApiError) throw error;
     throw new ApiError(
       422,

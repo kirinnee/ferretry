@@ -1,7 +1,13 @@
 import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ProjectListSchema, type ProjectInfo, type ProjectList, type RegisterProjectRequest } from '@ferretry/protocol';
+import {
+  ProjectListSchema,
+  ProjectPathSchema,
+  type ProjectInfo,
+  type ProjectList,
+  type RegisterProjectRequest,
+} from '@ferretry/protocol';
 
 /**
  * The daemon's authoritative Project registry.  This deliberately has no scan
@@ -51,8 +57,13 @@ export class FileProjectCatalog {
   }
 
   private async materialize(request: RegisterProjectRequest): Promise<string> {
-    const requested = resolve(request.path);
-    if (!isAbsolute(requested)) throw new Error('project path must be absolute');
+    // The protocol schema owns the absolute-path decision; enforce that same schema here,
+    // before resolve(), so a direct caller cannot bypass the trust boundary the mount's
+    // parseBody forms. resolve() is total, so checking its output was a dead guard — a
+    // relative input became absolute against this daemon's cwd and sailed through.
+    const parsed = ProjectPathSchema.safeParse(request.path);
+    if (!parsed.success) throw new Error('project path must be absolute');
+    const requested = resolve(parsed.data);
     if (request.kind === 'new-folder') {
       await mkdir(requested, { recursive: false, mode: 0o700 });
       if (request.initializeGit) await this.runGit(['init', requested]);
