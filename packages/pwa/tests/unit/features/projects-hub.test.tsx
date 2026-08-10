@@ -44,6 +44,7 @@ const slice = (patch: Partial<DaemonProjectsSlice> = {}): DaemonProjectsSlice =>
 });
 
 interface HubOptions {
+  readonly projectHref?: (projectId: string) => string;
   readonly slice?: DaemonProjectsSlice;
   readonly discoveries?: readonly RecentProjectOption[] | null;
   readonly sessionsError?: string | null;
@@ -60,6 +61,7 @@ const hub = (options: HubOptions = {}) => (
     status={options.status ?? null}
     onRegister={options.onRegister ?? (async () => true)}
     onDismiss={options.onDismiss ?? (() => undefined)}
+    {...(options.projectHref === undefined ? {} : { projectHref: options.projectHref })}
     now={NOW}
   />
 );
@@ -309,6 +311,41 @@ describe('ProjectsHub', () => {
         row.getAttribute('data-registered-project'),
       ),
     ).toEqual(['/work/ferretry', '/work/bare']);
+    await mounted.unmount();
+  });
+
+  it('links only the rows that have a record id, and only when a route was supplied', async () => {
+    // Arrange — one registered record and one bare row the grouping type
+    // allows. A path is not an identity, so the bare row has nothing to link to.
+    const mounted = await mount(
+      hub({
+        slice: slice({ projects: [registered, { name: 'bare', path: '/work/bare' }] }),
+        projectHref: id => `/d/workstation/projects/${id}`,
+      }),
+    );
+
+    // Assert
+    const links = [...mounted.container.querySelectorAll('[data-registered-project] a')];
+    expect(links.map(link => link.getAttribute('href'))).toEqual([
+      '/d/workstation/projects/11111111-1111-4111-8111-111111111111',
+    ]);
+    expect(links[0]?.textContent).toBe('ferretry');
+    const rows = [...mounted.container.querySelectorAll('[data-registered-project]')];
+    expect(must(rows[1], 'the bare row').querySelector('a')).toBeNull();
+    expect(must(rows[1], 'the bare row').textContent).toContain('bare');
+    await mounted.unmount();
+  });
+
+  it('keeps a registered row unlinked when the caller mounted no detail route', async () => {
+    // Arrange — the hub is also rendered by suites and harness frames that have
+    // no router, so the link is opt-in rather than assumed.
+    const mounted = await mount(hub());
+
+    // Assert
+    expect(mounted.container.querySelector('[data-registered-project] a')).toBeNull();
+    expect(must(mounted.container.querySelector('[data-registered-project] h3'), 'the heading').textContent).toBe(
+      'ferretry',
+    );
     await mounted.unmount();
   });
 
