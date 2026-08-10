@@ -497,28 +497,33 @@ const main = async (): Promise<number> => {
     ]);
 
     /**
-     * THE FROZEN DISPOSITION IS ASSERTED, not a disjunction over both worlds.
-     *
-     * The nested `flowchart.htmlLabels` override is deliberately left
-     * author-reachable and the compiled-SVG re-admission is the primary gate. So this
-     * requires the override to actually reach Mermaid, Mermaid to emit the disallowed
-     * shape, and the shipped gate to refuse it — a rule that also passed when Mermaid
-     * emitted nothing would stop measuring the gate at all. If the override is ever
-     * cut off upstream, this verdict is rewritten with the owner of that change
-     * rather than quietly widened here.
+     * TWO REAL MERMAID INPUTS, ONE PRODUCTION INVARIANT. The ordinary diagram
+     * proves the correctly hashed bundle installs and runs; the second uses syntax
+     * only Mermaid can parse to ask for HTML labels. The shell extends Mermaid's
+     * `secure` list with `htmlLabels`, so both must stay plain SVG. A future bundle
+     * that emits a forbidden element still meets the independent production SVG-gate
+     * fixtures; this browser proof must not pretend it did so today.
      */
-    const emittedForeignObject = directive.hasForeignObject === true;
+    const mermaidResults = [
+      ['ordinary diagram', correct],
+      ['nested init directive', directive],
+    ] as const;
+    const safeMermaid = (result: Record<string, unknown>): boolean =>
+      result.reply === 'mermaid-svg' &&
+      result.parsedByProductionParser === true &&
+      result.hasForeignObject === false &&
+      result.hasScript === false &&
+      result.admitted === true;
     score(
-      'init-directive-foreign-object-refused-by-the-parent-gate',
-      directive.reply === 'mermaid-svg' &&
-        emittedForeignObject &&
-        directive.hasScript === false &&
-        directive.admitted === false,
+      'mermaid-ordinary-and-init-directive-stay-svg-safe',
+      mermaidResults.every(([, result]) => safeMermaid(result)),
       [
-        'the diagram opened with a nested `flowchart.htmlLabels: true` init directive, which only real Mermaid parses',
-        `Mermaid emitted a \`<foreignObject>\`: ${String(emittedForeignObject)}; it emitted a \`<script>\`: ${String(directive.hasScript)}`,
-        `\`fyRenderMermaidSvg\` admitted the result: ${String(directive.admitted)}${directive.gateReason === null ? '' : ` (${String(directive.gateReason)})`}`,
-        'the reader is therefore shown the source rather than an admitted diagram; nothing here claims the override was prevented',
+        'the nested input asks for `htmlLabels: true` through a Mermaid init directive, so the real library—not a synthetic parser—decides whether the shell lock holds',
+        ...mermaidResults.map(
+          ([label, result]) =>
+            `${label}: reply ${String(result.reply)}, parsed ${String(result.parsedByProductionParser)}, \`<foreignObject>\` ${String(result.hasForeignObject)}, \`<script>\` ${String(result.hasScript)}, admitted ${String(result.admitted)}${result.gateReason === null ? '' : ` (${String(result.gateReason)})`}`,
+        ),
+        'the separate production SVG-gate fixtures retain refusal coverage for forbidden elements; this property proves Mermaid does not produce one under the shipped configuration',
       ],
     );
 

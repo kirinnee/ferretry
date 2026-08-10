@@ -190,12 +190,12 @@ export const FY_RENDER_JOURNEY_PROPERTIES: readonly FyRenderJourneyProperty[] = 
       "The frame reported that the library did not load and sent no diagram, so the mutated bundle's global never appeared.",
   },
   {
-    id: 'init-directive-foreign-object-refused-by-the-parent-gate',
-    title: 'A nested init directive does restore HTML labels, and the parent gate refuses the result',
-    steps: ['mermaid-init-directive'],
+    id: 'mermaid-ordinary-and-init-directive-stay-svg-safe',
+    title: 'Ordinary and nested-init Mermaid diagrams stay in safe SVG and pass the production gate',
+    steps: ['mermaid-correct-hash', 'mermaid-init-directive'],
     observers: ['frame', 'parent'],
     verdict:
-      'The render completed, Mermaid emitted a `<foreignObject>` and no `<script>`, and `fyRenderMermaidSvg` refused that diagram — so the reader is shown the source instead of an admitted one. The nested `flowchart.htmlLabels` override is deliberately left author-reachable and the compiled-SVG re-admission is the primary gate, so this asserts the refusal and never claims the override was prevented. A rule that also passed when Mermaid emitted nothing would stop measuring the gate; if the override is ever cut off upstream, this verdict is rewritten with the owner of that change.',
+      'Both the ordinary diagram and a diagram whose nested init directive asks for HTML labels complete with neither `<foreignObject>` nor `<script>`, and `fyRenderMermaidSvg` admits each result. The shell locks `htmlLabels` through Mermaid’s extended `secure` list; the separate SVG-gate fixtures continue to prove that a forbidden element is refused.',
   },
   {
     id: 'lottie-renders-and-acknowledges-play',
@@ -286,12 +286,11 @@ export const FY_RENDER_JOURNEY_MERMAID_SOURCE = 'graph TD;\n  A[Start] --> B[Don
 /**
  * The same diagram, opened with an init directive that asks for HTML labels back.
  *
- * MERMAID'S `securityLevel: 'strict'` DOES NOT PROTECT `htmlLabels`. Its `secure`
- * list names the keys a diagram may not override, and `htmlLabels` is not one of
- * them by default — so a diagram can ask for a `<foreignObject>` carrying HTML
- * even though the shell initialised the library with `htmlLabels: false`. Only the
- * real library parses this syntax, which is exactly why it needs a browser step
- * and cannot be reached from a unit test.
+ * The shell extends Mermaid's `secure` list with `htmlLabels`, so this request
+ * must not override the shell's `htmlLabels: false` setting. Only the real library
+ * parses this syntax, which is exactly why the proof needs a browser step rather
+ * than a unit test. The production SVG gate remains a separate refusal for a
+ * future Mermaid change that did emit a forbidden element.
  */
 export const FY_RENDER_JOURNEY_MERMAID_INIT_DIRECTIVE_SOURCE =
   '%%{init: {"htmlLabels": true, "flowchart": {"htmlLabels": true}}}%%\ngraph TD;\n  A[Start] --> B[Done];\n';
