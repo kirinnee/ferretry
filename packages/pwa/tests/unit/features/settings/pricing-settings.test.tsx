@@ -723,6 +723,125 @@ describe('PricingSettings', () => {
     expect(text(renderer)).not.toContain('late-alpha');
   });
 
+  it('refuses a rate amount the shared precision rule cannot parse and sends nothing', async () => {
+    const api = pricingApi(pricingView({ catalog: [] }));
+    const renderer = await renderPricing(api);
+
+    press(renderer, 'data-pricing-add');
+    enterValidManualDraft(renderer, 'manual:gpt-5:2026-08', 'gpt-5');
+    change(renderer, 'data-pricing-rate-field', 'reasoning', '0.1234567');
+    submitPricingForm(renderer);
+    await settle();
+
+    expect(text(renderer)).toContain('Enter a non-negative USD amount with no more than six decimal places.');
+    expect(marked(renderer, 'data-pricing-rate-field', 'reasoning')[0]?.props['aria-invalid']).toBe(true);
+    expect(marked(renderer, 'data-pricing-rate-field', 'reasoning')[0]?.props.value).toBe('0.1234567');
+    expect(marked(renderer, 'data-pricing-rate-field', 'input')[0]?.props['aria-invalid']).toBe(false);
+    expect(marked(renderer, 'data-pricing-field', 'modelId')[0]?.props['aria-invalid']).toBe(false);
+    expect(api.calls).toHaveLength(1);
+  });
+
+  it('says the same refusal in the editor and beside the catalog when a save meets a moved catalog', async () => {
+    const api = pricingApi(
+      pricingView({ catalog: [] }),
+      new FyHttpError('catalog moved', 409, 'analytics_pricing_stale_catalog'),
+    );
+    const renderer = await renderPricing(api);
+
+    press(renderer, 'data-pricing-add');
+    enterValidManualDraft(renderer, 'manual:gpt-5:2026-08', 'gpt-5');
+    submitPricingForm(renderer);
+    await settle();
+
+    const refusal =
+      'The pricing catalog changed after this form opened. Refresh the catalog, review the current row, and retry your save.';
+    const rendered = text(renderer);
+    expect(rendered.split(refusal)).toHaveLength(3);
+    expect(marked(renderer, 'data-pricing-editor', 'add')).toHaveLength(1);
+    expect(marked(renderer, 'data-pricing-field', 'modelId')[0]?.props.value).toBe('gpt-5');
+    expect(marked(renderer, 'data-pricing-stale')).toHaveLength(1);
+    expect(rendered).not.toContain('catalog moved');
+  });
+
+  it('reports a moved catalog on the preview surface and marks the shown catalog stale', async () => {
+    const api = pricingApi(pricingView(), new FyHttpError('sources moved', 409, 'analytics_pricing_stale_sources'));
+    const renderer = await renderPricing(api);
+
+    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    press(renderer, 'data-pricing-preview');
+    await settle();
+
+    const refusal =
+      'The catalog or configured source changed before this preview completed. Refresh the catalog, then request a fresh preview.';
+    const rendered = text(renderer);
+    expect(rendered.split(refusal)).toHaveLength(3);
+    expect(marked(renderer, 'data-pricing-preview-id')).toHaveLength(0);
+    expect(marked(renderer, 'data-pricing-stale')).toHaveLength(1);
+    expect(marked(renderer, 'data-pricing-row', manualRate().pricingKey)).toHaveLength(1);
+    expect(rendered).not.toContain('sources moved');
+  });
+
+  it('keeps the reviewed diff and its selection when an apply fails for a reason the preview survives', async () => {
+    const api = pricingApi(pricingView(), preview(), new Error('the daemon refused the write'));
+    const renderer = await renderPricing(api);
+
+    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    press(renderer, 'data-pricing-preview');
+    await settle();
+    toggle(renderer, manualRate().pricingKey, true);
+    press(renderer, 'data-pricing-apply');
+    await settle();
+
+    const rendered = text(renderer);
+    expect(rendered.split('the daemon refused the write')).toHaveLength(2);
+    expect(marked(renderer, 'data-pricing-preview-id', 'preview-1')).toHaveLength(1);
+    expect(marked(renderer, 'data-pricing-preview-stale')).toHaveLength(0);
+    expect(marked(renderer, 'data-pricing-stale')).toHaveLength(0);
+    expect(marked(renderer, 'data-pricing-select', manualRate().pricingKey)[0]?.props.checked).toBe(true);
+    expect(marked(renderer, 'data-pricing-apply')[0]?.props.disabled).toBe(false);
+  });
+
+  it('states that a configured feed proposed no catalog entries instead of showing an empty ledger', async () => {
+    const api = pricingApi(pricingView(), preview({ changes: [] }));
+    const renderer = await renderPricing(api);
+
+    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    press(renderer, 'data-pricing-preview');
+    await settle();
+
+    expect(marked(renderer, 'data-pricing-preview-id', 'preview-1')).toHaveLength(1);
+    expect(marked(renderer, 'data-pricing-preview-empty')).toHaveLength(1);
+    expect(text(renderer)).toContain('This configured feed proposed no catalog entries.');
+    expect(marked(renderer, 'data-pricing-select')).toHaveLength(0);
+    expect(marked(renderer, 'data-pricing-apply')[0]?.props.disabled).toBe(true);
+  });
+
+  it('drops the draft and its failure when the operator cancels the editor', async () => {
+    const api = pricingApi(pricingView(), new Error('configuration write failed'));
+    const renderer = await renderPricing(api);
+
+    press(renderer, 'data-pricing-edit', manualRate().pricingKey);
+    change(renderer, 'data-pricing-rate-field', 'input', 'one dollar');
+    submitPricingForm(renderer);
+    expect(marked(renderer, 'data-pricing-rate-field', 'input')[0]?.props['aria-invalid']).toBe(true);
+
+    change(renderer, 'data-pricing-rate-field', 'input', '2.5');
+    submitPricingForm(renderer);
+    await settle();
+    expect(text(renderer)).toContain('configuration write failed');
+
+    run(() => buttonNamed(renderer, 'Cancel').props.onClick());
+
+    expect(marked(renderer, 'data-pricing-editor')).toHaveLength(0);
+    expect(text(renderer)).not.toContain('configuration write failed');
+    expect(marked(renderer, 'data-pricing-row', manualRate().pricingKey)).toHaveLength(1);
+
+    press(renderer, 'data-pricing-add');
+    expect(marked(renderer, 'data-pricing-editor', 'add')).toHaveLength(1);
+    expect(marked(renderer, 'data-pricing-field', 'modelId')[0]?.props.value).toBe('');
+    expect(marked(renderer, 'data-pricing-rate-field', 'input')[0]?.props['aria-invalid']).toBe(false);
+  });
+
   it('exports an iconless daemon Settings tab definition', () => {
     const createClient: AnalyticsPricingClientFactory = async (_daemon: DaemonConnection) =>
       ({ request: async () => null }) as never;
@@ -731,5 +850,17 @@ describe('PricingSettings', () => {
     expect(tab.id).toBe('model-pricing');
     expect(tab.label).toBe('Model pricing');
     expect('icon' in tab).toBe(false);
+  });
+
+  it('renders the pricing surface the exported tab hands the Settings shell, scoped to its daemon', async () => {
+    const api = pricingApi(pricingView({ catalog: [manualRate({ modelId: 'tab-model' })] }));
+    const tab = pricingSettingsTab(api.createClient);
+
+    const renderer = render(<tab.Surface connection={connection('gamma')} />);
+    await settle();
+
+    expect(marked(renderer, 'data-pricing-daemon', 'gamma')).toHaveLength(1);
+    expect(text(renderer)).toContain('tab-model');
+    expect(api.calls.map(call => call.connectionId)).toEqual(['gamma']);
   });
 });
