@@ -84,18 +84,32 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         cols = '',
         rows = '',
       ] = line.split(SEPARATOR);
-      const createdAtMs = Date.parse(created);
+      const parsedCreatedAtMs = Date.parse(created);
       // An unreadable or unwritten opener contributes no key at all, so the view
       // reports "unrecorded" rather than a class this build invented for it.
       const opener = decodeTerminalOpener(openedBy);
+      const createdAtMs = Number.isFinite(parsedCreatedAtMs) ? parsedCreatedAtMs : this.now();
       const record: TerminalRecord = {
         id,
         ownerId,
         title,
         root,
         tmuxSession,
-        createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : this.now(),
-        lastActivityAtMs: number(activity, this.now() / 1_000) * 1_000,
+        createdAtMs,
+        // THE TWO CLOCKS DISAGREE ON PRECISION, so the later one is not always
+        // the larger number. Creation is our own ISO stamp, written to the pane
+        // in MILLISECONDS; activity is tmux's `#{session_activity}`, a UNIX time
+        // in WHOLE SECONDS. A terminal opened at …:19.997 that has not been
+        // typed into since therefore reports activity at …:19.000 — earlier than
+        // its own creation — and the protocol refuses that listing outright, so
+        // one freshly opened shell made `GET …/terminals` unparseable for every
+        // reader of it: the composer's `%` menu, which never opened and re-asked
+        // on every keystroke because a rejected answer is never cached, and the
+        // terminal pane beside it. Clamping here rather than relaxing the schema
+        // keeps monotonicity a property of the record, which is what every
+        // consumer already reads it as; the lost sub-second is tmux's own
+        // resolution and was never ours to report.
+        lastActivityAtMs: Math.max(createdAtMs, number(activity, this.now() / 1_000) * 1_000),
         cols: Math.max(1, Math.trunc(number(cols, 100))),
         rows: Math.max(1, Math.trunc(number(rows, 30))),
         ...(opener === undefined ? {} : { openedBy: opener }),

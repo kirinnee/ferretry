@@ -107,17 +107,3 @@ export function composerHolds(frame: string, text: string, evidence: LandingEvid
   const seen = composerEvidence(frame, text);
   return evidence === 'placeholder' ? seen.placeholders > 0 : seen.chars > 0;
 }
-
-/**
- * Codex's native `/model` flow — a two-stage selector that is neither a model turn nor an idle
- * composer.
- *
- * Its frame can retain the submitted `/model` line in scrollback, so the character probe alone would
- * read that echo as a still-unsubmitted payload and press Enter again, selecting the highlighted
- * model without anyone choosing it. These headings are shipped by the Codex TUI; the second is
- * deliberately an unterminated prefix, because Codex appends the currently selected model name and
- * that set grows.
- */
-export function paneShowsModelSelector(frame: string): boolean {
-  return /Select Model and Effort|Select Reasoning Level for/i.test(frame);
-}

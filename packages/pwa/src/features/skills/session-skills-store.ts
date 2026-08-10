@@ -44,6 +44,10 @@ export interface SessionSkillsRead {
    * doing it twice would be two answers to "is this the same name".
    */
   readonly names: readonly string[] | undefined;
+  /** The same proved catalog the names and pane share, or undefined while unread. */
+  readonly catalog: SkillsCatalog | undefined;
+  /** The read already in flight for this session, without consuming the pane's one join. */
+  readonly settled: () => Promise<void> | undefined;
   /**
    * The loader the pane is given. Its first call for a session joins the read
    * this hook already started; every later call is a real refresh.
@@ -57,6 +61,8 @@ interface SharedRead {
   readonly controller: AbortController;
   /** Whether the one join has been spent. The next asker is a refresh. */
   handedOut: boolean;
+  /** Whether callers still need to await this read. */
+  pending: boolean;
 }
 
 /** This session's catalog, owned once and shared with the pane that shows it. */
@@ -67,7 +73,11 @@ export function useSessionSkills(
 ): SessionSkillsRead {
   // The answer carries the session it describes, so a session change makes it
   // stale by construction rather than by remembering to clear it.
-  const [answer, setAnswer] = useState<{ readonly key: string; readonly names: readonly string[] } | null>(null);
+  const [answer, setAnswer] = useState<{
+    readonly key: string;
+    readonly catalog: SkillsCatalog;
+    readonly names: readonly string[];
+  } | null>(null);
   // The identity is read as two primitives so the read re-runs on a real daemon
   // or session change and not merely because a parent re-rendered with a fresh
   // scope object.
@@ -85,7 +95,8 @@ export function useSessionSkills(
   const start = useCallback<SkillsCatalogLoader>(
     (target, signal) =>
       loader(target, signal).then(catalog => {
-        if (daemonSessionKey(target) === key) setAnswer({ key, names: catalog.skills.map(skill => skill.name) });
+        if (daemonSessionKey(target) === key)
+          setAnswer({ key, catalog, names: catalog.skills.map(skill => skill.name) });
         return catalog;
       }),
     [key, loader],
@@ -95,10 +106,18 @@ export function useSessionSkills(
   if (shared.current === null || shared.current.key !== key) {
     const controller = new AbortController();
     const read = start(daemonSessionScope({ daemonId }, sessionId), controller.signal);
+    const held = { key, read, controller, handedOut: false, pending: true };
+    shared.current = held;
     // The rejection is still delivered to whoever asked, so the pane can say
     // what happened. This only stops an unawaited read from failing the process.
-    read.catch(() => undefined);
-    shared.current = { key, read, controller, handedOut: false };
+    void read.then(
+      () => {
+        held.pending = false;
+      },
+      () => {
+        held.pending = false;
+      },
+    );
   }
 
   // `key` is in the list although the body never reads it: it is what decides
@@ -123,5 +142,16 @@ export function useSessionSkills(
     [start],
   );
 
-  return { names: answer?.key === key ? answer.names : undefined, load };
+  const settled = useCallback((): Promise<void> | undefined => {
+    const held = shared.current;
+    if (held?.key !== key || !held.pending) return undefined;
+    return held.read.then(() => undefined);
+  }, [key]);
+
+  return {
+    catalog: answer?.key === key ? answer.catalog : undefined,
+    names: answer?.key === key ? answer.names : undefined,
+    load,
+    settled,
+  };
 }

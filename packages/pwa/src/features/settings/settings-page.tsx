@@ -25,6 +25,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
+import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { type DaemonReachabilityProbe, DaemonSettings, daemonDisplayName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
@@ -384,12 +385,20 @@ export function SettingsPage({
       'chat-width': (
         <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
       ),
-      'composer-markdown': <MarkdownComposerSettings />,
+      'composer-markdown': (
+        <MarkdownComposerSettings
+          vimEnabled={device.composerVimMode}
+          onChangeVim={composerVimMode => controls.setDeviceControls({ composerVimMode })}
+        />
+      ),
       'composer-enter-key': (
         <ComposerEnterKeySettings
           preference={device.composerEnterKey}
           onChange={composerEnterKey => controls.setDeviceControls({ composerEnterKey })}
         />
+      ),
+      'composer-suggestions': (
+        <ComposerSuggestionsSettings preferences={device} onChange={patch => controls.setDeviceControls(patch)} />
       ),
       theme: <ThemeSettings theme={theme} />,
       dictation: <DictationSettings {...dictation} />,
@@ -400,17 +409,11 @@ export function SettingsPage({
         </p>
       ),
     }),
-    [
-      controls,
-      density,
-      densityState.explicit,
-      densityState.setDensity,
-      device.chatWidth,
-      device.composerEnterKey,
-      dictation,
-      notifications,
-      theme,
-    ],
+    // `device` rather than its individual fields: the controls store reuses the
+    // very same device object for a patch that changed nothing, so depending on
+    // the whole record is as cheap as listing four of its fields and cannot fall
+    // behind the next one that is added.
+    [controls, density, densityState.explicit, densityState.setDensity, device, dictation, notifications, theme],
   );
   const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
 

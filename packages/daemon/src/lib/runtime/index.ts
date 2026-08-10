@@ -23,6 +23,7 @@ export * from './mounts/session-filesystem.ts';
 export * from './mounts/session-migrate.ts';
 export * from './mounts/session-reads.ts';
 export * from './mounts/session-resume.ts';
+export * from './mounts/session-runtime.ts';
 export * from './mounts/session-send.ts';
 export * from './mounts/session-signal.ts';
 export * from './mounts/sessions.ts';
