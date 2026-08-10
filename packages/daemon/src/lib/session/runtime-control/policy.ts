@@ -6,13 +6,13 @@
  * between awaits — the order is the contract, and it is checked in a test that reads like the list.
  */
 
-import type { RuntimeControlRequest, SessionView } from '@ferretry/protocol';
+import type { RuntimeControlRequest, SessionStatus, SessionView } from '@ferretry/protocol';
 import { isPickerQuarantined, pickerInputRefusal } from '../harness/quarantine.ts';
 import type { HarnessRuntimeSwitchRequest } from '../harness/runtime-switch.ts';
 import { TERMINAL_SEND_STATUSES } from '../send/types.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
 
-const PUBLIC_REFUSED_STATUSES = new Set(['starting', 'kill_failed'] as const);
+const PUBLIC_REFUSED_STATUSES: ReadonlySet<SessionStatus> = new Set(['starting', 'kill_failed']);
 
 /**
  * Why this session cannot take a control right now, or nothing.
@@ -33,7 +33,7 @@ export function documentRefusal(
   // session that is actually busy.
   const admitted =
     admits === 'public'
-      ? !TERMINAL_SEND_STATUSES.has(view.state.status) && !PUBLIC_REFUSED_STATUSES.has(view.state.status as never)
+      ? !TERMINAL_SEND_STATUSES.has(view.state.status) && !PUBLIC_REFUSED_STATUSES.has(view.state.status)
       : view.state.status === 'starting';
   if (!admitted)
     return new SessionRuntimeError(
