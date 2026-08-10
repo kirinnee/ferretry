@@ -101,7 +101,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   // exists to prevent. Such a route is served the long way instead: authentication still refuses an
   // anonymous caller, and a warden still has to satisfy the remedy.
   if (lookup.kind === 'matched' && lookup.route.minimum === 'none' && lookup.route.wardenRemedy === undefined) {
-    if (lookup.route.privilegedOnly === true && !request.loopback)
+    if (lookup.route.privilegedOnly === true && request.privilegedLoopback !== true)
       return {
         kind: 'refused',
         response: errorResponse(403, `the request may not use ${request.method} ${request.path}`, 'forbidden'),

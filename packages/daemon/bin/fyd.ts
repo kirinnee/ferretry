@@ -5568,7 +5568,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
             sockets: socketDispatcher,
             corsOrigins: browserOrigins(config),
           },
-          { host: config.host, port: config.port },
+          {
+            host: config.host,
+            port: config.port,
+            // A loopback peer is not proof of local arrival when this bind is deliberately exposed
+            // through a foreign proxy or tunnel: Bun sees the proxy, not the browser behind it.
+            directLoopbackIsPrivileged: !advertisesForeignAddress(config),
+          },
         ),
     );
   } catch (error) {

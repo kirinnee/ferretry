@@ -66,8 +66,12 @@ describe('ApiDispatcher authorization', () => {
     const dispatcher = dispatcherFor(echo('/v1/local-healthz', 'none', 'GET', true));
 
     // Act
-    const remote = await dispatcher.dispatch(request({ path: '/v1/local-healthz', loopback: false }));
-    const loopback = await dispatcher.dispatch(request({ path: '/v1/local-healthz', loopback: true }));
+    const remote = await dispatcher.dispatch(
+      request({ path: '/v1/local-healthz', loopback: false, privilegedLoopback: false }),
+    );
+    const loopback = await dispatcher.dispatch(
+      request({ path: '/v1/local-healthz', loopback: true, privilegedLoopback: true }),
+    );
 
     // Assert
     should(remote.status).equal(403);
