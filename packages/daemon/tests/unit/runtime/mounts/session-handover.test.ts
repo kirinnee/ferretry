@@ -285,6 +285,39 @@ describe('the session handover mount', () => {
     should(subsystem.cancels).be.empty();
   });
 
+  it('should refuse an unreadable, unparseable or non-object cancel body without cancelling anything', async () => {
+    // The three ways a cancel body can be wrong that are NOT "it carried a field", each answered as the
+    // caller-correctable refusal it is rather than as a 500 describing a daemon defect. `null` and an
+    // array matter on their own: both are `typeof 'object'`, so a route that only counted keys would
+    // read `[]` as an acceptable empty body and cancel a handover on a body that says nothing.
+    // Arrange
+    const subsystem = new FakeSessionHandover();
+    const subject = dispatcher(subsystem);
+
+    // Act
+    const vanished = await subject.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/handover/cancel',
+        headers: withRequestId(human, 'req-gone'),
+        unreadableBody: true,
+      }),
+    );
+    const unparseable = await subject.dispatch(cancelRequest('s1', withRequestId(human, 'req-junk'), 'not json'));
+    const nullBody = await subject.dispatch(cancelRequest('s1', withRequestId(human, 'req-null'), 'null'));
+    const arrayBody = await subject.dispatch(cancelRequest('s1', withRequestId(human, 'req-array'), '[]'));
+
+    // Assert
+    should(vanished.status).equal(400);
+    should((JSON.parse(vanished.body) as { code: string }).code).equal('unreadable_body');
+    should([unparseable.status, nullBody.status, arrayBody.status]).deepEqual([400, 400, 400]);
+    should(
+      [unparseable, nullBody, arrayBody].map(response => (JSON.parse(response.body) as { code: string }).code),
+    ).deepEqual(['invalid_body', 'invalid_body', 'invalid_body']);
+    // Every one of them was decided before the subsystem was reached, so no handover was touched.
+    should(subsystem.cancels).be.empty();
+  });
+
   it('should refuse an oversized cancel body with 413, before buffering all of it', async () => {
     // A cancel's whole contract is `{}` or nothing, so an unbounded read would let a caller make this
     // daemon buffer megabytes to be told the only acceptable body was two characters. The bound is

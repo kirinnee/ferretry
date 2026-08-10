@@ -1026,6 +1026,108 @@ describe('session handover protocol', () => {
     ]);
   });
 
+  it('should reject a resolved replacement that disagrees with the frozen plan on any launch field', () => {
+    // The receipt and its plan are ONE record, so every launch field the plan froze must be the one the
+    // resolved target names. Field by field rather than as a whole-object comparison: a single mismatched
+    // model or context window is the drift that would launch something other than what was authorized,
+    // and the caller has to be told which field disagreed.
+    // Act + Assert
+    assertRejects(
+      (
+        [
+          ['accountId', 'account-9'],
+          ['harness', 'claude'],
+          ['model', 'gpt-5-mini'],
+          ['effort', 'low'],
+          ['contextWindow', 1_000_000],
+        ] as const
+      ).map(([field, value]) => ({
+        name: `replacement ${field} disagrees with the plan target`,
+        schema: handover.SessionHandoverReceiptSchema,
+        value: {
+          ...receipt,
+          resolvedTarget: {
+            replacement: { ...resolvedReplacement, [field]: value },
+            coordinator: resolvedCoordinator,
+          },
+        },
+      })),
+    );
+  });
+
+  it('should reject a phase history that is empty, ends elsewhere, or stamps retiring off draining', () => {
+    // phaseHistory is the receipt's own account of how it got here, so the three ways it can contradict
+    // the receipt around it are refused rather than tolerated: no history at all, a history whose last
+    // entry is not the current phase, and a committed-effect stamp on a phase that does not authorize it.
+    // Act + Assert
+    assertRejects([
+      {
+        name: 'no history at all',
+        schema: handover.SessionHandoverReceiptSchema,
+        value: { ...receipt, phaseHistory: [] },
+      },
+      {
+        name: 'history that stops short of the current phase',
+        schema: handover.SessionHandoverReceiptSchema,
+        value: { ...receipt, phaseHistory: history(BOARD_LADDER.slice(0, -1)) },
+      },
+      {
+        name: 'a retiring stamp on a phase that is not draining',
+        schema: handover.SessionHandoverReceiptSchema,
+        value: {
+          ...receipt,
+          phaseHistory: BOARD_LADDER.map(phase =>
+            phase === 'approved' ? { phase, at: AT, effectIntent: 'retiring' } : { phase, at: AT },
+          ),
+        },
+      },
+    ]);
+  });
+
+  it('should refuse a handover plan that carries a conversation, whichever half of the pair says so', () => {
+    // A handover starts a NEW conversation under a different harness, so the transcript is the one thing
+    // that cannot cross. The plan says that twice — a null cut and a null conversation facet — and the
+    // receipt refuses a plan that breaks either half, not only the cut.
+    // Act + Assert
+    should(
+      handover.SessionHandoverReceiptSchema.safeParse({
+        ...receipt,
+        plan: { ...plan, facets: { ...plan.facets, conversation: { messages: [] } } },
+      }).success,
+    ).be.false();
+  });
+
+  it('should bind a refusal to a phase that can settle into one, and keep completed refusal-free', () => {
+    // A refusal is the durable settlement intent, so where it may sit is part of the contract: a terminal
+    // failure phase must carry one, `completed` must not, and a nonterminal phase may only carry one when
+    // its own track has a legal terminal failure edge to settle onto. `relinquished` has none — its only
+    // successor is `predecessor_stopped` — so a refusal parked there describes an outcome that can never
+    // be reached from it.
+    // Act + Assert
+    assertRejects([
+      {
+        name: 'a terminal failure phase with no refusal',
+        schema: handover.SessionHandoverReceiptSchema,
+        value: { ...receipt, phase: 'refused' as const, phaseHistory: history(['requested', 'refused']) },
+      },
+      {
+        name: 'a completed receipt carrying a refusal',
+        schema: handover.SessionHandoverReceiptSchema,
+        value: { ...receipt, refusal: { failure: 'step_failed', message: 'late' } },
+      },
+      {
+        name: 'a nonterminal refusal on a phase with no terminal failure edge',
+        schema: handover.SessionHandoverReceiptSchema,
+        value: {
+          ...receipt,
+          phase: 'relinquished' as const,
+          phaseHistory: history(BOARD_LADDER.slice(0, BOARD_LADDER.indexOf('relinquished') + 1)),
+          refusal: { failure: 'step_failed', message: 'the stop never ran' },
+        },
+      },
+    ]);
+  });
+
   it('should parse a handover request and reject unknown fields and a missing coordinator', () => {
     // Act + Assert — a non-board root states coordinator: null explicitly.
     should(handover.SessionHandoverRequestSchema.safeParse({ ...request, coordinator: null }).success).be.true();
