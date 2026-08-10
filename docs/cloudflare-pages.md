@@ -24,6 +24,9 @@ repository that deploys its own build. Two secrets are the whole setup.
 3. Push to `main` or run **Actions** → **Deploy PWA to Pages** → **Run workflow**. The workflow
    builds `packages/pwa/dist` and directly uploads that directory to the `ferretry` project.
 
+Do **not** connect the Git repository to Cloudflare. This repository deploys prebuilt assets from
+GitHub Actions; a connected repo would set up a second, competing build.
+
 ## Deliberate deployment policy
 
 - Pull requests receive no Pages preview URL. This keeps unreviewed branches from becoming public
