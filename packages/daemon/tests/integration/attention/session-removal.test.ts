@@ -108,6 +108,7 @@ function attentionFor(opened: OpenedDaemonStorage): AttentionService {
         return true;
       },
     },
+    { raised: async () => undefined },
   );
 }
 
