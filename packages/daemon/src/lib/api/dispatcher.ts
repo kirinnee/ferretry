@@ -62,9 +62,9 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * The order matters and differs from the source in one way worth naming. Unknown-route and
  * wrong-verb answers are produced only AFTER authentication succeeds, so an unauthenticated caller
  * cannot map the daemon's private surface by watching 404 turn into 405. Public routes are answered
- * before authentication is even attempted, because that is the whole point of being public — unless
- * one also declares a warden remedy, which is a route asking for a check it just skipped past; that
- * one is served the long way, and the shortcut below says why.
+ * before authentication is even attempted, because that is the whole point of being public. A public
+ * route may still require loopback arrival, which the shortcut enforces itself; one that declares a
+ * warden remedy is served the long way, because it asks for a check the shortcut would skip past.
  *
  * THE FULL ORDER, AND IT IS STRUCTURAL RATHER THAN CONVENTIONAL — there is no branch below that
  * produces `authorized` for a request an earlier step refused:
@@ -94,12 +94,20 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   const lookup = router.lookup(request.method, request.path);
   // The public shortcut answers before authentication is even attempted, which is the whole point of
   // being public — but it is a shortcut past EVERY check below, so it may only be taken by a route
-  // that asks for none of them. A `none` route that also declared a warden remedy would be served to
-  // anyone at all, remedy and authorizer unconsulted, which is the loudest possible version of the
-  // failure this axis exists to prevent. Such a route is served the long way instead: authentication
-  // still refuses an anonymous caller, and a warden still has to satisfy the remedy.
-  if (lookup.kind === 'matched' && lookup.route.minimum === 'none' && lookup.route.wardenRemedy === undefined)
+  // that asks for none of them. Privileged arrival is the one exception it can answer itself: a
+  // public-but-local route remains anonymous on loopback, but refuses a remote caller before any
+  // handler runs. A `none` route that also declared a warden remedy would be served to anyone at all,
+  // remedy and authorizer unconsulted, which is the loudest possible version of the failure this axis
+  // exists to prevent. Such a route is served the long way instead: authentication still refuses an
+  // anonymous caller, and a warden still has to satisfy the remedy.
+  if (lookup.kind === 'matched' && lookup.route.minimum === 'none' && lookup.route.wardenRemedy === undefined) {
+    if (lookup.route.privilegedOnly === true && !request.loopback)
+      return {
+        kind: 'refused',
+        response: errorResponse(403, `the request may not use ${request.method} ${request.path}`, 'forbidden'),
+      };
     return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params } };
+  }
 
   const presented = authenticate(credentials, {
     bearer: bearerToken(headerValue(request, 'authorization')),
