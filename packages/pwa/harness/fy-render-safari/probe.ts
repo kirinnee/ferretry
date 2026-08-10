@@ -499,9 +499,10 @@ const main = async (): Promise<number> => {
     /**
      * TWO REAL MERMAID INPUTS, ONE PRODUCTION INVARIANT. The ordinary diagram
      * proves the correctly hashed bundle installs and runs; the second uses syntax
-     * only Mermaid can parse to ask for HTML labels. The shell extends Mermaid's
-     * `secure` list with `htmlLabels`, so both must stay plain SVG. A future bundle
-     * that emits a forbidden element still meets the independent production SVG-gate
+     * only Mermaid can parse to ask for HTML labels. The shell's extended `secure`
+     * list holds the top-level key; this step measures that nested
+     * `flowchart.htmlLabels` does not defeat the pinned build. A future bundle that
+     * emits a forbidden element still meets the independent production SVG-gate
      * fixtures; this browser proof must not pretend it did so today.
      */
     const mermaidResults = [

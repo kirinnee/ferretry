@@ -195,7 +195,7 @@ export const FY_RENDER_JOURNEY_PROPERTIES: readonly FyRenderJourneyProperty[] = 
     steps: ['mermaid-correct-hash', 'mermaid-init-directive'],
     observers: ['frame', 'parent'],
     verdict:
-      'Both the ordinary diagram and a diagram whose nested init directive asks for HTML labels complete with neither `<foreignObject>` nor `<script>`, and `fyRenderMermaidSvg` admits each result. The shell locks `htmlLabels` through Mermaid’s extended `secure` list; the separate SVG-gate fixtures continue to prove that a forbidden element is refused.',
+      'Both the ordinary diagram and a diagram whose nested init directive asks for HTML labels complete with neither `<foreignObject>` nor `<script>`, and `fyRenderMermaidSvg` admits each result. The extended `secure` list holds the top-level `htmlLabels` key; this pinned build is measured not to let nested `flowchart.htmlLabels` defeat it, while the separate SVG-gate fixtures prove that a forbidden element is refused.',
   },
   {
     id: 'lottie-renders-and-acknowledges-play',
@@ -286,11 +286,11 @@ export const FY_RENDER_JOURNEY_MERMAID_SOURCE = 'graph TD;\n  A[Start] --> B[Don
 /**
  * The same diagram, opened with an init directive that asks for HTML labels back.
  *
- * The shell extends Mermaid's `secure` list with `htmlLabels`, so this request
- * must not override the shell's `htmlLabels: false` setting. Only the real library
- * parses this syntax, which is exactly why the proof needs a browser step rather
- * than a unit test. The production SVG gate remains a separate refusal for a
- * future Mermaid change that did emit a forbidden element.
+ * The shell's extended `secure` list holds the top-level `htmlLabels` key, while
+ * nested `flowchart.htmlLabels` remains reachable on paper. This browser step
+ * measures that the nested request does not defeat the pinned build; only the real
+ * library parses this syntax. The production SVG gate remains the fail-closed
+ * refusal for a future Mermaid change that did emit a forbidden element.
  */
 export const FY_RENDER_JOURNEY_MERMAID_INIT_DIRECTIVE_SOURCE =
   '%%{init: {"htmlLabels": true, "flowchart": {"htmlLabels": true}}}%%\ngraph TD;\n  A[Start] --> B[Done];\n';
