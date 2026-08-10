@@ -14,6 +14,7 @@
 
 import type { AttentionItem, AttentionResponse, AttentionSnapshot } from '@ferretry/protocol';
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { useLayoutEffect } from 'react';
 
 import {
   type AttentionActionClient,
@@ -122,6 +123,35 @@ const modal = async (props: {
     />,
   );
 
+/** What the dialog said on the commit that a reader is first handed. */
+interface CommittedDialog {
+  /** The `aria-labelledby` text — what a screen reader announces for the sheet. */
+  readonly label: string;
+  readonly text: string;
+  readonly approveControls: number;
+}
+
+/**
+ * Reads the sheet from a LAYOUT effect, which is exactly where `BottomSheet`
+ * installs the dialog's focus — so this is the dialog as the first commit
+ * exposes it, with no passive effect awaited and none yet run.
+ */
+const DialogLayoutProbe = ({ into }: { readonly into: CommittedDialog[] }) => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the sink is a stable array the test owns, and this probe must read the FIRST commit exactly once
+  useLayoutEffect(() => {
+    const panel = must(document.getElementById('attention-sheet'), 'the sheet panel at layout time');
+    const labelId = must(panel.getAttribute('aria-labelledby'), 'the dialog label id');
+    into.push({
+      label: must(document.getElementById(labelId), 'the dialog label').textContent ?? '',
+      text: panel.textContent ?? '',
+      approveControls: Array.from(panel.querySelectorAll('button')).filter(button =>
+        button.textContent?.includes('Approve'),
+      ).length,
+    });
+  }, []);
+  return null;
+};
+
 const buttonNamed = (container: HTMLElement, label: string): HTMLButtonElement =>
   must(
     Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes(label)),
@@ -214,6 +244,53 @@ describe('AttentionActionModal', () => {
     expect(view.container.textContent).toContain('Choose a deploy window');
     expect(view.container.textContent).toContain('!A7');
     expect(view.container.textContent).toContain('2/2');
+
+    await view.unmount();
+  });
+
+  it('hands the FIRST committed dialog the explicit target, never the oldest item', async () => {
+    // The one the eventual-selection test above cannot see. `BottomSheet` traps
+    // focus in a layout effect, so the first committed dialog is already the one
+    // a keyboard or a screen reader is holding: a target picked in a passive
+    // effect would announce A3's label and offer A3's Approve control under a
+    // proved `!A7`. This probe reads that commit; it awaits nothing.
+    const committed: CommittedDialog[] = [];
+    const view = await mount(
+      <>
+        <AttentionActionModal
+          client={client([])}
+          connection={connection}
+          id="attention-sheet"
+          onClose={() => undefined}
+          open
+          scope={scope}
+          snapshot={snapshot({
+            items: [item(), item({ id: 'A7', subject: 'Choose a deploy window', ask: { kind: 'open-question' } })],
+            count: 2,
+          })}
+          status="ready"
+          swipeEnabled={false}
+          targetId="A7"
+        />
+        <DialogLayoutProbe into={committed} />
+      </>,
+    );
+
+    const first = must(committed[0], 'the first committed dialog');
+    expect(first.label).toBe('Choose a deploy window');
+    expect(first.text).toContain('!A7');
+    // A3 is present in the deck and must appear nowhere in this commit — not as
+    // the announced label, not as prose, and above all not as a live control
+    // that answers a decision the reader never navigated to.
+    expect(first.text).not.toContain('Approve the pairing request');
+    expect(first.text).not.toContain('!A3');
+    expect(first.approveControls).toBe(0);
+
+    // Deck navigation is untouched: the target is where the sheet OPENS, and
+    // the reader can still step back through the older asks from there.
+    await interact(() => buttonNamed(view.container, 'Older').click());
+    expect(view.container.textContent).toContain('Approve the pairing request');
+    expect(view.container.textContent).toContain('1/2');
 
     await view.unmount();
   });

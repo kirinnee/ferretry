@@ -105,11 +105,22 @@ type AttentionOperation =
  * ONE array for "this session has no board yet".
  *
  * `snapshot?.items ?? []` allocates a fresh empty array on every render, and the
- * selection effect below depends on the list — so an unhydrated session would
- * re-run that effect forever and reset the reader's chosen item under them.
+ * episode effect below depends on the list — so an unhydrated session would
+ * re-run that effect forever.
  */
 const NO_ITEMS: readonly AttentionItem[] = [];
 const NO_RESOLVED: readonly ResolvedAttentionItem[] = [];
+
+/**
+ * The row the READER stepped to, remembered against the reference it was chosen
+ * under. A new `!A<n>` arriving while the sheet is open is a new pointer at a
+ * new decision, so it supersedes a choice made for the previous one instead of
+ * being silently overruled by it.
+ */
+interface DeckChoice {
+  readonly target: AttentionId | null;
+  readonly id: AttentionId;
+}
 
 /**
  * One ask at a time, in the app's radio-call visual language: the ask, why it
@@ -130,7 +141,7 @@ export function AttentionActionModal({
   onClose,
 }: AttentionActionModalProps) {
   const titleId = useId();
-  const [selectedId, setSelectedId] = useState<AttentionId | null>(null);
+  const [deckChoice, setDeckChoice] = useState<DeckChoice | null>(null);
   const [busyId, setBusyId] = useState<AttentionId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -146,6 +157,7 @@ export function AttentionActionModal({
   // before.
   const explicitTarget = targetId ?? null;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: items and explicitTarget are the deliberate refusal-reset triggers, see below
   useEffect(() => {
     if (!open) {
       // CLOSING DISCARDS THE EPISODE. One component instance serves every
@@ -154,30 +166,38 @@ export function AttentionActionModal({
       // next time the sheet opens — reporting an action that never happened
       // there. The notice survives for as long as this sheet stays open, and no
       // longer.
-      setSelectedId(null);
+      setDeckChoice(null);
       setBusyId(null);
       setError(null);
       setNotice(null);
       return;
     }
+    // A refusal belongs to the snapshot and the reference it was raised under;
+    // a newer board, or a new `!A<n>`, is a different question being asked.
     setError(null);
-    if (explicitTarget === null) {
-      setSelectedId(current => (items.some(item => item.id === current) ? current : (items[0]?.id ?? null)));
-      return;
-    }
-    // Preserve the target identity whether or not it survived: the actionable
-    // card renders only for this id, and an absent target renders its own
-    // addressed state below instead of substituting the first surviving row.
-    setSelectedId(explicitTarget);
   }, [items, open, explicitTarget]);
 
+  // WHICH ITEM IS ON SCREEN IS DERIVED DURING RENDER, never in an effect.
+  // `BottomSheet` installs the dialog's focus in a LAYOUT effect, so the first
+  // committed dialog is already the one a keyboard or a screen reader is handed;
+  // a target selected in a passive effect would let that first commit announce a
+  // DIFFERENT item's label and expose its actions under a proved `!A7`.
+  const navigatedId =
+    deckChoice !== null && deckChoice.target === explicitTarget && items.some(item => item.id === deckChoice.id)
+      ? deckChoice.id
+      : null;
+  // `items[0]` is the DECK's opening row and only the deck's. In explicit-target
+  // mode there is no first-item fallback at any point — not on the first commit,
+  // not while the ledger is unread, and not when a resolution race empties the
+  // target out from under the click.
+  const activeId = navigatedId ?? explicitTarget ?? items[0]?.id ?? null;
   // True only against an AUTHORITATIVE snapshot — a target that left the active
   // deck. While the ledger is still unread we cannot know, so this stays false
   // and the loading/unavailable states keep priority over any "addressed" claim.
   const targetMissing = snapshot !== null && explicitTarget !== null && !items.some(item => item.id === explicitTarget);
-  // The actionable item, if any. An explicit absent target renders `undefined`
-  // here so the addressed panel takes over; the deck path keeps its fallback.
-  const selected = targetMissing ? undefined : (items.find(item => item.id === selectedId) ?? items[0]);
+  // The actionable item, if any. A missing explicit target renders `undefined`
+  // here — the addressed panel takes over and no deck controls come with it.
+  const selected = targetMissing ? undefined : items.find(item => item.id === activeId);
   const addressedRecord = targetMissing ? resolved.find(item => item.id === explicitTarget) : undefined;
   const selectedIndex = selected === undefined ? -1 : items.findIndex(item => item.id === selected.id);
 
@@ -445,7 +465,7 @@ export function AttentionActionModal({
             variant="ghost"
             className="min-h-[44px]"
             disabled={selectedIndex <= 0}
-            onClick={() => setSelectedId(items[selectedIndex - 1]?.id ?? selected.id)}
+            onClick={() => setDeckChoice({ target: explicitTarget, id: items[selectedIndex - 1]?.id ?? selected.id })}
           >
             <ArrowLeft size={14} /> Older
           </Button>
@@ -456,7 +476,7 @@ export function AttentionActionModal({
             variant="ghost"
             className="min-h-[44px]"
             disabled={selectedIndex >= items.length - 1}
-            onClick={() => setSelectedId(items[selectedIndex + 1]?.id ?? selected.id)}
+            onClick={() => setDeckChoice({ target: explicitTarget, id: items[selectedIndex + 1]?.id ?? selected.id })}
           >
             Newer <ArrowRight size={14} />
           </Button>
