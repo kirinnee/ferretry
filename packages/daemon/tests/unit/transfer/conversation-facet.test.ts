@@ -54,7 +54,7 @@ describe('ConversationFacetContributor', () => {
       sessionId: 'source-a',
       through: point(512),
       messages: [
-        { point: point(0), role: 'user', text: 'first', timestamp: AT },
+        { point: point(0), role: 'user', text: 'secret TOKEN', timestamp: AT },
         { point: point(512, 1), role: 'assistant', text: 'second' },
       ],
       omissions: [
@@ -63,13 +63,18 @@ describe('ConversationFacetContributor', () => {
       ],
       selectionEvidence: { point: point(512), rawPrefix: rawPrefix(7) },
     };
-    const contributor = new ConversationFacetContributor(reader(async () => digest));
+    const contributor = new ConversationFacetContributor(
+      reader(async () => digest),
+      {
+        redact: async text => text.replace('secret TOKEN', '[redacted:TOKEN]'),
+      },
+    );
 
     const contribution = await contributor.contribute(input());
 
     expect(contribution.value).toEqual({
       messages: [
-        { point: point(0), role: 'user', text: 'first', timestamp: AT },
+        { point: point(0), role: 'user', text: '[redacted:TOKEN]', timestamp: AT },
         { point: point(512, 1), role: 'assistant', text: 'second' },
       ],
     });

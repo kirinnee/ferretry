@@ -3,8 +3,16 @@ import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '
 import { HarnessSchema, InteractionModeSchema, TranscriptProvenanceSchema } from './session.ts';
 import { ConversationMessagePointSchema } from './session-transfer-edge.ts';
 
-export type { ConversationMessagePoint, SessionTransferEdge } from './session-transfer-edge.ts';
-export { ConversationMessagePointSchema, SessionTransferEdgeSchema } from './session-transfer-edge.ts';
+export type {
+  ConversationMessagePoint,
+  ExactConversationMessagePoint,
+  SessionTransferEdge,
+} from './session-transfer-edge.ts';
+export {
+  ConversationMessagePointSchema,
+  ExactConversationMessagePointSchema,
+  SessionTransferEdgeSchema,
+} from './session-transfer-edge.ts';
 
 /**
  * One portable message row, and the DURABLE spelling of it.
@@ -31,9 +39,7 @@ export type ConversationTransferMessage = z.infer<typeof ConversationTransferMes
 
 /** Portable normalized content. The source transcript provenance is pinned on the plan source. */
 export const ConversationFacetSchema = z.strictObject({
-  // A non-null cut names one portable message, so the carried prefix must contain at least that
-  // message. An unavailable transcript is a preparation refusal, not an empty fork history.
-  messages: z.array(ConversationTransferMessageSchema).min(1).readonly(),
+  messages: z.array(ConversationTransferMessageSchema).readonly(),
 });
 export type ConversationFacet = z.infer<typeof ConversationFacetSchema>;
 

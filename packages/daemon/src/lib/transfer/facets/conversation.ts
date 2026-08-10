@@ -13,6 +13,7 @@
  */
 
 import type { ConversationFacet, TransferOmission } from '@ferretry/protocol';
+import type { TextRedactor } from '../../secrets/redaction.ts';
 import {
   type ConversationDigest,
   ConversationDigestError,
@@ -51,21 +52,28 @@ function toOmission(omission: ConversationDigestOmission): TransferOmission {
   };
 }
 
-function facetOf(digest: ConversationDigest): ConversationFacet {
+async function facetOf(digest: ConversationDigest, redactor: Pick<TextRedactor, 'redact'>): Promise<ConversationFacet> {
   return {
-    messages: digest.messages.map(message => ({
-      point: message.point,
-      role: message.role,
-      text: message.text,
-      ...(message.timestamp === undefined ? {} : { timestamp: message.timestamp }),
-    })),
+    messages: await Promise.all(
+      digest.messages.map(async message => ({
+        point: message.point,
+        role: message.role,
+        // The plan is the first durable copy that crosses a session boundary. Scrub here, before
+        // the plan, receipt and rendered brief can disagree about the content that was carried.
+        text: await redactor.redact(message.text),
+        ...(message.timestamp === undefined ? {} : { timestamp: message.timestamp }),
+      })),
+    ),
   };
 }
 
 export class ConversationFacetContributor implements TransferConversationContributor {
   readonly facet = 'conversation' as const;
 
-  constructor(private readonly reader: TransferConversationReader) {}
+  constructor(
+    private readonly reader: TransferConversationReader,
+    private readonly redactor: Pick<TextRedactor, 'redact'> = { redact: async text => text },
+  ) {}
 
   async contribute(input: TransferPrepareInput): Promise<TransferConversationContribution> {
     const through = input.request.cutMessagePoint;
@@ -114,7 +122,7 @@ export class ConversationFacetContributor implements TransferConversationContrib
       );
 
     return {
-      value: facetOf(digest),
+      value: await facetOf(digest, this.redactor),
       omissions: digest.omissions.map(toOmission),
       selectionEvidence: { rawPrefix: selectionEvidence.rawPrefix },
     };

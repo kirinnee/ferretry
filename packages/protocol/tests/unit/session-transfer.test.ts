@@ -115,6 +115,7 @@ const plan = {
 
 const cases: SchemaCase[] = [
   { name: 'message point', schema: transfer.ConversationMessagePointSchema, value: point },
+  { name: 'exact message point', schema: transfer.ExactConversationMessagePointSchema, value: point },
   // A case of its OWN, never folded into the conversation facet that contains it. The read row
   // extends this base, so two exported schemas describe a message now and one case cannot stand for
   // both: the facet's case would keep passing while this base drifted underneath it.
@@ -137,34 +138,33 @@ describe('session transfer protocol', () => {
     assertCoversEverySchema(transfer, cases);
   });
 
-  it('should require an exact block index without accepting another point spelling', () => {
+  it('should keep blockIndex optional without accepting another point spelling', () => {
     // Act
-    const actual = transfer.ConversationMessagePointSchema.parse({ v: 1, byteOffset: 0, blockIndex: 0 });
+    const actual = transfer.ConversationMessagePointSchema.parse({ v: 1, byteOffset: 0 });
 
     // Assert
-    should(actual).deepEqual({ v: 1, byteOffset: 0, blockIndex: 0 });
+    should(actual).deepEqual({ v: 1, byteOffset: 0 });
     assertRejects([
       {
         name: 'missing version',
         schema: transfer.ConversationMessagePointSchema,
-        value: { byteOffset: 0, blockIndex: 0 },
-      },
-      {
-        name: 'missing block index',
-        schema: transfer.ConversationMessagePointSchema,
-        value: { v: 1, byteOffset: 0 },
+        value: { byteOffset: 0 },
       },
       {
         name: 'string coordinate',
         schema: transfer.ConversationMessagePointSchema,
-        value: { v: 1, byteOffset: '0:1', blockIndex: 0 },
+        value: { v: 1, byteOffset: '0:1' },
       },
       {
         name: 'UI identity',
         schema: transfer.ConversationMessagePointSchema,
-        value: { v: 1, byteOffset: 0, blockIndex: 0, blockId: 'record|message|uuid|0' },
+        value: { v: 1, byteOffset: 0, blockId: 'record|message|uuid|0' },
       },
     ]);
+  });
+
+  it('should preserve an empty durable conversation facet for a plan written before a cut was required', () => {
+    should(transfer.ConversationFacetSchema.parse({ messages: [] })).deepEqual({ messages: [] });
   });
 
   it('should keep the durable message row binding-free so a plan stored before bindings still reads', () => {
@@ -202,11 +202,6 @@ describe('session transfer protocol', () => {
         name: 'an unversioned point is not a durable row coordinate',
         schema: transfer.ConversationTransferMessageSchema,
         value: { ...transferMessage, point: { byteOffset: 128, blockIndex: 1 } },
-      },
-      {
-        name: 'an offset without its block index is ambiguous here too',
-        schema: transfer.ConversationTransferMessageSchema,
-        value: { ...transferMessage, point: { v: 1, byteOffset: 128 } },
       },
     ]);
   });
@@ -270,11 +265,6 @@ describe('session transfer protocol', () => {
         name: 'conversation without cut',
         schema: transfer.SessionTransferPlanSchema,
         value: { ...handover, facets: plan.facets },
-      },
-      {
-        name: 'empty conversation for an exact cut',
-        schema: transfer.SessionTransferPlanSchema,
-        value: { ...plan, facets: { ...plan.facets, conversation: { messages: [] } } },
       },
       {
         name: 'handover edge with cut',

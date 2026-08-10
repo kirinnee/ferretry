@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, PositiveIntegerSchema } from './common.ts';
-import { ConversationMessagePointSchema } from './session-transfer-edge.ts';
+import { ConversationMessagePointSchema, ExactConversationMessagePointSchema } from './session-transfer-edge.ts';
 import { TransferOmissionSchema } from './session-transfer.ts';
 import { HarnessSchema, SessionStatusSchema } from './session.ts';
 
@@ -42,7 +42,7 @@ import { HarnessSchema, SessionStatusSchema } from './session.ts';
  */
 export const ForkSessionRequestSchema = z.strictObject({
   /** The exact durable message the new session's conversation is cut through. */
-  through: ConversationMessagePointSchema,
+  through: ExactConversationMessagePointSchema,
   /**
    * The opaque evidence the read surface issued FOR that exact message, echoed byte-for-byte.
    *

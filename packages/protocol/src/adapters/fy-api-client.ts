@@ -593,6 +593,7 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
+  /** Keep one request id across request()'s transport retries so a lost response cannot fork twice. */
   fork(id: string, input: ForkSessionRequest, requestId?: string): Promise<ForkSessionOutcome> {
     return this.#post(
       id,
@@ -641,6 +642,7 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
+  /** The cursor is opaque daemon evidence: validate it, but send its original bytes without trimming. */
   messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage> {
     const sessionId = encodeURIComponent(NonEmptyValueSchema.parse(id));
     const search = new URLSearchParams();

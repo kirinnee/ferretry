@@ -41,7 +41,6 @@ import { CodexModelPickerDriver, type PickerSleeper } from '../harness/picker-dr
 import { failureMessage } from '../harness/quarantine.ts';
 import type { RuntimeSwitchPlan } from '../harness/runtime-switch.ts';
 import type { HarnessQuirkService } from '../harness/service.ts';
-import type { LifecycleSessionStatus } from '../lifecycle/types.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
 import { documentRefusal, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
 import {
@@ -115,14 +114,14 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     if (replay !== undefined) return replay;
     return await this.ports.serial.run(
       id,
-      async () => await this.#driveWhileHeld(effect, request, requestId, 'running'),
+      async () => await this.#driveWhileHeld(effect, request, requestId, 'public'),
     );
   }
 
   /** The daemon-private half; its lifecycle caller already owns this session's mutation fence. */
   async startupWhileHeld(reference: string, request: RuntimeControlRequest, requestId: string): Promise<void> {
     const id = this.#require(reference);
-    await this.#driveWhileHeld(this.#effect(id, request, requestId), request, requestId, 'starting');
+    await this.#driveWhileHeld(this.#effect(id, request, requestId), request, requestId, 'startup');
   }
 
   /** Both refusals kept apart, because they are two different mistakes and two different statuses. */
@@ -242,7 +241,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
   async #apply(
     id: SessionId,
     request: RuntimeControlRequest,
-    admits: LifecycleSessionStatus,
+    admits: 'public' | 'startup',
     /** Called the instant before the harness is touched, so a retry can never repeat a keystroke. */
     spend: () => Promise<Extract<SessionEffectAdmission, 'perform' | 'settled'>>,
   ): Promise<{ readonly performed: boolean }> {
@@ -337,7 +336,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     effect: { readonly id: SessionId; readonly key: SessionEffectKey; readonly fingerprint: string },
     request: RuntimeControlRequest,
     requestId: string,
-    admits: LifecycleSessionStatus,
+    admits: 'public' | 'startup',
   ): Promise<SessionView> {
     const queued = await this.#replay(effect, requestId);
     if (queued !== undefined) return queued;

@@ -6,9 +6,17 @@ import { HarnessSchema } from './session-base.ts';
 export const ConversationMessagePointSchema = z.strictObject({
   v: z.literal(1),
   byteOffset: NonNegativeIntegerSchema,
-  blockIndex: NonNegativeIntegerSchema,
+  // Kept optional for plans written before multi-block transcript records were exported. Forks
+  // refine this legacy durable shape to an exact point at their request boundary.
+  blockIndex: NonNegativeIntegerSchema.optional(),
 });
 export type ConversationMessagePoint = z.infer<typeof ConversationMessagePointSchema>;
+
+/** A newly-issued fork cut must address one block, not merely a legacy record offset. */
+export const ExactConversationMessagePointSchema = ConversationMessagePointSchema.extend({
+  blockIndex: NonNegativeIntegerSchema,
+});
+export type ExactConversationMessagePoint = z.infer<typeof ExactConversationMessagePointSchema>;
 
 /** A target-only edge back to the exact source and transfer decision that created it. */
 export const SessionTransferEdgeSchema = z
@@ -30,6 +38,13 @@ export const SessionTransferEdgeSchema = z
         message:
           value.kind === 'fork' ? 'a fork must name its exact message cut' : 'a handover has no conversation cut',
         path: ['cutMessagePoint'],
+      });
+    }
+    if (value.kind === 'fork' && value.cutMessagePoint?.blockIndex === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a fork must name the exact block inside its message record',
+        path: ['cutMessagePoint', 'blockIndex'],
       });
     }
   });

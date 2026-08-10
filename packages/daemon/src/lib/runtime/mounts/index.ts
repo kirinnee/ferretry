@@ -349,6 +349,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // beneath it, registered in the same table after its parent — so none can shadow or be shadowed by
     // the migrate above or the deeper per-session subsystems below.
     ...sessionHandoverRoutes(subsystems.handover),
+    // Same shape and depth as its neighbours: the literal `fork` cannot shadow or be shadowed by a
+    // sibling, nor by the shallower session read above.
     ...sessionForkRoutes(subsystems.sessionFork),
     // The runtime controls register beside the migration, and for the same reason: both change what
     // is running in a session that already exists. Both paths are one-segment patterns under

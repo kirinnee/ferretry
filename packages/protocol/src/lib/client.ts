@@ -134,7 +134,17 @@ export interface IFyApiClient {
   handoverReceipt(id: string): Promise<SessionHandoverReceipt>;
   /** Cancel an in-flight handover; returns the receipt in its resulting terminal phase. */
   cancelHandover(id: string, requestId?: string): Promise<SessionHandoverReceipt>;
-  /** Fork an exact durable conversation point into an independent session. */
+  /**
+   * Fork one session's conversation, through an exact durable message, into a fresh session.
+   *
+   * `input` is passed WHOLE rather than as four arguments, because every field is a decision the
+   * caller made — which message, which agent, which model, which effort — and a positional list of
+   * three optional strings is the shape a caller silently gets wrong.
+   *
+   * `requestId` is the LOGICAL identity of one fork. `request()` retries a POST up to three times on
+   * transport failure, so without a stable id a lost response would leave a second forked session
+   * behind — an outcome no reader can distinguish from having asked twice.
+   */
   fork(id: string, input: ForkSessionRequest, requestId?: string): Promise<ForkSessionOutcome>;
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
@@ -142,7 +152,12 @@ export interface IFyApiClient {
   attachTarget(id: string): Promise<SessionAttachTarget>;
   snapshot(id: string): Promise<string>;
   logs(id: string, turn?: number): Promise<string>;
-  /** Read one session's durable conversation as rows a caller can fork through. */
+  /**
+   * Read one session's durable conversation as rows a caller can fork through. This is NOT `logs`
+   * with structure: the cursor and each row's binding are OPAQUE DAEMON-ISSUED BYTES, stored and sent
+   * back unchanged — never trimmed, parsed, derived, normalized, hashed or re-signed. The daemon owns
+   * the default page size, so an omitted `limit` stays absent rather than gaining a client-side default.
+   */
   messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage>;
   events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]>;
   history(id: string, after?: number, limit?: number): Promise<FyEvent[]>;

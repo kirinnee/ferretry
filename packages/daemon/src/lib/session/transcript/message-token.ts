@@ -283,7 +283,7 @@ function canonicalMessagePointBytes(point: ConversationMessagePoint): Uint8Array
   return Buffer.concat([
     sessionTranscriptUnsigned64(point.v),
     sessionTranscriptUnsigned64(point.byteOffset),
-    sessionTranscriptUnsigned64(point.blockIndex),
+    sessionTranscriptUnsigned64(point.blockIndex ?? 0),
   ]);
 }
 

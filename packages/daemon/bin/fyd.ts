@@ -1617,10 +1617,10 @@ function createSessionControlSubsystem(
         executable,
         ...(request.remoteControl === true ? plan.extraArgs : []),
         ...transcript.launchArguments,
-        // Free-form harness flags are carried first; the explicit model field is the daemon's
-        // catalogue-proved choice and therefore wins over a conflicting `--model` flag.
-        ...(request.harnessFlags ?? []),
+        // The catalogue-proved model is the daemon's default. A free-form operator flag is last,
+        // as documented: an explicitly supplied `--model` wins over that default.
         ...startupModelArguments(plan.model),
+        ...(request.harnessFlags ?? []),
       ];
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
@@ -3237,10 +3237,11 @@ interface SessionHandoverWiring {
  * coordination fact is carried into it, it proves it holds and can use the predecessor's board
  * membership, and only then is the predecessor retired.
  *
- * THREE PORTS ARE NOT REAL YET, AND THEY REFUSE RATHER THAN PRETEND. `preparer` and `importer` are the
- * shared harness-neutral transfer seam, which row 67 owns and lands (`src/lib/transfer/**` does not
- * exist on this branch); the board and lifecycle legs wait on the reviewed board-capability chain. A
- * handover cannot be performed without them, so each raises `step_failed` naming the missing piece.
+ * THE SHARED TRANSFER SEAM EXISTS, BUT THIS HANDOVER IS NOT WIRED TO IT YET. Its generic preparer,
+ * importer and target plan store are now available to the fork; the handover still lacks the
+ * handover-specific composition that would choose a replacement and bind the board and lifecycle legs.
+ * A handover cannot be performed without those legs, so each raises `step_failed` naming the missing
+ * capability.
  * What this deliberately does NOT do is invent a second preparation: a private copy here would be the
  * parallel domain the seam exists to prevent, and it would have to be deleted — with its receipts
  * already on disk — the moment the real one landed.
@@ -3255,13 +3256,12 @@ export function createSessionHandoverSubsystem(
   wiring: SessionHandoverWiring,
   receipts: HandoverReceiptStore,
 ): SessionHandoverService {
-  /** The seam is absent, so every call through it refuses in the taxonomy the receipt records. */
+  /** The generic seam is present; this operation deliberately refuses until its remaining legs exist. */
   const seamAbsent = (piece: string): never => {
     throw new HandoverError(
       'step_failed',
-      `this build carries no session transfer seam, so a handover cannot ${piece}: the shared preparer, ` +
-        'importer and plan store are landed by the conversation-fork work, and until they exist a ' +
-        'handover would have nothing to carry into the replacement',
+      `this build carries the shared session-transfer seam, but a handover cannot ${piece}: its ` +
+        'handover-specific replacement, board and lifecycle composition is not wired yet',
     );
   };
   return new SessionHandoverService(
@@ -4040,6 +4040,8 @@ interface ForkSubsystemParts {
   readonly transcripts: Pick<TranscriptProvenanceCapture, 'capture'>;
   /** The one daemon-private codec shared with the operator message read surface. */
   readonly messageTokens: SessionTranscriptMessageTokenCodec;
+  /** The same fail-closed redactor used by operator transcript reads. */
+  readonly redactor: Pick<SecretRedactor, 'redact'>;
   readonly environment: Pick<FileSessionEnvironmentStore, 'read'>;
   /** The startup half only — the intermediate annotation must not erase it. */
   readonly runtime: SessionRuntimeStartupHeldPort;
@@ -4093,7 +4095,7 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
         )) === 'accepted',
     },
     contributors: {
-      conversation: new ConversationFacetContributor(conversation),
+      conversation: new ConversationFacetContributor(conversation, parts.redactor),
       attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(parts.attachmentStore)),
       references: new ReferenceFacetContributor(),
       workspace: new WorkspaceFacetContributor(new GitTransferWorkspaceProbe(parts.gateway)),
@@ -5458,6 +5460,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         createLifecycle: (id, envelope) => createSessionLifecycle(storage, launcher, envelope, id),
         transcripts: transcriptProvenance,
         messageTokens: sessionTranscriptMessageTokens,
+        redactor: secretRedactor,
         environment: sessionEnvironments,
         runtime: sessionRuntime,
         view: async id => await sessions.get(id),
