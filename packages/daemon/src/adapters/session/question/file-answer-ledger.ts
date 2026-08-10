@@ -14,6 +14,12 @@ import type { SessionId } from '../../../lib/session-id.ts';
  * the whole history of an answer rather than its final opinion. A truncated final line — the exact
  * signature of a crash during the append — is skipped rather than allowed to poison the ledger.
  *
+ * THAT TOLERANCE IS THE FINAL LINE AND NOTHING ELSE, and `all` enforces it rather than assuming it.
+ * An unreadable line anywhere earlier means this file no longer accounts for its own history, and
+ * reading it as "no receipt" would hand the coordinator permission to drive a form a second time —
+ * so it raises instead. The same applies to a truncated tail that a later append has written past:
+ * it stops being a tail, and it takes the receipt appended after it down with it.
+ *
  * READ-MODIFY-WRITE IS SAFE HERE because every caller holds the session's own answer queue: the
  * coordinator takes it before reading and keeps it until the answer settles. This class takes no lock
  * of its own, which would be a second lock ordering to reason about for no benefit.
@@ -60,9 +66,30 @@ export class FileAnswerLedger implements AnswerLedger {
       // An unreadable receipt is missing idempotency evidence, never evidence that no answer ran.
       throw error;
     }
-    for (const line of contents.split('\n')) {
+    const lines = contents.split('\n');
+    const last = lines.length - 1;
+    for (const [index, line] of lines.entries()) {
       const record = parseRecord(line);
-      if (record !== undefined) records.set(record.requestId, record);
+      if (record !== undefined) {
+        records.set(record.requestId, record);
+        continue;
+      }
+      if (line.trim() === '') continue;
+      // THE TAIL IS THE ONLY TOLERATED DAMAGE, and it is tolerated because it is the one shape a
+      // crash can produce: the process died between the write and its newline, so nothing was ever
+      // acknowledged to a caller and no later line can exist. Anything unreadable ANYWHERE ELSE is a
+      // ledger this daemon cannot account for — including that same truncated tail once a later
+      // append has run, which concatenates onto it and takes the new receipt down with it.
+      //
+      // Skipping those would answer "no receipt" for a request that may well have driven a form, and
+      // "no receipt" is precisely what lets the coordinator drive the same selector a second time
+      // after a restart. Missing evidence is never evidence of absence here, so this fails closed.
+      if (index === last) continue;
+      throw new Error(
+        `the answer ledger ${this.file(id)} is corrupt at line ${index + 1}: it is neither a receipt this ` +
+          `daemon wrote nor the truncated final line a crash leaves, so the answers it does hold cannot be ` +
+          'trusted to be all of them; nothing may be driven from it until a person has read it',
+      );
     }
     return records;
   }

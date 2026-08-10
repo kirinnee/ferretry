@@ -122,16 +122,58 @@ describe('the durable answer ledger', () => {
       '{"requestId":"request-1","toolUseId":"tool-1","fingerprint":"print-1","outcome":"accepted"}',
     ],
   ])('refuses to read a fabricated receipt (%s)', async (_name, line) => {
-    // Arrange
+    // Arrange — a COMPLETE line, terminated: nothing about it is the crash signature, so it is not a
+    // line this ledger may quietly drop. Trusting it would let a fabricated record authorize a second
+    // drive; ignoring it would answer "no receipt" for a request that may have driven a form. The
+    // only honest third option is to refuse the whole file.
     const { ledger } = await subject();
     await mkdir(join(ledger.file(ID), '..'), { recursive: true });
     await appendFile(ledger.file(ID), `${line}\n`);
 
+    // Act + Assert
+    await should(ledger.read(ID, 'request-1')).be.rejectedWith(/is corrupt at line 1/u);
+  });
+
+  it('fails closed when a receipt was appended after a truncated line, rather than reading past it', async () => {
+    // Arrange — THE RESTART CASE, built out of the real methods rather than a hand-written file. A
+    // settled receipt, then a crash mid-append, then the daemon comes back up and appends again. The
+    // new receipt lands on the SAME line as the fragment, so tolerating the fragment as a tail would
+    // silently swallow both — and a request with no receipt is a request the coordinator may drive.
+    const { ledger } = await subject();
+    await ledger.append(ID, record({ outcome: 'confirmed' }));
+    await appendFile(ledger.file(ID), '{"requestId":"request-2","toolUse');
+    await ledger.append(ID, record({ requestId: 'request-3', toolUseId: 'tool-3' }));
+
+    // Act + Assert — not a silent `undefined` for request-3, and not a partial map either.
+    await should(ledger.all(ID)).be.rejectedWith(/is corrupt at line 2/u);
+    await should(ledger.read(ID, 'request-3')).be.rejectedWith(/is corrupt at line 2/u);
+    await should(ledger.read(ID, 'request-1')).be.rejectedWith(/is corrupt at line 2/u);
+  });
+
+  it('fails closed when damage sits between two good receipts', async () => {
+    // Arrange — the same rule stated without a crash anywhere near it: position, not provenance, is
+    // what decides, so a reader cannot be talked into trusting the receipts that surround damage.
+    const { ledger } = await subject();
+    await ledger.append(ID, record());
+    await appendFile(ledger.file(ID), 'not json at all\n');
+    await ledger.append(ID, record({ requestId: 'request-2', outcome: 'confirmed' }));
+
+    // Act + Assert
+    await should(ledger.all(ID)).be.rejectedWith(/is corrupt at line 2/u);
+  });
+
+  it('still tolerates a blank line, which is padding rather than a lost receipt', async () => {
+    // Arrange
+    const { ledger } = await subject();
+    await ledger.append(ID, record({ outcome: 'confirmed' }));
+    await appendFile(ledger.file(ID), '\n');
+    await ledger.append(ID, record({ requestId: 'request-2' }));
+
     // Act
-    const actual = await ledger.read(ID, 'request-1');
+    const actual = await ledger.all(ID);
 
     // Assert
-    should(actual).be.undefined();
+    should([...actual.keys()].sort()).deepEqual(['request-1', 'request-2']);
   });
 
   it('fails closed when a future daemon wrote an outcome this version does not know', async () => {
