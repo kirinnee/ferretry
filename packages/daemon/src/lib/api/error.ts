@@ -1,3 +1,9 @@
+/** A schema issue retained for route-level policy classification, never rendered directly. */
+export interface ApiValidationIssue {
+  readonly path: readonly PropertyKey[];
+  readonly message: string;
+}
+
 /**
  * An error a handler raises to answer with a specific status.
  *
@@ -10,6 +16,7 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly code?: string,
+    readonly validationIssues?: readonly ApiValidationIssue[],
   ) {
     super(message);
     this.name = 'ApiError';

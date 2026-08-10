@@ -137,5 +137,5 @@ function parseValue<Schema extends z.ZodType>(schema: Schema, value: unknown, wh
   const detail = result.error.issues
     .map(issue => `${issue.path.join('.') === '' ? where : issue.path.join('.')}: ${issue.message}`)
     .join('; ');
-  throw new ApiError(400, `the request ${where} is invalid — ${detail}`, 'invalid_request');
+  throw new ApiError(400, `the request ${where} is invalid — ${detail}`, 'invalid_request', result.error.issues);
 }

@@ -227,9 +227,34 @@ describe('the project catalog mount', () => {
       }),
     );
 
-    // Only a schema refusal is promoted to 422; a body that cannot be read as JSON stays 400.
+    // A body that cannot be read as JSON stays 400.
     should(response.status).equal(400);
     should(jsonBody(response)).match({ code: 'invalid_json' });
+    should(registered).be.empty();
+  });
+
+  it('keeps a parseable but non-policy-invalid registration body at 400', async () => {
+    const registered: RegisterProjectRequest[] = [];
+    const response = await (
+      await dispatcher({
+        projects: async () => [],
+        registerProject: async entry => {
+          registered.push(entry);
+          return PROJECT;
+        },
+        skills: async () => ({ harness: 'codex', skills: [] }),
+      })
+    ).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/projects',
+        headers: human,
+        body: JSON.stringify({ kind: 'existing-folder' }),
+      }),
+    );
+
+    should(response.status).equal(400);
+    should(jsonBody(response)).match({ code: 'invalid_request' });
     should(registered).be.empty();
   });
 });

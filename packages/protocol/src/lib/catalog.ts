@@ -53,6 +53,10 @@ function isProjectPathAbsolute(path: string): boolean {
   return path.startsWith('/');
 }
 
+/** The policy refusal the daemon mount may distinguish from ordinary malformed input. */
+export const ProjectPathMustBeAbsoluteMessage =
+  "a project path must be absolute; a relative path would resolve against the daemon's own directory";
+
 /**
  * The single owner of "a registered project path is absolute" (see
  * fact-ownership R1): a parser both ends of the wire share rather than a rule
@@ -60,7 +64,7 @@ function isProjectPathAbsolute(path: string): boolean {
  * refuses a relative path a caller cannot otherwise be trusted to name.
  */
 export const ProjectPathSchema = z.string().trim().min(1).refine(isProjectPathAbsolute, {
-  message: "a project path must be absolute; a relative path would resolve against the daemon's own directory",
+  message: ProjectPathMustBeAbsoluteMessage,
 });
 
 /** Every route is explicit: scanning a path is never a registration operation. */
