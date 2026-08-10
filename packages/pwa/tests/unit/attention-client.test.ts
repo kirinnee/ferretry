@@ -124,6 +124,30 @@ describe('DaemonAttentionClient', () => {
     should(client.store.attention(scopeB)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
   });
 
+  it('revalidates a ready board while coalescing every overlapping full-board read', async () => {
+    const refreshed = deferred<Response>();
+    let calls = 0;
+    const client = new DaemonAttentionClient(undefined, async () => {
+      calls += 1;
+      return calls === 1 ? response(snapshot('same/session')) : refreshed.promise;
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const first = client.revalidate(daemonA, scopeA);
+    const same = client.revalidate(daemonA, scopeA);
+    const hydration = client.hydrate(daemonA, scopeA);
+
+    should(first).equal(same);
+    should(first).equal(hydration);
+    should(calls).equal(2);
+    should(client.store.status(scopeA)).equal('ready');
+
+    refreshed.resolve(response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 1)));
+    await first;
+    should(client.store.count(scopeA)).equal(1);
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T01:00:00.000Z');
+  });
+
   it('keeps badge hydration distinct from full readiness and leaves failures unknown', async () => {
     const responses = [
       response(snapshot('same/session', '2026-07-31T00:30:00.000Z', 4)),
@@ -193,6 +217,150 @@ describe('DaemonAttentionClient', () => {
 
     should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
     should(client.store.count(scopeA)).equal(2);
+  });
+
+  it('does not let an in-flight revalidation overwrite a later mutation', async () => {
+    const refresh = deferred<Response>();
+    const mutation = deferred<Response>();
+    let calls = 0;
+    const client = new DaemonAttentionClient(undefined, async (_input, init) => {
+      calls += 1;
+      if (calls === 1) return response(snapshot('same/session'));
+      return init?.method === 'POST' ? mutation.promise : refresh.promise;
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const refreshing = client.revalidate(daemonA, scopeA);
+    const dismissing = client.dismiss(daemonA, scopeA, 'A1');
+    mutation.resolve(response(snapshot('same/session', '2026-07-31T03:00:00.000Z', 2)));
+    await dismissing;
+    refresh.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z', 1)));
+    await refreshing;
+
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T03:00:00.000Z');
+    should(client.store.count(scopeA)).equal(2);
+  });
+
+  it('queues a revalidation behind an earlier mutation so a pre-action GET cannot win', async () => {
+    const mutation = deferred<Response>();
+    const staleRefresh = deferred<Response>();
+    const freshRefresh = deferred<Response>();
+    let initialized = false;
+    let mutationCommitted = false;
+    let refreshBeforeCommit = false;
+    let refreshes = 0;
+    const client = new DaemonAttentionClient(undefined, async (_input, init) => {
+      if (init?.method === 'POST') {
+        const result = await mutation.promise;
+        mutationCommitted = true;
+        return result;
+      }
+      if (!initialized) {
+        initialized = true;
+        return response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 1));
+      }
+      refreshes += 1;
+      if (!mutationCommitted) {
+        refreshBeforeCommit = true;
+        return staleRefresh.promise;
+      }
+      return freshRefresh.promise;
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const mutating = client.dismiss(daemonA, scopeA, 'A1');
+    const refreshing = client.revalidate(daemonA, scopeA);
+    const sameRefresh = client.revalidate(daemonA, scopeA);
+    should(refreshing).equal(sameRefresh);
+
+    // This is the response the old implementation let arrive before the POST.
+    // The coordinator keeps its GET from being issued, so resolving it cannot
+    // advance the board revision or suppress the mutation's own snapshot.
+    staleRefresh.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z', 1)));
+    should(refreshBeforeCommit).be.false();
+    mutation.resolve(response(snapshot('same/session', '2026-07-31T03:00:00.000Z')));
+    await mutating;
+
+    // Published as soon as the action returns, before the caller waits for the
+    // queued refresh or that refresh publishes its later post-action board.
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T03:00:00.000Z');
+    should(client.store.count(scopeA)).equal(0);
+
+    freshRefresh.resolve(response(snapshot('same/session', '2026-07-31T04:00:00.000Z')));
+    await refreshing;
+    should(refreshes).equal(1);
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T04:00:00.000Z');
+    should(client.store.count(scopeA)).equal(0);
+  });
+
+  it('releases queued revalidation after a rejected mutation without retaining either promise', async () => {
+    const mutation = deferred<Response>();
+    let initialized = false;
+    let refreshes = 0;
+    const client = new DaemonAttentionClient(undefined, async (_input, init) => {
+      if (init?.method === 'POST') return mutation.promise;
+      if (!initialized) {
+        initialized = true;
+        return response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 1));
+      }
+      refreshes += 1;
+      return response(snapshot('same/session', `2026-07-31T0${refreshes + 1}:00:00.000Z`, 2));
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const mutating = client.dismiss(daemonA, scopeA, 'A1');
+    const rejected = should(mutating).be.rejectedWith('action failed');
+    const refreshing = client.revalidate(daemonA, scopeA);
+    should(refreshes).equal(0);
+
+    mutation.reject(new Error('action failed'));
+    await rejected;
+    await refreshing;
+    should(refreshes).equal(1);
+    should(client.store.status(scopeA)).equal('ready');
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
+
+    await client.revalidate(daemonA, scopeA);
+    should(refreshes).equal(2);
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T03:00:00.000Z');
+  });
+
+  it('waits for every outstanding mutation while preserving reverse-completion authority', async () => {
+    const firstResponse = deferred<Response>();
+    const secondResponse = deferred<Response>();
+    const mutations = [firstResponse, secondResponse];
+    let initialized = false;
+    let refreshes = 0;
+    const client = new DaemonAttentionClient(undefined, async (_input, init) => {
+      if (init?.method === 'POST') {
+        const next = mutations.shift();
+        if (next === undefined) throw new Error('unexpected mutation');
+        return next.promise;
+      }
+      if (!initialized) {
+        initialized = true;
+        return response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 2));
+      }
+      refreshes += 1;
+      return response(snapshot('same/session', '2026-07-31T04:00:00.000Z'));
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const first = client.dismiss(daemonA, scopeA, 'A1');
+    const second = client.resolve(daemonA, scopeA, 'A2');
+    const refreshing = client.revalidate(daemonA, scopeA);
+
+    secondResponse.resolve(response(snapshot('same/session', '2026-07-31T03:00:00.000Z')));
+    await second;
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T03:00:00.000Z');
+    should(refreshes).equal(0);
+
+    firstResponse.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z', 1)));
+    await first;
+    await refreshing;
+    should(refreshes).equal(1);
+    should(client.store.attention(scopeA)?.updatedAt).equal('2026-07-31T04:00:00.000Z');
+    should(client.store.count(scopeA)).equal(0);
   });
 
   it('keeps the newest mutation when mutation responses settle in reverse order', async () => {
@@ -370,5 +538,40 @@ describe('DaemonAttentionClient', () => {
     client.clearDaemon(rotated.daemonId);
     should(client.store.attention(rotatedScope)).be.undefined();
     should(client.store.attention(scopeB)).not.be.undefined();
+  });
+
+  it('clears a mutation-queued revalidation across same-id re-pair before it can issue transport', async () => {
+    const oldMutation = deferred<Response>();
+    const rotated = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://new-a.example.test',
+      deviceToken: 'new-token',
+    });
+    const rotatedScope = daemonSessionScope(rotated, 'same/session');
+    let oldInitialized = false;
+    let oldRefreshes = 0;
+    const client = new DaemonAttentionClient(undefined, async (input, init) => {
+      if (String(input).startsWith('https://new-a.')) {
+        return response(snapshot('same/session', '2026-07-31T04:00:00.000Z', 2));
+      }
+      if (init?.method === 'POST') return oldMutation.promise;
+      if (!oldInitialized) {
+        oldInitialized = true;
+        return response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 1));
+      }
+      oldRefreshes += 1;
+      return response(snapshot('same/session', '2026-07-31T03:00:00.000Z', 1));
+    });
+
+    await client.hydrate(daemonA, scopeA);
+    const mutating = client.dismiss(daemonA, scopeA, 'A1');
+    const queued = client.revalidate(daemonA, scopeA);
+    await client.hydrate(rotated, rotatedScope);
+
+    oldMutation.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z')));
+    await Promise.all([mutating, queued]);
+    should(oldRefreshes).equal(0);
+    should(client.store.attention(rotatedScope)?.updatedAt).equal('2026-07-31T04:00:00.000Z');
+    should(client.store.count(rotatedScope)).equal(2);
   });
 });

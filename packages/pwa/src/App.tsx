@@ -619,9 +619,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       .then(api => {
         if (!current) return;
         setClient(api);
+        const attentionScope = daemonSessionScope(connection, sessionId);
         control = startSessionWorkspaceRefresh({
           api: {
-            logs: async id => await api.logs(id),
+            // Attention shares the workspace's one visibility-aware refresh
+            // owner. Its own status reports a failed board read, so a failure
+            // here must not relabel a successful transcript as unreadable.
+            logs: async id => {
+              void store.attention.revalidate(connection, attentionScope).catch(() => undefined);
+              return await api.logs(id);
+            },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
           },
           sessionId,
@@ -642,7 +649,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       control?.stop();
       if (refreshControl.current === control) refreshControl.current = null;
     };
-  }, [connection, daemonId, sessionId, store.clients, store.fleet]);
+  }, [connection, daemonId, sessionId, store.attention, store.clients, store.fleet]);
 
   /**
    * THE LIVE FEED, AND THE FIRST THING IN THIS APP THAT CONSUMES ONE.

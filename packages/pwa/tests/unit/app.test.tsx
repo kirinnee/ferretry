@@ -25,6 +25,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import {
+  type AttentionSnapshot,
   DoctorReportSchema,
   type FyEvent,
   HealthViewSchema,
@@ -49,6 +50,7 @@ import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-c
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
@@ -139,6 +141,35 @@ const doctorReport = {
   limitation: 'PATH presence is all this report proves.',
 };
 
+const externalAttentionItem: AttentionSnapshot['items'][number] = {
+  id: 'A3',
+  source: 'agent-raised',
+  sourceRef: null,
+  sourceSeq: 1,
+  subject: 'Approve the pairing request',
+  why: 'The device needs a signed pairing record.',
+  waitingSince: '2026-07-31T11:30:00.000Z',
+  howToResolve: 'Approve to let this browser reach the daemon.',
+  ask: { kind: 'permission' },
+  raisedBy: 'agent',
+  raisedBySession: 'shared',
+  raisedByName: 'zoe',
+};
+
+const attentionSnapshot = (
+  sessionId: string,
+  items: AttentionSnapshot['items'] = [],
+  updatedAt = '2026-07-31T12:00:00.000Z',
+): AttentionSnapshot => ({
+  v: 1,
+  sessionId,
+  items,
+  resolved: [],
+  count: items.length,
+  parseErrors: 0,
+  updatedAt,
+});
+
 class MemoryRepository implements DaemonConnectionRepository {
   readonly values = new Map<string, string>();
 
@@ -222,6 +253,8 @@ interface ShellOptions {
   readonly sessionStatus?: () => SessionStatus;
   /** Daemon-owned normalized transcript tail returned by `logs`. */
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
+  /** Complete Attention board returned by this daemon/session route. */
+  readonly attention?: (sessionId: string) => AttentionSnapshot;
   /** The recent Warden-report index, deliberately supplied by the paired daemon. */
   readonly wardenVerdicts?: () => Promise<WardenVerdictsView>;
 }
@@ -326,17 +359,14 @@ const appStore = async (
     fetcher: async input => {
       const url = String(input);
       carrierRequests.push(url);
-      const attention = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
-      if (attention?.[1])
-        return Response.json({
-          v: 1,
-          sessionId: decodeURIComponent(attention[1]),
-          items: [],
-          resolved: [],
-          count: 0,
-          parseErrors: 0,
-          updatedAt: '2026-08-01T10:00:00.000Z',
-        });
+      // The board a live session reads. A test that wants to watch a refresh
+      // land supplies its own answer per read; every other test gets the same
+      // empty deck the shell has always been given here.
+      const attentionRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
+      if (attentionRoute?.[1] !== undefined) {
+        const sessionId = decodeURIComponent(attentionRoute[1]);
+        return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
+      }
       if (url.endsWith('/v1/pair'))
         return Response.json({
           daemonId: GAMMA_ID,
@@ -984,6 +1014,55 @@ describe('AppShell', () => {
     expect(reads).toEqual(['alpha:shared', 'beta:shared']);
     expect(transcriptReads).toEqual(['alpha:shared', 'beta:shared']);
     await view.unmount();
+  });
+
+  it('revalidates a ready Attention board through the mounted workspace refresh', async () => {
+    let items: AttentionSnapshot['items'] = [];
+    let attentionReads = 0;
+    let refresh: (() => void) | undefined;
+    const restoreInterval = patchGlobal(globalThis, 'setInterval', (callback: () => void, milliseconds: number) => {
+      if (milliseconds === 3_000 && refresh === undefined) refresh = callback;
+      return 1;
+    });
+    const restoreClearInterval = patchGlobal(globalThis, 'clearInterval', () => {});
+
+    try {
+      const { store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+        transcript: 'assistant/message: Review !A3 before continuing.',
+        attention: sessionId => {
+          attentionReads += 1;
+          return attentionSnapshot(sessionId, items);
+        },
+      });
+      try {
+        await settle();
+        expect(refresh).toBeDefined();
+        const scope = daemonSessionScope(alpha, 'shared');
+        expect(store.attention.store.status(scope)).toBe('ready');
+        expect(store.attention.store.count(scope)).toBe(0);
+        expect(view.container.querySelector('button[aria-label="Attention"]')).not.toBeNull();
+        expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
+
+        const initialAttentionReads = attentionReads;
+        items = [externalAttentionItem];
+        await interact(() => refresh?.());
+        await settle();
+        expect(attentionReads).toBeGreaterThan(initialAttentionReads);
+        expect(store.attention.store.count(scope)).toBe(1);
+
+        const trigger = must(
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="Answer attention (1)"]'),
+          'the refreshed Attention trigger',
+        );
+        expect(trigger.textContent).toContain('1');
+        expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      restoreClearInterval();
+      restoreInterval();
+    }
   });
 
   it('publishes a lifecycle result and immediately refreshes its daemon-scoped evidence', async () => {

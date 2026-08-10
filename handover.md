@@ -380,8 +380,8 @@ row's capability has not shipped.
 |  10 | LANDED  | `attention-board.tsx` visibly maps permission, multiple-choice, answer-review, and open-question asks to their respective direct controls.                                                                                                                                                           |
 |  12 | PARTIAL | Push enrolment, preferences, and browser delivery exist, but `packages/daemon/src/lib/push/service.ts` states that production raises no notification yet. Agent-callable, auditable delivery and automatic Attention delivery are still missing.                                                     |
 |  14 | PARTIAL | `packages/daemon/src/lib/warden/attention.ts` has a read-only attention projection and `mounts/warden.ts` exposes configuration, but it does not implement the required policy-governed remediation, node-scoped deduplication, and recovery resolution.                                             |
-|  17 | PARTIAL | `packages/pwa/src/features/attention/attention-board.tsx` shows clear actions inline; it is not the requested focused action modal with a phone-first entry point.                                                                                                                                   |
-|  40 | OPEN    | No Attention swipe entry point or gesture-to-answer mapping is present in `packages/pwa/src`.                                                                                                                                                                                                        |
+|  17 | LANDED  | `packages/pwa/src/features/attention/attention-action-modal.tsx` is the focused phone-first modal the live session workspace opens; `attention-board.tsx` is now the pure ledger behind it rather than the action surface.                                                                           |
+|  40 | LANDED  | `packages/pwa/src/features/attention/attention-answer-controls.tsx` maps a swipe to each finite labelled answer on compact screens and keeps every one of them tappable; open questions stay textual. Covered by `packages/pwa/tests/unit/features/attention-answer-controls.test.tsx`.              |
 |  42 | LANDED  | `packages/pwa/src/features/analytics/global-analytics-page.tsx` declares reusable daily, weekly, by-model, average, maximum, and status starter queries for the global and session analytics surfaces.                                                                                               |
 |  66 | PARTIAL | `packages/daemon/src/lib/analytics/pricing.ts` can price or honestly mark usage unpriced, but there is no Settings/API rate catalogue, provider sync/preview, manual overrides, or historical effective-rate snapshot surface.                                                                       |
 |   9 | LANDED  | `packages/pwa/src/components/attachment-unlock-prompt.tsx` states and enforces password clearing; the daemon attachment flow hands the in-memory decrypted document to the agent without writing a decrypted file.                                                                                   |
@@ -390,7 +390,8 @@ row's capability has not shipped.
 |   5 | PARTIAL | The aggregate CLI route has a bounded, measured fleet read. The PWA Tasks pane still performs one task-detail request per task after its list request, so its repeated-read cost and pane-level before/after measurement remain open.                                                                |
 
 The person-noticeable remaining queue is: #69/#68 Projects and worktree workflows; #36 compact browser HUD;
-#63 Pins strip; #39 and #33 composer editing/autocomplete completion; #17 and #40 focused mobile
-Attention actions; #12 notification delivery; #5 Tasks-pane load time; #47/#14 recovery policy and
-warden escalation; #48 and #67 cross-harness continuity; and #66 pricing configuration. The first
-seven are direct day-to-day PWA gaps; the others are important safety, continuity, and operator gaps.
+#63 Pins strip; #39 and #33 composer editing/autocomplete completion; #12 notification delivery;
+#5 Tasks-pane load time; #47/#14 recovery policy and warden escalation; #48 and #67 cross-harness
+continuity; and #66 pricing configuration. The first five are direct day-to-day PWA gaps; the others
+are important safety, continuity, and operator gaps. #17 and #40 left this queue when the focused
+mobile Attention modal and its swipe controls landed.
