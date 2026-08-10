@@ -182,8 +182,10 @@ export const TaskBoardMarkDoneRequestSchema = z.strictObject({
 export type TaskBoardMarkDoneRequest = z.infer<typeof TaskBoardMarkDoneRequestSchema>;
 
 export const TaskBoardCoordinatorReplacementSchema = z.strictObject({
+  requestId: z.string().trim().min(1),
   sessionId: z.string().min(1),
   replacementSessionId: z.string().min(1),
+  replacementRootSessionId: z.string().min(1),
 });
 export type TaskBoardCoordinatorReplacement = z.infer<typeof TaskBoardCoordinatorReplacementSchema>;
 

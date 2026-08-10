@@ -3,6 +3,7 @@ import {
   type TaskBoardChildAccess,
   TaskBoardChildGrantApprovalSchema,
   TaskBoardChildGrantRequestSchema,
+  TaskBoardCoordinatorReplacementSchema,
   TaskBoardCreateRequestSchema,
   type TaskBoardCreateResponse,
   type TaskBoardErrorCode,
@@ -31,11 +32,16 @@ import { TaskBoardCreationService } from '../../task-boards/creation-service.ts'
 import { membershipForGrant } from '../../task-boards/domain-helpers.ts';
 import { isTaskBoardError, TaskBoardError } from '../../task-boards/error.ts';
 import { TaskBoardInvitationService } from '../../task-boards/invitation-service.ts';
-import { TaskBoardMembershipService } from '../../task-boards/membership-service.ts';
+import {
+  CHILD_GRANT_PROMOTION_REVOKE_REASON,
+  isExactRelinquishReplay,
+  TaskBoardMembershipService,
+} from '../../task-boards/membership-service.ts';
 import type {
-  TaskBoardAuthorization,
+  TaskBoardCoordinatorReplacementCapabilityDeriver,
   TaskBoardCredential,
   TaskBoardCredentialIssuer,
+  TaskBoardMemberAuthorization,
   TaskBoardRepository,
   TaskBoardRepositoryState,
   TaskBoardSession,
@@ -50,7 +56,7 @@ import type {
  * is keyed on `sessionCapabilityHash`, "the daemon-owned session credential", and no such credential
  * existed. It does now — `SessionLifecycleService.create` mints one for EVERY session, puts the
  * SHA-256 on the record and the plaintext in the session's own environment — so a grant finally has
- * an identity to hang off, and this mount supplies the four adapters the ports named.
+ * an identity to hang off, and this mount supplies the adapters the ports named.
  *
  * HOW A CALLER IS IDENTIFIED, AND WHY NO ROUTE HERE READS A SESSION ID. Every peer route derives WHO
  * is calling from the capability it presented: the presented secret is hashed, the binding holding
@@ -59,24 +65,24 @@ import type {
  * that header is an ATTRIBUTION a caller controls, and a board is the one place in this daemon where
  * a spoofed attribution would be a privilege escalation rather than a wrong name in a journal.
  *
- * HOW A REQUEST ID IS OBTAINED. Not one board request on the wire carries an idempotency key — the
- * CLI's eleven bodies are strict schemas and none of them has a field for one — while every reducer
- * here is written around one, because a retried grant must replay rather than duplicate. So the id is
- * DERIVED from the operation's own identity: the same create, requested twice, hashes to the same id
- * and replays to `created: false` instead of conflicting. A random id per call would have made every
- * retry a new operation, which is the outcome the reducers' replay ledgers exist to prevent.
+ * HOW A REQUEST ID IS OBTAINED. Ordinary peer operations still derive an id from their payload because
+ * their strict wire bodies predate an explicit key. Coordinator replacement is the deliberate
+ * exception: its protocol-owned `requestId` names one logical handover attempt, because that same id
+ * also recovers the exact post-commit capability after a delivery failure or daemon restart. A later
+ * move to the same target carries a fresh id and is therefore a new operation rather than an old ledger
+ * entry accidentally replaying.
  *
- * HOW A MINTED CAPABILITY REACHES THE SESSION IT WAS MINTED FOR, AND THE ONE LAG IN IT. The board
- * document holds the plaintext (that is what a binding is) and the response never carries it — the
- * CLI states in code that "the daemon should never send one" and strips anything capability-shaped as
- * a second lock. The delivery channel is therefore the session's environment store, the same seam
+ * HOW A MINTED CAPABILITY REACHES THE SESSION IT WAS MINTED FOR, AND THE ONE LAG IN IT. A board grant
+ * records only the hash; the repository's private binding store holds the existing credential, and
+ * the response never carries it — the CLI states in code that "the daemon should never send one" and
+ * strips anything capability-shaped as a second lock. The delivery channel is therefore the session's environment store, the same seam
  * that carries `FY_SESSION_BOARD_CAPABILITY`, and a pane reads its environment AT LAUNCH. So a
  * session that is already running when its grant is issued sees `FY_BOARD_CAPABILITY` on its next
  * launch — a revive — rather than immediately. That is a real limitation and it is stated here rather
  * than papered over: the alternative channel, typing an export into a live pane, would write the
  * secret into the terminal transcript the agent later quotes back.
  *
- * WHAT IS DELIBERATELY NOT SERVED, all three for reasons upstream of wiring:
+ * WHAT IS DELIBERATELY NOT SERVED, both for reasons upstream of wiring:
  *
  *   * `POST /mark-done` and `POST /grants/revoke` — THERE IS NO SERVICE. `TaskBoardOperationKind`
  *     names `mark-done.set` and `grant.revoke`, `TaskBoardAuditEvent` names their audit events, and
@@ -86,14 +92,14 @@ import type {
  *     coordinator-replacement perform internally. Mounting these means WRITING the domain, which is a
  *     port rather than a wiring, and a hand-rolled revoke at the route layer would be an
  *     authorization decision made outside the only place that makes them.
- *   * `POST /coordinator/replace` — the service exists and its AUTHORITY MODEL does not fit the wire.
- *     `ReplaceCoordinatorCommand` takes an `administratorSessionId` checked by a
- *     `TaskBoardAdministrator` predicate, so the domain expects a SESSION to hold administrator
- *     authority. The command is authenticated by `FY_BOARD_ADMIN_CAPABILITY` — the human operator,
- *     who is not a session and has no id to put in that field or in the audit entry it becomes.
- *     Choosing what `canAdminister` returns, and whom the replacement is attributed to, is a
- *     deliberate decision about who may take a coordinator's authority away; it is not derivable from
- *     anything in this repository, so it is left rather than guessed.
+ *
+ * `POST /coordinator/replace` USED TO BE A THIRD, and the reason it no longer is names the defect it
+ * was hiding. The mount recorded its authority model as undecided — the command wanted an administrator
+ * SESSION and the wire authenticates the human operator, who is not one. That was never an open design
+ * question: the operator IS a principal, `human_admin`, and the port of the board domain simply dropped
+ * the non-session principal that carried it. Restoring it (`lib/task-boards/types.ts`) makes the route
+ * a wiring again, and the decision it records is truthful: `actorSessionId: null`, `actorName: 'user'`,
+ * rather than a session's name on a human's decision.
  */
 
 /** The environment variable the CLI reads a peer's board capability from. A wire contract with
@@ -146,6 +152,8 @@ export interface TaskBoardSubsystem {
   readonly sessions: TaskBoardSessionDirectory;
   /** Ids, capabilities and the hash they are compared through. */
   readonly issuer: TaskBoardCredentialIssuer;
+  /** Re-derivable secret material for the one operation whose delivery must survive a restart. */
+  readonly coordinatorReplacementCapabilities: TaskBoardCoordinatorReplacementCapabilityDeriver;
   /** The instant a mutation is stamped with. */
   now(): string;
   /** SHA-256 of the operator's board capability, minted into the state home on first use. */
@@ -174,13 +182,7 @@ function services(issuer: TaskBoardCredentialIssuer): TaskBoardServices {
     creation: new TaskBoardCreationService(),
     children: new TaskBoardChildGrantService(authorization),
     invitations: new TaskBoardInvitationService(authorization, hash),
-    /**
-     * NO SESSION ADMINISTERS A BOARD TODAY, and this mount serves no route that would need one: the
-     * coordinator replacement is not mounted precisely because the wire authenticates an operator
-     * while this predicate expects a session. Answering `false` is the fail-closed statement of that,
-     * so the one method behind it can never be reached through a mounted route by accident.
-     */
-    membership: new TaskBoardMembershipService(authorization, () => false),
+    membership: new TaskBoardMembershipService(authorization),
   };
 }
 
@@ -249,7 +251,7 @@ export interface TaskBoardTaskActionAuthorizer {
     readonly targetSessionId: string;
     readonly capability: string;
     readonly action: TaskBoardAction;
-  }): Promise<TaskBoardAuthorization>;
+  }): Promise<TaskBoardMemberAuthorization>;
 }
 
 export function taskBoardTaskActionAuthorizer(world: TaskBoardSubsystem): TaskBoardTaskActionAuthorizer {
@@ -317,6 +319,59 @@ async function requireOperator(subsystem: MountedTaskBoards, request: ApiRequest
  */
 function derivedRequestId(issuer: TaskBoardCredentialIssuer, parts: readonly (string | boolean)[]): string {
   return issuer.hash(JSON.stringify(parts));
+}
+
+/**
+ * Resolve the relinquishing member without turning every retired capability back into authority.
+ *
+ * A fresh call still goes through `peerCredential`, and therefore needs the active binding. The only
+ * binding-less exception is the exact operation that already committed: the presented secret must
+ * hash to its historical grant, its derived request id must locate one durable relinquish operation,
+ * and the reducer-owned replay decision must pin the kind, actor, generation, result, and fingerprint.
+ */
+function relinquishingCaller(
+  state: TaskBoardRepositoryState,
+  sessions: readonly TaskBoardSession[],
+  capability: string,
+  issuer: TaskBoardCredentialIssuer,
+): { readonly member: TaskBoardCredential; readonly requestId: string } {
+  const capabilityHash = issuer.hash(capability);
+  const activeBinding = state.bindings.find(candidate => issuer.hash(candidate.capability) === capabilityHash);
+  if (activeBinding !== undefined) {
+    const member = peerCredential(state, sessions, capability, issuer);
+    return {
+      member,
+      requestId: derivedRequestId(issuer, [
+        'membership.relinquish',
+        member.sessionId,
+        String(member.runtimeGeneration),
+      ]),
+    };
+  }
+  const replays = state.boards.flatMap(board =>
+    board.grants
+      .filter(grant => !grant.active && grant.capabilityHash === capabilityHash)
+      .flatMap(grant => {
+        const member = {
+          sessionId: grant.sessionId,
+          runtimeGeneration: grant.runtimeGeneration,
+          capabilityHash,
+        };
+        const requestId = derivedRequestId(issuer, [
+          'membership.relinquish',
+          member.sessionId,
+          String(member.runtimeGeneration),
+        ]);
+        return board.appliedOperations
+          .filter(operation => operation.requestId === requestId && isExactRelinquishReplay(operation, grant, member))
+          .map(() => ({ member, requestId }));
+      }),
+  );
+  const replay = replays.length === 1 ? replays[0] : undefined;
+  if (replay === undefined) {
+    throw new TaskBoardError('forbidden', 'the presented board capability names no live membership or exact replay');
+  }
+  return replay;
 }
 
 /** The membership one grant projects, which is the whole of what a board tells a peer about itself. */
@@ -467,6 +522,7 @@ function mounted(world: TaskBoardSubsystem): MountedTaskBoards {
     repository: world.repository,
     sessions: world.sessions,
     issuer: world.issuer,
+    coordinatorReplacementCapabilities: world.coordinatorReplacementCapabilities,
     now: () => world.now(),
     operatorCapabilityHash: async () => await world.operatorCapabilityHash(),
     deliver: async (sessionId, variables) => await world.deliver(sessionId, variables),
@@ -489,7 +545,6 @@ async function approveChildGrant(subsystem: MountedTaskBoards, context: RouteCon
   );
   const request = await parseBody(context.request, TaskBoardChildGrantApprovalSchema);
   const at = subsystem.now();
-  const grantCapability = subsystem.issuer.capability();
   const outcome = await subsystem.repository
     .transaction(async state => {
       const sessions = await subsystem.sessions.snapshot();
@@ -503,7 +558,7 @@ async function approveChildGrant(subsystem: MountedTaskBoards, context: RouteCon
           requestId: derivedRequestId(subsystem.issuer, ['grant.approve', request.grantRequestId]),
           at,
         },
-        { grantId: subsystem.issuer.id('grant'), capability: grantCapability },
+        () => ({ grantId: subsystem.issuer.id('grant'), capability: subsystem.issuer.capability() }),
       );
       // The intent, as the transaction leaves it, is the answer this route reports — read from the
       // committed state rather than reconstructed, so a refusal reports the reducer's own reason.
@@ -512,12 +567,12 @@ async function approveChildGrant(subsystem: MountedTaskBoards, context: RouteCon
         .find(candidate => candidate.requestId === request.grantRequestId);
       if (intent === undefined)
         throw new TaskBoardError('unavailable', 'the approved child grant intent is no longer readable');
-      return { state: mutation.state, result: { approved: mutation.result.approved, intent } };
+      return { state: mutation.state, result: { approval: mutation.result, intent } };
     })
     .catch(reraise);
-  if (outcome.approved) {
+  if (outcome.approval.approved) {
     await subsystem.deliver(outcome.intent.targetSessionId, {
-      [BOARD_CAPABILITY_VARIABLE]: grantCapability.value,
+      [BOARD_CAPABILITY_VARIABLE]: outcome.approval.durableCapability,
     });
   }
   return jsonResponse(childGrantView(outcome.intent) satisfies TaskBoardGrantRequestView);
@@ -611,7 +666,6 @@ async function acceptInvitation(subsystem: MountedTaskBoards, context: RouteCont
     'accepting an invitation needs the one-time proof the coordinator’s approval issued',
   );
   const at = subsystem.now();
-  const grantCapability = subsystem.issuer.capability();
   const outcome = await subsystem.repository
     .transaction(async state => {
       const sessions = await subsystem.sessions.snapshot();
@@ -629,7 +683,7 @@ async function acceptInvitation(subsystem: MountedTaskBoards, context: RouteCont
           ]),
           at,
         },
-        { grantId: subsystem.issuer.id('grant'), capability: grantCapability },
+        () => ({ grantId: subsystem.issuer.id('grant'), capability: subsystem.issuer.capability() }),
       );
     })
     .catch(reraise);
@@ -638,7 +692,9 @@ async function acceptInvitation(subsystem: MountedTaskBoards, context: RouteCont
     // board's own answer travels as the refusal reason rather than as a shape the client cannot read.
     throw new ApiError(409, `the invitation was not accepted: it is ${outcome.invitation.status}`, 'conflict');
   }
-  await subsystem.deliver(outcome.membership.sessionId, { [BOARD_CAPABILITY_VARIABLE]: grantCapability.value });
+  await subsystem.deliver(outcome.membership.sessionId, {
+    [BOARD_CAPABILITY_VARIABLE]: outcome.durableCapability,
+  });
   return jsonResponse(outcome.membership satisfies TaskBoardMembership, 201);
 }
 
@@ -683,19 +739,111 @@ async function relinquish(subsystem: MountedTaskBoards, context: RouteContext): 
   const response = await subsystem.repository
     .transaction(async state => {
       const sessions = await subsystem.sessions.snapshot();
-      const member = peerCredential(state, sessions, capability, subsystem.issuer);
+      const caller = relinquishingCaller(state, sessions, capability, subsystem.issuer);
       return subsystem.services.membership.relinquish(state, sessions, {
-        member,
-        requestId: derivedRequestId(subsystem.issuer, [
-          'membership.relinquish',
-          member.sessionId,
-          String(member.runtimeGeneration),
-        ]),
+        member: caller.member,
+        requestId: caller.requestId,
         at,
       });
     })
     .catch(reraise);
   return jsonResponse(response satisfies TaskBoardRelinquishResponse);
+}
+
+/**
+ * The operator moves a board's coordinator key into another live tree.
+ *
+ * WHY THIS IS AN OPERATOR ROUTE AND NOT A MEMBER ONE. Taking the coordinator's authority away is the
+ * one board decision no member may make about itself: a membership root that could re-appoint the
+ * coordinator governing it would hold both halves of the approval it is supposed to be checked by. The
+ * caller is therefore the non-session principal — proved by the same board admin capability that
+ * creates boards — and the reducer refuses any authorization carrying a session id.
+ *
+ * The body names a MEMBER of the board rather than the board, because that is the address the CLI has:
+ * `sessionId` locates the board through its binding, exactly as every other member-addressed route
+ * does. `replacementSessionId` names the descendant and `replacementRootSessionId` binds it to the
+ * exact tree the handover receipt expects. The descendant may be unbound, or may carry the coordinator
+ * child grant delivered before its first launch; that latter credential is promoted byte-for-byte.
+ */
+async function replaceCoordinator(subsystem: MountedTaskBoards, context: RouteContext): Promise<ApiResponse> {
+  await requireOperator(subsystem, context.request);
+  const request = await parseBody(context.request, TaskBoardCoordinatorReplacementSchema);
+  const at = subsystem.now();
+  const replacement = await subsystem.repository
+    .transaction(async state => {
+      const sessions = await subsystem.sessions.snapshot();
+      const binding = state.bindings.find(candidate => candidate.sessionId === request.sessionId);
+      if (binding === undefined)
+        throw new TaskBoardError('not-found', `session ${request.sessionId} has no central task-board scope`);
+      const replacementSession = sessions.find(candidate => candidate.id === request.replacementSessionId);
+      if (replacementSession === undefined)
+        throw new TaskBoardError('not-found', `session ${request.replacementSessionId} was not found`);
+      const existingBinding = state.bindings.find(candidate => candidate.sessionId === replacementSession.id);
+      const board = state.boards.find(candidate => candidate.id === binding.boardId);
+      const currentReplacementGrant =
+        board === undefined || existingBinding === undefined
+          ? undefined
+          : board.grants.find(candidate => candidate.id === existingBinding.grantId);
+      const promotedCapability =
+        existingBinding !== undefined &&
+        currentReplacementGrant !== undefined &&
+        currentReplacementGrant.id === board?.coordinatorGrantId &&
+        board.grants.some(
+          candidate =>
+            !candidate.active &&
+            candidate.sessionId === replacementSession.id &&
+            candidate.capabilityHash === currentReplacementGrant.capabilityHash &&
+            candidate.revokeReason === CHILD_GRANT_PROMOTION_REVOKE_REASON,
+        );
+      const reuseGrantedCapability =
+        existingBinding !== undefined &&
+        (currentReplacementGrant?.id !== board?.coordinatorGrantId || promotedCapability);
+      const capability = reuseGrantedCapability
+        ? {
+            value: existingBinding.capability,
+            hash: subsystem.issuer.hash(existingBinding.capability),
+          }
+        : await subsystem.coordinatorReplacementCapabilities.derive({
+            requestId: request.requestId,
+            boardId: binding.boardId,
+            memberSessionId: request.sessionId,
+            replacementSessionId: replacementSession.id,
+            replacementRootSessionId: request.replacementRootSessionId,
+            replacementSessionIncarnation: replacementSession.incarnation,
+            replacementRuntimeGeneration: replacementSession.runtimeGeneration,
+          });
+      const mutation = subsystem.services.membership.replaceCoordinator(
+        state,
+        sessions,
+        {
+          boardId: binding.boardId,
+          memberSessionId: request.sessionId,
+          administrator: subsystem.services.authorization.administrator(state, binding.boardId, 'human_admin'),
+          coordinatorSessionId: request.replacementSessionId,
+          replacementRootSessionId: request.replacementRootSessionId,
+          requestId: request.requestId,
+          at,
+        },
+        { grantId: subsystem.issuer.id('grant'), capability },
+      );
+      const coordinatorBinding = mutation.state.bindings.find(
+        candidate => candidate.sessionId === replacementSession.id,
+      );
+      if (coordinatorBinding === undefined) {
+        throw new TaskBoardError('unavailable', 'the coordinator replacement committed without a durable binding');
+      }
+      return {
+        state: mutation.state,
+        result: { outcome: mutation.result, capability: capability.value },
+      };
+    })
+    .catch(reraise);
+  // Every retry deliberately delivers again. The capability is deterministic for this operation, so
+  // replay repairs a failed delivery instead of overwriting the session with unauthenticating material.
+  await subsystem.deliver(replacement.outcome.membership.sessionId, {
+    [BOARD_CAPABILITY_VARIABLE]: replacement.capability,
+  });
+  return jsonResponse(replacement.outcome.membership satisfies TaskBoardMembership);
 }
 
 /**
@@ -779,6 +927,13 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       noStore: true,
       handle: async context => await relinquish(subsystem, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/task-boards/coordinator/replace',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await replaceCoordinator(subsystem, context),
     },
   ];
 }

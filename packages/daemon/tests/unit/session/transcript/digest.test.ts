@@ -1,13 +1,11 @@
 import { describe, it } from 'bun:test';
+import type { ConversationMessagePoint } from '@ferretry/protocol';
 import should from 'should';
-import {
-  ConversationDigestError,
-  type ConversationMessagePoint,
-  digestConversation,
-} from '../../../../src/lib/session/transcript/index.ts';
+import { ConversationDigestError, digestConversation } from '../../../../src/lib/session/transcript/index.ts';
 import type { TranscriptBatch, TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
 
 const point = (byteOffset: number, blockIndex?: number): ConversationMessagePoint => ({
+  v: 1,
   byteOffset,
   ...(blockIndex === undefined ? {} : { blockIndex }),
 });
@@ -61,13 +59,13 @@ describe('digestConversation', () => {
     // Assert
     should(actual).eql({
       sessionId: 'session-1',
-      through: { byteOffset: 150 },
+      through: { v: 1, byteOffset: 150 },
       messages: [
-        { point: { byteOffset: 0 }, role: 'system', text: 'You are an assistant.' },
-        { point: { byteOffset: 40 }, role: 'user', text: 'Inspect the repository.' },
-        { point: { byteOffset: 150 }, role: 'assistant', text: 'The repository is clean.' },
+        { point: { v: 1, byteOffset: 0 }, role: 'system', text: 'You are an assistant.' },
+        { point: { v: 1, byteOffset: 40 }, role: 'user', text: 'Inspect the repository.' },
+        { point: { v: 1, byteOffset: 150 }, role: 'assistant', text: 'The repository is clean.' },
       ],
-      omissions: [{ point: { byteOffset: 88 }, kind: 'tool-call', reason: 'harness-specific' }],
+      omissions: [{ point: { v: 1, byteOffset: 88 }, kind: 'tool-call', reason: 'harness-specific' }],
     });
   });
 
@@ -80,7 +78,7 @@ describe('digestConversation', () => {
 
     // Assert
     should(actual.messages.map(entry => entry.text)).eql(['first', 'second']);
-    should(actual.through).eql({ byteOffset: 0, blockIndex: 1 });
+    should(actual.through).eql({ v: 1, byteOffset: 0, blockIndex: 1 });
   });
 
   it('should refuse a bounded or malformed transcript rather than returning a shorter history', () => {

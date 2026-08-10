@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
+import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
 import type {
   AttachmentView,
   CgroupConfigPatch,
@@ -120,6 +121,17 @@ export interface IFyApiClient {
     allowContextDowngrade?: boolean,
     requestId?: string,
   ): Promise<SessionView>;
+  /**
+   * Start a cross-harness handover of a top-level session. Returns the durable receipt at its current
+   * phase (HTTP 202); poll it with `handoverReceipt`. `requestId` is the LOGICAL identity of one handover
+   * and is what makes the POST safe to retry — it travels on FY_REQUEST_ID_HEADER, supplied when the caller
+   * retries and minted per call otherwise.
+   */
+  handover(id: string, request: SessionHandoverRequestInput, requestId?: string): Promise<SessionHandoverReceipt>;
+  /** Read the durable handover receipt for a session at any phase, terminal included. */
+  handoverReceipt(id: string): Promise<SessionHandoverReceipt>;
+  /** Cancel an in-flight handover; returns the receipt in its resulting terminal phase. */
+  cancelHandover(id: string, requestId?: string): Promise<SessionHandoverReceipt>;
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;

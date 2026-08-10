@@ -11,13 +11,9 @@
  * other session's file.
  */
 
+import type { ConversationMessagePoint } from '@ferretry/protocol';
 import type { TranscriptBatch, TranscriptEvent, TranscriptHarness, TranscriptSource } from '../../transcript/types.ts';
-import {
-  type ConversationDigest,
-  ConversationDigestError,
-  type ConversationMessagePoint,
-  digestConversation,
-} from './digest.ts';
+import { type ConversationDigest, ConversationDigestError, digestConversation } from './digest.ts';
 
 /** The session facts a transcript read needs, projected out of whatever served them. */
 export interface TranscriptTarget {

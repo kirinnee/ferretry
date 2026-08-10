@@ -101,16 +101,42 @@ describe('board commands', () => {
 
   it('should build a coordinator replacement', () => {
     // Act
-    const actual = coordinatorReplaceCommand('s-1', 's-2');
+    const actual = coordinatorReplaceCommand('s-1', 's-2', 'root-2', 'replace-1');
 
     // Assert
-    should(actual).eql({ command: 'coordinator-replace', body: { sessionId: 's-1', replacementSessionId: 's-2' } });
+    should(actual).eql({
+      command: 'coordinator-replace',
+      body: {
+        requestId: 'replace-1',
+        sessionId: 's-1',
+        replacementSessionId: 's-2',
+        replacementRootSessionId: 'root-2',
+      },
+    });
+  });
+
+  it('should mint one operation id for an ordinary coordinator replacement attempt', () => {
+    // Act
+    const first = coordinatorReplaceCommand('s-1', 's-2', 'root-2');
+    const second = coordinatorReplaceCommand('s-1', 's-2', 'root-2');
+    if (first.command !== 'coordinator-replace' || second.command !== 'coordinator-replace') {
+      throw new Error('coordinatorReplaceCommand returned another command');
+    }
+
+    // Assert — building a command defines a logical attempt. Retrying that command reuses its body;
+    // building a later command is a genuinely new operation, even when it names the same target.
+    should(first.body)
+      .have.property('requestId')
+      .match(/^[0-9a-f-]{36}$/u);
+    should(second.body).have.property('requestId').not.equal(first.body.requestId);
   });
 
   it('should refuse a replacement missing either side', () => {
     // Act + Assert
-    should(() => coordinatorReplaceCommand('', 's-2')).throw(/current board member is required/u);
-    should(() => coordinatorReplaceCommand('s-1', ' ')).throw(/replacement session is required/u);
+    should(() => coordinatorReplaceCommand('', 's-2', 'root-2')).throw(/current board member is required/u);
+    should(() => coordinatorReplaceCommand('s-1', ' ', 'root-2')).throw(/replacement session is required/u);
+    should(() => coordinatorReplaceCommand('s-1', 's-2', ' ')).throw(/replacement membership root is required/u);
+    should(() => coordinatorReplaceCommand('s-1', 's-2', 'root-2', ' ')).throw(/replacement request id is required/u);
   });
 
   it('should build a revocation that records why', () => {

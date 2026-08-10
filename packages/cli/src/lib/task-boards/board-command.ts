@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   type TaskBoardChildAccess,
   TaskBoardChildAccessSchema,
@@ -125,10 +126,21 @@ export function markDoneCommand(
   return { command: 'mark-done', body };
 }
 
-export function coordinatorReplaceCommand(sessionId: string, replacement: string): TaskBoardCommand {
+/**
+ * One logical replacement attempt. A saga passes its persisted id back on retry; an ordinary CLI
+ * invocation mints the id once while building the command, and every transport retry reuses its body.
+ */
+export function coordinatorReplaceCommand(
+  sessionId: string,
+  replacement: string,
+  replacementRoot: string,
+  requestId: string = randomUUID(),
+): TaskBoardCommand {
   const body = TaskBoardCoordinatorReplacementSchema.parse({
+    requestId: required(requestId, 'the replacement request id'),
     sessionId: required(sessionId, 'the current board member'),
     replacementSessionId: required(replacement, 'the replacement session'),
+    replacementRootSessionId: required(replacementRoot, 'the replacement membership root'),
   });
   return { command: 'coordinator-replace', body };
 }

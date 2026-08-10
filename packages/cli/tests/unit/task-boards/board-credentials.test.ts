@@ -44,7 +44,7 @@ describe('which proof a board command needs', () => {
     for (const command of [
       createBoardCommand({ creator: 'a', coordinator: 'b' }),
       markDoneCommand('s-1', { enable: true }),
-      coordinatorReplaceCommand('s-1', 's-2'),
+      coordinatorReplaceCommand('s-1', 's-2', 'root-2'),
       revokeCommand('s-1', 's-2', { reason: 'x' }),
     ]) {
       should(taskBoardCredentialKind(command)).equal('admin');

@@ -9,6 +9,19 @@ import type {
 export type ActiveTaskBoardRole = Exclude<TaskBoardRole, 'none'>;
 export type ChildTaskBoardRole = Exclude<ActiveTaskBoardRole, 'top_agent'>;
 
+/**
+ * Who a board decision can be attributed to. Two of these are not sessions.
+ *
+ * A ROLE ON A BOARD AND A PRINCIPAL ASKING FOR SOMETHING ARE DIFFERENT FACTS, and conflating them is
+ * what left coordinator replacement unreachable: the operator holds the board admin capability, has no
+ * session id, no incarnation and no runtime generation, and every attempt to express that authority as
+ * a session forced a fiction into the field the audit entry is built from. `human_admin` is the human
+ * at the machine; `daemon` is the daemon acting for itself. Neither can ever be minted from a board
+ * capability — they are constructed only where the operator credential is verified.
+ */
+export type TaskBoardNonSessionPrincipal = 'human_admin' | 'daemon';
+export type TaskBoardPrincipalRole = ActiveTaskBoardRole | TaskBoardNonSessionPrincipal;
+
 export interface TaskBoardSession {
   readonly id: string;
   readonly incarnation: string;
@@ -157,6 +170,8 @@ export interface TaskBoardAuditEntry {
   readonly event: TaskBoardAuditEvent;
   readonly requestId: string;
   readonly actorSessionId: string | null;
+  /** What to call an actor with no session id — `user` for the operator. Absent for a member. */
+  readonly actorName?: string;
   readonly outcome: 'applied' | 'replayed' | 'denied';
   readonly detail: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -197,6 +212,18 @@ export interface TaskBoard {
   readonly invitations: readonly TaskBoardInvitation[];
   readonly appliedOperations: readonly TaskBoardAppliedOperation[];
   readonly audit: readonly TaskBoardAuditEntry[];
+  /**
+   * Sessions that once held membership here and no longer do, appended when a grant is retired and
+   * never removed.
+   *
+   * WHY THE BOARD OWNS THIS AND NOT THE BINDINGS. A session's tasks are addressed through the board
+   * it belongs to, and a binding is deleted the instant its grant stops being active. Without this
+   * list, retiring a membership root would take every task its tree ever owned out of the board's
+   * reach — the tasks would have MOVED, in the only sense that matters to a caller, without a single
+   * file being touched. A retired id is a TARGET only: it names no capability, so nothing here can
+   * make a retired session act.
+   */
+  readonly retiredSessionIds: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -226,20 +253,62 @@ export interface TaskBoardCredential {
   readonly capabilityHash: string;
 }
 
+/**
+ * An authorized decision, whoever made it.
+ *
+ * `sessionId` and `runtimeGeneration` are nullable because the non-session principals genuinely have
+ * neither. Writing a placeholder id there would put a session's name on a human's decision in the
+ * audit trail, which is the one thing an audit trail must not do.
+ */
 export interface TaskBoardAuthorization {
   readonly boardId: string;
   readonly grantId: string;
-  readonly sessionId: string;
-  readonly role: ActiveTaskBoardRole;
+  readonly sessionId: string | null;
+  readonly role: TaskBoardPrincipalRole;
   readonly allowedActions: readonly TaskBoardAction[];
   readonly boardEpoch: number;
   readonly coordinatorEpoch: number;
+  readonly runtimeGeneration: number | null;
+}
+
+/**
+ * A MEMBER's authorization: proved by a board capability, so the session terms are always present.
+ *
+ * Every reducer that acts on behalf of a session takes this narrower type, which is why widening the
+ * base type above cost those reducers nothing — a non-session principal cannot be passed where a
+ * member is required, and the compiler is what says so.
+ */
+export interface TaskBoardMemberAuthorization extends TaskBoardAuthorization {
+  readonly sessionId: string;
+  readonly role: ActiveTaskBoardRole;
   readonly runtimeGeneration: number;
 }
 
 export interface TaskBoardSecret {
   readonly value: string;
   readonly hash: string;
+}
+
+/** Every fact a recoverable coordinator capability is cryptographically bound to. */
+export interface TaskBoardCoordinatorReplacementCapabilityIdentity {
+  readonly requestId: string;
+  readonly boardId: string;
+  readonly memberSessionId: string;
+  readonly replacementSessionId: string;
+  readonly replacementRootSessionId: string;
+  readonly replacementSessionIncarnation: string;
+  readonly replacementRuntimeGeneration: number;
+}
+
+/**
+ * Re-derives the capability for one coordinator replacement operation.
+ *
+ * Unlike `TaskBoardCredentialIssuer.capability`, this material must survive a commit followed by a
+ * failed delivery and a daemon restart. The implementation therefore owns a daemon-durable secret;
+ * the caller-controlled request id is identity, never key material.
+ */
+export interface TaskBoardCoordinatorReplacementCapabilityDeriver {
+  derive(identity: TaskBoardCoordinatorReplacementCapabilityIdentity): Promise<TaskBoardSecret>;
 }
 
 export interface TaskBoardErrorShape {

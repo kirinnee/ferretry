@@ -79,6 +79,47 @@ describe('task board snapshot codec', () => {
     should(read.state).eql(state);
   });
 
+  it('should read a board written before retirement existed as one that has retired nobody', () => {
+    // Arrange — a document from a daemon that had never heard of `retiredSessionIds`.
+    const state = createdState();
+    const board = state.boards[0];
+    should(board).be.ok();
+    const { retiredSessionIds: _absent, ...legacyBoard } = board ?? ({} as NonNullable<typeof board>);
+    const legacy = JSON.stringify({
+      version: TASK_BOARD_SNAPSHOT_VERSION,
+      ...state,
+      boards: [legacyBoard],
+    });
+
+    // Act
+    const read = parseTaskBoardSnapshot(legacy);
+
+    // Assert — it parses, and it parses as EMPTY rather than as absent.
+    should(read.ok).be.true();
+    if (!read.ok) return;
+    should(read.state.boards[0]?.retiredSessionIds).deepEqual([]);
+  });
+
+  it('should round-trip the sessions a board has retired', () => {
+    // Arrange
+    const state = createdState();
+    const board = state.boards[0];
+    should(board).be.ok();
+    if (board === undefined) return;
+    const retired: TaskBoardRepositoryState = {
+      ...state,
+      boards: [{ ...board, retiredSessionIds: ['root', 'coordinator'] }],
+    };
+
+    // Act
+    const read = parseTaskBoardSnapshot(serializeTaskBoardSnapshot(retired));
+
+    // Assert
+    should(read.ok).be.true();
+    if (!read.ok) return;
+    should(read.state).eql(retired);
+  });
+
   it('should carry the document version beside the state so a shape change is a migration', () => {
     // Act
     const document: unknown = JSON.parse(serializeTaskBoardSnapshot(createdState()));
