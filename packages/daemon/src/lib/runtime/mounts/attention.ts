@@ -1,8 +1,15 @@
-import { type AttentionErrorCode, AttentionActionRequestSchema } from '@ferretry/protocol';
+import {
+  type AttentionErrorCode,
+  AttentionActionRequestSchema,
+  type DirectNotificationRequest,
+  DirectNotificationRequestSchema,
+  DirectNotificationResponseSchema,
+  FY_REQUEST_ID_HEADER,
+} from '@ferretry/protocol';
 import { isHumanAdminActor, parseActor, type ApiActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
+import { decodeParameter, headerValue, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
@@ -11,6 +18,7 @@ import {
   type AttentionFailure,
   type AttentionService,
 } from '../../attention/index.ts';
+import type { NotificationResult } from '../../notifications/index.ts';
 
 /**
  * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -19,10 +27,20 @@ import {
  * `/v1/sessions/:sessionId/attention` — so mounting it is what turns the shipped `fy attention`,
  * `fy answer` and `fy resolve` commands from 404s into a working capability.
  *
- * `POST /v1/sessions/:sessionId/notify` is deliberately NOT here. It pushes to the human's devices,
- * and the daemon has no push subsystem yet; answering it with anything would claim a delivery that
- * never happened, and `unknown_route` is the honest answer until the transport exists.
+ * The sibling notify route is the explicit, audited outbound path. It uses the same server-derived
+ * actor and allows an agent only its own session; a human may target any known session. Its delivered
+ * count means push endpoints accepted the payload, never that a person observed it.
  */
+
+export interface DirectNotificationSubsystem {
+  notifyDirect(
+    sessionId: string,
+    request: DirectNotificationRequest,
+    actor: AttentionActor,
+    attribution: string,
+    requestId: string,
+  ): Promise<NotificationResult>;
+}
 
 /**
  * How each domain refusal is reported.
@@ -107,6 +125,28 @@ async function apply(attention: AttentionService, context: RouteContext): Promis
   return mutation.ok ? jsonResponse(mutation.snapshot) : refusal(mutation.error);
 }
 
+/** The caller-owned identity of a retryable notification mutation. */
+function notificationRequestId(context: RouteContext): string {
+  const value = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+  if (value === '') {
+    throw new ApiError(
+      400,
+      `a notification must carry ${FY_REQUEST_ID_HEADER}: without it a retried request becomes a second push to the human's devices`,
+      'missing_request_id',
+    );
+  }
+  return value;
+}
+
+async function notify(notifications: DirectNotificationSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const sessionId = pathSessionId(context);
+  const requestId = notificationRequestId(context);
+  const actor = attentionActor(context.actor);
+  const request = await parseBody(context.request, DirectNotificationRequestSchema);
+  const result = await notifications.notifyDirect(sessionId, request, actor, context.actor ?? '', requestId);
+  return result.ok ? jsonResponse(DirectNotificationResponseSchema.parse(result.value)) : refusal(result.error);
+}
+
 /**
  * `admin` scope on both, which is the conservative reading of a surface a warden can currently only
  * reach through the daemon's own trusted reconciliation. A route that says nothing about scope is
@@ -115,7 +155,10 @@ async function apply(attention: AttentionService, context: RouteContext): Promis
  * `noStore` because an attention board is the thing a human is watching to know whether a session is
  * waiting on them; a cached one shows a question that has already been answered.
  */
-export function attentionRoutes(attention: AttentionService): readonly ApiRoute[] {
+export function attentionRoutes(
+  attention: AttentionService,
+  notifications: DirectNotificationSubsystem,
+): readonly ApiRoute[] {
   return [
     {
       method: 'GET',
@@ -130,6 +173,13 @@ export function attentionRoutes(attention: AttentionService): readonly ApiRoute[
       minimum: 'operator',
       noStore: true,
       handle: async context => await apply(attention, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/notify',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await notify(notifications, context),
     },
   ];
 }

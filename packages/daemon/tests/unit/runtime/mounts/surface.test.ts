@@ -195,6 +195,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
         : undefined,
   },
   attention: attentionService(),
+  notifications: {
+    notifyDirect: async sessionId => ({ ok: true, value: { sessionId, delivered: 0 } }),
+  },
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
   catalogs: {
@@ -350,11 +353,8 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // The handover added three: its two writes are `operator` like the migration they sit beside, and
-    // its receipt read is `authenticated`, because reading what happened to a session is a lesser
-    // thing than causing it. Board continuity adds the operator-only coordinator replacement route.
-    // Runtime controls add two more operator-only session mutations beside that surface.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 116, 'admin-token': 1 });
+    // Direct notification delivery joins the handover and runtime additions on the operator surface.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 117, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -458,6 +458,7 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
+      'POST /v1/sessions/:sessionId/notify',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
       'GET /v1/tasks',

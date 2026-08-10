@@ -42,6 +42,7 @@ export * from './migrate/report-store.ts';
 export * from './migrate/tool-inventory.ts';
 export * from './migrate/verdict.ts';
 export * from './names/index.ts';
+export * from './notifications/index.ts';
 export * from './pairing/index.ts';
 export * from './paths.ts';
 export * from './pins/index.ts';

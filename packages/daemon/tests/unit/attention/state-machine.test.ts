@@ -96,6 +96,7 @@ describe('Attention state machine', () => {
     should(actual.items).have.length(1);
     should(actual.resolved).have.length(0);
     should(isActiveAttention(activeEntry(created.ledger))).be.true();
+    should(created.item).deepEqual(actual.items[0]);
   });
 
   it('should stamp exact human, agent, daemon, and warden provenance', () => {
@@ -213,6 +214,7 @@ describe('Attention state machine', () => {
 
     // Assert
     should(actual.change).equal('refreshed');
+    should(actual.item).deepEqual(actual.snapshot.items[0]);
     should(actual.snapshot.count).equal(1);
     should(actual.snapshot.items[0]).containDeep({
       id: 'A1',
@@ -235,6 +237,8 @@ describe('Attention state machine', () => {
     // Assert
     should(duplicate.changed).be.false();
     should(regressed.changed).be.false();
+    should(duplicate.item).be.undefined();
+    should(regressed.item).be.undefined();
     should(regressed.snapshot.items[0]?.sourceSeq).equal(4);
     should(regressed.snapshot.items[0]?.subject).equal('Approve the deployment?');
   });

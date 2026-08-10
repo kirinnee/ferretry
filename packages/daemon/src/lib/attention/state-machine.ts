@@ -28,6 +28,11 @@ export type AttentionActor =
   | { readonly kind: 'agent'; readonly sessionId: string; readonly name: string | null }
   | { readonly kind: 'daemon'; readonly cause: DaemonAttentionCause };
 
+/** Whether an agent actor is confined to the board or session it is trying to change. */
+export function agentConfinedTo(actor: AttentionActor, sessionId: string): boolean {
+  return actor.kind !== 'agent' || actor.sessionId === sessionId;
+}
+
 export type AttentionEntry =
   | { readonly lifecycle: 'active'; readonly origin: AttentionActor; readonly item: AttentionItem }
   | { readonly lifecycle: 'addressed'; readonly origin: AttentionActor; readonly item: ResolvedAttentionItem };
@@ -105,6 +110,8 @@ export type AttentionMutation =
       readonly change: AttentionChange;
       readonly ledger: AttentionLedger;
       readonly snapshot: AttentionSnapshot;
+      /** The raised item on created and refreshed mutations; absent for every other change. */
+      readonly item?: AttentionItem;
     };
 
 export function emptyAttentionLedger(sessionId: string, at: string): AttentionLedger {
@@ -214,7 +221,7 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
   // An agent's provenance proves authority only for that exact session. Keep
   // this check in the pure daemon-owned layer so a transport or future
   // in-process caller cannot bypass it by constructing a command directly.
-  if (command.actor.kind === 'agent' && command.actor.sessionId !== ledger.sessionId) {
+  if (!agentConfinedTo(command.actor, ledger.sessionId)) {
     return failure('forbidden', 'an agent may change attention only in its own session');
   }
   switch (command.action) {
@@ -301,7 +308,7 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
     entries: [...ledger.entries, { lifecycle: 'active', origin: actor, item }],
     updatedAt: command.at,
   };
-  return success(next, true, 'created');
+  return success(next, true, 'created', item);
 }
 
 function refreshStable(
@@ -336,7 +343,7 @@ function refreshStable(
     ),
     updatedAt: command.at,
   };
-  return success(next, true, 'refreshed');
+  return success(next, true, 'refreshed', item);
 }
 
 function addressById(
@@ -545,8 +552,20 @@ function unchanged(ledger: AttentionLedger): AttentionMutation {
   return success(ledger, false, 'unchanged');
 }
 
-function success(ledger: AttentionLedger, changed: boolean, change: AttentionChange): AttentionMutation {
-  return { ok: true, changed, change, ledger, snapshot: attentionSnapshot(ledger) };
+function success(
+  ledger: AttentionLedger,
+  changed: boolean,
+  change: AttentionChange,
+  item?: AttentionItem,
+): AttentionMutation {
+  return {
+    ok: true,
+    changed,
+    change,
+    ledger,
+    snapshot: attentionSnapshot(ledger),
+    ...(item === undefined ? {} : { item }),
+  };
 }
 
 function failure(code: AttentionErrorCode, message: string): AttentionMutation {
