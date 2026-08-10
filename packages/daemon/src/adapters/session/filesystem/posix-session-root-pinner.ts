@@ -23,6 +23,7 @@ import {
   rootIsDenied,
   type SessionRootPinner,
   unsupportedPlatform,
+  type WorkBudget,
 } from '../../../lib/session/filesystem/index.ts';
 import type { PinnedWorkingDirectory } from '../../../lib/worktrees/ports.ts';
 import { type DirectorySyscalls, loadDirectorySyscalls } from './directory-syscalls.ts';
@@ -204,7 +205,7 @@ class PosixPinnedTarget implements PinnedTarget {
    * Stopped one dirent past the cap, so the advertised limit bounds real memory and latency instead of
    * slicing a list already materialised in full — which also bounds how long this holds the directory.
    */
-  async list(maxEntries: number): Promise<PinnedListing> {
+  async list(maxEntries: number, budget?: WorkBudget): Promise<PinnedListing> {
     return this.directory.enter(this.fd, () => {
       const here = this.directory.here();
       const dir = opendirSync('.');
@@ -216,6 +217,12 @@ class PosixPinnedTarget implements PinnedTarget {
           if (dirent === null) break;
           if (entries.length >= maxEntries) {
             truncated = true; // one dirent past the cap is all we need to know
+            break;
+          }
+          // Asked before classifying rather than after, because classifying is what costs: a spent
+          // budget must not buy one more `lstat` per remaining child of a directory holding thousands.
+          if (budget?.expired() === true) {
+            truncated = true;
             break;
           }
           const type = direntType(dirent);

@@ -345,7 +345,7 @@ describe('the mounted daemon surface', () => {
     // The handover added three: its two writes are `operator` like the migration they sit beside, and
     // its receipt read is `authenticated`, because reading what happened to a session is a lesser
     // thing than causing it. Board continuity adds the operator-only coordinator replacement route.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 113, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 114, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -495,9 +495,10 @@ describe('the mounted daemon surface', () => {
       // Dictation enhancement: the daemon's one remaining speech-to-text route, and a fixed literal
       // under a prefix no other subsystem uses. Recognition happens in the browser.
       'POST /v1/stt/enhance',
-      // The working-tree read. Its three deeper paths come before the one-segment `fs`, which is what
+      // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',
+      'GET /v1/sessions/:sessionId/fs/index',
       'GET /v1/sessions/:sessionId/fs/changes',
       'GET /v1/sessions/:sessionId/fs/diff',
       'GET /v1/sessions/:sessionId/fs',

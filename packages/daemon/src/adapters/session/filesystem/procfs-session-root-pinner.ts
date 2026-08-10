@@ -14,6 +14,7 @@ import {
   rootIsDenied,
   type SessionRootPinner,
   unsupportedPlatform,
+  type WorkBudget,
 } from '../../../lib/session/filesystem/index.ts';
 import {
   canonicalRel,
@@ -134,7 +135,7 @@ class ProcfsPinnedTarget implements PinnedTarget {
    * A `readdir` would materialise all million entries of a `node_modules`-scale directory before the
    * slice, which makes the cap decorative and hands a token holder a cheap allocation amplifier.
    */
-  async list(maxEntries: number): Promise<PinnedListing> {
+  async list(maxEntries: number, budget?: WorkBudget): Promise<PinnedListing> {
     const own = procPath(this.handle.fd);
     const kept: PinnedDirectoryEntry[] = [];
     let truncated = false;
@@ -143,6 +144,12 @@ class ProcfsPinnedTarget implements PinnedTarget {
       for await (const dirent of dir) {
         if (kept.length >= maxEntries) {
           truncated = true; // one dirent past the cap is all we need to know
+          break;
+        }
+        // Asked before classifying rather than after, because classifying is what costs: a spent budget
+        // must not buy one more `lstat` per remaining child of a directory holding thousands.
+        if (budget?.expired() === true) {
+          truncated = true;
           break;
         }
         const type = direntType(dirent);

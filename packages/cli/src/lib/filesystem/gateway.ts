@@ -1,3 +1,4 @@
+import { SessionFileIndexResponseSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { FilesystemApiClient, IFilesystemGateway } from './ports.ts';
 import { FsChangesSchema, FsFileViewSchema, FsListingSchema } from './wire.ts';
@@ -34,6 +35,10 @@ export class ProtocolFilesystemGateway implements IFilesystemGateway {
   async file(sessionId: string, path: string, rev?: 'head') {
     const target = required(path, 'a relative file path is required');
     return await this.client.request(withPath(`${filesystemPath(sessionId)}/file`, target, rev), FsFileViewSchema);
+  }
+
+  async index(sessionId: string) {
+    return await this.client.request(`${filesystemPath(sessionId)}/index`, SessionFileIndexResponseSchema);
   }
 
   async changes(sessionId: string) {

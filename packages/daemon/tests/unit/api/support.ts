@@ -39,6 +39,8 @@ export interface RequestOverrides {
   readonly unreadableBody?: boolean;
   /** Collects what the read was asked for and whether it happened. */
   readonly reads?: BodyReads;
+  /** The caller's cancellation, for a route long enough to be worth abandoning. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -59,6 +61,7 @@ export function request(overrides: RequestOverrides = {}): ApiRequest {
     headers,
     clientAddress: overrides.clientAddress,
     loopback: overrides.loopback ?? false,
+    ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
     text: async (limitBytes?: number) => {
       reads?.limits.push(limitBytes);
       if (overrides.unreadableBody === true) throw new Error('the connection dropped');

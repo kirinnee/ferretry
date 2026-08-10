@@ -158,6 +158,29 @@ export function hasDiffableChange(changes: readonly SessionGitChange[]): boolean
   return changes.some(change => change.status !== '??' && change.status !== '!!');
 }
 
+/**
+ * Parse `ls-files -z`, which is one NUL-terminated path per record and nothing else.
+ *
+ * A capped stream can end mid-pathname, and `split` presents that fragment as an ordinary final record —
+ * which would put a file that does not exist into a search index and send a reader to a 404. The
+ * unterminated tail is therefore dropped, exactly as the status parser drops its own.
+ *
+ * Deduplicated because `--cached` reports one path once per merge stage, so a conflicted file arrives
+ * two or three times and would otherwise be three rows in a result list.
+ */
+export function parseFileList(stdout: string, truncated: boolean): readonly string[] {
+  const records = stdout.split(NUL);
+  if (truncated && !stdout.endsWith(NUL)) records.pop();
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  for (const record of records) {
+    if (record === '' || seen.has(record)) continue;
+    seen.add(record);
+    paths.push(record);
+  }
+  return paths;
+}
+
 export interface HeadTreeEntry {
   readonly mode: number;
   readonly oid: string;

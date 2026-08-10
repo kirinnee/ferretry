@@ -43,3 +43,18 @@ describe('filesystem command surface', () => {
     should(JSON.parse(file.out.messages[0] ?? '')).have.property('path', 'src/app.ts');
   });
 });
+
+describe('the index command', () => {
+  it('should read the index through both spellings and pass the query on', async () => {
+    // Arrange + Act
+    const plain = run(['fs', 'index', 'Fable']);
+    const searched = run(['files', 'search', 'Fable', '--query', 'app', '--json']);
+    await plain.parsed;
+    await searched.parsed;
+
+    // Assert
+    should(plain.gateway.calls[0]).deepEqual({ method: 'index', args: ['Fable'] });
+    should(searched.gateway.calls[0]).deepEqual({ method: 'index', args: ['Fable'] });
+    should(JSON.parse(searched.out.messages[0] ?? '')).match({ files: [{ name: 'app.ts' }] });
+  });
+});
