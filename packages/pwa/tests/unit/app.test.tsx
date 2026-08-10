@@ -29,6 +29,7 @@ import {
   DoctorReportSchema,
   type FyEvent,
   HealthViewSchema,
+  type ProjectInfo,
   type SessionStatus,
   SOCKET_TICKET_TTL_SECONDS,
   type WardenVerdictsView,
@@ -257,6 +258,8 @@ interface ShellOptions {
   readonly attention?: (sessionId: string) => AttentionSnapshot;
   /** The recent Warden-report index, deliberately supplied by the paired daemon. */
   readonly wardenVerdicts?: () => Promise<WardenVerdictsView>;
+  /** The durable project registry this daemon answers `/v1/projects` with. */
+  readonly projects?: readonly ProjectInfo[];
 }
 
 interface HealthRead {
@@ -382,6 +385,11 @@ const appStore = async (
           expiresAt: '2026-08-01T10:00:30.000Z',
         });
       if (url.endsWith('/terminals')) return Response.json(terminalListing);
+      // The durable registry, and ONLY when a test supplies one. The default
+      // stays the empty document every other page gets, because the registry's
+      // own failure path is what the projects-route test asserts on.
+      if (options.projects !== undefined && new URL(url).pathname === '/v1/projects')
+        return Response.json(options.projects);
       return Response.json({});
     },
   });
@@ -644,6 +652,70 @@ describe('AppShell', () => {
     expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
       'Could not read this daemon’s project registry',
     );
+    await view.unmount();
+  });
+
+  it('mounts one registered project from its UUID-addressed route', async () => {
+    // Arrange — the route carries the record id, not the folder path, so the
+    // screen has to find the project in the daemon's own registry.
+    const projectId = '11111111-1111-4111-8111-111111111111';
+
+    // Act
+    const { view } = await renderShell(`/d/alpha/projects/${projectId}`, [alpha.daemonId], {
+      projects: [
+        {
+          id: projectId,
+          name: 'ferretry',
+          path: '/work/ferretry',
+          source: 'existing-folder',
+          createdAt: '2026-08-01T10:00:00.000Z',
+        },
+      ],
+    });
+    await settle();
+
+    // Assert — the composition root reached the real page through its slot,
+    // and the shell put the reader inside the projects trail rather than at its
+    // root.
+    const page = view.container.querySelector(`[data-project-detail="${projectId}"]`);
+    expect(page).not.toBeNull();
+    expect(page?.textContent).toContain('ferretry');
+    expect(page?.textContent).toContain('/work/ferretry');
+    const crumbs = [...view.container.querySelectorAll('nav a, nav span')].map(node => node.textContent ?? '');
+    expect(crumbs).toContain('Projects');
+    await view.unmount();
+  });
+
+  it('walks from the registry to one project without leaving the app', async () => {
+    // Arrange
+    const projectId = '11111111-1111-4111-8111-111111111111';
+    const { view } = await renderShell('/d/alpha/projects', [alpha.daemonId], {
+      projects: [
+        {
+          id: projectId,
+          name: 'ferretry',
+          path: '/work/ferretry',
+          source: 'existing-folder',
+          createdAt: '2026-08-01T10:00:00.000Z',
+        },
+      ],
+    });
+    await settle();
+    const link = view.container.querySelector<HTMLAnchorElement>('[data-registered-project] a');
+    expect(link?.getAttribute('href')).toBe(`/d/alpha/projects/${projectId}`);
+
+    // Act — an ordinary primary click.
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+    await interact(() => link?.dispatchEvent(click));
+    await settle();
+
+    // Assert — the SAME mounted tree is now the detail screen. A raw anchor
+    // would have left through the document instead, which in this environment
+    // means the tree would still be showing the registry.
+    expect(click.defaultPrevented).toBe(true);
+    expect(window.location.pathname).toBe(`/d/alpha/projects/${projectId}`);
+    expect(view.container.querySelector(`[data-project-detail="${projectId}"]`)).not.toBeNull();
+    expect(view.container.querySelector('#projects-heading')).toBeNull();
     await view.unmount();
   });
 
@@ -1262,6 +1334,7 @@ describe('route change accessibility', () => {
         { kind: 'sessions', daemonId: id },
         { kind: 'new-session', daemonId: id },
         { kind: 'projects', daemonId: id },
+        { kind: 'project-detail', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
         { kind: 'settings', daemonId: id },
         { kind: 'warden', daemonId: id },
@@ -1276,6 +1349,7 @@ describe('route change accessibility', () => {
       'Sessions',
       'Sessions, New',
       'Sessions, Projects',
+      'Sessions, Projects, Project',
       'Sessions, shared',
       'Sessions, Settings',
       'Sessions, Warden',

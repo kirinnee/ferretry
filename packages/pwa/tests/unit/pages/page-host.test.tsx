@@ -9,6 +9,7 @@ import {
   type DaemonPageProps,
   PageHost,
   type PageHostSlots,
+  type ProjectDetailPageProps,
   type SessionChatPageProps,
 } from '../../../src/lib/pages/page-host.tsx';
 import { type PageRoute, parseRoute } from '../../../src/lib/pages/routes.ts';
@@ -39,12 +40,19 @@ describe('PageHost', () => {
       receivedScope = scope;
       return <div data-page="session">session</div>;
     };
+    let receivedProjectId: string | undefined;
+    const ProjectDetail = ({ connection: actual, projectId }: ProjectDetailPageProps) => {
+      received.push(actual);
+      receivedProjectId = projectId;
+      return <div data-page="project-detail">project-detail</div>;
+    };
     const slots: PageHostSlots = {
       ConnectionPicker: () => <div data-page="connections">connections</div>,
       Setup: () => <div data-page="setup">setup</div>,
       Sessions: daemonPage('sessions'),
       NewSession: daemonPage('new-session'),
       Projects: daemonPage('projects'),
+      ProjectDetail,
       SessionChat,
       Settings: daemonPage('settings'),
       Warden: daemonPage('warden'),
@@ -56,6 +64,7 @@ describe('PageHost', () => {
       '/d/daemon-a',
       '/d/daemon-a/new',
       '/d/daemon-a/projects',
+      '/d/daemon-a/projects/11111111-1111-4111-8111-111111111111',
       '/d/daemon-a/session/session-one',
       '/d/daemon-a/settings',
       '/d/daemon-a/warden',
@@ -74,6 +83,7 @@ describe('PageHost', () => {
       '<div data-page="sessions">sessions</div>',
       '<div data-page="new-session">new-session</div>',
       '<div data-page="projects">projects</div>',
+      '<div data-page="project-detail">project-detail</div>',
       '<div data-page="session">session</div>',
       '<div data-page="settings">settings</div>',
       '<div data-page="warden">warden</div>',
@@ -84,7 +94,44 @@ describe('PageHost', () => {
     should(received).have.length(paths.length);
     for (const actual of received) should(actual).equal(connection);
     should(receivedScope).deepEqual({ daemonId: connection.daemonId, sessionId: 'session-one' });
+    should(receivedProjectId).equal('11111111-1111-4111-8111-111111111111');
     should(html.join('')).not.containEql('device-secret');
+  });
+
+  it('should refuse the project detail route rather than render it unmounted', () => {
+    // Arrange
+    const connection = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'device-secret',
+    });
+    const unusedDaemonPage = (): never => {
+      throw new Error('a daemon page must not render');
+    };
+    const slots: PageHostSlots = {
+      ConnectionPicker: unusedDaemonPage,
+      Setup: unusedDaemonPage,
+      Sessions: unusedDaemonPage,
+      NewSession: unusedDaemonPage,
+      SessionChat: unusedDaemonPage,
+      Settings: unusedDaemonPage,
+      Warden: unusedDaemonPage,
+      Analytics: unusedDaemonPage,
+      Learning: unusedDaemonPage,
+    };
+
+    // Act
+    const unmounted = (): string =>
+      renderToStaticMarkup(
+        <PageHost
+          route={pageRoute('/d/daemon-a/projects/11111111-1111-4111-8111-111111111111')}
+          connection={connection}
+          slots={slots}
+        />,
+      );
+
+    // Assert
+    should(unmounted).throw('the project detail route is not mounted');
   });
 
   it('should render the connection picker without inventing a default daemon', () => {
