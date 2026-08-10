@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { UnimplementedFleetCapabilityError, unimplementedCapabilities } from '../../src/lib/capabilities.ts';
-import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
+import { UnimplementedFleetCapabilityError } from '../../src/lib/capabilities.ts';
+import { type FleetConfig, FleetConfigCapabilities, FleetConfigSchema } from '../../src/lib/config.ts';
+import { unimplementedCapabilities } from '../../src/lib/unimplemented.ts';
 
 const ID_CLAUDE = '00000000-0000-4000-8000-00000000c1a1';
 
@@ -25,12 +26,14 @@ const config = (patch: Record<string, unknown> = {}): FleetConfig =>
     ...patch,
   });
 
-const keysOf = (value: FleetConfig): readonly string[] => unimplementedCapabilities(value).map(item => item.key);
+const unsupported = (value: FleetConfig) => unimplementedCapabilities(value, FleetConfigCapabilities);
+
+const keysOf = (value: FleetConfig): readonly string[] => unsupported(value).map(item => item.key);
 
 describe('unimplementedCapabilities', () => {
   it('should report nothing for a configuration that carries only defaults', () => {
     // Act
-    const actual = unimplementedCapabilities(config());
+    const actual = unsupported(config());
 
     // Assert — every one of these sections parses; none of them is a request.
     should(actual).deepEqual([]);
@@ -94,7 +97,7 @@ describe('unimplementedCapabilities', () => {
 describe('UnimplementedFleetCapabilityError', () => {
   it('should name every offending key, what it would do, and what happens instead', () => {
     // Arrange
-    const capabilities = unimplementedCapabilities(config({ health: { enabled: true }, usage: { jitter: 0.5 } }));
+    const capabilities = unsupported(config({ health: { enabled: true }, usage: { jitter: 0.5 } }));
 
     // Act
     const actual = new UnimplementedFleetCapabilityError(capabilities);
@@ -110,9 +113,7 @@ describe('UnimplementedFleetCapabilityError', () => {
 
   it('should say "a capability" when only one key offends', () => {
     // Act
-    const actual = new UnimplementedFleetCapabilityError(
-      unimplementedCapabilities(config({ health: { enabled: true } })),
-    );
+    const actual = new UnimplementedFleetCapabilityError(unsupported(config({ health: { enabled: true } })));
 
     // Assert
     should(actual.message).match(/asks for a capability this build does not implement/);

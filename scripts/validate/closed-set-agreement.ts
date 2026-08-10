@@ -4,18 +4,18 @@
  * ## THE DEFECT
  *
  * `DAEMON_CAPABILITIES` owns the closed capability set in `@ferretry/protocol`, while the daemon's
- * configuration schema spells the same six keys again. TypeScript proves that every key written in
- * the daemon is a capability; it does not prove that every capability was written. Adding a seventh
- * protocol member can therefore compile while configuration continues returning only six.
+ * configuration schema needs a literal Zod field map. The mapped type on that map now proves that
+ * every protocol capability is present; this gate keeps independently comparing the source shapes
+ * while the owner decides whether the redundant detector should be removed.
  *
- * `PushNotificationKindSchema` and the PWA's `NOTIFICATION_KINDS` have the same shape. A
- * `satisfies readonly PushNotificationKind[]` annotation proves soundness, not completeness.
+ * `PushNotificationKindSchema` and the PWA's `NOTIFICATION_KIND_FIELDS` have the same shape. Its
+ * mapped type likewise proves completeness, while `NOTIFICATION_KINDS` is derived from the map.
  *
  * This gate compares every registered pair in BOTH directions and rejects duplicate members. It is
- * deliberately a temporary detector, not the final ownership model. The approved design's §4.6
- * says not to keep a capability-enumeration gate, and Wave 2a replaces both registered closed sets
- * with compiler-exhaustive derivation. The explicit Wave A brief requires detection before that
- * move, so this gate changes no production behavior and is scheduled to leave with Wave 2a.
+ * deliberately a detector rather than the final ownership model. Wave 2a upgrades the first two
+ * registered pairs to compiler-exhaustive maps, so they no longer need this gate for completeness;
+ * the gate remains unchanged in scope pending the owner's deletion decision and still changes no
+ * production behavior.
  *
  * ## WHY IT PARSES INSTEAD OF SCANNING FOR QUOTES — TWO MEASURED FAIL-OPENS
  *
@@ -61,9 +61,9 @@
  *            with comments and whitespace allowed anywhere. A member is `'…'` or `"…"` naming a plain
  *            identifier-shaped value — never an identifier, spread, hole, nested array or object,
  *            template literal, or any other expression.
- *   OBJECT   `{` then only `<key>: grantSchemaFor('<key>')` entries separated by commas, one optional
- *            trailing comma, comments allowed. No spread, no computed or quoted key, no shorthand, no
- *            other callee, no non-literal argument, and nothing trailing the call.
+ *   OBJECT   `{` then only the entry shape the registered map names, separated by commas, one optional
+ *            trailing comma, comments allowed. No spread, computed or quoted key, shorthand, or
+ *            extra expressions are permitted.
  *
  * Zero members, a duplicate member, a marker that is absent or declared twice in code, a delimiter
  * that is not where it must be, and a key whose grant argument names another capability are all gate
@@ -472,6 +472,39 @@ function grantEntries(file: string, text: string, kind: Uint8Array, openAt: numb
   return members;
 }
 
+/** Every key of a literal boolean key map, refusing any entry that is not exactly `<key>: true`. */
+function trueEntries(file: string, text: string, kind: Uint8Array, openAt: number, closeAt: number): string[] {
+  const what = 'notification key-map entries are exactly `<key>: true`';
+  const members: string[] = [];
+  let index = openAt + 1;
+  let expecting: 'entry' | 'separator' = 'entry';
+
+  for (;;) {
+    index = skipTrivia(text, kind, index);
+    if (index >= closeAt) break;
+
+    if (expecting === 'separator') {
+      if (text[index] === ',' && kind[index] === CODE) {
+        expecting = 'entry';
+        index += 1;
+        continue;
+      }
+      fail(
+        `${file}:${lineAt(text, index)}: nothing may follow a notification key-map entry — found ${snippet(text, index)}`,
+      );
+    }
+
+    const key = readIdentifier(text, kind, index);
+    if (key === undefined) fail(`${file}:${lineAt(text, index)}: ${what} — found ${snippet(text, index)}`);
+    index = expectAt(file, text, kind, index + key.length, ':', `notification key ${key}`) + 1;
+    index = expectIdentifier(file, text, kind, index, 'true', `the value for notification key ${key}`);
+    members.push(key);
+    expecting = 'separator';
+  }
+
+  return members;
+}
+
 function literalArray(file: string, marker: string, label: string): Enumeration {
   const text = source(file);
   const kind = classify(file, text);
@@ -485,8 +518,8 @@ function literalArray(file: string, marker: string, label: string): Enumeration 
 function grantObject(file: string, label: string): Enumeration {
   const text = source(file);
   const kind = classify(file, text);
-  const marker = 'CapabilityGrantsDocumentSchema =';
-  const markerAt = soleDeclaration(file, text, kind, marker);
+  const schemaMarker = 'CapabilityGrantsDocumentSchema =';
+  const schemaAt = soleDeclaration(file, text, kind, schemaMarker);
   // ADJACENT, token by token, never a forward search for the next `.strictObject(`.
   //
   // Searching forward adopted an unrelated object with no way to tell. Reassign the declaration to a
@@ -497,14 +530,32 @@ function grantObject(file: string, label: string): Enumeration {
   // precisely because the six entries were extracted once already, and the next refactor that moves a
   // reusable field map BELOW it re-creates the shape.
   //
-  // So the chain from the marker to the object is spelled out: `z` `.` `strictObject` `(` `{`, with
-  // only trivia allowed between the tokens. A refactor that changes the builder is then exit 2 — a
-  // probe that has to be re-aimed deliberately, which is the honest answer.
-  let cursor = expectIdentifier(file, text, kind, markerAt + marker.length, 'z', `the declaration ${marker}`);
+  // So the chain from the schema to the field map is spelled out: `z` `.` `strictObject` `(` then
+  // `CAPABILITY_GRANT_FIELDS`, with only trivia allowed between tokens. A refactor that changes the
+  // builder is exit 2 — a probe that has to be re-aimed deliberately, which is the honest answer.
+  let cursor = expectIdentifier(
+    file,
+    text,
+    kind,
+    schemaAt + schemaMarker.length,
+    'z',
+    `the declaration ${schemaMarker}`,
+  );
   cursor = expectAt(file, text, kind, cursor, '.', 'the zod builder for the grants document') + 1;
   cursor = expectIdentifier(file, text, kind, cursor, 'strictObject', 'the zod builder for the grants document');
   cursor = expectAt(file, text, kind, cursor, '(', 'z.strictObject for the grants document') + 1;
-  const openAt = expectAt(file, text, kind, cursor, '{', 'z.strictObject( for the grants document');
+  expectIdentifier(
+    file,
+    text,
+    kind,
+    cursor,
+    'CAPABILITY_GRANT_FIELDS',
+    'z.strictObject field map for the grants document',
+  );
+
+  const marker = 'CAPABILITY_GRANT_FIELDS =';
+  const markerAt = soleDeclaration(file, text, kind, marker);
+  const openAt = expectAt(file, text, kind, markerAt + marker.length, '{', `the declaration ${marker}`);
   const closeAt = balancedEnd(file, text, kind, openAt, '{', '}');
   const members = grantEntries(file, text, kind, openAt, closeAt);
   return {
@@ -513,6 +564,16 @@ function grantObject(file: string, label: string): Enumeration {
     pattern: "<key>: grantSchemaFor('<member>') entries in CapabilityGrantsDocumentSchema",
     members,
   };
+}
+
+function trueObject(file: string, marker: string, label: string): Enumeration {
+  const text = source(file);
+  const kind = classify(file, text);
+  const markerAt = soleDeclaration(file, text, kind, marker);
+  const openAt = expectAt(file, text, kind, markerAt + marker.length, '{', `the declaration ${JSON.stringify(marker)}`);
+  const closeAt = balancedEnd(file, text, kind, openAt, '{', '}');
+  const members = trueEntries(file, text, kind, openAt, closeAt);
+  return { label, file, pattern: `<key>: true entries in ${marker}`, members };
 }
 
 const agreements: readonly Agreement[] = [
@@ -532,10 +593,10 @@ const agreements: readonly Agreement[] = [
       'PushNotificationKindSchema = z.enum(',
       '@ferretry/protocol PushNotificationKindSchema',
     ),
-    replica: literalArray(
+    replica: trueObject(
       'packages/pwa/src/lib/notification-preferences.ts',
-      'NOTIFICATION_KINDS =',
-      'PWA NOTIFICATION_KINDS',
+      'NOTIFICATION_KIND_FIELDS =',
+      'PWA NOTIFICATION_KIND_FIELDS',
     ),
   },
   {

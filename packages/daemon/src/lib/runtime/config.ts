@@ -198,21 +198,27 @@ const grantSchemaFor = (capability: DaemonCapability) =>
     })
     .prefault({});
 
-export const CapabilityGrantsDocumentSchema = z
-  .strictObject({
-    fleet: grantSchemaFor('fleet'),
-    terminal: grantSchemaFor('terminal'),
-    browser: grantSchemaFor('browser'),
-    filesystem: grantSchemaFor('filesystem'),
-    warden: grantSchemaFor('warden'),
-    // Every capability in `DAEMON_CAPABILITIES` needs its key HERE, spelled out. The keys are literal
-    // rather than derived from the array so the parsed type stays exact, and the cost of that is this
-    // comment: a capability missing from this object is refused when an operator writes it AND absent
-    // from what `readGrants` returns, while `CapabilityGrants` says it is there. TypeScript does not
-    // catch the second — a strict object widens on the way out.
-    pairing: grantSchemaFor('pairing'),
-  })
-  .prefault({});
+/**
+ * The literal shape Zod needs, proved complete against the protocol-owned capability set.
+ *
+ * `strictObject` preserves the exact parsed object type only when it receives literal fields, so
+ * deriving this object from `DAEMON_CAPABILITIES` would lose the useful Zod inference. This mapped
+ * type keeps that requirement without accepting a second, incomplete capability list: adding a
+ * protocol capability makes this declaration a compile error until it names the corresponding
+ * grant field.
+ */
+type CapabilityGrantFields = { readonly [K in DaemonCapability]: ReturnType<typeof grantSchemaFor> };
+
+const CAPABILITY_GRANT_FIELDS = {
+  fleet: grantSchemaFor('fleet'),
+  terminal: grantSchemaFor('terminal'),
+  browser: grantSchemaFor('browser'),
+  filesystem: grantSchemaFor('filesystem'),
+  warden: grantSchemaFor('warden'),
+  pairing: grantSchemaFor('pairing'),
+} as const satisfies CapabilityGrantFields;
+
+export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FIELDS).prefault({});
 
 /**
  * The document an operator owns: exactly the fields `config/daemon.json` holds, and nothing derived.

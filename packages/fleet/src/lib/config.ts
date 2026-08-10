@@ -19,6 +19,7 @@
  */
 import { z } from 'zod';
 import { AccountIdSchema, AccountModeSchema, FleetManifestModelSchema, HarnessKindSchema } from './manifest.ts';
+import type { SchemaCapabilityDeclaration } from './unimplemented.ts';
 
 const NonEmptyString = z.string().min(1);
 
@@ -202,6 +203,9 @@ export type Alias = z.infer<typeof AliasSchema>;
 
 const positiveSeconds = (fallback: number) => z.number().int().positive().default(fallback);
 
+/** The schema default and the R3 comparison share this one value. */
+export const USAGE_JITTER_DEFAULT = 0.25;
+
 export const HealthSchema = z
   .strictObject({
     /** Off by default: every probe is a real model call. */
@@ -233,7 +237,7 @@ export const UsageSchema = z
     /** On by default: a usage read is cheap and consumes no quota. */
     enabled: z.boolean().default(true),
     interval: positiveSeconds(60),
-    jitter: z.number().min(0).max(1).default(0.25),
+    jitter: z.number().min(0).max(1).default(USAGE_JITTER_DEFAULT),
     concurrency: z.number().int().positive().default(6),
     timeout: positiveSeconds(15),
     atLimitPercent: z.number().min(1).max(100).default(100),
@@ -474,3 +478,34 @@ export const FleetConfigSchema = z
     }
   });
 export type FleetConfig = z.infer<typeof FleetConfigSchema>;
+
+/**
+ * The fleet settings this schema accepts for migration compatibility but this build cannot honour.
+ *
+ * This is deliberately adjacent to {@link FleetConfigSchema}: accepting a setting is not the same
+ * as implementing it, and a caller can print this declaration mechanically with
+ * {@link unimplementedCapabilities}. Removing an entry is the commit that implements it.
+ */
+export const FleetConfigCapabilities = {
+  unimplementedCapabilities: [
+    {
+      key: 'usage.cliProxy',
+      capability: 'reading runtime availability from a local CLIProxyAPI pool',
+      consequence: 'the accounts that pool serves report as ordinary accounts, so a pool in cooldown looks usable',
+      requested: (config: FleetConfig) => config.usage.cliProxy.length > 0,
+    },
+    {
+      key: 'health.enabled',
+      capability: 'probing each account with a real model call to prove it can complete a turn',
+      consequence: 'nothing verifies an account beyond that its wrapper exists, so a broken account reads as fine',
+      requested: (config: FleetConfig) => config.health.enabled,
+    },
+    {
+      key: 'usage.jitter',
+      capability: 'spreading a fleet’s background probes so they do not synchronize',
+      consequence:
+        'the daemon re-collects when a snapshot has aged past usage.interval rather than on a timer, so there is no synchronized cycle to spread',
+      requested: (config: FleetConfig) => config.usage.jitter !== USAGE_JITTER_DEFAULT,
+    },
+  ],
+} as const satisfies SchemaCapabilityDeclaration<FleetConfig>;
