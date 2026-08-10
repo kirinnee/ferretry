@@ -1,3 +1,5 @@
+import { MAX_SESSION_FILE_INDEX_FILES } from '@ferretry/protocol';
+
 /**
  * The frozen vocabulary of the session working-tree viewer.
  *
@@ -32,6 +34,40 @@ export const MAX_LISTING_ENTRIES = 2_000;
 
 /** How far into a file a NUL byte still means "do not try to render this as text". */
 export const BINARY_SNIFF_BYTES = 8 * 1024;
+
+/**
+ * The bounds on ONE whole-session file index, so a search over a large tree costs a known amount.
+ *
+ * A working tree has no upper size, and an index read is the one call in this surface that walks all of
+ * it. Every bound reports itself as a `truncated` skip and downgrades coverage rather than silently
+ * returning a short list, because a short list nobody was told about reads as "that file does not exist".
+ *
+ * The file count is generous on purpose: it is a name and a basename per row, so twenty thousand of them
+ * is a few hundred kilobytes, and a repository that large is exactly the one a person cannot search by
+ * scrolling. The candidate count prevents ignored, excluded, missing or unsupported entries from making
+ * the daemon inspect an arbitrarily larger set just to find those files. The directory count bounds a
+ * NON-repository walk, which is the only path that opens one descriptor per directory; a Git worktree
+ * asks Git once whatever its depth. The byte cap bounds that answer's size.
+ */
+export const MAX_INDEX_FILES = MAX_SESSION_FILE_INDEX_FILES;
+export const MAX_INDEX_CANDIDATES = 40_000;
+export const MAX_INDEX_DIRECTORIES = 4_000;
+export const MAX_INDEX_LIST_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The WALL-CLOCK bound, which is the only one of these that bounds what a caller actually waits for.
+ *
+ * The counts above bound how much is looked at; they do not bound how long looking takes, and the two
+ * are not the same fact. Proving a Git candidate is a current regular file is a component-by-component
+ * walk from the pin, so the candidate cap alone admits a request measured in tens of seconds on a large
+ * monorepo — and the server closes an idle connection at thirty, which turns an answer this schema has
+ * exact words for (`coverage: 'partial'`) into a dropped socket the client can say nothing about.
+ *
+ * Fifteen seconds therefore leaves the response room to be built and written inside that window. It is a
+ * budget for the WHOLE call — the Git question and every open and enumeration after it — because a
+ * per-operation timeout multiplied by an unbounded operation count is not a bound at all.
+ */
+export const MAX_INDEX_WALL_MS = 15_000;
 
 /**
  * Per-side cap for a diff. Both sides are held in memory and staged into a scratch directory before

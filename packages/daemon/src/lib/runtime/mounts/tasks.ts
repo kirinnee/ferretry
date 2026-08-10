@@ -1,9 +1,13 @@
 import {
   FY_REQUEST_ID_HEADER,
   type FleetTaskListResponse,
+  MAX_SESSION_SEARCH_QUERY_LENGTH,
+  matchesSessionSearchQuery,
   type ScopedTaskDetailResponse,
   type ScopedTaskSummary,
   type ScopedTaskView,
+  sessionSearchTaskHaystack,
+  SessionSearchQuerySchema,
   type SessionStatus,
   type SessionTaskListResponse,
   TASK_SCHEMA_VERSION,
@@ -214,10 +218,53 @@ function afterSequence(request: ApiRequest): number {
 const TASK_FILTERS = ['repo', 'assignee', 'kind', 'status'] as const;
 type TaskFilter = (typeof TASK_FILTERS)[number];
 
-function taskFilters(request: ApiRequest): ReadonlyMap<TaskFilter, string> {
+/**
+ * The free-text search over a board, deliberately NOT a member of {@link TASK_FILTERS}.
+ *
+ * That set is documented as exact-match on a named field, and a substring search over five fields is a
+ * different kind of question — adding it there would make the comment above it false and would let
+ * `?q=` be compared with `!==` against a field that does not exist.
+ *
+ * Answering it HERE is what deletes an N+1. The list route already materialises every full task and
+ * throws the prose away to keep a two-hundred-row board from being a megabyte, so a client that wanted
+ * to match on description, original ask or clarifications had to re-read every row one at a time — and
+ * a single unreadable row then erased the entire result. Matching where the prose already is costs no
+ * extra read at all.
+ *
+ * A present-but-blank `q` is refused rather than treated as "no filter": an empty search box is a
+ * question that has not been asked, and silently answering it with the whole board is the one result a
+ * reader cannot act on.
+ */
+function taskQuery(request: ApiRequest): string | undefined {
+  const raw = request.query.get('q')?.[0];
+  if (raw === undefined) return undefined;
+  const parsed = SessionSearchQuerySchema.safeParse(raw);
+  if (!parsed.success)
+    throw new ApiError(
+      400,
+      `q must be between 1 and ${MAX_SESSION_SEARCH_QUERY_LENGTH} characters of search text`,
+      'invalid_query',
+    );
+  return parsed.data;
+}
+
+/** Does this task match the free-text search, if one was asked for at all? */
+function matchesQuery(task: Task, query: string | undefined): boolean {
+  return query === undefined || matchesSessionSearchQuery(sessionSearchTaskHaystack(task), query);
+}
+
+function taskFilters(request: ApiRequest, allowQuery: boolean): ReadonlyMap<TaskFilter, string> {
   const filters = new Map<TaskFilter, string>();
   for (const [name, values] of request.query) {
     if (name === 'after') continue;
+    if (name === 'q') {
+      if (allowQuery) continue;
+      throw new ApiError(
+        400,
+        'q searches one current session and is not available on the fleet task route',
+        'invalid_query_scope',
+      );
+    }
     const known = TASK_FILTERS.find(filter => filter === name);
     if (known === undefined) throw new ApiError(400, `unknown task filter ${name}`, 'unknown_filter');
     const value = values[0];
@@ -351,10 +398,11 @@ const NO_DISCARDED_RECORDS = 0;
 
 /** One session's board, filtered and summarised. */
 async function listSession(subsystem: TaskSubsystem, sessionId: string, context: RouteContext): Promise<ApiResponse> {
-  const filters = taskFilters(context.request);
+  const filters = taskFilters(context.request, true);
+  const query = taskQuery(context.request);
   const read = await boardFor(subsystem, sessionId).list().catch(reraise);
   const board = read.entries.map(entry => entry.task);
-  const shown = board.filter(task => matchesFilters(task, filters));
+  const shown = board.filter(task => matchesFilters(task, filters) && matchesQuery(task, query));
   // Resolved for the rows the caller will actually see, not for the whole board: a filtered list must
   // not fan out over the fleet on behalf of tasks it is about to discard.
   const observations = await observeAssignees(subsystem, shown);
@@ -398,7 +446,7 @@ function unreadableFleetBoard(sessionId: string, error: unknown): never {
  * response's scope is `null`.
  */
 async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const filters = taskFilters(context.request);
+  const filters = taskFilters(context.request, false);
   // Gathered before any assignee is resolved, so ONE batch answers for the whole fleet: resolving
   // inside the loop would fan out over every session once per session's board.
   // Each board is an atomic, daemon-scoped snapshot. The reads are independent, so the bounded

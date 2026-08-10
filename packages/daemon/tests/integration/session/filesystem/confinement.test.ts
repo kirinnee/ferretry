@@ -624,6 +624,43 @@ const suite = (label: string, pinner: SessionRootPinner) =>
         should(listing.truncated).be.true();
       });
 
+      it('should abandon a directory from inside when the budget runs out mid-enumeration', async () => {
+        // Classifying one child costs its own filesystem calls, so a directory of thousands is the one
+        // enumeration worth stopping part-way rather than after every entry has been described. The
+        // budget is asked BEFORE each classification, and what it stops short of is reported the same
+        // way the entry cap is — `truncated`, because both mean "entries exist this answer omits".
+        // Arrange
+        const { root } = await fixture();
+        for (const name of ['one', 'two', 'three']) await writeFile(path.join(root, name), name);
+        let seen = 0;
+        const budget = {
+          expired: () => {
+            seen += 1;
+            return seen > 2;
+          },
+        };
+
+        // Act
+        const listing = await withTarget(root, '', async target => await target.list(50, budget));
+
+        // Assert
+        should(listing.entries).have.length(2);
+        should(listing.truncated).be.true();
+      });
+
+      it('should enumerate the whole directory under a budget that never expires', async () => {
+        // Arrange
+        const { root } = await fixture();
+        for (const name of ['one', 'two']) await writeFile(path.join(root, name), name);
+
+        // Act
+        const listing = await withTarget(root, '', async target => await target.list(50, { expired: () => false }));
+
+        // Assert
+        should(listing.truncated).be.false();
+        should(listing.entries.map(entry => entry.name).sort()).eql(['one', 'src', 'two']);
+      });
+
       it('should report a listing that fits as untruncated', async () => {
         // Arrange
         const { root } = await fixture();

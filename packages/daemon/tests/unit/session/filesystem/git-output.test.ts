@@ -6,6 +6,7 @@ import {
   parseBatchCheck,
   parseBranchHeader,
   parseCheckIgnore,
+  parseFileList,
   parseHeadTreeEntry,
   parseNumstat,
   parsePorcelainStatus,
@@ -446,5 +447,71 @@ describe('the empty tree object id', () => {
   it('should be the well-known constant Git recognises without a commit', () => {
     // Arrange / Act / Assert
     should(EMPTY_TREE_OID).eql('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
+  });
+});
+
+describe('parsing the file list', () => {
+  const NUL = String.fromCharCode(0);
+
+  it('should read one NUL-terminated path per record', () => {
+    // Arrange
+    const stdout = `README.md${NUL}src/app.ts${NUL}`;
+
+    // Act
+    const paths = parseFileList(stdout, false);
+
+    // Assert
+    should(paths).eql(['README.md', 'src/app.ts']);
+  });
+
+  it('should drop the unterminated tail of a capped stream, never index a half name', () => {
+    // A fragment presented as an ordinary record puts a file that does not exist into a search result
+    // and sends the reader to a 404.
+    // Arrange
+    const stdout = `README.md${NUL}src/very-long-pa`;
+
+    // Act
+    const paths = parseFileList(stdout, true);
+
+    // Assert
+    should(paths).eql(['README.md']);
+  });
+
+  it('should keep a complete final record even when the stream was capped', () => {
+    // Arrange
+    const stdout = `README.md${NUL}src/app.ts${NUL}`;
+
+    // Act
+    const paths = parseFileList(stdout, true);
+
+    // Assert
+    should(paths).eql(['README.md', 'src/app.ts']);
+  });
+
+  it('should report a conflicted path once, not once per merge stage', () => {
+    // Arrange
+    const stdout = `both.ts${NUL}both.ts${NUL}both.ts${NUL}other.ts${NUL}`;
+
+    // Act
+    const paths = parseFileList(stdout, false);
+
+    // Assert
+    should(paths).eql(['both.ts', 'other.ts']);
+  });
+
+  it('should treat a path holding a newline or a tab as one path', () => {
+    // Arrange
+    const stdout = `weird\nname.ts${NUL}tab\tname.ts${NUL}`;
+
+    // Act
+    const paths = parseFileList(stdout, false);
+
+    // Assert
+    should(paths).eql(['weird\nname.ts', 'tab\tname.ts']);
+  });
+
+  it('should read an empty listing as no paths at all', () => {
+    // Arrange / Act / Assert
+    should(parseFileList('', false)).eql([]);
   });
 });

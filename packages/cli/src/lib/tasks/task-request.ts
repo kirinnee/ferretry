@@ -1,4 +1,6 @@
 import {
+  MAX_SESSION_SEARCH_QUERY_LENGTH,
+  SessionSearchQuerySchema,
   type TaskActionRequest,
   TaskActionRequestSchema,
   type TaskCreateRequest,
@@ -140,6 +142,8 @@ export interface TaskListOptions {
   readonly kind?: string;
   readonly status?: readonly string[];
   readonly view?: string;
+  /** Free text matched against a task's number, title, description, original ask and clarifications. */
+  readonly query?: string;
 }
 
 /** The filter pairs `task list` sends as its query string, already validated against the wire enums. */
@@ -155,7 +159,20 @@ export function buildTaskListFilters(options: TaskListOptions): readonly (readon
     const status = present(raw);
     if (status !== undefined) filters.push(['status', requireChoice(status, TaskStatusSchema.options, '--status')]);
   }
+  // Sent as `q` and validated by the daemon, which is where the search decision lives: matching needs
+  // the description, original ask and clarifications, and the list route deliberately does not carry
+  // them. Refusing an over-long term here as well keeps the failure at the terminal instead of costing
+  // a request that can only come back 400.
+  if (options.query !== undefined) filters.push(['q', requireSearchQuery(options.query)]);
   return filters;
+}
+
+/** A search term the daemon will accept, refused at the terminal when it cannot be. */
+function requireSearchQuery(value: string): string {
+  const parsed = SessionSearchQuerySchema.safeParse(value);
+  if (!parsed.success)
+    throw new Error(`--query must be between 1 and ${MAX_SESSION_SEARCH_QUERY_LENGTH} characters of search text`);
+  return parsed.data;
 }
 
 export function resolveTaskListView(options: TaskListOptions): TaskListView {

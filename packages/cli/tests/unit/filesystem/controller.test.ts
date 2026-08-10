@@ -129,3 +129,127 @@ describe('filesystem controller', () => {
     should(out.messages[1]).containEql('No working-tree changes');
   });
 });
+
+describe('the file index reading', () => {
+  it('should print what the daemon could not cover, even when everything matched', async () => {
+    // "No results" over a partial index and "no results" over a complete one are different answers.
+    // Arrange
+    const { subject, out } = controller();
+
+    // Act
+    await subject.index('ses-1', {});
+
+    // Assert
+    should(out.messages[0]).containEql('3 of 3 indexed files');
+    should(out.messages[0]).containEql('(partial)');
+    should(out.messages[0]).containEql('not indexed: 2 denied, 1 unreadable');
+    should(out.messages[0]).containEql('src/app.ts');
+  });
+
+  it('should narrow the index by the same query decision the daemon applies to tasks', async () => {
+    // Arrange
+    const { subject, out } = controller();
+
+    // Act
+    await subject.index('ses-1', { query: 'APP.TS' });
+
+    // Assert
+    should(out.messages[0]).containEql('1 of 3 indexed files');
+    should(out.messages[0]).containEql('src/app.ts');
+    should(out.messages[0]).not.containEql('README.md');
+  });
+
+  it('should match a query against the path as well as the basename', async () => {
+    // Arrange
+    const { subject, out } = controller();
+
+    // Act
+    await subject.index('ses-1', { query: 'nested' });
+
+    // Assert
+    should(out.messages[0]).containEql('src/nested/deep.ts');
+  });
+
+  it('should say so plainly when a query matched nothing', async () => {
+    // Arrange
+    const { subject, out } = controller();
+
+    // Act
+    await subject.index('ses-1', { query: 'no-such-file' });
+
+    // Assert
+    should(out.messages[0]).containEql('0 of 3 indexed files');
+    should(out.messages[0]).containEql('No matching files.');
+  });
+
+  it('should reject a malformed query before making any index request', async () => {
+    // Arrange
+    const blank = controller();
+    const overLong = controller();
+    const control = controller();
+
+    // Act
+    const failures = await Promise.all([
+      blank.subject.index('ses-1', { query: '   ' }).catch((error: unknown) => error),
+      overLong.subject.index('ses-1', { query: 'x'.repeat(201) }).catch((error: unknown) => error),
+      control.subject.index('ses-1', { query: 'two\nlines' }).catch((error: unknown) => error),
+    ]);
+
+    // Assert
+    should(failures.every(failure => failure instanceof Error)).be.true();
+    should(blank.gateway.calls).be.empty();
+    should(overLong.gateway.calls).be.empty();
+    should(control.gateway.calls).be.empty();
+  });
+
+  it('should emit the narrowed index as JSON when asked', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller();
+
+    // Act
+    await subject.index('ses-1', { query: 'deep', json: true });
+
+    // Assert
+    should(gateway.calls[0]).deepEqual({ method: 'index', args: ['ses-1'] });
+    should(JSON.parse(out.messages[0] ?? '')).match({
+      files: [{ path: 'src/nested/deep.ts', name: 'deep.ts' }],
+      coverage: 'partial',
+    });
+  });
+
+  it('should render a complete index with nothing left out', async () => {
+    // Arrange
+    const gateway = new RecordingFilesystemGateway({
+      index: { v: 1, sessionId: 's1', root: '/work/repo', files: [], coverage: 'complete', skipped: [] },
+    });
+    const { subject, out } = controller(gateway);
+
+    // Act
+    await subject.index('ses-1', {});
+
+    // Assert
+    should(out.messages[0]).containEql('0 of 0 indexed files (complete)');
+    should(out.messages[0]).not.containEql('not indexed');
+  });
+
+  it('should count one indexed file in the singular', async () => {
+    // Arrange
+    const gateway = new RecordingFilesystemGateway({
+      index: {
+        v: 1,
+        sessionId: 's1',
+        root: '/work/repo',
+        files: [{ path: 'only.ts', name: 'only.ts' }],
+        coverage: 'complete',
+        skipped: [],
+      },
+    });
+    const { subject, out } = controller(gateway);
+
+    // Act
+    await subject.index('ses-1', {});
+
+    // Assert
+    should(out.messages[0]).containEql('1 of 1 indexed file (complete)');
+  });
+});

@@ -64,8 +64,50 @@ export interface PinnedDirectoryEntry {
 
 export interface PinnedListing {
   readonly entries: readonly PinnedDirectoryEntry[];
-  /** The directory held at least one entry past the cap. */
+  /** The directory held at least one entry past the cap, or the budget ran out part-way through it. */
   readonly truncated: boolean;
+}
+
+/**
+ * A cooperative stop, asked BETWEEN steps and never able to interrupt one.
+ *
+ * The whole-tree index is the one read here that can run long enough for a caller to give up on it or
+ * for a deadline to matter, and neither can be honoured by abandoning the work: a `Promise.race` that
+ * resolves early leaves enumerations and opens running against a root the domain has already closed,
+ * which is a use-after-close in the one subsystem whose entire purpose is holding descriptors correctly.
+ * So nothing is ever abandoned. Every loop that could take another step asks first, and a step already
+ * begun is always awaited and always closed.
+ *
+ * The RESIDUAL that buys is exact and worth stating: at most one already-started operation finishes
+ * after `expired()` first turns true. For a walk to one path that is a bounded component walk — depth
+ * many opens, microseconds. For an enumeration it would be a whole directory, which is why
+ * {@link PinnedTarget.list} takes a budget and stops mid-directory rather than at its end. Underneath
+ * both sits one filesystem call that no cooperative check can shorten; a hung mount is bounded by the
+ * kernel, not by this.
+ *
+ * A Git child is the one residual this cannot shorten AT ALL. Nothing here can reach into a spawn
+ * already running, so an abort arriving mid-command is not felt until that command ends — which is why
+ * every Git question in an index read is given the caller's REMAINING budget as its own timeout, and why
+ * the budget is asked again before each one. The guarantee is therefore precise: no new child is started
+ * after cancellation, and one already started is bounded by the timeout it was given, never by the abort.
+ */
+export interface WorkBudget {
+  /** Has the deadline passed, or has the caller gone away? Asked often; must stay cheap and pure. */
+  expired(): boolean;
+}
+
+/**
+ * The same budget, handed to something that starts a CHILD.
+ *
+ * A spawn cannot be interrupted from here at all, so it gets the two facts that let it be bounded from
+ * the outside instead: whether to start at all, and how long it may take if it does. An implementation
+ * that runs more than one command must ask BOTH between them — a timeout alone would let a caller who
+ * allowed ten seconds wait twenty, and a cancellation the first command never saw would still start the
+ * second.
+ */
+export interface SpawnBudget extends WorkBudget {
+  /** Milliseconds left. Zero exactly when {@link WorkBudget.expired} is true, so it is never a licence. */
+  remainingMs(): number;
 }
 
 /**
@@ -88,8 +130,15 @@ export interface PinnedTarget {
   readonly identities: readonly ComponentIdentity[];
   /** Bytes of an already-open regular file, or `undefined` when it exceeds `maxBytes`. */
   read(maxBytes: number): Promise<Uint8Array | undefined>;
-  /** One level of an already-open directory, streamed and stopped one entry past `maxEntries`. */
-  list(maxEntries: number): Promise<PinnedListing>;
+  /**
+   * One level of an already-open directory, streamed and stopped one entry past `maxEntries`.
+   *
+   * A `budget` that expires part-way stops the stream where it stands and reports `truncated`, which is
+   * the same thing the entry cap already means: entries exist that this answer does not name. Classifying
+   * one child needs its own filesystem calls, so a directory of thousands is the one enumeration long
+   * enough to be worth abandoning from the inside rather than after it finishes.
+   */
+  list(maxEntries: number, budget?: WorkBudget): Promise<PinnedListing>;
   close(): Promise<void>;
 }
 
@@ -197,6 +246,20 @@ export interface RenderedDiff {
 }
 
 /**
+ * Every path under the session cwd that Git does not exclude, in ONE answer.
+ *
+ * The gitignore rule is applied by the tool that owns it — `--exclude-standard` — rather than being
+ * re-derived a directory at a time, which is both the correct owner and the difference between one
+ * question and one per directory. `truncated` means Git's own output hit the caller's byte cap, so the
+ * list is short by an amount nobody can know without asking again for more.
+ */
+export interface SessionFileList {
+  /** Relative to the session cwd, in Git's own order, each name at most once. */
+  readonly paths: readonly string[];
+  readonly truncated: boolean;
+}
+
+/**
  * The Git reads this viewer needs, every one of them taking a PINNED working directory.
  *
  * `ignoredPaths` must THROW when it cannot tell, rather than answering "not ignored": a viewer that
@@ -204,7 +267,34 @@ export interface RenderedDiff {
  * into a refusal.
  */
 export interface SessionGit {
-  repoInfo(cwd: GitWorkingDirectory): Promise<SessionRepoInfo>;
+  /**
+   * Is this a worktree, and what is its shape?
+   *
+   * A `budget` bounds this WHOLE question rather than each command needed to answer it, and answering it
+   * takes more than one: the second is started only if the budget still allows one, and is given only
+   * what the first one left.
+   *
+   * THE CONTRACT THAT BUYS: a caller who supplies a budget must re-ask `expired()` before trusting this
+   * answer. An expired budget short-circuits, so the result then describes only what was already known
+   * and its remaining fields are placeholders rather than findings. That is the honest shape — the
+   * alternative is spawning a child for a caller who has already stopped waiting.
+   */
+  repoInfo(cwd: GitWorkingDirectory, budget?: SpawnBudget): Promise<SessionRepoInfo>;
+  /**
+   * Every unexcluded path beneath this working directory, bounded by `maxBytes` of Git output and by
+   * `timeoutMs` of waiting for it.
+   *
+   * Throws when Git could not answer, and the DOMAIN turns that into an index that reports itself
+   * incomplete rather than into a refusal of the whole read: a search surface that answers "no files"
+   * and a search surface that answers "I could not look" must not be the same response, because only one
+   * of them tells a reader to stop trusting the result. What this returns is a candidate list and never
+   * a permission — every gate still runs on the read that follows.
+   *
+   * A `budget` is how much of the caller's OVERALL time this question may spend. What the runner can
+   * enforce on a child it started is a timeout, which is the one kind of cancellation available here:
+   * the cooperative {@link WorkBudget} cannot reach inside a spawn once it is running.
+   */
+  listFiles(cwd: GitWorkingDirectory, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList>;
   ignoredPaths(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<ReadonlySet<string>>;
   isTracked(cwd: GitWorkingDirectory, rel: string): Promise<boolean>;
   changes(cwd: GitWorkingDirectory): Promise<SessionChangesView>;
