@@ -20,13 +20,14 @@ import {
   type SocketRoute,
   textResponse,
 } from '../../../src/lib/api/index.ts';
+import { mayTrustDirectLoopback, parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
 
 /**
  * These tests bind a REAL socket, so every one of them asks for port 0 on 127.0.0.1 and stops the
  * server in teardown. A fixed port would collide with whatever the host already runs and fail for a
  * reason that has nothing to do with the code under test.
  */
-const BIND = { host: '127.0.0.1', port: 0 } as const;
+const BIND = { host: '127.0.0.1', port: 0, directLoopbackIsPrivileged: true } as const;
 
 const CREDENTIALS = { admin: 'admin-secret' } as const;
 /** The transport translation is the subject here, so no ticket is redeemable. */
@@ -119,6 +120,20 @@ describe('BunApiServer', () => {
 
     // Assert
     should(((await response.json()) as Record<string, unknown>).loopback).be.true();
+  });
+
+  it('should authorize an anonymous privileged-only route from a direct loopback peer', async () => {
+    const handle = await serve({
+      method: 'GET',
+      path: '/v1/local-healthz',
+      minimum: 'none',
+      privilegedOnly: true,
+      handle: async () => jsonResponse({ ok: true }),
+    });
+
+    const response = await fetch(`${handle.url}/v1/local-healthz`);
+
+    should(response.status).equal(200);
   });
 
   it('should carry the transport-observed peer address for rate limiting', async () => {
@@ -321,11 +336,50 @@ describe('BunApiServer against a substituted host', () => {
 
   it('should fall back to the requested address when the host reports none', async () => {
     // Act
-    const handle = await new BunApiServer(silentHost).listen(surfaceOf([mirror]), { host: '::1', port: 4242 });
+    const handle = await new BunApiServer(silentHost).listen(surfaceOf([mirror]), {
+      host: '::1',
+      port: 4242,
+      directLoopbackIsPrivileged: true,
+    });
 
     // Assert: an IPv6 host is bracketed so the URL a client is handed is one it can parse.
     should(handle.port).equal(4242);
     should(handle.url).equal('http://[::1]:4242');
+  });
+
+  it('should fail closed for an anonymous privileged-only route behind a loopback proxy', async () => {
+    // A wildcard bind with an operator-recorded address is the documented pairing remedy, but a
+    // local reverse proxy can still forward a remote browser to Bun from 127.0.0.1. The production
+    // fyd configuration must therefore deny this carrier assertion rather than trusting an
+    // X-Forwarded-* value the client or proxy could forge.
+    let served: ((request: Request) => Promise<Response | undefined>) | undefined;
+    const proxiedHost = {
+      serve: (options: { readonly fetch: (request: Request) => Promise<Response | undefined> }) => {
+        served = options.fetch;
+        return { requestIp: () => '127.0.0.1', upgrade: () => false, stop: () => undefined };
+      },
+    };
+    await new BunApiServer(proxiedHost).listen(
+      surfaceOf([
+        {
+          method: 'GET',
+          path: '/v1/local-healthz',
+          minimum: 'none',
+          privilegedOnly: true,
+          handle: async () => jsonResponse({ ok: true }),
+        },
+      ]),
+      {
+        ...BIND,
+        directLoopbackIsPrivileged: mayTrustDirectLoopback(
+          parseDaemonConfig({ host: '0.0.0.0', port: 7_431, publicUrl: 'http://192.168.1.10:7431' }),
+        ),
+      },
+    );
+
+    const response = await served?.(new Request('http://127.0.0.1/v1/local-healthz'));
+
+    should(response?.status).equal(403);
   });
 
   it('should answer 400 when the runtime refuses to switch the protocol', async () => {

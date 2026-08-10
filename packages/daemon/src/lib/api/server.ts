@@ -18,6 +18,12 @@ export interface ApiBindOptions {
    * machine and fails for a reason that has nothing to do with the test.
    */
   readonly port: number;
+  /**
+   * Whether this direct HTTP carrier may treat its loopback peer as privileged for an anonymous
+   * `privilegedOnly` route. A loopback-bound daemon advertised through a foreign proxy cannot make
+   * that claim: the immediate peer would be the proxy, not necessarily this machine's user.
+   */
+  readonly directLoopbackIsPrivileged: boolean;
 }
 
 /** A listening host. The adapter owns the sockets; nothing in the domain does. */

@@ -32,6 +32,8 @@ export interface RequestOverrides {
   readonly query?: readonly (readonly [string, string])[];
   readonly clientAddress?: string;
   readonly loopback?: boolean;
+  /** An unforgeable carrier proof for an anonymous public privileged-only route. */
+  readonly privilegedLoopback?: boolean;
   readonly body?: string;
   /** Bytes per piece for a bounded read, so a case can drive a body that arrives in installments. */
   readonly bodyPieceBytes?: number;
@@ -61,6 +63,7 @@ export function request(overrides: RequestOverrides = {}): ApiRequest {
     headers,
     clientAddress: overrides.clientAddress,
     loopback: overrides.loopback ?? false,
+    privilegedLoopback: overrides.privilegedLoopback,
     ...(overrides.signal === undefined ? {} : { signal: overrides.signal }),
     text: async (limitBytes?: number) => {
       reads?.limits.push(limitBytes);

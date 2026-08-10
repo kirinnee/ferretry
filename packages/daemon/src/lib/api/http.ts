@@ -30,6 +30,16 @@ export interface ApiRequest {
    *  loopback peers, so a token can never travel in a loggable URL across a network hop. */
   readonly loopback: boolean;
   /**
+   * Whether this carrier can prove that a loopback peer is the machine itself rather than a remote
+   * caller forwarded through a locally bound proxy. It is deliberately separate from `loopback`:
+   * the immediate TCP peer is useful for existing local transport rules, but cannot authorize an
+   * anonymous public privileged-only route when the daemon advertises a foreign proxy address.
+   *
+   * Carriers that do not provide that proof leave this absent. Public privileged-only routes then
+   * fail closed; ordinary authenticated locality rules continue to use `loopback` as before.
+   */
+  readonly privilegedLoopback?: boolean;
+  /**
    * Fires when the caller gives up, so a long read can stop instead of finishing for nobody.
    *
    * Optional because most handlers answer in one read and have nothing to abandon, and requiring it

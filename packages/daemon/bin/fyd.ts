@@ -329,6 +329,7 @@ import {
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
   type MillisecondClockPort,
+  mayTrustDirectLoopback,
   type MountedSubsystems,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
@@ -5568,7 +5569,14 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
             sockets: socketDispatcher,
             corsOrigins: browserOrigins(config),
           },
-          { host: config.host, port: config.port },
+          {
+            host: config.host,
+            port: config.port,
+            // A loopback peer is privileged only on a loopback-only direct bind. A wildcard bind
+            // can still have a local reverse proxy forwarding a remote browser, so Bun's immediate
+            // peer is never enough proof there — even when its public URL is the pairing remedy.
+            directLoopbackIsPrivileged: mayTrustDirectLoopback(config),
+          },
         ),
     );
   } catch (error) {

@@ -156,7 +156,7 @@ export class BunApiServer implements ApiServerPort {
       maxFrameBytes: SOCKET_MAX_FRAME_BYTES,
       maxBodyBytes: this.maxBodyBytes,
       fetch: async (request: Request) => {
-        const apiRequest = toApiRequest(request, server.requestIp(request));
+        const apiRequest = toApiRequest(request, server.requestIp(request), options.directLoopbackIsPrivileged);
         const presentedOrigin = request.headers.get('origin');
         const origin =
           presentedOrigin === null || presentedOrigin === new URL(request.url).origin ? null : presentedOrigin;
@@ -390,7 +390,11 @@ function finish(socket: HostSocket): void {
 }
 
 /** Translates a runtime `Request` into the transport-free shape the domain routes on. */
-export function toApiRequest(request: Request, remoteAddress: string | undefined): ApiRequest {
+export function toApiRequest(
+  request: Request,
+  remoteAddress: string | undefined,
+  directLoopbackIsPrivileged = false,
+): ApiRequest {
   const url = new URL(request.url);
   return {
     method: request.method,
@@ -400,6 +404,7 @@ export function toApiRequest(request: Request, remoteAddress: string | undefined
     headers: headersFrom(Object.fromEntries(request.headers)),
     clientAddress: remoteAddress,
     loopback: remoteAddress !== undefined && isLoopbackPeer(remoteAddress),
+    privilegedLoopback: directLoopbackIsPrivileged && remoteAddress !== undefined && isLoopbackPeer(remoteAddress),
     // The runtime's own abort, passed through rather than re-derived: it is what a disconnect actually
     // fires, and a handler that walks a tree needs to hear it from the transport that noticed.
     signal: request.signal,

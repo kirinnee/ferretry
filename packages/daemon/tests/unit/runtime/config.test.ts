@@ -7,6 +7,7 @@ import {
   configuredAt,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
+  mayTrustDirectLoopback,
   overriddenBy,
   parseDaemonConfig,
   recordedPortDocument,
@@ -257,6 +258,18 @@ describe('daemon configuration', () => {
       url: 'http://192.168.1.10:7431',
       origin: 'operator',
     });
+  });
+
+  it('should trust direct loopback only for a loopback-only bind with no foreign advertisement', () => {
+    const direct = parseDaemonConfig({ host: '127.0.0.1', port: 7_431 });
+    const proxied = parseDaemonConfig({ host: '127.0.0.1', port: 7_431, publicUrl: 'https://box.example.test' });
+    // This is intentionally not a foreign-advertisement warning, but it IS unsafe evidence for the
+    // anonymous privileged-only shortcut: a reverse proxy can reach the local Bun listener.
+    const wildcard = parseDaemonConfig({ host: '0.0.0.0', port: 7_431, publicUrl: 'http://192.168.1.10:7431' });
+
+    should(mayTrustDirectLoopback(direct)).be.true();
+    should(mayTrustDirectLoopback(proxied)).be.false();
+    should(mayTrustDirectLoopback(wildcard)).be.false();
   });
 
   it('should refuse damaged or ambiguous pricing evidence before the daemon can use it', () => {

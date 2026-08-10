@@ -49,11 +49,35 @@ describe('ApiDispatcher authorization', () => {
     const dispatcher = dispatcherFor(echo('/healthz', 'none'));
 
     // Act
-    const response = await dispatcher.dispatch(request({ path: '/healthz' }));
+    const remote = await dispatcher.dispatch(request({ path: '/healthz', loopback: false }));
+    const loopback = await dispatcher.dispatch(request({ path: '/healthz', loopback: true }));
 
     // Assert
-    should(response.status).equal(200);
-    should(jsonBody(response).actor).be.null();
+    should(remote.status).equal(200);
+    should(jsonBody(remote).actor).be.null();
+    should(loopback.status).equal(200);
+    should(jsonBody(loopback).actor).be.null();
+  });
+
+  it('should refuse a remote caller to a public route requiring privileged arrival', async () => {
+    // This route is deliberately anonymous: privileged arrival constrains WHERE it is served, not
+    // which credential is presented. The public shortcut must therefore enforce locality itself.
+    // Arrange
+    const dispatcher = dispatcherFor(echo('/v1/local-healthz', 'none', 'GET', true));
+
+    // Act
+    const remote = await dispatcher.dispatch(
+      request({ path: '/v1/local-healthz', loopback: false, privilegedLoopback: false }),
+    );
+    const loopback = await dispatcher.dispatch(
+      request({ path: '/v1/local-healthz', loopback: true, privilegedLoopback: true }),
+    );
+
+    // Assert
+    should(remote.status).equal(403);
+    should(jsonBody(remote).code).equal('forbidden');
+    should(loopback.status).equal(200);
+    should(jsonBody(loopback).actor).be.null();
   });
 
   it('should refuse an unauthenticated request to a token route', async () => {
