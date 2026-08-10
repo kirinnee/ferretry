@@ -20,6 +20,7 @@ import {
   type SocketRoute,
   textResponse,
 } from '../../../src/lib/api/index.ts';
+import { mayTrustDirectLoopback, parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
 
 /**
  * These tests bind a REAL socket, so every one of them asks for port 0 on 127.0.0.1 and stops the
@@ -347,9 +348,10 @@ describe('BunApiServer against a substituted host', () => {
   });
 
   it('should fail closed for an anonymous privileged-only route behind a loopback proxy', async () => {
-    // A foreign public URL may be served through a local reverse proxy. Bun then sees 127.0.0.1
-    // even when the browser is remote, so the bind configuration must deny the anonymous shortcut
-    // rather than trusting an X-Forwarded-* value the client or proxy could forge.
+    // A wildcard bind with an operator-recorded address is the documented pairing remedy, but a
+    // local reverse proxy can still forward a remote browser to Bun from 127.0.0.1. The production
+    // fyd configuration must therefore deny this carrier assertion rather than trusting an
+    // X-Forwarded-* value the client or proxy could forge.
     let served: ((request: Request) => Promise<Response | undefined>) | undefined;
     const proxiedHost = {
       serve: (options: { readonly fetch: (request: Request) => Promise<Response | undefined> }) => {
@@ -367,7 +369,12 @@ describe('BunApiServer against a substituted host', () => {
           handle: async () => jsonResponse({ ok: true }),
         },
       ]),
-      { ...BIND, directLoopbackIsPrivileged: false },
+      {
+        ...BIND,
+        directLoopbackIsPrivileged: mayTrustDirectLoopback(
+          parseDaemonConfig({ host: '0.0.0.0', port: 7_431, publicUrl: 'http://192.168.1.10:7431' }),
+        ),
+      },
     );
 
     const response = await served?.(new Request('http://127.0.0.1/v1/local-healthz'));

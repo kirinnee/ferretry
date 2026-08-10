@@ -8,6 +8,7 @@ import {
   daemonAddress,
   decideAdvertisement,
   FY_DEFAULT_DAEMON_PORT,
+  isLoopbackHost,
   isWildcardHost,
   LOOPBACK,
 } from '@ferretry/protocol';
@@ -461,6 +462,18 @@ export function recordedPortDocument(
 export function advertisesForeignAddress(config: DaemonConfig): boolean {
   if (isWildcardHost(config.host)) return false;
   return new URL(config.publicUrl).origin !== new URL(config.bindUrl).origin;
+}
+
+/**
+ * Whether the direct Bun carrier may prove that an immediate loopback peer is this host's caller.
+ *
+ * A wildcard bind is reachable from another machine even when its advertised address is the
+ * documented pairing remedy, and a loopback bind with a foreign advertisement is behind a proxy or
+ * tunnel. Neither lets Bun distinguish a local client from the remote peer the proxy forwarded, so
+ * anonymous public privileged-only routes must fail closed there.
+ */
+export function mayTrustDirectLoopback(config: DaemonConfig): boolean {
+  return isLoopbackHost(config.host) && !advertisesForeignAddress(config);
 }
 
 /**
