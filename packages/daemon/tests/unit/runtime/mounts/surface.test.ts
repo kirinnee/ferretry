@@ -353,7 +353,8 @@ describe('the mounted daemon surface', () => {
     // The handover added three: its two writes are `operator` like the migration they sit beside, and
     // its receipt read is `authenticated`, because reading what happened to a session is a lesser
     // thing than causing it. Board continuity adds the operator-only coordinator replacement route.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 114, 'admin-token': 1 });
+    // Runtime controls add two more operator-only session mutations beside that surface.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 116, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
