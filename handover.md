@@ -165,7 +165,7 @@ paths are refused, escaping/in-tree/broken symlinks are not served, oversized fi
 read, tree swaps fail closed, and vanished entries do not crash enumeration. Attachments use their
 separate daemon-scoped path and retain their existing validation and composer behavior.
 
-**#20 stays open, and what is left is named rather than implied.** The flow is now real end to end:
+**#20 is done, and what it still does not cover is named rather than implied.** The flow is now real end to end:
 a transcript `AskUserQuestion` becomes a `pendingQuestion` on the session document, the browser
 renders it, `POST /v1/sessions/:id/answer` drives the exact rendered form, and the durable state is
 cleared only after the pane visibly advanced. What this pass added is that the answer is now
@@ -177,14 +177,19 @@ answer rather than re-driving the form. An answer that was admitted and cannot b
 is quarantined for a person, never retried — repeating arrow and `Enter` into a selector that has
 since moved would answer something nobody chose.
 
-Two things are still outstanding and neither is cosmetic. **Question discovery is a side effect of
-reading a session**, so the browser's poll is what materializes a question and a direct API client
-must happen to read first; making it a transcript reconciliation on the monitor tick is a mounted
-subsystem of its own. **A failed answer strands the session**: the original product snapshotted the
-pane, drove the form back out of the way and told the human to reply in prose, and none of that is
-ported — so a drive that fails leaves the question pending, and a pending question makes every
-subsequent send refuse. That needs the pane-matcher family the migration survey lists as GAP, which
-is also what the bound abandon on `interrupt` is waiting for.
+**Question discovery is no longer a side effect of reading a session.** The monitor tick reconciles
+transcript and durable answer evidence for every session it can see, under the answer domain's own
+per-session queue and with no terminal-drive capability at all, so a question materializes whether or
+not a browser happened to poll — and a session whose evidence cannot be read is reported by id rather
+than allowed to abandon the roster.
+
+**A failed answer no longer strands the session, except in the one case that cannot be proved.** A
+drive that fails snapshots the pane, sends exactly one positively-bound Escape, releases the durable
+question and tells the human what to reply to in prose. What is NOT ported is the pane-matcher family
+the migration survey lists as GAP: without it, a cancellation whose effect was not positively observed
+leaves both the receipt and the question standing for a person rather than guessing, and abandoning a
+named question through `interrupt` still refuses with `question_abandon_unsupported` — releasing the
+wrong overlay is worse than refusing.
 
 ## 🚨 Attention, notifications & warden
 
