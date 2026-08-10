@@ -32,6 +32,7 @@ import { OnboardingProgressStore, resetOnboardingProgress } from './features/onb
 import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
+import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
@@ -71,6 +72,7 @@ import {
   type DaemonPageProps,
   PageHost,
   type PageHostSlots,
+  type ProjectDetailPageProps,
   type SessionChatPageProps,
 } from './lib/pages/page-host.tsx';
 import {
@@ -1058,12 +1060,17 @@ function ProjectsRoute({ connection }: DaemonPageProps) {
   return <ProjectsPage connection={connection} />;
 }
 
+function ProjectDetailRoute({ connection, projectId }: ProjectDetailPageProps) {
+  return <ProjectDetailPage connection={connection} projectId={projectId} />;
+}
+
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
   Sessions: SessionsRoute,
   NewSession: NewSessionRoute,
   Projects: ProjectsRoute,
+  ProjectDetail: ProjectDetailRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,

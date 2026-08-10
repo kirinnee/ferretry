@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { ProjectDetailPage } from '../../features/projects/project-detail.tsx';
+
 import type { DaemonConnection, DaemonId } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import type { PageRoute } from './routes.ts';
@@ -12,6 +12,11 @@ export interface SessionChatPageProps extends DaemonPageProps {
   readonly scope: DaemonSessionScope;
 }
 
+export interface ProjectDetailPageProps extends DaemonPageProps {
+  /** The protocol UUID of the registered project, taken from the route. */
+  readonly projectId: string;
+}
+
 export interface PageHostSlots {
   readonly ConnectionPicker: ComponentType;
   /** First-run setup. Connection-free: it exists precisely because there is none yet. */
@@ -19,6 +24,7 @@ export interface PageHostSlots {
   readonly Sessions: ComponentType<DaemonPageProps>;
   readonly NewSession: ComponentType<DaemonPageProps>;
   readonly Projects?: ComponentType<DaemonPageProps>;
+  readonly ProjectDetail?: ComponentType<ProjectDetailPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
   readonly Settings: ComponentType<DaemonPageProps>;
   readonly Warden: ComponentType<DaemonPageProps>;
@@ -61,7 +67,8 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
       if (slots.Projects === undefined) throw new Error('the projects route is not mounted');
       return <slots.Projects connection={matchedConnection} />;
     case 'project-detail':
-      return <ProjectDetailPage connection={matchedConnection} projectId={route.projectId} />;
+      if (slots.ProjectDetail === undefined) throw new Error('the project detail route is not mounted');
+      return <slots.ProjectDetail connection={matchedConnection} projectId={route.projectId} />;
     case 'session':
       return (
         <slots.SessionChat
