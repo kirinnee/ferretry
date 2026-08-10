@@ -74,6 +74,19 @@
   min-height: 44px;
   min-width: 44px;
 }
+/* The refusal the coordinator sends back names the request id verbatim — one
+   unbroken ~76-character token — because a refusal that hides WHICH request was
+   already answered tells the reader nothing they can act on. At the default
+   `overflow-wrap: normal` that token cannot break: measured on a real 390px
+   capture the paragraph laid out 606px inside a 340px box and ran 253px past
+   the card's own right edge, so the phone reader saw a broken frame and could
+   not read the id at all (desktop, at 1374px, never overflowed and is
+   unaffected). `anywhere` lets the break land mid-token and also lets the
+   paragraph's min-content width shrink, so the card keeps its box at every
+   width the app supports. */
+.fy-question-form > [role='alert'] {
+  overflow-wrap: anywhere;
+}
 .fy-screen-heading,
 .fy-detail-header,
 .fy-composer-actions,

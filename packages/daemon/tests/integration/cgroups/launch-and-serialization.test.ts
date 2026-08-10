@@ -530,6 +530,9 @@ describe('what the compiled RESUME path actually execs', () => {
           },
         },
         launcher: subject.resume,
+        // This case never reaches a released advisory: registration fails before any dismissal is
+        // owed, so the port is present to satisfy the contract and records nothing.
+        answerAttention: { acknowledge: async () => undefined },
         turns: { writeTurn: async () => '/unused', clearMarkers: async () => undefined },
         monitors: { stop: async () => undefined, start: async () => undefined },
         gate: {

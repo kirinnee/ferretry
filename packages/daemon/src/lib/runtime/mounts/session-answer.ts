@@ -5,7 +5,23 @@ import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.t
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
-export type SessionAnswerFailure = 'invalid' | 'not_found' | 'refused' | 'failed';
+/**
+ * Why an answer could not be served.
+ *
+ * `refused`, `conflict` and `unconfirmed` are three genuinely different next actions and are
+ * deliberately not collapsed into one `409`: answer the question that is displayed NOW, use a fresh
+ * request id for a different answer, and go and look at the session because nobody can say whether
+ * the last attempt reached it. A caller that saw one code would otherwise be told to retry in the
+ * one case where retrying is the thing that must not happen.
+ */
+export type SessionAnswerFailure =
+  | 'invalid'
+  | 'not_found'
+  | 'refused'
+  | 'conflict'
+  | 'unconfirmed'
+  | 'released'
+  | 'failed';
 
 export class SessionAnswerError extends Error {
   constructor(
@@ -54,6 +70,15 @@ function refuse(error: unknown): never {
       throw new ApiError(404, error.message, 'not-found');
     case 'refused':
       throw new ApiError(409, error.message, 'answer_refused');
+    case 'conflict':
+      throw new ApiError(409, error.message, 'answer_request_id_reused');
+    // The one refusal that must never be read as "try again": a retry is exactly what it forbids.
+    case 'unconfirmed':
+      throw new ApiError(409, error.message, 'answer_unconfirmed');
+    // Recovery deliberately removed structured-question state. The next action is inspect the
+    // terminal and use prose when safe, not retry a destructive selector drive.
+    case 'released':
+      throw new ApiError(409, error.message, 'answer_released');
     case 'failed':
       throw new ApiError(500, error.message, 'session_answer_failed');
   }

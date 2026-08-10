@@ -6,6 +6,7 @@ import type {
   MonitorHealth,
   MonitorMonotonicClock,
   MonitorNudge,
+  MonitorQuestions,
   MonitorTickReport,
   MonitorWaits,
   ParkedSession,
@@ -16,6 +17,7 @@ export interface SessionMonitorPorts {
   readonly waits: MonitorWaits;
   readonly heartbeats: WaitHeartbeatSink;
   readonly nudge: MonitorNudge;
+  readonly questions: MonitorQuestions;
   readonly clock: ClockPort;
   /** Wall milliseconds, for comparing against deadlines written by other processes. */
   readonly wallClock: { nowMs(): number };
@@ -112,6 +114,20 @@ export class SessionMonitorService {
         failures.set(session.id, message(error));
       }
     }
+    // Question evidence is a second planner on this tick, not a second execution path. Its adapter
+    // holds the answer domain's queue while reconciling transcript and ledger state, and has no
+    // terminal-drive capability at all.
+    let questionFailures: ReadonlyMap<string, string>;
+    try {
+      questionFailures = await this.ports.questions.reconcile();
+    } catch (error) {
+      // A planner-wide failure is a failed tick, not a fabricated session id in the per-session
+      // failure map. Do not stamp it as completed: health must expose that reconciliation stopped.
+      this.consecutiveFailures += 1;
+      this.lastFailure = message(error);
+      throw error;
+    }
+    for (const [id, failure] of questionFailures) if (!failures.has(id)) failures.set(id, failure);
     this.prune(roster);
     const elapsedMs = this.ports.monotonic.elapsedMs();
     const sinceLastTickMs = this.lastTickElapsedMs === undefined ? undefined : elapsedMs - this.lastTickElapsedMs;

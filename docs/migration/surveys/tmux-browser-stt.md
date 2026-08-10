@@ -57,10 +57,11 @@ pane counters.
 
 ### 1.2 Structured-question drive — pure functions (lines 384–1343)
 
-The source's full matcher family remains **GAP**. Ferretry now carries a deliberately narrower, fail-closed
+The source's full matcher family remains **GAP**. Ferretry carries a deliberately narrower, fail-closed
 subset in `adapters/session/question/tmux-structured-question-driver.ts`: it positively binds the visible
-question text, all option labels, and the cursor before sending any key, then requires visible form advance.
-Unknown menus, free-text pages that cannot be bound, and unreadable selection origins refuse rather than guess.
+question text (including hard wraps), all transcript options, a harness-rendered implicit `Other…`, and the
+cursor before sending any answer key, then requires visible form advance. Unknown menus, free-text pages that
+cannot be bound, and unreadable selection origins refuse rather than guess.
 
 The remaining source capabilities are:
 
@@ -71,15 +72,79 @@ The remaining source capabilities are:
 `visibleQuestionIndex`, `anyQuestionVisible`, `structuredMenuVisible`, `visibleMultiSelectState`,
 `blockMultiSelectState`, `paneShowsFreeformComposer`, `freeformComposerLine`, `FreeTextRegion`,
 `freeTextQuestionRegion`, `freeTextPageShowsQuestion`, `StructuredAnswerOutcome`,
-`StructuredQuestionDriveError`, `structuredAnswerRefusal`.
+`structuredAnswerRefusal`.
 
-**Why the full family is not ported here.** These exist to answer a harness's own multiple-choice / multi-select
-/ free-text question by keystroke, and they refuse rather than guess when the pane does not
-provably show the question being answered. Ferretry has no structured-question surface at all:
-there is no `PendingQuestion` in `@ferretry/protocol`, no `/v1/sessions/:id/answer` route, and
-nothing that records a question. Porting the readers with no question to read would put ~900 lines
-of unmountable code in the tree, which both repo gates correctly refuse. It is one unit's work:
-the protocol type, the store, the route, and then these readers.
+**Why the full family is still not ported.** These exist to answer a harness's own multiple-choice /
+multi-select / free-text question by keystroke, and they refuse rather than guess when the pane does
+not provably show the question being answered.
+
+The reason recorded here originally — that Ferretry had no structured-question surface at all, no
+`PendingQuestion`, no answer route and nothing that recorded a question — **stopped being true and
+this paragraph did not.** All three exist: `PendingQuestionSchema` in `packages/protocol/src/lib/session.ts`,
+`POST /v1/sessions/:sessionId/answer` in `packages/daemon/src/lib/runtime/mounts/session-answer.ts`,
+and `projectStructuredQuestion` writing the question into durable state on every session read.
+
+What is actually left is the matcher family above for the public **bound abandon** (see §1.3 and the
+map's `interrupt` row), which must identify an arbitrary live question before pressing Escape.
+Answer-failure recovery no longer waits on that family: the driver already owns the exact pending
+tool and can re-bind that same form. It snapshots through the existing last-snapshot store and
+attempts at most one Escape, and only after that positive bind. What happens next turns entirely on
+whether the release was CONFIRMED, and the two branches are deliberately different:
+
+- **Confirmed release** — cancellation was positively observed, or the form had already visibly
+  advanced. The exact durable question is atomically released to prose, and the receipt settles as
+  `failed` when no answer input could have landed or `quarantined` when it may have. Prose is
+  permitted from that point.
+- **Unconfirmed cancellation, or a release that could not be committed** — the receipt stays
+  `accepted`, the honest name for "keys may or may not have landed", and the exact binding (the
+  pending question and the answers driven against it) is retained rather than released. Prose is
+  REFUSED, because fallback prose could answer a still-live native selector, and the answer is
+  never re-driven either.
+
+**Monitor evidence reconciles those `accepted` rows without re-driving anything.**
+`reconcileAnswerEvidence` promotes a receipt to `confirmed` only on the authoritative
+`lastAnsweredQuestionToolUseId` stamp, and to `quarantined` only when the transcript POSITIVELY
+proves that form advanced without proving which answer landed: a `tool-result` for that exact
+`toolUseId`, or a different question drawn in its place. **A terminal `completed`/`aborted` turn is
+not release evidence.** It says nothing about the pane, so it cannot prove a rendered selector
+stopped being drawn; `projectStructuredQuestion` leaves such a form `pending` and its receipt
+`accepted`, which keeps prose REFUSED rather than minting a prose-permitting advisory from an
+assumption. An unchanged active form stays `accepted` and therefore remains a hard quarantine. No
+answer key is ever sent a second time on ledger or monitor evidence alone.
+
+**The released advisory survives reads and ordinary prose.**
+`structured-answer-released-unconfirmed` is advisory rather than an input modal — `authorizeSend`
+and the resume policy both exempt that one attention kind, so prose continues while it stands, and
+the projection re-asserts it from the ledger on every subsequent read instead of letting ordinary
+traffic erase it. That re-assertion is EXACT and per record: the standing message is compared against
+the sentence this daemon would have minted for a given ledger record, never searched for the tool id,
+so `tool-1` does not own a message naming `tool-10`, ids carrying whitespace or the sentence's own
+delimiter words work, and a message owned by anything other than exactly one record fails closed to
+NOT owned rather than guessing which operation a person read about. A durable `acknowledged` row
+suppresses the RE-MINT for its own tool and does nothing else: it does not itself clear an advisory
+that is already standing, because a read is not a clear owner.
+
+**It clears on exactly two things, and a read is neither.** Later authoritative confirmation of that
+answer, or the successful explicit BARE human-admin relaunch (`admin-cli` / `admin-ui`, no message)
+completing its own final clear. That relaunch is one chain in one order, holding the answer queue
+throughout: release the old pane, get a successful replacement and delivery, append exactly one
+durable `acknowledged` record for the single quarantined operation the standing advisory names, and
+only then clear that exact attention in the `session.resumed` transition. A crash between the append
+and the clear leaves an acknowledged row beside a standing advisory and a retry finishes it — the
+opposite order would leave a cleared warning with nothing recording that a person dismissed it. A
+live pane keeps that bare-admin path reachable: the dismissal gives up the send shortcut and takes the
+relaunch rather than meeting `already running`, because otherwise the one action that may dismiss the
+warning would be unavailable on exactly the healthy sessions that carry it. Nothing else clears it — not
+old-pane cleanup, not the relaunch or the delivery by itself, not `preserved` false-terminal
+recovery, not a `peer`, `warden`, `daemon` or unknown actor, not a message-bearing resume or live
+send, and not a failed acknowledgment; every failure in that chain leaves the advisory standing, and
+an acknowledgment failure recovers the replacement to a supervised running session rather than
+launching a second pane or reporting a terminal verdict about it. An `acknowledged` record is human
+dismissal ONLY: it never writes `lastAnsweredQuestionToolUseId` and never means the structured answer
+landed. The blocking `structured-answer-unconfirmed` kind never clears through resume at all. The
+dismissal is additive to the `UnregisteredResumeReplacement` teardown path, which is unchanged. Pane
+death, cancellation failure, and restart replay remain fail-closed and never authorize a second
+drive.
 
 The nearest thing Ferretry does have is `lib/session/harness/picker-screen.ts` +
 `dismiss.ts` — the same discipline (classify the pane, re-verify immediately before every send,
@@ -87,27 +152,27 @@ refuse on an unknown screen) applied to Codex's model picker rather than to agen
 
 ### 1.3 `TmuxController` methods (lines 1344–2371)
 
-| Source method     | Ferretry                                                                           |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `alive`           | `lib/tmux/controller.ts`                                                           |
-| `listSessions`    | `lib/tmux/controller.ts`                                                           |
-| `capture`         | `lib/tmux/controller.ts` (`capture(session, history)`)                             |
-| `captureVisible`  | `lib/tmux/controller.ts` (`capture(session, false)`)                               |
-| `promptReady`     | `lib/tmux/pane.ts` — pure, out of the class                                        |
-| `state`           | `lib/tmux/controller.ts`                                                           |
-| `launch`          | `lib/tmux/controller.ts` + `adapters/session/lifecycle/…-launcher.ts`              |
-| `stop`            | `lib/tmux/controller.ts`                                                           |
-| `waitReady`       | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**            |
-| `inject`          | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**            |
-| `send`            | `adapters/…/tmux-session-lifecycle-launcher.ts` `deliver` — **this PR**            |
-| `paneProcessId`   | **GAP** — `#{pane_pid}` args exist (`panePidArguments`), no caller                 |
-| `processTreePids` | **GAP** — process-tree walk; see `lib/migrate/process-table.ts` (adjacent)         |
-| `subprocessAlive` | **GAP** — depends on `processTreePids`                                             |
-| `typeIntoQueue`   | **GAP** — mid-turn native-queue typing (`tab to queue`)                            |
-| `interrupt`       | **GAP** — no interrupt route exists                                                |
-| `answerQuestion`  | PARTIAL — `adapters/session/question/tmux-structured-question-driver.ts`; see §1.2 |
-| `cancelQuestion`  | **GAP** — see §1.2                                                                 |
-| `snapshot`        | Partly — `adapters/session/resume/tmux-resume-launcher.ts` `snapshot`              |
+| Source method     | Ferretry                                                                                                                                                                                                                                           |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alive`           | `lib/tmux/controller.ts`                                                                                                                                                                                                                           |
+| `listSessions`    | `lib/tmux/controller.ts`                                                                                                                                                                                                                           |
+| `capture`         | `lib/tmux/controller.ts` (`capture(session, history)`)                                                                                                                                                                                             |
+| `captureVisible`  | `lib/tmux/controller.ts` (`capture(session, false)`)                                                                                                                                                                                               |
+| `promptReady`     | `lib/tmux/pane.ts` — pure, out of the class                                                                                                                                                                                                        |
+| `state`           | `lib/tmux/controller.ts`                                                                                                                                                                                                                           |
+| `launch`          | `lib/tmux/controller.ts` + `adapters/session/lifecycle/…-launcher.ts`                                                                                                                                                                              |
+| `stop`            | `lib/tmux/controller.ts`                                                                                                                                                                                                                           |
+| `waitReady`       | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**                                                                                                                                                                            |
+| `inject`          | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**                                                                                                                                                                            |
+| `send`            | `adapters/…/tmux-session-lifecycle-launcher.ts` `deliver` — **this PR**                                                                                                                                                                            |
+| `paneProcessId`   | **GAP** — `#{pane_pid}` args exist (`panePidArguments`), no caller                                                                                                                                                                                 |
+| `processTreePids` | **GAP** — process-tree walk; see `lib/migrate/process-table.ts` (adjacent)                                                                                                                                                                         |
+| `subprocessAlive` | **GAP** — depends on `processTreePids`                                                                                                                                                                                                             |
+| `typeIntoQueue`   | **GAP** — mid-turn native-queue typing (`tab to queue`)                                                                                                                                                                                            |
+| `interrupt`       | PARTIAL — turn-stop is served by `SessionSendService.interrupt`; public bound abandon still answers `501`                                                                                                                                          |
+| `answerQuestion`  | PORTED for the bound shapes in §1.2 — durably idempotent and monitor-reconciled; a confirmed release settles `failed`/`quarantined` and permits prose, while an unconfirmed one stays `accepted` with the exact binding retained and prose refused |
+| `cancelQuestion`  | PARTIAL — the answer-failure path re-binds the exact owned form and sends at most one Escape, releasing to prose only when that cancellation is confirmed; the public arbitrary-form bound-abandon path remains GAP                                |
+| `snapshot`        | Partly — `adapters/session/resume/tmux-resume-launcher.ts` `snapshot`                                                                                                                                                                              |
 
 **`paneProcessId` / `subprocessAlive` — GAP with a live consequence.** kteam uses the pane pid and
 its process tree to tell "the harness exited but tmux kept the pane" from "the harness is running a
