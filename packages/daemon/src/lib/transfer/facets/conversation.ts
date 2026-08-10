@@ -72,7 +72,7 @@ export class ConversationFacetContributor implements TransferConversationContrib
 
   constructor(
     private readonly reader: TransferConversationReader,
-    private readonly redactor: Pick<TextRedactor, 'redact'> = { redact: async text => text },
+    private readonly redactor: Pick<TextRedactor, 'redact'>,
   ) {}
 
   async contribute(input: TransferPrepareInput): Promise<TransferConversationContribution> {

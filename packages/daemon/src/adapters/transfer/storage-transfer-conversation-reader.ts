@@ -36,6 +36,7 @@ import type { ConversationDigest } from '../../lib/session/transcript/digest.ts'
 import { SessionTranscriptReader } from '../../lib/session/transcript/reader.ts';
 import type { TranscriptDigestJournal } from '../../lib/session/transcript/reader.ts';
 import type { TranscriptSource } from '../../lib/transcript/types.ts';
+import type { TextRedactor } from '../../lib/secrets/redaction.ts';
 import type {
   TransferConversationReadInput,
   TransferConversationReader,
@@ -47,6 +48,7 @@ export class StorageTransferConversationReader implements TransferConversationRe
   constructor(
     private readonly sources: readonly TranscriptSource[],
     private readonly journal: TranscriptDigestJournal,
+    private readonly redactor: Pick<TextRedactor, 'redact'> = { redact: async text => text },
   ) {}
 
   /**
@@ -56,7 +58,7 @@ export class StorageTransferConversationReader implements TransferConversationRe
   async digest(input: TransferConversationReadInput): Promise<ConversationDigest | undefined> {
     const file = input.transcriptProvenance.file;
     if (file === undefined) return undefined;
-    return await this.digestFile(file, input.sourceSessionId, input.sourceHarness, input.through);
+    return await this.digestFile(file, input.sourceSessionId, input.sourceHarness, input.through, false);
   }
 
   /**
@@ -66,7 +68,7 @@ export class StorageTransferConversationReader implements TransferConversationRe
   async digestPinned(input: TransferConversationValidationInput): Promise<ConversationDigest | undefined> {
     const file = input.transcriptProvenance.file;
     if (file === undefined) return undefined;
-    return await this.digestFile(file, input.sourceSessionId, input.sourceHarness, input.through);
+    return await this.digestFile(file, input.sourceSessionId, input.sourceHarness, input.through, true);
   }
 
   private async digestFile(
@@ -74,8 +76,16 @@ export class StorageTransferConversationReader implements TransferConversationRe
     sessionId: string,
     harness: Harness,
     through: ConversationMessagePoint,
+    scrub: boolean,
   ): Promise<ConversationDigest | undefined> {
     const reader = new SessionTranscriptReader(this.sources, { file: async () => file }, this.journal);
-    return await reader.digest({ sessionId, harness }, through);
+    const digest = await reader.digest({ sessionId, harness }, through);
+    if (!scrub || digest === undefined) return digest;
+    return {
+      ...digest,
+      messages: await Promise.all(
+        digest.messages.map(async message => ({ ...message, text: await this.redactor.redact(message.text) })),
+      ),
+    };
   }
 }

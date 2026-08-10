@@ -29,6 +29,8 @@ import type {
 } from '../../../src/lib/transcript/types.ts';
 import { ConversationFacetContributor } from '../../../src/lib/transfer/facets/conversation.ts';
 
+const identityRedactor = { redact: async (text: string) => text };
+
 /**
  * The one conversation cut, over the file a plan PINS rather than the file a session currently
  * points at.
@@ -191,7 +193,7 @@ describe('StorageTransferConversationReader', () => {
     );
 
     // Act: the contributor can pass only the already-read source snapshot to the digest adapter.
-    const contribution = await new ConversationFacetContributor(reader).contribute({
+    const contribution = await new ConversationFacetContributor(reader, identityRedactor).contribute({
       request: {
         sourceSessionId: id,
         requestId: 'request-a',

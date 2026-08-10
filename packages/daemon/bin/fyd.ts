@@ -4076,6 +4076,7 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
   const conversation = new StorageTransferConversationReader(
     parts.transcriptSources,
     new StorageTranscriptDigestJournal(parts.storage),
+    parts.redactor,
   );
   const preparer = new SessionTransferPreparer({
     source: new StorageTransferSourceReader(parts.storage),

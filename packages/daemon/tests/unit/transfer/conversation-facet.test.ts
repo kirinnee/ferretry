@@ -20,6 +20,7 @@ const point = (byteOffset: number, blockIndex = 0): ConversationMessagePoint => 
 });
 
 const rawPrefix = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
+const identityRedactor = { redact: async (text: string) => text };
 
 const reader = (
   answer: (input: TransferConversationReadInput) => Promise<ConversationDigest | undefined>,
@@ -40,6 +41,7 @@ describe('ConversationFacetContributor', () => {
         read += 1;
         return undefined;
       }),
+      identityRedactor,
     );
 
     const contribution = await contributor.contribute(input({ cutMessagePoint: null }));
@@ -109,6 +111,7 @@ describe('ConversationFacetContributor', () => {
           selectionEvidence: { point: input.through, rawPrefix: rawPrefix(1) },
         };
       }),
+      identityRedactor,
     );
     const frozen = input();
     const transcriptProvenance = frozen.source.transcriptProvenance;
@@ -133,6 +136,7 @@ describe('ConversationFacetContributor', () => {
         read += 1;
         return undefined;
       }),
+      identityRedactor,
     );
 
     const error = (await contributor
@@ -145,7 +149,10 @@ describe('ConversationFacetContributor', () => {
   });
 
   it('refuses an unlocatable transcript instead of manufacturing an empty prefix for an exact cut', async () => {
-    const contributor = new ConversationFacetContributor(reader(async () => undefined));
+    const contributor = new ConversationFacetContributor(
+      reader(async () => undefined),
+      identityRedactor,
+    );
 
     const error = (await contributor.contribute(input()).catch((thrown: unknown) => thrown)) as TransferPrepareError;
 
@@ -164,7 +171,10 @@ describe('ConversationFacetContributor', () => {
     });
 
     for (const answer of [digest(), digest({ point: point(512, 1), rawPrefix: rawPrefix(2) })]) {
-      const contributor = new ConversationFacetContributor(reader(async () => answer));
+      const contributor = new ConversationFacetContributor(
+        reader(async () => answer),
+        identityRedactor,
+      );
       const error = (await contributor.contribute(input()).catch((thrown: unknown) => thrown)) as TransferPrepareError;
 
       expect(error).toBeInstanceOf(TransferPrepareError);
@@ -180,6 +190,7 @@ describe('ConversationFacetContributor', () => {
         reader(async () => {
           throw new ConversationDigestError(failure, `refused: ${failure}`);
         }),
+        identityRedactor,
       );
 
       const error = (await contributor.contribute(input()).catch((thrown: unknown) => thrown)) as TransferPrepareError;
@@ -196,6 +207,7 @@ describe('ConversationFacetContributor', () => {
       reader(async () => {
         throw boom;
       }),
+      identityRedactor,
     );
 
     expect(contributor.contribute(input())).rejects.toBe(boom);

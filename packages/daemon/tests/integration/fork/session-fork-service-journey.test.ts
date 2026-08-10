@@ -334,6 +334,7 @@ interface JourneyOptions {
   readonly loseRuntimeOutcomeOnce?: boolean;
   /** Loses the receipt advance after a complete import, leaving the target ahead of the receipt. */
   readonly loseImportStampOnce?: boolean;
+  readonly redact?: (text: string) => Promise<string>;
 }
 
 interface Journey {
@@ -437,6 +438,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     new StorageTransferConversationReader(
       [new NodeTranscriptSource(new ClaudeTranscriptParser()), new NodeTranscriptSource(new CodexTranscriptParser())],
       new StorageTranscriptDigestJournal(storage),
+      { redact: options.redact ?? (async text => text) },
     );
 
   /** The composition root's own start-account resolution, over the two published accounts. */
@@ -515,7 +517,9 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
           )) === 'accepted',
       },
       contributors: {
-        conversation: new ConversationFacetContributor(conversation),
+        conversation: new ConversationFacetContributor(conversation, {
+          redact: options.redact ?? (async text => text),
+        }),
         attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(attachments())),
         references: new ReferenceFacetContributor(),
         workspace: new WorkspaceFacetContributor(
@@ -1341,6 +1345,21 @@ describe('the fork journey over real storage', () => {
     should(subject.minted).eql([FIRST_TARGET]);
     should(times(subject, 'launch')).equal(0);
     should(await subject.snapshotSource()).eql(before);
+    await subject.close();
+  });
+
+  it('redacts transcript text in the durable plan, receipt and imported opening document', async () => {
+    const subject = await journey('redacted-artifacts', {
+      redact: async text => text.replace(CARRIED, '[redacted:SECRET]'),
+    });
+
+    const outcome = await subject.fork(key('redacted'), command(subject));
+    const held = await subject.target(outcome.targetSessionId);
+    const receipt = await subject.receipt('redacted');
+    const serialized = `${JSON.stringify(outcome.plan)}${held.plan}${JSON.stringify(receipt)}${held.brief}`;
+
+    should(serialized).not.containEql(CARRIED);
+    should(serialized).containEql('[redacted:SECRET]');
     await subject.close();
   });
 });
