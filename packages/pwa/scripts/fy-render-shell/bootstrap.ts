@@ -107,12 +107,19 @@ interface MermaidLibrary {
   let sendOverPort: ((reply: Reply) => void) | null = null;
   let port: MessagePort | null = null;
   let readyAnnouncement: ReturnType<typeof setInterval> | null = null;
+  let readyAnnouncements = 0;
   let animation: LottieAnimation | null = null;
   /** One render per frame. Reload is a fresh frame, never a second command. */
   let consumed = false;
 
   const send = (reply: Reply): void => {
     if (sendOverPort !== null) sendOverPort(reply);
+  };
+
+  const stopReadyAnnouncements = (): void => {
+    if (readyAnnouncement === null) return;
+    clearInterval(readyAnnouncement);
+    readyAnnouncement = null;
   };
 
   /** Every string this frame puts on the wire is cut to a documented length. */
@@ -312,10 +319,7 @@ interface MermaidLibrary {
     const offered = event.ports.length > 0 ? event.ports[0] : undefined;
     if (offered === undefined) return;
     port = offered;
-    if (readyAnnouncement !== null) {
-      clearInterval(readyAnnouncement);
-      readyAnnouncement = null;
-    }
+    stopReadyAnnouncements();
     // Bound BEFORE any library can run — see `sendOverPort` above.
     sendOverPort = offered.postMessage.bind(offered) as (reply: Reply) => void;
     const startPort = offered.start.bind(offered);
@@ -325,8 +329,16 @@ interface MermaidLibrary {
   };
 
   listen('message', onGlobalMessage);
+  listen('pagehide', stopReadyAnnouncements);
   // A `postMessage` notification has no acknowledgement. Keep announcing until
   // the parent proves receipt by transferring the one authenticated port.
   postToParent({ kind: 'shell-ready' } satisfies Reply, '*');
-  readyAnnouncement = setInterval(() => postToParent({ kind: 'shell-ready' } satisfies Reply, '*'), 100);
+  readyAnnouncement = setInterval(() => {
+    readyAnnouncements += 1;
+    if (readyAnnouncements * 100 >= FY_RENDER_SANDBOX_LIMITS.readyDeadlineMs) {
+      stopReadyAnnouncements();
+      return;
+    }
+    postToParent({ kind: 'shell-ready' } satisfies Reply, '*');
+  }, 100);
 })();
