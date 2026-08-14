@@ -435,6 +435,14 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
       daemon: { product: layout.product, name: layout.daemonName },
       sourceBinary: () => resolveDaemonBinary(environment, daemonName),
     }),
+    installedDaemon: () => {
+      try {
+        return resolveDaemonBinary(environment, daemonName);
+      } catch {
+        // A service-managed launch may not inherit a login shell or PATH. Its promoted snapshot is valid.
+        return undefined;
+      }
+    },
     clock,
     out,
   });

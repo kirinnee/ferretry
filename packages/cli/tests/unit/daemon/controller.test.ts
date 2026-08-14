@@ -143,6 +143,76 @@ describe('daemon uninstall', () => {
 });
 
 describe('daemon start', () => {
+  it('should promote and launch a changed installed daemon when stopped', async () => {
+    const snapshots = new FakeSnapshots();
+    const old = daemonSnapshot({ id: `sha256-${'a'.repeat(64)}`, sourceBinary: '/opt/fyd-0.143.0' });
+    const fresh = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: '/opt/fyd-0.175.3' });
+    snapshots.currentAnswer = old;
+    snapshots.buildAnswer = { ...fresh, created: true };
+    snapshots.listAnswer = [old, fresh];
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: { installedDaemon: () => fresh.sourceBinary } as unknown as Partial<DaemonControllerDeps>,
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).containEql('build');
+    should(snapshots.calls).containEql(`promote:${fresh.id}`);
+    should(service.startedExecutables).deepEqual([fresh.binaryPath]);
+  });
+
+  it('should keep the promoted snapshot when the installed daemon is unavailable', async () => {
+    const snapshots = new FakeSnapshots();
+    const { controller, out, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: { installedDaemon: () => undefined } as unknown as Partial<DaemonControllerDeps>,
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).not.containEql('build');
+    should(service.startedExecutables).deepEqual([snapshots.currentAnswer?.binaryPath]);
+    should(out.text).not.match(/installed daemon/u);
+  });
+
+  it('should stay silent and reuse the snapshot when the installed daemon agrees', async () => {
+    const snapshots = new FakeSnapshots();
+    const { controller, out } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: {
+        installedDaemon: () => snapshots.currentAnswer?.sourceBinary,
+      } as unknown as Partial<DaemonControllerDeps>,
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).not.containEql('build');
+    should(out.text).not.match(/installed daemon|promoted .* differs/u);
+  });
+
+  it('should warn but never swap a changed installed daemon while one is running', async () => {
+    const snapshots = new FakeSnapshots();
+    const { controller, out, service } = harness({
+      probes: [health()],
+      snapshots,
+      overrides: { installedDaemon: () => '/opt/fyd-0.175.3' } as unknown as Partial<DaemonControllerDeps>,
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).not.containEql('build');
+    should(snapshots.calls).not.containEql(`promote:${snapshots.buildAnswer.id}`);
+    should(service.calls).not.containEql('start');
+    should(out.text).match(/fy daemon restart/u);
+  });
+
   it('should leave a healthy daemon alone rather than restarting it', async () => {
     // Arrange
     const { controller, out, service } = harness({ probes: [health()] });
@@ -330,6 +400,26 @@ describe('daemon stop', () => {
 });
 
 describe('daemon restart', () => {
+  it('should promote a changed installed daemon before restarting it', async () => {
+    const snapshots = new FakeSnapshots();
+    const old = daemonSnapshot({ id: `sha256-${'a'.repeat(64)}`, sourceBinary: '/opt/fyd-0.143.0' });
+    const fresh = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: '/opt/fyd-0.175.3' });
+    snapshots.currentAnswer = old;
+    snapshots.buildAnswer = { ...fresh, created: true };
+    snapshots.listAnswer = [old, fresh];
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: { installedDaemon: () => fresh.sourceBinary } as unknown as Partial<DaemonControllerDeps>,
+    });
+
+    await controller.restart();
+
+    should(snapshots.calls).containEql(`promote:${fresh.id}`);
+    should(service.startedExecutables).deepEqual([fresh.binaryPath]);
+  });
+
   it('should wait for the old daemon to go quiet before starting the new one', async () => {
     // Arrange — a fixed 500ms sleep is what made kteam's successor die on EADDRINUSE.
     const { controller, out, service } = harness({
@@ -402,6 +492,17 @@ describe('daemon restart', () => {
 });
 
 describe('daemon status', () => {
+  it('should report an installed daemon that differs from the promoted snapshot', async () => {
+    const { controller, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: () => '/opt/fyd-0.175.3' } as unknown as Partial<DaemonControllerDeps>,
+    });
+
+    await controller.status({});
+
+    should(out.text).match(/installed daemon .* differs from promoted snapshot/u);
+  });
+
   it('should report a serving daemon as a human summary and succeed', async () => {
     // Arrange
     const { controller, out } = harness({ probes: [health()] });
