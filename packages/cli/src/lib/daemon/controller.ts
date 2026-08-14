@@ -46,6 +46,12 @@ export interface DaemonCommandOptions {
   readonly follow?: boolean;
 }
 
+export interface InstalledDaemonBinary {
+  readonly path: string;
+  readonly source: 'FY_DAEMON_BIN' | 'PATH';
+  readonly version?: string | undefined;
+}
+
 export class DaemonStartupFailedError extends Error {
   constructor(message: string) {
     super(message);
@@ -80,6 +86,10 @@ export interface DaemonControllerDeps {
   /** Serializes every mutating verb below against the same verbs in other invocations. */
   readonly lifecycle: IDaemonLifecycleLockPort;
   readonly snapshots: IDaemonSnapshotPort;
+  /** The installed daemon binary, when this invocation has one on its PATH. */
+  readonly installedDaemon?: () => InstalledDaemonBinary | undefined;
+  /** Reads a daemon artifact's version without making it part of the snapshot format. */
+  readonly daemonVersion?: (path: string) => string | undefined;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
   readonly readiness?: ReadinessPolicy;
@@ -169,6 +179,7 @@ export class DaemonController {
   async #start(): Promise<void> {
     const serving = await this.deps.health.probe();
     if (serving !== undefined) {
+      await this.#warnIfInstalledDaemonDiffers();
       this.deps.out.success(`${this.#name} is already serving (pid ${String(serving.pid)})`);
       return;
     }
@@ -177,11 +188,12 @@ export class DaemonController {
     if (incumbent.state === 'running') {
       // A service manager reports `activating` as running. Leave that incumbent's executable and
       // sole GC root untouched, but still honor `start`'s contract to wait until its API serves.
+      await this.#warnIfInstalledDaemonDiffers();
       const ready = await this.#awaitReady(owner, {}, true);
       this.deps.out.success(`${this.#name} ready (pid ${String(ready.pid)})`);
       return;
     }
-    const snapshot = await this.#ensurePromotedSnapshot();
+    const snapshot = await this.#ensurePromotedSnapshot(true);
     await this.#holdRetainedClosures(snapshot);
     const handle = await owner.start(snapshot.binaryPath);
     const health = await this.#awaitReady(owner, handle);
@@ -204,7 +216,7 @@ export class DaemonController {
     // incumbent. Reconciliation is tolerant, so a damaged sibling is a warning rather than a refusal,
     // but an operator must hear that warning while the healthy daemon is still untouched — never only
     // after restart has already created downtime.
-    const snapshot = await this.#ensurePromotedSnapshot();
+    const snapshot = await this.#ensurePromotedSnapshot(true);
     const inventory = await this.#inventory();
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
@@ -226,7 +238,72 @@ export class DaemonController {
     if (options.json === true) this.deps.out.success(renderDaemonStatusJson(view));
     else if (code === 0) this.deps.out.success(renderDaemonStatus(view));
     else this.deps.out.warn(renderDaemonStatus(view));
+    if (options.json !== true) await this.#warnIfInstalledDaemonDiffers();
     if (code !== 0) this.deps.out.setExitCode(code);
+  }
+
+  async which(options: DaemonCommandOptions): Promise<void> {
+    const installed = this.#installedDaemon();
+    const promoted = await this.deps.snapshots.current().catch((error: unknown) => {
+      this.deps.out.warn(
+        `could not inspect the promoted ${this.#name} snapshot: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return undefined;
+    });
+    const running = await this.deps.health.probe();
+    const promotedVersion = promoted === undefined ? undefined : this.#daemonVersion(promoted.binaryPath);
+    const payload = {
+      installed:
+        installed === undefined
+          ? { state: 'not-found' as const }
+          : {
+              state: 'found' as const,
+              path: installed.path,
+              source: installed.source,
+              version: installed.version ?? null,
+            },
+      promoted:
+        promoted === undefined
+          ? { state: 'not-found' as const }
+          : {
+              state: 'found' as const,
+              id: promoted.id,
+              path: promoted.binaryPath,
+              sourcePath: promoted.sourceBinary,
+              version: promotedVersion ?? null,
+            },
+      running:
+        running === undefined
+          ? { state: 'not-running' as const }
+          : { state: 'running' as const, pid: running.pid, version: running.version },
+    };
+    if (options.json === true) {
+      this.deps.out.success(JSON.stringify(payload, null, 2));
+      return;
+    }
+    const lines = [
+      payload.installed.state === 'found'
+        ? `installed: ${payload.installed.path} (${payload.installed.source}, version ${payload.installed.version ?? 'unknown'})`
+        : `installed: not found on PATH`,
+      payload.promoted.state === 'found'
+        ? `promoted: ${payload.promoted.id} version ${payload.promoted.version ?? 'unknown'} artifact ${payload.promoted.path} source ${payload.promoted.sourcePath}`
+        : 'promoted: no snapshot has been promoted yet',
+      payload.running.state === 'running'
+        ? `running: pid ${String(payload.running.pid)} version ${payload.running.version}`
+        : 'running: daemon is not running',
+    ];
+    if (installed !== undefined && promoted !== undefined && installed.path !== promoted.sourceBinary)
+      lines.push('installed and promoted differ; run fy daemon restart to use the installed daemon');
+    if (
+      running !== undefined &&
+      promoted !== undefined &&
+      promotedVersion !== undefined &&
+      running.version !== promotedVersion
+    )
+      lines.push('running and promoted differ; run fy daemon restart to apply the promoted snapshot');
+    if (running !== undefined && installed?.version !== undefined && running.version !== installed.version)
+      lines.push('running and installed differ; run fy daemon restart to use the installed daemon');
+    this.deps.out.success(lines.join('\n'));
   }
 
   async logs(options: DaemonCommandOptions): Promise<void> {
@@ -452,13 +529,63 @@ export class DaemonController {
    * `current()` throws for a lost, malformed, dangling or unverifiable pointer, so damaged evidence
    * can never be overwritten as if this were a fresh installation.
    */
-  async #ensurePromotedSnapshot(): Promise<DaemonSnapshot> {
+  async #ensurePromotedSnapshot(refreshInstalled = false): Promise<DaemonSnapshot> {
     const current = await this.deps.snapshots.current();
-    if (current !== undefined) return current;
+    if (current !== undefined) {
+      if (!refreshInstalled) return current;
+      const installed = this.#installedDaemon();
+      if (installed === undefined || installed.path === current.sourceBinary) return current;
+      const built = await this.deps.snapshots.build();
+      const promoted = await this.deps.snapshots.promote(built.id);
+      this.deps.out.warn(
+        `installed ${this.#name} daemon ${current.sourceBinary} differs from promoted snapshot; promoted ${promoted.sourceBinary}`,
+      );
+      return promoted;
+    }
     const built = await this.deps.snapshots.build();
     const promoted = await this.deps.snapshots.promote(built.id);
     this.deps.out.warn(`no promoted ${this.#name} snapshot existed; built and promoted ${promoted.id}`);
     return promoted;
+  }
+
+  #installedDaemon(): InstalledDaemonBinary | undefined {
+    try {
+      return this.deps.installedDaemon?.();
+    } catch (error: unknown) {
+      this.deps.out.warn(
+        `could not compare the installed ${this.#name} daemon; using the promoted snapshot: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    }
+  }
+
+  async #warnIfInstalledDaemonDiffers(): Promise<void> {
+    const installed = this.#installedDaemon();
+    if (installed === undefined) return;
+    try {
+      const current = await this.deps.snapshots.current();
+      if (current !== undefined && current.sourceBinary !== installed.path) {
+        this.deps.out.warn(
+          `installed daemon ${installed.path} differs from promoted snapshot ${current.sourceBinary}; run fy daemon restart to apply it`,
+        );
+      }
+    } catch (error: unknown) {
+      this.deps.out.warn(
+        `could not compare the installed ${this.#name} daemon; leaving the running daemon untouched: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  #daemonVersion(path: string): string | undefined {
+    try {
+      return this.deps.daemonVersion?.(path);
+    } catch {
+      return undefined;
+    }
   }
 
   /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */

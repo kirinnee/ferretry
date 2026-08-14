@@ -143,6 +143,79 @@ describe('daemon uninstall', () => {
 });
 
 describe('daemon start', () => {
+  it('should promote and launch a changed installed daemon when stopped', async () => {
+    const snapshots = new FakeSnapshots();
+    const old = daemonSnapshot({ id: `sha256-${'a'.repeat(64)}`, sourceBinary: '/opt/fyd-0.143.0' });
+    const fresh = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: '/opt/fyd-0.175.3' });
+    snapshots.currentAnswer = old;
+    snapshots.buildAnswer = { ...fresh, created: true };
+    snapshots.listAnswer = [old, fresh];
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: { installedDaemon: () => ({ path: fresh.sourceBinary, source: 'PATH' }) },
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).containEql('build');
+    should(snapshots.calls).containEql(`promote:${fresh.id}`);
+    should(service.startedExecutables).deepEqual([fresh.binaryPath]);
+  });
+
+  it('should keep the promoted snapshot when the installed daemon is unavailable', async () => {
+    const snapshots = new FakeSnapshots();
+    const { controller, out, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: { installedDaemon: () => undefined },
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).not.containEql('build');
+    should(service.startedExecutables).deepEqual([snapshots.currentAnswer?.binaryPath]);
+    should(out.text).not.match(/installed daemon/u);
+  });
+
+  it('should stay silent and reuse the snapshot when the installed daemon agrees', async () => {
+    const snapshots = new FakeSnapshots();
+    const { controller, out } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: {
+        installedDaemon: () =>
+          snapshots.currentAnswer === undefined
+            ? undefined
+            : { path: snapshots.currentAnswer.sourceBinary, source: 'PATH' },
+      },
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).not.containEql('build');
+    should(out.text).not.match(/installed daemon|promoted .* differs/u);
+  });
+
+  it('should warn but never swap a changed installed daemon while one is running', async () => {
+    const snapshots = new FakeSnapshots();
+    const { controller, out, service } = harness({
+      probes: [health()],
+      snapshots,
+      overrides: { installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH' }) },
+    });
+
+    await controller.start();
+
+    should(snapshots.calls).not.containEql('build');
+    should(snapshots.calls).not.containEql(`promote:${snapshots.buildAnswer.id}`);
+    should(service.calls).not.containEql('start');
+    should(out.text).match(/fy daemon restart/u);
+  });
+
   it('should leave a healthy daemon alone rather than restarting it', async () => {
     // Arrange
     const { controller, out, service } = harness({ probes: [health()] });
@@ -330,6 +403,26 @@ describe('daemon stop', () => {
 });
 
 describe('daemon restart', () => {
+  it('should promote a changed installed daemon before restarting it', async () => {
+    const snapshots = new FakeSnapshots();
+    const old = daemonSnapshot({ id: `sha256-${'a'.repeat(64)}`, sourceBinary: '/opt/fyd-0.143.0' });
+    const fresh = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: '/opt/fyd-0.175.3' });
+    snapshots.currentAnswer = old;
+    snapshots.buildAnswer = { ...fresh, created: true };
+    snapshots.listAnswer = [old, fresh];
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      snapshots,
+      overrides: { installedDaemon: () => ({ path: fresh.sourceBinary, source: 'PATH' }) },
+    });
+
+    await controller.restart();
+
+    should(snapshots.calls).containEql(`promote:${fresh.id}`);
+    should(service.startedExecutables).deepEqual([fresh.binaryPath]);
+  });
+
   it('should wait for the old daemon to go quiet before starting the new one', async () => {
     // Arrange — a fixed 500ms sleep is what made kteam's successor die on EADDRINUSE.
     const { controller, out, service } = harness({
@@ -402,6 +495,17 @@ describe('daemon restart', () => {
 });
 
 describe('daemon status', () => {
+  it('should report an installed daemon that differs from the promoted snapshot', async () => {
+    const { controller, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH' }) },
+    });
+
+    await controller.status({});
+
+    should(out.text).match(/installed daemon .* differs from promoted snapshot/u);
+  });
+
   it('should report a serving daemon as a human summary and succeed', async () => {
     // Arrange
     const { controller, out } = harness({ probes: [health()] });
@@ -464,6 +568,60 @@ describe('daemon status', () => {
 
     // Assert
     should(direct.calls).containEql('inspect:4242');
+  });
+});
+
+describe('daemon which', () => {
+  it('should clearly report unavailable installed, promoted, and running daemons', async () => {
+    const snapshots = new FakeSnapshots();
+    snapshots.currentAnswer = undefined;
+    const { controller, out } = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      snapshots,
+      overrides: { installedDaemon: () => undefined },
+    });
+
+    await controller.which({});
+
+    should(out.text).containEql('installed: not found on PATH');
+    should(out.text).containEql('promoted: no snapshot has been promoted yet');
+    should(out.text).containEql('running: daemon is not running');
+  });
+
+  it('should warn and still report the other unavailable identities when the promoted snapshot cannot be read', async () => {
+    // A damaged promoted pointer must not make `which` unusable: the operator still needs to know
+    // whether an installed or running daemon exists, as well as why promotion could not be inspected.
+    const snapshots = new FakeSnapshots();
+    snapshots.currentError = new Error('promoted manifest is unreadable');
+    const { controller, out } = harness({
+      probes: [undefined],
+      snapshots,
+      overrides: { installedDaemon: () => undefined },
+    });
+
+    await controller.which({});
+
+    should(out.text).containEql('could not inspect the promoted fyd snapshot: promoted manifest is unreadable');
+    should(out.text).containEql('installed: not found on PATH');
+    should(out.text).containEql('promoted: no snapshot has been promoted yet');
+    should(out.text).containEql('running: daemon is not running');
+  });
+
+  it('should render all identities and remedies as JSON', async () => {
+    const { controller, out } = harness({
+      overrides: {
+        installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH', version: '0.175.3' }),
+        daemonVersion: () => '0.143.0',
+      },
+    });
+
+    await controller.which({ json: true });
+
+    const payload: unknown = JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '');
+    should(payload).have.property('installed').with.property('version', '0.175.3');
+    should(payload).have.property('promoted').with.property('version', '0.143.0');
+    should(payload).have.property('running').with.property('version', '1.2.3');
   });
 });
 
