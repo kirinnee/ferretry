@@ -589,6 +589,25 @@ describe('daemon which', () => {
     should(out.text).containEql('running: daemon is not running');
   });
 
+  it('should warn and still report the other unavailable identities when the promoted snapshot cannot be read', async () => {
+    // A damaged promoted pointer must not make `which` unusable: the operator still needs to know
+    // whether an installed or running daemon exists, as well as why promotion could not be inspected.
+    const snapshots = new FakeSnapshots();
+    snapshots.currentError = new Error('promoted manifest is unreadable');
+    const { controller, out } = harness({
+      probes: [undefined],
+      snapshots,
+      overrides: { installedDaemon: () => undefined },
+    });
+
+    await controller.which({});
+
+    should(out.text).containEql('could not inspect the promoted fyd snapshot: promoted manifest is unreadable');
+    should(out.text).containEql('installed: not found on PATH');
+    should(out.text).containEql('promoted: no snapshot has been promoted yet');
+    should(out.text).containEql('running: daemon is not running');
+  });
+
   it('should render all identities and remedies as JSON', async () => {
     const { controller, out } = harness({
       overrides: {
