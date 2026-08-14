@@ -102,6 +102,14 @@ export interface SessionLifecycleEvent {
 
 /** Durable boundary for lifecycle records; concrete persistence belongs to adapters. */
 export interface SessionLifecycleRepository {
+  /**
+   * Durably claims the session's storage layout without publishing a lifecycle record.
+   *
+   * Credentialled creation uses this as its first write: the plaintext environment can then land
+   * inside the claimed directory before any config document exposes its hash. It is idempotent, and
+   * `read(id)` must still answer `undefined` until `write` publishes the record.
+   */
+  reserve(id: SessionId): Promise<void>;
   read(id: SessionId): Promise<SessionLifecycleRecord | undefined>;
   write(record: SessionLifecycleRecord, event: SessionLifecycleEvent): Promise<void>;
 }
@@ -111,8 +119,20 @@ export interface SessionLifecycleLauncher {
   /** True when this session's terminal already exists — the only safe guard against a second pane. */
   alive(record: SessionLifecycleRecord): Promise<boolean>;
   launch(record: SessionLifecycleRecord): Promise<void>;
-  /** Types one instruction into the live terminal once it is ready to accept input. */
-  deliver(record: SessionLifecycleRecord, instruction: string): Promise<void>;
+  /**
+   * Waits until the newly launched harness is at an idle prompt, clearing only recognised startup
+   * dialogs. Required so pre-turn runtime work cannot weaken the interactive control path's
+   * refuse-rather-than-queue rule.
+   */
+  ready(record: SessionLifecycleRecord): Promise<void>;
+  /**
+   * Types one instruction into the live terminal once it is ready to accept input.
+   *
+   * `beforeWrite` is called after readiness is proved and immediately before the first composer
+   * write. A durable effect ledger uses that exact boundary: a cold-pane refusal remains retryable,
+   * while a crash after the callback can never cause the instruction to be typed twice.
+   */
+  deliver(record: SessionLifecycleRecord, instruction: string, beforeWrite?: () => Promise<void>): Promise<void>;
   /** Captures a live final frame before a durable terminal transition, if one exists. */
   snapshot(record: SessionLifecycleRecord): Promise<void>;
   stop(record: SessionLifecycleRecord): Promise<void>;

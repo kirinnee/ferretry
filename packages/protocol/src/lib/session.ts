@@ -1,8 +1,18 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { HarnessSchema } from './session-base.ts';
+import { SessionProvenanceSchema } from './session-provenance.ts';
+import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
 
-export const HarnessSchema = z.enum(['claude', 'codex']);
-export type Harness = z.infer<typeof HarnessSchema>;
+export type { Harness } from './session-base.ts';
+export { HarnessSchema } from './session-base.ts';
+/**
+ * Re-exported here rather than added to the package barrel separately, because the stamp is a FIELD
+ * of the session config below: a reader that has `SessionConfig` should reach its provenance shape
+ * through the same module, not hunt for a second import path.
+ */
+export type { SessionProvenance, SessionSpawnOrigin, WardenLineageSource } from './session-provenance.ts';
+export { SessionProvenanceSchema, SessionSpawnOriginSchema, WardenLineageSourceSchema } from './session-provenance.ts';
 
 export const InteractionModeSchema = z.enum(['auto', 'interactive']);
 export type InteractionMode = z.infer<typeof InteractionModeSchema>;
@@ -222,6 +232,22 @@ export const SessionConfigSchema = z.object({
   teammate: z.string().optional(),
   label: z.string().optional(),
   parent: z.string().optional(),
+  /**
+   * The spawn-side warden stamp: who caused this session to exist, and whether it descends from a
+   * warden.
+   *
+   * OPTIONAL FOR TWO SEPARATE REASONS, and conflating them would be a bug. A session started before
+   * stamping existed carries none; and "no stamp" is a genuinely different answer from "not a
+   * descendant", because the first means nobody has decided and the second means somebody did.
+   *
+   * A PRESENT-BUT-DAMAGED STAMP FAILS THIS WHOLE PARSE, deliberately. Zod strips unknown keys, not
+   * invalid declared ones, so a corrupt record takes the session out of every surface at once rather
+   * than quietly handing the warden detector `undefined` for a session that may well be
+   * warden-descended. That is the loop the shield exists to prevent, so the loud failure is the safe
+   * one — and `transcript` below already carries exactly this blast radius, so it is not a new
+   * hazard class.
+   */
+  provenance: SessionProvenanceSchema.optional(),
   boardAccess: TaskBoardAccessSchema,
   agent: z.string().min(1),
   harness: HarnessSchema,
@@ -248,6 +274,8 @@ export const SessionConfigSchema = z.object({
       at: InstantSchema,
     })
     .optional(),
+  /** Target-only lineage back to the transfer decision that created this fresh session. */
+  transferredFrom: SessionTransferEdgeSchema.optional(),
   /**
    * Optional because a session started before this record existed has none, and because a harness
    * home the daemon cannot resolve must leave the session with no transcript rather than a guessed
@@ -394,7 +422,7 @@ export const SessionAttachTargetSchema = z.strictObject({
   /** The private tmux server owned by the daemon that answered the request. */
   socketPath: z.string().min(1).regex(/^\//u, 'the tmux socket path must be absolute'),
   tmuxSession: z.string().min(1),
-  paneId: z.string().regex(/^%[1-9][0-9]*$/u),
+  paneId: z.string().regex(/^%(?:0|[1-9][0-9]*)$/u),
   pid: PositiveIntegerSchema.refine(value => value > 1, 'the pane pid must be greater than one'),
   /** Linux `/proc/<pid>/stat` start ticks, which distinguish a reused PID. */
   processStartTicks: PositiveIntegerSchema,
@@ -478,6 +506,11 @@ const StartSessionBaseSchema = z.strictObject({
   remoteControl: z.boolean().optional(),
   harnessFlags: z.array(z.string()).optional(),
   model: z.string().min(1).optional(),
+  /**
+   * Opaque startup reasoning choice. The selected account's live runtime decision validates the
+   * value; the protocol deliberately does not own a second harness effort enum.
+   */
+  effort: z.string().min(1).optional(),
   intervalSeconds: PositiveIntegerSchema.optional(),
   timeoutSeconds: NonNegativeIntegerSchema.optional(),
   nudgeAfterSeconds: NonNegativeIntegerSchema.optional(),

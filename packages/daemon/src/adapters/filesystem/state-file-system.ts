@@ -31,6 +31,54 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
+/** The kind questions a directory read can answer without touching the entry itself. */
+export interface DirectoryEntryKind {
+  readonly name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+  isFIFO(): boolean;
+  isSocket(): boolean;
+  isBlockDevice(): boolean;
+  isCharacterDevice(): boolean;
+}
+
+/**
+ * What kind of entry this is, decided WITHOUT opening it.
+ *
+ * Opening is not an option: a FIFO left in the state home would block the caller until somebody
+ * wrote to it, turning a classification into a hang. So the directory read's own answer is used,
+ * and every non-directory, non-regular kind is simply "not a regular file".
+ *
+ * The one case worth a syscall is `DT_UNKNOWN`, which some FUSE, overlay and network mounts return
+ * for everything: there every predicate is false, and refusing outright would make a perfectly
+ * ordinary home unusable on those filesystems. It is resolved with `lstat`, which does not follow a
+ * symlink and does not block on a FIFO. If even that cannot establish the kind, the entry is
+ * neither a directory nor a regular file — fail closed, never "probably fine".
+ */
+export async function classifyDirectoryEntry(
+  directory: string,
+  entry: DirectoryEntryKind,
+  lstatAt: (path: string) => Promise<Stats> = lstat,
+): Promise<DirectoryEntry> {
+  if (entry.isDirectory()) return { name: entry.name, directory: true, regularFile: false };
+  if (entry.isFile()) return { name: entry.name, directory: false, regularFile: true };
+  if (
+    entry.isSymbolicLink() ||
+    entry.isFIFO() ||
+    entry.isSocket() ||
+    entry.isBlockDevice() ||
+    entry.isCharacterDevice()
+  )
+    return { name: entry.name, directory: false, regularFile: false };
+  try {
+    const kind = await lstatAt(join(directory, entry.name));
+    return { name: entry.name, directory: kind.isDirectory(), regularFile: kind.isFile() };
+  } catch {
+    return { name: entry.name, directory: false, regularFile: false };
+  }
+}
+
 function namesSameFile(information: Stats, expected: JournalFingerprint): boolean {
   return information.dev.toString() === expected.device && information.ino.toString() === expected.inode;
 }
@@ -117,8 +165,12 @@ export class StateFileSystem implements FileSystemPort {
 
   async listDirectory(path: string): Promise<readonly DirectoryEntry[]> {
     try {
-      const entries = await readdir(await this.checked(path), { withFileTypes: true });
-      return entries.map(entry => ({ name: entry.name, directory: entry.isDirectory() }));
+      const checked = await this.checked(path);
+      const entries = await readdir(checked, { withFileTypes: true });
+      // The kind is asked here, where the directory read already knows it and nothing is followed
+      // or opened: a symlink reports as a symlink, so a caller deciding by name cannot be handed
+      // somebody else's bytes, and a FIFO cannot make the classification block.
+      return await Promise.all(entries.map(async entry => await classifyDirectoryEntry(checked, entry)));
     } catch (error) {
       if (isMissing(error)) return [];
       throw error;

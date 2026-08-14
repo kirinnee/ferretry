@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   decideLayout,
   type FileSystemPort,
@@ -44,14 +44,40 @@ function logFileOnly(name: string): boolean {
   return name.length > '.log'.length && name.endsWith('.log');
 }
 
-/** Atomic writes name their scratch file `<target>.<id>.tmp`, and bootstrap only writes the marker. */
-function markerScratchFile(paths: FoundationPaths): (name: string) => boolean {
-  const prefix = `${basename(paths.layoutVersion)}.`;
+/** Atomic writes name their scratch file `<target>.<id>.tmp`, with a strict path-safe writer id. */
+function scratchFileFor(...targets: readonly string[]): (name: string) => boolean {
   const suffix = '.tmp';
-  return name =>
-    name.startsWith(prefix) &&
-    name.endsWith(suffix) &&
-    /^[a-zA-Z0-9-]+$/.test(name.slice(prefix.length, name.length - suffix.length));
+  const prefixes = targets.map(target => `${basename(target)}.`);
+  return name => {
+    if (!name.endsWith(suffix)) return false;
+    const prefix = prefixes.find(candidate => name.startsWith(candidate));
+    if (prefix === undefined) return false;
+    return /^[a-zA-Z0-9-]+$/.test(name.slice(prefix.length, name.length - suffix.length));
+  };
+}
+
+/**
+ * The message-token key's own name — THE one spelling of it, exported so nothing spells it twice.
+ *
+ * TWO PROGRAMS HAVE TO AGREE ABOUT THIS STRING, which is exactly the shape of defect this repo has
+ * shipped before with the layout marker: the codec publishes the file, and this recovery decides
+ * whether a home holding it may still be claimed. A second literal that drifted would not fail
+ * loudly — it would make a home carrying a perfectly good key read as foreign state and refuse to
+ * boot for ever, and the only move left to its owner would be to delete an intact installation. So
+ * the name is declared here, beside the rule that recognises it, and the codec derives its path from
+ * this constant rather than repeating the string.
+ *
+ * The key is created once, on first use, by the same daemon that bootstraps the home, so a crash
+ * between publishing it and writing the marker leaves a home holding exactly this file.
+ *
+ * It is recognised by EXACT basename and as a regular file only. Nothing wider: a directory of that
+ * name, a symlink, or any other name under `state` is still foreign state, and the temporary that
+ * publishes the key is recognised only under the temporary directory, by the scratch grammar.
+ */
+export const SESSION_MESSAGE_TOKEN_KEY_BASENAME = 'session-message-token.key';
+
+function stateHomeKeyFile(name: string): boolean {
+  return name === SESSION_MESSAGE_TOKEN_KEY_BASENAME;
 }
 
 export class StateHomeLayout {
@@ -71,11 +97,20 @@ export class StateHomeLayout {
         bootstrapDirectory(paths.config),
         bootstrapDirectory(paths.fleet),
         bootstrapDirectory(paths.logs, [], logFileOnly),
-        bootstrapDirectory(paths.state, [
-          bootstrapDirectory(paths.index),
-          bootstrapDirectory(paths.sessions),
-          bootstrapDirectory(paths.temporary, [], markerScratchFile(paths)),
-        ]),
+        bootstrapDirectory(
+          paths.state,
+          [
+            bootstrapDirectory(paths.index),
+            bootstrapDirectory(paths.sessions),
+            // The marker's scratch and the token key's scratch, and no other temporary name.
+            bootstrapDirectory(
+              paths.temporary,
+              [],
+              scratchFileFor(paths.layoutVersion, join(paths.state, SESSION_MESSAGE_TOKEN_KEY_BASENAME)),
+            ),
+          ],
+          stateHomeKeyFile,
+        ),
       ],
       name => name === lockName,
     );
@@ -96,7 +131,11 @@ export class StateHomeLayout {
   private async holdsOnlyBootstrapEntries(node: BootstrapDirectory, fileSystem: FileSystemPort): Promise<boolean> {
     for (const entry of await fileSystem.listDirectory(node.path)) {
       if (!entry.directory) {
-        if (!node.file(entry.name)) return false;
+        // A recognised NAME is not enough: bootstrap writes ordinary files, so a symlink, socket or
+        // device wearing one of those names is somebody else's state and still refuses. `directory`
+        // being false would have admitted every one of them. `=== true` is deliberate — a source
+        // that does not classify its entries fails closed rather than being read as "ordinary".
+        if (entry.regularFile !== true || !node.file(entry.name)) return false;
         continue;
       }
       const child = node.directories.get(entry.name);

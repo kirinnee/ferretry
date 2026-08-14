@@ -113,8 +113,14 @@ export class TmuxPaneDelivery {
    * The caller gets back which kind of delivery happened, because a slash command the TUI handles
    * itself is a success with no turn behind it.
    */
-  async deliver(session: string, text: string, options: StartupDialogOptions = {}): Promise<InjectionOutcome> {
+  async deliver(
+    session: string,
+    text: string,
+    options: StartupDialogOptions = {},
+    beforeWrite?: () => Promise<void>,
+  ): Promise<InjectionOutcome> {
     await this.waitReady(session, options);
+    await beforeWrite?.();
     const evidence = await this.fill(session, text);
     return await this.submit(session, text, evidence);
   }

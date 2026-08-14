@@ -161,11 +161,114 @@ describe('SessionTranscriptReader', () => {
     );
 
     // Act
-    const actual = await subject.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 12 });
+    const actual = await subject.digest(
+      { sessionId: 'session-1', harness: 'claude' },
+      { v: 1, byteOffset: 12, blockIndex: 0 },
+    );
 
     // Assert
     should(proofs).eql(['session-1']);
-    should(actual.messages).eql([{ point: { v: 1, byteOffset: 12 }, role: 'user', text: 'restart from here' }]);
+    should(actual.messages).eql([
+      { point: { v: 1, byteOffset: 12, blockIndex: 0 }, role: 'user', text: 'restart from here' },
+    ]);
+  });
+
+  it('should page portable rows, each bound to its record’s commitment, after the journal proof', async () => {
+    // Arrange
+    const proofs: string[] = [];
+    const record = { byteOffset: 0, bytes: Buffer.from('{"m":"restart from here"}\n') };
+    const subject = new SessionTranscriptReader(
+      [
+        source('claude', async file => ({
+          ...batch(file, [
+            { kind: 'message', harness: 'claude', role: 'user', text: 'restart from here', byteOffset: 0 },
+          ]),
+          rawRecords: [record],
+        })),
+      ],
+      resolving('/transcript.jsonl'),
+      digestJournal(proofs),
+    );
+
+    // Act
+    const rows = await subject.portableRows({ sessionId: 'session-1', harness: 'claude' });
+
+    // Assert
+    should(proofs).eql(['session-1']);
+    should(rows).have.length(1);
+    should(rows?.[0]?.rawPrefix).have.length(32);
+  });
+
+  it('should read an already-resolved file without resolving a second time', async () => {
+    // Arrange: production resolves once — the discovering resolver may persist an attribution —
+    // re-reads the session's pinned facts, and only then reads transcript bytes.
+    const opened: string[] = [];
+    const subject = new SessionTranscriptReader(
+      [
+        source('claude', async file => {
+          opened.push(file);
+          return { ...batch(file, []), rawRecords: [] };
+        }),
+      ],
+      {
+        file: async () => {
+          throw new Error('the resolved-file read must never resolve again');
+        },
+      },
+      digestJournal(),
+    );
+
+    // Act
+    const rows = await subject.portableRowsFromFile({ sessionId: 'session-1', harness: 'claude' }, '/pinned.jsonl');
+
+    // Assert
+    should(opened).eql(['/pinned.jsonl']);
+    should(rows).be.empty();
+  });
+
+  it('should answer no rows for a session whose transcript cannot be named or read', async () => {
+    // Arrange
+    const unresolvable = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, []))],
+      resolving(undefined),
+      digestJournal(),
+    );
+    const unreadable = new SessionTranscriptReader(
+      [
+        source('claude', async () => {
+          throw new Error('ENOENT');
+        }),
+      ],
+      resolving('/transcript.jsonl'),
+      digestJournal(),
+    );
+
+    // Act / Assert: missing evidence, which is a different answer from damaged evidence.
+    should(await unresolvable.portableRows({ sessionId: 'session-1', harness: 'claude' })).be.undefined();
+    should(
+      await unreadable.portableRowsFromFile({ sessionId: 'session-1', harness: 'claude' }, '/t.jsonl'),
+    ).be.undefined();
+  });
+
+  it('should refuse rows without a journal proof, and refuse a batch carrying no record bytes', async () => {
+    // Arrange
+    const withoutJournal = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, []))],
+      resolving('/transcript.jsonl'),
+    );
+    const withoutRecords = new SessionTranscriptReader(
+      [
+        source('claude', async file =>
+          batch(file, [{ kind: 'message', harness: 'claude', role: 'user', text: 'unbindable', byteOffset: 0 }]),
+        ),
+      ],
+      resolving('/transcript.jsonl'),
+      digestJournal(),
+    );
+
+    // Act / Assert
+    await should(withoutJournal.portableRows({ sessionId: 'session-1', harness: 'claude' })).be.rejected();
+    await should(withoutRecords.portableRows({ sessionId: 'session-1', harness: 'claude' })).be.rejected();
   });
 
   it('should refuse a digest when no daemon journal proof or transcript can be read', async () => {
@@ -182,10 +285,10 @@ describe('SessionTranscriptReader', () => {
 
     // Act / Assert
     await should(
-      withoutJournal.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0 }),
+      withoutJournal.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0, blockIndex: 0 }),
     ).be.rejected();
     await should(
-      withoutTranscript.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0 }),
+      withoutTranscript.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0, blockIndex: 0 }),
     ).be.rejected();
   });
 });

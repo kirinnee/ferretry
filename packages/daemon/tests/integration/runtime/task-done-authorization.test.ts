@@ -67,8 +67,16 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
     this.live.add(record.config.tmuxSession);
   }
 
-  async deliver(): Promise<void> {
-    return undefined;
+  async ready(_record: SessionLifecycleRecord): Promise<void> {
+    // This recorder has no harness prompt; a recorded launch is immediately ready.
+  }
+
+  async deliver(
+    _record: SessionLifecycleRecord,
+    _instruction: string,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<void> {
+    await beforeWrite?.();
   }
 
   async snapshot(): Promise<void> {

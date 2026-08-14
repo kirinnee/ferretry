@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { AttachmentView } from '@ferretry/protocol';
+import { type AttachmentView, AttachmentViewSchema } from '@ferretry/protocol';
 import { decryptPdfInMemory, PdfDecryptError } from './decrypt-pdf.ts';
 
 const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024;
@@ -81,8 +82,12 @@ export class SessionAttachmentStore {
       throw new SessionAttachmentError('invalid', `${label} id is not usable`);
   }
 
-  private view(stored: StoredAttachment, sessionId: string): AttachmentView {
-    const unlocked = this.unlocked.get(this.key(sessionId, stored.id));
+  /**
+   * One attachment as its MANIFEST alone describes it: identity, size, content hash, and the locked
+   * state of an encrypted original. Nothing here consults the plaintext cache, so this projection is
+   * the same for every reader regardless of what some session has unlocked.
+   */
+  private durableView(stored: StoredAttachment): AttachmentView {
     return {
       id: stored.id,
       filename: stored.filename,
@@ -90,19 +95,61 @@ export class SessionAttachmentStore {
       size: stored.size,
       sha256: stored.sha256,
       createdAt: stored.createdAt,
-      ...(stored.encrypted === undefined
-        ? {}
-        : unlocked === undefined
-          ? { encrypted: { kind: 'pdf', locked: true } }
-          : {
-              encrypted: {
-                kind: 'pdf',
-                locked: false,
-                expiresAt: unlocked.expiresAt,
-                decryptedSize: unlocked.bytes.byteLength,
-              },
-            }),
+      ...(stored.encrypted === undefined ? {} : { encrypted: { kind: 'pdf', locked: true } }),
     };
+  }
+
+  private view(stored: StoredAttachment, sessionId: string): AttachmentView {
+    const unlocked = this.unlocked.get(this.key(sessionId, stored.id));
+    if (stored.encrypted === undefined || unlocked === undefined) return this.durableView(stored);
+    return {
+      ...this.durableView(stored),
+      encrypted: {
+        kind: 'pdf',
+        locked: false,
+        expiresAt: unlocked.expiresAt,
+        decryptedSize: unlocked.bytes.byteLength,
+      },
+    };
+  }
+
+  /**
+   * Every attachment this session DURABLY holds, in content-address order.
+   *
+   * Deliberately blind to the unlock cache. A transfer inventory describes originals — the bytes that
+   * can be copied — and an encrypted original is locked whatever some live session has decrypted in
+   * memory. Reporting an unlock here would let one session's password decide what another session is
+   * told it inherits, so the list is built from `durableView` and every encrypted entry reads locked.
+   *
+   * A directory with no manifest is a torn upload rather than an attachment, so it is skipped: there
+   * is nothing to describe and nothing to carry. A manifest that EXISTS and does not parse is a
+   * different answer and is raised, because bytes may well be there and an inventory that quietly
+   * omitted them would report a complete list that is not one.
+   */
+  async list(sessionId: string): Promise<readonly AttachmentView[]> {
+    this.assertId(sessionId, 'session');
+    const root = join(this.options.root, 'attachments', this.options.daemonId, sessionId);
+    let entries: readonly Dirent[];
+    try {
+      entries = await readdir(root, { withFileTypes: true });
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') return [];
+      throw new SessionAttachmentError('corrupt', 'attachment storage for this session cannot be listed');
+    }
+    const ids = entries
+      .filter(entry => entry.isDirectory() && ID.test(entry.name))
+      .map(entry => entry.name)
+      .sort();
+    const views: AttachmentView[] = [];
+    for (const id of ids) {
+      try {
+        views.push(this.durableView(await this.stored(sessionId, id)));
+      } catch (error) {
+        if (error instanceof SessionAttachmentError && error.failure === 'not_found') continue;
+        throw error;
+      }
+    }
+    return views;
   }
 
   private async stored(sessionId: string, attachmentId: string): Promise<StoredAttachment> {
@@ -115,15 +162,69 @@ export class SessionAttachmentStore {
         throw new SessionAttachmentError('not_found', 'attachment was not found');
       throw new SessionAttachmentError('corrupt', 'attachment manifest cannot be read');
     }
+    return this.manifest(parsed, attachmentId);
+  }
+
+  /**
+   * One manifest, PARSED rather than trusted, and the only place that decides what a usable one is.
+   *
+   * `AttachmentViewSchema` already owns what an attachment's facts must look like — a non-empty
+   * filename and mime, a non-negative integer size, a 64-hex digest, a real instant — so the durable
+   * projection is validated against it rather than this file re-listing those rules and drifting from
+   * them. Four things that schema cannot know are checked beside it:
+   *
+   * - the directory an attachment was found in must be the id the record claims;
+   * - the id must be the CONTENT ADDRESS of the bytes it describes (`att_<sha256>`), so a manifest
+   *   cannot rename somebody else's content into this slot;
+   * - the durable encryption record is `{ kind: 'pdf' }` or nothing — a shape this store writes and
+   *   no wire schema describes, and one that must never be normalised from something else, because
+   *   the projection reports every encrypted original as locked;
+   * - a filename can never be read back as a path.
+   *
+   * Anything else is `corrupt`. That matters beyond this store: this inventory feeds a durable
+   * transfer plan, so a manifest half-read here becomes a plan that fails validation much later,
+   * about a session, instead of a refusal now, about the file that is actually damaged. Proving the
+   * ORIGINAL bytes still hash to this address is deliberately NOT done here — that belongs to the
+   * paths that read those bytes: `download`, and the transfer copier on the import write.
+   */
+  private manifest(document: unknown, attachmentId: string): StoredAttachment {
+    const record: Readonly<Record<string, unknown>> =
+      typeof document === 'object' && document !== null && !Array.isArray(document)
+        ? (document as Readonly<Record<string, unknown>>)
+        : {};
+    const encrypted = record.encrypted;
+    const encryptionIsDurable =
+      encrypted === undefined ||
+      (typeof encrypted === 'object' &&
+        encrypted !== null &&
+        !Array.isArray(encrypted) &&
+        (encrypted as { readonly kind?: unknown }).kind === 'pdf');
+    const durable = AttachmentViewSchema.safeParse({
+      id: record.id,
+      filename: record.filename,
+      mime: record.mime,
+      size: record.size,
+      sha256: record.sha256,
+      createdAt: record.createdAt,
+      ...(encrypted === undefined ? {} : { encrypted: { kind: 'pdf', locked: true } }),
+    });
     if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      (parsed as StoredAttachment).id !== attachmentId ||
-      !SAFE_NAME.test((parsed as StoredAttachment).filename ?? '') ||
-      typeof (parsed as StoredAttachment).size !== 'number'
+      !durable.success ||
+      !encryptionIsDurable ||
+      durable.data.id !== attachmentId ||
+      durable.data.id !== `att_${durable.data.sha256}` ||
+      !SAFE_NAME.test(durable.data.filename)
     )
       throw new SessionAttachmentError('corrupt', 'attachment manifest is invalid');
-    return parsed as StoredAttachment;
+    return {
+      id: durable.data.id,
+      filename: durable.data.filename,
+      mime: durable.data.mime,
+      size: durable.data.size,
+      sha256: durable.data.sha256,
+      createdAt: durable.data.createdAt,
+      ...(encrypted === undefined ? {} : { encrypted: { kind: 'pdf' as const } }),
+    };
   }
 
   async upload(

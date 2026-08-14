@@ -1,6 +1,13 @@
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import type {
+  SessionEffectAdmission,
+  SessionEffectKey,
+  SessionEffectLedger,
+  SessionEffectStanding,
+} from '../../../../src/lib/session/effects/index.ts';
 import {
   type CreateSessionLifecycleRequest,
   defaultSessionLifecycleSettings,
@@ -21,11 +28,23 @@ import {
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 const ID = 'ms8-abcd1234';
+const FIRST_TURN_INSTRUCTION =
+  `Read the file /state/sessions/${ID}/turns/turn-001.md now, then carefully follow every instruction ` +
+  'inside it. This is your complete task for this turn.';
 
 /** Round-trips through JSON the way the real store does, so no test can rely on object identity. */
 class MemoryRepository implements SessionLifecycleRepository {
   readonly documents = new Map<string, string>();
   readonly events: SessionLifecycleEvent[] = [];
+  readonly reservations: SessionId[] = [];
+  reserveFailure?: unknown;
+  writeFailure?: unknown;
+  exposeDocumentBeforeFailure = false;
+
+  async reserve(id: SessionId): Promise<void> {
+    this.reservations.push(id);
+    if (this.reserveFailure !== undefined) throw this.reserveFailure;
+  }
 
   async read(id: SessionId): Promise<SessionLifecycleRecord | undefined> {
     const document = this.documents.get(id);
@@ -33,7 +52,9 @@ class MemoryRepository implements SessionLifecycleRepository {
   }
 
   async write(record: SessionLifecycleRecord, event: SessionLifecycleEvent): Promise<void> {
+    if (this.writeFailure !== undefined && !this.exposeDocumentBeforeFailure) throw this.writeFailure;
     this.documents.set(record.config.id, JSON.stringify(record));
+    if (this.writeFailure !== undefined) throw this.writeFailure;
     this.events.push(event);
   }
 
@@ -48,6 +69,7 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   readonly calls: string[] = [];
   live = false;
   launchErrors: unknown[] = [];
+  readyError?: unknown;
   deliverError?: unknown;
   stopError?: unknown;
   /** Set when a launch must make the pane appear, as a real tmux launch does. */
@@ -55,13 +77,20 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   /** Set when a *failing* launch still leaves a pane behind — the case retrying must not fight. */
   liveAfterFailure = false;
 
+  constructor(private readonly order: string[] = []) {}
+
+  private record(call: string): void {
+    this.calls.push(call);
+    this.order.push(call);
+  }
+
   async alive(): Promise<boolean> {
-    this.calls.push('alive');
+    this.record('alive');
     return this.live;
   }
 
   async launch(): Promise<void> {
-    this.calls.push('launch');
+    this.record('launch');
     const failure = this.launchErrors.shift();
     if (failure) {
       if (this.liveAfterFailure) this.live = true;
@@ -70,22 +99,90 @@ class RecordingLauncher implements SessionLifecycleLauncher {
     if (this.livenessFromLaunch) this.live = true;
   }
 
-  async deliver(_record: SessionLifecycleRecord, instruction: string): Promise<void> {
-    this.calls.push(`deliver:${instruction}`);
+  async ready(_record: SessionLifecycleRecord): Promise<void> {
+    this.record('ready');
+    if (this.readyError) throw this.readyError;
+  }
+
+  async deliver(
+    _record: SessionLifecycleRecord,
+    instruction: string,
+    beforeWrite?: () => Promise<void>,
+  ): Promise<void> {
+    if (beforeWrite !== undefined) {
+      this.order.push('beforeWrite');
+      await beforeWrite();
+    }
+    this.record(`deliver:${instruction}`);
     if (this.deliverError) throw this.deliverError;
   }
 
   async snapshot(): Promise<void> {
-    this.calls.push('snapshot');
+    this.record('snapshot');
   }
 
   async stop(): Promise<void> {
-    this.calls.push('stop');
+    this.record('stop');
     if (this.stopError) throw this.stopError;
   }
 
   launches(): number {
     return this.calls.filter(call => call === 'launch').length;
+  }
+}
+
+/** A stateful durable-effect fake: the state survives every retry through one harness. */
+class RecordingEffectLedger implements SessionEffectLedger {
+  readonly calls: string[] = [];
+  standing: SessionEffectStanding = 'unclaimed';
+  scriptedBegin?: SessionEffectAdmission;
+  beginErrorAfterRecord?: unknown;
+  settleError?: unknown;
+  private fingerprint?: string;
+
+  constructor(private readonly order: string[] = []) {}
+
+  private record(call: string): void {
+    this.calls.push(call);
+    this.order.push(call);
+  }
+
+  private standingFor(fingerprint: string): SessionEffectStanding {
+    return this.fingerprint !== undefined && this.fingerprint !== fingerprint ? 'conflict' : this.standing;
+  }
+
+  async inspect(key: SessionEffectKey, fingerprint: string): Promise<SessionEffectStanding> {
+    this.record(`effect:inspect:${key.effectId}`);
+    return this.standingFor(fingerprint);
+  }
+
+  async begin(key: SessionEffectKey, fingerprint: string, _at: string): Promise<SessionEffectAdmission> {
+    this.record(`effect:begin:${key.effectId}`);
+    if (this.scriptedBegin !== undefined) {
+      const admission = this.scriptedBegin;
+      if (admission === 'perform' || admission === 'unsettled') {
+        this.fingerprint = fingerprint;
+        this.standing = 'unsettled';
+      } else if (admission === 'settled') {
+        this.fingerprint = fingerprint;
+        this.standing = 'settled';
+      }
+      return admission;
+    }
+    const standing = this.standingFor(fingerprint);
+    if (standing !== 'unclaimed') return standing;
+    this.fingerprint = fingerprint;
+    this.standing = 'unsettled';
+    if (this.beginErrorAfterRecord !== undefined) throw this.beginErrorAfterRecord;
+    return 'perform';
+  }
+
+  async settle(key: SessionEffectKey, fingerprint: string, _at: string): Promise<void> {
+    this.record(`effect:settle:${key.effectId}`);
+    if (this.settleError !== undefined) throw this.settleError;
+    if (this.standingFor(fingerprint) !== 'unsettled')
+      throw new Error(`effect ${key.effectId} cannot settle from ${this.standingFor(fingerprint)}`);
+    this.standing = 'settled';
   }
 }
 
@@ -101,18 +198,40 @@ class RecordingTaskStore implements SessionTaskStore {
 }
 
 const CAPABILITY = 'a-very-secret-session-capability';
-const HASH = 'f'.repeat(64);
+const credential = (capability: string): SessionCredential => ({
+  capability,
+  hash: createHash('sha256').update(capability, 'utf8').digest('hex'),
+});
+const HASH = credential(CAPABILITY).hash;
 
 class FixedCredentialIssuer implements SessionCredentialIssuer {
+  issues = 0;
+
   issue(): SessionCredential {
-    return { capability: CAPABILITY, hash: HASH };
+    this.issues += 1;
+    return credential(CAPABILITY);
+  }
+}
+
+class SequenceCredentialIssuer implements SessionCredentialIssuer {
+  issues = 0;
+
+  constructor(private readonly credentials: readonly SessionCredential[]) {}
+
+  issue(): SessionCredential {
+    const credential = this.credentials[this.issues];
+    if (credential === undefined) throw new Error('credential sequence exhausted');
+    this.issues += 1;
+    return credential;
   }
 }
 
 class RecordingEnvironmentStore implements SessionEnvironmentStore {
   readonly written = new Map<string, Readonly<Record<string, string>>>();
+  writeFailure?: unknown;
 
   async write(id: SessionId, environment: Readonly<Record<string, string>>): Promise<void> {
+    if (this.writeFailure !== undefined) throw this.writeFailure;
     this.written.set(id, environment);
   }
 
@@ -188,8 +307,10 @@ interface Harness {
   readonly repository: MemoryRepository;
   readonly launcher: RecordingLauncher;
   readonly tasks: RecordingTaskStore;
+  readonly effects: RecordingEffectLedger;
   readonly directories: FakeDirectoryResolver;
   readonly serial: QueueingSerialExecutor;
+  readonly order: string[];
   readonly subject: SessionLifecycleService;
 }
 
@@ -197,15 +318,18 @@ function harness(
   overrides: Partial<SessionLifecyclePorts> = {},
   settings?: Partial<SessionLifecycleSettings>,
 ): Harness {
+  const order: string[] = [];
   const repository = new MemoryRepository();
-  const launcher = new RecordingLauncher();
+  const launcher = new RecordingLauncher(order);
   const tasks = new RecordingTaskStore();
+  const effects = new RecordingEffectLedger(order);
   const directories = new FakeDirectoryResolver();
   const serial = new QueueingSerialExecutor();
   const ports: SessionLifecyclePorts = {
     repository,
     launcher,
     tasks,
+    effects,
     directories,
     ids: new FixedIdFactory(),
     clock: new SequenceClock(),
@@ -216,8 +340,10 @@ function harness(
     repository,
     launcher,
     tasks,
+    effects,
     directories,
     serial,
+    order,
     subject: new SessionLifecycleService(ports, { ...defaultSessionLifecycleSettings, ...settings }),
   };
 }
@@ -245,6 +371,7 @@ describe('SessionLifecycleService', () => {
     should(actual.state.status).equal('created');
     should(directories.requested).deepEqual(['/workspace/project']);
     should(repository.current()).deepEqual(actual);
+    should(repository.reservations).deepEqual([ID]);
     should(serial.keys).deepEqual([ID]);
     should(repository.events).deepEqual([
       { type: 'session.created', data: { agent: AGENT, mode: 'auto', cwd: '/canonical/project' } },
@@ -268,6 +395,107 @@ describe('SessionLifecycleService', () => {
     should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
   });
 
+  it('should publish no credential hash when the durable environment write fails, and allow a clean retry', async () => {
+    // Arrange
+    const environment = new RecordingEnvironmentStore();
+    environment.writeFailure = new Error('environment rename failed');
+    const credentials = new SequenceCredentialIssuer([credential('discarded-capability'), credential(CAPABILITY)]);
+    const { repository, subject } = harness({ credentials, environment });
+
+    // Act + Assert — the plaintext never became durable, so neither may its hash.
+    await should(subject.create(input())).be.rejectedWith('environment rename failed');
+    should(repository.documents.size).equal(0);
+    should(repository.events).deepEqual([]);
+    should([...environment.written.keys()]).deepEqual([]);
+
+    // The failed attempt left no record for a retry to mistake for a completed create.
+    environment.writeFailure = undefined;
+    const retried = await subject.create(input());
+    should(retried.config.sessionCapabilityHash).equal(HASH);
+    should(credentials.issues).equal(2);
+    should(repository.reservations).deepEqual([ID, ID]);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+  });
+
+  it('should overwrite a staged plaintext with a fresh matching credential when record publication fails', async () => {
+    // Arrange — the reservation and first plaintext land, but the repository fails before exposing
+    // any lifecycle document. This is the durable prefix a daemon crash leaves for a retry.
+    const environment = new RecordingEnvironmentStore();
+    const credentials = new SequenceCredentialIssuer([credential('first-capability'), credential(CAPABILITY)]);
+    const { repository, subject } = harness({ credentials, environment });
+    repository.writeFailure = new Error('config write failed');
+
+    // Act + Assert
+    await should(subject.create(input())).be.rejectedWith('config write failed');
+    should(repository.documents.size).equal(0);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: 'first-capability' });
+
+    repository.writeFailure = undefined;
+    const retried = await subject.create(input());
+    should(retried.config.sessionCapabilityHash).equal(HASH);
+    should(repository.current().config.sessionCapabilityHash).equal(HASH);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    should(credentials.issues).equal(2);
+    should(repository.reservations).deepEqual([ID, ID]);
+  });
+
+  it('should durably store the matching plaintext before a torn repository write exposes its hash', async () => {
+    // Arrange — model a repository that makes config.json visible and then fails before completing
+    // the state/journal tail of its create write.
+    const environment = new RecordingEnvironmentStore();
+    const credentials = new FixedCredentialIssuer();
+    const { repository, subject } = harness({ credentials, environment });
+    repository.exposeDocumentBeforeFailure = true;
+    repository.writeFailure = new Error('state write failed');
+
+    // Act
+    await should(subject.create(input())).be.rejectedWith('state write failed');
+
+    // Assert — any reader that can already see the hash can also read its exact plaintext. A retry
+    // refuses the existing record without minting or overwriting that credential.
+    should(repository.current().config.sessionCapabilityHash).equal(HASH);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    await should(subject.create(input())).be.rejectedWith(`session already exists: ${ID}`);
+    should(credentials.issues).equal(1);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+  });
+
+  it('should refuse credential issuance when no durable environment store is wired', async () => {
+    // Arrange
+    const credentials = new FixedCredentialIssuer();
+    const { repository, subject } = harness({ credentials });
+
+    // Act + Assert
+    await should(subject.create(input())).be.rejectedWith(/requires a durable environment store/u);
+    should(credentials.issues).equal(0);
+    should(repository.documents.size).equal(0);
+  });
+
+  it('should refuse a caller-supplied hash that has no lifecycle-issued plaintext', async () => {
+    // Arrange
+    const { repository, subject } = harness();
+
+    // Act + Assert
+    await should(subject.create(input({ sessionCapabilityHash: HASH }))).be.rejectedWith(
+      /requires a lifecycle-issued credential/u,
+    );
+    should(repository.reservations).deepEqual([]);
+    should(repository.documents.size).equal(0);
+  });
+
+  it('should publish neither environment nor record when reserving the session layout fails', async () => {
+    // Arrange
+    const environment = new RecordingEnvironmentStore();
+    const { repository, subject } = harness({ credentials: new FixedCredentialIssuer(), environment });
+    repository.reserveFailure = new Error('session marker write failed');
+
+    // Act + Assert
+    await should(subject.create(input())).be.rejectedWith('session marker write failed');
+    should(repository.documents.size).equal(0);
+    should(repository.events).deepEqual([]);
+    should([...environment.written.keys()]).deepEqual([]);
+  });
+
   it('should leave the session and its environment untouched when no credential issuer is wired', async () => {
     // Arrange
     const environment = new RecordingEnvironmentStore();
@@ -281,7 +509,7 @@ describe('SessionLifecycleService', () => {
     should([...environment.written.keys()]).deepEqual([]);
   });
 
-  it('should not write an environment for a create that never produced a record', async () => {
+  it('should not write an environment for a create refused by a live terminal collision', async () => {
     // Arrange
     const environment = new RecordingEnvironmentStore();
     const { launcher, subject } = harness({ credentials: new FixedCredentialIssuer(), environment });
@@ -291,7 +519,7 @@ describe('SessionLifecycleService', () => {
     await should(subject.create(input())).be.rejectedWith(/already live/u);
 
     // Assert
-    // A secret on disk for a session that does not exist is a credential nothing can ever revoke.
+    // A colliding terminal is rejected before either durable half of credentialled creation.
     should([...environment.written.keys()]).deepEqual([]);
   });
 
@@ -319,7 +547,7 @@ describe('SessionLifecycleService', () => {
     should(repository.documents.size).equal(0);
   });
 
-  it('should deliver the assigned task to the terminal before reporting a session as running', async () => {
+  it('should make no explicit ready call when there is no before-first-turn callback', async () => {
     // Arrange
     const { repository, launcher, tasks, subject } = harness();
     launcher.livenessFromLaunch = true;
@@ -329,18 +557,143 @@ describe('SessionLifecycleService', () => {
 
     // Assert
     should(actual.state.status).equal('running');
-    should(launcher.calls).deepEqual([
-      'alive',
-      'alive',
-      'launch',
-      `deliver:Read the file /state/sessions/${ID}/turns/turn-001.md now, then carefully follow every instruction inside it. This is your complete task for this turn.`,
-    ]);
+    should(launcher.calls).deepEqual(['alive', 'alive', 'launch', `deliver:${FIRST_TURN_INSTRUCTION}`]);
     should(tasks.documents.get(ID)).equal('# Assigned task\n\nBuild it\n');
     should(repository.events.map(entry => entry.type)).deepEqual([
       'session.created',
       'session.starting',
       'session.running',
     ]);
+  });
+
+  it('should launch, wait for readiness, run startup work and admit the write in that order', async () => {
+    // Arrange
+    const { launcher, order, subject } = harness();
+    launcher.livenessFromLaunch = true;
+
+    // Act
+    const actual = await subject.createAndStart(input(), async record => {
+      launcher.calls.push(`configure:${record.config.tmuxSession}`);
+      order.push('beforeFirstTurn');
+    });
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(launcher.calls).deepEqual([
+      'alive',
+      'alive',
+      'launch',
+      'ready',
+      `configure:fy-${ID}`,
+      `deliver:${FIRST_TURN_INSTRUCTION}`,
+    ]);
+    should(order.slice(order.indexOf('launch'))).deepEqual([
+      'launch',
+      'ready',
+      'beforeFirstTurn',
+      'beforeWrite',
+      'effect:begin:turn-1',
+      `deliver:${FIRST_TURN_INSTRUCTION}`,
+      'effect:settle:turn-1',
+    ]);
+  });
+
+  it('should record readiness failure and deliver nothing', async () => {
+    // Arrange
+    const { effects, launcher, repository, tasks, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    launcher.readyError = new Error('the harness exited before its prompt became ready');
+
+    // Act + Assert
+    await should(subject.createAndStart(input(), async () => undefined)).be.rejectedWith(
+      'the harness exited before its prompt became ready',
+    );
+    should(repository.current().state).containDeep({
+      status: 'failed',
+      reason: 'the harness exited before its prompt became ready',
+    });
+    should(launcher.calls).containEql('ready');
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).deepEqual([]);
+    should(tasks.documents.size).equal(0);
+    should(effects.standing).equal('unclaimed');
+  });
+
+  it('should record failed startup runtime setup without delivering turn one', async () => {
+    // Arrange
+    const { repository, launcher, tasks, subject } = harness();
+    launcher.livenessFromLaunch = true;
+
+    // Act + Assert
+    await should(
+      subject.createAndStart(input(), async () => {
+        throw new Error('effort is unavailable');
+      }),
+    ).be.rejectedWith('effort is unavailable');
+    should(repository.current().state).containDeep({ status: 'failed', reason: 'effort is unavailable' });
+    should(launcher.calls.filter(call => call.startsWith('deliver'))).deepEqual([]);
+    should(tasks.documents.size).equal(0);
+  });
+
+  it('should skip an already settled first turn and still finish the live session as running', async () => {
+    // Arrange
+    const { effects, launcher, order, repository, tasks, subject } = harness();
+    await subject.create(input());
+    launcher.live = true;
+    effects.standing = 'settled';
+
+    // Act
+    const actual = await subject.start(ID, async () => {
+      order.push('beforeFirstTurn');
+    });
+
+    // Assert — the durable outcome, not a second callback or composer write, is resumed.
+    should(actual.state.status).equal('running');
+    should(launcher.launches()).equal(0);
+    should(launcher.calls.filter(call => call === 'ready' || call.startsWith('deliver:'))).deepEqual([]);
+    should(order).not.containEql('beforeFirstTurn');
+    should(tasks.documents.size).equal(0);
+    should(repository.events.map(entry => entry.type)).deepEqual([
+      'session.created',
+      'session.starting',
+      'session.running',
+    ]);
+  });
+
+  it('should treat a first turn settled between inspect and begin as a successful replay', async () => {
+    // Arrange: inspection sees the default `unclaimed`; another attempt settles before this one wins
+    // the compare-and-set at the launcher's exact pre-write callback.
+    const { effects, launcher, repository, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    effects.scriptedBegin = 'settled';
+
+    // Act
+    const actual = await subject.createAndStart(input());
+
+    // Assert — `settled` aborts before the fake records any composer write, but it is a completed
+    // first turn rather than a launch failure.
+    should(actual.state.status).equal('running');
+    should(effects.calls).deepEqual(['effect:inspect:turn-1', 'effect:begin:turn-1']);
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).deepEqual([]);
+    should(repository.events.map(entry => entry.type)).deepEqual([
+      'session.created',
+      'session.starting',
+      'session.running',
+    ]);
+    should(repository.current().state.reason).be.undefined();
+  });
+
+  it('should fail an unsettled first turn without launching or delivering it again', async () => {
+    // Arrange
+    const { effects, launcher, repository, tasks, subject } = harness();
+    await subject.create(input());
+    effects.standing = 'unsettled';
+
+    // Act + Assert
+    await should(subject.start(ID)).be.rejectedWith(/began but never settled/u);
+    should(repository.current().state).containDeep({ status: 'failed' });
+    should(launcher.launches()).equal(0);
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).deepEqual([]);
+    should(tasks.documents.size).equal(0);
   });
 
   it('should never type into a bare interactive terminal', async () => {
@@ -359,11 +712,11 @@ describe('SessionLifecycleService', () => {
   it('should fail the launch, not report a running agent, when the task cannot be delivered', async () => {
     // Arrange
     const { repository, launcher, subject } = harness();
-    launcher.deliverError = new Error('pane did not become ready');
+    launcher.deliverError = new Error('the pane write failed');
 
     // Act + Assert
-    await should(subject.createAndStart(input())).be.rejectedWith('pane did not become ready');
-    should(repository.current().state).containDeep({ status: 'failed', reason: 'pane did not become ready' });
+    await should(subject.createAndStart(input())).be.rejectedWith('the pane write failed');
+    should(repository.current().state).containDeep({ status: 'failed', reason: 'the pane write failed' });
     should(repository.events.map(entry => entry.type)).deepEqual([
       'session.created',
       'session.starting',
@@ -465,29 +818,49 @@ describe('SessionLifecycleService', () => {
     ]);
   });
 
-  it('should adopt the pane a crash left behind instead of opening a second one', async () => {
+  it('should not replay when the durable before-write callback records intent and loses its response', async () => {
     // Arrange
-    const { launcher, subject } = harness();
-    await subject.create(input());
-    launcher.deliverError = new Error('lost the daemon mid-launch');
-    await should(subject.start(ID)).be.rejected();
-    // The record is `failed` with a live pane, exactly as a crashed launch leaves it.
+    const { effects, launcher, repository, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    effects.beginErrorAfterRecord = new Error('lost the effect admission response');
+
+    // Act: the callback durably began the effect, then died before the launcher recorded a write.
+    await should(subject.createAndStart(input())).be.rejectedWith('lost the effect admission response');
+    should(effects.standing).equal('unsettled');
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).deepEqual([]);
+    should(repository.current().state.status).equal('failed');
+
+    // A restart sees the durable middle state and refuses rather than guessing that no write began.
+    effects.beginErrorAfterRecord = undefined;
+    await should(subject.start(ID)).be.rejectedWith(/began but never settled/u);
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).deepEqual([]);
+    should(launcher.launches()).equal(1);
+  });
+
+  it('should not replay when delivery may have landed and its result was lost', async () => {
+    // Arrange
+    const { effects, launcher, repository, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    launcher.deliverError = new Error('lost the pane delivery response');
+
+    // Act: the fake records the composer write after `beforeWrite`, then loses its answer.
+    await should(subject.createAndStart(input())).be.rejectedWith('lost the pane delivery response');
+    should(effects.standing).equal('unsettled');
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).have.length(1);
+    should(repository.current().state.status).equal('failed');
+
+    // Retrying the failed lifecycle may adopt the pane, but may never type the assignment twice.
     launcher.deliverError = undefined;
-    launcher.live = true;
-
-    // Act
-    const actual = await subject.start(ID);
-
-    // Assert
-    should(actual.state.status).equal('running');
+    await should(subject.start(ID)).be.rejectedWith(/began but never settled/u);
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).have.length(1);
     should(launcher.launches()).equal(1);
   });
 
   it('should relaunch a starting record whose pane is gone rather than wedging it', async () => {
     // Arrange
-    const { repository, launcher, subject } = harness();
+    const { repository, launcher, tasks, subject } = harness();
     await subject.create(input());
-    launcher.deliverError = new Error('daemon died before the prompt landed');
+    tasks.failure = new Error('daemon died before the task document landed');
     await should(subject.start(ID)).be.rejected();
     const interrupted = repository.current();
     await repository.write(
@@ -497,7 +870,7 @@ describe('SessionLifecycleService', () => {
         data: {},
       },
     );
-    launcher.deliverError = undefined;
+    tasks.failure = undefined;
 
     // Act
     const actual = await subject.start(ID);

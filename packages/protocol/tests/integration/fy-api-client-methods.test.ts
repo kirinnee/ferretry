@@ -60,6 +60,22 @@ const FOREIGN_CONVERSATION = {
   messages: [{ id: 'record-1', role: 'user', text: 'A real imported message.' }],
 };
 
+/** One page of the addressable conversation: a redacted row, its coordinate and its evidence. */
+const TRANSCRIPT_PAGE = {
+  v: 1,
+  sessionId: SESSION_ID,
+  messages: [
+    {
+      point: { v: 1, byteOffset: 0, blockIndex: 0 },
+      role: 'assistant',
+      text: 'The token is [redacted] and the plan stands.',
+      timestamp: '2026-08-06T07:00:00.000Z',
+      selectionBinding: 'selection-binding-1',
+    },
+  ],
+  nextCursor: 'message-cursor-1',
+};
+
 const sessionResponse = (): Response => jsonResponse(sessionView);
 
 const CASES: readonly MethodCase[] = [
@@ -529,6 +545,40 @@ const CASES: readonly MethodCase[] = [
     expected: LOG_TEXT,
   },
   {
+    // No cursor and no limit means NO query string at all. `?cursor=&limit=` would be two malformed
+    // values rather than two unstated ones, and the daemon owns the default page size.
+    name: 'messages from the first forkable row',
+    invoke: client => client.messages(SESSION_ID),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
+    name: 'messages continuing after an opaque cursor',
+    invoke: client => client.messages(SESSION_ID, 'message-cursor-1'),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages?cursor=message-cursor-1',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
+    name: 'messages with a stated page size and no cursor',
+    invoke: client => client.messages(SESSION_ID, undefined, 50),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/messages?limit=50',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
+    name: 'messages with both a cursor and the server maximum',
+    invoke: client => client.messages('sessions/../secrets', 'message-cursor-1', 1_000),
+    verb: 'GET',
+    path: '/v1/sessions/sessions%2F..%2Fsecrets/messages?cursor=message-cursor-1&limit=1000',
+    response: () => jsonResponse(TRANSCRIPT_PAGE),
+    expected: TRANSCRIPT_PAGE,
+  },
+  {
     name: 'events with default paging',
     invoke: client => client.events(SESSION_ID),
     verb: 'GET',
@@ -587,6 +637,40 @@ describe('FyApiClient typed method delegation', () => {
     });
   }
 
+  it('should put the cursor on the wire exactly as the daemon issued it', async () => {
+    // The cursor is daemon-issued, daemon-verified evidence about the prefix already served. A
+    // client that trimmed it, re-encoded it, or rebuilt it from the last row's point would present
+    // a token nobody issued — and the refusal that followed would read as a changed transcript.
+    // Arrange — the characters a careless client damages: padding, a plus, a slash, a tab.
+    const opaqueCursor = ' cur/v1+AAAA==\tBBBB ';
+    const transport = new QueuedHttpTransport(jsonResponse(TRANSCRIPT_PAGE));
+    const client = await connectClient(transport);
+
+    // Act
+    await client.messages(SESSION_ID, opaqueCursor);
+
+    // Assert — decoded from the query rather than compared against a hand-spelled escaping, so the
+    // assertion proves fidelity rather than restating one encoder's output.
+    const url = new URL(String(transport.calls[0]?.url));
+    should(url.pathname).equal('/api/v1/sessions/session-1/messages');
+    should(url.searchParams.get('cursor')).equal(opaqueCursor);
+    should(url.searchParams.has('limit')).be.false();
+  });
+
+  it('should let a caller cancel a long message read', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(jsonResponse(TRANSCRIPT_PAGE));
+    const client = await connectClient(transport);
+    const controller = new AbortController();
+
+    // Act
+    const actual = await client.messages(SESSION_ID, undefined, undefined, controller.signal);
+
+    // Assert
+    should(actual).deepEqual(TRANSCRIPT_PAGE);
+    should(transport.calls[0]?.init.signal).not.be.undefined();
+  });
+
   it('should pass a caller cancellation through an event read', async () => {
     // Arrange
     const cancelled = new Error('operator left');
@@ -641,6 +725,7 @@ describe('FyApiClient typed method input validation', () => {
       () => client.snapshot('   '),
       () => client.logs('   '),
       () => client.events('   '),
+      () => client.messages('   '),
       () => client.upload('   ', new Blob(['a'])),
     ];
 
@@ -663,6 +748,14 @@ describe('FyApiClient typed method input validation', () => {
       () => client.events('session-1', -1),
       () => client.events('session-1', 0, 1_001),
       () => client.history('session-1', 0, 0),
+      // The daemon enforces 1..1,000 itself; refusing the same range here costs a round trip that
+      // could only ever end in `invalid_query`.
+      () => client.messages('session-1', undefined, 0),
+      () => client.messages('session-1', undefined, 1_001),
+      () => client.messages('session-1', undefined, 1.5),
+      // A blank cursor is not "no cursor". Sending it would ask the daemon to authenticate an empty
+      // token rather than start from the first row.
+      () => client.messages('session-1', '   '),
     ];
 
     // Act

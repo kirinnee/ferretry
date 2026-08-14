@@ -1,27 +1,41 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { HarnessSchema, InteractionModeSchema, TranscriptProvenanceSchema } from './session.ts';
+import { ConversationMessagePointSchema } from './session-transfer-edge.ts';
+
+export type {
+  ConversationMessagePoint,
+  ExactConversationMessagePoint,
+  SessionTransferEdge,
+} from './session-transfer-edge.ts';
+export {
+  ConversationMessagePointSchema,
+  ExactConversationMessagePointSchema,
+  SessionTransferEdgeSchema,
+} from './session-transfer-edge.ts';
 
 /**
- * One durable message inside a provenance-bound harness transcript.
+ * One portable message row, and the DURABLE spelling of it.
  *
- * A record id is not usable here: every harness may omit it, while the JSONL
- * reader assigns a byte offset to every record. A block index distinguishes
- * multiple normalized messages emitted by the same record.
+ * This is the row a frozen {@link SessionTransferPlanSchema} persists, so its bytes are a
+ * compatibility surface: a plan written before this export existed must still parse afterwards. It
+ * therefore carries NO selection-integrity binding. A binding is evidence about a request that is
+ * being made now — it is checked once, before anything is claimed — and a value stored inside a plan
+ * that replays after a restart would be evidence of nothing by the time anything read it.
+ *
+ * It is exported so the point-bearing READ row can extend it rather than respell it. Extending is
+ * what keeps one message shape in the repository: a second literal would be a copy that drifts, and
+ * the half that drifted would describe a message the other half cannot build a plan from. The
+ * extension direction is one-way on purpose — this module must never import the read row back, or
+ * the durable plan would inherit a field no stored plan has.
  */
-export const ConversationMessagePointSchema = z.strictObject({
-  v: z.literal(1),
-  byteOffset: NonNegativeIntegerSchema,
-  blockIndex: NonNegativeIntegerSchema.optional(),
-});
-export type ConversationMessagePoint = z.infer<typeof ConversationMessagePointSchema>;
-
-const ConversationTransferMessageSchema = z.strictObject({
+export const ConversationTransferMessageSchema = z.strictObject({
   point: ConversationMessagePointSchema,
   role: z.enum(['user', 'assistant', 'developer', 'system']),
   text: z.string(),
   timestamp: InstantSchema.optional(),
 });
+export type ConversationTransferMessage = z.infer<typeof ConversationTransferMessageSchema>;
 
 /** Portable normalized content. The source transcript provenance is pinned on the plan source. */
 export const ConversationFacetSchema = z.strictObject({
@@ -117,30 +131,6 @@ export const TransferOmissionSchema = z.strictObject({
 });
 export type TransferOmission = z.infer<typeof TransferOmissionSchema>;
 
-export const SessionTransferEdgeSchema = z
-  .strictObject({
-    v: z.literal(1),
-    kind: z.enum(['handover', 'fork']),
-    sourceSessionId: z.string().min(1),
-    sourceIncarnation: z.string().min(1),
-    sourceHarness: HarnessSchema,
-    cutMessagePoint: ConversationMessagePointSchema.nullable(),
-    planId: z.string().min(1),
-    at: InstantSchema,
-  })
-  .superRefine((value, context) => {
-    const shouldCarryConversation = value.kind === 'fork';
-    if (shouldCarryConversation !== (value.cutMessagePoint !== null)) {
-      context.addIssue({
-        code: 'custom',
-        message:
-          value.kind === 'fork' ? 'a fork must name its exact message cut' : 'a handover has no conversation cut',
-        path: ['cutMessagePoint'],
-      });
-    }
-  });
-export type SessionTransferEdge = z.infer<typeof SessionTransferEdgeSchema>;
-
 const TransferRetryPolicySchema = z.strictObject({
   transientAttempts: NonNegativeIntegerSchema,
   stalledAttempts: NonNegativeIntegerSchema,
@@ -216,6 +206,13 @@ export const SessionTransferPlanSchema = z
         code: 'custom',
         message: 'cutMessagePoint null is the sole representation of a transfer with no conversation',
         path: ['facets', 'conversation'],
+      });
+    }
+    if (carriesConversation && value.facets.conversation?.messages.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a fork cut must carry the message it names',
+        path: ['facets', 'conversation', 'messages'],
       });
     }
     if (carriesConversation && value.source.transcriptProvenance === null) {

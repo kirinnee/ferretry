@@ -5,6 +5,7 @@ import type { CodexPickerCleanup } from '../../../../src/lib/session/harness/cle
 import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';
 import { HarnessQuirkService } from '../../../../src/lib/session/harness/service.ts';
 import {
+  runtimeQuarantineState,
   SessionRuntimeControlService,
   type SessionRuntimeControlPorts,
 } from '../../../../src/lib/session/runtime-control/service.ts';
@@ -16,10 +17,12 @@ import {
   CODEX_VIEW,
   catalogCache,
   FakeAccounts,
+  FailOnReentrySerial,
   FakePickerTransport,
   FakeRuntimeInjector,
   FakeRuntimePane,
   FakeRuntimeRepository,
+  FakeSessionEffectLedger,
   NOW,
   RecordingSerial,
 } from './support.ts';
@@ -48,9 +51,10 @@ const harnessService = (recovery: 'recovered' | 'quarantined' = 'quarantined') =
 /** The concrete fakes stay concrete, so a test can read what they recorded. */
 interface Overrides {
   readonly repository?: FakeRuntimeRepository;
+  readonly effects?: SessionRuntimeControlPorts['effects'];
   readonly pane?: FakeRuntimePane;
   readonly injector?: FakeRuntimeInjector;
-  readonly serial?: RecordingSerial;
+  readonly serial?: SessionRuntimeControlPorts['serial'];
   readonly picker?: SessionRuntimeControlPorts['picker'];
   readonly harness?: SessionRuntimeControlPorts['harness'];
   readonly accounts?: SessionRuntimeControlPorts['accounts'];
@@ -64,8 +68,10 @@ function subjectWith(overrides: Overrides = {}) {
   const pane = overrides.pane ?? new FakeRuntimePane();
   const injector = overrides.injector ?? new FakeRuntimeInjector();
   const serial = overrides.serial ?? new RecordingSerial();
+  const effects = overrides.effects ?? new FakeSessionEffectLedger();
   const ports: SessionRuntimeControlPorts = {
     repository,
+    effects,
     pane,
     injector,
     picker: overrides.picker ?? (() => new FakePickerTransport()),
@@ -77,7 +83,7 @@ function subjectWith(overrides: Overrides = {}) {
     clock: overrides.clock ?? { now: () => NOW },
     clientName: overrides.clientName ?? 'fy',
   };
-  return { ports, repository, pane, injector, serial, subject: new SessionRuntimeControlService(ports) };
+  return { effects, ports, repository, pane, injector, serial, subject: new SessionRuntimeControlService(ports) };
 }
 
 /** The refusal a call produced, as a value. */
@@ -141,6 +147,77 @@ describe('resolving the session a control names', () => {
       failure: 'failed',
       message: /no readable launch record/u,
     });
+  });
+});
+
+describe('restating dependency failures', () => {
+  it('should restate a repository view failure as a runtime failure', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository();
+    repository.view = async () => {
+      throw new Error('the session view is unreadable');
+    };
+    const { subject } = subjectWith({ repository });
+
+    // Act / Assert
+    should(await refusal(subject.models('s1'))).match({
+      failure: 'failed',
+      message: 'the session view is unreadable',
+    });
+  });
+
+  it('should restate an effect inspection failure before entering the mutation fence', async () => {
+    // Arrange
+    const effects = new FakeSessionEffectLedger();
+    effects.inspect = async () => {
+      throw new Error('the effect ledger cannot be inspected');
+    };
+    const serial = new RecordingSerial();
+    const { subject, injector } = subjectWith({ effects, serial });
+
+    // Act
+    const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+    // Assert
+    should(failure).match({ failure: 'failed', message: 'the effect ledger cannot be inspected' });
+    should(serial.entered).equal(0);
+    should(injector.delivered).be.empty();
+  });
+
+  it('should restate an effect admission failure without touching the harness', async () => {
+    // Arrange
+    const effects = new FakeSessionEffectLedger();
+    effects.begin = async () => {
+      throw new Error('the effect cannot be begun');
+    };
+    const { subject, injector, repository } = subjectWith({ effects });
+
+    // Act
+    const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+    // Assert
+    should(failure).match({ failure: 'failed', message: 'the effect cannot be begun' });
+    should(injector.delivered).be.empty();
+    should(repository.calls).be.empty();
+  });
+
+  it('should restate an effect settlement failure without repeating the completed input', async () => {
+    // Arrange
+    const effects = new FakeSessionEffectLedger();
+    effects.settle = async () => {
+      throw new Error('the effect cannot be settled');
+    };
+    const { subject, injector, repository } = subjectWith({ effects });
+
+    // Act
+    const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+    const retry = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+    // Assert
+    should(failure).match({ failure: 'failed', message: 'the effect cannot be settled' });
+    should(retry).match({ failure: 'unsettled' });
+    should(injector.delivered).deepEqual([['fy-s1', '/compact']]);
+    should(repository.calls).match([{ kind: 'journal', event: 'control.session_command' }]);
   });
 });
 
@@ -243,9 +320,15 @@ describe('spending the request id', () => {
     should(injector.delivered).be.empty();
   });
 
-  it('should replay the first answer for a genuine retry without touching the harness again', async () => {
-    // Arrange
-    const repository = new FakeRuntimeRepository({ views: [CLAUDE_VIEW()] });
+  it('should answer a genuine retry from a fresh view without touching the harness again', async () => {
+    // Arrange — each read is visibly newer, so replaying a cached projection would fail.
+    const repository = new FakeRuntimeRepository({
+      views: [
+        sessionView('s1', { turn: 1 }, { status: 'running' }),
+        sessionView('s1', { turn: 2 }, { status: 'running' }),
+        sessionView('s1', { turn: 3 }, { status: 'running' }),
+      ],
+    });
     const { subject, injector } = subjectWith({ repository });
 
     // Act
@@ -253,7 +336,9 @@ describe('spending the request id', () => {
     const second = await subject.control('s1', COMPACT, 'req-1');
 
     // Assert
-    should(second).equal(first);
+    should(first.config.turn).equal(2);
+    should(second.config.turn).equal(3);
+    should(second === first).equal(false);
     should(injector.delivered).have.length(1);
   });
 
@@ -282,6 +367,31 @@ describe('spending the request id', () => {
     // Assert: the queue was entered twice and never held by two at once.
     should(serial.entered).equal(2);
     should(serial.peak).equal(1);
+  });
+
+  it('should enter a caller-held startup fence without re-entering it, while public control acquires it', async () => {
+    // Arrange: this serial throws on same-key recursion, turning the production executor's deadlock
+    // mode into an immediate assertion. Startup sees `starting`; mounted control sees `running`.
+    const startupSerial = new FailOnReentrySerial();
+    const startupRepository = new FakeRuntimeRepository({ views: [CLAUDE_VIEW({ status: 'starting' })] });
+    const startup = subjectWith({ repository: startupRepository, serial: startupSerial });
+    const publicSerial = new FailOnReentrySerial();
+    const mounted = subjectWith({ serial: publicSerial });
+
+    // Act
+    await startupSerial.run('s1', async () => {
+      await startup.subject.startupWhileHeld('s1', EFFORT, 'startup-1');
+    });
+    await mounted.subject.control('s1', COMPACT, 'public-1');
+
+    // Assert: startup used only the caller's entry; mounted control made its own single entry.
+    should(startupSerial.requested).deepEqual(['s1']);
+    should(startupSerial.entered).deepEqual(['s1']);
+    should(startup.injector.delivered).deepEqual([['fy-s1', '/effort high']]);
+    should(startup.repository.calls.filter(call => call.kind === 'journal')).have.length(1);
+    should(publicSerial.requested).deepEqual(['s1']);
+    should(publicSerial.entered).deepEqual(['s1']);
+    should(mounted.injector.delivered).deepEqual([['fy-s1', '/compact']]);
   });
 });
 
@@ -577,5 +687,51 @@ describe('a picker drive that failed part way', () => {
     should(repository.calls).be.empty();
     should(pane.stopped).be.empty();
     should(failure).match({ failure: 'failed' });
+  });
+
+  it('should merge only safe quarantine fields over a standing failed-stop verdict', () => {
+    // Arrange
+    const patch = {
+      status: 'failed',
+      health: 'crashed',
+      promptReady: false,
+      finishedAt: NOW,
+      reason: 'picker recovery failed',
+      needsHuman: 'run fy resume s1',
+      needsHumanKind: CODEX_PICKER_QUARANTINE_KIND,
+    } as const;
+
+    // Act
+    const protectedState = runtimeQuarantineState(
+      {
+        id: 's1',
+        status: 'kill_failed',
+        reason: 'operator stop: tmux refused',
+        finishedAt: '2026-08-05T00:00:00.000Z',
+        exitCode: 137,
+      },
+      patch,
+    );
+    const ordinaryState = runtimeQuarantineState({ id: 's1', status: 'running', reason: 'old' }, patch);
+
+    // Assert
+    should(protectedState).deepEqual({
+      id: 's1',
+      status: 'kill_failed',
+      reason: 'operator stop: tmux refused',
+      finishedAt: '2026-08-05T00:00:00.000Z',
+      exitCode: 137,
+      health: 'crashed',
+      promptReady: false,
+      needsHuman: 'run fy resume s1',
+      needsHumanKind: CODEX_PICKER_QUARANTINE_KIND,
+    });
+    should(ordinaryState).containDeep({
+      status: 'failed',
+      reason: 'picker recovery failed',
+      finishedAt: NOW,
+      health: 'crashed',
+      promptReady: false,
+    });
   });
 });

@@ -59,7 +59,7 @@ function paneKey(pane: Pick<RegisteredTerminalPane, 'tmuxSession' | 'paneId' | '
 export function hasSafeTerminalPaneIdentity(pane: ObservedTerminalPane | RegisteredTerminalPane): boolean {
   return (
     pane.tmuxSession.length > 0 &&
-    /^%[1-9][0-9]*$/u.test(pane.paneId) &&
+    /^%(?:0|[1-9][0-9]*)$/u.test(pane.paneId) &&
     Number.isSafeInteger(pane.pid) &&
     pane.pid > 1 &&
     Number.isSafeInteger(pane.processStartTicks) &&

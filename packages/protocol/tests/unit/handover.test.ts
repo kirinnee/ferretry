@@ -1089,6 +1089,18 @@ describe('session handover protocol', () => {
     // that cannot cross. The plan says that twice — a null cut and a null conversation facet — and the
     // receipt refuses a plan that breaks either half, not only the cut.
     // Act + Assert
+    const cut = handover.SessionHandoverReceiptSchema.safeParse({
+      ...receipt,
+      plan: {
+        ...plan,
+        source: { ...plan.source, cutMessagePoint: { v: 1, byteOffset: 0, blockIndex: 0 } },
+      },
+    });
+    should(cut.success).be.false();
+    if (cut.success) throw new Error('a handover receipt with a conversation cut unexpectedly parsed');
+    should(cut.error.issues.map(issue => issue.message)).containEql(
+      'a handover plan carries no conversation cut (cutMessagePoint must be null)',
+    );
     should(
       handover.SessionHandoverReceiptSchema.safeParse({
         ...receipt,

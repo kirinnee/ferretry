@@ -62,7 +62,7 @@ export class TmuxController {
     if (result.code !== 0) return undefined;
     const [paneId = '', rawPid = ''] = result.stdout.trim().split('\t');
     const pid = Number(rawPid);
-    return /^%[1-9][0-9]*$/u.test(paneId) && Number.isSafeInteger(pid) && pid > 1 ? { paneId, pid } : undefined;
+    return /^%(?:0|[1-9][0-9]*)$/u.test(paneId) && Number.isSafeInteger(pid) && pid > 1 ? { paneId, pid } : undefined;
   }
 
   async killPaneExact(paneId: string): Promise<void> {

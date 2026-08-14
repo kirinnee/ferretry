@@ -192,7 +192,7 @@ describe('SessionProvenanceStamper.restamp', () => {
     should(stamped.provenance.parent).eql('p1');
   });
 
-  it('should leave a root session without a parent on resume', () => {
+  it('should leave a root session without a parent even when the relaunch request supplies one', () => {
     // Arrange
     const existing: SessionProvenance = {
       v: 1,
@@ -203,9 +203,15 @@ describe('SessionProvenanceStamper.restamp', () => {
     };
 
     // Act
-    const stamped = stamperAt(RESUMED_AT).restamp({ id: 's1', requestedByHuman: true }, fleetOf(), existing);
+    const stamped = stamperAt(RESUMED_AT).restamp(
+      { id: 's1', parent: 'new-parent', requestedByHuman: true },
+      fleetOf({ id: 'new-parent' }),
+      existing,
+    );
 
-    // Assert
+    // Assert: absence is durable creation history. Spreading the fresh stamp before conditionally
+    // restoring the old parent would leave `new-parent` behind here.
     should(stamped.provenance.parent).eql(undefined);
+    should(stamped.provenance.origin).eql('human');
   });
 });

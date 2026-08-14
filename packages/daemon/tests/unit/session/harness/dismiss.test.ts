@@ -24,6 +24,8 @@ describe('isAddressablePaneId', () => {
     { paneId: '', addressable: false },
     { paneId: 'fy-session', addressable: false },
     { paneId: '%', addressable: false },
+    { paneId: '%00', addressable: false },
+    { paneId: '%01', addressable: false },
     { paneId: '%1x', addressable: false },
   ])('should treat $paneId as addressable=$addressable', ({ paneId, addressable }) => {
     // Arrange / Act / Assert

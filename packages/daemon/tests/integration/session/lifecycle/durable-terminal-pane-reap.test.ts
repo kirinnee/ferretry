@@ -71,13 +71,8 @@ async function fixture(id = 'reap-session'): Promise<ReapFixture> {
   await opened.storage.writeState(record.config.id, { id: record.config.id, status: 'created' });
   const tmux = new BunTmuxProcess(tmuxExecutable, join(home, 'throwaway-tmux.sock'));
   const controller = new TmuxController(tmux);
-  // `%0` is intentionally outside the domain's safe pane-id grammar, so reserve it on this
-  // throwaway server before creating the daemon-owned pane that the registrar must prove.
-  await controller.launch({
-    session: 'reap-bootstrap',
-    cwd: process.cwd(),
-    command: ['/bin/sh', '-c', 'exec sleep 600'],
-  });
+  // A fresh private server assigns its first pane `%0`; the production registrar and reaper must
+  // prove that real first-pane identity rather than avoiding it with a bootstrap session.
   await controller.launch({
     session: record.config.tmuxSession,
     cwd: process.cwd(),
@@ -89,7 +84,6 @@ async function fixture(id = 'reap-session'): Promise<ReapFixture> {
   const runtime = new ExactTmuxPaneReaper(controller);
   cleanups.add(async () => {
     await controller.stop(record.config.tmuxSession);
-    await controller.stop('reap-bootstrap');
     await opened.storage.close();
     await rm(home, { recursive: true, force: true });
   });
@@ -132,6 +126,7 @@ describe('durable terminal pane reap adapters', () => {
     await subject.registrar.register(subject.record);
     const path = createSessionPaths(subject.storage.paths, subject.record.config.id).terminalPane;
     const persisted = JSON.parse(await readFile(path, 'utf8')) as RegisteredTerminalPane;
+    should(persisted.paneId).equal('%0');
     const foreignId = parseSessionId('foreign-session');
     await subject.storage.writeState(foreignId, { id: foreignId, status: 'completed', finishedAt: NOW });
     await subject.files.writeTextAtomic(

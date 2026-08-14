@@ -12,6 +12,7 @@ import {
   type MigrateSessionRequest,
   type RegisterProjectRequest,
   refusalNotice,
+  type RuntimeControlRequest,
   type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
@@ -111,6 +112,41 @@ import {
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
+import {
+  FileSessionForkReceiptStore,
+  forkOpeningTurnRefusal,
+  forkReceiptFile,
+  SessionForkTargetBinder,
+  SessionForkTargetResolver,
+  type SessionForkStartAccountResolver,
+} from '../src/adapters/fork/index.ts';
+import {
+  FileSessionAttachmentCopier,
+  FileSessionTransferBriefWriter,
+  FileSessionTransferTargetPlanStore,
+  GitTransferWorkspaceProbe,
+  SessionAttachmentTransferReader,
+  StorageTransferConversationReader,
+  StorageTransferEnvelopeWriter,
+  StorageTransferSourceReader,
+} from '../src/adapters/transfer/index.ts';
+import {
+  AttachmentFacetContributor,
+  ConversationFacetContributor,
+  LineageFacetContributor,
+  ReferenceFacetContributor,
+  SessionTransferPreparer,
+  TransferPrepareError,
+  WorkspaceFacetContributor,
+} from '../src/lib/transfer/index.ts';
+import {
+  SessionForkFacade,
+  type SessionForkIdFactory,
+  sessionForkKey,
+  SessionForkService,
+} from '../src/lib/fork/index.ts';
+import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index.ts';
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
@@ -142,6 +178,9 @@ import {
   TimeSessionIdFactory,
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
+import { FileSessionEffectLedger } from '../src/adapters/session/effects/index.ts';
+import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -178,7 +217,9 @@ import {
 import { FileLastSnapshotStore } from '../src/adapters/session/snapshot/index.ts';
 import {
   FileHarnessWrapperSource,
+  FileSessionTranscriptMessageTokenCodec,
   NodeCodexRolloutIndex,
+  sessionMessageTokenKeyFile,
   StorageTranscriptClaims,
   StorageTranscriptDigestJournal,
   StorageTranscriptProvenanceStore,
@@ -304,15 +345,16 @@ import {
   firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
+  HARNESS_PICKER_COMMAND,
   DEFAULT_HANDOVER_SETTINGS,
   HandoverError,
   type HandoverJournalAppend,
   type HandoverReceiptStore,
   HandoverReconcileLoop,
   SessionHandoverService,
-  HARNESS_PICKER_COMMAND,
   type HarnessPreflight,
   HarnessQuirkService,
+  harnessQuirks,
   harnessAbsentWarning,
   harnessMigrationRefusal,
   harnessPreflightSummary,
@@ -339,6 +381,7 @@ import {
   type NameClaim,
   type NameSubsystem,
   NO_PASSWORD_DISCLOSURE,
+  type OperatorMessageSource,
   normalizeCallsign,
   type ObservedSession,
   observedRuntimeStatePatch,
@@ -430,6 +473,8 @@ import {
   type SessionMigrateSubsystem,
   SessionMonitorService,
   SessionPlanner,
+  type SessionAncestor,
+  SessionProvenanceRecorder,
   SessionProvenanceStamper,
   SessionReadError,
   SessionResumeError,
@@ -437,6 +482,8 @@ import {
   type SessionResumeSubsystem,
   type SessionRootPinner,
   SessionRuntimeControlService,
+  type SessionRuntimeStartupHeldPort,
+  runtimeQuarantineState,
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
@@ -445,6 +492,8 @@ import {
   type SessionSignalSubsystem,
   SessionTranscriptReader,
   SessionTranscriptResolver,
+  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+  type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptTail,
   SignalRefused,
   type SocketTicketBroker,
@@ -480,12 +529,14 @@ import {
   type TranscriptSearchOptions,
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
+  temporaryFilePath,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
   unreadableManifestPreflight,
   usageProbeCommand,
   usageRefreshMs,
+  verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   type WardenFleetSession,
   type WardenSubsystem,
@@ -1431,6 +1482,21 @@ function createSessionControlSubsystem(
   directories: WorkingDirectoryResolver,
   /** The session's own private directory, which is the string a Codex rollout is correlated by. */
   sessionDirectory: (id: SessionId) => string,
+  /**
+   * The STARTUP half of the one runtime subsystem, applying effort before turn one is delivered.
+   *
+   * Not the mounted control, and for the same reason a fork does not use it: at this point the
+   * session is `starting`, which the public path refuses by design. A start and a fork occupy the
+   * identical window and go through the identical entry point.
+   */
+  runtime: SessionRuntimeStartupHeldPort,
+  /**
+   * The spawn-side warden stamp, decided at create because create is the only moment it can be.
+   *
+   * It also owns the LABEL: a warden descendant is force-labelled, so the label and the stamp have
+   * to be decided by the same call or the two shield mechanisms can disagree about one session.
+   */
+  provenance: SessionProvenanceStamper,
   clock: ClockPort,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
@@ -1497,6 +1563,30 @@ function createSessionControlSubsystem(
         correlationToken: sessionDirectory(id),
         at: clock.now(),
       });
+      /**
+       * The spawn stamp, decided here because here is where the fleet and the request are both in
+       * hand and nothing has been written yet.
+       *
+       * THE LABEL COMES BACK FROM THE STAMPER, and that is not a convenience. `resolveSpawnLabel`
+       * FORCES a warden descendant's label, and inherits the parent's otherwise. Writing
+       * `request.label` beside a `wardenLineage: true` stamp would produce a session whose two
+       * shield mechanisms — the label check and the stamp check — disagree, and the detector reading
+       * the label first would mask the disagreement until somebody edited the label.
+       *
+       * `requestedByHuman` is `request.parent === undefined`: a start with no parent arrived from a
+       * human surface, and one with a parent was spawned by the session that named itself the
+       * parent. It decides `origin` only — warden descent overrides it either way — so the worst a
+       * wrong reading does is misattribute, never unshield.
+       */
+      const stamped = provenance.stamp(
+        {
+          id,
+          ...(request.label === undefined ? {} : { label: request.label }),
+          ...(request.parent === undefined ? {} : { parent: request.parent }),
+          requestedByHuman: request.parent === undefined,
+        },
+        await spawnAncestry(storage, sessions),
+      );
       // BEFORE the callsign is claimed, so a start refused over an unusable attachment does not park
       // a pool name for the whole resolution window on a session that never happens.
       const opening = composeOpeningMessage(attachments, id, request);
@@ -1514,6 +1604,12 @@ function createSessionControlSubsystem(
         ...(request.model === undefined ? {} : { requestedModel: request.model }),
         ...(request.parent === undefined ? {} : { parent: request.parent }),
       });
+      const startupRuntime: RuntimeControlRequest | undefined =
+        request.effort === undefined
+          ? undefined
+          : harnessQuirks(account.kind).effortIsRuntimeCommand
+            ? { action: 'effort', effort: request.effort }
+            : { action: 'model', model: plan.model, effort: request.effort };
       // The remote-control arguments are added only when the caller asked for the surface, because
       // they are what makes the harness publish one — adding them anyway would open a control channel
       // for a session whose own document records that it has none.
@@ -1521,7 +1617,9 @@ function createSessionControlSubsystem(
         executable,
         ...(request.remoteControl === true ? plan.extraArgs : []),
         ...transcript.launchArguments,
-        // LAST, so an operator flag still wins over everything the daemon decided for them.
+        // The catalogue-proved model is the daemon's default. A free-form operator flag is last,
+        // as documented: an explicitly supplied `--model` wins over that default.
+        ...startupModelArguments(plan.model),
         ...(request.harnessFlags ?? []),
       ];
       const envelope: SessionProtocolEnvelope = {
@@ -1565,7 +1663,10 @@ function createSessionControlSubsystem(
          */
         ...(transcript.provenance === undefined ? {} : { transcript: transcript.provenance }),
         ...(teammate === undefined ? {} : { teammate }),
-        ...(request.label === undefined ? {} : { label: request.label }),
+        // The STAMPER's label, never the request's — see the stamp above for why the two must be
+        // decided together.
+        ...(stamped.label === undefined ? {} : { label: stamped.label }),
+        provenance: stamped.provenance,
         ...SESSION_START_DEFAULTS,
         ...(request.intervalSeconds === undefined ? {} : { intervalSeconds: request.intervalSeconds }),
         ...(request.timeoutSeconds === undefined ? {} : { timeoutSeconds: request.timeoutSeconds }),
@@ -1597,7 +1698,14 @@ function createSessionControlSubsystem(
         // true: the board's session directory reads the session's own documents, so the target must
         // exist for the grant to name it, and a refusal must not have cost an agent.
         if (boardAsk !== undefined) await boardGrants(boardAsk.capability, id, boardAsk.role);
-        await lifecycle.start(id);
+        await lifecycle.start(
+          id,
+          startupRuntime === undefined
+            ? undefined
+            : async () => {
+                await runtime.startupWhileHeld(id, startupRuntime, `${requestId}:startup-runtime`);
+              },
+        );
       } catch (error) {
         // A BOARD refusal is not a launch failure and must not be answered as one: nothing launched,
         // and the caller asked for a session WITH board access. The record is retired with the
@@ -1688,10 +1796,88 @@ function resumeRefusal(error: unknown): never {
  * the service turns that into a `ResumeRefused`, which would surface as a 409 about a session the
  * caller should simply be told does not exist.
  */
+/**
+ * The fleet as lineage resolution may consult it: id, label, parent, stamp, and nothing else.
+ *
+ * Snapshotted per spawn rather than held, because descent is decided against the fleet as it is at
+ * that moment — a cached map would let a session resolve against an ancestor that has since been
+ * pruned, or miss one that has since appeared, and both answers outlive the request that made them.
+ *
+ * The projection is deliberately narrow. Handing the resolver whole session views would let it start
+ * reading fields whose meaning it has no business depending on, and the four it gets are exactly the
+ * four `SessionAncestor` declares.
+ */
+async function spawnAncestry(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+): Promise<ReadonlyMap<string, SessionAncestor>> {
+  /**
+   * A FAILED READ IS NOT AN EMPTY FLEET, and the difference is the whole shield.
+   *
+   * The public session list deliberately omits a session whose documents do not parse, so it cannot
+   * be the source of an ancestry proof: damage to a parent would become the false fact that the
+   * parent does not exist. The storage index names the authoritative set first, and the strict
+   * per-session read then either proves every member or propagates the damaged document. If an
+   * indexed session has disappeared by that strict read, `get` returns undefined and that is also a
+   * failed snapshot, never a row to filter away.
+   *
+   * So the failure propagates, and both callers fail SAFE without either of them deciding to:
+   * a start raises before anything is created, so no unshielded session exists; and a revive's
+   * recorder is wrapped in a catch that leaves the durable configuration exactly as it was, so an
+   * existing shield survives untouched.
+   */
+  const views = await Promise.all(
+    storage.listSessions().map(async indexed => {
+      const view = await sessions.get(indexed.id);
+      if (view === undefined)
+        throw new Error(`indexed session ${indexed.id} disappeared while its spawn ancestry was being read`);
+      return { id: indexed.id, view };
+    }),
+  );
+  return new Map(
+    views.map(({ id, view }) => [
+      id,
+      {
+        id,
+        ...(view.config.label === undefined ? {} : { label: view.config.label }),
+        ...(view.config.parent === undefined ? {} : { parent: view.config.parent }),
+        ...(view.config.provenance === undefined ? {} : { provenance: view.config.provenance }),
+      },
+    ]),
+  );
+}
+
+/**
+ * Re-stamps one relaunched session from its CURRENT label and parent.
+ *
+ * The request must carry both: the stamper's answer is the label the session is stored under, and a
+ * relaunch that passed an empty shell would drop the group the session belongs to. They are read
+ * from the session's own view rather than remembered, because a migration or an edit may have moved
+ * either since the session was created.
+ */
+async function recordRelaunchProvenance(
+  recorder: SessionProvenanceRecorder,
+  sessions: SessionDirectorySubsystem,
+  id: SessionId,
+): Promise<void> {
+  const current = await sessions.get(id);
+  if (current === undefined) return;
+  await recorder.recordRelaunch({
+    id,
+    ...(current.config.label === undefined ? {} : { label: current.config.label }),
+    ...(current.config.parent === undefined ? {} : { parent: current.config.parent }),
+    // A revive is not a spawn: nobody is asking for a NEW session, so this decides nothing on its
+    // own. `restamp` recovers the origin from the existing stamp when there is one, and a session
+    // with no stamp and no parent was a root start, which is the human case.
+    requestedByHuman: current.config.parent === undefined,
+  });
+}
+
 function createSessionResumeSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   service: SessionResumeService,
+  provenance: SessionProvenanceRecorder,
 ): SessionResumeSubsystem {
   return {
     resume: async (reference, actor, message) => {
@@ -1702,6 +1888,20 @@ function createSessionResumeSubsystem(
       await service
         .resume({ id, actor, ...(message === undefined ? {} : { message }) })
         .catch((error: unknown) => resumeRefusal(error));
+      /**
+       * The spawn stamp is brought up to date HERE, between the relaunch and the read-back.
+       *
+       * It cannot ride the lifecycle: `configDocument` merges `{ ...envelope, ...stored, ...record
+       * .config }`, and a stored document beats the envelope — right for monotonicity, and it means
+       * a session created before stamping existed would never acquire one. Doing it before the view
+       * is read means the answer the caller gets already carries the stamp, rather than showing a
+       * session that will only look correct on the next request.
+       *
+       * A failure here must not fail a revive that has already relaunched a pane: the stamp is a
+       * shield that the next relaunch will try again for, and refusing the whole revive over it
+       * would turn a recoverable gap into a session the operator cannot bring back.
+       */
+      await recordRelaunchProvenance(provenance, sessions, id).catch(() => undefined);
       // Read back through the SAME reader the list and the single read serve, so a revive answers with
       // the view those surfaces will show rather than a projection of the resume outcome.
       const view = await sessions.get(id).catch(() => undefined);
@@ -2509,6 +2709,19 @@ async function wardenFleetSession(parts: WardenParts, view: SessionView): Promis
       ...(view.config.teammate === undefined ? {} : { teammate: view.config.teammate }),
       ...(view.config.label === undefined ? {} : { label: view.config.label }),
       ...(view.config.parent === undefined ? {} : { parent: view.config.parent }),
+      /**
+       * The detector's second lineage mechanism, and until now it was dead in production.
+       *
+       * `WardenSessionConfig.wardenLineage` is a PROJECTION of the spawn stamp, never a second
+       * lineage shape — the boolean the detector needs, derived from the one durable record. Nothing
+       * projected it before, so only the label check and the parent walk ran, and the walk is exactly
+       * the backstop the stamp exists to replace: a warden is pruned while its children are still
+       * running, so the walk reaches the truth only while the ancestor it needs still exists.
+       *
+       * Projected as a boolean rather than passing the stamp through, because a `wardenLineage`
+       * field on the session config document would be the second shape this deliberately avoids.
+       */
+      ...(view.config.provenance === undefined ? {} : { wardenLineage: view.config.provenance.wardenLineage }),
       agent: view.config.agent,
       ...(view.config.model === undefined ? {} : { model: view.config.model }),
       // The start's own resolution, carried beside the configured value rather than folded into it —
@@ -3024,10 +3237,11 @@ interface SessionHandoverWiring {
  * coordination fact is carried into it, it proves it holds and can use the predecessor's board
  * membership, and only then is the predecessor retired.
  *
- * THREE PORTS ARE NOT REAL YET, AND THEY REFUSE RATHER THAN PRETEND. `preparer` and `importer` are the
- * shared harness-neutral transfer seam, which row 67 owns and lands (`src/lib/transfer/**` does not
- * exist on this branch); the board and lifecycle legs wait on the reviewed board-capability chain. A
- * handover cannot be performed without them, so each raises `step_failed` naming the missing piece.
+ * THE SHARED TRANSFER SEAM EXISTS, BUT THIS HANDOVER IS NOT WIRED TO IT YET. Its generic preparer,
+ * importer and target plan store are now available to the fork; the handover still lacks the
+ * handover-specific composition that would choose a replacement and bind the board and lifecycle legs.
+ * A handover cannot be performed without those legs, so each raises `step_failed` naming the missing
+ * capability.
  * What this deliberately does NOT do is invent a second preparation: a private copy here would be the
  * parallel domain the seam exists to prevent, and it would have to be deleted — with its receipts
  * already on disk — the moment the real one landed.
@@ -3042,13 +3256,12 @@ export function createSessionHandoverSubsystem(
   wiring: SessionHandoverWiring,
   receipts: HandoverReceiptStore,
 ): SessionHandoverService {
-  /** The seam is absent, so every call through it refuses in the taxonomy the receipt records. */
+  /** The generic seam is present; this operation deliberately refuses until its remaining legs exist. */
   const seamAbsent = (piece: string): never => {
     throw new HandoverError(
       'step_failed',
-      `this build carries no session transfer seam, so a handover cannot ${piece}: the shared preparer, ` +
-        'importer and plan store are landed by the conversation-fork work, and until they exist a ' +
-        'handover would have nothing to carry into the replacement',
+      `this build carries the shared session-transfer seam, but a handover cannot ${piece}: its ` +
+        'handover-specific replacement, board and lifecycle composition is not wired yet',
     );
   };
   return new SessionHandoverService(
@@ -3791,6 +4004,209 @@ async function resolveRelayCarrierSources(
   return chooseRelayCarrierSources(config.carrierSet.relays, advertisement);
 }
 
+/**
+ * Everything the fork subsystem is assembled from, named once so the assembly below reads as one
+ * decision rather than a wall of positional arguments.
+ *
+ * Each field is an EXISTING owner rather than a fork-private one, and that is the point of writing
+ * this out: the account resolution is the start's, the planner is the process's one planner, the
+ * quirk service and the Codex catalogue cache are the runtime route's, and the lifecycle factory is
+ * the same one every other create goes through. A fork that resolved an account differently from a
+ * start, or read a second catalogue, would launch an agent this daemon was wrong about.
+ */
+interface ForkSubsystemParts {
+  readonly storage: DaemonStorage;
+  readonly paths: FoundationPaths;
+  readonly attachmentStore: SessionAttachmentStore;
+  /**
+   * Where one session's attachment originals live, in the layout `SessionAttachmentStore` itself
+   * uses: `<state>/attachments/<daemonId>/<sessionId>`.
+   *
+   * It is a PARAMETER rather than something derived here, and that is the whole point. The daemon id
+   * is only known after pairing opens, and the copier and the store must address one tree: a copier
+   * writing under the session's own private directory puts real bytes on disk that
+   * `attachmentStore.download` and `unlock` cannot see, so a forked session shows its attachments in
+   * the manifest and fails to open any of them. Wired from the same two values that construct the
+   * store, in the one place that holds both.
+   */
+  readonly attachmentOriginals: (sessionId: string) => string;
+  readonly transcriptSources: readonly TranscriptSource[];
+  readonly gateway: GitWorktreeGateway;
+  readonly accounts: SessionForkStartAccountResolver;
+  readonly planner: SessionPlanner;
+  readonly harness: Pick<HarnessQuirkService, 'planSwitch'>;
+  readonly catalog: CodexRuntimeCatalogCache;
+  readonly createLifecycle: (id: SessionId, envelope?: SessionProtocolEnvelope) => SessionLifecycleService;
+  readonly transcripts: Pick<TranscriptProvenanceCapture, 'capture'>;
+  /** The one daemon-private codec shared with the operator message read surface. */
+  readonly messageTokens: SessionTranscriptMessageTokenCodec;
+  /** The same fail-closed redactor used by operator transcript reads. */
+  readonly redactor: Pick<SecretRedactor, 'redact'>;
+  readonly environment: Pick<FileSessionEnvironmentStore, 'read'>;
+  /** The startup half only — the intermediate annotation must not erase it. */
+  readonly runtime: SessionRuntimeStartupHeldPort;
+  readonly view: (id: SessionId) => Promise<SessionView | undefined>;
+  readonly ids: SessionForkIdFactory;
+  readonly clock: ClockPort;
+}
+
+/**
+ * The production fork: one route, and the whole restart-safe machine behind it.
+ *
+ * THE PREPARATION HALF READS AND NOTHING ELSE. It is handed a source reader, a conversation reader,
+ * an attachment reader and a workspace probe — no writer, no lifecycle, no board — so seam
+ * invariants I1 and I2 hold because there is nothing here to violate them with.
+ *
+ * THE IMPORT HALF IS BOUND TO THE TARGET. Its port set is `{envelope, brief, attachments,
+ * conversation}`: the first three write only into the id the binder was constructed with, and the
+ * fourth is read-only revalidation of the pinned point. There is no board port and no child-grant
+ * requester, so an imported session cannot inherit board access — it has no way to ask for one.
+ *
+ * THE REFERENCE CONTRIBUTOR IS DELIBERATELY UNINJECTED. No production counter for the reference
+ * grammar exists yet, and this is not the place to invent one: a regex here would be a second
+ * grammar with nothing to keep it honest against the owner's. Uninjected, the contributor reports a
+ * structured `not_implemented` omission, which is the honest answer and a visible one.
+ *
+ * The serial executor is its OWN queue, for the reason the migration's is: a fork holds its key
+ * across a create, an import and a launch, and must not make every unrelated document write in this
+ * daemon wait behind it.
+ */
+function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
+  const forkQueue = new KeyedSerialExecutor();
+  const conversation = new StorageTransferConversationReader(
+    parts.transcriptSources,
+    new StorageTranscriptDigestJournal(parts.storage),
+    parts.redactor,
+  );
+  const preparer = new SessionTransferPreparer({
+    source: new StorageTransferSourceReader(parts.storage),
+    selection: {
+      verifySelection: async (evidence, binding) =>
+        (await verifySessionTranscriptMessageToken(
+          parts.messageTokens,
+          SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+          {
+            sessionId: evidence.sourceSessionId,
+            incarnation: evidence.sourceIncarnation,
+            provenance: evidence.transcriptProvenance,
+          },
+          evidence.through,
+          evidence.rawPrefix,
+          binding,
+        )) === 'accepted',
+    },
+    contributors: {
+      conversation: new ConversationFacetContributor(conversation, parts.redactor),
+      attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(parts.attachmentStore)),
+      references: new ReferenceFacetContributor(),
+      workspace: new WorkspaceFacetContributor(new GitTransferWorkspaceProbe(parts.gateway)),
+      lineage: new LineageFacetContributor(),
+    },
+  });
+  /**
+   * The target's own `transfer-plan.json`, installed before import and re-read on every replay.
+   *
+   * TARGET-ONLY BY CONSTRUCTION. `FileSessionTransferTargetPlanStore` holds nothing but this
+   * document, so the fork composition has no global transfer-receipt capability at all — the durable
+   * fork receipt is `FileSessionForkReceiptStore`, and it is the single owner of that fact.
+   *
+   * This replaced a shim that built the two-halved `FileSessionTransferPlanStore` and fed its receipt
+   * half a FABRICATED path, deriving a plan id from `{sourceSessionId: planId, requestId: planId}`.
+   * That receipt half was never called, but the composition still held a writer aimed at the receipt
+   * tree under a key no real fork would ever mint — a capability nothing needed and a path nothing
+   * else would recognise. Reachable-but-unused is exactly the shape that becomes a second receipt
+   * owner the first time somebody wires it up.
+   */
+  const planStore = new FileSessionTransferTargetPlanStore(id =>
+    join(createSessionPaths(parts.paths, id).directory, 'transfer-plan.json'),
+  );
+  const briefWriter = new FileSessionTransferBriefWriter(
+    id => createSessionPaths(parts.paths, parseSessionId(id)).directory,
+  );
+  const attachmentCopier = new FileSessionAttachmentCopier(parts.attachmentOriginals);
+  /**
+   * ONE resolver instance, handed to both halves.
+   *
+   * The service validates before the receipt is claimed, where a refusal costs nothing; the binder
+   * validates again at create, so a receipt claimed by an older daemon — or before the pre-claim
+   * check existed — still cannot launch a session at a level its account will not serve. Sharing the
+   * instance is what makes the second call free: both hit the same held catalogue entry, so the
+   * belt costs a map lookup rather than a second probe against a live account.
+   */
+  const resolver = new SessionForkTargetResolver({
+    accounts: parts.accounts,
+    planner: parts.planner,
+    harness: parts.harness,
+    // The ONE held Codex catalogue. It is probed by `validate`, in the working directory the plan
+    // froze, rather than at resolution time — resolution runs before anything has read the source,
+    // so the target's own directory is not known to it yet.
+    catalog: parts.catalog,
+  });
+  const binder = new SessionForkTargetBinder({
+    runtimeChoice: resolver,
+    storage: parts.storage,
+    createLifecycle: parts.createLifecycle,
+    accounts: parts.accounts,
+    planner: parts.planner,
+    // A NAME SHIM ONLY: the binder's port spells the read `read` where the store spells it `load`.
+    // Renaming either owner to match the other would touch a file this composition does not own, and
+    // a second implementation would give one document two writers.
+    plans: {
+      read: async id => await planStore.load(id),
+      install: async (id, plan) => await planStore.install(id, plan),
+    },
+    transcripts: parts.transcripts,
+    importPorts: {
+      envelope: new StorageTransferEnvelopeWriter(parts.storage),
+      brief: briefWriter,
+      // The store's OWN tree, not the session's private directory: bytes written anywhere else are
+      // real files that `attachmentStore.download` and `unlock` cannot find, so a forked session
+      // would list its attachments and fail to open a single one.
+      attachments: attachmentCopier,
+      conversation,
+    },
+    imported: { brief: briefWriter, attachments: attachmentCopier },
+    environment: parts.environment,
+    tmuxSession: id => sessionTmuxName(id, defaultSessionLifecycleSettings),
+    runtime: parts.runtime,
+    view: parts.view,
+    sessionDirectory: id => createSessionPaths(parts.paths, id).directory,
+    clock: parts.clock,
+  });
+  return new SessionForkFacade(
+    new SessionForkService({
+      receipts: new FileSessionForkReceiptStore(key => forkReceiptFile(parts.paths.state, key)),
+      resolver,
+      preparer,
+      /**
+       * The lifecycle's own limit, asked rather than copied.
+       *
+       * `forkOpeningTurnRefusal` measures the exact rendering the brief writer and the lifecycle's
+       * turn-one document both use, against the very constants `lifecycle.create` parses with. It is
+       * ASKED rather than re-derived: a second reading of that limit here would be a second owner of
+       * it, and the arm that drifted would either claim a fork that can never be created or refuse
+       * one that could. Asking it before the claim turns a conversation too large to hand over into
+       * an ordinary refusal that wrote nothing, instead of a claimed receipt whose create can never
+       * succeed and whose every retry re-drives the same impossible step forever.
+       */
+      opening: {
+        assertDeliverable: plan => {
+          const refusal = forkOpeningTurnRefusal(plan);
+          if (refusal !== undefined) throw new TransferPrepareError('plan_invalid', refusal);
+        },
+      },
+      binder,
+      ids: parts.ids,
+      clock: { now: () => parts.clock.now() },
+      // The composite key becomes the executor's string key HERE, through the core's own renderer,
+      // so two forks of different sources never queue behind each other for sharing a request id.
+      // Its own executor, for the reason the migration has one: a fork holds its key across a
+      // create, an import and a launch, and must not make unrelated document writes wait on it.
+      serial: { run: async (key, work) => await forkQueue.run(sessionForkKey(key), work) },
+    }),
+  );
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // Pairing opens before any subsystem. Keep its validated daemon identity in
@@ -3801,6 +4217,17 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   const millisecondClock = { now: () => Date.now() };
   const environment = new RuntimeEnvironment();
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
+  const messageTokenKey = sessionMessageTokenKeyFile(paths.state);
+  /**
+   * ONE durable private key owner for both message cursors and fork-selection bindings.
+   *
+   * The codec resolves lazily, so constructing it before the state home is opened performs no IO.
+   * Both domains reach this same instance after boot; a second codec would still read the same file,
+   * but it would be a second materialization queue and a second answer to first-use failure/retry.
+   */
+  const sessionTranscriptMessageTokens = new FileSessionTranscriptMessageTokenCodec(messageTokenKey, writerId =>
+    temporaryFilePath(paths, messageTokenKey, writerId),
+  );
   const worktreeClock = new SystemWorktreeClock();
   const files = new NodeWorktreeFileSystem();
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
@@ -3994,6 +4421,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    */
   const sessionCredentials = new NodeSessionCredentialIssuer();
   const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
+  // ONE durable owner for every irreversible pane effect in this daemon. Lifecycle turn delivery
+  // and runtime controls deliberately share it so neither can mint a second replay vocabulary.
+  const sessionEffects = new FileSessionEffectLedger(id => createSessionPaths(paths, id).directory);
   /**
    * The rollout index, shared by the start that records a Codex baseline and the resolver that
    * later correlates against it — one reader of one home, so the two halves cannot disagree about
@@ -4066,6 +4496,47 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       new StorageTranscriptDigestJournal(storage),
     );
   /**
+   * One addressable-message read under the provenance that resolution just completed.
+   *
+   * ORDER IS THE CONTRACT. The resolver may discover a Codex rollout and persist that attribution,
+   * so the configuration read must happen after it. Only the completed record's incarnation and
+   * provenance become token context, and only then does `portableRowsFromFile` perform the one
+   * transcript-byte read. Calling `portableRows` here would go through the resolver again and make
+   * the bytes and the context answers from two independently moving resolution steps.
+   */
+  const createSessionTranscriptMessageSource = (storage: DaemonStorage): OperatorMessageSource => {
+    const resolver = createTranscriptFileResolver(storage);
+    const reader = new SessionTranscriptReader(
+      transcriptSources,
+      resolver,
+      new StorageTranscriptDigestJournal(storage),
+    );
+    return {
+      read: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return { kind: 'unresolved' };
+        const file = await resolver.file(sessionId).catch(() => undefined);
+        if (file === undefined) return { kind: 'unresolved' };
+
+        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+        if (!config.success || config.data.id !== sessionId) return { kind: 'unreadable' };
+        const provenance = config.data.transcript;
+        if (provenance === undefined || provenance.identity === 'undiscovered' || provenance.file !== file)
+          return { kind: 'unresolved' };
+
+        const rows = await reader
+          .portableRowsFromFile({ sessionId, harness: config.data.harness }, file)
+          .catch(() => undefined);
+        if (rows === undefined) return { kind: 'unreadable' };
+        return {
+          kind: 'read',
+          context: { sessionId, incarnation: config.data.incarnation, provenance },
+          rows,
+        };
+      },
+    };
+  };
+  /**
    * The same transcript read, for an operator who asked to SEE it.
    *
    * It reports RESOLUTION separately from content, over the one resolver the reader itself uses, and
@@ -4135,6 +4606,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         repository: new StorageSessionLifecycleRepository(storage, envelope),
         launcher,
         tasks: new FileSessionTaskStore(taskId => createSessionPaths(paths, taskId).directory),
+        effects: sessionEffects,
         directories: new NodeWorkingDirectoryResolver(),
         // EVERY session gets a credential, not only one that asked for board access: the board
         // domain keys `TaskBoardSession` on this hash, so a session minted without one could never
@@ -4233,6 +4705,15 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    * the account's OWN executable in the session's OWN directory, which is what makes its answer the
    * list that account's picker will render.
    */
+  /**
+   * ONE stamper for this world, hoisted so the subsystem factory below can close over it.
+   *
+   * It is a world field as well, but `createSubsystems` is a positional callback that receives
+   * neither the world nor its siblings — so a start and a revive would otherwise each have to build
+   * their own, and two stampers reading two clocks is two answers to "when did this session begin".
+   * The start decides the stamp at create and the revive re-stamps through it; both go through this.
+   */
+  const spawnProvenance = new SessionProvenanceStamper(clock);
   const codexRuntimeModels = new CodexRuntimeCatalogCache((binary, cwd) =>
     new CodexAppServerCatalog({ clientName: DAEMON_NAME, clientVersion: daemonVersion }).models(binary, cwd),
   );
@@ -4477,7 +4958,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       };
     },
     sessions: planner,
-    provenance: new SessionProvenanceStamper(clock),
+    provenance: spawnProvenance,
     harness: harnessService,
     transcripts: {
       sources: transcriptSources,
@@ -4619,7 +5100,11 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // storage operation: it remains in the store's process-local cache only.
       if (attachmentDaemonId === undefined)
         throw new Error('pairing identity was not opened before attachment mounting');
-      const attachmentStore = new SessionAttachmentStore({ root: paths.state, daemonId: attachmentDaemonId });
+      // Held as a const so every later reader gets the SAME proven identity: the `let` above is
+      // captured by closures, so its narrowing does not survive into one, and a second reader that
+      // re-checked could disagree with this one about which daemon's tree it is addressing.
+      const attachmentsDaemonId = attachmentDaemonId;
+      const attachmentStore = new SessionAttachmentStore({ root: paths.state, daemonId: attachmentsDaemonId });
       const sessionAttachments = {
         upload: async (
           id: string,
@@ -4789,6 +5274,64 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // ordinary managed session that happens to carry the warden label — which is exactly what the
       // detector's lineage shield reads. A private launch path would produce a session the fleet
       // read could not see and the shield could not recognise.
+      const sessionRuntime = new SessionRuntimeControlService({
+        /**
+         * The durable boundary, as five delegations.
+         *
+         * A reference arrives as three outcomes rather than two: not an id at all, a well-formed id
+         * nobody holds, and a session. The service answers `400` and `404` from that distinction,
+         * so collapsing it here would change what these routes already reply.
+         */
+        repository: {
+          find: reference => {
+            const id = tryParseSessionId(reference);
+            if (id === undefined) return { kind: 'invalid' };
+            return storage.findSession(id) === undefined ? { kind: 'missing' } : { kind: 'session', id };
+          },
+          view: async id => await sessions.get(id).catch(() => undefined),
+          launch: async id => {
+            // PARSED, not asserted: a control types into a real terminal, so a configuration
+            // document that no longer validates must refuse rather than address whatever pane it
+            // names — the same rule the send slice's terminal follows.
+            const parsed = SessionLifecycleConfigSchema.safeParse(
+              lifecycleConfigDocument(await storage.readConfig(id)),
+            );
+            return parsed.success ? parsed.data : undefined;
+          },
+          journal: async (id, event, data) => {
+            await storage.append(id, event, data);
+          },
+          quarantine: async (id, patch) => {
+            await storage.updateState(id, current => runtimeQuarantineState(current, patch));
+          },
+        },
+        pane: launchTmux,
+        injector: new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+        // Bound to one session per drive, and addressed by pane id from there on.
+        picker: tmuxSession =>
+          new TmuxCodexPickerDrive(
+            tmux,
+            launchTmux,
+            new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+            tmuxSession,
+            HARNESS_PICKER_COMMAND,
+          ),
+        effects: sessionEffects,
+        // The world's own harness service, so the decision a control performs and the recovery a
+        // failed drive runs are the ones this daemon published rather than a second construction.
+        harness: harnessService,
+        accounts,
+        // ONE cache for the daemon. Per-subsystem caches would each spawn their own probe, which
+        // is the second speaker to a live account this cache exists to prevent.
+        catalog: codexRuntimeModels,
+        // The lifecycle's process-wide per-session fence. Public control acquires it; startup enters
+        // through the explicit held capability from lifecycle's before-first-turn callback.
+        serial: sessionMutations,
+        sleeper: { sleep: milliseconds => Bun.sleep(milliseconds) },
+        clock,
+        // The instruction a quarantined session shows a human names the CLI they actually type.
+        clientName: CLIENT_NAME,
+      });
       const sessionControl = createSessionControlSubsystem(
         storage,
         sessions,
@@ -4818,6 +5361,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         transcriptProvenance,
         new NodeWorkingDirectoryResolver(),
         id => createSessionPaths(paths, id).directory,
+        sessionRuntime,
+        // The stamper the world already constructed, now actually called. Before this it was a field
+        // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
+        spawnProvenance,
         clock,
       );
       const wardenPaths = createWardenPaths(paths.home);
@@ -4892,6 +5439,35 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // opened. Resource limits and the reap both need "which panes does this daemon own, and which
       // of their sessions are provably over" — two readers of one ledger, never two ledgers.
       const cgroupPanes = new DurableTerminalPaneStore(storage, stateFiles, paths);
+      // The fork, constructed after the runtime and migration dependencies it borrows from and
+      // before the subsystem literal that mounts it. Every owner it needs is already a local here:
+      // taking them by name rather than rebuilding them is what keeps a fork's account resolution,
+      // model planning and effort vocabulary identical to a start's.
+      const sessionFork = createForkSubsystem({
+        storage,
+        paths,
+        attachmentStore,
+        // Derived from the SAME two values `attachmentStore` was constructed from, three lines above,
+        // and in the only scope that holds both: `SessionAttachmentStore` composes
+        // `<root>/attachments/<daemonId>/<sessionId>` internally, so the copier is pointed at that
+        // tree explicitly rather than at a plausible-looking directory beside the session.
+        attachmentOriginals: id => join(paths.state, 'attachments', attachmentsDaemonId, id),
+        transcriptSources,
+        gateway,
+        accounts: async agent => await resolveStartAccount(accounts, agent, executables),
+        planner,
+        harness: harnessService,
+        catalog: codexRuntimeModels,
+        createLifecycle: (id, envelope) => createSessionLifecycle(storage, launcher, envelope, id),
+        transcripts: transcriptProvenance,
+        messageTokens: sessionTranscriptMessageTokens,
+        redactor: secretRedactor,
+        environment: sessionEnvironments,
+        runtime: sessionRuntime,
+        view: async id => await sessions.get(id),
+        ids: sessionIds,
+        clock,
+      });
       // ONE receipt store for both readers of it: the service that writes a receipt and the loop that
       // rosters the ones which are not yet terminal. Two handles over one directory would be two
       // answers to "what is still in flight".
@@ -5031,7 +5607,16 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           worktrees.managedRoot,
         ),
         sessionControl,
-        sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
+        sessionResume: createSessionResumeSubsystem(
+          storage,
+          sessions,
+          resume,
+          // The SAME stamper the start uses, so a create and a revive can never disagree about how
+          // descent is decided; only the ancestry snapshot differs, and it is taken per relaunch.
+          new SessionProvenanceRecorder(spawnProvenance, new StorageSessionProvenanceStore(storage), {
+            snapshot: async () => await spawnAncestry(storage, sessions),
+          }),
+        ),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
         sessionAnswer: createSessionAnswerSubsystem(
           storage,
@@ -5044,68 +5629,13 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         ),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
-        sessionRuntime: new SessionRuntimeControlService({
-          /**
-           * The durable boundary, as five delegations.
-           *
-           * A reference arrives as three outcomes rather than two: not an id at all, a well-formed id
-           * nobody holds, and a session. The service answers `400` and `404` from that distinction,
-           * so collapsing it here would change what these routes already reply.
-           */
-          repository: {
-            find: reference => {
-              const id = tryParseSessionId(reference);
-              if (id === undefined) return { kind: 'invalid' };
-              return storage.findSession(id) === undefined ? { kind: 'missing' } : { kind: 'session', id };
-            },
-            view: async id => await sessions.get(id).catch(() => undefined),
-            launch: async id => {
-              // PARSED, not asserted: a control types into a real terminal, so a configuration
-              // document that no longer validates must refuse rather than address whatever pane it
-              // names — the same rule the send slice's terminal follows.
-              const parsed = SessionLifecycleConfigSchema.safeParse(
-                lifecycleConfigDocument(await storage.readConfig(id)),
-              );
-              return parsed.success ? parsed.data : undefined;
-            },
-            journal: async (id, event, data) => {
-              await storage.append(id, event, data);
-            },
-            quarantine: async (id, patch) => {
-              await storage.updateState(id, current => ({ ...(current as Record<string, unknown>), ...patch }));
-            },
-          },
-          pane: launchTmux,
-          injector: new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
-          // Bound to one session per drive, and addressed by pane id from there on.
-          picker: tmuxSession =>
-            new TmuxCodexPickerDrive(
-              tmux,
-              launchTmux,
-              new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
-              tmuxSession,
-              HARNESS_PICKER_COMMAND,
-            ),
-          // The world's own harness service, so the decision a control performs and the recovery a
-          // failed drive runs are the ones this daemon published rather than a second construction.
-          harness: harnessService,
-          accounts,
-          // ONE cache for the daemon. Per-subsystem caches would each spawn their own probe, which
-          // is the second speaker to a live account this cache exists to prevent.
-          catalog: codexRuntimeModels,
-          // Its own queue: a picker drive holds the session for several seconds of keystrokes, and
-          // must not make every unrelated document write wait behind it.
-          serial: new KeyedSerialExecutor(),
-          sleeper: { sleep: milliseconds => Bun.sleep(milliseconds) },
-          clock,
-          // The instruction a quarantined session shows a human names the CLI they actually type.
-          clientName: CLIENT_NAME,
-        }),
+        sessionRuntime,
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
         sessionMigrate,
+        sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
           root: quotaFailoverRoot(paths.home),
           storage,
@@ -5242,6 +5772,8 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
             },
           },
           createSessionTranscriptTail(storage),
+          createSessionTranscriptMessageSource(storage),
+          sessionTranscriptMessageTokens,
           lastSnapshots,
           // The screen, the transcript and the journal are the three places a secret would surface if
           // a child ever printed one, so all three are scrubbed here rather than at whichever caller

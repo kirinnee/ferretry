@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harness/quarantine.ts';
+import { IDLE_SEND_STATUSES } from '../../../../src/lib/session/send/types.ts';
 import {
   documentRefusal,
   needsLiveCatalog,
@@ -19,14 +20,13 @@ import { CLAUDE_VIEW, CODEX_VIEW } from './support.ts';
 describe('what a session document alone refuses', () => {
   it('should let a running session through', () => {
     // Act / Assert
-    should(documentRefusal(CLAUDE_VIEW(), 'fy')).be.undefined();
+    should(documentRefusal(CLAUDE_VIEW(), 'fy', 'public')).be.undefined();
   });
 
-  it('should refuse every status a send would refuse, and no second list of them', () => {
-    // Two lists would eventually disagree about `interrupted`.
+  it('should refuse terminal statuses from the public running window', () => {
     // Act
     const refusals = (['failed', 'stopped', 'completed'] as const).map(status =>
-      documentRefusal(CLAUDE_VIEW({ status }), 'fy'),
+      documentRefusal(CLAUDE_VIEW({ status }), 'fy', 'public'),
     );
 
     // Assert
@@ -34,11 +34,32 @@ describe('what a session document alone refuses', () => {
     should(refusals[0]).match({ message: /requires a running session/u });
   });
 
+  it('should refuse a session whose stop has already failed before touching its pane', () => {
+    const refusal = documentRefusal(CLAUDE_VIEW({ status: 'kill_failed' }), 'fy', 'public');
+
+    should(refusal).match({ failure: 'refused', message: /kill_failed/u });
+  });
+
+  it('should admit every durable idle status through the public window', () => {
+    // A declared wait is the canonical point to change a model or compact, and each of these is
+    // already idle by the send domain's definition. The later pane check still requires a prompt.
+    const refusals = [...IDLE_SEND_STATUSES].map(status => documentRefusal(CLAUDE_VIEW({ status }), 'fy', 'public'));
+
+    should(refusals).deepEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('should admit retrying through the public window', () => {
+    // Retry is not one of the send domain's named idle statuses, but its durable state is still
+    // nonterminal; the pane check decides whether its harness is ready for this control right now.
+    should(documentRefusal(CLAUDE_VIEW({ status: 'retrying' }), 'fy', 'public')).be.undefined();
+  });
+
   it('should refuse a picker quarantine and name the CLI a human actually types', () => {
     // Act
     const refusal = documentRefusal(
       CLAUDE_VIEW({ needsHumanKind: CODEX_PICKER_QUARANTINE_KIND, needsHuman: 'resume it' }),
       'fy',
+      'public',
     );
 
     // Assert
@@ -47,7 +68,23 @@ describe('what a session document alone refuses', () => {
 
   it('should not read an UNRELATED needs-human as a picker quarantine', () => {
     // Act / Assert
-    should(documentRefusal(CLAUDE_VIEW({ needsHumanKind: 'question', needsHuman: 'answer it' }), 'fy')).be.undefined();
+    should(
+      documentRefusal(CLAUDE_VIEW({ needsHumanKind: 'question', needsHuman: 'answer it' }), 'fy', 'public'),
+    ).be.undefined();
+  });
+
+  it('should keep the private startup window exact', () => {
+    // Act
+    const publicOnStarting = documentRefusal(CLAUDE_VIEW({ status: 'starting' }), 'fy', 'public');
+    const startupOnRunning = documentRefusal(CLAUDE_VIEW(), 'fy', 'startup');
+    const startupOnWaiting = documentRefusal(CLAUDE_VIEW({ status: 'waiting' }), 'fy', 'startup');
+    const startupOnStarting = documentRefusal(CLAUDE_VIEW({ status: 'starting' }), 'fy', 'startup');
+
+    // Assert
+    should(publicOnStarting).match({ failure: 'refused', message: /requires a running session/u });
+    should(startupOnRunning).match({ failure: 'refused', message: /still starting/u });
+    should(startupOnWaiting).match({ failure: 'refused', message: /still starting/u });
+    should(startupOnStarting).be.undefined();
   });
 });
 

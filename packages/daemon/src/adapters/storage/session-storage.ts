@@ -130,6 +130,15 @@ interface SessionObservation {
   readonly journal?: JournalObservation;
 }
 
+/** The durable layout claim lifecycle creation makes before it publishes any session evidence. */
+function isOnlySessionReservation(evidence: {
+  readonly config?: unknown;
+  readonly state?: unknown;
+  readonly journal?: { readonly fingerprint: { readonly size: number } };
+}): boolean {
+  return evidence.config === undefined && evidence.state === undefined && evidence.journal?.fingerprint.size === 0;
+}
+
 type SessionInspection =
   | { readonly kind: 'current'; readonly session?: IndexedSession }
   | { readonly kind: 'repair'; readonly source: SessionSource | null; readonly session?: IndexedSession };
@@ -254,6 +263,29 @@ export class DaemonStorage {
   }
 
   /**
+   * Reserves a current session LAYOUT without publishing config, state, or an event.
+   *
+   * WHAT IS DURABLE HERE, PRECISELY: the journal and the marker INSIDE the session directory. Each is
+   * written through a primitive that syncs the file and then the directory holding it, so an
+   * interrupted prefix is recoverable by `ensureSessionDirectory` and repeating a reservation is
+   * safe. Readers still see no session document until a later write publishes one.
+   *
+   * WHAT IS NOT DURABLE HERE, AND WHOSE JOB IT IS: the entry NAMING `<sessions>/<id>`. An entry lives
+   * in its immediate parent, and nothing on this path syncs `<sessions>` — so after this returns the
+   * layout inside the directory is durable while the directory's own name may not be. That barrier is
+   * the CALLER's: `StorageSessionLifecycleRepository.reserve` supplies it unconditionally, on every
+   * call, immediately after this one. Giving storage that guarantee would put one fact in two owners
+   * and widen a shared primitive every session write goes through; the broader storage-wide version
+   * is a declared #F117 GAP rather than something this method quietly half-provides.
+   */
+  async reserveSessionDirectory(id: SessionId): Promise<void> {
+    this.assertOpen();
+    await this.serial.run(id, async () => {
+      await this.ensureSessionDirectory(id);
+    });
+  }
+
+  /**
    * Gives every version-1 session directory a journal and the current marker, in place.
    *
    * Only version 1 is touched, and only where a journal can be created without destroying evidence.
@@ -278,9 +310,11 @@ export class DaemonStorage {
     });
   }
 
-  private async refuseNonEmptyUnmarkedSession(id: SessionId): Promise<void> {
-    const entries = await this.fileSystem.listDirectory(createSessionPaths(this.paths, id).directory);
-    if (entries.length > 0) throw new SessionLayoutError(id, undefined);
+  /** Refuses every unmarked directory except the exact lossless prefix reservation can leave. */
+  private async refuseUnrecoverableUnmarkedSession(id: SessionId): Promise<void> {
+    const paths = createSessionPaths(this.paths, id);
+    const entries = await this.fileSystem.listDirectory(paths.directory);
+    if (!(await this.recoverableCreation(paths, entries))) throw new SessionLayoutError(id, undefined);
   }
 
   private async readStableJournal(
@@ -348,16 +382,19 @@ export class DaemonStorage {
       this.readStableJournal(paths.events, id),
     ]);
     if (marker === undefined && !includeMissingMarker) {
-      await this.refuseNonEmptyUnmarkedSession(id);
+      await this.refuseUnrecoverableUnmarkedSession(id);
       return undefined;
     }
-    return {
+    const source = {
       id,
       marker: { file: paths.marker, text: marker ?? '' },
       config: config === undefined ? undefined : { file: paths.config, text: config },
       state: state === undefined ? undefined : { file: paths.state, text: state },
       journal,
     };
+    return (marker === undefined || decideSessionMarker(marker) === 'proceed') && isOnlySessionReservation(source)
+      ? undefined
+      : source;
   }
 
   private async readObservation(id: SessionId, includeMissingMarker = false): Promise<SessionObservation | undefined> {
@@ -369,10 +406,10 @@ export class DaemonStorage {
       this.fileSystem.information(paths.events),
     ]);
     if (marker === undefined && !includeMissingMarker) {
-      await this.refuseNonEmptyUnmarkedSession(id);
+      await this.refuseUnrecoverableUnmarkedSession(id);
       return undefined;
     }
-    return {
+    const observation = {
       id,
       marker: { file: paths.marker, text: marker ?? '' },
       config: config === undefined ? undefined : { file: paths.config, text: config },
@@ -390,6 +427,9 @@ export class DaemonStorage {
               },
             },
     };
+    return (marker === undefined || decideSessionMarker(marker) === 'proceed') && isOnlySessionReservation(observation)
+      ? undefined
+      : observation;
   }
 
   private applySource(source: SessionSource): {
@@ -828,7 +868,7 @@ export class DaemonStorage {
     const paths = createSessionPaths(this.paths, id);
     const marker = await this.fileSystem.readText(paths.marker);
     if (marker === undefined) {
-      await this.refuseNonEmptyUnmarkedSession(id);
+      await this.refuseUnrecoverableUnmarkedSession(id);
       return undefined;
     }
     if (decideSessionMarker(marker) === 'refuse') throw new SessionLayoutError(id, marker);
@@ -1150,10 +1190,11 @@ export class DaemonStorage {
   /**
    * The readable session directories and, for each, whether its journal has vanished.
    *
-   * One `readText` per directory plus one `stat` for each directory that owes a journal. No journal
-   * bytes are read and nothing is reconciled, so a health tick can afford this on every pass. Loss
-   * is decided exactly as the read paths decide it — current marker OR a surviving index witness —
-   * so a legacy session that has not been migrated is not silently reported as healthy.
+   * One marker read and three metadata probes per directory; no document or journal bytes are read
+   * and nothing is reconciled, so a health tick can afford this on every pass. A reservation with no
+   * config, state, or event is deliberately absent: it is storage for an in-flight create, not a
+   * published session. Loss is otherwise decided exactly as the read paths decide it — current
+   * marker OR a surviving index witness — so an unmigrated legacy session is not silently healthy.
    */
   async surveySessionDirectories(): Promise<readonly SessionDirectorySurvey[]> {
     this.assertOpen();
@@ -1164,11 +1205,24 @@ export class DaemonStorage {
       const id = tryParseSessionId(entry.name);
       if (id === undefined) continue;
       const paths = createSessionPaths(this.paths, id);
-      const marker = await this.fileSystem.readText(paths.marker);
+      const [marker, config, state, journal] = await Promise.all([
+        this.fileSystem.readText(paths.marker),
+        this.fileSystem.information(paths.config),
+        this.fileSystem.information(paths.state),
+        this.fileSystem.information(paths.events),
+      ]);
       if (decideSessionMarker(marker) === 'refuse') continue;
+      if (
+        isOnlySessionReservation({
+          config,
+          state,
+          ...(journal === undefined ? {} : { journal: { fingerprint: journal } }),
+        })
+      )
+        continue;
       const indexed = this.index.findSession(id);
       const owesJournal = sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null);
-      const journalLost = owesJournal && (await this.fileSystem.information(paths.events)) === undefined;
+      const journalLost = owesJournal && journal === undefined;
       survey.push({ id, journalLost });
     }
     return survey.sort((left, right) => left.id.localeCompare(right.id));

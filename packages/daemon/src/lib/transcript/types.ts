@@ -230,6 +230,29 @@ export interface TranscriptParseInput {
   readonly startByteOffset?: number;
   /** Adapter-supplied read time used only when a proof record has no harness timestamp. */
   readonly observedAt?: string;
+  /**
+   * The exact bytes `text` was decoded from, whose first byte is at `startByteOffset`.
+   *
+   * Supplied so the parser — the one owner of where a physical record starts and ends — can emit
+   * each record's exact byte slice from the same read. A decoded string cannot stand in for it:
+   * re-encoding is only lossless while the input was valid UTF-8, and evidence that changes meaning
+   * on a malformed byte is evidence about the decoder rather than about the file.
+   */
+  readonly bytes?: Uint8Array;
+}
+
+/**
+ * One complete physical record of a transcript file, exactly as it was read.
+ *
+ * `bytes` is the verbatim slice INCLUDING its line terminator when the file has one there, and
+ * without inventing one for a final record that ends at end of file. A blank or unrecognised record
+ * is still a record: it occupies the byte range, and evidence that skipped it would be evidence
+ * about a file nobody has.
+ */
+export interface TranscriptRawRecord {
+  /** Zero-based file byte offset of the record's first byte — the same coordinate an event carries. */
+  readonly byteOffset: number;
+  readonly bytes: Uint8Array;
 }
 
 export interface TranscriptRecordContext {
@@ -266,6 +289,14 @@ export interface TranscriptParseResult {
   readonly remainder: string;
   readonly parsedRecords: number;
   readonly ignoredRecords: number;
+  /**
+   * Every complete physical record consumed by this parse, in file order.
+   *
+   * Emitted exactly when the caller supplied `bytes`, because that is the only input from which an
+   * exact slice can be taken. The parse that decides the boundaries is the one that reports them —
+   * a second splitter downstream would be a second answer to "where does a record end".
+   */
+  readonly rawRecords?: readonly TranscriptRawRecord[];
 }
 
 /** Common parser contract: callers inject this interface and never branch by harness. */
@@ -292,6 +323,15 @@ export interface TranscriptBatch {
   readonly events: readonly TranscriptEvent[];
   readonly observedInputs: readonly ObservedHumanInput[];
   readonly issues: readonly TranscriptIssue[];
+  /**
+   * Every complete physical record this batch was parsed from, carried from the SAME read.
+   *
+   * Present only when the source handed the parser the bytes its text was decoded from. A consumer
+   * that needs record-exact evidence must refuse a batch without it rather than reconstruct one:
+   * re-reading the file would answer about a later state of it, and re-splitting the normalized
+   * events would answer about what the parser kept rather than about what the file holds.
+   */
+  readonly rawRecords?: readonly TranscriptRawRecord[];
 }
 
 export interface TranscriptReadOptions {

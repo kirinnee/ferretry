@@ -27,6 +27,8 @@ export * from './secrets.ts';
 export * from './service.ts';
 export * from './session-search.ts';
 export * from './session.ts';
+export * from './session-fork.ts';
+export * from './session-transcript.ts';
 export * from './session-transfer.ts';
 export * from './socket-ticket.ts';
 export * from './state-home-layout.ts';

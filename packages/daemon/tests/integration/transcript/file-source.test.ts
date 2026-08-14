@@ -10,8 +10,12 @@ import {
   NodeTranscriptSource,
   type TranscriptFileRuntime,
 } from '../../../src/adapters/transcript/file-source.ts';
+import {
+  extendSessionTranscriptRawPrefix,
+  sessionTranscriptRawPrefixStart,
+} from '../../../src/lib/session/transcript/message-token.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
-import type { TranscriptBatch } from '../../../src/lib/transcript/types.ts';
+import type { TranscriptBatch, TranscriptRawRecord } from '../../../src/lib/transcript/types.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -923,6 +927,155 @@ describe('NodeTranscriptFileRuntime', () => {
     // Assert
     should(actualMissing).be.undefined();
     should(actualFault.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+  });
+});
+
+/**
+ * The record evidence a selection binding rests on, carried from the read that produced it.
+ *
+ * The source's job here is deliberately small: hand the parser the very bytes it decoded, and pass
+ * on whatever the parser says the records were. Every property below fails if it splits the buffer
+ * itself, re-encodes text, or drops the evidence on one of its paths.
+ */
+describe('NodeTranscriptSource physical record evidence', () => {
+  const chainOf = (records: readonly TranscriptRawRecord[]): string =>
+    Buffer.from(
+      records.reduce(
+        (previous, entry) => extendSessionTranscriptRawPrefix(previous, entry.bytes),
+        sessionTranscriptRawPrefixStart(),
+      ),
+    ).toString('hex');
+
+  it('should carry exactly the records the parser reported, byte for byte', async () => {
+    // Arrange: an invalid UTF-8 byte inside an otherwise ordinary transcript, because that is where
+    // a decode-and-re-encode carrier stops being exact.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'evidence.jsonl');
+    const first = Buffer.from(jsonl(userRecord('first')), 'utf8');
+    const damaged = Buffer.concat([
+      Buffer.from('{"type":"user","message":{"role":"user","content":"'),
+      Buffer.of(0xff),
+      Buffer.from('"}}\n'),
+    ]);
+    const bytes = Buffer.concat([first, damaged]);
+    await writeFile(file, bytes);
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    // Act
+    const actual = await subject.read(file);
+
+    // Assert
+    const records = actual.rawRecords ?? [];
+    should(records).have.length(2);
+    should(Buffer.concat(records.map(entry => Buffer.from(entry.bytes))).equals(bytes)).be.true();
+    should(Buffer.from(records[1]?.bytes ?? []).equals(damaged)).be.true();
+    should(records.map(entry => entry.byteOffset)).deepEqual([0, first.byteLength]);
+  });
+
+  it('should agree with the byte offsets carried on its own events', async () => {
+    // Arrange: the boundary the chain commits to and the coordinate a fork is cut at must be the
+    // same boundary — a one-record drift binds every point to its neighbour's content.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'aligned.jsonl');
+    await writeFile(file, [userRecord('one'), userRecord('twö'), userRecord('three')].map(jsonl).join(''));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    // Act
+    const actual = await subject.read(file);
+
+    // Assert
+    const offsets = new Set((actual.rawRecords ?? []).map(entry => entry.byteOffset));
+    should(actual.events).have.length(3);
+    should(actual.events.every(event => event.byteOffset !== undefined && offsets.has(event.byteOffset))).be.true();
+  });
+
+  it('should commit the records BELOW a read cap to the same values a whole read gives them', async () => {
+    // Arrange: the same file read twice — once completely, once with a cap that stops after the
+    // second record. A record's commitment depends on the prefix before it, not on where the reader
+    // happened to stop.
+    //
+    // Scope, deliberately narrow: every record compared here was already COMPLETE below the cap. A
+    // record that genuinely crosses a read boundary is never reassembled by a capped one-shot read —
+    // it is cut back to the last terminator and reported as truncated — so that case is proved by
+    // the spanning-record test in this same block, on the follow path, where a record actually is
+    // held as pending bytes and joined to what arrives next.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'bounded-evidence.jsonl');
+    const records = ['one', 'two', 'three'].map(text => jsonl(userRecord(text)));
+    await writeFile(file, records.join(''));
+    const recordBytes = Buffer.byteLength(records[0]!);
+    const whole = new NodeTranscriptSource(new ClaudeTranscriptParser());
+    const capped = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), undefined, {
+      maxReadBytes: recordBytes * 2 + 10,
+    });
+
+    // Act
+    const complete = await whole.read(file);
+    const bounded = await capped.read(file);
+
+    // Assert
+    const boundedRecords = bounded.rawRecords ?? [];
+    should(boundedRecords).have.length(2);
+    should(chainOf(boundedRecords)).equal(chainOf((complete.rawRecords ?? []).slice(0, 2)));
+    // The bounded read still says it stopped short, which is what makes the digest refuse it.
+    should(bounded.issues.map(issue => issue.code)).deepEqual(['source-truncated']);
+  });
+
+  it('should reconstruct a record that spans two reads once, with the whole-read commitment', async () => {
+    // Arrange: the FIRST record is cut in half, so the follower must hold the head as pending bytes
+    // and join it to the tail that arrives next. Making it the first record means its commitment is
+    // `extend(H_0, bytes)` in both the follow and the whole-read case, so the two are comparable
+    // directly rather than through everything that came before them.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'spanning.jsonl');
+    const record = Buffer.from(jsonl(userRecord('this record spans the read boundary')), 'utf8');
+    const split = Math.floor(record.byteLength / 2);
+    await writeFile(file, record.subarray(0, split));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      // Act
+      const partial = await nextBatch(iterator, 'half of the first record');
+      await appendFile(file, record.subarray(split));
+      const completed = await nextBatch(iterator, 'the completed first record');
+      const whole = await subject.read(file);
+      const second = Buffer.from(jsonl(userRecord('second record')), 'utf8');
+      await appendFile(file, second);
+      const after = await nextBatch(iterator, 'the record after the spanning one');
+
+      // Assert: half a line commits to nothing…
+      should(partial.rawRecords).be.empty();
+      should(partial.issues.map(issue => issue.code)).deepEqual(['incomplete-line']);
+
+      // …the joined record is emitted ONCE, verbatim, terminator included, at offset zero…
+      const spanning = completed.rawRecords ?? [];
+      should(spanning).have.length(1);
+      should(spanning[0]?.byteOffset).equal(0);
+      should(Buffer.from(spanning[0]?.bytes ?? []).equals(record)).be.true();
+
+      // …and its commitment is byte-identical to the one a single whole read produces.
+      should(chainOf(spanning)).equal(chainOf((whole.rawRecords ?? []).slice(0, 1)));
+
+      // The next batch carries only what came after it: no record is committed to twice.
+      should((after.rawRecords ?? []).map(entry => entry.byteOffset)).deepEqual([record.byteLength]);
+      should(Buffer.from(after.rawRecords?.[0]?.bytes ?? []).equals(second)).be.true();
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should carry no evidence on a path that read no bytes', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    // Act
+    const missing = await subject.read(join(temporary, 'absent.jsonl'));
+
+    // Assert: nothing was read, so nothing is vouched for — and the digest refuses its absence.
+    should(missing.rawRecords).be.undefined();
+    should(missing.issues.map(issue => issue.code)).deepEqual(['source-missing']);
   });
 });
 

@@ -201,8 +201,22 @@ describe('parseSessionProvenance', () => {
     // Act
     const parsed = parseSessionProvenance(value);
 
-    // Assert: the instant is canonicalized to UTC on the way in.
-    should(parsed?.at).eql('2026-07-30T10:00:00.000Z');
+    /**
+     * Assert: the offset is PRESERVED, not canonicalized to UTC.
+     *
+     * This assertion used to read `2026-07-30T10:00:00.000Z`, and the change is a real consequence
+     * of moving the schema into `@ferretry/protocol` rather than a slip. The daemon's own
+     * `InstantSchema` is `z.iso.datetime({offset: true}).transform(v => new Date(v).toISOString())`
+     * — it normalises. The protocol's is the same validator WITHOUT the transform, because the wire
+     * carries an instant as the caller spelled it, and every other instant on this very document
+     * (`createdAt`, `transcript.resolvedAt`, `transferredFrom.at`) already behaves that way.
+     *
+     * Taking the protocol's contract is the point of the move: one shape, one instant rule, and a
+     * stamp that round-trips through `SessionConfigSchema` unchanged. Both spellings still name the
+     * same moment, and the stamper itself writes `clock.now()`, which is already UTC — so the only
+     * values this affects are hand-edited ones.
+     */
+    should(parsed?.at).eql('2026-07-30T12:00:00+02:00');
     should(parsed?.warden).eql('w1');
   });
 

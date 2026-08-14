@@ -1,21 +1,26 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
+  classifyDirectoryEntry,
   type DaemonStorage,
   DaemonStorageFactory,
+  type DirectoryEntryKind,
   KeyedSerialExecutor,
   type OpenedDaemonStorage,
   RuntimeEnvironment,
+  SESSION_MESSAGE_TOKEN_KEY_BASENAME,
   SqliteHomeLockFactory,
   StateFileSystem,
   StateFileSystemFactory,
   StateHomeLayout,
   SystemClock,
 } from '../../src/adapters/index.ts';
+
 import {
   createFoundationPaths,
   type FileSystemFactory,
@@ -23,6 +28,13 @@ import {
   resolveStateHome,
   StateHomeLayoutError,
 } from '../../src/lib/index.ts';
+
+/**
+ * The pinned key basename the marker-absent recovery admits, and the root of its scratch name —
+ * IMPORTED from the owner rather than restated, so a test cannot keep passing against a name
+ * production no longer writes.
+ */
+const TOKEN_KEY_BASENAME = SESSION_MESSAGE_TOKEN_KEY_BASENAME;
 
 const homes = new Set<string>();
 const stores = new Set<DaemonStorage>();
@@ -170,6 +182,28 @@ describe('interrupted bootstrap recovery', () => {
     should(String(failure)).containEql('injected marker write failure');
     should(recovered.layout.created).be.true();
     should(await readFile(paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await exists(scratch)).be.false();
+  });
+
+  it('should recover a scaffold holding the published token key and its own scratch file', async () => {
+    // Arrange: the key is created once, on first use, by the same daemon that bootstraps the home —
+    // so a crash between publishing it and writing the marker leaves exactly this shape. Without a
+    // rule for it, a perfectly intact installation would refuse to boot for ever.
+    const home = await createTemporaryHome();
+    const paths = pathsFor(home);
+    const failing = factoryFor(home, { create: created => new MarkerFailingStateFileSystem(created) });
+    await capturedError(async () => await failing.open());
+    const key = join(paths.state, TOKEN_KEY_BASENAME);
+    const scratch = join(paths.temporary, `${TOKEN_KEY_BASENAME}.7f3a-1.tmp`);
+    await writeFile(key, Buffer.alloc(32), { mode: 0o600 });
+    await writeFile(scratch, Buffer.alloc(32), { mode: 0o600 });
+
+    // Act
+    const recovered = await openStorage(home);
+
+    // Assert: recovery accepts the home, keeps the key, and sweeps only the scratch.
+    should(recovered.layout.created).be.true();
+    should(await exists(key)).be.true();
     should(await exists(scratch)).be.false();
   });
 
@@ -412,5 +446,154 @@ describe('foreign state-home refusal', () => {
     should(error instanceof StateHomeLayoutError).be.true();
     should(await exists(paths.layoutVersion)).be.false();
     should(await entriesOf(home)).deepEqual(['daemon.lock']);
+  });
+});
+
+/**
+ * The classification itself, including the one case a real filesystem here cannot produce.
+ *
+ * Some FUSE, overlay and network mounts answer `DT_UNKNOWN` for every entry, so every Dirent
+ * predicate is false. Refusing those outright would make an ordinary home unusable there, and
+ * calling them regular files would defeat the whole check — so that case, and only that case, is
+ * resolved with a non-following `lstat`. Nothing is ever opened.
+ */
+describe('directory entry classification', () => {
+  const indeterminate = (name: string): DirectoryEntryKind => ({
+    name,
+    isDirectory: () => false,
+    isFile: () => false,
+    isSymbolicLink: () => false,
+    isFIFO: () => false,
+    isSocket: () => false,
+    isBlockDevice: () => false,
+    isCharacterDevice: () => false,
+  });
+
+  const kindOf = (directory: boolean, file: boolean): Stats =>
+    ({ isDirectory: () => directory, isFile: () => file }) as Stats;
+
+  it('should resolve an indeterminate entry with lstat, and fail closed when even that cannot', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const answering = (kind: Stats) => async (path: string) => {
+      asked.push(path);
+      return kind;
+    };
+
+    // Act
+    const regular = await classifyDirectoryEntry('/state', indeterminate('key'), answering(kindOf(false, true)));
+    const folder = await classifyDirectoryEntry('/state', indeterminate('sessions'), answering(kindOf(true, false)));
+    const neither = await classifyDirectoryEntry('/state', indeterminate('pipe'), answering(kindOf(false, false)));
+    const refused = await classifyDirectoryEntry('/state', indeterminate('gone'), async () => {
+      throw Object.assign(new Error('lstat refused'), { code: 'EACCES' });
+    });
+
+    // Assert
+    should(asked).deepEqual(['/state/key', '/state/sessions', '/state/pipe']);
+    should(regular).deepEqual({ name: 'key', directory: false, regularFile: true });
+    should(folder).deepEqual({ name: 'sessions', directory: true, regularFile: false });
+    should(neither).deepEqual({ name: 'pipe', directory: false, regularFile: false });
+    should(refused).deepEqual({ name: 'gone', directory: false, regularFile: false });
+  });
+
+  it('should never consult lstat for a kind the directory read already knows', async () => {
+    // Arrange: one syscall per unknown entry is acceptable; one per entry on every listing is not,
+    // and asking about a FIFO at all is how a classification turns into a hang.
+    const known = (kind: keyof DirectoryEntryKind): DirectoryEntryKind => ({
+      ...indeterminate('entry'),
+      [kind]: () => true,
+    });
+    const never = async (): Promise<Stats> => {
+      throw new Error('the kind was already known, so nothing may be asked about the path');
+    };
+
+    // Act
+    const results = await Promise.all(
+      (
+        ['isDirectory', 'isFile', 'isSymbolicLink', 'isFIFO', 'isSocket', 'isBlockDevice', 'isCharacterDevice'] as const
+      ).map(async kind => await classifyDirectoryEntry('/state', known(kind), never)),
+    );
+
+    // Assert
+    should(results.map(entry => entry.regularFile)).deepEqual([false, true, false, false, false, false, false]);
+    should(results.map(entry => entry.directory)).deepEqual([true, false, false, false, false, false, false]);
+  });
+});
+
+/**
+ * A recognised NAME is not a recognised ENTRY.
+ *
+ * Recovery admits two token-key names, and both are admitted as ORDINARY FILES. Anything else
+ * wearing one of those names belongs to whoever planted it: a symlink resolves to bytes outside the
+ * home, and a FIFO is not data at all — an implementation that decided by opening the path would
+ * block the daemon's bootstrap for ever on one. The classification therefore comes from the
+ * directory read, and these prove it on the real filesystem rather than on a stand-in.
+ */
+describe('token-key entries in a marker-absent home', () => {
+  /**
+   * The link's target lives in its OWN tracked temporary directory, never inside the home under
+   * test: an extra unknown file in the home would refuse the layout by itself, and the assertion
+   * would then pass even with the classification broken.
+   */
+  const plantSymlink = async (path: string): Promise<void> => {
+    const elsewhere = await createTemporaryHome();
+    const outside = join(elsewhere, 'somebody-elses-key');
+    await writeFile(outside, Buffer.alloc(32), { mode: 0o600 });
+    await symlink(outside, path);
+  };
+
+  const plantFifo = (path: string): void => {
+    const made = Bun.spawnSync(['mkfifo', path]);
+    if (!made.success) throw new Error(`fixture mkfifo failed: ${new TextDecoder().decode(made.stderr)}`);
+  };
+
+  it.each([
+    {
+      name: 'a symlink wearing the key name',
+      plant: async (paths: FoundationPaths) => await plantSymlink(join(paths.state, TOKEN_KEY_BASENAME)),
+    },
+    {
+      name: 'a FIFO wearing the key name',
+      plant: async (paths: FoundationPaths) => plantFifo(join(paths.state, TOKEN_KEY_BASENAME)),
+    },
+    {
+      name: 'a directory wearing the key name',
+      plant: async (paths: FoundationPaths) => await mkdir(join(paths.state, TOKEN_KEY_BASENAME)),
+    },
+    {
+      name: 'a symlink wearing the scratch name',
+      plant: async (paths: FoundationPaths) =>
+        await plantSymlink(join(paths.temporary, `${TOKEN_KEY_BASENAME}.writer-a.tmp`)),
+    },
+    {
+      name: 'a FIFO wearing the scratch name',
+      plant: async (paths: FoundationPaths) => plantFifo(join(paths.temporary, `${TOKEN_KEY_BASENAME}.writer-a.tmp`)),
+    },
+    {
+      name: 'a scratch name whose writer id is outside the strict grammar',
+      plant: async (paths: FoundationPaths) =>
+        await writeFile(join(paths.temporary, `${TOKEN_KEY_BASENAME}.writer_a.tmp`), 'foreign'),
+    },
+    {
+      name: 'a key name that is nearly, but not exactly, the pinned one',
+      plant: async (paths: FoundationPaths) =>
+        await writeFile(join(paths.state, `${TOKEN_KEY_BASENAME}.old`), Buffer.alloc(32)),
+    },
+  ])('should refuse $name and leave the home unclaimed', async ({ plant }) => {
+    // Arrange: a complete interrupted scaffold, plus the planted entry and nothing else — so the
+    // refusal can only come from the entry's KIND, never from an extra unknown name.
+    const home = await createTemporaryHome();
+    const paths = pathsFor(home);
+    const failing = factoryFor(home, { create: created => new MarkerFailingStateFileSystem(created) });
+    await capturedError(async () => await failing.open());
+    await plant(paths);
+
+    // Act
+    const error = await capturedError(async () => await openStorage(home));
+
+    // Assert: refused promptly — nothing here opens the planted entry — and nothing was claimed.
+    should(error instanceof StateHomeLayoutError).be.true();
+    should((error as StateHomeLayoutError).decision.reason).equal('missing-marker');
+    should(await exists(paths.layoutVersion)).be.false();
   });
 });

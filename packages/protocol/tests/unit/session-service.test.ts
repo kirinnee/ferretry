@@ -58,6 +58,31 @@ const transcriptProvenance = {
   resolvedAt: INSTANT,
 };
 
+const transferredFrom = {
+  v: 1,
+  kind: 'fork',
+  sourceSessionId: 'session-source',
+  sourceIncarnation: 'session-source-2',
+  sourceHarness: 'claude',
+  cutMessagePoint: { v: 1, byteOffset: 128, blockIndex: 1 },
+  planId: 'transfer-plan-1',
+  at: INSTANT,
+};
+
+/**
+ * A warden descendant's stamp: the shape whose whole job is to still be true after the warden that
+ * caused it has been pruned.
+ */
+const spawnProvenance = {
+  v: 1,
+  at: INSTANT,
+  origin: 'warden',
+  parent: 'warden-7',
+  warden: 'warden-7',
+  wardenLineage: true,
+  lineageSource: 'parent_stamp',
+};
+
 const pendingQuestion = {
   toolUseId: 'tool-1',
   questions: [{ question: 'Proceed?', header: 'Choice', options: [{ label: 'Yes' }], multiSelect: false }],
@@ -116,6 +141,26 @@ const sessionCases: SchemaCase[] = [
     schema: session.SessionConfigSchema,
     value: { ...sessionView.config, transcript: transcriptProvenance },
   },
+  {
+    name: 'session config with transfer lineage',
+    schema: session.SessionConfigSchema,
+    value: { ...sessionView.config, transferredFrom },
+  },
+  { name: 'spawn origin', schema: session.SessionSpawnOriginSchema, value: 'warden' },
+  { name: 'warden lineage source', schema: session.WardenLineageSourceSchema, value: 'parent_stamp' },
+  { name: 'spawn provenance', schema: session.SessionProvenanceSchema, value: spawnProvenance },
+  {
+    name: 'unshielded spawn provenance',
+    schema: session.SessionProvenanceSchema,
+    value: { v: 1, at: INSTANT, origin: 'human', wardenLineage: false, lineageSource: 'none' },
+  },
+  {
+    name: 'session config with a spawn stamp',
+    schema: session.SessionConfigSchema,
+    value: { ...sessionView.config, provenance: spawnProvenance },
+  },
+  // The same document with NO stamp: "nobody has decided" is a different answer from "not a
+  // descendant", and both have to parse.
   { name: 'session config', schema: session.SessionConfigSchema, value: sessionView.config },
   { name: 'session health', schema: session.SessionHealthSchema, value: 'healthy' },
   { name: 'account availability', schema: session.AccountAvailabilitySchema, value: 'available' },
@@ -141,7 +186,7 @@ const sessionCases: SchemaCase[] = [
   {
     name: 'start request',
     schema: session.StartSessionRequestSchema,
-    value: { agent: 'agent', mode: 'auto', prompt: 'Do work', boardAccess: 'none' },
+    value: { agent: 'agent', mode: 'auto', prompt: 'Do work', boardAccess: 'none', effort: 'high' },
   },
   { name: 'send request', schema: session.SendRequestSchema, value: { message: 'Continue' } },
   {
@@ -273,6 +318,96 @@ describe('session schemas', () => {
     assertCoversEverySchema(session, cases);
   });
 
+  /**
+   * The refinements are what make an inconsistent stamp UNREADABLE rather than half-true, and
+   * half-true is the dangerous state. A record claiming descent while naming no warden would shield
+   * a session whose ancestry nobody can audit afterwards; a record claiming descent while recording
+   * `none` as the source would shield one nothing ever decided about. The reverse disagreements are
+   * dangerous too: a warden traceback or origin beside a negative shield is still warden evidence,
+   * and consumers must never have to choose which half to trust.
+   */
+  it('should refuse a spawn stamp whose descent and evidence disagree', () => {
+    // Arrange
+    const shieldedWithoutEvidence = {
+      v: 1,
+      at: INSTANT,
+      origin: 'warden',
+      warden: 'warden-7',
+      wardenLineage: true,
+      lineageSource: 'none',
+    };
+    const shieldedWithoutWarden = {
+      v: 1,
+      at: INSTANT,
+      origin: 'warden',
+      wardenLineage: true,
+      lineageSource: 'parent_stamp',
+    };
+    // Evidence recorded while claiming no descent is the same disagreement from the other side.
+    const evidenceWithoutDescent = {
+      v: 1,
+      at: INSTANT,
+      origin: 'human',
+      wardenLineage: false,
+      lineageSource: 'self_label',
+    };
+    const wardenWithoutDescent = {
+      v: 1,
+      at: INSTANT,
+      origin: 'human',
+      warden: 'warden-7',
+      wardenLineage: false,
+      lineageSource: 'none',
+    };
+    const wardenOriginWithoutDescent = {
+      v: 1,
+      at: INSTANT,
+      origin: 'warden',
+      wardenLineage: false,
+      lineageSource: 'none',
+    };
+    const descentWithoutWardenOrigin = {
+      v: 1,
+      at: INSTANT,
+      origin: 'session',
+      warden: 'warden-7',
+      wardenLineage: true,
+      lineageSource: 'parent_stamp',
+    };
+
+    // Act + Assert
+    assertRejects([
+      { name: 'shielded with no evidence', schema: session.SessionProvenanceSchema, value: shieldedWithoutEvidence },
+      { name: 'shielded with no warden', schema: session.SessionProvenanceSchema, value: shieldedWithoutWarden },
+      { name: 'evidence with no descent', schema: session.SessionProvenanceSchema, value: evidenceWithoutDescent },
+      { name: 'warden with no descent', schema: session.SessionProvenanceSchema, value: wardenWithoutDescent },
+      {
+        name: 'warden origin with no descent',
+        schema: session.SessionProvenanceSchema,
+        value: wardenOriginWithoutDescent,
+      },
+      {
+        name: 'descent with no warden origin',
+        schema: session.SessionProvenanceSchema,
+        value: descentWithoutWardenOrigin,
+      },
+    ]);
+  });
+
+  /**
+   * A DECLARED optional field that is present and invalid fails the WHOLE parse — Zod strips unknown
+   * keys, never invalid declared ones. That is the blast radius the wire widening accepts on purpose:
+   * one corrupt stamp takes the session out of every surface at once, rather than quietly handing the
+   * warden detector `undefined` for a session that may well be warden-descended.
+   */
+  it('should refuse an entire session config whose spawn stamp is damaged', () => {
+    // Arrange
+    const damaged = { ...sessionView.config, provenance: { v: 1, at: INSTANT, origin: 'nonsense' } };
+
+    // Act + Assert
+    assertRejects([{ name: 'config with a damaged stamp', schema: session.SessionConfigSchema, value: damaged }]);
+  });
+
   it('should resolve every runtime-control and signal union member', () => {
     // Arrange
     const controls = [{ action: 'model', model: 'm' }, { action: 'effort', effort: 'high' }, { action: 'compact' }];
@@ -339,6 +474,11 @@ describe('session schemas', () => {
           initialAttachments: [{ filename: 'x', base64: '***' }],
         },
       },
+      {
+        name: 'empty startup effort',
+        schema: session.StartSessionRequestSchema,
+        value: { agent: 'agent', mode: 'auto', prompt: 'work', effort: '' },
+      },
       { name: 'empty rename', schema: session.RenameSessionRequestSchema, value: {} },
       { name: 'help without message', schema: session.SignalSessionRequestSchema, value: { kind: 'help' } },
       {
@@ -372,6 +512,7 @@ describe('session schemas', () => {
 
   it('should reject attach evidence that cannot address exactly one live pane', () => {
     // Arrange — every field here is what stops an attach landing on somebody else's terminal.
+    should(session.SessionAttachTargetSchema.parse({ ...sessionAttachTarget, paneId: '%0' }).paneId).equal('%0');
     const cases: SchemaCase[] = [
       {
         name: 'a relative tmux socket',
@@ -384,9 +525,19 @@ describe('session schemas', () => {
         value: { ...sessionAttachTarget, paneId: 'fy-session-1' },
       },
       {
-        name: 'the zeroth pane, which tmux never issues',
+        name: 'a pane id that has no numeric value',
         schema: session.SessionAttachTargetSchema,
-        value: { ...sessionAttachTarget, paneId: '%0' },
+        value: { ...sessionAttachTarget, paneId: '%' },
+      },
+      {
+        name: 'a zero pane id with a noncanonical leading zero',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, paneId: '%00' },
+      },
+      {
+        name: 'a positive pane id with a noncanonical leading zero',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, paneId: '%01' },
       },
       {
         // pid 1 is init. Attaching to it would mean the pane process is already gone.

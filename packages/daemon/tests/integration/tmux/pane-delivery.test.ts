@@ -101,6 +101,26 @@ describe('tmux pane delivery — readiness', () => {
 });
 
 describe('tmux pane delivery — landing proof', () => {
+  it('should admit a durable effect after readiness but before the first composer write', async () => {
+    // Arrange — the first two frames are boot frames, so an early callback would spend a turn that
+    // never touched the TUI. Once it runs, no literal or paste write may have happened yet.
+    const server = new FakeTmuxServer();
+    server.bootCaptures = 2;
+    const { subject } = delivery(server);
+    let admitted = 0;
+
+    // Act
+    await subject.deliver(SESSION, 'continue', {}, async () => {
+      admitted += 1;
+      should(server.calls.some(call => call.includes('-l') || call[0] === 'load-buffer')).be.false();
+      should(server.calls.filter(call => call[0] === 'capture-pane')).not.be.empty();
+    });
+
+    // Assert
+    should(admitted).equal(1);
+    should(server.submitted).deepEqual(['continue']);
+  });
+
   it('should type a short single-line turn literally and submit it once it is proven on screen', async () => {
     // Arrange
     const server = new FakeTmuxServer();

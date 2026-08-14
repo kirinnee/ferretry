@@ -1,6 +1,7 @@
+import { type FileHandle, open } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { SessionConfig } from '@ferretry/protocol';
-import { parseSessionId, type SessionId } from '../../../lib/index.ts';
+import { createSessionPaths, parseSessionId, type SessionId } from '../../../lib/index.ts';
 import type {
   SessionLifecycleEvent,
   SessionLifecycleRecord,
@@ -69,6 +70,54 @@ function storedTurn(state: Readonly<Record<string, unknown>> | undefined): numbe
   return typeof turn === 'number' && Number.isInteger(turn) && turn >= 0 ? turn : undefined;
 }
 
+/**
+ * Whether an error means this platform cannot sync a directory at all.
+ *
+ * Exactly the three the state filesystem tolerates, and no more — a directory sync that failed for
+ * any other reason has not happened, and the durability this file promises would be a lie.
+ */
+function unsupportedDirectorySync(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EINVAL' || code === 'ENOTSUP' || code === 'EPERM';
+}
+
+/**
+ * Persisting one directory's own entries, for the reservation boundary above.
+ *
+ * A directory fsync is not universally supported, so the same three errnos `StateFileSystem` already
+ * tolerates are tolerated here — from the OPEN as well as the sync, because that is where such a
+ * platform usually refuses — and a filesystem that cannot sync a directory must not fail a start.
+ * Everything else propagates, because a reservation that could not be made durable for any other
+ * reason has not been made.
+ */
+export async function fsyncReservedDirectory(
+  path: string,
+  /**
+   * Opens the directory to be synced.
+   *
+   * A parameter rather than a constructor port, and defaulted to the real call, because the ONLY
+   * thing a test needs to vary is which errno the open produces — and that cannot be produced from
+   * outside on a filesystem that supports directory opens. Nothing else about the helper varies.
+   */
+  openDirectory: (target: string) => Promise<FileHandle> = target => open(target, 'r'),
+): Promise<void> {
+  let handle: FileHandle;
+  try {
+    handle = await openDirectory(path);
+  } catch (error) {
+    // TOLERATED AT THE OPEN TOO, which is where a filesystem that cannot sync directories usually
+    // says so: it refuses the read-only open of a directory rather than failing the fsync behind it.
+    if (!unsupportedDirectorySync(error)) throw error;
+    return;
+  }
+  try {
+    await handle.sync();
+  } catch (error) {
+    if (!unsupportedDirectorySync(error)) throw error;
+  } finally {
+    await handle.close();
+  }
+}
 /** Stores lifecycle records in the daemon's authoritative config/state/journal triplet. */
 export class StorageSessionLifecycleRepository implements SessionLifecycleRepository {
   constructor(
@@ -81,7 +130,42 @@ export class StorageSessionLifecycleRepository implements SessionLifecycleReposi
      * transition from erasing the half of it the lifecycle does not own.
      */
     private readonly envelope?: SessionProtocolEnvelope,
+    /**
+     * Persists one directory's own entries.
+     *
+     * A seam solely so the ORDER can be proved — reservation first, then the parent — because that
+     * ordering is a claim about invisible IO and a claim about invisible IO rots silently. Nothing
+     * else varies it.
+     */
+    private readonly syncDirectory: (path: string) => Promise<void> = fsyncReservedDirectory,
   ) {}
+
+  /**
+   * Reserves the session's layout, then persists it, then persists the entry that NAMES it.
+   *
+   * TWO DIRECTORIES, INNERMOST FIRST, AND ON EVERY CALL. An entry lives in its immediate parent, so
+   * the journal and marker entries live in the SESSION directory and the session directory's own
+   * name lives in `<sessions>`. Persisting only the parent makes the target reachable and its
+   * contents still losable; persisting only the session directory makes its contents durable inside
+   * an inode nothing names. The reservation barrier owes both.
+   *
+   * WHY IT CANNOT BE CONDITIONAL ON HAVING CREATED ANYTHING. Storage publishes the marker with an
+   * atomic rename and syncs the session directory AFTER it, so a process that dies in between leaves
+   * a marker that is page-cache-visible but not durable. The next `ensureSessionDirectory` sees a
+   * current marker, merely observes the journal and returns without syncing anything — so the retry
+   * that "found everything already there" is exactly the call that must sync, and it is the one a
+   * created-only rule would skip. The same reasoning covers a concurrent creator: an attempt that
+   * observes another's directory cannot know whether that other attempt has reached its own sync.
+   *
+   * WHY IT IS HERE AND NOT IN STORAGE. `reserveSessionDirectory` stays layout-only; the broader
+   * storage guarantee is a declared #F117 GAP. This is the lifecycle's own boundary making its own
+   * reservation whole, with no `DaemonStorage` or `StateFileSystem` interface change.
+   */
+  async reserve(id: SessionId): Promise<void> {
+    await this.storage.reserveSessionDirectory(id);
+    await this.syncDirectory(createSessionPaths(this.storage.paths, id).directory);
+    await this.syncDirectory(this.storage.paths.sessions);
+  }
 
   async read(id: SessionId): Promise<SessionLifecycleRecord | undefined> {
     const [config, state] = await Promise.all([this.storage.readConfig(id), this.storage.readState(id)]);

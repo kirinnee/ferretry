@@ -13,11 +13,13 @@ const transcript = {
   file: '/home/agent/.claude/projects/repo/11111111-2222-3333-4444-555555555555.jsonl',
   resolvedAt: AT,
 };
-const conversation = {
-  messages: [
-    { point, role: 'assistant' as const, text: 'Keep :agent and @src/index.ts byte-for-byte.', timestamp: AT },
-  ],
+const transferMessage = {
+  point,
+  role: 'assistant' as const,
+  text: 'Keep :agent and @src/index.ts byte-for-byte.',
+  timestamp: AT,
 };
+const conversation = { messages: [transferMessage] };
 const attachments = {
   attachments: [
     {
@@ -113,6 +115,11 @@ const plan = {
 
 const cases: SchemaCase[] = [
   { name: 'message point', schema: transfer.ConversationMessagePointSchema, value: point },
+  { name: 'exact message point', schema: transfer.ExactConversationMessagePointSchema, value: point },
+  // A case of its OWN, never folded into the conversation facet that contains it. The read row
+  // extends this base, so two exported schemas describe a message now and one case cannot stand for
+  // both: the facet's case would keep passing while this base drifted underneath it.
+  { name: 'transfer message', schema: transfer.ConversationTransferMessageSchema, value: transferMessage },
   { name: 'conversation facet', schema: transfer.ConversationFacetSchema, value: conversation },
   { name: 'attachment facet', schema: transfer.AttachmentFacetSchema, value: attachments },
   { name: 'reference facet', schema: transfer.ReferenceFacetSchema, value: references },
@@ -138,7 +145,11 @@ describe('session transfer protocol', () => {
     // Assert
     should(actual).deepEqual({ v: 1, byteOffset: 0 });
     assertRejects([
-      { name: 'missing version', schema: transfer.ConversationMessagePointSchema, value: { byteOffset: 0 } },
+      {
+        name: 'missing version',
+        schema: transfer.ConversationMessagePointSchema,
+        value: { byteOffset: 0 },
+      },
       {
         name: 'string coordinate',
         schema: transfer.ConversationMessagePointSchema,
@@ -148,6 +159,49 @@ describe('session transfer protocol', () => {
         name: 'UI identity',
         schema: transfer.ConversationMessagePointSchema,
         value: { v: 1, byteOffset: 0, blockId: 'record|message|uuid|0' },
+      },
+    ]);
+  });
+
+  it('should preserve an empty durable conversation facet for a plan written before a cut was required', () => {
+    should(transfer.ConversationFacetSchema.parse({ messages: [] })).deepEqual({ messages: [] });
+  });
+
+  it('should keep the durable message row binding-free so a plan stored before bindings still reads', () => {
+    // The read row extends THIS base with a required `selectionBinding`. That evidence is about a
+    // request being made now — it is verified once, before anything is claimed — so a copy frozen
+    // inside a plan that replays after a restart would be evidence of nothing. A plan written before
+    // the binding existed must therefore still parse, and the base must refuse to carry one.
+    // Arrange — a plan exactly as it was persisted before any binding was on the wire.
+    const stored = JSON.parse(JSON.stringify(plan)) as unknown;
+
+    // Act
+    const parsed = transfer.SessionTransferPlanSchema.parse(stored);
+
+    // Assert
+    should(parsed.facets.conversation?.messages).have.length(1);
+    should(JSON.stringify(parsed).includes('"selectionBinding"')).be.false();
+    assertRejects([
+      {
+        name: 'the durable row does not carry request evidence',
+        schema: transfer.ConversationTransferMessageSchema,
+        value: { ...transferMessage, selectionBinding: 'selection-binding-1' },
+      },
+      {
+        name: 'and neither does the plan that stores it',
+        schema: transfer.SessionTransferPlanSchema,
+        value: {
+          ...plan,
+          facets: {
+            ...plan.facets,
+            conversation: { messages: [{ ...transferMessage, selectionBinding: 'selection-binding-1' }] },
+          },
+        },
+      },
+      {
+        name: 'an unversioned point is not a durable row coordinate',
+        schema: transfer.ConversationTransferMessageSchema,
+        value: { ...transferMessage, point: { byteOffset: 128, blockIndex: 1 } },
       },
     ]);
   });
@@ -169,6 +223,24 @@ describe('session transfer protocol', () => {
         name: 'unknown plan field',
         schema: transfer.SessionTransferPlanSchema,
         value: { ...plan, boardId: 'board-1' },
+      },
+    ]);
+  });
+
+  it('should require warden descent and the named warden to agree in both directions', () => {
+    // Act + Assert
+    should(transfer.LineageFacetSchema.safeParse(lineage).success).be.true();
+    should(transfer.LineageFacetSchema.safeParse({ wardenLineage: false, warden: null }).success).be.true();
+    assertRejects([
+      {
+        name: 'warden descent without the warden it traces to',
+        schema: transfer.LineageFacetSchema,
+        value: { wardenLineage: true, warden: null },
+      },
+      {
+        name: 'a named warden without warden descent',
+        schema: transfer.LineageFacetSchema,
+        value: { wardenLineage: false, warden: 'warden-1' },
       },
     ]);
   });
@@ -199,26 +271,10 @@ describe('session transfer protocol', () => {
         schema: transfer.SessionTransferEdgeSchema,
         value: { ...edge, kind: 'handover' },
       },
-    ]);
-  });
-
-  it('should make warden lineage name the warden it traces back to, in both directions', () => {
-    // The lineage facet is the safety-critical fact a transfer carries forward, and the flag and the name
-    // are one statement rather than two fields: a descent that claims a warden but names none cannot be
-    // audited, and a name with the flag off would let a warden's descent be carried while reading as
-    // absent. Both halves are refused so neither spelling can enter a plan.
-    // Act + Assert
-    should(transfer.LineageFacetSchema.safeParse({ wardenLineage: false, warden: null }).success).be.true();
-    assertRejects([
       {
-        name: 'lineage claimed with no warden named',
-        schema: transfer.LineageFacetSchema,
-        value: { wardenLineage: true, warden: null },
-      },
-      {
-        name: 'a warden named with no lineage claimed',
-        schema: transfer.LineageFacetSchema,
-        value: { wardenLineage: false, warden: 'warden-1' },
+        name: 'empty conversation for an exact fork cut',
+        schema: transfer.SessionTransferPlanSchema,
+        value: { ...plan, facets: { ...plan.facets, conversation: { messages: [] } } },
       },
     ]);
   });

@@ -293,6 +293,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     { pendingSourceSessionIds: async () => [] },
     { every: () => () => {} },
   ),
+  sessionFork: {
+    fork: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   tasks: taskSubsystem(),
   taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),
@@ -368,6 +373,27 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
     { capture: async () => ({ alive: true, dead: false, text: 'screen' }) },
     { tail: async () => ({ kind: 'read', events: [] }) },
+    // The addressable conversation, and its COMPLETED context: a resolved identity, because a page is
+    // refused outright until the daemon has established which file this session's transcript is. What a
+    // row and a cursor mean is proved in the read's own tests; this fixture exists so the route is real.
+    {
+      read: async () => ({
+        kind: 'read',
+        context: {
+          sessionId: 's1',
+          incarnation: 'one',
+          provenance: {
+            v: 1,
+            home: '/harness/home',
+            identity: 'minted',
+            harnessSessionId: 'harness-one',
+            file: '/harness/home/one.jsonl',
+          },
+        },
+        rows: [],
+      }),
+    },
+    { tag: async () => new Uint8Array(32), matches: async () => false },
   ),
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
@@ -384,7 +410,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 125, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 127, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -480,6 +506,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',
       'POST /v1/sessions/:sessionId/handover/cancel',
+      'POST /v1/sessions/:sessionId/fork',
       'GET /v1/sessions/:sessionId/runtime-models',
       'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
@@ -567,6 +594,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/events',
       'GET /v1/sessions/:sessionId/snapshot',
       'GET /v1/sessions/:sessionId/logs',
+      'GET /v1/sessions/:sessionId/messages',
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
