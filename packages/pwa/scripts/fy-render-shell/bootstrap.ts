@@ -30,12 +30,14 @@
  * later replaced `postMessage` or `addEventListener` would find this module
  * already holding the originals.
  *
- * THE HANDSHAKE IS ONE-TIME AND IDENTITY-CHECKED. `event.origin` inside an
- * opaque-origin frame is the literal string `"null"` and authenticates nothing,
- * so the only check that carries information is `event.source === parent`.
- * Exactly one global message is ever accepted — the one carrying a fresh
- * `MessagePort` — and the global listener is removed the moment it lands.
- * Everything after that is port-only traffic no other document can reach.
+ * THE HANDSHAKE IS IDENTITY-CHECKED. `event.origin` inside an opaque-origin
+ * frame is the literal string `"null"` and authenticates nothing, so the only
+ * check that carries information is `event.source === parent`. Readiness is
+ * advertised until the parent actually transfers a port: one lost cross-window
+ * notification must not strand a correctly loaded opaque frame forever. Exactly
+ * one global message is accepted — the one carrying a fresh `MessagePort` — and
+ * the global listener is removed the moment it lands. Everything after that is
+ * port-only traffic no other document can reach.
  */
 import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/lib/fy-render.ts';
 
@@ -104,6 +106,7 @@ interface MermaidLibrary {
    */
   let sendOverPort: ((reply: Reply) => void) | null = null;
   let port: MessagePort | null = null;
+  let readyAnnouncement: ReturnType<typeof setInterval> | null = null;
   let animation: LottieAnimation | null = null;
   /** One render per frame. Reload is a fresh frame, never a second command. */
   let consumed = false;
@@ -309,6 +312,10 @@ interface MermaidLibrary {
     const offered = event.ports.length > 0 ? event.ports[0] : undefined;
     if (offered === undefined) return;
     port = offered;
+    if (readyAnnouncement !== null) {
+      clearInterval(readyAnnouncement);
+      readyAnnouncement = null;
+    }
     // Bound BEFORE any library can run — see `sendOverPort` above.
     sendOverPort = offered.postMessage.bind(offered) as (reply: Reply) => void;
     const startPort = offered.start.bind(offered);
@@ -318,5 +325,8 @@ interface MermaidLibrary {
   };
 
   listen('message', onGlobalMessage);
+  // A `postMessage` notification has no acknowledgement. Keep announcing until
+  // the parent proves receipt by transferring the one authenticated port.
   postToParent({ kind: 'shell-ready' } satisfies Reply, '*');
+  readyAnnouncement = setInterval(() => postToParent({ kind: 'shell-ready' } satisfies Reply, '*'), 100);
 })();
