@@ -154,7 +154,7 @@ describe('daemon start', () => {
       probes: [undefined, health()],
       serviceReports: [stoppedReport],
       snapshots,
-      overrides: { installedDaemon: () => fresh.sourceBinary } as unknown as Partial<DaemonControllerDeps>,
+      overrides: { installedDaemon: () => ({ path: fresh.sourceBinary, source: 'PATH' }) },
     });
 
     await controller.start();
@@ -170,7 +170,7 @@ describe('daemon start', () => {
       probes: [undefined, health()],
       serviceReports: [stoppedReport],
       snapshots,
-      overrides: { installedDaemon: () => undefined } as unknown as Partial<DaemonControllerDeps>,
+      overrides: { installedDaemon: () => undefined },
     });
 
     await controller.start();
@@ -187,8 +187,11 @@ describe('daemon start', () => {
       serviceReports: [stoppedReport],
       snapshots,
       overrides: {
-        installedDaemon: () => snapshots.currentAnswer?.sourceBinary,
-      } as unknown as Partial<DaemonControllerDeps>,
+        installedDaemon: () =>
+          snapshots.currentAnswer === undefined
+            ? undefined
+            : { path: snapshots.currentAnswer.sourceBinary, source: 'PATH' },
+      },
     });
 
     await controller.start();
@@ -202,7 +205,7 @@ describe('daemon start', () => {
     const { controller, out, service } = harness({
       probes: [health()],
       snapshots,
-      overrides: { installedDaemon: () => '/opt/fyd-0.175.3' } as unknown as Partial<DaemonControllerDeps>,
+      overrides: { installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH' }) },
     });
 
     await controller.start();
@@ -411,7 +414,7 @@ describe('daemon restart', () => {
       probes: [undefined, health()],
       serviceReports: [stoppedReport],
       snapshots,
-      overrides: { installedDaemon: () => fresh.sourceBinary } as unknown as Partial<DaemonControllerDeps>,
+      overrides: { installedDaemon: () => ({ path: fresh.sourceBinary, source: 'PATH' }) },
     });
 
     await controller.restart();
@@ -495,7 +498,7 @@ describe('daemon status', () => {
   it('should report an installed daemon that differs from the promoted snapshot', async () => {
     const { controller, out } = harness({
       probes: [health()],
-      overrides: { installedDaemon: () => '/opt/fyd-0.175.3' } as unknown as Partial<DaemonControllerDeps>,
+      overrides: { installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH' }) },
     });
 
     await controller.status({});
@@ -565,6 +568,41 @@ describe('daemon status', () => {
 
     // Assert
     should(direct.calls).containEql('inspect:4242');
+  });
+});
+
+describe('daemon which', () => {
+  it('should clearly report unavailable installed, promoted, and running daemons', async () => {
+    const snapshots = new FakeSnapshots();
+    snapshots.currentAnswer = undefined;
+    const { controller, out } = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      snapshots,
+      overrides: { installedDaemon: () => undefined },
+    });
+
+    await controller.which({});
+
+    should(out.text).containEql('installed: not found on PATH');
+    should(out.text).containEql('promoted: no snapshot has been promoted yet');
+    should(out.text).containEql('running: daemon is not running');
+  });
+
+  it('should render all identities and remedies as JSON', async () => {
+    const { controller, out } = harness({
+      overrides: {
+        installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH', version: '0.175.3' }),
+        daemonVersion: () => '0.143.0',
+      },
+    });
+
+    await controller.which({ json: true });
+
+    const payload: unknown = JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '');
+    should(payload).have.property('installed').with.property('version', '0.175.3');
+    should(payload).have.property('promoted').with.property('version', '0.143.0');
+    should(payload).have.property('running').with.property('version', '1.2.3');
   });
 });
 

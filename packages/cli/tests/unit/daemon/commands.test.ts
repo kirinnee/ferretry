@@ -150,6 +150,12 @@ describe('daemon command surface', () => {
     should(JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '')).have.property('daemon', 'fyd');
   });
 
+  it('should route which and its JSON flag through the daemon controller', async () => {
+    const { parsed, out } = run(['daemon', 'which', '--json']);
+    await parsed;
+    should(JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '')).have.property('installed');
+  });
+
   it('should print the log', async () => {
     // Arrange + Act
     const { parsed, logs } = run(['daemon', 'logs']);

@@ -387,6 +387,13 @@ function resolveDaemonBinary(environment: Record<string, string | undefined>, da
   return found;
 }
 
+function daemonBinaryVersion(path: string): string | undefined {
+  const result = Bun.spawnSync([path, '--version'], { stdout: 'pipe', stderr: 'ignore' });
+  if (result.exitCode !== 0) return undefined;
+  const version = new TextDecoder().decode(result.stdout).trim();
+  return version === '' ? undefined : version;
+}
+
 /**
  * Builds the daemon-control controller.
  *
@@ -437,12 +444,18 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     }),
     installedDaemon: () => {
       try {
-        return resolveDaemonBinary(environment, daemonName);
+        const path = resolveDaemonBinary(environment, daemonName);
+        return {
+          path,
+          source: (environment.FY_DAEMON_BIN?.trim() ?? '') === '' ? ('PATH' as const) : ('FY_DAEMON_BIN' as const),
+          version: daemonBinaryVersion(path),
+        };
       } catch {
         // A service-managed launch may not inherit a login shell or PATH. Its promoted snapshot is valid.
         return undefined;
       }
     },
+    daemonVersion: daemonBinaryVersion,
     clock,
     out,
   });

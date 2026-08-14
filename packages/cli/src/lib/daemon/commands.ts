@@ -64,6 +64,14 @@ export function registerDaemonCommands(
     });
 
   daemon
+    .command('which')
+    .description('show the installed, promoted, and currently running daemon identities')
+    .option('--json', 'print the machine-readable daemon identities')
+    .action(async (flags: DaemonCommandOptions) => {
+      await controller().which(flags);
+    });
+
+  daemon
     .command('logs')
     .description('print the daemon log')
     .option('-f, --follow', 'keep streaming as the log grows')
