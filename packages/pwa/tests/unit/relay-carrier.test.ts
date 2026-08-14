@@ -1146,10 +1146,22 @@ describe('the carrier router', () => {
   });
 
   it('should default its network and its dial to the browser when neither is injected', async () => {
-    const router = new DaemonCarrierRouter({ crypto: relayCrypto });
-    // No lookup has been supplied, so nothing is a paired daemon and this reaches the
-    // default network — which is the real `fetch`, refused here by an unroutable host.
-    await should(router.fetch('http://127.0.0.1:1/v1/projects')).be.rejected();
+    let browserFetchCalls = 0;
+    const originalFetch = globalThis.fetch;
+    const browserFetch = (async () => {
+      browserFetchCalls += 1;
+      throw new TypeError('browser fetch fixture refused the request');
+    }) as unknown as typeof fetch;
+    globalThis.fetch = browserFetch;
+    try {
+      const router = new DaemonCarrierRouter({ crypto: relayCrypto });
+      // No lookup has been supplied, so nothing is a paired daemon and this reaches the
+      // browser default. A browser-shaped fixture proves the route without opening a socket.
+      await should(router.fetch('http://127.0.0.1:1/v1/projects')).be.rejectedWith(/fixture refused/u);
+      should(browserFetchCalls).equal(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   /**

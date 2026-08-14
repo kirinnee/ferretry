@@ -22,6 +22,24 @@ if (!registered.__ferretryDomRegistered) {
   GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
   registered.__ferretryDomRegistered = true;
 }
+// DOM units assert app-side click and embedding contracts. They do not own a
+// browser page loader, so keep happy-dom from resolving iframe, anchor, or
+// popup navigation against the network after those contracts have been read.
+const happyDOM = (
+  window as typeof window & {
+    happyDOM: {
+      settings: {
+        navigation: Record<
+          'disableMainFrameNavigation' | 'disableChildFrameNavigation' | 'disableChildPageNavigation',
+          boolean
+        >;
+      };
+    };
+  }
+).happyDOM;
+happyDOM.settings.navigation.disableMainFrameNavigation = true;
+happyDOM.settings.navigation.disableChildFrameNavigation = true;
+happyDOM.settings.navigation.disableChildPageNavigation = true;
 
 /**
  * happy-dom 20.11.1 keeps its internal MutationObserver delivery closure only

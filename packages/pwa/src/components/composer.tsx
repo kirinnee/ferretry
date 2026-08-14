@@ -11,6 +11,7 @@ import {
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
+import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
@@ -73,6 +74,15 @@ export interface ComposerProps {
    * honest state, and never a second fetch.
    */
   readonly autocompleteReady?: () => Promise<void> | undefined;
+  /**
+   * The host's authenticated carrier transport for the autocomplete families
+   * that must read the daemon themselves (files and terminal surfaces).
+   *
+   * A session page already owns this route selection. Threading it through
+   * keeps an autocomplete request on that same measured carrier instead of
+   * silently falling back to the browser's direct network path.
+   */
+  readonly autocompleteFetcher?: DaemonFetch;
   /** Which suggestion families this reader still wants offered. Absent means all
    *  of them. Suppression is menus only — every reference still parses here. */
   readonly suggestions?: ComposerSuggestionSwitches;
@@ -286,6 +296,7 @@ export function Composer({
   autocompleteAttention,
   autocompleteSkills,
   autocompleteReady,
+  autocompleteFetcher,
   suggestions,
   vimMode = false,
 }: ComposerProps) {
@@ -356,6 +367,7 @@ export function Composer({
       createComposerAutocompleteProviders({
         daemon,
         scope,
+        ...(autocompleteFetcher === undefined ? {} : { fetcher: autocompleteFetcher }),
         suggestions: { mentionSuggestions, directReferenceSuggestions, skillSuggestions },
         // THE GETTERS ARE UNCONDITIONAL once a host claims these families, and
         // they read the LIVE prop through a ref rather than closing over one
@@ -380,7 +392,16 @@ export function Composer({
     // through the ref above, so a settled catalog publishes itself through the
     // providers' own `snapshotKey` instead of rebuilding every provider and
     // aborting an open list mid-request. Only identity and policy rebuild.
-    [daemon, directReferenceSuggestions, hostWarmup, hosted, mentionSuggestions, scope, skillSuggestions],
+    [
+      autocompleteFetcher,
+      daemon,
+      directReferenceSuggestions,
+      hostWarmup,
+      hosted,
+      mentionSuggestions,
+      scope,
+      skillSuggestions,
+    ],
   );
   const autocomplete = useComposerAutocomplete({
     value: draft,
