@@ -15,6 +15,19 @@
  * is computed in this tab from that state, so the credential reaches no third party either. This is why
  * the harness screenshots use a fixed fake code: a committed PNG of a real one would be a real leak.
  *
+ * ## THE FIRST DEVICE REQUIRES AN OPERATOR PASSWORD
+ *
+ * Not a prompt and not a nudge: no code is minted until one exists. `fleet.configure` is on by default
+ * for a governed caller, so a device paired to a machine with no password can provision the host —
+ * writing runnable wrappers into the operator's accounts — with nothing to prove. Requiring the password
+ * at the one moment remote access is being created DELETES that state rather than warning about it, and
+ * the safe configuration stops depending on somebody noticing a disclosure.
+ *
+ * IT IS THIS FLOW'S REQUIREMENT, NEVER STARTUP'S AND NEVER LOCAL USE'S. A person setting up on their own
+ * machine with nothing paired is asked for nothing, because there is no remote caller for a gate to stand
+ * in front of. An install that already has devices and no password meets the requirement at its NEXT
+ * pairing, which needs no separate nag and cannot lock anybody out.
+ *
  * ## A REFUSAL IS EXPLAINED, NEVER GREYED
  *
  * A caller who is not on the host and whose operator has switched `pairing` off cannot read this panel at
@@ -24,6 +37,7 @@
  */
 
 import {
+  type GrantsView,
   invitationRedeemableByAnotherDevice,
   localOnlyNotice,
   type PairedDevice,
@@ -33,13 +47,20 @@ import {
   pairingMintOutcome,
   refusalNotice,
 } from '@ferretry/protocol';
-import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { QrSymbol } from '../../components/qr-symbol.tsx';
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import {
+  PAIRING_PASSWORD_REQUIREMENT,
+  PAIRING_PASSWORD_REQUIREMENT_REMOTE,
+  PAIRING_PASSWORD_UNDETERMINED,
+  type PairingGate,
+  pairingGate,
+} from '../../lib/grants.ts';
 import {
   isThisDevice,
   orderedPairedDevices,
@@ -65,6 +86,8 @@ import {
   revokePairedDevice,
   revokePairingCode,
 } from './add-device-api.ts';
+import { readGrants, setOperatorPassword } from './grants-api.ts';
+import { OperatorPasswordCard } from './operator-password.tsx';
 
 /** The invite, as this screen holds it: the daemon it belongs to, and what the daemon answered. */
 interface HeldInvite {
@@ -289,12 +312,28 @@ function PairedDeviceRow({
 export interface AddDeviceCardProps {
   readonly connection: DaemonConnection;
   readonly view: PairedDevicesView;
+  /**
+   * Whether a code may be offered at all, and what to say when it may not.
+   *
+   * IT IS A PROP RATHER THAN A READ. This panel renders what it is given, so a test drives every branch
+   * of the requirement without a network, and the harness screenshots the same component.
+   */
+  readonly gate: PairingGate;
   /** The live invite, when one has been minted in this panel. */
   readonly invite: PairingCodeMintResponse | null;
   /** Now, supplied rather than read, so the countdown is deterministic in a test and a screenshot. */
   readonly nowMs: number;
   readonly busy?: boolean;
   readonly failure?: PairingFailure | null;
+  /** A refusal the daemon answered the password call with, rendered whole and kept apart from `failure`. */
+  readonly passwordFailure?: string | null;
+  /**
+   * Setting the FIRST password, which is the only password act this panel offers.
+   *
+   * There is deliberately no clear: this card exists here to satisfy a requirement, and putting the undo
+   * for the requirement beside the requirement would be a control that argues with the panel around it.
+   */
+  readonly onSetPassword: (password: string) => void;
   readonly onMint: () => void;
   readonly onDiscardInvite: () => void;
   readonly onRevokeCode: () => void;
@@ -310,10 +349,13 @@ export interface AddDeviceCardProps {
 export function AddDeviceCard({
   connection,
   view,
+  gate,
   invite,
   nowMs,
   busy = false,
   failure = null,
+  passwordFailure = null,
+  onSetPassword,
   onMint,
   onDiscardInvite,
   onRevokeCode,
@@ -346,14 +388,22 @@ export function AddDeviceCard({
           A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
           that reads it becomes a device you can see and revoke below.
         </p>
-        {invite === null ? (
+        {/* THE PASSWORD IS REQUIRED BEFORE THE FIRST DEVICE, and this is where the requirement belongs:
+            the moment remote access is being created. Not at startup, and not for local use — a person
+            setting up on their own machine with nothing paired has no remote caller for a gate to stand in
+            front of, and asking them to invent a secret first would be friction for nothing.
+
+            `fleet.configure` is on by default for a governed caller, so a device paired to a machine with
+            no password can provision the host. Requiring the password DELETES that state instead of
+            warning about it. */}
+        {gate.kind === 'open' && invite === null ? (
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               disabled={busy}
               data-pair-mint=""
               onClick={onMint}
-              className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
+              className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Plus size={15} aria-hidden="true" />
               Add a device
@@ -361,7 +411,48 @@ export function AddDeviceCard({
             <span className="text-meta leading-base text-faint">{PAIRING_EXPIRY_NOTE}</span>
           </div>
         ) : null}
+        {gate.kind === 'needs-password' ? (
+          <p
+            role="status"
+            className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+            data-pair-needs-password={gate.local ? 'local' : 'remote'}
+          >
+            <ShieldAlert size={14} className="mr-1 inline" aria-hidden="true" />
+            {gate.local ? PAIRING_PASSWORD_REQUIREMENT : PAIRING_PASSWORD_REQUIREMENT_REMOTE}
+          </p>
+        ) : null}
+        {gate.kind === 'undetermined' ? (
+          <>
+            <p
+              role="status"
+              className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-ui leading-base text-err"
+              data-pair-password-undetermined=""
+            >
+              <ShieldAlert size={14} className="mr-1 inline" aria-hidden="true" />
+              {PAIRING_PASSWORD_UNDETERMINED}
+            </p>
+            {/* The daemon's own words, on their own line: they are a message from somewhere else, and
+                appending one mid-paragraph reads as a typo. */}
+            <p className="m-0 text-meta leading-base text-faint" data-pair-password-undetermined-reason="">
+              {gate.reason}
+            </p>
+          </>
+        ) : null}
       </section>
+
+      {/* The control that satisfies the requirement, in the flow that requires it, so nobody is sent to
+          another screen and back. It is the SAME component the grant settings render — one control, one
+          set of rules about where it can succeed. */}
+      {gate.kind === 'needs-password' && gate.local ? (
+        <OperatorPasswordCard
+          state={{ kind: 'ready', first: true }}
+          busy={busy}
+          failure={passwordFailure}
+          heading="Set the operator password"
+          intro="This is the gate every device you add will have to pass to change anything here. It is not your computer’s login, and nothing in Ferretry uses it to run anything as another user."
+          onSet={onSetPassword}
+        />
+      ) : null}
 
       {invite !== null && countdown !== null ? (
         <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-label="Pairing code" data-pair-invite="">
@@ -501,7 +592,21 @@ export function AddDeviceSurface({
   const [invite, setInvite] = useState<HeldInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<PairingFailure | null>(null);
+  const [passwordFailure, setPasswordFailure] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => now());
+  /**
+   * Whether this machine has an operator password, and what went wrong if that is unknown.
+   *
+   * READ ALONGSIDE THE DEVICE LIST, not lazily when somebody presses the button. The requirement has to
+   * be explained BEFORE the press, which is the same reason the grant view is one call rather than a
+   * probe per control. A failure here is carried rather than swallowed: not knowing is not the same as
+   * knowing there is one.
+   */
+  const [grants, setGrants] = useState<{
+    readonly daemonId: DaemonConnection['daemonId'];
+    readonly view: GrantsView | null;
+    readonly reason?: string;
+  } | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -509,15 +614,25 @@ export function AddDeviceSurface({
     setLoaded(null);
     setLoadFailure(null);
     setFailure(null);
+    setPasswordFailure(null);
+    setGrants(null);
     // The code belongs to the daemon that minted it, so switching machines drops it rather than carrying a
     // live credential across the boundary everything else here is keyed by.
     setInvite(null);
     void createClient(connection)
       .then(async next => {
         const view = await readPairedDevices(next);
+        // Settled rather than awaited together: a grant view this browser could not read must not turn a
+        // working device list into a load failure. It becomes the `undetermined` gate instead, which says
+        // what is unknown rather than pretending the panel is broken.
+        const grant = await readGrants(next).then(
+          answer => ({ view: answer }),
+          (cause: unknown) => ({ view: null, reason: pairingFailure(cause).message }),
+        );
         if (!current) return;
         setClient(next);
         setLoaded({ daemonId: connection.daemonId, view });
+        setGrants({ daemonId: connection.daemonId, ...grant });
       })
       .catch((cause: unknown) => {
         if (current) setLoadFailure({ daemonId: connection.daemonId, failure: pairingFailure(cause) });
@@ -571,6 +686,32 @@ export function AddDeviceSurface({
     }
   }, [client, connection.daemonId, invite]);
 
+  /**
+   * Sets the FIRST operator password, from the flow that requires one.
+   *
+   * The value is an ARGUMENT and nothing else — never state here, never logged, never echoed. No unlock is
+   * sent because this can only run where none exists to prove: the panel offers this control exclusively
+   * for `needs-password`, and a machine with no password has nothing to unlock with. It takes a `string`
+   * rather than `string | undefined` for the same reason — there is no clearing here, and a parameter that
+   * could express one would be an undo for the requirement this panel exists to state.
+   */
+  const setFirstPassword = useCallback(
+    async (password: string) => {
+      if (client === null || loaded?.daemonId !== connection.daemonId) return;
+      setBusy(true);
+      setPasswordFailure(null);
+      try {
+        await setOperatorPassword(client, password);
+        setGrants({ daemonId: connection.daemonId, view: await readGrants(client) });
+      } catch (cause) {
+        setPasswordFailure(pairingFailure(cause).message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, connection.daemonId, loaded?.daemonId],
+  );
+
   const revokeDevice = useCallback(
     async (deviceId: string) => {
       if (client === null || loaded?.daemonId !== connection.daemonId) return;
@@ -592,10 +733,19 @@ export function AddDeviceSurface({
       <AddDeviceCard
         connection={connection}
         view={loaded.view}
+        gate={
+          grants?.daemonId === connection.daemonId
+            ? pairingGate(grants.view, grants.reason)
+            : // Still reading, or an answer that belongs to a daemon this panel has since switched away
+              // from. Either way this browser does not know, and the honest gate is the one that says so.
+              pairingGate(null, 'this browser has not read this machine’s grant view yet')
+        }
         invite={invite?.daemonId === connection.daemonId ? invite.minted : null}
         nowMs={nowMs}
         busy={busy}
         failure={failure}
+        passwordFailure={passwordFailure}
+        onSetPassword={password => void setFirstPassword(password)}
         onMint={() => void mint()}
         onDiscardInvite={() => setInvite(null)}
         onRevokeCode={() => void revokeCode()}

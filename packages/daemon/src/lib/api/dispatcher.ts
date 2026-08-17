@@ -176,6 +176,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // The TRANSPORT's answer, never a header's. A relayed hop terminates on this very host, so
       // anything derived from an address would read as local and hand a remote caller the machine.
       loopback: request.loopback,
+      // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
+      // headers and would make this decision movable by a header. The host's command line holds this
+      // token and is ungoverned; a browser on the same machine does not and is gated until it unlocks.
+      adminToken: authentication.tokenClass === 'admin',
       actor,
       unlock: headerValue(request, OPERATOR_UNLOCK_HEADER),
     }) ?? { allowed: false, refusal: 'undetermined' as const };

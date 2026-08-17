@@ -32,7 +32,7 @@ import {
   type CapabilityGrantView,
   DAEMON_CAPABILITIES,
 } from '@ferretry/protocol';
-import { CircleHelp, Info, Laptop, ShieldCheck, Wifi } from 'lucide-react';
+import { CircleHelp, Info, Laptop, Lock, ShieldCheck, Wifi } from 'lucide-react';
 import { useId } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
@@ -229,19 +229,25 @@ export interface CapabilityListProps {
   readonly connection: DaemonConnection;
   readonly capabilities: readonly CapabilityGrantView[];
   /**
-   * How the DAEMON saw this connection.
+   * Whether the operator's limits APPLY to this connection, as the daemon reported it.
    *
-   * NORMALLY SUPPLIED, from `GrantsView.governed` — it is the daemon's own
-   * `isGovernedCaller(request.loopback)` and the only honest source, because a page on a loopback address
-   * can be reaching the daemon through the relay. Passing it means the screen reads the fact rather than
-   * inferring it, which is the point of the field existing at all.
+   * NORMALLY SUPPLIED, from `GrantsView.governed` — the daemon's own `isGovernedCaller` answer and the
+   * only honest source, because a page on a loopback address can be reaching the daemon through the
+   * relay. Passing it means the screen reads the fact rather than inferring it, which is the point of the
+   * field existing at all.
    *
-   * OMITTED, the posture falls back to `mayGrant` unanimity. That is correct while `mayGrant` is
-   * `!governed`, and it degrades to "cannot tell" if it ever stops being — which is what the empty-list
-   * and capabilities-disagree cases already rely on. Never derived from the page: a `127.0.0.1` address
-   * bar does not mean a loopback connection.
+   * OMITTED, the posture falls back to `mayGrant` unanimity, which answers locality only. Never derived
+   * from the page: a `127.0.0.1` address bar does not mean a loopback connection.
    */
   readonly governed?: boolean | undefined;
+  /**
+   * Whether the request ARRIVED on this host — the second, independent fact.
+   *
+   * It is not `!governed` any more: a browser on the machine is a paired device and is governed until it
+   * unlocks, so the two are both true at once for the connection this field was added for. Without it,
+   * that browser would be badged "Remote" while sitting on the machine.
+   */
+  readonly hostLocal?: boolean | undefined;
 }
 
 /**
@@ -251,17 +257,27 @@ export interface CapabilityListProps {
  * an answer nobody gave. Rows are ordered by the protocol's own declaration rather than by arrival, so
  * a person can build a habit around their position.
  */
-export function CapabilityList({ connection, capabilities, governed }: CapabilityListProps) {
+export function CapabilityList({ connection, capabilities, governed, hostLocal }: CapabilityListProps) {
   const headingId = useId();
-  // The capabilities carry the fact (`mayGrant` is the daemon's own `!governed`), so it is read from
-  // them rather than requested a second time. An explicit prop wins when a caller has the boolean
-  // independently. Neither path touches the page's address.
-  const posture = governed === undefined ? postureFromCapabilities(capabilities) : connectionPosture(governed);
+  // The capabilities carry locality (`mayGrant`), so an omitted prop is read from them rather than
+  // requested a second time. Explicit props win when a caller has the booleans independently. Neither
+  // path touches the page's address.
+  const posture =
+    governed === undefined ? postureFromCapabilities(capabilities) : connectionPosture(governed, hostLocal);
   const copy = postureCopy(posture);
   const entries = DAEMON_CAPABILITIES.map(capability =>
     capabilities.find(candidate => candidate.capability === capability),
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
-  const PostureIcon = posture === 'direct-local' ? Laptop : posture === 'governed-remote' ? Wifi : CircleHelp;
+  // One glyph per posture, and `local-locked` gets the LOCK rather than the laptop: the reader is at the
+  // machine, and the fact worth a glyph is the gate, not the address.
+  const PostureIcon =
+    posture === 'direct-local'
+      ? Laptop
+      : posture === 'local-locked'
+        ? Lock
+        : posture === 'governed-remote'
+          ? Wifi
+          : CircleHelp;
 
   return (
     <section
@@ -300,8 +316,11 @@ export function CapabilityList({ connection, capabilities, governed }: Capabilit
         {/* Which way the switches travel from HERE. It is the difference between the two postures that
             a person can actually act on, so it is stated with them rather than left to be discovered by
             pressing something. */}
+        {/* `local-locked` takes the LOCAL sentence: this browser is on the machine and its switches do
+            travel both ways once it unlocks. Printing the remote one-way note there would tell somebody
+            standing at the machine that a door they can reopen is shut for good. */}
         <p className="m-0 mt-1 text-meta font-semibold leading-base" data-capability-direction={posture}>
-          {posture === 'direct-local' ? LOCAL_TWO_WAY_NOTE : REMOTE_ONE_WAY_NOTE}
+          {posture === 'direct-local' || posture === 'local-locked' ? LOCAL_TWO_WAY_NOTE : REMOTE_ONE_WAY_NOTE}
         </p>
       </div>
 

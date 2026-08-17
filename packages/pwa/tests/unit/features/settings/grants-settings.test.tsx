@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { type CapabilityGrantView, DAEMON_CAPABILITIES, type GrantRefusal, type GrantsView } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { GrantsCard, GrantsSurface, GrantUnlockPrompt } from '../../../../src/features/settings/grants-settings.tsx';
+import {
+  GrantsCard,
+  type GrantsCardProps,
+  GrantsSurface,
+  GrantUnlockPrompt,
+} from '../../../../src/features/settings/grants-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { NO_PASSWORD_DISCLOSURE, PASSWORD_SET_DISCLOSURE } from '../../../../src/lib/grants.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
@@ -25,13 +30,31 @@ const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantVie
 
 const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability })),
-  // Governed by default: these fixtures stand for a caller who is NOT on the host, which is the only
-  // caller the grants apply to.
+  // Governed by default, and NOT on the host: these fixtures stand for a paired device somewhere else.
+  // The two are separate fields because they came apart — a browser ON the machine is governed too until
+  // it unlocks — so a fixture has to say which caller it means rather than implying it with one boolean.
   governed: true,
+  hostLocal: false,
   passwordSet: false,
   unlocked: false,
   ...overrides,
 });
+
+/**
+ * The card with the password callbacks defaulted, so a test names only the props it is about.
+ *
+ * The real props are REQUIRED on `GrantsCard`: the live surface always supplies them, and a control that
+ * silently did nothing on press is the failure this whole screen is written against. The default lives
+ * here, in the test, rather than in the component.
+ */
+function PasswordlessGrantsCard({
+  onSetPassword = () => {},
+  onClearPassword = () => {},
+  ...rest
+}: Omit<GrantsCardProps, 'onSetPassword' | 'onClearPassword'> &
+  Partial<Pick<GrantsCardProps, 'onSetPassword' | 'onClearPassword'>>) {
+  return <GrantsCard {...rest} onSetPassword={onSetPassword} onClearPassword={onClearPassword} />;
+}
 
 const text = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());
 
@@ -43,14 +66,49 @@ const axisSwitch = (renderer: ReactTestRenderer, id: string) =>
   renderer.root.findAll(node => typeof node.type === 'string' && node.props['data-grant-axis'] === id)[0];
 
 describe('GrantsCard', () => {
-  it('states who the rows apply to, because loopback reads them as its own limits otherwise', () => {
-    const rendered = text(
-      render(
-        <GrantsCard connection={connection()} view={view()} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
-      ),
+  it('states who the rows apply to, and says something DIFFERENT to each connection', () => {
+    // One sentence used to serve every caller, and it stopped being true: "these apply to callers that
+    // are not on this machine" is false for a browser ON the machine that has not unlocked yet, and false
+    // in the direction that sends that reader hunting for a permission problem they do not have.
+    const scope = (renderer: ReactTestRenderer): unknown =>
+      renderer.root.findAll(node => typeof node.type === 'string' && node.props['data-grant-scope'] !== undefined)[0]
+        ?.props['data-grant-scope'];
+
+    const remote = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view()}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
-    expect(rendered).toContain('not on this machine');
-    expect(rendered).toContain('already has the machine');
+    expect(scope(remote)).toBe('this-browser');
+    expect(text(remote)).toContain('reached the machine from somewhere else');
+
+    const locked = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view({ governed: true, hostLocal: true, passwordSet: true })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(scope(locked)).toBe('this-browser-until-unlocked');
+    expect(text(locked)).toContain('paired device wherever it runs');
+
+    const unlocked = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view({ governed: false, hostLocal: true, passwordSet: true, unlocked: true })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(scope(unlocked)).toBe('not-on-this-machine');
+    expect(text(unlocked)).toContain('none of them apply to it right now');
   });
 
   /**
@@ -65,7 +123,7 @@ describe('GrantsCard', () => {
    */
   it('renders no widening switch for a caller that may never turn a capability on', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           capabilities: [
@@ -94,7 +152,7 @@ describe('GrantsCard', () => {
 
   it('warns a one-way caller before they close a door only the machine can reopen', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({ capabilities: [entry({ capability: 'fleet', mayGrant: false })] })}
         nowMs={NOW}
@@ -115,7 +173,7 @@ describe('GrantsCard', () => {
     // lockout happens at the click.
     // Arrange, Act
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({ capabilities: [entry({ capability: 'pairing', mayGrant: false })] })}
         nowMs={NOW}
@@ -132,7 +190,7 @@ describe('GrantsCard', () => {
 
   it('says nothing about one-way doors to a caller standing at the machine', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({ capabilities: [entry({ capability: 'fleet', mayGrant: true })] })}
         nowMs={NOW}
@@ -147,7 +205,7 @@ describe('GrantsCard', () => {
 
   it('offers a live widening switch at the machine, where turning one on is allowed', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           capabilities: [
@@ -185,7 +243,7 @@ describe('GrantsCard', () => {
       )[0]?.props['data-capability-posture'];
 
     const remote = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           governed: true,
@@ -199,10 +257,11 @@ describe('GrantsCard', () => {
     expect(posture(remote)).toBe('governed-remote');
 
     const local = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           governed: false,
+          hostLocal: true,
           capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: true })),
         })}
         nowMs={NOW}
@@ -211,11 +270,36 @@ describe('GrantsCard', () => {
       />,
     );
     expect(posture(local)).toBe('direct-local');
+
+    // THE CONNECTION THE TWO FIELDS WERE SPLIT FOR: on the machine AND governed. It is neither of the
+    // two postures above, and collapsing it into either is a lie in a different direction — "Remote"
+    // to somebody standing at the machine, or "Direct" over a gate they have not passed.
+    const localLocked = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view({
+          governed: true,
+          hostLocal: true,
+          passwordSet: true,
+          capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: true })),
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(posture(localLocked)).toBe('local-locked');
   });
 
   it('says once, beside the configure controls, that nothing is standing behind them', () => {
     const renderer = render(
-      <GrantsCard connection={connection()} view={view()} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view()}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
     expect(text(renderer)).toContain(NO_PASSWORD_DISCLOSURE);
     // ONCE. A disclosure repeated per capability is the nagging the contract rules out.
@@ -225,7 +309,7 @@ describe('GrantsCard', () => {
   it('says the opposite when the layer is on rather than staying silent about it', () => {
     const rendered = text(
       render(
-        <GrantsCard
+        <PasswordlessGrantsCard
           connection={connection()}
           view={view({ passwordSet: true })}
           nowMs={NOW}
@@ -243,7 +327,13 @@ describe('GrantsCard', () => {
       capabilities: [...DAEMON_CAPABILITIES].reverse().map(capability => entry({ capability })),
     });
     const renderer = render(
-      <GrantsCard connection={connection()} view={shuffled} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={shuffled}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
     expect(marked(renderer, 'data-grant-capability').map(node => node.props['data-grant-capability'])).toEqual([
       ...DAEMON_CAPABILITIES,
@@ -253,14 +343,20 @@ describe('GrantsCard', () => {
   it('invents no row for a capability the daemon did not report', () => {
     const partial = view({ capabilities: [entry({ capability: 'fleet' })] });
     const renderer = render(
-      <GrantsCard connection={connection()} view={partial} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={partial}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
     expect(marked(renderer, 'data-grant-capability')).toHaveLength(1);
   });
 
   it('carries a reason on EVERY axis, which is the point of the unit', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           passwordSet: true,
@@ -291,7 +387,7 @@ describe('GrantsCard', () => {
 
   it('explains an allowed-but-immovable axis rather than greying it silently', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           capabilities: [
@@ -319,7 +415,7 @@ describe('GrantsCard', () => {
 
   it('lets a caller holding an unlock change a capability the document does not grant configure on', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({
           passwordSet: true,
@@ -337,7 +433,7 @@ describe('GrantsCard', () => {
   it('reports the axis and the value a reader asked for, from the recorded answer', () => {
     const changes: Array<readonly [string, string, boolean]> = [];
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view()}
         nowMs={NOW}
@@ -351,7 +447,7 @@ describe('GrantsCard', () => {
 
   it('shows provenance per capability, the same treatment every other value gets', () => {
     const renderer = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({ capabilities: [entry({ origin: 'config file' })] })}
         nowMs={NOW}
@@ -365,12 +461,18 @@ describe('GrantsCard', () => {
 
   it('offers the unlock prompt only where a password could actually help', () => {
     const none = render(
-      <GrantsCard connection={connection()} view={view()} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view()}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
     expect(marked(none, 'data-grant-unlock')).toHaveLength(0);
 
     const set = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({ passwordSet: true })}
         nowMs={NOW}
@@ -383,7 +485,7 @@ describe('GrantsCard', () => {
     // Locked out: no prompt at all. One here would invite five more guesses at a daemon that has
     // already stopped listening.
     const locked = render(
-      <GrantsCard
+      <PasswordlessGrantsCard
         connection={connection()}
         view={view({ passwordSet: true, lockedUntil: '2026-01-01T00:15:00.000Z' })}
         nowMs={NOW}
@@ -398,7 +500,7 @@ describe('GrantsCard', () => {
   it('renders a change refusal whole, because the daemon’s sentence names the command to run', () => {
     const rendered = text(
       render(
-        <GrantsCard
+        <PasswordlessGrantsCard
           connection={connection()}
           view={view()}
           nowMs={NOW}
@@ -413,7 +515,14 @@ describe('GrantsCard', () => {
 
   it('disables every control while a change is in flight', () => {
     const renderer = render(
-      <GrantsCard connection={connection()} view={view()} nowMs={NOW} busy onChange={() => {}} onUnlock={() => {}} />,
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view()}
+        nowMs={NOW}
+        busy
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
     for (const control of marked(renderer, 'data-grant-axis')) expect(control.props.disabled).toBe(true);
   });
@@ -422,7 +531,7 @@ describe('GrantsCard', () => {
     const undetermined: GrantRefusal = 'undetermined';
     const rendered = text(
       render(
-        <GrantsCard
+        <PasswordlessGrantsCard
           connection={connection()}
           view={view({
             passwordSet: true,
@@ -443,6 +552,97 @@ describe('GrantsCard', () => {
       ),
     );
     expect(rendered).toContain('could not read its own grant document');
+  });
+
+  it('renders the password control in every posture, and only offers it where it can succeed', () => {
+    // A setting that silently disappears on a phone is a setting somebody goes looking for, so the panel is
+    // always on the page and the REASON takes the control's place where the daemon would refuse it.
+    // Arrange, Act
+    const remote = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view({ governed: true, hostLocal: false, passwordSet: true })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    const local = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view({ governed: false, hostLocal: true, passwordSet: true, unlocked: true })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(marked(remote, 'data-operator-password')[0]?.props['data-operator-password']).toBe('remote');
+    expect(marked(remote, 'data-password-field')).toHaveLength(0);
+    expect(marked(local, 'data-operator-password')[0]?.props['data-operator-password']).toBe('ready');
+    expect(marked(local, 'data-password-field')).toHaveLength(1);
+  });
+
+  it('holds a widening switch on the machine until the browser unlocks, naming the password', () => {
+    // A local browser is a paired device and is governed until it unlocks. A switch that looked live and
+    // failed on press would read as broken software; the sentence that belongs there is the password, NOT
+    // "only at the machine" — this reader is at the machine.
+    // Arrange
+    const localLocked = view({
+      governed: true,
+      hostLocal: true,
+      passwordSet: true,
+      capabilities: [
+        entry({
+          capability: 'terminal',
+          use: false,
+          granted: { use: false, configure: true },
+          useRefusal: 'not-granted',
+          mayGrant: true,
+        }),
+      ],
+    });
+
+    // Act
+    const renderer = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={localLocked}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(axisSwitch(renderer, 'terminal.use')?.props.disabled).toBe(true);
+    const rendered = text(renderer);
+    expect(rendered).toContain('needs the operator password');
+    expect(rendered).not.toContain('only be switched on at the machine');
+  });
+
+  it('leaves a narrowing switch live for that same browser, because revoking is never gated', () => {
+    // A prompt between a person and shutting a door is a liability during the incident that made them reach
+    // for it.
+    // Arrange, Act
+    const renderer = render(
+      <PasswordlessGrantsCard
+        connection={connection()}
+        view={view({
+          governed: true,
+          hostLocal: true,
+          passwordSet: true,
+          capabilities: [entry({ capability: 'terminal', mayGrant: true })],
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(axisSwitch(renderer, 'terminal.use')?.props.disabled).toBe(false);
   });
 });
 
@@ -508,6 +708,35 @@ describe('GrantUnlockPrompt', () => {
     run(() => busyField?.props.onChange({ target: { value: 'operator-secret' } }));
     run(() => busy.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} }));
     expect(attempts).toEqual([]);
+  });
+
+  it('says what the password buys HERE, which is not the same for both readers', () => {
+    // "Turning a capability on from off this host needs it" was the whole story while a local browser was
+    // ungoverned. It is false for the reader most likely to meet this prompt now — one ON the machine,
+    // which needs the unlock for its own changes — so the sentence branches.
+    // Arrange, Act
+    const remote = render(
+      <GrantUnlockPrompt held={null} daemonId={daemon} nowMs={NOW} failure={null} busy={false} onUnlock={() => {}} />,
+    );
+    const local = render(
+      <GrantUnlockPrompt
+        held={null}
+        daemonId={daemon}
+        nowMs={NOW}
+        failure={null}
+        busy={false}
+        hostLocal
+        onUnlock={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(marked(remote, 'data-grant-unlock-purpose')[0]?.props['data-grant-unlock-purpose']).toBe('remote');
+    expect(text(remote)).toContain('from off this host needs it');
+    expect(marked(local, 'data-grant-unlock-purpose')[0]?.props['data-grant-unlock-purpose']).toBe('local');
+    expect(text(local)).toContain('ungoverned for five minutes');
+    // Neither reader is told a revoke needs it, because it never does.
+    for (const rendered of [text(remote), text(local)]) expect(rendered).toContain('never');
   });
 
   it('never offers to save the password to a browser password manager', () => {
@@ -773,5 +1002,173 @@ describe('GrantsSurface', () => {
     });
     // A token proves the operator to ONE machine; the new daemon must be asked again.
     expect(marked(renderer as ReactTestRenderer, 'data-grant-unlock')[0]?.props['data-grant-unlock']).toBe('prompt');
+  });
+});
+
+describe('GrantsSurface — moving the operator password', () => {
+  /**
+   * A daemon that behaves like the real one about this password: locked until an unlock is spent, ready
+   * afterwards, and answering the PUT with the single boolean the route discloses.
+   */
+  const passwordWorld = () => {
+    const calls: Array<{ path: string; method: string; unlock: string | null; body: string | undefined }> = [];
+    let unlocked = false;
+    let passwordSet = true;
+    return {
+      calls,
+      create: async () => ({
+        request: (async (path: string, _schema: unknown, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          const unlock = new Headers(init?.headers).get('x-ferretry-operator-unlock');
+          const body = typeof init?.body === 'string' ? init.body : undefined;
+          calls.push({ path, method, unlock, body });
+          if (path.endsWith('/unlock')) {
+            unlocked = true;
+            return {
+              token: 'fy_unlock_aaaaaaaaaaaaaaaaaaaaaaaa',
+              expiresAt: '2026-01-01T00:05:00.000Z',
+              ttlSeconds: 300,
+            };
+          }
+          if (path.endsWith('/password')) {
+            passwordSet = (JSON.parse(String(body ?? '{}')) as { password?: string }).password !== undefined;
+            // The daemon drops every held unlock when the password moves, so the next read says so.
+            unlocked = false;
+            return { passwordSet };
+          }
+          return view({ governed: !unlocked, hostLocal: true, passwordSet, unlocked });
+        }) as never,
+      }),
+    };
+  };
+
+  /** Unlocks, then types a new password into the control the unlock opened, and submits. */
+  const replacePassword = async (renderer: ReactTestRenderer, next: string) => {
+    const unlockField = marked(renderer, 'data-grant-unlock-field')[0];
+    run(() => unlockField?.props.onChange({ target: { value: 'operator-secret' } }));
+    await runAsync(async () => {
+      renderer.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+    });
+    await runAsync(async () => {
+      marked(renderer, 'data-password-field')[0]?.props.onChange({ target: { value: next } });
+    });
+    await runAsync(async () => {
+      marked(renderer, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: next } });
+    });
+    await runAsync(async () => {
+      renderer.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+    });
+  };
+
+  it('replaces the password with the unlock in a HEADER and the value in a BODY, then re-reads', async () => {
+    // Replacing an existing password is a privileged change, so the daemon asks this browser to prove the
+    // current one. The new value travels in a body — a URL reaches every proxy access log — and the view is
+    // re-read because `passwordSet` decides what every other control on this screen may do.
+    // Arrange
+    const world = passwordWorld();
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(<GrantsSurface connection={connection()} createClient={world.create} now={() => NOW} />);
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await replacePassword(surface, 'a-newer-secret');
+
+    // Assert
+    const put = world.calls.find(call => call.method === 'PUT');
+    expect(put?.path).toBe('/v1/grants/password');
+    expect(put?.unlock).toBe('fy_unlock_aaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(JSON.parse(String(put?.body))).toEqual({ password: 'a-newer-secret' });
+    // Never in a path or a query, on any call.
+    expect(world.calls.some(call => call.path.includes('a-newer-secret'))).toBe(false);
+    // And the screen never renders it back.
+    expect(text(surface)).not.toContain('a-newer-secret');
+    // Re-read after the write, so the panel is not describing the machine as it used to be.
+    expect(world.calls.filter(call => call.method === 'GET').length).toBe(3);
+  });
+
+  it('drops the held unlock once the password has moved, because the daemon has', async () => {
+    // A password that changed must invalidate what the old one bought. A browser still presenting the old
+    // token would claim an authority the machine has already withdrawn.
+    // Arrange
+    const world = passwordWorld();
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(<GrantsSurface connection={connection()} createClient={world.create} now={() => NOW} />);
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await replacePassword(surface, 'a-newer-secret');
+
+    // Assert — the prompt is offered again rather than a held badge nobody can spend.
+    expect(marked(surface, 'data-grant-unlock')[0]?.props['data-grant-unlock']).toBe('prompt');
+    expect(marked(surface, 'data-operator-password')[0]?.props['data-operator-password']).toBe('locked');
+  });
+
+  it('renders a refused password change whole, and keeps the screen honest about the state', async () => {
+    // The daemon's sentence names the command a human runs — a terminal on this machine, which never asks
+    // for the old password — and that is exactly the reader this refusal reaches.
+    // Arrange
+    const refusal = 'changing this machine’s operator password needs the password it already has';
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <GrantsSurface
+          connection={connection()}
+          createClient={async () => ({
+            request: (async (_path: string, _schema: unknown, init?: RequestInit) => {
+              if ((init?.method ?? 'GET') === 'PUT') throw new Error(refusal);
+              return view({ governed: false, hostLocal: true, passwordSet: false, unlocked: false });
+            }) as never,
+          })}
+          now={() => NOW}
+        />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await runAsync(async () => {
+      marked(surface, 'data-password-field')[0]?.props.onChange({ target: { value: 'a-good-password' } });
+    });
+    await runAsync(async () => {
+      marked(surface, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: 'a-good-password' } });
+    });
+    await runAsync(async () => {
+      surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+    });
+
+    // Assert
+    expect(marked(surface, 'data-password-failure')).toHaveLength(1);
+    expect(text(surface)).toContain('needs the password it already has');
+    // Still reported as unset, because the call that would have set it did not land.
+    expect(marked(surface, 'data-password-state')[0]?.props['data-password-state']).toBe('unset');
+  });
+
+  it('clears the password when the reader removes it, spelling that as an absent field', async () => {
+    // Absence is the operation. `''` would fail the minimum-length rule instead of disarming the gate, which
+    // is why a client bug cannot silently do this.
+    // Arrange
+    const world = passwordWorld();
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(<GrantsSurface connection={connection()} createClient={world.create} now={() => NOW} />);
+    });
+    const surface = renderer as ReactTestRenderer;
+    const unlockField = marked(surface, 'data-grant-unlock-field')[0];
+    run(() => unlockField?.props.onChange({ target: { value: 'operator-secret' } }));
+    await runAsync(async () => {
+      surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+    });
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-password-clear')[0]?.props.onClick());
+
+    // Assert
+    const put = world.calls.find(call => call.method === 'PUT');
+    expect(JSON.parse(String(put?.body))).toEqual({});
+    expect(marked(surface, 'data-password-state')[0]?.props['data-password-state']).toBe('unset');
   });
 });

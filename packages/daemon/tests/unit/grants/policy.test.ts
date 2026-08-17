@@ -3,6 +3,7 @@ import { DAEMON_CAPABILITIES, GRANT_UNLOCK_LOCKOUT_SECONDS, GRANT_UNLOCK_MAX_ATT
 import should from 'should';
 import {
   applyGrantPatch,
+  type CallerArrival,
   capabilityNoun,
   DEFAULT_CAPABILITY_GRANTS,
   decideCapability,
@@ -12,6 +13,7 @@ import {
   INITIAL_UNLOCK_ATTEMPTS,
   isGovernedCaller,
   isUnlockLocked,
+  mayChangeOperatorPassword,
   NO_PASSWORD_DISCLOSURE,
   patchedCapabilities,
   recordUnlockFailure,
@@ -27,16 +29,67 @@ const evaluation = (overrides: Partial<Parameters<typeof decideCapability>[1]> =
   unlockHeld: false,
   rateLimited: false,
   governed: true,
+  hostLocal: false,
+  ...overrides,
+});
+
+/** One caller, as the four facts governance reads about it. The default is a remote device. */
+const arrival = (overrides: Partial<CallerArrival> = {}): CallerArrival => ({
+  loopback: false,
+  adminToken: false,
+  passwordSet: false,
+  unlockHeld: false,
   ...overrides,
 });
 
 describe('who the grants govern', () => {
-  it('should govern a caller that did not arrive over loopback, and exempt one that did', () => {
-    // Somebody on the machine already HAS the machine. Gating them would be friction with no safety,
-    // and it would make a document that refuses everything one nobody could ever edit back.
+  it('should govern every caller that did not arrive over loopback, whatever it holds', () => {
+    // Arrival is still the first question, and no credential answers it: a remote caller holding the
+    // host's admin token, a live unlock, or both is governed all the same.
     // Act + Assert
-    should(isGovernedCaller(true)).be.false();
-    should(isGovernedCaller(false)).be.true();
+    should(isGovernedCaller(arrival({ loopback: false }))).be.true();
+    should(isGovernedCaller(arrival({ loopback: false, adminToken: true, unlockHeld: true }))).be.true();
+  });
+
+  it('should exempt the host command line, which holds the admin token', () => {
+    // Reading that token file already requires being on the machine, so gating it would be friction with
+    // no safety — and it would close the one door a FORGOTTEN password is repaired through. This is the
+    // escape hatch, asserted rather than assumed.
+    // Act + Assert
+    should(isGovernedCaller(arrival({ loopback: true, adminToken: true, passwordSet: true }))).be.false();
+    should(mayChangeOperatorPassword(arrival({ loopback: true, adminToken: true, passwordSet: true }))).be.true();
+  });
+
+  it('should govern a LOCAL BROWSER until it presents an unlock, then stop', () => {
+    // A browser is a paired device wherever it runs, and an unattended tab on the machine was one tap
+    // from provisioning it. So local arrival alone is no longer an exemption: one gate at the door, then
+    // full authority. It is friction rather than a boundary — somebody at the keyboard can open a
+    // terminal — and what it buys is that a destructive change is deliberate.
+    // Arrange
+    const local = { loopback: true, adminToken: false, passwordSet: true };
+
+    // Act + Assert
+    should(isGovernedCaller(arrival({ ...local, unlockHeld: false }))).be.true();
+    should(isGovernedCaller(arrival({ ...local, unlockHeld: true }))).be.false();
+  });
+
+  it('should leave a local browser ungoverned while this machine has no password at all', () => {
+    // The state every new user starts in. There is nothing to unlock with and no gate to pass, so a
+    // fresh install is useful immediately and nobody is asked to invent a secret before their first run.
+    // The first password is required when the first DEVICE is paired, which is where remote access
+    // begins — not at startup and not for local use.
+    // Act + Assert
+    should(isGovernedCaller(arrival({ loopback: true, passwordSet: false }))).be.false();
+    should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: false }))).be.true();
+  });
+
+  it('should refuse a local browser the password itself until it unlocks', () => {
+    // Otherwise the gate would be one tap wide: a locked browser could simply replace the password it
+    // could not prove, and every sentence about deliberateness would be false. The way back for somebody
+    // who has genuinely forgotten it is the admin token above, never this.
+    // Act + Assert
+    should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: true, unlockHeld: false }))).be.false();
+    should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: true, unlockHeld: true }))).be.true();
   });
 
   it('should treat a RELAYED request as remote even though the relay terminates on this host', () => {
@@ -62,8 +115,8 @@ describe('who the grants govern', () => {
       'rendezvous-session',
     );
 
-    // Act
-    const governed = isGovernedCaller(relayed.loopback);
+    // Act — and it presents the host's own token class too, which changes nothing off the host.
+    const governed = isGovernedCaller(arrival({ loopback: relayed.loopback, adminToken: true }));
 
     // Assert — the address it claims changes nothing.
     should(relayed.loopback).be.false();

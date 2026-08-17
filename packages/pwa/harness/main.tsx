@@ -1501,6 +1501,7 @@ const HARNESS_GRANTS_LOCKED: GrantsView = {
     grantEntry('pairing', on, 'granted', 'locked', 'config file'),
   ],
   governed: true,
+  hostLocal: false,
   passwordSet: true,
   unlocked: false,
   attemptsRemaining: 5,
@@ -1515,6 +1516,7 @@ const HARNESS_GRANTS_UNGATED: GrantsView = {
     grantEntry(capability, on, 'granted', 'ungated', 'default', true),
   ),
   governed: false,
+  hostLocal: true,
   passwordSet: false,
   unlocked: false,
 };
@@ -1523,6 +1525,7 @@ const HARNESS_GRANTS_UNGATED: GrantsView = {
 const HARNESS_GRANTS_RATE_LIMITED: GrantsView = {
   capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'rate-limited')),
   governed: true,
+  hostLocal: false,
   passwordSet: true,
   unlocked: false,
   attemptsRemaining: 0,
@@ -1533,8 +1536,39 @@ const HARNESS_GRANTS_RATE_LIMITED: GrantsView = {
 const HARNESS_GRANTS_UNDETERMINED: GrantsView = {
   capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'undetermined', 'undetermined')),
   governed: true,
+  hostLocal: false,
   passwordSet: true,
   unlocked: false,
+};
+
+/**
+ * A BROWSER ON THE MACHINE THAT HAS NOT UNLOCKED YET — governed and local at once.
+ *
+ * The connection the two fields were split for. `mayGrant` stays true because locality decides widening
+ * and this caller is at the machine; the configure axes read `locked` because it has not proved the
+ * password. A fixture that moved the two together could not express this state at all, which is exactly
+ * why it earns a capture of its own.
+ */
+const HARNESS_GRANTS_LOCAL_LOCKED: GrantsView = {
+  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'locked', 'default', true)),
+  governed: true,
+  hostLocal: true,
+  passwordSet: true,
+  unlocked: false,
+  attemptsRemaining: 5,
+};
+
+/** The same browser after one unlock: ungoverned, and the password control is live. */
+const HARNESS_GRANTS_LOCAL_UNLOCKED: GrantsView = {
+  capabilities: DAEMON_CAPABILITIES.map(capability =>
+    grantEntry(capability, on, 'granted', 'granted', 'default', true),
+  ),
+  governed: false,
+  hostLocal: true,
+  passwordSet: true,
+  unlocked: true,
+  unlockExpiresAt: '2026-01-01T00:05:00.000Z',
+  attemptsRemaining: 5,
 };
 
 /**
@@ -5891,6 +5925,8 @@ function Shell() {
             nowMs={HARNESS_GRANT_NOW_MS}
             onChange={() => {}}
             onUnlock={() => {}}
+            onSetPassword={() => {}}
+            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5907,6 +5943,8 @@ function Shell() {
             nowMs={HARNESS_GRANT_NOW_MS}
             onChange={() => {}}
             onUnlock={() => {}}
+            onSetPassword={() => {}}
+            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5924,6 +5962,54 @@ function Shell() {
             unlockFailure={{ message: 'too many wrong operator passwords', retryable: false, attemptsRemaining: 0 }}
             onChange={() => {}}
             onUnlock={() => {}}
+            onSetPassword={() => {}}
+            onClearPassword={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // A BROWSER ON THE MACHINE THAT HAS NOT UNLOCKED. The badge says "on this machine — locked", the
+      // switches that would widen carry the password as their reason rather than a command to run on a
+      // host the reader is already sitting at, and the password control states what it needs before
+      // anybody taps it. The way back — a terminal that never asks for the old password — is on screen.
+      label: 'Capability limits — local, not yet unlocked',
+      render: () => (
+        <div data-harness="grants-local-locked">
+          <GrantsCard
+            connection={daemon}
+            view={HARNESS_GRANTS_LOCAL_LOCKED}
+            nowMs={HARNESS_GRANT_NOW_MS}
+            onChange={() => {}}
+            onUnlock={() => {}}
+            onSetPassword={() => {}}
+            onClearPassword={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // The same browser one unlock later: ungoverned, full authority, and the password control live —
+      // set, replace or remove, with the consequence of removing it beside the button.
+      label: 'Capability limits — local, unlocked',
+      render: () => (
+        <div data-harness="grants-local-unlocked">
+          <GrantsCard
+            connection={daemon}
+            view={HARNESS_GRANTS_LOCAL_UNLOCKED}
+            nowMs={HARNESS_GRANT_NOW_MS}
+            // The held token as well as the view, because they are separate inputs: `unlocked` is what the
+            // DAEMON says and `held` is what this tab actually has. A frame with one and not the other
+            // would show a prompt asking for a password the same card claims to be past.
+            held={{
+              daemonId: daemon.daemonId,
+              token: `fy_unlock_${'a'.repeat(22)}`,
+              expiresAtMs: HARNESS_GRANT_NOW_MS + 300_000,
+            }}
+            onChange={() => {}}
+            onUnlock={() => {}}
+            onSetPassword={() => {}}
+            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5940,6 +6026,8 @@ function Shell() {
             nowMs={HARNESS_GRANT_NOW_MS}
             onChange={() => {}}
             onUnlock={() => {}}
+            onSetPassword={() => {}}
+            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5979,8 +6067,10 @@ function Shell() {
           <AddDeviceCard
             connection={daemon}
             view={HARNESS_PAIRED_DEVICES}
+            gate={{ kind: 'open' }}
             invite={null}
             nowMs={HARNESS_PAIR_NOW_MS}
+            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
@@ -6009,8 +6099,10 @@ function Shell() {
           <AddDeviceCard
             connection={daemon}
             view={HARNESS_PAIRED_DEVICES}
+            gate={{ kind: 'open' }}
             invite={HARNESS_INVITE}
             nowMs={HARNESS_PAIR_NOW_MS}
+            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
@@ -6048,8 +6140,10 @@ function Shell() {
           <AddDeviceCard
             connection={daemon}
             view={HARNESS_PAIRED_DEVICES}
+            gate={{ kind: 'open' }}
             invite={HARNESS_INVITE}
             nowMs={Date.parse('2026-01-01T00:03:00.000Z')}
+            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}
@@ -6061,14 +6155,44 @@ function Shell() {
     {
       // Nothing but the machine itself can reach this daemon. Said as a fact with the way forward, never
       // as a bare empty list — an empty list reads as "something was removed".
+      //
+      // AND IT IS THE FIRST-PAIRING FRAME: no password is set, so there is no Add-a-device button yet —
+      // the requirement and the control that satisfies it are what stand in its place.
       label: 'Add a device — nothing paired yet',
       render: () => (
         <div data-harness="pair-empty">
           <AddDeviceCard
             connection={daemon}
             view={{ devices: [], hostLocal: true }}
+            gate={{ kind: 'needs-password', local: true }}
             invite={null}
             nowMs={HARNESS_PAIR_NOW_MS}
+            onSetPassword={() => {}}
+            onMint={() => {}}
+            onDiscardInvite={() => {}}
+            onRevokeCode={() => {}}
+            onRevokeDevice={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // The same requirement met by a reader who cannot satisfy it from where they are: an install with
+      // devices already paired, no password, and a browser that is not on the machine. It names the two
+      // places that can set one instead of offering a button that would be refused.
+      label: 'Add a device — password needed, away from the machine',
+      render: () => (
+        <div data-harness="pair-needs-password-remote">
+          <AddDeviceCard
+            connection={daemon}
+            // `hostLocal: false` deliberately: this reader is AWAY from the machine, and a frame whose
+            // badge said "you are at this machine" beside "only the machine itself can set one" would be a
+            // committed screenshot of two contradictory claims.
+            view={{ ...HARNESS_PAIRED_DEVICES, hostLocal: false }}
+            gate={{ kind: 'needs-password', local: false }}
+            invite={null}
+            nowMs={HARNESS_PAIR_NOW_MS}
+            onSetPassword={() => {}}
             onMint={() => {}}
             onDiscardInvite={() => {}}
             onRevokeCode={() => {}}

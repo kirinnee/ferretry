@@ -41,6 +41,8 @@ import {
   type GrantRefusal,
   type GrantsPatch,
   type GrantsView,
+  OPERATOR_PASSWORD_MIN_LENGTH,
+  OperatorPasswordSchema,
 } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 
@@ -201,17 +203,27 @@ export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'f
  * indistinguishable in those fields, so any inference from them would be a guess that is wrong for a
  * real configuration.
  */
-export type ConnectionPosture = 'direct-local' | 'governed-remote' | 'unknown';
+export type ConnectionPosture = 'direct-local' | 'local-locked' | 'governed-remote' | 'unknown';
 
 /**
- * The posture, from the daemon's own account of the request.
+ * The posture, from the daemon's own account of the request — TWO facts, not one.
  *
- * `governed` is the value `isGovernedCaller(request.loopback)` produces inside the daemon — false for a
- * caller standing on the host. `undefined` means the daemon did not say, which is its own posture.
+ * `governed` used to be the exact inverse of "on this host", and `local-locked` is what happened when
+ * it stopped being: a browser is a paired device wherever it runs, so a local one is governed until it
+ * presents an unlock. Reading locality off `governed` would now paint somebody standing at the machine
+ * as remote for as long as their unlock is missing or expired, which is the inversion this whole
+ * module exists to avoid — in the flattering direction last time and in the confusing direction now.
+ *
+ * `hostLocal` absent is `unknown` for the same reason it always was: an OLDER daemon that does not send
+ * it must not be read as loopback, because the friendly assumption is the dangerous one.
  */
-export function connectionPosture(governed: boolean | undefined): ConnectionPosture {
+export function connectionPosture(governed: boolean | undefined, hostLocal?: boolean): ConnectionPosture {
   if (governed === undefined) return 'unknown';
-  return governed ? 'governed-remote' : 'direct-local';
+  // A view that carries `governed` but not `hostLocal` is a daemon from before the two came apart, and
+  // there `!governed` WAS locality. Trusting it is not a guess: that daemon gates no local browser.
+  const local = hostLocal ?? !governed;
+  if (!local) return 'governed-remote';
+  return governed ? 'local-locked' : 'direct-local';
 }
 
 /**
@@ -235,7 +247,11 @@ export function postureFromCapabilities(capabilities: readonly CapabilityGrantVi
   if (capabilities.length === 0) return 'unknown';
   const first = capabilities[0]?.mayGrant;
   if (first === undefined || capabilities.some(entry => entry.mayGrant !== first)) return 'unknown';
-  return connectionPosture(!first);
+  // `mayGrant` is LOCALITY now (`grants/service.ts`), which is the half this fallback can answer. It
+  // cannot see whether a local browser has unlocked, so it reports `direct-local` for one that has not
+  // — the row-level `locked` refusals still say so, and inventing `local-locked` from no evidence would
+  // be the same guess this function refuses to make about an empty list.
+  return connectionPosture(!first, first);
 }
 
 /** What each posture means for the whole screen, in the words a person would use about themselves. */
@@ -253,6 +269,13 @@ const POSTURE_COPY = {
     detail:
       'Everything below is open because you are standing at the machine, not because it was granted. Somebody at the machine already has the machine, so gating them would be friction with no safety. The same browser on your phone, over the network or the relay, would be governed by every limit on this page.',
     tone: 'ok',
+  },
+  'local-locked': {
+    badge: 'On this machine — locked',
+    headline: 'This browser is on the machine, and is waiting for the operator password before it acts as one.',
+    detail:
+      'A browser is a paired device wherever it runs, including here, so the limits below apply to it until you enter the password once. After that this tab is ungoverned for five minutes and nothing else asks again. It is a deliberateness step rather than a wall — anybody at this keyboard can open a terminal — and it is what stops an unattended tab being one tap from reconfiguring the machine.',
+    tone: 'limit',
   },
   'governed-remote': {
     badge: 'Remote — governed',
@@ -571,6 +594,48 @@ export function grantChangeNeedsUnlock(view: GrantsView, capability: DaemonCapab
   return entry !== undefined;
 }
 
+/**
+ * Whether pressing this switch would be refused until this browser unlocks.
+ *
+ * THE DIRECTION DECIDES IT. Narrowing is never gated — a prompt between a person and shutting a door is
+ * a liability during the incident that made them reach for it — so this is only ever true of a widening
+ * press. `mayGrant` false means the switch is not a control at all and the one-way notice already says
+ * so; the case this catches is the new one: a browser ON the machine that has not proved the password
+ * yet, where a switch that looked live and failed on press would read as broken software.
+ */
+export function axisChangeLocked(view: GrantsView, entry: CapabilityGrantView, recorded: boolean): boolean {
+  if (recorded || !entry.mayGrant) return false;
+  return view.governed && view.passwordSet && !view.unlocked;
+}
+
+/**
+ * Who the limits on this screen actually apply to, in one sentence that cannot be wrong for a real
+ * configuration.
+ *
+ * A SINGLE SENTENCE WAS THE DEFECT. "These apply to callers that are not on this machine" was true when
+ * a local browser was ungoverned by construction; it is false for a local browser waiting to unlock, and
+ * false in the direction that sends somebody hunting for a permission problem they do not have.
+ */
+const GRANT_SCOPE_NOTES = {
+  'direct-local': 'not-on-this-machine',
+  'local-locked': 'this-browser-until-unlocked',
+  'governed-remote': 'this-browser',
+  unknown: 'cannot-tell',
+} satisfies Record<ConnectionPosture, string>;
+
+/** The stable mark a test and a screenshot can name the branch by. */
+export const grantScopeKey = (posture: ConnectionPosture): string => GRANT_SCOPE_NOTES[posture];
+
+export function grantScopeNote(posture: ConnectionPosture): string {
+  if (posture === 'direct-local')
+    return 'These apply to callers that are not on this machine — a paired phone, a browser across the network, a session carried over the relay. This browser is on the machine and has unlocked, so none of them apply to it right now.';
+  if (posture === 'local-locked')
+    return 'These apply to a paired phone or a browser across the network — and, until you enter the operator password once, to this browser too. A browser is a paired device wherever it runs, including on the machine itself.';
+  if (posture === 'governed-remote')
+    return 'These apply to this browser. It reached the machine from somewhere else, which is the case the limits exist for: possession of the machine is exactly what this connection does not have.';
+  return 'This daemon did not say how it saw this connection, so treat these as the limits that would apply to a remote device — the safe reading rather than the flattering one.';
+}
+
 /** Whether the operator's document already records this axis the way a change would set it. */
 export function grantAlreadyReads(
   view: GrantsView,
@@ -721,3 +786,159 @@ export function operatorUnlockFailure(error: unknown): OperatorUnlockFailure {
 
 /** The limiter, stated before anybody has spent a try, so five is a known budget rather than a surprise. */
 export const UNLOCK_LIMIT_NOTE = `Five wrong passwords and this daemon stops checking for fifteen minutes. It counts per machine, not per browser, so a colleague’s wrong guesses spend the same ${String(GRANT_UNLOCK_MAX_ATTEMPTS)}.`;
+
+// ─── setting the operator password ─────────────────────────────────────────────────────────────
+
+/**
+ * THE COMMANDS ON THE HOST, named in one place because they are the way back out of every dead end.
+ *
+ * A control that can lock somebody out carries the way back at the point of decision, and the way back
+ * out of this one is a terminal on the machine. `set` never asks for the old password — that is the
+ * property the whole design leans on, and it is the sentence a person who has forgotten theirs needs.
+ */
+export const PASSWORD_HOST_SET_COMMAND = 'fy daemon password set';
+export const PASSWORD_HOST_CLEAR_COMMAND = 'fy daemon password clear';
+
+/**
+ * ARRIVAL AND CREDENTIAL ARE DIFFERENT FACTS, said before the tap rather than discovered by one.
+ *
+ * The route this control calls is refused to every caller off the host, and a person holding a phone
+ * on the same desk reads "on the same network" as "on the machine". Naming the distinction is what
+ * stops the refusal reading as a bug.
+ */
+export const PASSWORD_ARRIVAL_VS_CREDENTIAL =
+  'Being at this machine and holding its password are separate things. A browser running on the machine can set it; a paired phone cannot, even sitting on the same desk, because the daemon refuses this from every connection that arrived from somewhere else.';
+
+/**
+ * The explained-unavailable state for a remote browser. NOT a greyed control and not silence.
+ *
+ * Hiding it would leave somebody hunting for a setting the product does have; greying it out with
+ * nothing beside it is the dead end these panels exist to remove. So the reason and the alternative
+ * are rendered where the control would have been.
+ */
+export const PASSWORD_REMOTE_UNAVAILABLE = `This browser reached the machine from somewhere else, so it cannot set the operator password — the daemon refuses that from any connection that did not arrive on the host, whatever credential it holds. Set it from a browser on the machine, or run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal there.`;
+
+/**
+ * What clearing it actually removes, stated at the control rather than after the press.
+ *
+ * It is the only action here that makes the machine LESS protected, and the consequence is specific:
+ * every paired device stops needing anything to change what is already switched on.
+ */
+export const PASSWORD_CLEAR_WARNING =
+  'Clearing it removes the gate. Every paired device can then change the settings of whatever is already switched on here without proving anything, and this browser stops being asked too. Turning a capability on stays a local act either way.';
+
+/**
+ * The recovery path, in the words of somebody who does not have the password.
+ *
+ * THIS IS THE SENTENCE THAT KEEPS THE FEATURE FROM BEING A LOCKOUT. A local browser needs the current
+ * password to replace it, so the reader who has forgotten theirs is exactly the reader this control
+ * strands — and the escape hatch is a terminal on this machine, which never asks for the old one.
+ */
+export const PASSWORD_RECOVERY_NOTE = `Forgotten it? Run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal on this machine — it replaces the password without asking for the old one, and \`${PASSWORD_HOST_CLEAR_COMMAND}\` removes the requirement entirely. Nothing about this password can lock you out of your own machine.`;
+
+/** What this browser may do about the password right now, and why, in one answer. */
+export type PasswordControlState =
+  /** On the host and past the gate: the control is live. */
+  | { readonly kind: 'ready'; readonly first: boolean }
+  /** On the host, a password exists, and this browser has not proved it yet. */
+  | { readonly kind: 'locked' }
+  /** Not on the host. The daemon would refuse it, so the reason is rendered instead of the control. */
+  | { readonly kind: 'remote' };
+
+/**
+ * Whether this browser may move the password, decided from the DAEMON's own account of the request.
+ *
+ * IT RESTATES THE DAEMON'S RULE RATHER THAN INVENTING ONE, and the rule has two halves that a single
+ * boolean cannot carry: the route is refused off the host at all (`hostLocal`), and a local browser is
+ * a paired device that must unlock first (`governed`). A control that guessed either half would either
+ * fail on press or hide itself on the one machine that can use it.
+ */
+export function passwordControlState(view: GrantsView): PasswordControlState {
+  if (!view.hostLocal) return { kind: 'remote' };
+  if (view.passwordSet && !view.unlocked) return { kind: 'locked' };
+  return { kind: 'ready', first: !view.passwordSet };
+}
+
+/**
+ * Why a candidate password is not acceptable yet, or nothing when it is.
+ *
+ * THE RULE HAS ONE OWNER AND IT IS THE PROTOCOL. Re-checking a length here would be a second copy of
+ * the minimum that could fall behind the schema the daemon parses with, so the schema is asked. It is
+ * asked BEFORE the call so a person is told at the field rather than by a 400, and the value is passed
+ * through and dropped — nothing about the candidate is retained, logged or echoed.
+ */
+export function operatorPasswordProblem(candidate: string): string | undefined {
+  if (candidate === '') return 'Enter a password to set.';
+  if (OperatorPasswordSchema.safeParse(candidate).success) return undefined;
+  return `Use at least ${String(OPERATOR_PASSWORD_MIN_LENGTH)} characters. It gates changes from other devices and is rate-limited, so length is the only rule.`;
+}
+
+/**
+ * The rule, before anybody has typed anything wrong.
+ *
+ * IT READS THE MINIMUM FROM THE SAME CONSTANT the refusal above does, rather than spelling a number in
+ * prose: a hint that said "eight" while the schema wanted ten would be a lie told at the exact moment
+ * somebody is trying to comply with it.
+ */
+export const OPERATOR_PASSWORD_RULE_NOTE = `At least ${String(OPERATOR_PASSWORD_MIN_LENGTH)} characters. It is stored as a verifier and can never be read back — not by a command, not by a route, not by this browser.`;
+
+/** Whether the two typed values agree, checked in the browser so a typo is not stored as the password. */
+export const operatorPasswordMismatch = (candidate: string, confirmation: string): boolean =>
+  candidate !== '' && confirmation !== '' && candidate !== confirmation;
+
+// ─── the password a first pairing requires ─────────────────────────────────────────────────────
+
+/**
+ * Whether adding a device must set a password FIRST.
+ *
+ * ## THE UNSAFE STATE IS DELETED RATHER THAN WARNED ABOUT
+ *
+ * `fleet.configure` is on by default for a governed caller, so on a machine with no password any paired
+ * device may provision the host — writing executable wrappers into the operator's accounts — with
+ * nothing to prove. The old answer was a disclosure somebody had to read. This one removes the state:
+ * a password exists from the first pairing onward, so every remote change has a gate.
+ *
+ * IT IS THE PAIRING FLOW THAT REQUIRES IT, NEVER STARTUP AND NEVER LOCAL USE. A person setting up on
+ * their own machine with nothing paired is asked for nothing, because there is no remote caller for a
+ * gate to stand in front of. The requirement lands at the exact moment remote access is being created.
+ */
+export const pairingNeedsPassword = (view: GrantsView): boolean => !view.passwordSet;
+
+/** Whether Add-a-device may offer a code, and what to say when it may not. */
+export type PairingGate =
+  /** A password exists, so every device this mint creates arrives behind a gate. */
+  | { readonly kind: 'open' }
+  /** No password yet. `local` says whether this browser is the one that can fix it. */
+  | { readonly kind: 'needs-password'; readonly local: boolean }
+  /** Ferretry could not read whether a password exists, which is not the same as knowing there is one. */
+  | { readonly kind: 'undetermined'; readonly reason: string };
+
+/**
+ * The gate, from the grant view — or from the failure to read it.
+ *
+ * AN UNREADABLE ANSWER IS NOT A SAFE ONE. Minting anyway would be exactly the damaged-state-as-empty-
+ * state defect the rest of this product refuses: the requirement would silently lapse on the one machine
+ * whose daemon could not answer for itself. So it fails closed and names the way through, which is the
+ * host's own `fy pair` — a command that needs no browser and no grant read at all.
+ */
+export function pairingGate(view: GrantsView | null, failure?: string): PairingGate {
+  if (view === null) return { kind: 'undetermined', reason: failure ?? 'the grant view could not be read' };
+  if (!pairingNeedsPassword(view)) return { kind: 'open' };
+  return { kind: 'needs-password', local: view.hostLocal };
+}
+
+/** Said where the button was, when the daemon could not tell this browser whether a password exists. */
+export const PAIRING_PASSWORD_UNDETERMINED = `Ferretry could not read whether this machine has an operator password, and it will not hand out a pairing code on the assumption that it does — a device added without one can change the settings of whatever is already switched on here. Add the device from the machine instead, with \`fy pair\`.`;
+
+/** Why the Add-a-device button is not the first thing on this panel, said where the button was. */
+export const PAIRING_PASSWORD_REQUIREMENT =
+  'Adding a device needs an operator password on this machine first. A paired device can change the settings of whatever is already switched on here — including the agent fleet, which writes runnable files into your accounts — and the password is what stands in front of that. Set one below and the code follows.';
+
+/**
+ * The same requirement, for a reader who cannot satisfy it from where they are.
+ *
+ * An existing install with devices already paired and no password reaches this: the requirement applies
+ * to the NEXT pairing, and a remote browser cannot set the password. So it names the two places that
+ * can, rather than presenting a button that would be refused.
+ */
+export const PAIRING_PASSWORD_REQUIREMENT_REMOTE = `Adding a device needs an operator password on this machine first, and only the machine itself can set one. Open Ferretry in a browser on that machine, or run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal there, and this panel will hand out codes again.`;

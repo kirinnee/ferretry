@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type {
-  PairedDevice,
-  PairedDevicesView,
-  PairingCodeMintResponse,
-  PairingId,
-  PairingInvitationLink,
+import {
+  DAEMON_CAPABILITIES,
+  type GrantsView,
+  type PairedDevice,
+  type PairedDevicesView,
+  type PairingCodeMintResponse,
+  type PairingId,
+  type PairingInvitationLink,
 } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
@@ -101,6 +103,30 @@ const view = (overrides: Partial<PairedDevicesView> = {}): PairedDevicesView => 
   ...overrides,
 });
 
+/**
+ * The grant view this panel reads to learn whether a password exists.
+ *
+ * A password IS set by default here, so a test about codes and revokes never has to think about the
+ * first-pairing requirement — the tests that are about it override this.
+ */
+const grantsView = (overrides: Partial<GrantsView> = {}): GrantsView => ({
+  capabilities: DAEMON_CAPABILITIES.map(capability => ({
+    capability,
+    use: true,
+    configure: true,
+    granted: { use: true, configure: true },
+    useRefusal: 'granted',
+    configureRefusal: 'granted',
+    mayGrant: true,
+    origin: 'default',
+  })),
+  governed: false,
+  hostLocal: true,
+  passwordSet: true,
+  unlocked: false,
+  ...overrides,
+});
+
 const text = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());
 
 const marked = (renderer: ReactTestRenderer, attribute: string, value?: string) =>
@@ -116,8 +142,12 @@ const card = (overrides: Partial<Parameters<typeof AddDeviceCard>[0]> = {}) =>
     <AddDeviceCard
       connection={connection()}
       view={view()}
+      // Open by default, so a test about codes and revokes says nothing about the password requirement.
+      // The tests that ARE about it pass their own gate.
+      gate={{ kind: 'open' }}
       invite={null}
       nowMs={NOW}
+      onSetPassword={() => {}}
       onMint={() => {}}
       onDiscardInvite={() => {}}
       onRevokeCode={() => {}}
@@ -361,20 +391,83 @@ describe('AddDeviceCard', () => {
     should(marked(renderer, 'data-pair-qr-failure')).have.length(1);
     should(marked(renderer, 'data-pair-url')).have.length(1);
   });
+
+  it('offers no code at all until an operator password exists, and the control that fixes it', () => {
+    // THE REQUIREMENT, RATHER THAN A NUDGE. `fleet.configure` is on by default for a governed caller, so a
+    // device paired to a machine with no password can provision the host — writing runnable wrappers into
+    // the operator's accounts — with nothing to prove. Requiring the password at the moment remote access
+    // is created deletes that state instead of warning about it.
+    // Arrange, Act
+    const renderer = card({ gate: { kind: 'needs-password', local: true } });
+
+    // Assert — no button, the reason in its place, and the control that satisfies it in the same flow.
+    should(marked(renderer, 'data-pair-mint')).be.empty();
+    should(marked(renderer, 'data-pair-needs-password', 'local')).have.length(1);
+    should(marked(renderer, 'data-operator-password')).have.length(1);
+    expect(text(renderer)).toContain('runnable files into your accounts');
+  });
+
+  it('names the two places that can set one when the reader is not at the machine', () => {
+    // An install with devices already paired and no password reaches this: the requirement applies to the
+    // NEXT pairing, and a remote browser cannot set the password. So it says where it CAN be done rather
+    // than offering a control that would be refused.
+    // Arrange, Act
+    const renderer = card({ gate: { kind: 'needs-password', local: false } });
+
+    // Assert
+    should(marked(renderer, 'data-pair-mint')).be.empty();
+    should(marked(renderer, 'data-pair-needs-password', 'remote')).have.length(1);
+    // No form here: this browser could not succeed, and a control that fails on press teaches somebody the
+    // product is broken.
+    should(marked(renderer, 'data-password-field')).be.empty();
+    expect(text(renderer)).toContain('fy daemon password set');
+  });
+
+  it('refuses to mint on an ASSUMPTION when it could not read whether a password exists', () => {
+    // Damaged state is not empty state. Minting anyway would let the requirement silently lapse on the one
+    // machine whose daemon could not answer for itself, so it fails closed and names a route through that
+    // needs no grant read at all.
+    // Arrange, Act
+    const renderer = card({ gate: { kind: 'undetermined', reason: 'the daemon did not answer' } });
+
+    // Assert
+    should(marked(renderer, 'data-pair-mint')).be.empty();
+    should(marked(renderer, 'data-pair-password-undetermined')).have.length(1);
+    // The daemon's own words, on their own line rather than run into the sentence above.
+    should(marked(renderer, 'data-pair-password-undetermined-reason')).have.length(1);
+    expect(text(renderer)).toContain('the daemon did not answer');
+    expect(text(renderer)).toContain('fy pair');
+  });
 });
 
 /** A client that answers each route from the fixtures, and records what was asked. */
 function fakeClient(world: {
   readonly devices?: PairedDevicesView;
+  readonly grants?: GrantsView;
+  readonly grantsFailure?: unknown;
+  readonly passwordFailure?: unknown;
   readonly mintFailure?: unknown;
   readonly readFailure?: unknown;
   readonly revokeFailure?: unknown;
   readonly calls?: string[];
+  readonly bodies?: string[];
 }): PairingClientFactory {
+  let passwordSet = world.grants?.passwordSet ?? true;
   return async () => ({
     request: async (path, schema, init) => {
       const method = init?.method ?? 'GET';
       world.calls?.push(`${method} ${path}`);
+      // Recorded so a test can assert the password never reached a URL, and reached a BODY instead.
+      if (typeof init?.body === 'string') world.bodies?.push(init.body);
+      if (path === '/v1/grants' && method === 'GET') {
+        if (world.grantsFailure !== undefined) throw world.grantsFailure;
+        return schema.parse({ ...(world.grants ?? grantsView()), passwordSet });
+      }
+      if (path === '/v1/grants/password' && method === 'PUT') {
+        if (world.passwordFailure !== undefined) throw world.passwordFailure;
+        passwordSet = (JSON.parse(String(init?.body ?? '{}')) as { password?: string }).password !== undefined;
+        return schema.parse({ passwordSet });
+      }
       if (path === '/v1/pair/devices' && method === 'GET') {
         if (world.readFailure !== undefined) throw world.readFailure;
         return schema.parse(world.devices ?? view());
@@ -408,8 +501,121 @@ describe('AddDeviceSurface', () => {
     });
 
     // Assert
-    should(calls).deepEqual(['GET /v1/pair/devices']);
+    should(calls).deepEqual(['GET /v1/pair/devices', 'GET /v1/grants']);
     should(marked(renderer as ReactTestRenderer, 'data-pair-mint')).have.length(1);
+  });
+
+  it('requires the first password, sets it in a BODY, and only then offers the button', async () => {
+    // THE WHOLE FIRST-PAIRING JOURNEY, in one test: no button while the machine has no password, the
+    // control in its place, and the button once the daemon says a password exists. The credential rule is
+    // asserted on the same path — the value reaches a body and never a URL.
+    // Arrange — a fresh machine with nothing paired and no password.
+    const calls: string[] = [];
+    const bodies: string[] = [];
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface
+          connection={connection()}
+          createClient={fakeClient({
+            calls,
+            bodies,
+            devices: view({ devices: [] }),
+            grants: grantsView({ passwordSet: false }),
+          })}
+          now={() => NOW}
+        />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+    const before = marked(surface, 'data-pair-mint').length;
+
+    // Act — type it twice and submit, which is the only path that can reach the daemon.
+    await runAsync(async () => {
+      marked(surface, 'data-password-field')[0]?.props.onChange({ target: { value: 'the-first-one' } });
+    });
+    await runAsync(async () => {
+      marked(surface, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: 'the-first-one' } });
+    });
+    await runAsync(async () => {
+      surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+    });
+
+    // Assert
+    should(before).equal(0);
+    should(calls).deepEqual([
+      'GET /v1/pair/devices',
+      'GET /v1/grants',
+      'PUT /v1/grants/password',
+      // Re-read, because `passwordSet` is what decides whether this panel may offer a code at all.
+      'GET /v1/grants',
+    ]);
+    should(marked(surface, 'data-pair-mint')).have.length(1);
+    should(marked(surface, 'data-pair-needs-password')).be.empty();
+    // In a BODY, and in no path or query anywhere.
+    should(bodies).deepEqual([JSON.stringify({ password: 'the-first-one' })]);
+    should(calls.some(call => call.includes('the-first-one'))).be.false();
+    // And nowhere on screen: no value, no masked form, no length.
+    expect(text(surface)).not.toContain('the-first-one');
+  });
+
+  it('reports a refused password without pretending the requirement is met', async () => {
+    // A gate this browser failed to set is a gate that does not exist, and showing the button anyway would
+    // hand out a code the requirement was supposed to stand in front of.
+    // Arrange
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface
+          connection={connection()}
+          createClient={fakeClient({
+            grants: grantsView({ passwordSet: false }),
+            passwordFailure: Object.assign(new Error('this daemon refused the password'), { code: 'grant_forbidden' }),
+          })}
+          now={() => NOW}
+        />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Act
+    await runAsync(async () => {
+      marked(surface, 'data-password-field')[0]?.props.onChange({ target: { value: 'a-good-password' } });
+    });
+    await runAsync(async () => {
+      marked(surface, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: 'a-good-password' } });
+    });
+    await runAsync(async () => {
+      surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+    });
+
+    // Assert — the daemon's own sentence, and still no button.
+    should(marked(surface, 'data-password-failure')).have.length(1);
+    expect(text(surface)).toContain('this daemon refused the password');
+    should(marked(surface, 'data-pair-mint')).be.empty();
+  });
+
+  it('will not hand out a code when it could not read whether a password exists', async () => {
+    // The device list read fine; the grant read did not. That is not a broken panel and it is not a machine
+    // with a password — it is a state that says so, and fails closed.
+    // Arrange, Act
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface
+          connection={connection()}
+          createClient={fakeClient({ grantsFailure: new Error('the daemon did not answer') })}
+          now={() => NOW}
+        />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+
+    // Assert — the list rendered, and the mint did not.
+    should(marked(surface, 'data-paired-device')).have.length(1);
+    should(marked(surface, 'data-pair-mint')).be.empty();
+    should(marked(surface, 'data-pair-password-undetermined')).have.length(1);
+    expect(text(surface)).toContain('the daemon did not answer');
   });
 
   it('mints, shows the code, and revokes it against the id the mint answered with', async () => {
@@ -430,7 +636,15 @@ describe('AddDeviceSurface', () => {
 
     // Assert — and the code is gone from the screen once the machine has ended it.
     should(showed).equal(1);
-    should(calls).deepEqual(['GET /v1/pair/devices', 'POST /v1/pair/code', `DELETE /v1/pair/code/${PAIRING_ID}`]);
+    should(calls).deepEqual([
+      'GET /v1/pair/devices',
+      // The grant read is what tells this panel whether a password exists, and therefore whether it may
+      // offer a code at all. It happens WITH the list rather than at the press, because the requirement
+      // has to be explained before somebody reaches for the button.
+      'GET /v1/grants',
+      'POST /v1/pair/code',
+      `DELETE /v1/pair/code/${PAIRING_ID}`,
+    ]);
     should(marked(surface, 'data-pair-code')).be.empty();
   });
 

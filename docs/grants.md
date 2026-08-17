@@ -5,18 +5,51 @@ than the name suggests.
 
 ## The one-sentence version
 
-**A loopback caller is ungoverned. Everything here is about the caller who reached this daemon from
-somewhere else** — a paired phone, a browser across the network, a session carried over the relay.
+**The host's command line is ungoverned; a local browser is ungoverned once it unlocks. Everything
+else here is about the caller who reached this daemon from somewhere else** — a paired phone, a
+browser across the network, a session carried over the relay.
 
-## Why loopback is exempt
+## Why the host command line is exempt
 
 Somebody standing at the machine already _has_ the machine. They can edit
 `<FY_HOME>/config/daemon.json`, run `fy` directly, or start any program they like. A permission model
-that gated them would add friction and no safety, and it would make a grant document that refuses
-everything a document nobody could ever edit back.
+that gated the command line would add friction and no safety — and it would slam the one door a
+**forgotten password** can still be repaired through, which is the whole reason this feature cannot
+brick a machine. `fy` authenticates with the admin token, and reading that file already requires
+being on the host.
 
-So the common case — one person, one laptop, a browser on `127.0.0.1` — needs **no setup, no
-questionnaire and no password**. Nothing in this document applies to it.
+## Why a local browser is not
+
+A **browser is a paired device wherever it runs**, including on the machine itself. An unattended tab
+on somebody's desk was one tap from provisioning the host — writing runnable wrappers into their
+accounts — so a local browser is governed by everything below **until it presents an unlock**, and
+ungoverned afterwards. One gate at the door, then full authority; no per-action prompt and no second
+gate. That is exactly what `sudo` provides.
+
+**It is friction, not a boundary, and no comment in this repository may say otherwise.** A person at
+that keyboard can open a terminal, read the admin token and do all of it anyway. What the gate buys is
+that a destructive change is _deliberate_: it defends against a slip, casual misuse and a tab left
+open. It does not defend against an attacker with local access.
+
+**A machine with no password cannot ask for one**, so a local browser there is ungoverned as it always
+was. That is the state every new install starts in: **no setup, no questionnaire and no password** to
+be useful. The first password is required when the first **device** is paired
+([pairing](pairing.md)), which is the moment remote access starts existing.
+
+So the answer has four cases rather than two:
+
+| caller                                      | governed?                         |
+| ------------------------------------------- | --------------------------------- |
+| `fy` on the host (admin token, loopback)    | no, always                        |
+| a local browser, no password on the machine | no — there is no gate to pass     |
+| a local browser, password set, no unlock    | **yes** — until it unlocks        |
+| a local browser, password set, unlocked     | no, for the unlock's five minutes |
+| anything off the host                       | yes, unconditionally              |
+
+`GrantsView` therefore carries **two** booleans rather than one: `governed` (do the limits apply to
+me) and `hostLocal` (did this request arrive on the machine). They used to be exact inverses; they are
+not any more, and a UI that derived one from the other would badge somebody standing at the machine as
+remote the moment their unlock expired. Widening still follows `hostLocal` — see the table below.
 
 ## "Loopback" means how the request arrived
 
@@ -84,10 +117,12 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   _on_ the machine, and "add a device" had no home outside a terminal. The routes now sit at `admin`
   scope with a `pairing` demand, which is the layer that can say "loopback yes, remote by decision".
 - **The scope move widens the layer beneath this one.** Any paired device reaching the daemon over
-  loopback can now mint. That is the loopback principle applied consistently — somebody at the machine
-  already has the machine — and a grant cannot narrow it, because a grant only ever governs a caller
-  who is not on this host. It is stated here rather than discovered, because it is the part of the
-  design a reviewer should agree to.
+  loopback can mint — once it is past the operator-password gate, which is where a local browser now
+  proves itself. That is the loopback principle applied consistently — somebody at the machine already
+  has the machine — and a grant cannot narrow it, because a grant only ever governs a caller who is not
+  on this host. It is stated here rather than discovered, because it is the part of the design a
+  reviewer should agree to. The PWA additionally refuses to mint the FIRST code until a password exists;
+  see [pairing](pairing.md).
 - **Its safety is the one-way gate, not its default.** A caller who is not on the host may switch
   `pairing` **off** and can never switch it back **on**. An operator who decides that only the machine
   itself hands out credentials therefore makes a decision that sticks: a stolen phone cannot restore an
@@ -180,15 +215,37 @@ right about the artefact it was handed, and the formatter had changed the artefa
   was right while claiming to be closed.
 - Set it with `fy daemon password set`, reading the value from **stdin**. There is no flag that takes
   one: an argument is in shell history and in `/proc/<pid>/cmdline` for every account on the box.
+- **A local browser can also set, replace and clear it** — `PUT /v1/grants/password`, which is
+  `privilegedOnly`, so no caller off the host reaches it whatever credential it holds. Replacing an
+  existing one needs an unlock, because a browser that could rewrite the password it cannot prove would
+  make the gate one tap wide. Setting the **first** one needs nothing: there is no gate yet.
+- **`fy daemon password set` never asks for the old password, and that door must stay open.** It is the
+  escape hatch: a local browser needs the current password to move it, so a forgotten password would
+  otherwise brick the daemon forever — no remote path, no local path, nothing. The admin token is
+  ungoverned for exactly this reason (`isGovernedCaller`), the UI names the command wherever somebody
+  could get stuck, and `packages/daemon/tests/unit/{grants/service,runtime/mounts/grants}.test.ts`
+  assert recovery from a state where the password is unknown.
+- **Every held unlock dies when the password moves.** Rotating after a device is lost achieves nothing
+  if what the old one bought survives it, so the browser drops its own held token too rather than
+  presenting an authority the machine has already withdrawn.
 
 ## Widening is a local act. There is no remote path to it.
 
-| act                                | local (loopback) | remote (governed)                              |
-| ---------------------------------- | ---------------- | ---------------------------------------------- |
-| turn **on** (off→on)               | allowed          | **never — password or no password**            |
-| turn **off** (on→off)              | allowed          | allowed                                        |
-| configure a capability that is on  | allowed          | allowed; the password gates it when one is set |
-| configure a capability that is off | allowed          | refused — it is off                            |
+"Local" below means **on the host and past the gate** — `fy`, or a browser that has unlocked (or a
+machine with no password at all). A local browser that has _not_ unlocked reads the `locked` refusal on
+`configure` and on any widen, and its remedy is the password rather than a command to run on the host it
+is already sitting at.
+
+| act                                | local (past the gate) | remote (governed)                              |
+| ---------------------------------- | --------------------- | ---------------------------------------------- |
+| turn **on** (off→on)               | allowed               | **never — password or no password**            |
+| turn **off** (on→off)              | allowed               | allowed                                        |
+| configure a capability that is on  | allowed               | allowed; the password gates it when one is set |
+| configure a capability that is off | allowed               | refused — it is off                            |
+
+Widening follows **`hostLocal`, not `governed`**: a local browser waiting to unlock may still widen once
+it has, so `mayGrant` stays true for it. Reporting `false` there would tell somebody standing at the
+machine that a door they can reopen is shut for good.
 
 A patch that widens one capability and narrows another is refused **entirely**. A half-applied widen
 leaves the operator with a machine in a state they did not ask for and were not told about, and the
@@ -285,13 +342,27 @@ command says so at the moment somebody might be tempted to do that instead.
   model accepts this — a tunnel needs shell access, and anybody with that can read the admin token
   anyway — but `pairing` is the capability where it matters most, so it is written down rather than
   discovered.
+- **The local browser gate is bypassable by design, and only the browser is gated.** Anybody at that
+  keyboard can open a terminal, read the admin token and change everything without the password. The
+  gate buys deliberateness against slips and unattended tabs, nothing more, and the escape hatch it
+  depends on is the same door that makes it bypassable. There is no version of this that is both
+  unbypassable and recoverable, and recoverable is the one that was chosen.
+- **The first-password requirement lives in the PWA's pairing flow, not in the daemon.** `POST
+/v1/pair/code` still mints on a passwordless machine, so `fy pair` on the host is unaffected — which is
+  deliberate, because a daemon-side requirement would demand a password before a local operator could
+  add their own first device from a terminal. The consequence is that the guarantee is "the browser will
+  not create a passwordless remote device", not "no passwordless remote device can exist".
+- **An install that already has paired devices and no password is not migrated.** Nothing nags it and
+  nothing is revoked; the requirement lands at its **next** pairing, which needs no separate prompt and
+  cannot lock anybody out. Such an operator can also set one at any time from a local browser or with
+  `fy daemon password set`.
 - **`configure` has no route of its own for `terminal`, `browser` or `pairing`.** Those three
   subsystems have no host settings the API can change today, so their configure axis governs exactly
   one thing: whether a remote caller may re-grant that capability. It is not decoration — it is the
   coarse switch's own lock. `filesystem.configure` also gates `POST /v1/projects`, because registering
   a project may create a directory, initialise Git or clone a repository at an arbitrary absolute host
   path. Like the real host-changing routes governed by `fleet.configure` and `warden.configure`, this
-  remains permissive by default and does not govern a loopback caller.
+  remains permissive by default and does not govern the host's own command line.
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a

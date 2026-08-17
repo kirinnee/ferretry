@@ -39,8 +39,11 @@ const capability = (
 
 const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(name => capability(name, { use: true, configure: true })),
-  // The CLI runs on the host, so the caller these fixtures stand for is the ungoverned one.
+  // The CLI runs on the host and authenticates with the admin token, so the caller these fixtures stand
+  // for is the one that is BOTH local and ungoverned — the two facts that came apart when a local browser
+  // started needing an unlock. The command line never does.
   governed: false,
+  hostLocal: true,
   passwordSet: false,
   unlocked: false,
   ...overrides,
@@ -110,14 +113,20 @@ const controller = (gateway: IGrantGateway, out = new RecordingOutput()) => ({
 describe('the grant report', () => {
   it('should say who the rows apply to before showing any of them', () => {
     // The commonest wrong reading would be to see `configure off` and conclude your own command line
-    // is blocked. Loopback is ungoverned, and a report that left that implicit would send somebody
-    // hunting a permission problem they do not have.
+    // is blocked. THIS reader is the command line, which is ungoverned, and a report that left that
+    // implicit would send somebody hunting a permission problem they do not have.
+    //
+    // IT NO LONGER SAYS "a loopback caller is ungoverned", because that stopped being true: a browser on
+    // this machine is a paired device and is governed until it enters the password once. The old sentence
+    // would now be a report that disagrees with the daemon enforcing it.
     // Act
     const rendered = renderGrants(view(), 'fy');
 
     // Assert
     expect(rendered.split('\n')[0]).toContain('NOT on this host');
-    expect(rendered).toContain('loopback caller is ungoverned');
+    expect(rendered).toContain('This command line is ungoverned');
+    expect(rendered).toContain('governed until it enters the operator password once');
+    expect(rendered).not.toContain('loopback caller is ungoverned');
   });
 
   it('should show where each value came from', () => {

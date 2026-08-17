@@ -13,14 +13,25 @@
  * of. A URL is deliberately not an option: a query parameter reaches every proxy's access log, and an
  * unlock in a log outlives its five minutes.
  *
- * ## THERE IS NO PASSWORD SETTER
+ * ## THE PASSWORD SETTER EXISTS, AND ONLY WHERE IT CAN SUCCEED
  *
- * `PUT /v1/grants/password` is a `host`-scope route: a paired device that could clear the password
- * could remove its own gate. It is absent from this module rather than present and unused, because a
- * method nobody may successfully call is an invitation to wire a control to it.
+ * `PUT /v1/grants/password` is refused to every caller that did not ARRIVE on the host — the route is
+ * `privilegedOnly`, so a relayed hop is refused whatever credential it carries — and a local browser is
+ * a paired device, so the daemon also wants an unlock before it will move an existing password. Both
+ * halves are the daemon's, and `passwordControlState` in `src/lib/grants.ts` is where a screen reads
+ * them so a control is never rendered somewhere it would fail on press.
+ *
+ * The password TRAVELS IN A BODY, exactly like the unlock below, and for the same reason: a query
+ * parameter reaches every proxy's access log and would outlive the five minutes it is worth. Nothing
+ * here retains it, echoes it or logs it, and there is no reader for it anywhere in this system — the
+ * response is a single boolean saying whether one is now set, which is the entire disclosure.
+ *
+ * CLEARING IS SPELLED AS ABSENCE. `undefined` sends `{}`, so a client bug producing `''` is refused by
+ * the minimum-length rule instead of silently disarming the gate.
  */
 
 import {
+  GrantPasswordRequestSchema,
   type GrantsPatch,
   GrantsPatchSchema,
   type GrantsView,
@@ -63,6 +74,38 @@ export async function changeGrants(client: GrantClient, patch: GrantsPatch, unlo
     },
     body: JSON.stringify(GrantsPatchSchema.parse(patch)),
   });
+}
+
+/**
+ * Whether a password is set, which is all this route ever answers.
+ *
+ * DERIVED FROM `GrantsViewSchema` rather than declared, so the one field this response shares with the
+ * grant view cannot come to mean two things. `fy`'s own gateway derives it the same way from the same
+ * owner (`packages/cli/src/lib/grants/gateway.ts`), which is what keeps the two clients agreeing.
+ */
+const PasswordOutcomeSchema = GrantsViewSchema.pick({ passwordSet: true });
+
+/**
+ * Sets, replaces or clears the operator password. `undefined` CLEARS it.
+ *
+ * The unlock goes in the same header a grant change uses, because replacing an existing password is a
+ * privileged change and the daemon asks a local browser to prove the current one first. It is passed in
+ * and forgotten, exactly as `changeGrants` treats it.
+ */
+export async function setOperatorPassword(
+  client: GrantClient,
+  password: string | undefined,
+  unlock?: string,
+): Promise<boolean> {
+  const outcome = await client.request(`${GRANTS_PATH}/password`, PasswordOutcomeSchema, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/json',
+      ...(unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock }),
+    },
+    body: JSON.stringify(GrantPasswordRequestSchema.parse(password === undefined ? {} : { password })),
+  });
+  return outcome.passwordSet;
 }
 
 /** Spends one password attempt. The password travels in a body, never in a path or a query. */
