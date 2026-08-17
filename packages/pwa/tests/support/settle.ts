@@ -10,9 +10,11 @@
  * `for (turn = 0; turn < turns && !ready(); turn += 1)` RETURNS AS IF SATISFIED when it runs out of
  * turns: the next assertion then reports the value that never arrived, so an expired wait presents
  * as a missing entry — the damaged-state-as-empty-state pattern this codebase refuses everywhere
- * else. One expired wait in `app.test.tsx` surfaced as three unrelated-looking CI failures for days,
- * two of them in a different describe block, and nothing in the output named a timeout. So running
- * out of budget THROWS, and says what never became true.
+ * else. The expired wait in `app.test.tsx` spent days reported as an absent terminal stream ticket,
+ * in a CI run whose other two failures had an entirely different cause — and because nothing in the
+ * output named a timeout, all three read as one unexplained flake and blocked every PR in the
+ * repository. Making it speak was what separated them. So running out of budget THROWS, and says what
+ * never became true.
  *
  * The budget is WALL CLOCK rather than a turn count, because a turn is not a unit of time: an
  * `act()` flush on a loaded CI runner costs many times what it costs on an idle laptop, so one turn
@@ -32,8 +34,8 @@
  * DEFAULT 5-second per-test timeout (`scripts/ci/test.sh` raises it for the int and sit tiers only),
  * so a wait has to give up well inside that or Bun's own timeout wins the race and takes the
  * diagnostic with it. Two seconds leaves the rest of a test — the mount, the interaction, the
- * assertions, measured at ~700ms on the loaded runners where this failed — its own room inside the
- * same 5 seconds.
+ * assertions — its own room inside the same 5 seconds: the whole test measured ~1s on the runners
+ * where this failed, of which the old wait was ~300ms.
  */
 const SETTLE_BUDGET_MS = 2_000;
 

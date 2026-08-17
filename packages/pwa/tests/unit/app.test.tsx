@@ -269,14 +269,17 @@ afterAll(() => {
  *
  * Each test unmounts its own view on its last line, which is the right thing to read and is not a
  * guarantee: an assertion that throws first skips that line, and the abandoned root stays mounted in
- * the live document with its effects, intervals and subscriptions running. The next test then mounts
- * a SECOND shell over the first and fails on a document it never owned — which is how one expired
- * wait in this file reported three failures on CI, two of them in a describe block that had nothing
- * to do with it and no defect of its own.
+ * the live document with its effects, intervals and subscriptions running, for whatever runs next.
  *
- * A test's own `unmount` deregisters, so the teardown below is a net rather than a second teardown:
- * it only ever fires for a test that failed, and it keeps that failure local to the test that caused
- * it.
+ * This is hygiene, not a repair of a known failure — and the distinction is worth writing down,
+ * because the obvious story here is wrong. The three CI failures this file used to produce LOOKED
+ * like exactly that cascade and were not: the terminal-deck test already unmounts in a `finally`, so
+ * it never leaked a mount at all, and forcing a genuine leak from the first finder test leaves the
+ * second one passing. They were two leaked browser globals, fixed at their leakers. So do not read
+ * this net as the thing that keeps those green.
+ *
+ * A test's own `unmount` deregisters, so the teardown below only ever fires for a test that already
+ * failed, and it keeps that failure local to the test that caused it.
  */
 const liveMounts = new Set<Mounted>();
 
@@ -1134,18 +1137,18 @@ describe('AppShell', () => {
           'the Terminal pane launcher',
         ).click(),
       );
-      // ACROSS REAL TASK BOUNDARIES, not just microtasks: the deck loads its emulator through a
-      // dynamic `import()` and only then attaches, so the chain is module load → listing → ticket →
-      // socket with a task between the links, and the first module load is measurably slower than
-      // the rest. `settle` flushes two microtasks, which is right for everything else in this file
-      // and is not enough for this. The socket is what the assertions below are about, so it is what
-      // the wait is gated on — and if it never opens, THIS line says so instead of leaving the
-      // absence to be reported three assertions and two describe blocks later.
-      // The chain is module load → listing → ticket → socket, so which of those the carrier was asked
-      // for names the link that stalled: nothing at all means the emulator never loaded and the deck
-      // refused before it could ask; a listing without a ticket is the ticket purchase; a ticket
-      // without a socket is the attach. An expiry that only said "no socket" would leave that to be
-      // guessed on a runner nobody can attach a debugger to.
+      // ACROSS REAL TASK BOUNDARIES, not just microtasks. The chain is module load → listing →
+      // ticket → socket, with a task between the links; `settle` flushes two microtasks, which is
+      // right for everything else in this file and is not enough for this. The socket is what the
+      // assertions below are about, so it is what the wait is gated on — and if it never opens, THIS
+      // line says so rather than leaving the next assertion to report an absent URL.
+      //
+      // WHICH of those links the carrier was asked for is the diagnosis, so the expiry carries it:
+      // nothing at all means the deck never listed; a listing without a ticket puts the stall at the
+      // emulator, because the attach effect only runs once `loadXterm` has produced one; a ticket
+      // without a socket is the attach itself. An expiry that only said "no socket" leaves that to be
+      // guessed on a runner nobody can attach a debugger to — which cost two CI rounds before it said
+      // this much.
       await settleUntil(
         () => sockets.length > 0,
         () =>
@@ -1830,8 +1833,10 @@ const touchEvent = (type: string, clientY: number, count = 1): Event => {
  * "expected the destination finder to be present" is true and useless: the button is absent from a
  * shell that rendered the not-paired fallback instead of the workspace, and absent again from a
  * workspace whose app bar decided it was on a phone — `AppBar` only lays out the destination row when
- * `useLayoutMode` reads a viewport at least 768px wide. Those are opposite defects with one symptom,
- * so the absence carries the three facts that tell them apart.
+ * `useLayoutMode` reads a viewport at least 768px wide. Those are opposite defects with one symptom, so
+ * the absence reports the measured viewport, whether the app bar rendered at all, whether the
+ * destination row did, and what the shell actually says. It was the SECOND of those that turned out to
+ * be true, and reading it off a CI log took one push.
  */
 const finderButton = (container: HTMLElement): HTMLButtonElement =>
   must(
