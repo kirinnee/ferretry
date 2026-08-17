@@ -3,7 +3,7 @@ import { type CapabilityGrantView, DAEMON_CAPABILITIES, type GrantRefusal, type 
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { GrantsCard, GrantsSurface, GrantUnlockPrompt } from '../../../../src/features/settings/grants-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { NO_PASSWORD_DISCLOSURE, PASSWORD_SET_DISCLOSURE } from '../../../../src/lib/grants.ts';
+import { capabilityReach, NO_PASSWORD_DISCLOSURE, PASSWORD_SET_DISCLOSURE } from '../../../../src/lib/grants.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
 
 const connection = (id = 'alpha') =>
@@ -258,14 +258,22 @@ describe('GrantsCard', () => {
     expect(marked(renderer, 'data-grant-capability')).toHaveLength(1);
   });
 
-  it('carries a reason on EVERY axis, which is the point of the unit', () => {
+  /**
+   * THE RULE, RESTATED AFTER THE REDESIGN. It was never "every control carries a paragraph" — it is
+   * that no control a person cannot move is left silent. A live switch reading On needs no sentence
+   * telling it so; a dead one needs the reason and the way back, in the flow of the page.
+   */
+  it('leaves no immovable control without a reason, and no live control with a paragraph', () => {
     const renderer = render(
       <GrantsCard
         connection={connection()}
         view={view({
           passwordSet: true,
           capabilities: [
+            // Live: the document grants both axes, so both switches move and the password is the only
+            // thing between the reader and a change. The unlock prompt above says that once.
             entry({ capability: 'fleet', configure: false, configureRefusal: 'locked' }),
+            // Dead: switched off entirely, and no remote caller can reopen it.
             entry({
               capability: 'terminal',
               use: false,
@@ -281,12 +289,160 @@ describe('GrantsCard', () => {
         onUnlock={() => {}}
       />,
     );
-    // Two capabilities, two axes each: four controls, four reasons. No greyed control without one.
-    expect(marked(renderer, 'data-grant-axis')).toHaveLength(4);
-    expect(marked(renderer, 'data-grant-axis-reason')).toHaveLength(4);
+
+    // Four controls. Every dead one is explained, and the two live ones carry no paragraph at all —
+    // `terminal`'s single shared sentence is the only prose the two rows spend between them.
+    const controls = marked(renderer, 'data-grant-axis');
+    expect(controls).toHaveLength(4);
+    for (const control of controls)
+      if (control.props.disabled === true) expect(control.props['aria-describedby']).toBeDefined();
+    expect(marked(renderer, 'data-grant-axis-reason')).toHaveLength(0);
+    expect(marked(renderer, 'data-grant-capability-reason')).toHaveLength(1);
+    // The live ones still SAY what stands behind them — a badge rather than a paragraph.
+    expect(marked(renderer, 'data-grant-axis-badge').map(node => node.props['data-grant-axis-badge'])).toContain(
+      'fleet.configure',
+    );
     const rendered = text(renderer);
-    expect(rendered).toContain('needs the operator password');
-    expect(rendered).toContain('switched off');
+    expect(rendered).toContain('Needs the password');
+    expect(rendered).toContain('switched off entirely');
+  });
+
+  /**
+   * THE DUPLICATION THE OWNER'S SCREENSHOT CAUGHT. A capability that is off entirely is ONE fact, and
+   * the screen printed it under both of its axes; a daemon that cannot read its own document is one
+   * fact too. Both switches point at the single sentence, which is also what the screen means.
+   */
+  it('says one reason once when both axes land on the same one', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({
+              capability: 'terminal',
+              use: false,
+              configure: false,
+              granted: { use: false, configure: false },
+              useRefusal: 'not-granted',
+              configureRefusal: 'not-granted',
+            }),
+          ],
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+
+    expect(marked(renderer, 'data-grant-axis-reason')).toHaveLength(0);
+    const shared = marked(renderer, 'data-grant-capability-reason');
+    expect(shared).toHaveLength(1);
+    // Both controls are described by it, so a reader who cannot see the layout gets the same answer.
+    const id = shared[0]?.props.id;
+    expect(axisSwitch(renderer, 'terminal.use')?.props['aria-describedby']).toContain(id);
+    expect(axisSwitch(renderer, 'terminal.configure')?.props['aria-describedby']).toContain(id);
+    // And the remedy names BOTH flags: turning only `--use` back on leaves the other control dead.
+    expect(text(renderer)).toContain('fy daemon config set terminal --use --configure');
+  });
+
+  /**
+   * THE BUG UNDER THE DUPLICATION. The capability-wide sentence under a `configure` control of a
+   * capability whose `use` is ON told a reader their access was switched off when it was not, and sent
+   * them to the host to run `--use` on a switch that was already on.
+   */
+  it('never tells a reader a capability they may use is switched off', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({
+              capability: 'warden',
+              use: true,
+              configure: false,
+              granted: { use: true, configure: false },
+              useRefusal: 'granted',
+              configureRefusal: 'not-granted',
+            }),
+          ],
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+
+    // Two dead controls, two DIFFERENT reasons — this is the case that must not be collapsed.
+    const reasons = marked(renderer, 'data-grant-axis-reason');
+    expect(reasons).toHaveLength(2);
+    expect(marked(renderer, 'data-grant-capability-reason')).toHaveLength(0);
+    expect(text(renderer)).toContain('may use fleet supervision');
+    // The `configure` sentence itself, read alone: it never claims the capability is off, and the
+    // remedy it names is the flag that would actually change this control.
+    const configure = String(
+      reasons.find(node => node.props['data-grant-axis-reason'] === 'warden.configure')?.props.children,
+    );
+    expect(configure).toContain('can be used from here');
+    expect(configure).toContain('--configure');
+    expect(configure).not.toContain('--use');
+  });
+
+  /** The state is the headline, so it is a marker a test and a screenshot can both read. */
+  it('marks what each axis is set to, because that is what the row is for', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [entry({ capability: 'warden', configure: false, granted: { use: true, configure: false } })],
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(axisSwitch(renderer, 'warden.use')?.props['data-grant-axis-state']).toBe('on');
+    expect(axisSwitch(renderer, 'warden.configure')?.props['data-grant-axis-state']).toBe('off');
+  });
+
+  /**
+   * WHAT IS TRUE OF EVERY ROW IS SAID ONCE. The two axis questions were printed under all twelve
+   * controls, which crowded out the only thing that differs between them.
+   */
+  it('asks what the two columns mean once, not twelve times', () => {
+    const renderer = render(
+      <GrantsCard connection={connection()} view={view()} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
+    );
+    expect(marked(renderer, 'data-grant-axis-legend')).toHaveLength(1);
+    const rendered = text(renderer);
+    expect(rendered).toContain('May this browser use it at all?');
+    expect(rendered.split('May this browser use it at all?')).toHaveLength(2);
+  });
+
+  /**
+   * The capability list directly above already answers "what does this reach". Answering it a second
+   * time under the switches is what made a reader scroll past every capability twice.
+   */
+  it('does not answer the reach question a second time under the switches', () => {
+    const rendered = text(
+      render(
+        <GrantsCard connection={connection()} view={view()} nowMs={NOW} onChange={() => {}} onUnlock={() => {}} />,
+      ),
+    );
+    // Once each — the list owns "what does this reach", and the switches own "what is it set to".
+    for (const capability of DAEMON_CAPABILITIES) expect(rendered.split(capabilityReach(capability))).toHaveLength(2);
+  });
+
+  it('renders no switch panel for a daemon that listed no capabilities', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: [] })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(renderer.root.findAll(node => node.props['aria-label'] === 'Capability switches')).toHaveLength(0);
   });
 
   it('explains an allowed-but-immovable axis rather than greying it silently', () => {
@@ -420,29 +576,61 @@ describe('GrantsCard', () => {
 
   it('does not report five allowed rows for a daemon that cannot read its own decision', () => {
     const undetermined: GrantRefusal = 'undetermined';
-    const rendered = text(
-      render(
-        <GrantsCard
-          connection={connection()}
-          view={view({
-            passwordSet: true,
-            capabilities: DAEMON_CAPABILITIES.map(capability =>
-              entry({
-                capability,
-                use: false,
-                configure: false,
-                useRefusal: undetermined,
-                configureRefusal: undetermined,
-              }),
-            ),
-          })}
-          nowMs={NOW}
-          onChange={() => {}}
-          onUnlock={() => {}}
-        />,
-      ),
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          passwordSet: true,
+          capabilities: DAEMON_CAPABILITIES.map(capability =>
+            entry({
+              capability,
+              use: false,
+              configure: false,
+              useRefusal: undetermined,
+              configureRefusal: undetermined,
+            }),
+          ),
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
     );
+    const rendered = text(renderer);
     expect(rendered).toContain('could not read its own grant document');
+    // ONCE. It is a fact about the DAEMON, and every row would otherwise print the same sentence —
+    // six copies of it on one screen, which is the wall this redesign is removing.
+    expect(marked(renderer, 'data-grant-daemon-fault')).toHaveLength(1);
+    expect(marked(renderer, 'data-grant-capability-reason')).toHaveLength(0);
+    expect(rendered.split('could not read its own grant document')).toHaveLength(2);
+  });
+
+  it('keeps a single capability’s fault beside that capability', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({ capability: 'fleet' }),
+            entry({
+              capability: 'warden',
+              use: false,
+              configure: false,
+              useRefusal: 'undetermined',
+              configureRefusal: 'undetermined',
+            }),
+          ],
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    // Not every row reports it, so it is this row's fact and stays on this row.
+    expect(marked(renderer, 'data-grant-daemon-fault')).toHaveLength(0);
+    expect(
+      marked(renderer, 'data-grant-capability-reason').map(node => node.props['data-grant-capability-reason']),
+    ).toEqual(['warden']);
   });
 });
 

@@ -174,6 +174,37 @@ export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'f
   return `${capabilityLabel(capability)} is switched off, and can only be switched on at the machine — an operator password does not let a paired device turn it on. Run \`${clientName} daemon config set ${capability} --use\` there.`;
 }
 
+/**
+ * THE SAME STATEMENT, TOLD PER AXIS, because one sentence for two axes said something false.
+ *
+ * `grantOnlyAtMachine` is a sentence about the CAPABILITY, and it is the right one where the capability
+ * list uses it: only under a row whose `use` is off. Rendering it under a `configure` control was the
+ * duplication bug this screen shipped — the same paragraph printed twice under one capability, and on a
+ * capability whose `use` is ON ("may use it, may not configure it") it asserted the capability was
+ * switched off and pointed at `--use`, a remedy for a switch that is already on.
+ *
+ * So the three real states get three sentences:
+ *
+ *  - **Both axes off** — one fact about the capability, naming BOTH flags, because turning only `--use`
+ *    back on leaves the reader staring at a `configure` control that is still dead.
+ *  - **`use` off** — the capability sentence, unchanged.
+ *  - **`configure` off while `use` is on** — the narrow truth: usable from here, and only the machine
+ *    can open its host settings.
+ *
+ * The both-axes case deliberately returns the SAME string for either axis: the screen collapses two
+ * identical explanations into one, so saying it once is the fix rather than a coincidence.
+ */
+export function grantWideningOnlyAtMachine(
+  entry: CapabilityGrantView,
+  axis: CapabilityAxis,
+  clientName = 'fy',
+): string {
+  if (!entry.granted.use && !entry.granted.configure)
+    return `${capabilityLabel(entry.capability)} is switched off entirely, and can only be switched on at the machine — an operator password does not let a paired device turn it on. Run \`${clientName} daemon config set ${entry.capability} --use --configure\` there.`;
+  if (axis === 'use') return grantOnlyAtMachine(entry.capability, clientName);
+  return `${capabilityLabel(entry.capability)} can be used from here, but changing how it behaves on the host is switched off — and only the machine can turn that on. Run \`${clientName} daemon config set ${entry.capability} --configure\` there.`;
+}
+
 // ─── how this browser reached this daemon ───────────────────────────────────────────────────────
 
 /**
@@ -527,11 +558,15 @@ export const axisRefusal = (entry: CapabilityGrantView, axis: CapabilityAxis): G
  * provenance column `fyd --print-config` gives every other value, and the question it answers is
  * "which of these did I choose" — which is what somebody reading a permission report is usually
  * actually asking.
+ *
+ * A MARK, NOT A SENTENCE. The screen used to carry both — a badge reading "set by the operator" and a
+ * line under it reading "Written down by the operator of this machine." — which is one fact printed
+ * twice per capability, twelve lines of provenance on a screen whose actual subject is on or off. The
+ * badge survived because it is the scannable half; the wording lives here so the badge and any future
+ * reader of the same fact cannot word it two ways.
  */
-export const originNote = (entry: CapabilityGrantView): string =>
-  entry.origin === 'config file'
-    ? 'Written down by the operator of this machine.'
-    : 'Not written down; this is the product default.';
+export const originBadge = (entry: CapabilityGrantView): string =>
+  entry.origin === 'config file' ? 'set by the operator' : 'product default';
 
 /** One axis change, as the partial patch the wire expects. */
 export const grantPatch = (capability: DaemonCapability, axis: CapabilityAxis, next: boolean): GrantsPatch =>

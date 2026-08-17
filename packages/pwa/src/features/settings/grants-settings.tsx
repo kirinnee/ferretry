@@ -9,6 +9,20 @@
  * bare "forbidden". The wording lives in `src/lib/grants.ts` so the Fleet tab, the Files pane and this
  * screen cannot word the same refusal three ways.
  *
+ * ## THE EXPLANATION IS NOT THE SAME THING AS A WALL OF PROSE
+ *
+ * The first version proved the rule above by printing a paragraph under all twelve controls, in a
+ * bordered box, in a warning tone — so the one thing that actually differs between them, whether they
+ * are ON, ended up the smallest mark on the screen, and the same sentence appeared under both axes of
+ * one capability. The rule is that a control nobody can move must say WHY. It was never that a control
+ * anybody can move must say "the operator allows this".
+ *
+ * So the state leads, and prose is spent where it buys something: a sentence stays in the flow of the
+ * page under every immovable control and every fault, a badge carries the short form where the switch
+ * is live, and anything true of every row — what the two columns ask, who the rows apply to, whether a
+ * password stands behind them — is said ONCE at the top of the section. What the capability list
+ * directly above already answers ("what does this reach") is not answered a second time here.
+ *
  * ## LOOPBACK HAS NOTHING TO DECIDE, AND THE SCREEN SAYS SO
  *
  * A browser on `127.0.0.1` is ungoverned: every capability reads allowed and every reason reads
@@ -53,17 +67,17 @@ import {
   axisLabel,
   axisQuestion,
   capabilityLabel,
-  capabilityReach,
   type GrantGuidance,
   grantAlreadyReads,
   grantChangeNeedsUnlock,
-  grantOnlyAtMachine,
+  grantGuidance,
   grantPatch,
+  grantWideningOnlyAtMachine,
   type HeldUnlock,
   NO_PASSWORD_DISCLOSURE,
   type OperatorUnlockFailure,
   operatorUnlockFailure,
-  originNote,
+  originBadge,
   PASSWORD_SET_DISCLOSURE,
   remoteRevokeWarning,
   UNLOCK_LIMIT_NOTE,
@@ -82,58 +96,137 @@ const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
 };
 
 /**
- * One axis: what it is, whether it is on, and — when it is not changeable — why.
+ * The badge's colour ALONE, because a chip inside a switch would be a box drawn inside a box.
  *
- * THE EXPLANATION IS NOT CONDITIONAL ON HOVER, a title attribute or a disclosure. A person meeting a
- * control they cannot move needs the reason at the same moment they meet it, which means in the flow
- * of the page.
+ * The switch already carries a border and a fill that say on or off; a second bordered pill inside it
+ * competes with exactly the thing this screen is meant to show first.
+ */
+const BADGE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
+  ok: 'text-ok',
+  disclosure: 'text-muted',
+  limit: 'text-warn',
+  fault: 'text-err',
+};
+
+/**
+ * A reason is an EXPLANATION; the one-way door is a WARNING. They must not paint the same.
+ *
+ * Filling both meant a row could carry three identical amber blocks and a reader had no way to tell
+ * which one was about something they were about to do. So a reason is outlined rather than filled, and
+ * the filled warn block is reserved for the sentence about a change that cannot be undone. A FAULT
+ * keeps its fill: a daemon that cannot read its own document is not a state to leaf past.
+ */
+const REASON_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
+  ok: 'border-ok-border text-ok',
+  disclosure: 'border-border-strong text-muted',
+  limit: 'border-warn-border text-warn',
+  fault: 'border-err-border bg-err-bg text-err',
+};
+
+/**
+ * Whether this browser could move this control at all — a property of the machine, not of a request.
+ *
+ * `busy` disables the button too, but a change in flight is not a reason anybody needs explaining, so
+ * it is deliberately NOT part of this: an explanation that appeared and vanished with each round trip
+ * would read as the screen changing its mind about the operator's decision.
+ */
+const axisImmovable = (
+  entry: CapabilityGrantView,
+  axis: CapabilityAxis,
+  changeable: boolean,
+  oneWay: boolean,
+): boolean => !changeable || (oneWay && !entry.granted[axis]);
+
+/**
+ * The one sentence that keeps a control from being a greyed switch.
+ *
+ * Composed in `src/lib/grants.ts` rather than here, because the ALLOWED-but-immovable case needs its
+ * own wording and getting it wrong is silent: reusing the `configure` refusal on an allowed `use` row
+ * tells a person their access is switched off when it is on.
+ *
+ * An off axis a one-way caller may never turn on is NOT A CONTROL. Rendering a switch that fails on
+ * press teaches somebody the product is broken; the truth is that the machine decided, and a sentence
+ * naming the machine is the useful thing in its place. That sentence is now told PER AXIS —
+ * `grantWideningOnlyAtMachine` — because the capability-wide one was printed under both axes of one
+ * capability, and under a `configure` control of a capability that is on it stated the opposite of
+ * what was true.
+ */
+function axisReason(
+  entry: CapabilityGrantView,
+  axis: CapabilityAxis,
+  changeable: boolean,
+  oneWay: boolean,
+): GrantGuidance {
+  if (oneWay && !entry.granted[axis])
+    return {
+      tone: 'limit',
+      badge: 'Only at the machine',
+      explanation: grantWideningOnlyAtMachine(entry, axis),
+      offersUnlock: false,
+    };
+  return axisGuidance(entry, axis, changeable);
+}
+
+/**
+ * One axis: WHETHER IT IS ON, first, and — when it cannot be moved — why, underneath it.
+ *
+ * ## THE STATE IS THE HEADLINE
+ *
+ * The word and the toggle are the largest thing in the control, because "is this on" is the question a
+ * person opens this screen with. What used to sit here — the axis's full question, on every one of
+ * twelve controls — is now said ONCE at the top of the section, where a fact true of every row belongs.
+ *
+ * ## THE EXPLANATION IS NOT CONDITIONAL ON HOVER, a title attribute or a disclosure
+ *
+ * A person meeting a control they cannot move needs the reason at the same moment they meet it, so an
+ * immovable control keeps its sentence in the flow of the page. A control that CAN be moved gets the
+ * badge only: repeating "the operator allows this" under a switch reading On is the wall of prose this
+ * redesign exists to remove, and the section header already carries what is true of every row.
  */
 function AxisControl({
   entry,
   axis,
+  reason,
   changeable,
-  oneWay,
+  immovable,
+  explanation,
+  explanationId,
+  describedBy,
+  stretch,
   busy,
   onChange,
 }: {
   readonly entry: CapabilityGrantView;
   readonly axis: CapabilityAxis;
+  readonly reason: GrantGuidance;
   /** Whether the daemon would accept this browser changing this axis at all. */
   readonly changeable: boolean;
-  /** True when this caller may switch the capability off but never back on. */
-  readonly oneWay: boolean;
+  /** Whether the machine's answer, rather than a request in flight, is what holds this still. */
+  readonly immovable: boolean;
+  /** The sentence to print under this control, or `null` when the row prints it for both axes. */
+  readonly explanation: string | null;
+  readonly explanationId: string;
+  /** Every element that explains this control, for a reader who cannot see what is beside it. */
+  readonly describedBy: string | undefined;
+  /**
+   * Whether this control may fill its cell, so a pair side by side lines its states up.
+   *
+   * A badge makes one control a line taller than the other, and two switches whose On/Off marks sit at
+   * different heights are two things the eye has to find separately — on the screen whose whole point
+   * is that the state is found first. It is only ever set when NEITHER cell carries a sentence: a
+   * button stretched to match a paragraph beside it would be a switch the height of a card.
+   */
+  readonly stretch: boolean;
   readonly busy: boolean;
   readonly onChange: (next: boolean) => void;
 }) {
   const recorded = entry.granted[axis];
-  /**
-   * An off axis a one-way caller may never turn on is NOT A CONTROL.
-   *
-   * Rendering a switch that fails on press teaches somebody the product is broken; the truth is that
-   * the machine decided, and a sentence naming the machine is the useful thing in its place. This is
-   * the owner's rule made structural: "do not render a control that always fails."
-   */
-  const deadWideningSwitch = oneWay && !recorded;
-  const disabled = busy || !changeable || deadWideningSwitch;
-  const describedBy = useId();
-  /**
-   * The one sentence that keeps this from being a greyed switch.
-   *
-   * Composed in `src/lib/grants.ts` rather than here, because the ALLOWED-but-immovable case needs its
-   * own wording and getting it wrong is silent: reusing the `configure` refusal on an allowed `use`
-   * row tells a person their access is switched off when it is on.
-   */
-  const reason = deadWideningSwitch
-    ? {
-        tone: 'limit' as const,
-        badge: 'Only at the machine',
-        explanation: grantOnlyAtMachine(entry.capability),
-        offersUnlock: false,
-      }
-    : axisGuidance(entry, axis, changeable);
+  const disabled = busy || immovable;
+  /** A badge is worth the pixels only where the state alone does not answer the question. */
+  const informative = immovable || reason.tone === 'limit' || reason.tone === 'fault';
 
   return (
-    <div className="min-w-0">
+    <div className="flex min-w-0 flex-col gap-1">
       <button
         type="button"
         role="switch"
@@ -142,58 +235,104 @@ function AxisControl({
         disabled={disabled}
         data-grant-axis={`${entry.capability}.${axis}`}
         data-grant-axis-changeable={changeable ? 'yes' : 'no'}
+        data-grant-axis-state={recorded ? 'on' : 'off'}
         onClick={() => onChange(!recorded)}
         className={cn(
-          'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
+          'flex min-h-control w-full items-center justify-between gap-2 rounded-control border px-control-x py-1.5 text-left transition-colors',
+          stretch ? 'flex-1' : '',
           recorded ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
           disabled ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
         )}
       >
-        <span className="min-w-0">
-          <span className={cn('block text-ui font-semibold', recorded ? 'text-accent' : 'text-fg')}>
-            {axisLabel(axis)}
-          </span>
-          <span className="block text-meta leading-base text-muted">{axisQuestion(axis)}</span>
+        <span className="flex min-w-0 flex-col">
+          <span className={cn('text-ui font-semibold', recorded ? 'text-accent' : 'text-fg')}>{axisLabel(axis)}</span>
+          {informative ? (
+            <span
+              className={cn('text-meta leading-base', BADGE_CLASS[reason.tone])}
+              data-grant-axis-badge={`${entry.capability}.${axis}`}
+            >
+              {reason.badge}
+            </span>
+          ) : null}
         </span>
-        <span
-          aria-hidden="true"
-          className={cn(
-            'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
-            recorded ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-          )}
-        >
+        <span className="flex shrink-0 items-center gap-2">
           <span
+            className={cn('text-meta font-semibold uppercase tracking-label', recorded ? 'text-accent' : 'text-muted')}
+          >
+            {recorded ? 'On' : 'Off'}
+          </span>
+          <span
+            aria-hidden="true"
             className={cn(
-              'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
-              recorded ? 'translate-x-[18px]' : 'translate-x-[2px]',
+              'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+              recorded ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
             )}
-          />
+          >
+            <span
+              className={cn(
+                'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
+                recorded ? 'translate-x-[18px]' : 'translate-x-[2px]',
+              )}
+            />
+          </span>
         </span>
       </button>
-      <p
-        id={describedBy}
-        className={cn('m-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base', TONE_CLASS[reason.tone])}
-        data-grant-axis-reason={`${entry.capability}.${axis}`}
-      >
-        {reason.explanation}
-      </p>
+      {explanation === null ? null : (
+        <p
+          id={explanationId}
+          className={cn(
+            'm-0 rounded-control border px-2 py-1 text-meta leading-base break-words',
+            REASON_CLASS[reason.tone],
+          )}
+          data-grant-axis-reason={`${entry.capability}.${axis}`}
+        >
+          {explanation}
+        </p>
+      )}
     </div>
   );
 }
 
-/** One capability: what it reaches, where the answer came from, and both axes. */
-function CapabilityCard({
+/**
+ * One capability, as a ROW rather than a card: its name, both axes side by side, and what is not
+ * obvious from the two switches.
+ *
+ * ## WHAT THE ROW NO LONGER REPEATS
+ *
+ * The capability's reach and the provenance sentence were printed here AND in the capability list
+ * directly above it, so a person scrolled past every one of them twice. The list owns "what does this
+ * reach"; this row owns "what is it set to, and may I change it". The provenance survives as the badge
+ * it always had beside it.
+ *
+ * ## ONE REASON, SAID ONCE
+ *
+ * Two axes can land on the SAME sentence — a capability switched off entirely, or a daemon that cannot
+ * read its own grant document, is one fact about the capability rather than two facts about its axes —
+ * and printing it under both controls is the duplication the owner's screenshot caught. When the two
+ * explanations are identical the row prints one and both switches point at it, which is also what the
+ * screen means: one reason, governing both.
+ */
+function CapabilityRow({
   entry,
-  view,
+  unlocked,
+  hoisted,
   busy,
   onChange,
 }: {
   readonly entry: CapabilityGrantView;
-  readonly view: GrantsView;
+  /** Whether a held operator unlock is standing behind this browser's changes right now. */
+  readonly unlocked: boolean;
+  /**
+   * A sentence the SECTION already carries, so no row repeats it.
+   *
+   * A daemon that cannot read its own grant document says the same thing about every capability on it,
+   * and printing that once per row is the same sentence six times down one screen.
+   */
+  readonly hoisted: string | null;
   readonly busy: boolean;
   readonly onChange: (axis: CapabilityAxis, next: boolean) => void;
 }) {
-  const headingId = useId();
+  const baseId = useId();
   /**
    * Whether this browser may change this capability's grants at all.
    *
@@ -202,7 +341,7 @@ function CapabilityCard({
    * not configure `terminal` is also saying the UI may not re-grant itself `terminal`. A held unlock
    * makes the caller the operator, so the per-capability gate has nothing left to add.
    */
-  const changeable = view.unlocked || (entry.granted.use && entry.granted.configure);
+  const changeable = unlocked || (entry.granted.use && entry.granted.configure);
   /**
    * Whether a switch here can travel back.
    *
@@ -211,52 +350,91 @@ function CapabilityCard({
    * only closes. Both facts are stated rather than discovered by pressing something.
    */
   const oneWay = !entry.mayGrant;
+  const reasons: Readonly<Record<CapabilityAxis, GrantGuidance>> = {
+    use: axisReason(entry, 'use', changeable, oneWay),
+    configure: axisReason(entry, 'configure', changeable, oneWay),
+  };
+  /** A control nobody can move must say why; a fault must say it whether or not it can be moved. */
+  const explains = (axis: CapabilityAxis): boolean =>
+    axisImmovable(entry, axis, changeable, oneWay) ||
+    (reasons[axis].tone === 'fault' && reasons[axis].explanation !== hoisted);
+  const shared = explains('use') && explains('configure') && reasons.use.explanation === reasons.configure.explanation;
+  const sharedId = `${baseId}-reason`;
+  const warned = oneWay && entry.granted.use;
+  const warningId = `${baseId}-one-way`;
+  const describedBy = (axis: CapabilityAxis): string | undefined => {
+    const ids = [explains(axis) ? (shared ? sharedId : `${baseId}-${axis}`) : '', warned ? warningId : ''].filter(
+      id => id !== '',
+    );
+    return ids.length === 0 ? undefined : ids.join(' ');
+  };
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby={headingId}
+    <li
+      className="flex min-w-0 flex-col gap-2 border-t border-border-strong py-3 first:border-t-0 first:pt-0"
       data-grant-capability={entry.capability}
+      aria-labelledby={`${baseId}-name`}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 id={headingId} className="m-0 text-ui font-semibold text-fg">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <h4 id={`${baseId}-name`} className="m-0 text-ui font-semibold text-fg">
           {capabilityLabel(entry.capability)}
         </h4>
         <span
           className="rounded-control border border-border-soft bg-surface-2 px-2 py-0.5 text-meta text-faint"
           data-grant-origin={entry.origin}
         >
-          {entry.origin === 'config file' ? 'set by the operator' : 'product default'}
+          {originBadge(entry)}
         </span>
       </div>
-      <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
-      <p className="m-0 text-meta leading-base text-faint">{originNote(entry)}</p>
       <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
         {CAPABILITY_AXES.map(axis => (
           <AxisControl
             key={axis}
             entry={entry}
             axis={axis}
+            reason={reasons[axis]}
             changeable={changeable}
-            oneWay={oneWay}
+            immovable={axisImmovable(entry, axis, changeable, oneWay)}
+            explanation={explains(axis) && !shared ? reasons[axis].explanation : null}
+            explanationId={`${baseId}-${axis}`}
+            describedBy={describedBy(axis)}
+            stretch={!explains('use') && !explains('configure')}
             busy={busy}
             onChange={next => onChange(axis, next)}
           />
         ))}
       </div>
+      {shared ? (
+        <p
+          id={sharedId}
+          className={cn(
+            'm-0 rounded-control border px-2 py-1 text-meta leading-base break-words',
+            REASON_CLASS[reasons.use.tone],
+          )}
+          data-grant-capability-reason={entry.capability}
+        >
+          {reasons.use.explanation}
+        </p>
+      ) : null}
       {/* THE ONE-WAY DOOR, said before anybody walks through it. A remote caller may switch this off
           and can never switch it back on, so the consequence belongs beside the switch rather than in
           a document read afterwards. It is shown while the capability is still ON, because that is the
-          only moment the warning can change what somebody does. */}
-      {oneWay && entry.granted.use ? (
+          only moment the warning can change what somebody does — and for `pairing` it carries the
+          ordering, because that switch also refuses the revocation somebody is reaching for it to
+          apply. */}
+      {warned ? (
         <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          id={warningId}
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn break-words"
           data-grant-one-way={entry.capability}
         >
+          {/* The mark that separates "this is how it is" from "this is what your next press does".
+              Three outlined explanations and one filled warning in a row read alike without it. */}
+          <TriangleAlert size={13} className="mr-1 inline shrink-0" aria-hidden="true" />
           {remoteRevokeWarning(entry.capability)}
         </p>
       ) : null}
-    </section>
+    </li>
   );
 }
 
@@ -412,6 +590,19 @@ export function GrantsCard({
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
   /** Whether anything here could need the password, so the prompt is not offered where it is inert. */
   const unlockUseful = view.passwordSet && view.lockedUntil === undefined;
+  /**
+   * THE FAULT THAT BELONGS TO THE DAEMON RATHER THAN TO A CAPABILITY.
+   *
+   * A daemon that could not read its own grant document refuses everything governed by it, and the
+   * sentence saying so is identical under all six rows — the definition of a thing to say once. It is
+   * hoisted only when EVERY row reports it, because a single undetermined capability is a fact about
+   * that capability and belongs beside it.
+   */
+  const daemonFault =
+    entries.length > 0 &&
+    entries.every(entry => entry.useRefusal === 'undetermined' && entry.configureRefusal === 'undetermined')
+      ? grantGuidance('undetermined').explanation
+      : null;
 
   return (
     <section
@@ -452,6 +643,17 @@ export function GrantsCard({
           browser across the network, a session carried over the relay. A browser running on the machine itself is
           governed by none of it, because somebody at the machine already has the machine.
         </p>
+        {/* WHAT THE TWO COLUMNS ASK, ONCE. It was printed under all twelve controls, which is the same
+            sentence twelve times on one screen — and it crowded out the only thing that differs between
+            them, which is whether they are on. It is composed from the same vocabulary the switches
+            label themselves with, so the legend and the controls cannot drift apart. */}
+        <p className="m-0 text-meta leading-base text-faint" data-grant-axis-legend="">
+          {CAPABILITY_AXES.map(axis => (
+            <span key={axis} className="mr-3 inline-block">
+              <strong className="font-semibold text-muted">{axisLabel(axis)}</strong> — {axisQuestion(axis)}
+            </span>
+          ))}
+        </p>
         {/* The disclosure, ONCE, next to the configure controls it is about. Not a modal, not a
             recurring warning, and not a question anybody has to answer. */}
         <p
@@ -463,6 +665,16 @@ export function GrantsCard({
         >
           {view.passwordSet ? PASSWORD_SET_DISCLOSURE : NO_PASSWORD_DISCLOSURE}
         </p>
+        {daemonFault === null ? null : (
+          <p
+            role="alert"
+            className={cn('m-0 rounded-control border px-3 py-2 text-ui leading-base', TONE_CLASS.fault)}
+            data-grant-daemon-fault=""
+          >
+            <TriangleAlert size={14} className="mr-1 inline" aria-hidden="true" />
+            {daemonFault}
+          </p>
+        )}
         {view.lockedUntil === undefined ? null : (
           <p
             role="alert"
@@ -488,15 +700,25 @@ export function GrantsCard({
         />
       ) : null}
 
-      {entries.map(entry => (
-        <CapabilityCard
-          key={entry.capability}
-          entry={entry}
-          view={view}
-          busy={busy}
-          onChange={(axis, next) => onChange(entry.capability, axis, next)}
-        />
-      ))}
+      {/* ONE PANEL, NOT SIX. Six bordered cards stacked down a phone is six sets of chrome between a
+          person and the six answers they came for; a list with a rule between rows is the same
+          information as a thing you can run your eye down. */}
+      {entries.length === 0 ? null : (
+        <section className="kt-panel min-w-0 p-panel" aria-label="Capability switches">
+          <ul className="m-0 flex list-none flex-col p-0">
+            {entries.map(entry => (
+              <CapabilityRow
+                key={entry.capability}
+                entry={entry}
+                unlocked={view.unlocked}
+                hoisted={daemonFault}
+                busy={busy}
+                onChange={(axis, next) => onChange(entry.capability, axis, next)}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       {changeFailure === null ? null : (
         <p

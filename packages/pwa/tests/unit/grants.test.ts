@@ -22,9 +22,10 @@ import {
   grantGuidance,
   grantPatch,
   grantRefusalNotice,
+  grantWideningOnlyAtMachine,
   NO_PASSWORD_DISCLOSURE,
   operatorUnlockFailure,
-  originNote,
+  originBadge,
   UNLOCK_LIMIT_NOTE,
   unlockSecondsRemaining,
   usableUnlock,
@@ -150,13 +151,71 @@ describe('grant vocabulary', () => {
   });
 
   it('reports provenance without dressing a default up as a problem', () => {
-    expect(originNote(entry({ origin: 'config file' }))).toContain('operator');
-    expect(originNote(entry({ origin: 'default' }))).toContain('default');
+    expect(originBadge(entry({ origin: 'config file' }))).toContain('operator');
+    expect(originBadge(entry({ origin: 'default' }))).toContain('default');
   });
 
   it('states the limiter before anybody has spent a try', () => {
     expect(UNLOCK_LIMIT_NOTE).toContain('5');
     expect(UNLOCK_LIMIT_NOTE).toContain('per machine');
+  });
+});
+
+/**
+ * THE DUPLICATION BUG, PINNED.
+ *
+ * The capability-wide sentence was printed under BOTH axes of one capability — and under the
+ * `configure` axis of a capability whose `use` is on, it asserted the capability was switched off and
+ * named `--use`, a remedy for a switch that is already on. Each of the three states now has its own
+ * sentence, and the both-off one is deliberately identical for either axis so the screen can print it
+ * once for the row.
+ */
+describe('grantWideningOnlyAtMachine', () => {
+  const off = entry({
+    capability: 'terminal',
+    use: false,
+    configure: false,
+    granted: { use: false, configure: false },
+    useRefusal: 'not-granted',
+    configureRefusal: 'not-granted',
+  });
+  const usableButFixed = entry({
+    capability: 'warden',
+    use: true,
+    configure: false,
+    granted: { use: true, configure: false },
+    useRefusal: 'granted',
+    configureRefusal: 'not-granted',
+  });
+
+  it('says one thing about a capability that is off entirely, and names both flags to turn it back on', () => {
+    const useSide = grantWideningOnlyAtMachine(off, 'use');
+    expect(useSide).toBe(grantWideningOnlyAtMachine(off, 'configure'));
+    expect(useSide).toContain('switched off entirely');
+    expect(useSide).toContain('--use --configure');
+  });
+
+  it('never tells a reader a capability they may use is switched off', () => {
+    const configureSide = grantWideningOnlyAtMachine(usableButFixed, 'configure');
+    expect(configureSide).toContain('can be used from here');
+    expect(configureSide).toContain('--configure');
+    expect(configureSide).not.toContain('--use');
+    // The `use` axis of an off capability keeps the capability sentence it always had.
+    const stillOff = entry({
+      capability: 'browser',
+      use: false,
+      configure: true,
+      granted: { use: false, configure: true },
+      useRefusal: 'not-granted',
+    });
+    expect(grantWideningOnlyAtMachine(stillOff, 'use')).toContain('is switched off, and can only be switched on');
+  });
+
+  it('names the client the reader actually has, rather than hardcoding one', () => {
+    expect(grantWideningOnlyAtMachine(off, 'use', 'ferretry')).toContain('ferretry daemon config set terminal');
+    expect(grantWideningOnlyAtMachine(usableButFixed, 'configure', 'ferretry')).toContain(
+      'ferretry daemon config set warden',
+    );
   });
 });
 
