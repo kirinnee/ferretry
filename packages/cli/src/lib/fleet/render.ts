@@ -636,9 +636,12 @@ function originLabel(origin: FleetCompositionOrigin): string {
 function sharingLine(field: string, sharing: FleetAssetSharing): string {
   if (sharing.state === 'absent') return `  ${field.padEnd(9)}—`;
   const others = sharing.referrers - 1;
-  const company = others === 0 ? 'only this account' : `with ${plural(others, 'other account')}`;
   const state =
-    sharing.state === 'shared' ? `SHARED "${sharing.name}" ${company}` : `own copy (${company}, undeclared)`;
+    sharing.state === 'shared'
+      ? `SHARED "${sharing.name}" · ${others === 0 ? 'only this account' : `with ${plural(others, 'other account')}`}`
+      : // A private copy several accounts happen to use is a fleet sharing something it never declared,
+        // and saying so is the offer to fix it. One account using its own document needs no adjective.
+        `own copy${others === 0 ? '' : ` · also used by ${plural(others, 'other account')}, undeclared`}`;
   return `  ${field.padEnd(9)}${state}\n  ${' '.repeat(9)}${sharing.path} · from ${originLabel(sharing.origin)}`;
 }
 
