@@ -235,7 +235,23 @@ const sessionSearchFixture = (url: URL): Response | null => {
   return null;
 };
 
+/**
+ * THE WIDTH THIS SHELL IS ASSERTED AT, said out loud rather than inherited.
+ *
+ * `useLayoutMode` reads `window.innerWidth`, which is one process-wide happy-dom window shared by
+ * every file in the tier — so a file that mounts a phone and does not hand the viewport back decides
+ * what the NEXT file's shell looks like. This suite asserts a desktop app bar (the destination row
+ * exists only above 768px), and it was failing on CI and nowhere else purely because CI walks the
+ * tree in a different order and reached this file while a sidebar suite's 390px was still installed.
+ *
+ * A suite that depends on a global states it. 1440px is the width the other shell suites pin, and it
+ * is handed back afterwards so this file cannot do to another what was done to it.
+ */
+const DESKTOP_WIDTH = 1_440;
+let restoreInnerWidth: (() => void) | undefined;
+
 beforeAll(() => {
+  restoreInnerWidth = patchGlobal(window, 'innerWidth', DESKTOP_WIDTH);
   restoreFetch = patchGlobal(globalThis, 'fetch', async (input: unknown) => {
     const raw = String(input instanceof Request ? input.url : input);
     requestedUrls.push(raw);
@@ -243,7 +259,10 @@ beforeAll(() => {
   });
 });
 
-afterAll(() => restoreFetch?.());
+afterAll(() => {
+  restoreFetch?.();
+  restoreInnerWidth?.();
+});
 
 /**
  * Every shell this file has mounted and not yet torn down.
@@ -1089,9 +1108,18 @@ describe('AppShell', () => {
       await settleUntil(
         () => sockets.length > 0,
         () =>
-          `the terminal deck to open its stream socket (terminal requests reached: ${JSON.stringify(
-            carrierRequests.filter(url => url.includes('/terminals')),
-          )})`,
+          [
+            'the terminal deck to open its stream socket',
+            `(terminal requests reached: ${JSON.stringify(carrierRequests.filter(url => url.includes('/terminals')))}`,
+            // The deck's own lamp is the state machine's answer: `idle` means the attach effect found
+            // no emulator, so `loadXterm` has not resolved; `refused` means it or the attach rejected
+            // and no retry is coming; `connecting` means the ticket purchase is in flight. Without it
+            // a missing ticket cannot tell "still loading" from "gave up".
+            `link lamps: ${JSON.stringify(
+              [...view.container.querySelectorAll<HTMLElement>('.kt-webterm__lamp')].map(lamp => lamp.dataset.state),
+            )}`,
+            `canvases: ${view.container.querySelectorAll('[data-terminal-canvas]').length})`,
+          ].join(', '),
         interact,
       );
 

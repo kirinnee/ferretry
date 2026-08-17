@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
@@ -25,6 +25,23 @@ const setWidth = async (width: number): Promise<void> => {
     window.dispatchEvent(new Event('resize'));
   });
 };
+
+/**
+ * THE VIEWPORT IS PROCESS-WIDE STATE and this file's last word on it was a phone.
+ *
+ * Bun runs the whole tier in one process against one happy-dom window, so a width left at 390px is
+ * the width every later FILE mounts at. That is not hypothetical: it is why `app.test.tsx` reported
+ * "expected the destination finder to be present" on CI and nowhere else — `AppBar` lays out the
+ * destination row only above 768px, so a suite that never mentions viewports was failing on this
+ * file's leftovers, and only because CI walks the test tree in a different order than a laptop does.
+ * Handing the window back is what makes file order stop mattering.
+ */
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+
+afterAll(() => {
+  if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+  else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'innerWidth');
+});
 
 const group = (name: string, path: string, rows: readonly SessionView[]): SessionGroup => ({ name, path, rows });
 
