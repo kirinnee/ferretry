@@ -11,6 +11,7 @@ import {
   scrollThemeFamilyIntoView,
 } from '../../src/shell/theme-toggle.tsx';
 import { interact, mount, pressKey } from '../support/dom.ts';
+import { settleUntil } from '../support/settle.ts';
 
 const memoryStorage = (seed: Record<string, string> = {}): ThemePreferenceStorage => ({
   getItem: key => seed[key] ?? null,
@@ -34,18 +35,6 @@ const installMatchMedia = (): void => {
       removeEventListener: (_: string, __: MediaListener) => {},
     }),
   });
-};
-
-/**
- * `useKeyboardOpen` answers through a MutationObserver, whose callback is a
- * microtask the test cannot await directly — and under coverage instrumentation
- * one turn of the loop is not always enough. Settle until the condition holds
- * rather than guessing a number of turns.
- */
-const settle = async (until: () => boolean, turns = 20): Promise<void> => {
-  for (let turn = 0; turn < turns && !until(); turn++) {
-    await interact(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
-  }
 };
 
 const trigger = (container: HTMLElement): HTMLButtonElement => {
@@ -442,7 +431,10 @@ describe('ThemeToggle', () => {
 
     // Act
     document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'open');
-    await settle(() => panel() === null);
+    // `useKeyboardOpen` answers through a MutationObserver, whose callback is a microtask the test
+    // cannot await directly — and under coverage instrumentation one turn is not always enough. Wait
+    // on the closure itself rather than on a guessed number of turns, and say so if it never closes.
+    await settleUntil(() => panel() === null, 'the theme panel to close for the software keyboard', interact);
 
     // Assert — closed, and focus was NOT pushed onto the hiding trigger.
     expect(panel()).toBeNull();

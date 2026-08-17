@@ -17,10 +17,7 @@ import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal, AttentionActionTrigger } from '../../src/features/attention/attention-action-modal.tsx';
 import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
-import {
-  SESSION_SEARCH_QUERY_DEBOUNCE_MS,
-  SessionSearchProvider,
-} from '../../src/features/session-search/session-search.tsx';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -37,6 +34,7 @@ import { openSidePaneTab, registerSidePaneTab, resetSidePaneTabsStates } from '.
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
+import { settleUntil } from '../support/settle.ts';
 import { taskSummary } from '../support/tasks.ts';
 
 const alpha = daemonConnection({
@@ -989,18 +987,20 @@ describe('SessionChatPage', () => {
       // line would see the file row alone and count 1 — a failure that looks
       // like a missing result and is really a missing wait.
       //
-      // GATED ON THE ANSWER, NOT ON A DURATION. A single sleep of
-      // `SESSION_SEARCH_QUERY_DEBOUNCE_MS + 20` is enough on an idle machine and
-      // measurably is not under full-suite load, where the timer fires late and
-      // the fetch still has to resolve behind it. Waiting for the response this
-      // test is about removes the race instead of widening it.
+      // GATED ON THE ANSWER, NOT ON A DURATION. A single sleep of the query debounce plus a margin is
+      // enough on an idle machine and measurably is not under full-suite load, where the timer fires
+      // late and the fetch still has to resolve behind it. Waiting for the response this test is
+      // about removes the race instead of widening it — and the shared wait FAILS when its budget
+      // runs out, so an answer that never arrives is reported as the expired wait it is rather than
+      // as one popup row too few.
       const popupRows = () =>
         page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
       const answered = () => seen.some(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle');
-      for (let turn = 0; turn < 40 && !(answered() && popupRows().length === 2); turn += 1)
-        await runAsync(
-          async () => await new Promise(resolve => setTimeout(resolve, SESSION_SEARCH_QUERY_DEBOUNCE_MS / 4)),
-        );
+      await settleUntil(
+        () => answered() && popupRows().length === 2,
+        'the narrowed task search to answer and both rows to render',
+        runAsync,
+      );
 
       const results = popupRows();
       expect(results).toHaveLength(2);

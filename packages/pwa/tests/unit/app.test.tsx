@@ -35,7 +35,7 @@ import {
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
-import { StrictMode } from 'react';
+import { type ReactElement, StrictMode } from 'react';
 
 import {
   App,
@@ -57,8 +57,9 @@ import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
-import { interact, mount, must, pressKey } from '../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
+import { settleUntil } from '../support/settle.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -244,7 +245,41 @@ beforeAll(() => {
 
 afterAll(() => restoreFetch?.());
 
-afterEach(() => {
+/**
+ * Every shell this file has mounted and not yet torn down.
+ *
+ * Each test unmounts its own view on its last line, which is the right thing to read and is not a
+ * guarantee: an assertion that throws first skips that line, and the abandoned root stays mounted in
+ * the live document with its effects, intervals and subscriptions running. The next test then mounts
+ * a SECOND shell over the first and fails on a document it never owned — which is how one expired
+ * wait in this file reported three failures on CI, two of them in a describe block that had nothing
+ * to do with it and no defect of its own.
+ *
+ * A test's own `unmount` deregisters, so the teardown below is a net rather than a second teardown:
+ * it only ever fires for a test that failed, and it keeps that failure local to the test that caused
+ * it.
+ */
+const liveMounts = new Set<Mounted>();
+
+const mountShell = async (element: ReactElement): Promise<Mounted> => {
+  const view = await mount(element);
+  liveMounts.add(view);
+  return {
+    ...view,
+    unmount: async () => {
+      liveMounts.delete(view);
+      await view.unmount();
+    },
+  };
+};
+
+afterEach(async () => {
+  // Before the module state below is reset, because unmounting runs the effect cleanups that read it.
+  // Newest first: a shell mounted later can only be over the top of an earlier one.
+  for (const view of [...liveMounts].reverse()) {
+    liveMounts.delete(view);
+    await view.unmount();
+  }
   setPath('/');
   localStorage.clear();
   requestedUrls.length = 0;
@@ -439,7 +474,7 @@ const renderShell = async (
     else store.connections.add(daemon === alpha.daemonId ? alpha : beta);
   }
   setPath(path);
-  const view = await mount(
+  const view = await mountShell(
     <RouterProvider>
       <StoreProvider store={store}>
         <AppShell />
@@ -454,25 +489,6 @@ const settle = async (): Promise<void> => {
     await Promise.resolve();
     await Promise.resolve();
   });
-};
-
-/**
- * Settles a surface whose effects cross REAL task boundaries, not just microtasks.
- *
- * The terminal deck loads its emulator through a dynamic `import()` and only then attaches, so the
- * chain is module load → listing → ticket → socket, with a task between the links and a first module
- * load that is measurably slower than the rest. `settle` flushes two microtasks, which is right for
- * everything else here and is not enough for that.
- *
- * It stops on the CONDITION rather than after a fixed count, so a loaded machine waits longer instead
- * of failing; the ceiling is only there so a genuine regression fails in a second rather than hanging.
- */
-const settleUntil = async (ready: () => boolean, turns = 60): Promise<void> => {
-  for (let turn = 0; turn < turns && !ready(); turn += 1) {
-    await interact(async () => {
-      await new Promise(resolve => setTimeout(resolve, 5));
-    });
-  }
 };
 
 /**
@@ -1058,7 +1074,14 @@ describe('AppShell', () => {
           'the Terminal pane launcher',
         ).click(),
       );
-      await settleUntil(() => sockets.length > 0);
+      // ACROSS REAL TASK BOUNDARIES, not just microtasks: the deck loads its emulator through a
+      // dynamic `import()` and only then attaches, so the chain is module load → listing → ticket →
+      // socket with a task between the links, and the first module load is measurably slower than
+      // the rest. `settle` flushes two microtasks, which is right for everything else in this file
+      // and is not enough for this. The socket is what the assertions below are about, so it is what
+      // the wait is gated on — and if it never opens, THIS line says so instead of leaving the
+      // absence to be reported three assertions and two describe blocks later.
+      await settleUntil(() => sockets.length > 0, 'the terminal deck to open its stream socket', interact);
 
       expect(carrierRequests).toContain('https://alpha.example.test/v1/sessions/shared/terminals');
       expect(carrierRequests).toContain(
@@ -1312,7 +1335,7 @@ describe('route change accessibility', () => {
     const store = await appStore(reads);
     store.connections.add(alpha);
     setPath('/d/alpha');
-    const view = await mount(
+    const view = await mountShell(
       <StrictMode>
         <RouterProvider>
           <StoreProvider store={store}>
@@ -2472,7 +2495,7 @@ describe('the fleet notification watch', () => {
 describe('App', () => {
   it('mounts the public root with its own router and store', async () => {
     setPath('/');
-    const view = await mount(<App />);
+    const view = await mountShell(<App />);
     await settle();
 
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
