@@ -1077,6 +1077,26 @@ describe('AppShell', () => {
    * carrier's fetcher, at the daemon the route named, for the terminal the daemon listed.
    */
   it('gives the production terminal deck the measured carrier its direct attach is gated on', async () => {
+    // THE EMULATOR IS LOADED FIRST, AND ITS FAILURE IS REPORTED RATHER THAN SWALLOWED.
+    //
+    // The deck loads `@xterm/xterm` through a dynamic `import()` inside an effect and, if that
+    // rejects, deliberately has nowhere to go: "The emulator could not be loaded at all. There is
+    // nothing to retry into", so it sets `refused` and drops the reason on the floor. Correct for a
+    // reader, blinding for a test — CI showed exactly that state (one canvas mounted, lamp `refused`,
+    // the terminal listing sent and no ticket ever bought) with no way to see why.
+    //
+    // Awaiting the same modules here answers it: the module registry is per process, so the deck's
+    // own `loadXterm` resolves from what this line loaded, and a rejection fails the test with the
+    // real reason instead of a silent `refused`. What the test is about — the ROOT passing the
+    // measured-carrier getter its direct attach is gated on — is untouched; this only stops a module
+    // load from being measured as part of the attach.
+    try {
+      await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+    } catch (cause) {
+      throw new Error(`the terminal emulator modules could not be loaded in this environment: ${String(cause)}`, {
+        cause,
+      });
+    }
     const sockets: string[] = [];
     const restoreSocket = patchGlobal(globalThis, 'WebSocket', recordingSocket(sockets));
     const { carrierRequests, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
