@@ -1090,12 +1090,33 @@ describe('AppShell', () => {
     // real reason instead of a silent `refused`. What the test is about — the ROOT passing the
     // measured-carrier getter its direct attach is gated on — is untouched; this only stops a module
     // load from being measured as part of the attach.
+    //
+    // The load is only half of it. That `.catch` sits on the END of the chain, so it also swallows
+    // anything the `.then` throws — `new Terminal(...)`, `loadAddon`, `open(host)` — and CI proved the
+    // modules themselves import cleanly, which leaves the construction. So both halves are exercised
+    // here, and each reports its own reason.
+    const emulator = await (async () => {
+      try {
+        return await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+      } catch (cause) {
+        throw new Error(`the terminal emulator modules could not be loaded in this environment: ${String(cause)}`, {
+          cause,
+        });
+      }
+    })();
+    const probeHost = document.createElement('div');
+    document.body.appendChild(probeHost);
     try {
-      await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+      const probe = new emulator[0].Terminal();
+      probe.loadAddon(new emulator[1].FitAddon());
+      probe.open(probeHost);
+      probe.dispose();
     } catch (cause) {
-      throw new Error(`the terminal emulator modules could not be loaded in this environment: ${String(cause)}`, {
+      throw new Error(`the terminal emulator could not be constructed in this environment: ${String(cause)}`, {
         cause,
       });
+    } finally {
+      probeHost.remove();
     }
     const sockets: string[] = [];
     const restoreSocket = patchGlobal(globalThis, 'WebSocket', recordingSocket(sockets));
