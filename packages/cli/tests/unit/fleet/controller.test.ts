@@ -19,6 +19,7 @@ import {
   RecordingHealthCollector,
   RecordingIdentitySource,
   RecordingLoginService,
+  RecordingSharingGateway,
   RecordingPlanner,
   RecordingRecommendationGateway,
   RecordingScaffolder,
@@ -47,6 +48,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
     usage: new RecordingUsageCollector(),
     identities: new RecordingIdentitySource(),
     logins: new RecordingLoginService(),
+    sharing: new RecordingSharingGateway(),
     clock: new FrozenClock(),
     recommendations: new RecordingRecommendationGateway(),
     authorizations: new RecordingAuthorizationGateway(),
@@ -778,5 +780,42 @@ describe('reporting a stuck apply claim and displaced content', () => {
     should(payload.outcome).equal('rollback-incomplete');
     should(payload.failure.displaced).have.length(2);
     should(payload.failure.unrestored).have.length(1);
+  });
+});
+
+describe('reading the sharing report', () => {
+  it('should ask the daemon rather than resolving the configuration locally', async () => {
+    // Arrange — this process holds the same configuration and could resolve the report itself. That is
+    // precisely the second description that eventually disagrees with the one the Fleet tab reads.
+    const sharing = new RecordingSharingGateway();
+    const { subject, out } = controller({ sharing });
+
+    // Act
+    await subject.sharing({});
+
+    // Assert
+    should(sharing.calls).equal(1);
+    should(out.text).containEql('Shared documents');
+  });
+
+  it('should emit the report itself under --json', async () => {
+    // Arrange
+    const { subject, out } = controller();
+
+    // Act
+    await subject.sharing({ json: true });
+
+    // Assert — the payload is the wire report, not a rendering of it, so a script reads the same fields
+    // the browser does.
+    should(JSON.parse(out.text)).have.property('documents');
+  });
+
+  it('should let a refusal surface rather than printing an empty report', async () => {
+    // Arrange — a host with no fleet configuration answers with a refusal, and "shares nothing" is a
+    // different fact from "has no fleet".
+    const { subject } = controller({ sharing: new RecordingSharingGateway(new Error('no fleet config')) });
+
+    // Act / Assert
+    await should(subject.sharing({})).be.rejectedWith(/no fleet config/u);
   });
 });

@@ -11,6 +11,7 @@ import type {
   IFleetOutput,
   IFleetPlanner,
   IFleetScaffolder,
+  IFleetSharingGateway,
   IFleetUsageCollectorFactory,
   IRecommendationGateway,
 } from './ports.ts';
@@ -19,6 +20,7 @@ import {
   renderApplyResult,
   renderFleetApplyFailure,
   renderFleetApproval,
+  renderFleetSharing,
   renderHealth,
   renderIdentityStatus,
   renderLoginResults,
@@ -74,6 +76,8 @@ export interface FleetControllerDeps {
   readonly recommendations: IRecommendationGateway;
   /** Required, not optional: four construction sites is cheaper than a runtime absence check. */
   readonly authorizations: IFleetAuthorizationGateway;
+  /** Reading the sharing report the Fleet tab reads, from the one resolver that owns it. */
+  readonly sharing: IFleetSharingGateway;
   readonly out: IFleetOutput;
 }
 
@@ -265,6 +269,18 @@ export class FleetController {
     }
     const mint = await this.deps.authorizations.authorize(proposalId);
     this.deps.out.success(renderFleetApproval(mint));
+  }
+
+  /**
+   * Which documents this fleet shares, and whether each account uses one or its own copy.
+   *
+   * Asked of the daemon rather than derived here. This process holds the same configuration, so it
+   * could resolve the report itself — and that is precisely the second description that eventually
+   * disagrees with the one the Fleet tab is reading. One resolver, one answer, two surfaces.
+   */
+  async sharing(options: FleetCommandOptions): Promise<void> {
+    const sharing = await this.deps.sharing.sharing();
+    this.#report(sharing, options, () => renderFleetSharing(sharing));
   }
 
   /** The provider logins this host has, joined from the declared configuration and the manifest. */

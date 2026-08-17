@@ -16,6 +16,29 @@ import type { SettingsFormat } from './settings.ts';
 export const ASSET_FIELDS = ['settings', 'memory', 'skills', 'hooks', 'hooksDir', 'mcp'] as const;
 export type AssetField = (typeof ASSET_FIELDS)[number];
 
+/** What kind of thing an asset field names in the asset tree. */
+export type AssetShape = 'file' | 'directory';
+
+/**
+ * Whether each field names one file or a whole directory, independent of harness.
+ *
+ * The shape is a property of the field rather than of the harness that receives it: `skills` is a
+ * directory wherever it lands. It is declared here, beside the destinations, because the two facts
+ * are read together — and it is the fact that decides whether a shared asset can be privately
+ * materialized through the reviewed text-document path, which writes files and only files.
+ *
+ * Annotated rather than `satisfies`-checked: a `Record<AssetField, …>` annotation is what makes a
+ * newly added asset field a compile error here instead of an absent entry nobody notices.
+ */
+export const ASSET_FIELD_SHAPES: Readonly<Record<AssetField, AssetShape>> = {
+  settings: 'file',
+  memory: 'file',
+  skills: 'directory',
+  hooks: 'file',
+  hooksDir: 'directory',
+  mcp: 'file',
+};
+
 /**
  * How one asset field is materialized.
  *

@@ -17,6 +17,7 @@ export * from './provisioning.ts';
 export * from './quota.ts';
 export * from './scaffold.ts';
 export * from './settings.ts';
+export * from './sharing.ts';
 export {
   planSharedHistory,
   type SharedHistoryAction,

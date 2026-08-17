@@ -12,6 +12,7 @@ import {
   RecordingHealthCollector,
   RecordingIdentitySource,
   RecordingLoginService,
+  RecordingSharingGateway,
   RecordingPlanner,
   RecordingRecommendationGateway,
   RecordingScaffolder,
@@ -29,6 +30,7 @@ function run(argv: string[]) {
   const logins = new RecordingLoginService();
   const identities = new RecordingIdentitySource();
   const scaffolder = new RecordingScaffolder();
+  const sharing = new RecordingSharingGateway();
   const out = new CapturingOutput();
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
@@ -43,6 +45,7 @@ function run(argv: string[]) {
       usage,
       health,
       identities,
+      sharing,
       logins,
       clock: new FrozenClock(),
       recommendations,
@@ -60,6 +63,7 @@ function run(argv: string[]) {
     logins,
     identities,
     scaffolder,
+    sharing,
     out,
   };
 }
@@ -307,5 +311,17 @@ describe('fleet authorize', () => {
     // Assert
     await should(parsed).be.rejectedWith(/has no --json/u);
     should(authorizations.proposalIds).be.empty();
+  });
+});
+
+describe('the fleet sharing verb', () => {
+  it('should read the report and accept the group-wide --json flag', async () => {
+    // Act
+    const { parsed, sharing, out } = run(['fleet', '--json', 'sharing']);
+    await parsed;
+
+    // Assert
+    should(sharing.calls).equal(1);
+    should(JSON.parse(out.text)).have.property('accounts');
   });
 });

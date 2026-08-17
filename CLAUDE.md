@@ -100,6 +100,23 @@ cannot discover a self-hosted rendezvous, and naming one in the link is deferred
 three modes are built on both ends; read §14 for the state machine and §13 for what is still
 outstanding around it rather than restating either here.
 
+`packages/fleet` gives a fleet **one default set of instructions, skills and base settings** that
+every account uses, with a per-account switch between that shared document and the account's own copy.
+The contract is [docs/fleet-sharing.md](docs/fleet-sharing.md). Sharing was always expressible — two
+accounts referencing one path in the asset tree each get a copy of it — so what this adds is a
+**declaration and a report**, not a second mechanism: `config.shared` names documents, the sharing
+report says per account and per field whether the effective value is a declared shared one or its own
+and which slot supplied it, and `link` / `unlink` are reviewed mutations like any other. **Unlink
+materialises a private copy** rather than leaving an account with nothing, and never touches the shared
+document. **Identity and auth are never shared**, enforced by the schema rather than by convention:
+everything shareable is a `Profile` field, and an account's identity and provider login are
+`AccountRoute` / `Agent` fields that no strict profile can express. This is deliberately **not** the
+`shared-history.ts` pool — every asset path is a destination the fleet plan writes on every apply,
+which is the exact opposite of the pool's "the harness owns this and Ferretry never writes it", and
+pooling one would give a single inode two owners. Migration is therefore a declaration and moves
+nothing. `settings` is reported but not linkable, and a directory asset cannot be privately
+materialised; the doc names each remaining limit.
+
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
 renderer and one click behaviour. The authoring and implementation contract is

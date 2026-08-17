@@ -18,7 +18,7 @@ import type {
   FleetUsageSnapshot,
 } from '@ferretry/fleet';
 import { FleetApplyFailureError } from '@ferretry/fleet';
-import type { FleetApprovalMint } from '@ferretry/protocol';
+import type { FleetAccountSharing, FleetApprovalMint, FleetSharing } from '@ferretry/protocol';
 import type {
   FleetScaffoldOptions,
   IFleetApplier,
@@ -32,6 +32,7 @@ import type {
   IFleetOutput,
   IFleetPlanner,
   IFleetScaffolder,
+  IFleetSharingGateway,
   IFleetUsageCollector,
   IFleetUsageCollectorFactory,
   IRecommendationGateway,
@@ -393,6 +394,53 @@ export class RecordingAuthorizationGateway implements IFleetAuthorizationGateway
 
   authorize(proposalId: string): Promise<FleetApprovalMint> {
     this.proposalIds.push(proposalId);
+    return this.value instanceof Error ? Promise.reject(this.value) : Promise.resolve(this.value);
+  }
+}
+
+/** One account in a sharing report, with every field spelled out so an override changes one thing. */
+export function sharingAccount(overrides: Partial<FleetAccountSharing> = {}): FleetAccountSharing {
+  return {
+    accountId: ACCOUNT_ID,
+    kind: 'claude',
+    wrapper: 'claude-primary',
+    displayName: 'Claude (primary)',
+    fields: {
+      memory: {
+        state: 'shared',
+        name: 'default',
+        path: './CLAUDE.md',
+        origin: { kind: 'base-profile', name: 'base' },
+        referrers: 1,
+      },
+      skills: { state: 'absent' },
+      hooks: { state: 'absent' },
+      hooksDir: { state: 'absent' },
+      mcp: { state: 'absent' },
+    },
+    settings: [],
+    linkable: ['memory', 'skills', 'mcp'],
+    ...overrides,
+  };
+}
+
+/** One shared-document report a test can assert on, with every field spelled out. */
+export function sharingReport(overrides: Partial<FleetSharing> = {}): FleetSharing {
+  return {
+    documents: [{ field: 'memory', name: 'default', path: './CLAUDE.md', accounts: [ACCOUNT_ID] }],
+    accounts: [sharingAccount()],
+    ...overrides,
+  };
+}
+
+/** Answers the sharing read with one prepared report, or fails the way the daemon would. */
+export class RecordingSharingGateway implements IFleetSharingGateway {
+  calls = 0;
+
+  constructor(private readonly value: FleetSharing | Error = sharingReport()) {}
+
+  sharing(): Promise<FleetSharing> {
+    this.calls += 1;
     return this.value instanceof Error ? Promise.reject(this.value) : Promise.resolve(this.value);
   }
 }

@@ -18,7 +18,7 @@ import type {
   SharedHistoryChange,
   SharedHistoryPreview,
 } from '@ferretry/fleet';
-import type { FleetApprovalMint } from '@ferretry/protocol';
+import type { FleetApprovalMint, FleetAssetSharing, FleetCompositionOrigin, FleetSharing } from '@ferretry/protocol';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
 const INDENT = '    ';
@@ -620,4 +620,60 @@ export function renderFleetApproval(mint: FleetApprovalMint): string {
     'Type it into the Fleet tab that is waiting for it. It approves this one change and nothing else,',
     'and it expires by itself. Running this command again mints a new code and stops this one working.',
   ].join('\n');
+}
+
+/** Where a value came from, in the words a person reading a configuration would use. */
+function originLabel(origin: FleetCompositionOrigin): string {
+  if (origin.kind === 'account') return 'this account';
+  if (origin.kind === 'variant') return `the ${origin.name} lane`;
+  if (origin.kind === 'agent') return `the ${origin.name} agent`;
+  // Every remaining slot is a named profile — the base one, an agent's, or a lane's — and a reader
+  // does not need to be told which list it appeared in to know where to edit it.
+  return `the ${origin.name} profile`;
+}
+
+/** One field's state, said in one line: shared with how many, its own, or nothing declared. */
+function sharingLine(field: string, sharing: FleetAssetSharing): string {
+  if (sharing.state === 'absent') return `  ${field.padEnd(9)}—`;
+  const others = sharing.referrers - 1;
+  const company = others === 0 ? 'only this account' : `with ${plural(others, 'other account')}`;
+  const state =
+    sharing.state === 'shared' ? `SHARED "${sharing.name}" ${company}` : `own copy (${company}, undeclared)`;
+  return `  ${field.padEnd(9)}${state}\n  ${' '.repeat(9)}${sharing.path} · from ${originLabel(sharing.origin)}`;
+}
+
+/**
+ * The sharing screen: which documents this fleet offers, and what each account actually uses.
+ *
+ * Written so the two questions a person has are answered in the order they ask them — "what is
+ * shared" then "who is on it" — and so a document nobody uses is visible rather than implied by
+ * absence from the account list. An account field that resolves to an undeclared path shared by
+ * others is called out, because that is a fleet sharing something it never said it shared.
+ */
+export function renderFleetSharing(sharing: FleetSharing): string {
+  const lines: string[] = [];
+  lines.push(sharing.documents.length === 0 ? 'This fleet declares no shared documents.' : 'Shared documents');
+  for (const document of sharing.documents) {
+    const users = document.accounts.length === 0 ? 'used by no account' : plural(document.accounts.length, 'account');
+    lines.push(`  ${document.field}/${document.name}  ${document.path} · ${users}`);
+  }
+  lines.push('');
+  if (sharing.accounts.length === 0) {
+    lines.push('This fleet declares no accounts.');
+    return lines.join('\n');
+  }
+  for (const account of sharing.accounts) {
+    lines.push(`${account.displayName} (${account.wrapper}, ${account.kind})`);
+    for (const field of account.linkable) lines.push(sharingLine(field, account.fields[field]));
+    for (const layer of account.settings) {
+      lines.push(
+        layer.kind === 'inline'
+          ? `  settings  [${layer.position}] inline · from ${originLabel(layer.origin)}`
+          : `  settings  [${layer.position}] ${layer.name === undefined ? 'own' : `SHARED "${layer.name}"`} · ${layer.path} · from ${originLabel(layer.origin)}`,
+      );
+    }
+    lines.push('');
+  }
+  lines.push('Link one to a shared document, or give it its own copy, from the Fleet tab.');
+  return lines.join('\n');
 }

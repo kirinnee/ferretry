@@ -13,6 +13,7 @@
  */
 import { type FleetConfig, FleetConfigSchema, SafeNameSchema } from '@ferretry/fleet';
 import { type FleetMutation, FleetMutationSchema } from '@ferretry/protocol';
+import { planSharedAssetUnlink, sharedAssetLinkPath } from './sharing.ts';
 
 /**
  * The wire shape is the shared one. This module owns what a mutation *means* — how it derives the
@@ -148,15 +149,74 @@ function createAccount(
   return { ...config, agents: agents.map((existing, at) => (at === index ? next : existing)) };
 }
 
-function editAccount(config: FleetConfig, mutation: Extract<FleetMutation, { kind: 'edit-account' }>): unknown {
+/**
+ * Rewrite one account's route in place, found by id, and hand back the whole configuration.
+ *
+ * One walk shared by every mutation that changes an existing account, because "find the agent whose
+ * routes hold this id, replace that one route, leave every other agent alone" is fiddly enough that a
+ * second copy of it would eventually differ — and the way it would differ is by editing the wrong
+ * account.
+ */
+function withRoute(
+  config: FleetConfig,
+  accountId: string,
+  rewrite: (route: Record<string, unknown>, kind: string) => Record<string, unknown>,
+): unknown {
   const agents = config.agents as unknown as Record<string, unknown>[];
   for (const [index, agent] of agents.entries()) {
-    const routes = agent.routes as Record<string, { id: string; wrapper: string; home: string }>;
-    const entry = Object.entries(routes).find(([, route]) => route.id === mutation.accountId);
+    const routes = agent.routes as Record<string, Record<string, unknown>>;
+    const entry = Object.entries(routes).find(([, route]) => route.id === accountId);
     if (entry === undefined) continue;
     const [variant, route] = entry;
-    // Start from what the account already is, so an edit that names one field changes one field.
-    const next: Record<string, unknown> = { ...(route as Record<string, unknown>) };
+    const next = rewrite({ ...route }, agent.kind as string);
+    // Identity is never edited: the id, its wrapper and its home are what every consumer joins on,
+    // and changing them here would silently repoint an account rather than change it.
+    next.id = route.id;
+    next.wrapper = route.wrapper;
+    next.home = route.home;
+    const updated = { ...agent, routes: { ...routes, [variant]: next } };
+    return { ...config, agents: agents.map((existing, at) => (at === index ? updated : existing)) };
+  }
+  throw new FleetMutationRefusal(`this fleet declares no account with id "${accountId}"`);
+}
+
+/**
+ * Set one asset field in an account's own overlay, and clear the harness overlay that would beat it.
+ *
+ * The second half is not tidiness. Within one slot a `claude:` / `codex:` overlay is applied *after*
+ * the flat fields, so an account whose layer carries `claude: { memory: … }` would keep using that
+ * document however the flat field was set — the operation would report success and change nothing.
+ * Only this account's own harness is touched: the other overlay belongs to no account of this kind.
+ *
+ * That is the whole reason a write here takes effect. `route.layer` is the LAST slot of the
+ * composition chain — `compositionSlots` owns that order — so once the overlay inside it is out of the
+ * way, nothing else can override the value. Both operations' tests assert the resolved state after the
+ * derivation rather than trusting that, because the ordering is the load-bearing part.
+ */
+function layerWithAsset(
+  route: Record<string, unknown>,
+  kind: string,
+  field: string,
+  path: string,
+): Record<string, unknown> {
+  const layer = mergedLayer((route.layer ?? {}) as Record<string, unknown>, { [field]: path });
+  const overlay = layer[kind] as Record<string, unknown> | undefined;
+  if (overlay !== undefined && field in overlay) {
+    const { [field]: _replaced, ...rest } = overlay;
+    // An overlay emptied by this is dropped rather than left as `claude: {}`, which the schema accepts
+    // but which reads as a per-harness override that is not there.
+    if (Object.keys(rest).length === 0) {
+      const { [kind]: _empty, ...withoutOverlay } = layer;
+      return { ...route, layer: withoutOverlay };
+    }
+    return { ...route, layer: { ...layer, [kind]: rest } };
+  }
+  return { ...route, layer };
+}
+
+function editAccount(config: FleetConfig, mutation: Extract<FleetMutation, { kind: 'edit-account' }>): unknown {
+  // Start from what the account already is, so an edit that names one field changes one field.
+  return withRoute(config, mutation.accountId, next => {
     patched(next, {
       displayName: mutation.displayName,
       mode: mutation.mode,
@@ -171,15 +231,43 @@ function editAccount(config: FleetConfig, mutation: Extract<FleetMutation, { kin
           ? mutation.layer
           : mergedLayer((next.layer ?? {}) as Record<string, unknown>, mutation.layer),
     });
-    // Identity is never edited: the id, its wrapper and its home are what every consumer joins on,
-    // and changing them here would silently repoint an account rather than change it.
-    next.id = route.id;
-    next.wrapper = route.wrapper;
-    next.home = route.home;
-    const updated = { ...agent, routes: { ...routes, [variant]: next } };
-    return { ...config, agents: agents.map((existing, at) => (at === index ? updated : existing)) };
-  }
-  throw new FleetMutationRefusal(`this fleet declares no account with id "${mutation.accountId}"`);
+    return next;
+  });
+}
+
+/**
+ * Point one account's field at a declared shared document.
+ *
+ * The reference is written into the account's own overlay rather than by removing whatever earlier
+ * slot supplied a different one: an account may be linked to a document no slot above it names, and
+ * removing an override cannot express that. The cost is that the account then names the shared
+ * document explicitly — which is honest, and is why the report classifies sharing by the *document*
+ * rather than by which slot it came from.
+ */
+function linkSharedAsset(
+  config: FleetConfig,
+  mutation: Extract<FleetMutation, { kind: 'link-shared-asset' }>,
+): unknown {
+  const path = sharedAssetLinkPath(config, mutation.accountId, mutation.field, mutation.name);
+  return withRoute(config, mutation.accountId, (route, kind) => layerWithAsset(route, kind, mutation.field, path));
+}
+
+/**
+ * Give one account its own copy of the document it currently shares.
+ *
+ * Only the configuration half is here. The copy itself is a text document the mount composes from the
+ * shared source and writes inside the provisioner's rollback boundary, so the account never points at
+ * a path that does not exist — and the shared document is not touched at all, which is what makes this
+ * safe for everybody else still using it.
+ */
+function unlinkSharedAsset(
+  config: FleetConfig,
+  mutation: Extract<FleetMutation, { kind: 'unlink-shared-asset' }>,
+): unknown {
+  const unlink = planSharedAssetUnlink(config, mutation.accountId, mutation.field);
+  return withRoute(config, mutation.accountId, (route, kind) =>
+    layerWithAsset(route, kind, mutation.field, unlink.destination),
+  );
 }
 
 /**
@@ -193,12 +281,22 @@ export function applyFleetMutation(config: FleetConfig, mutation: FleetMutation,
   if (mutation.kind === 'initialize') {
     throw new FleetMutationRefusal('initialization does not derive a configuration; it scaffolds one');
   }
-  const candidate =
-    mutation.kind === 'create-account' ? createAccount(config, mutation, mintId) : editAccount(config, mutation);
+  const candidate = derived(config, mutation, mintId);
   const parsed = FleetConfigSchema.safeParse(candidate);
   if (!parsed.success) {
     const issues = parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('\n');
     throw new FleetMutationRefusal(`the resulting fleet configuration would be invalid:\n${issues}`);
   }
   return parsed.data;
+}
+
+function derived(
+  config: FleetConfig,
+  mutation: Exclude<FleetMutation, { kind: 'initialize' }>,
+  mintId: () => string,
+): unknown {
+  if (mutation.kind === 'create-account') return createAccount(config, mutation, mintId);
+  if (mutation.kind === 'link-shared-asset') return linkSharedAsset(config, mutation);
+  if (mutation.kind === 'unlink-shared-asset') return unlinkSharedAsset(config, mutation);
+  return editAccount(config, mutation);
 }

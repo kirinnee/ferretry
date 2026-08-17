@@ -201,6 +201,129 @@ const layerFields = {
   mcp: FleetAssetRefSchema,
 } as const;
 
+/**
+ * The asset fields a shared document may supply, and the subset a link may move.
+ *
+ * Restated here rather than imported, for the reason every shape in this file is: the browser does not
+ * depend on the fleet package. `settings` is shareable but not linkable — it is a stack that is
+ * deep-merged left to right, so "use the shared one" would have to choose a position in that stack,
+ * and a shared layer in the wrong position is silently overridden or silently overriding. It is
+ * reported so a person can see which layers are shared documents, and changed through the ordinary
+ * overlay edit where the order is written down.
+ */
+export const FLEET_SHAREABLE_FIELDS = ['settings', 'memory', 'skills', 'hooks', 'hooksDir', 'mcp'] as const;
+export const FLEET_LINKABLE_FIELDS = ['memory', 'skills', 'hooks', 'hooksDir', 'mcp'] as const;
+
+export const FleetShareableFieldSchema = z.enum(FLEET_SHAREABLE_FIELDS);
+export const FleetLinkableFieldSchema = z.enum(FLEET_LINKABLE_FIELDS);
+export type FleetLinkableField = z.infer<typeof FleetLinkableFieldSchema>;
+
+/**
+ * Which composition slot supplied a value.
+ *
+ * Carried because "shared or account-local" is a question about *where the value came from*, and a
+ * client that had to answer it would be re-implementing the fleet's precedence order in a package
+ * that cannot see the configuration. Every slot but `account` is shared by construction: a profile
+ * reaches every agent that lists it, and an agent's own fields reach all of its lanes.
+ */
+export const FleetCompositionOriginSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('base-profile'), name: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('agent-profile'), name: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('variant-profile'), name: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('variant'), name: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('agent'), name: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('account') }),
+]);
+export type FleetCompositionOrigin = z.infer<typeof FleetCompositionOriginSchema>;
+
+/**
+ * What one account's asset field is: nothing, a declared shared document, or its own path.
+ *
+ * `referrers` is positive by construction in both non-absent arms — an account resolving a path is
+ * itself a referrer, so a zero would mean the count and the value disagree. `local` with more than one
+ * referrer is a path a fleet already shares without having declared it, which is a state a surface
+ * should offer to fix rather than one it should hide.
+ */
+export const FleetAssetSharingSchema = z.discriminatedUnion('state', [
+  z.strictObject({ state: z.literal('absent') }),
+  z.strictObject({
+    state: z.literal('shared'),
+    name: z.string().min(1),
+    path: z.string().min(1),
+    origin: FleetCompositionOriginSchema,
+    referrers: z.number().int().positive(),
+  }),
+  z.strictObject({
+    state: z.literal('local'),
+    path: z.string().min(1),
+    origin: FleetCompositionOriginSchema,
+    referrers: z.number().int().positive(),
+  }),
+]);
+export type FleetAssetSharing = z.infer<typeof FleetAssetSharingSchema>;
+
+/** One declared shared document and every account using it, by id. */
+export const FleetSharedDocumentSchema = z.strictObject({
+  field: FleetShareableFieldSchema,
+  name: z.string().min(1),
+  path: z.string().min(1),
+  accounts: z.array(z.uuid()).readonly(),
+});
+export type FleetSharedDocument = z.infer<typeof FleetSharedDocumentSchema>;
+
+/** One layer of an account's settings stack, in merge order. Reported, never linked. */
+export const FleetSettingsLayerSharingSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    position: z.number().int().nonnegative(),
+    kind: z.literal('inline'),
+    origin: FleetCompositionOriginSchema,
+  }),
+  z.strictObject({
+    position: z.number().int().nonnegative(),
+    kind: z.literal('document'),
+    path: z.string().min(1),
+    /** Absent when this layer is not one of the declared shared documents. */
+    name: z.string().min(1).optional(),
+    origin: FleetCompositionOriginSchema,
+    referrers: z.number().int().positive(),
+  }),
+]);
+export type FleetSettingsLayerSharing = z.infer<typeof FleetSettingsLayerSharingSchema>;
+
+export const FleetAccountSharingSchema = z.strictObject({
+  accountId: z.uuid(),
+  kind: z.enum(['claude', 'codex']),
+  wrapper: z.string().min(1),
+  displayName: z.string().min(1),
+  /** Every linkable field, always present, so a client never has to read absence as a state. */
+  fields: z.strictObject({
+    memory: FleetAssetSharingSchema,
+    skills: FleetAssetSharingSchema,
+    hooks: FleetAssetSharingSchema,
+    hooksDir: FleetAssetSharingSchema,
+    mcp: FleetAssetSharingSchema,
+  }),
+  settings: z.array(FleetSettingsLayerSharingSchema).readonly(),
+  /**
+   * The fields this account can actually be linked or unlinked. A field its harness has no
+   * destination for is excluded here, so a surface never offers a control whose apply would refuse.
+   */
+  linkable: z.array(FleetLinkableFieldSchema).readonly(),
+});
+export type FleetAccountSharing = z.infer<typeof FleetAccountSharingSchema>;
+
+/**
+ * The whole sharing picture, derived from the configuration rather than from disk.
+ *
+ * Which is the useful direction: it describes what the next apply will materialize, so the report a
+ * person reads and the plan they approve come from one document.
+ */
+export const FleetSharingSchema = z.strictObject({
+  documents: z.array(FleetSharedDocumentSchema).readonly(),
+  accounts: z.array(FleetAccountSharingSchema).readonly(),
+});
+export type FleetSharing = z.infer<typeof FleetSharingSchema>;
+
 const patchOf = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
 
 const HarnessOverlayPatchSchema = z.strictObject({
@@ -260,6 +383,32 @@ export const FleetMutationSchema = z.discriminatedUnion('kind', [
     available: z.boolean().optional(),
     unavailableReason: NonEmpty.optional(),
     layer: AccountLayerSchema.optional(),
+  }),
+  /**
+   * Point one account's asset field at a declared shared document, by name.
+   *
+   * The name rather than the path: a caller that could send a path would be choosing which of the
+   * host's files the next approved change copies into a home, and the one-line summary the host
+   * approves would not mention it. The daemon resolves the name through `config.shared`, so the only
+   * documents a remote caller can link are the ones the fleet declared.
+   */
+  z.strictObject({
+    kind: z.literal('link-shared-asset'),
+    accountId: z.uuid(),
+    field: FleetLinkableFieldSchema,
+    name: NonEmpty,
+  }),
+  /**
+   * Give one account its own copy of the shared document it currently uses.
+   *
+   * It carries no content and no destination. Both are derived on the host — the text from the shared
+   * document as it is now, the destination from the account's own wrapper name — because an unlink
+   * that let a caller supply either would be an arbitrary file write wearing a named intent's summary.
+   */
+  z.strictObject({
+    kind: z.literal('unlink-shared-asset'),
+    accountId: z.uuid(),
+    field: FleetLinkableFieldSchema,
   }),
   z.strictObject({
     kind: z.literal('edit-account'),

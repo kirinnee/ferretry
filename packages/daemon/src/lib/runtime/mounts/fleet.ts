@@ -22,6 +22,7 @@ import {
   FleetScaffoldPartialError,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
+  resolveFleetSharing,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
 import {
@@ -62,6 +63,8 @@ import {
   FleetProposalRequestSchema,
   type FleetProposalView,
   FleetProposalViewSchema,
+  type FleetSharing as FleetWireSharing,
+  FleetSharingSchema,
   type HarnessDiscoveryReport,
   HarnessDiscoveryReportSchema,
 } from '@ferretry/protocol';
@@ -85,6 +88,7 @@ import {
   type FleetMutation,
   FleetMutationRefusal,
 } from '../../fleet/mutations.ts';
+import { planSharedAssetUnlink, sharingSummary } from '../../fleet/sharing.ts';
 import {
   type FleetProposalProblem,
   type FleetProposalRecord,
@@ -153,6 +157,8 @@ export interface FleetSubsystem {
   /** Text assets the fleet copies into account homes, bounded to this daemon's asset tree. */
   assets(): Promise<FleetAssetTree>;
   asset(path: string): Promise<FleetAssetDocument>;
+  /** Which documents this fleet shares, and whether each account uses one or its own copy. */
+  sharing(): Promise<FleetWireSharing>;
   /** Derive, preview and hold a change. Writes nothing. */
   propose(request: FleetProposalRequest): Promise<FleetProposalView>;
   readProposal(id: string): Promise<FleetProposalView>;
@@ -330,12 +336,26 @@ function summarize(mutation: FleetMutation, candidate: FleetConfig): string {
   if (mutation.kind === 'create-account') {
     return `add ${derivedWrapperName(mutation.harness, mutation.name, mutation.variant ?? 'default')}`;
   }
+  const wrapper = wrapperOf(candidate, mutation.accountId);
+  // A sharing change says which document and which direction, because "change claude-work" is not
+  // enough for somebody deciding whether to approve a switch of every account's instructions.
+  if (mutation.kind === 'link-shared-asset') {
+    return `link ${wrapper ?? mutation.accountId} ${mutation.field} to the shared "${mutation.name}"`;
+  }
+  if (mutation.kind === 'unlink-shared-asset') {
+    return `give ${wrapper ?? mutation.accountId} its own ${mutation.field}`;
+  }
+  return wrapper === undefined ? `change account ${mutation.accountId}` : `change ${wrapper}`;
+}
+
+/** The wrapper name of one account in a candidate configuration, found by id. */
+function wrapperOf(candidate: FleetConfig, accountId: string): string | undefined {
   for (const agent of candidate.agents) {
     for (const route of Object.values(agent.routes)) {
-      if (route.id === mutation.accountId) return `change ${route.wrapper}`;
+      if (route.id === accountId) return route.wrapper;
     }
   }
-  return `change account ${mutation.accountId}`;
+  return undefined;
 }
 
 /** Report a first run in the same shape as an apply, so one result panel renders both. */
@@ -503,14 +523,70 @@ class MountedFleet implements FleetSubsystem {
   }
 
   private async compose(request: FleetProposalRequest): Promise<FleetProposalView> {
+    if (request.mutation.kind === 'initialize') return await this.composeInitialization(request);
+    return await this.composeChange(request, request.mutation);
+  }
+
+  /**
+   * Prepare a host that has no fleet at all.
+   *
+   * Split from the change path because the two differ in what they are allowed to read: this one must
+   * not read a configuration, since its whole precondition is that there is none.
+   */
+  private async composeInitialization(request: FleetProposalRequest): Promise<FleetProposalView> {
     const assetEdits = parseAssetEdits(request.assetEdits ?? []);
+    const assetRevisions = await this.pinnedRevisions(assetEdits.map(edit => edit.path));
+    const revision = await this.revision();
+    if (revision !== MISSING_CONFIG_REVISION) {
+      throw new FleetRefusal(
+        'fleet_proposal_refused',
+        `this host already has a fleet configuration at ${this.configPath}; initialization is for a host that has none`,
+      );
+    }
+    if (assetEdits.length > 0) {
+      // Two commit boundaries — a create-if-absent scaffold and a rollback-protected asset write —
+      // cannot be reported as one truthful outcome, and the half where the scaffold landed and the
+      // assets did not has no honest name. Preparing the host is its own step; edit afterwards.
+      throw new FleetRefusal(
+        'fleet_proposal_refused',
+        'preparing a host cannot carry asset edits; prepare the fleet first, then edit its assets',
+      );
+    }
+    return this.viewOf(
+      this.proposals.open({
+        revision,
+        mutation: request.mutation,
+        assetEdits,
+        assetRevisions,
+        payload: { kind: 'initialize', scaffold: this.scaffold(), documents: [] },
+        summary: 'prepare this host for a fleet',
+      }),
+    );
+  }
+
+  private async composeChange(
+    request: FleetProposalRequest,
+    mutation: Exclude<FleetMutation, { kind: 'initialize' }>,
+  ): Promise<FleetProposalView> {
+    // Read once for the whole composition. An unlink derives a text document from the configuration
+    // *and* derives the next configuration from it, and two reads could disagree — the private copy
+    // would then be seeded from a document the candidate no longer points at.
+    const current = await this.config();
+    const derived = await this.derivedAssetEdits(current, mutation);
+    const assetEdits = parseAssetEdits([...(request.assetEdits ?? []), ...derived.edits]);
     // Prove every edited path is inside the asset tree and passes through no link, before the
     // proposal exists — a proposal nobody can apply is worse than a refusal nobody stored.
     // What each edited asset is *now*, so one edited on the host after this was reviewed refuses
     // instead of being silently overwritten by text composed against the older version. The
     // expectation travels with the write as well as being checked up front, because only the write
     // can check it without a gap.
-    const assetRevisions = await this.assetRevisions(assetEdits);
+    // The documents this change writes, AND the ones it was composed FROM. A private copy seeded from
+    // a shared document is only correct while that document still says what it said at review time;
+    // pinning only the destination would let an edit to the source land as a silently stale copy.
+    const assetRevisions = [
+      ...(await this.pinnedRevisions(assetEdits.map(edit => edit.path))),
+      ...(await this.pinnedRevisions(derived.sources)),
+    ];
     const expected = new Map(assetRevisions.map(asset => [asset.path, asset.revision]));
     const documents: FleetDocumentWrite[] = [];
     for (const edit of assetEdits) {
@@ -522,37 +598,7 @@ class MountedFleet implements FleetSubsystem {
       });
     }
     const revision = await this.revision();
-
-    if (request.mutation.kind === 'initialize') {
-      if (revision !== MISSING_CONFIG_REVISION) {
-        throw new FleetRefusal(
-          'fleet_proposal_refused',
-          `this host already has a fleet configuration at ${this.configPath}; initialization is for a host that has none`,
-        );
-      }
-      if (assetEdits.length > 0) {
-        // Two commit boundaries — a create-if-absent scaffold and a rollback-protected asset write —
-        // cannot be reported as one truthful outcome, and the half where the scaffold landed and the
-        // assets did not has no honest name. Preparing the host is its own step; edit afterwards.
-        throw new FleetRefusal(
-          'fleet_proposal_refused',
-          'preparing a host cannot carry asset edits; prepare the fleet first, then edit its assets',
-        );
-      }
-      const scaffold = this.scaffold();
-      return this.viewOf(
-        this.proposals.open({
-          revision,
-          mutation: request.mutation,
-          assetEdits,
-          assetRevisions,
-          payload: { kind: 'initialize', scaffold, documents: [] },
-          summary: 'prepare this host for a fleet',
-        }),
-      );
-    }
-
-    const candidate = this.deriveCandidate(await this.config(), request.mutation);
+    const candidate = this.deriveCandidate(current, mutation);
     const plan = this.buildPlan(candidate);
     const preview = await this.previewFrom(plan);
     documents.unshift({
@@ -573,6 +619,54 @@ class MountedFleet implements FleetSubsystem {
         summary: summarize(request.mutation, candidate),
       }),
     );
+  }
+
+  /**
+   * The text documents the mutation itself contributes, on top of whatever the caller composed.
+   *
+   * Only an unlink has any, and its one document is derived rather than accepted: the destination from
+   * the account's own wrapper name, the content from the shared document as the host holds it now. A
+   * caller able to supply either would have an arbitrary file write carrying a named intent's summary.
+   *
+   * An existing file at the destination is refused rather than overwritten. It is the account's own
+   * previous copy, or somebody's work in progress, and either way replacing it with the shared text is
+   * not what "give this account its own copy" was asked to do.
+   */
+  private async derivedAssetEdits(
+    config: FleetConfig,
+    mutation: Exclude<FleetMutation, { kind: 'initialize' }>,
+  ): Promise<{ readonly edits: readonly FleetAssetEdit[]; readonly sources: readonly string[] }> {
+    if (mutation.kind !== 'unlink-shared-asset') return { edits: [], sources: [] };
+    const unlink = this.withMutationRefusals(() => planSharedAssetUnlink(config, mutation.accountId, mutation.field));
+    if ((await this.assetRevision(unlink.destination)) !== ABSENT_ASSET_REVISION) {
+      throw new FleetRefusal(
+        'fleet_proposal_refused',
+        `this fleet already has an asset at "${unlink.destination}"; point ${unlink.wrapper} at it with an account overlay rather than overwriting it with the shared text`,
+      );
+    }
+    const shared = await this.withAssetRefusals(() => this.assetStore.read(unlink.source));
+    return { edits: [{ path: unlink.destination, content: shared.content }], sources: [unlink.source] };
+  }
+
+  /** Turn a mutation's own refusal into the fleet's refusal grammar, so it is not a bare 500. */
+  private withMutationRefusals<T>(work: () => T): T {
+    try {
+      return work();
+    } catch (error) {
+      if (error instanceof FleetMutationRefusal) throw new FleetRefusal('fleet_proposal_refused', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Which documents this fleet shares and who uses one, derived from the configuration.
+   *
+   * Derived rather than read from the last manifest, because the useful question is what the *next*
+   * apply will materialize — so the report a person reads and the plan they approve come from one
+   * document. Parsed on the way out through the shared schema like every other answer here.
+   */
+  async sharing(): Promise<FleetWireSharing> {
+    return sharingSummary(resolveFleetSharing(await this.config()));
   }
 
   async readProposal(id: string): Promise<FleetProposalView> {
@@ -596,9 +690,10 @@ class MountedFleet implements FleetSubsystem {
     );
   }
 
-  private async assetRevisions(edits: readonly FleetAssetEdit[]): Promise<readonly FleetAssetRevision[]> {
+  /** What each of these assets is right now, so a change composed against an older one refuses. */
+  private async pinnedRevisions(paths: readonly string[]): Promise<readonly FleetAssetRevision[]> {
     const revisions: FleetAssetRevision[] = [];
-    for (const edit of edits) revisions.push({ path: edit.path, revision: await this.assetRevision(edit.path) });
+    for (const path of paths) revisions.push({ path, revision: await this.assetRevision(path) });
     return revisions;
   }
 
@@ -1144,6 +1239,21 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       noStore: true,
       handle: async context =>
         await respondWith(FleetPermissionsSchema, async () => subsystem.permissions(context.credential?.tokenClass)),
+    },
+    {
+      /**
+       * Which documents this fleet shares and who uses one.
+       *
+       * A read of its own rather than a field on the account roster: the roster is what the last apply
+       * published, and this is derived from the configuration as it stands now. Folding one into the
+       * other would give a single response two different notions of "current".
+       */
+      method: 'GET',
+      path: '/v1/fleet/sharing',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      noStore: true,
+      handle: async () => await respondWith(FleetSharingSchema, () => subsystem.sharing()),
     },
     {
       method: 'GET',
