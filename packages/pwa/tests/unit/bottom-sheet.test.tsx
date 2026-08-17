@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, it } from 'bun:test';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { interact, mount, pressKey } from '../support/dom.ts';
 
@@ -57,6 +57,29 @@ const firePointer = (
 const givePanelHeight = (panel: HTMLElement, height: number): void => {
   panel.getBoundingClientRect = () => ({ height }) as DOMRect;
 };
+
+/**
+ * `matchMedia` IS PROCESS-WIDE and this fake is deliberately partial.
+ *
+ * It answers `addEventListener` only, which is all `BottomSheet` asks for and is the whole point of a
+ * fake this small. Bun runs the tier in one process against one happy-dom window, though, so an
+ * unrestored fake becomes the `matchMedia` every later FILE gets — and something out there does ask
+ * for more: xterm's core browser service still calls the LEGACY `MediaQueryList.addListener`, which
+ * this object does not have. That is not hypothetical. It is why `app.test.tsx` reported a terminal
+ * deck whose socket never opened on CI and nowhere else — the emulator threw
+ * `this._resolutionMediaMatchList.addListener is not a function` inside a promise whose `.catch` turns
+ * every failure into a silent `refused` — and it was CI-only purely because CI walks the test tree in
+ * a different order than a laptop does.
+ *
+ * So the window is handed back. Making the fake richer would work too and would be the wrong fix: the
+ * next partial fake would leak the next missing method.
+ */
+const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+
+afterAll(() => {
+  if (originalMatchMedia) Object.defineProperty(window, 'matchMedia', originalMatchMedia);
+  else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'matchMedia');
+});
 
 beforeEach(() => {
   media.matches = false;
