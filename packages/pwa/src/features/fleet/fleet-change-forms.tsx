@@ -272,33 +272,40 @@ export function FleetLayerFields({
             </p>
           </div>
         )}
-        {/* One stack, one gap. The spacing used to be a `mt-3` on whichever label happened to come
-            second, which is the per-child margin that doubles the moment a field is inserted between them. */}
+        {/* One gap between FIELDS, and each field keeps its own label hugging its own control. The
+            spacing used to be a `mt-3` on whichever label happened to come second — the per-child margin
+            that doubles the moment a field is inserted between them — and a flat grid over label,
+            control and note would have been the opposite error: every part equally far from every other,
+            so a label no longer belongs to anything. */}
         <div className="grid gap-3">
-          <label className={FIELD_LABEL} htmlFor={id('-instructions-path')}>
-            Asset path
-          </label>
-          <input
-            id={id('-instructions-path')}
-            className="kt-input font-mono"
-            value={layer.instructions.path}
-            disabled={disabled}
-            placeholder="instructions/claude-studio.md"
-            onChange={event => setInstructions({ path: event.target.value })}
-          />
-          <PrefillNote field="instructionsPath" notes={notes} />
-          <label className={FIELD_LABEL} htmlFor={id('-instructions-text')}>
-            Contents
-          </label>
-          <textarea
-            id={id('-instructions-text')}
-            className="kt-input min-h-[9rem] font-mono"
-            rows={8}
-            value={layer.instructions.text}
-            disabled={disabled}
-            onChange={event => setInstructions({ text: event.target.value })}
-          />
-          <PrefillNote field="instructionsText" notes={notes} />
+          <div>
+            <label className={FIELD_LABEL} htmlFor={id('-instructions-path')}>
+              Asset path
+            </label>
+            <input
+              id={id('-instructions-path')}
+              className="kt-input font-mono"
+              value={layer.instructions.path}
+              disabled={disabled}
+              placeholder="instructions/claude-studio.md"
+              onChange={event => setInstructions({ path: event.target.value })}
+            />
+            <PrefillNote field="instructionsPath" notes={notes} />
+          </div>
+          <div>
+            <label className={FIELD_LABEL} htmlFor={id('-instructions-text')}>
+              Contents
+            </label>
+            <textarea
+              id={id('-instructions-text')}
+              className="kt-input min-h-[9rem] font-mono"
+              rows={8}
+              value={layer.instructions.text}
+              disabled={disabled}
+              onChange={event => setInstructions({ text: event.target.value })}
+            />
+            <PrefillNote field="instructionsText" notes={notes} />
+          </div>
         </div>
       </section>
 
@@ -716,47 +723,51 @@ export function FleetAccountForm({
 
       <section className={SECTION}>
         <div className="grid gap-3">
-          <label className={FIELD_LABEL} htmlFor={id('-account-models')}>
-            Models this account can serve
-          </label>
-          <textarea
-            id={id('-account-models')}
-            className="kt-input min-h-[5rem] font-mono"
-            rows={4}
-            value={draft.modelsText}
-            disabled={disabled}
-            placeholder={'claude-opus-5\nclaude-sonnet-5'}
-            onChange={event => onChange({ ...draft, modelsText: event.target.value })}
-          />
-          {/* Provenance first, because it is about the value in the box; the field's own help below it. */}
-          <PrefillNote field="models" notes={draft.prefilled} />
-          <p className="m-0 mt-1 text-meta text-muted">One per line, or comma separated.</p>
-          <label className={FIELD_LABEL} htmlFor={id('-account-default-model')}>
-            Default model
-          </label>
-          <select
-            id={id('-account-default-model')}
-            className="kt-input"
-            value={draft.defaultModel}
-            disabled={disabled || models.length === 0}
-            onChange={event => onChange({ ...draft, defaultModel: event.target.value })}
-          >
-            <option value="">Choose a model</option>
-            {models.map(model => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
-          {/* Only when it says something the line above did not: both are usually read out of the same
+          <div>
+            <label className={FIELD_LABEL} htmlFor={id('-account-models')}>
+              Models this account can serve
+            </label>
+            <textarea
+              id={id('-account-models')}
+              className="kt-input min-h-[5rem] font-mono"
+              rows={4}
+              value={draft.modelsText}
+              disabled={disabled}
+              placeholder={'claude-opus-5\nclaude-sonnet-5'}
+              onChange={event => onChange({ ...draft, modelsText: event.target.value })}
+            />
+            {/* Provenance first, because it is about the value in the box; the field's own help below it. */}
+            <PrefillNote field="models" notes={draft.prefilled} />
+            <p className="m-0 mt-1 text-meta text-muted">One per line, or comma separated.</p>
+          </div>
+          <div>
+            <label className={FIELD_LABEL} htmlFor={id('-account-default-model')}>
+              Default model
+            </label>
+            <select
+              id={id('-account-default-model')}
+              className="kt-input"
+              value={draft.defaultModel}
+              disabled={disabled || models.length === 0}
+              onChange={event => onChange({ ...draft, defaultModel: event.target.value })}
+            >
+              <option value="">Choose a model</option>
+              {models.map(model => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+            {/* Only when it says something the line above did not: both are usually read out of the same
             settings file, and one fact deserves one sentence. */}
-          {draft.prefilled.defaultModel === draft.prefilled.models ? null : (
-            <PrefillNote field="defaultModel" notes={draft.prefilled} />
-          )}
-          <p className="m-0 mt-1 text-meta text-muted">
-            An account that claims to be available has to be able to serve something, and name which of it is the
-            default.
-          </p>
+            {draft.prefilled.defaultModel === draft.prefilled.models ? null : (
+              <PrefillNote field="defaultModel" notes={draft.prefilled} />
+            )}
+            <p className="m-0 mt-1 text-meta text-muted">
+              An account that claims to be available has to be able to serve something, and name which of it is the
+              default.
+            </p>
+          </div>
         </div>
       </section>
 
