@@ -1081,7 +1081,19 @@ describe('AppShell', () => {
       // and is not enough for this. The socket is what the assertions below are about, so it is what
       // the wait is gated on — and if it never opens, THIS line says so instead of leaving the
       // absence to be reported three assertions and two describe blocks later.
-      await settleUntil(() => sockets.length > 0, 'the terminal deck to open its stream socket', interact);
+      // The chain is module load → listing → ticket → socket, so which of those the carrier was asked
+      // for names the link that stalled: nothing at all means the emulator never loaded and the deck
+      // refused before it could ask; a listing without a ticket is the ticket purchase; a ticket
+      // without a socket is the attach. An expiry that only said "no socket" would leave that to be
+      // guessed on a runner nobody can attach a debugger to.
+      await settleUntil(
+        () => sockets.length > 0,
+        () =>
+          `the terminal deck to open its stream socket (terminal requests reached: ${JSON.stringify(
+            carrierRequests.filter(url => url.includes('/terminals')),
+          )})`,
+        interact,
+      );
 
       expect(carrierRequests).toContain('https://alpha.example.test/v1/sessions/shared/terminals');
       expect(carrierRequests).toContain(
@@ -1743,8 +1755,24 @@ const touchEvent = (type: string, clientY: number, count = 1): Event => {
   return event;
 };
 
+/**
+ * The finder, or a failure that says WHY it is not there.
+ *
+ * "expected the destination finder to be present" is true and useless: the button is absent from a
+ * shell that rendered the not-paired fallback instead of the workspace, and absent again from a
+ * workspace whose app bar decided it was on a phone — `AppBar` only lays out the destination row when
+ * `useLayoutMode` reads a viewport at least 768px wide. Those are opposite defects with one symptom,
+ * so the absence carries the three facts that tell them apart.
+ */
 const finderButton = (container: HTMLElement): HTMLButtonElement =>
-  must(container.querySelector<HTMLButtonElement>('[data-app-bar-destination-search]'), 'the destination finder');
+  must(
+    container.querySelector<HTMLButtonElement>('[data-app-bar-destination-search]'),
+    `the destination finder (window.innerWidth ${window.innerWidth}, app bar ${
+      container.querySelector('header') === null ? 'absent' : 'present'
+    }, destination row ${
+      container.querySelector('[data-app-bar-destination-row]') === null ? 'absent' : 'present'
+    }, shell reads ${JSON.stringify(container.textContent?.slice(0, 160) ?? '')})`,
+  );
 
 describe('the global destination and settings finder', () => {
   it('finds an individual setting by a keyword that is in neither its label nor its description', async () => {

@@ -48,10 +48,16 @@ const MAX_TURN_DELAY_MS = 5;
  * package are genuinely different: happy-dom suites pass `interact` from `./dom.ts`, test-renderer
  * suites pass `runAsync` from `./react.ts`. Defaulting to either would drag that harness's global
  * registration into every suite that imported this one.
+ *
+ * `what` may be a FUNCTION, evaluated only when the budget runs out. A condition that failed is the
+ * one moment the surrounding state is worth reading, and the whole point of this helper is that the
+ * expiry explains itself: "the socket never opened" is a symptom, "the socket never opened and the
+ * daemon was never even asked for the terminal list" is a diagnosis. Nothing is computed on the happy
+ * path.
  */
 export const settleUntil = async (
   ready: () => boolean,
-  what: string,
+  what: string | (() => string),
   flush: (callback: () => Promise<void>) => Promise<void>,
   budgetMs: number = SETTLE_BUDGET_MS,
 ): Promise<void> => {
@@ -60,7 +66,9 @@ export const settleUntil = async (
   while (!ready()) {
     const elapsed = Date.now() - started;
     if (elapsed >= budgetMs)
-      throw new Error(`waited ${elapsed}ms over ${turns} turns for ${what}, which never became true`);
+      throw new Error(
+        `waited ${elapsed}ms over ${turns} turns for ${typeof what === 'string' ? what : what()}, which never became true`,
+      );
     const delay = Math.min(turns, MAX_TURN_DELAY_MS);
     await flush(async () => {
       await new Promise(resolve => setTimeout(resolve, delay));
