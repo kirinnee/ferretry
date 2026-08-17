@@ -33,25 +33,29 @@ import {
   type FleetProposalView,
   type FleetRefusalView,
   fleetRefusal,
+  type HarnessDiscoveryReport,
   listFleetAssets,
   parseApprovalCode,
   readFleetAsset,
   readFleetConfig,
+  readFleetHarnesses,
   readFleetManifest,
   readFleetPermissions,
   readFleetProposal,
 } from './fleet-api.ts';
 import { FleetAccountForm, FleetLayerForm, FleetProblems } from './fleet-change-forms.tsx';
 import {
+  accountHarnessDetection,
   accountProblems,
+  applyInstructionsChoice,
   approvalCommand,
   CHANGE_LIMITS,
   classifyInventory,
   createAccountProposal,
   currentUnreadable,
   declaredLayer,
+  detectedAccountDraft,
   editAccountProposal,
-  emptyAccountDraft,
   type FleetAccountDraft,
   type FleetAssetKnowledge,
   type FleetAuthorityMode,
@@ -60,19 +64,22 @@ import {
   type FleetProbe,
   type FleetUnreadableAsset,
   fleetAuthority,
-  harnessEvidence,
   initializeProposal,
+  instructionsAssets,
+  instructionsChoices,
+  instructionsChoiceValue,
   layerDraftFrom,
   layerProblems,
   mayComposeChange,
   mayInitialize,
   outcomeSummary,
+  reconcileAccountDraft,
   selectLayerAssets,
   unreadableAssetProblems,
   unseenAssets,
 } from './fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster, FleetRefusalAlert } from './fleet-change-review.tsx';
-import { defaultFleetHarness } from './fleet-model.ts';
+import { EYEBROW, FleetPath } from './fleet-typography.tsx';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
 
@@ -90,6 +97,8 @@ type FleetComposeMode =
       readonly unreadable: readonly FleetUnreadableAsset[];
       readonly assets: FleetAssetKnowledge;
       readonly loading: boolean;
+      /** True while a chosen existing document's current text is being fetched. */
+      readonly reading: boolean;
     }
   | {
       readonly kind: 'edit';
@@ -134,6 +143,13 @@ interface FleetSession {
   readonly inventory: FleetInventory | null;
   readonly config: FleetConfigView | null;
   readonly permissions: FleetPermissions | null;
+  /**
+   * What this HOST has, or `null` when this daemon did not say.
+   *
+   * `null` is a first-class state rather than an empty report: a form told nothing must fall back to
+   * the old, unprefilled behaviour and say so, never fill boxes in from an absence of evidence.
+   */
+  readonly discovery: HarnessDiscoveryReport | null;
   readonly mode: FleetComposeMode;
   readonly proposal: FleetProposalView | null;
   readonly code: string;
@@ -148,6 +164,7 @@ const freshSession = (generation: string): FleetSession => ({
   inventory: null,
   config: null,
   permissions: null,
+  discovery: null,
   mode: { kind: 'idle' },
   proposal: null,
   code: '',
@@ -288,8 +305,17 @@ export function FleetConfigurationSurface({
       const client = opened.value;
       const permissions = await probe(() => readFleetPermissions(client));
       const evidence = await readEvidence(client);
+      // The harness read is a separate probe on purpose: a daemon too old to serve it, or a credential
+      // refused it, must still produce a working fleet panel. A failure here means "nothing was
+      // detected", which the form states, rather than a panel that will not load.
+      const discovery = await probe(() => readFleetHarnesses(client));
       if (!live) return;
-      patch(generation, { client, permissions: permissions.ok ? permissions.value : null, ...evidence });
+      patch(generation, {
+        client,
+        permissions: permissions.ok ? permissions.value : null,
+        discovery: discovery.ok ? discovery.value : null,
+        ...evidence,
+      });
     })();
     return () => {
       live = false;
@@ -509,7 +535,7 @@ export function FleetConfigurationSurface({
   const live = inventory.kind === 'live' ? inventory.manifest.accounts : [];
   const composable = mayComposeChange(inventory) && session.permissions?.mayPropose === true;
   const variants = Object.keys(session.config?.variants ?? {});
-  const suggestion = defaultFleetHarness(harnessEvidence(live));
+  const detection = accountHarnessDetection(session.discovery, live);
   const composing = mode.kind !== 'idle' || session.proposal !== null;
 
   /**
@@ -524,10 +550,14 @@ export function FleetConfigurationSurface({
     patch(generation, {
       mode: {
         kind: 'create',
-        draft: emptyAccountDraft(suggestion ?? 'claude'),
+        // Opened ALREADY FILLED IN from what the daemon detected, rather than opened blank and then
+        // patched: a form that flickers from empty to prefilled is a form whose first frame is a lie
+        // about what a person has to type.
+        draft: detectedAccountDraft(detection, session.discovery),
         unreadable: [],
         assets: { listed: [], loaded: [] },
         loading: client !== null,
+        reading: false,
       },
       outcome: null,
       refusal: null,
@@ -545,6 +575,52 @@ export function FleetConfigurationSurface({
         return {
           ...previous,
           mode: { ...previous.mode, unreadable, assets: { listed, loaded: [] }, loading: false },
+        };
+      });
+    })();
+  };
+
+  /**
+   * Point this account at a document, and — for one that already exists — read what is in it.
+   *
+   * The read is what makes choosing a shared document safe rather than destructive. Until its text is
+   * here, the draft holds an empty string for a path the daemon has listed, and `unseenAssets` blocks
+   * staging on exactly those terms: the alternative is a change that quietly replaces somebody's house
+   * rules with nothing. A refusal is kept as the daemon's own sentence, so the blocker says WHY.
+   */
+  const chooseInstructions = (create: Extract<FleetComposeMode, { readonly kind: 'create' }>, value: string): void => {
+    const chosen = applyInstructionsChoice(create.draft, value, session.discovery);
+    const path = chosen.load;
+    patch(generation, {
+      mode: { ...create, draft: chosen.draft, reading: path !== undefined && client !== null },
+    });
+    if (path === undefined || client === null) return;
+
+    void (async () => {
+      const document = await probe(() => readFleetAsset(client, path));
+      setSession(previous => {
+        if (previous.generation !== generation || previous.mode.kind !== 'create') return previous;
+        // The person may have chosen something else while this was in flight. A late answer must never
+        // overwrite the document they are looking at now.
+        if (previous.mode.draft.layer.instructions.path !== path) return previous;
+        const create = previous.mode;
+        return {
+          ...previous,
+          mode: document.ok
+            ? {
+                ...create,
+                reading: false,
+                assets: { ...create.assets, loaded: [...create.assets.loaded, path] },
+                draft: {
+                  ...create.draft,
+                  layer: { ...create.draft.layer, instructions: { path, text: document.value.content } },
+                },
+              }
+            : {
+                ...create,
+                reading: false,
+                unreadable: [...create.unreadable, { scope: 'file', path, reason: document.refusal.detail }],
+              },
         };
       });
     })();
@@ -584,7 +660,7 @@ export function FleetConfigurationSurface({
             </h2>
             {/* WHICH HOST. A browser can be paired to several, and every path, wrapper and operation
                 below belongs to exactly this one. */}
-            <code className="block truncate font-mono text-meta text-muted">{String(connection.daemonId)}</code>
+            <FleetPath value={String(connection.daemonId)} className="text-meta text-muted" label="Daemon" />
           </div>
           <span
             className="kt-badge"
@@ -635,9 +711,9 @@ export function FleetConfigurationSurface({
           <div className="flex min-w-0 items-start gap-3">
             <span className="mt-0.5 shrink-0 text-warn">
               {inventory.kind === 'uninitialized' ? (
-                <ServerCog size={18} aria-hidden="true" />
+                <ServerCog size={16} aria-hidden="true" />
               ) : (
-                <TriangleAlert size={18} aria-hidden="true" />
+                <TriangleAlert size={16} aria-hidden="true" />
               )}
             </span>
             <div className="min-w-0">
@@ -690,7 +766,11 @@ export function FleetConfigurationSurface({
 
       {/* Two columns ONLY when there is a second thing to show. A lone roster in a half-width column
           with dead space beside it reads as a missing panel. */}
-      <div className={cn('grid min-w-0 gap-3', composing && 'xl:grid-cols-2')}>
+      {/* ONE COLUMN, deliberately, and the reason is arithmetic rather than taste. The settings shell
+          caps its content at 1080px, so a two-column split gave each panel about 520px — and an absolute
+          wrapper path does not fit in 520px, which is why every path on this screen was being torn apart
+          mid-token to make it. Stacked, each panel gets the whole measure and the paths stay whole. */}
+      <div className="grid min-w-0 gap-3">
         {inventory.kind === 'live' ? (
           <FleetLiveRoster
             accounts={live}
@@ -728,7 +808,14 @@ export function FleetConfigurationSurface({
           <section className="kt-panel overflow-hidden" ref={createRef} tabIndex={-1} aria-label="New account">
             <FleetAccountForm
               draft={mode.draft}
-              onChange={draft => patch(generation, { mode: { ...mode, draft } })}
+              // Every edit goes through ONE reconciliation: the field they touched stops claiming to be
+              // detected, a harness change refills what the old harness was speaking for, and the
+              // derived document name keeps up with the account until they name their own.
+              onChange={draft =>
+                patch(generation, {
+                  mode: { ...mode, draft: reconcileAccountDraft(mode.draft, draft, session.discovery) },
+                })
+              }
               onSubmit={() => void stage(createAccountProposal(mode.draft))}
               onCancel={() => dismissed({ mode: { kind: 'idle' }, refusal: null })}
               problems={[
@@ -744,7 +831,17 @@ export function FleetConfigurationSurface({
               ]}
               disabled={session.busy || mode.loading}
               loading={mode.loading}
-              suggestion={suggestion}
+              detection={detection}
+              instructions={{
+                choices: instructionsChoices(
+                  mode.draft,
+                  session.discovery,
+                  instructionsAssets(mode.assets.listed, session.config),
+                ),
+                value: instructionsChoiceValue(mode.draft, instructionsAssets(mode.assets.listed, session.config)),
+                onChoose: value => chooseInstructions(mode, value),
+                loading: mode.reading,
+              }}
               variants={variants.length === 0 ? ['default'] : variants}
             />
           </section>
@@ -776,7 +873,7 @@ export function FleetConfigurationSurface({
       </div>
 
       <section className="kt-panel px-panel py-3" aria-labelledby={id('-limits-heading')}>
-        <p className="kt-label m-0" id={id('-limits-heading')}>
+        <p className={EYEBROW} id={id('-limits-heading')}>
           Known limits
         </p>
         <ul className="m-0 mt-1 list-none space-y-1 p-0">
@@ -800,14 +897,14 @@ export function FleetConfigurationSurface({
             data-fleet-host-guidance=""
             aria-labelledby={id('-host-guidance-heading')}
           >
-            <p className="kt-label m-0" id={id('-host-guidance-heading')}>
+            <p className={EYEBROW} id={id('-host-guidance-heading')}>
               Host-authorised changes
             </p>
             <p className="m-0 mt-1 text-meta leading-base text-muted">
               This paired device may inspect this daemon, but only a terminal on the host may write fleet files or
               materialise wrappers. For a new fleet, run these commands on that host:
             </p>
-            <pre className="m-0 mt-2 overflow-x-auto rounded-control border border-border-soft bg-surface-2 p-3 font-mono text-meta leading-base text-fg">
+            <pre className="m-0 mt-2 overflow-x-auto whitespace-pre rounded-control bg-surface-2 p-3 font-mono text-meta leading-base text-fg">
               {FIRST_ACCOUNT_COMMANDS}
             </pre>
             <p className="mb-0 mt-2 text-meta leading-base text-muted">

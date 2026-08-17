@@ -62,6 +62,8 @@ import {
   FleetProposalRequestSchema,
   type FleetProposalView,
   FleetProposalViewSchema,
+  type HarnessDiscoveryReport,
+  HarnessDiscoveryReportSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { MAX_TEXT_BODY_BYTES, parseBody, parseOptionalBody } from '../../api/body.ts';
@@ -91,6 +93,7 @@ import {
   MISSING_CONFIG_REVISION,
   redactProposal,
 } from '../../fleet/proposals.ts';
+import type { HarnessDiscoveryReader } from '../../fleet/harness-discovery.ts';
 import {
   applyResultSummary,
   committedSummary,
@@ -129,6 +132,14 @@ export interface FleetSubsystem {
   /** The complete last-published manifest, not a wrapper-directory reconstruction. */
   accounts(): Promise<FleetManifest>;
   config(): Promise<FleetConfig>;
+  /**
+   * What this host already knows about each harness, so a form does not ask for it.
+   *
+   * Read fresh, and deliberately NOT part of the manifest read: the manifest says what this fleet
+   * publishes, while this says what the machine has. Somebody installing Claude Code for the first
+   * time has the second and none of the first, and that is precisely the person filling in this form.
+   */
+  harnesses(): Promise<HarnessDiscoveryReport>;
   /** The deliberately narrow, remotely-safe profile environment editor. */
   environment(): Promise<FleetEnvironmentView>;
   updateEnvironment(request: FleetEnvironmentUpdate): Promise<FleetEnvironmentView>;
@@ -218,6 +229,15 @@ export interface DaemonFleetOptions {
    * rather than fall back to a pathname — the fallback reopens the hole this closes.
    */
   readonly rootPinner: SessionRootPinner;
+  /**
+   * What this host knows about a harness before anything is launched.
+   *
+   * INJECTED, because assembling it needs the two things this layer may not reach for: where each
+   * harness keeps its own files on a real machine, and a read that leaves the state home — the state
+   * filesystem refuses every path outside `FY_HOME`, which is right for it and useless for reading
+   * somebody's `~/.claude`.
+   */
+  readonly harnesses: HarnessDiscoveryReader;
   /**
    * Writes a first run to the host. Defaulted to the file implementation, and overridable because
    * this mount has to answer for what any implementation of the port does: the file one reports
@@ -823,6 +843,16 @@ class MountedFleet implements FleetSubsystem {
     return await this.loadManifest();
   }
 
+  /**
+   * Pass-through on purpose. Every decision — what counts as detected, what a fallback says about
+   * itself, which absence gets which sentence — belongs to the discovery module, which is provable
+   * without a filesystem. A mount that re-derived any of it would be a second answer to the same
+   * question, and the two would drift the first time either moved.
+   */
+  async harnesses(): Promise<HarnessDiscoveryReport> {
+    return await this.options.harnesses.report();
+  }
+
   async config(): Promise<FleetConfig> {
     try {
       await readFile(this.configPath);
@@ -1022,6 +1052,22 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       // a proposal against and the roster inside that proposal are described by one schema.
       handle: async () =>
         await respondWith(FleetManifestSummarySchema, async () => manifestSummary(await subsystem.accounts())),
+    },
+    {
+      /**
+       * What this host has, as opposed to what this fleet publishes.
+       *
+       * `fleet`/`use` like every other read here, and for the same reason: the answer names absolute
+       * paths in somebody's home and the text of their instructions document, which is the same class
+       * of disclosure as a wrapper path or a settings layer. It is a READ — nothing is launched, and
+       * nothing on the host changes — so it sits beside `accounts` rather than behind `configure`.
+       */
+      method: 'GET',
+      path: '/v1/fleet/harnesses',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      noStore: true,
+      handle: async () => await respondWith(HarnessDiscoveryReportSchema, () => subsystem.harnesses()),
     },
     {
       method: 'GET',

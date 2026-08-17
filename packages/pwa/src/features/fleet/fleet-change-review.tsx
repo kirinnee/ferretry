@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useId } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import { EYEBROW, FIELD_LABEL, FleetPath } from './fleet-typography.tsx';
 import { absoluteTime } from '../../lib/session-screens.ts';
 import type { FleetApplyOutcome, FleetManifestAccountView, FleetProposalView, FleetRefusalView } from './fleet-api.ts';
 import {
@@ -39,11 +40,18 @@ import {
   rosterDiff,
 } from './fleet-change-model.ts';
 
+/**
+ * The verdict's tone, as the SHARED badge's own vocabulary.
+ *
+ * This used to be four hand-rolled border/background/text triples — a fifth chip design in a panel that
+ * already had `kt-badge` for exactly this job. The shared badge carries the tone, the clip path, the
+ * theme's own letter-spacing and the one uppercase role this panel keeps.
+ */
 const CHANGE_TONE: Readonly<Record<FleetRosterChange, string>> = {
-  unchanged: 'border-border bg-surface text-muted',
-  added: 'border-ok-border bg-ok-bg text-ok',
-  changed: 'border-accent bg-accent-soft text-accent',
-  removed: 'border-err-border bg-err-bg text-err',
+  unchanged: 'muted',
+  added: 'ok',
+  changed: 'accent',
+  removed: 'err',
 };
 
 const CHANGE_LABEL: Readonly<Record<FleetRosterChange, string>> = {
@@ -56,7 +64,7 @@ const CHANGE_LABEL: Readonly<Record<FleetRosterChange, string>> = {
 function AccountLine({ account }: { readonly account: FleetManifestAccountView }) {
   return (
     <div className="min-w-0 flex-1 basis-[12rem]">
-      <code className="block truncate font-mono text-ui font-semibold text-fg">{account.wrapper}</code>
+      <FleetPath value={account.wrapper} className="block text-ui font-semibold text-fg" />
       {/* Wraps rather than truncates: a clipped default model is the one fact a reader came for. */}
       <p className="m-0 text-meta leading-base text-muted">
         {account.displayName} · {account.mode} · {account.defaultModel ?? 'no default model'}
@@ -143,12 +151,7 @@ function RosterDiffRows({ rows }: { readonly rows: readonly FleetRosterRow[] }) 
           data-fleet-roster-change={row.change}
         >
           <AccountLine account={row.account} />
-          <span
-            className={cn(
-              'ml-auto shrink-0 rounded-badge border px-2 py-0.5 text-meta font-semibold uppercase tracking-label',
-              CHANGE_TONE[row.change],
-            )}
-          >
+          <span className="kt-badge ml-auto shrink-0" data-tone={CHANGE_TONE[row.change]}>
             {CHANGE_LABEL[row.change]}
           </span>
         </li>
@@ -174,7 +177,7 @@ export function FleetRefusalAlert({ refusal }: { readonly refusal: FleetRefusalV
       data-fleet-refusal={refusal.kind}
     >
       <div className="flex items-center gap-2 text-ui font-semibold text-err">
-        <CircleAlert size={15} aria-hidden="true" />
+        <CircleAlert size={16} aria-hidden="true" />
         {REFUSAL_HEADLINE[refusal.kind] ?? 'The daemon refused'}
         {refusal.code === undefined ? null : (
           <code className="ml-auto font-mono text-meta text-err">{refusal.code}</code>
@@ -263,14 +266,18 @@ export function FleetChangeReview({
         </div>
         <p className="m-0 mt-1 text-ui font-semibold text-fg">{proposal.summary}</p>
         <dl className="m-0 mt-2 grid gap-x-4 gap-y-1 text-meta sm:grid-cols-[auto_minmax(0,1fr)]">
-          <dt className="kt-label m-0">Proposal</dt>
+          <dt className={EYEBROW}>Proposal</dt>
           {/* Wrapped, never truncated: this id is what the host mints the approval AGAINST, so it is
               the one fact a reader came for. */}
-          <dd className="m-0 break-all font-mono text-meta text-fg">{proposal.id}</dd>
-          <dt className="kt-label m-0">Expires</dt>
+          <dd className="m-0 min-w-0">
+            <FleetPath value={proposal.id} className="text-meta text-fg" />
+          </dd>
+          <dt className={EYEBROW}>Expires</dt>
           <dd className="m-0 font-mono text-meta text-muted">{absoluteTime(proposal.expiresAt)}</dd>
-          <dt className="kt-label m-0">Config revision</dt>
-          <dd className="m-0 truncate font-mono text-meta text-muted">{proposal.revision}</dd>
+          <dt className={EYEBROW}>Config revision</dt>
+          <dd className="m-0 min-w-0">
+            <FleetPath value={proposal.revision} className="text-meta text-muted" />
+          </dd>
         </dl>
       </header>
 
@@ -285,28 +292,28 @@ export function FleetChangeReview({
           </p>
           <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Directories created">
             {preview.scaffold.directories.map(directory => (
-              <li key={directory} className="truncate font-mono text-meta text-muted">
-                {directory}
+              <li key={directory} className="min-w-0">
+                <FleetPath value={directory} className="text-meta text-muted" />
               </li>
             ))}
           </ul>
           <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Files seeded">
             {preview.scaffold.files.map(file => (
-              <li key={file.path} className="truncate font-mono text-meta text-fg">
-                {file.path}
+              <li key={file.path} className="min-w-0">
+                <FleetPath value={file.path} className="text-meta text-fg" />
               </li>
             ))}
           </ul>
           <p className="m-0 mt-2 text-meta leading-base text-muted">
             Add to your shell profile afterwards:{' '}
-            <code className="font-mono text-meta text-fg">{preview.scaffold.pathEntry}</code>
+            <FleetPath value={preview.scaffold.pathEntry} className="text-meta text-fg" />
           </p>
         </section>
       ) : (
         <>
           <section className="border-b border-border-soft" aria-labelledby={id('-proposed-roster-heading')}>
             <div className="flex min-w-0 items-center gap-2 px-panel py-2">
-              <ArrowRight size={14} className="shrink-0 text-accent" aria-hidden="true" />
+              <ArrowRight size={16} className="shrink-0 text-accent" aria-hidden="true" />
               <h3 id={id('-proposed-roster-heading')} className="m-0 text-ui font-semibold text-fg">
                 Host after this change
               </h3>
@@ -316,7 +323,7 @@ export function FleetChangeReview({
 
           <section aria-labelledby={id('-ledger-heading')}>
             <div className="flex min-w-0 items-center gap-2 border-b border-border-soft px-panel py-2">
-              <ListOrdered size={14} className="shrink-0 text-accent" aria-hidden="true" />
+              <ListOrdered size={16} className="shrink-0 text-accent" aria-hidden="true" />
               <h3 id={id('-ledger-heading')} className="m-0 text-ui font-semibold text-fg">
                 Operation ledger
               </h3>
@@ -334,13 +341,13 @@ export function FleetChangeReview({
                   <span className="shrink-0 font-mono text-meta tabular-nums text-faint">
                     {String(entry.index).padStart(2, '0')}
                   </span>
-                  <span className="shrink-0 text-meta font-semibold uppercase tracking-label text-fg-soft sm:w-[10.5rem]">
-                    {entry.action}
-                  </span>
+                  <span className="shrink-0 text-meta font-semibold text-fg-soft sm:w-[10.5rem]">{entry.action}</span>
                   <span className="min-w-0 flex-1 basis-full pl-6 sm:basis-0 sm:pl-0">
-                    <code className="block break-all font-mono text-meta text-fg">{entry.path}</code>
+                    <FleetPath value={entry.path} className="block text-meta text-fg" />
                     {entry.source === undefined ? null : (
-                      <code className="block break-all font-mono text-meta text-muted">from {entry.source}</code>
+                      <span className="block min-w-0 text-meta text-muted">
+                        from <FleetPath value={entry.source} className="text-meta text-muted" />
+                      </span>
                     )}
                     {entry.details.length === 0 ? null : (
                       <span
@@ -366,9 +373,9 @@ export function FleetChangeReview({
                 {preview.plan.sharedHistory.map(history => (
                   <li key={history.kind} className="px-panel py-2 text-meta leading-base text-muted">
                     <span className="font-semibold text-fg-soft">{history.kind} history</span> · pool{' '}
-                    <code className="font-mono text-meta">{history.pool}</code> · {history.migrated} moved,{' '}
-                    {history.links} linked, {history.conflicts} kept as-is. This step runs AFTER the manifest is
-                    published and is not rolled back with it.
+                    <FleetPath value={history.pool} className="text-meta" /> · {history.migrated} moved, {history.links}{' '}
+                    linked, {history.conflicts} kept as-is. This step runs AFTER the manifest is published and is not
+                    rolled back with it.
                   </li>
                 ))}
               </ul>
@@ -380,7 +387,7 @@ export function FleetChangeReview({
       {preview.documents.length === 0 ? null : (
         <section className="border-t border-border-soft" aria-labelledby={id('-documents-heading')}>
           <div className="flex min-w-0 items-center gap-2 px-panel py-2">
-            <FileCog size={14} className="shrink-0 text-accent" aria-hidden="true" />
+            <FileCog size={16} className="shrink-0 text-accent" aria-hidden="true" />
             <h3 id={id('-documents-heading')} className="m-0 text-ui font-semibold text-fg">
               Files written outside the plan
             </h3>
@@ -396,7 +403,7 @@ export function FleetChangeReview({
                 key={document.path}
                 className="flex min-w-0 gap-3 border-t border-border-soft px-panel py-1.5 text-meta"
               >
-                <code className="min-w-0 flex-1 break-all font-mono text-fg">{document.path}</code>
+                <FleetPath value={document.path} className="min-w-0 flex-1 text-fg" />
                 <span className="shrink-0 tabular-nums text-muted">{document.bytes} B</span>
               </li>
             ))}
@@ -412,7 +419,7 @@ export function FleetChangeReview({
         >
           {proposal.assetEdits.map(edit => (
             <li key={edit.path} className="flex min-w-0 gap-3 px-panel py-1.5 text-meta">
-              <code className="min-w-0 flex-1 break-all font-mono text-fg">{edit.path}</code>
+              <FleetPath value={edit.path} className="min-w-0 flex-1 text-fg" />
               <span className="shrink-0 tabular-nums text-muted">{edit.bytes} B</span>
             </li>
           ))}
@@ -427,9 +434,9 @@ export function FleetChangeReview({
       >
         <div className="flex min-w-0 items-center gap-2">
           {authority === 'direct' ? (
-            <ShieldCheck size={15} className="shrink-0 text-ok" aria-hidden="true" />
+            <ShieldCheck size={16} className="shrink-0 text-ok" aria-hidden="true" />
           ) : (
-            <Lock size={15} className="shrink-0 text-accent" aria-hidden="true" />
+            <Lock size={16} className="shrink-0 text-accent" aria-hidden="true" />
           )}
           <h3 id={id('-authority-heading')} className="m-0 text-ui font-semibold text-fg">
             Host authority
@@ -455,10 +462,8 @@ export function FleetChangeReview({
               A paired browser cannot provision a host on the strength of having paired. Run this on the host to mint a
               single-use approval for <span className="font-semibold text-fg">this exact proposal</span>:
             </p>
-            <pre className="kt-code-block m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono text-code">
-              {command}
-            </pre>
-            <label className="kt-label mb-1 mt-3 block" htmlFor={id('-approval-code')}>
+            <pre className="kt-code-block m-0 mt-2 overflow-x-auto whitespace-pre font-mono text-code">{command}</pre>
+            <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-approval-code')}>
               Approval code
             </label>
             <input
@@ -472,7 +477,7 @@ export function FleetChangeReview({
               onChange={event => onCodeChange(event.target.value)}
             />
             <p className="m-0 mt-1 flex flex-wrap items-center gap-1 text-meta text-muted">
-              <Hourglass size={12} className="shrink-0" aria-hidden="true" />
+              <Hourglass size={14} className="shrink-0" aria-hidden="true" />
               {approvalOutstanding
                 ? `An approval is outstanding until ${absoluteTime(proposal.approval?.expiresAt)}.`
                 : `No approval is outstanding yet. A code lasts ${FLEET_APPROVAL_TTL_SECONDS} seconds, is single-use, and this proposal accepts ${FLEET_APPROVAL_MAX_ATTEMPTS} wrong ones before it stops taking any.`}
@@ -507,7 +512,7 @@ export function FleetChangeReview({
 function Reason({ label, text }: { readonly label: string; readonly text: string }) {
   return (
     <div className="mt-2">
-      <p className="kt-label m-0">{label}</p>
+      <p className={EYEBROW}>{label}</p>
       <pre className="m-0 mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base">
         {text}
       </pre>
@@ -520,13 +525,13 @@ function PathList({ label, paths }: { readonly label: string; readonly paths: re
   if (paths.length === 0) return null;
   return (
     <div className="mt-2">
-      <p className="kt-label m-0">
+      <p className={EYEBROW}>
         {label} ({paths.length})
       </p>
       <ul className="m-0 mt-1 list-none space-y-0.5 p-0">
         {paths.map(path => (
-          <li key={path} className="break-all font-mono text-meta">
-            {path}
+          <li key={path} className="min-w-0">
+            <FleetPath value={path} className="text-meta" />
           </li>
         ))}
       </ul>
@@ -573,7 +578,7 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
       {outcome.outcome === 'committed' ? (
         <>
           <p className="m-0 mt-2 text-meta leading-base">
-            Manifest published at <code className="break-all font-mono text-meta">{outcome.result.manifestPath}</code>
+            Manifest published at <FleetPath value={outcome.result.manifestPath} className="text-meta" />
           </p>
           {outcome.result.prunedWrappers.length > 0 ? (
             <p className="m-0 mt-2 text-meta leading-base">
@@ -584,8 +589,8 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
               preview, and the preview is gone the moment the change is applied. */}
           {outcome.result.sharedHistory.map(history => (
             <p key={history.kind} className="m-0 mt-2 text-meta leading-base">
-              {history.kind} history · pool <code className="break-all font-mono">{history.pool}</code> ·{' '}
-              {history.migrated} moved, {history.links} linked, {history.conflicts} kept as-is
+              {history.kind} history · pool <FleetPath value={history.pool} /> · {history.migrated} moved,{' '}
+              {history.links} linked, {history.conflicts} kept as-is
             </p>
           ))}
         </>
@@ -596,8 +601,8 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
           scaffold preview that also carried it is discarded when the change is applied. */}
       {outcome.outcome === 'initialized' ? (
         <>
-          <p className="kt-label m-0 mt-2">Add this to your shell profile</p>
-          <pre className="m-0 mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-meta leading-base">
+          <p className={cn(EYEBROW, 'mt-2')}>Add this to your shell profile</p>
+          <pre className="m-0 mt-1 overflow-x-auto whitespace-pre font-mono text-meta leading-base">
             {outcome.pathEntry}
           </pre>
           <PathList label="Created" paths={outcome.created} />
@@ -610,7 +615,7 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
         <>
           <Reason label="Why it stopped" text={outcome.reason} />
           <p className="m-0 mt-2 text-meta leading-base">
-            It stopped at <code className="break-all font-mono">{outcome.failedPath}</code>.
+            It stopped at <FleetPath value={outcome.failedPath} />.
           </p>
           <PathList label="Created" paths={outcome.created} />
           <PathList label="Kept, because they already existed" paths={outcome.kept} />
@@ -621,8 +626,8 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
       {outcome.outcome === 'committed' && outcome.result.backupResidue !== undefined ? (
         <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Moved-aside files left on the host">
           {outcome.result.backupResidue.map(path => (
-            <li key={path} className="break-all font-mono text-meta">
-              {path}
+            <li key={path} className="min-w-0">
+              <FleetPath value={path} className="text-meta" />
             </li>
           ))}
         </ul>
@@ -648,8 +653,11 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
             <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Content the rollback moved aside">
               {outcome.displaced.map(entry => (
                 <li key={entry.path} className="text-meta leading-base">
-                  <code className="break-all font-mono">{entry.path}</code> was not this apply's to delete, so it was
-                  moved to <code className="break-all font-mono">{entry.movedTo}</code>.
+                  {/* A TYPOGRAPHIC apostrophe, and not only for looks: the daemon-scope gate lexer reads
+                      a bare quote in JSX text as the start of a string literal, and the next {' '} closes it —
+                      every bracket after that point stops balancing and the gate reports itself desynced. */}
+                  <FleetPath value={entry.path} /> was not this apply’s to delete, so it was moved to{' '}
+                  <FleetPath value={entry.movedTo} />.
                 </li>
               ))}
             </ul>
@@ -657,12 +665,11 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
           <ul className="m-0 mt-2 list-none space-y-2 p-0" aria-label="Paths whose prior state could not be verified">
             {outcome.unrestored.map(entry => (
               <li key={entry.path} className="rounded-control border border-current/40 p-2">
-                <code className="block break-all font-mono text-meta font-semibold">{entry.path}</code>
+                <FleetPath value={entry.path} className="block text-meta font-semibold" />
                 <p className="m-0 mt-0.5 text-meta leading-base">{entry.reason}</p>
                 {entry.backup === undefined ? null : (
                   <p className="m-0 mt-0.5 text-meta leading-base">
-                    The only remaining copy of the original is at{' '}
-                    <code className="break-all font-mono">{entry.backup}</code>. Do not delete it.
+                    The only remaining copy of the original is at <FleetPath value={entry.backup} />. Do not delete it.
                   </p>
                 )}
               </li>

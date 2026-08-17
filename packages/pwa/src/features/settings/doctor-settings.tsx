@@ -65,12 +65,16 @@ export function DoctorSettings({
             check.status === 'present' ? CircleCheck : check.status === 'missing' ? CircleAlert : CircleMinus;
           const tone = check.status === 'missing' ? 'text-err' : check.status === 'present' ? 'text-ok' : 'text-muted';
           return (
-            <li key={check.name} className="rounded-control border border-border-soft bg-surface-2 px-3 py-2">
-              <div className={`flex items-center gap-2 text-ui font-semibold ${tone}`}>
-                <Icon size={15} aria-hidden="true" /> {check.name}
+            // `border-strong`, not `border-soft`: this row sits on `surface-2`, where the soft hairline
+            // is invisible and the list reads as one undifferentiated block.
+            <li key={check.name} className="rounded-control border border-border-strong bg-surface-2 px-3 py-2">
+              <div className={`flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold ${tone}`}>
+                <Icon size={15} className="shrink-0" aria-hidden="true" /> {check.name}
                 <span className="ml-auto text-meta font-normal text-faint">{check.requirement}</span>
               </div>
-              <p className="mb-0 mt-1 text-meta leading-base text-muted">
+              {/* `break-words` because a summary now carries an absolute path — `/opt/homebrew/bin/claude`
+                  is one unbreakable token, and at 390px an unbroken one scrolls the whole page sideways. */}
+              <p className="mb-0 mt-1 break-words text-meta leading-base text-muted">
                 {check.summary}. {check.impact}
               </p>
             </li>

@@ -160,6 +160,16 @@ reader, never persisted, and never screenshotted for real (committed captures us
 Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.
 
+The fleet's **New account** form fills itself in from what the host already knows, and the contract for
+that is [docs/harness-discovery.md](docs/harness-discovery.md). `GET /v1/fleet/harnesses` surfaces the
+`PATH` lookup the boot preflight has always done — the **same** resolver, never a second detector — plus
+the model each harness declares in its own settings file and the `CLAUDE.md`/`AGENTS.md` that host already
+has. Two rules make prefilling safe: **a prefilled value carries the file it came from or it is not
+sent** (a fallback says so and is the fleet package's own starter model, never an invented one), and
+**every prefilled field stays editable, losing its provenance note the moment somebody types over it**.
+A host with no harness on `PATH` is a warning and never a refusal, exactly as at boot. Nothing here
+writes: the form hands off to the existing review-and-authorize step at one call.
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

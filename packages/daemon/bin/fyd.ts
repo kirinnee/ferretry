@@ -78,8 +78,10 @@ import {
   HttpUsageSource,
   JournalGrantAudit,
   KeyedSerialExecutor,
+  harnessHomeLayouts,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
+  NodeHarnessHomeDocuments,
   NodeCatalog,
   NodeForeignHistoryFiles,
   NodePairingCryptography,
@@ -548,6 +550,8 @@ import {
   WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
+import { MAX_ASSET_FILE_BYTES } from '../src/lib/fleet/assets.ts';
+import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import { daemonVersion } from '../src/lib/version.ts';
 
@@ -4381,6 +4385,35 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
   const accounts = new ManifestAccountInventory(stateFiles, paths.fleetManifest);
   /**
+   * What this host can actually run: a published wrapper by its path, a harness command by name.
+   *
+   * `PATH` is read at the point of the lookup rather than left to the default, which is resolved once
+   * per process: a daemon whose environment gains a harness after it booted must see the harness this
+   * host has now, not the one its startup environment happened to hold. The wrapper half never
+   * consults `PATH` at all — a daemon under a service manager inherits no shell profile, so the
+   * fleet's bin directory is routinely absent from it while the wrappers are perfectly present.
+   *
+   * Declared BEFORE the fleet mount because three things now read it and they must read the same one:
+   * the boot preflight, the doctor report, and the account form's harness discovery. Two resolvers
+   * would be two answers to "is Claude Code installed here", and the form's answer is the one a person
+   * would then act on.
+   */
+  const executables: ExecutableResolverPort = {
+    resolve: name => Bun.which(name, { PATH: process.env.PATH }) ?? undefined,
+    runnable: path => {
+      try {
+        accessSync(path, fsConstants.X_OK);
+        // A DIRECTORY PASSES THE EXECUTE CHECK on every POSIX host — that bit means "may be entered"
+        // there, not "may be run" — so the file half is asked separately. It matters now that a
+        // declared search directory produces candidates: `<dir>/claude` being a directory would
+        // otherwise be reported as the harness, with an absolute path that could never launch.
+        return statSync(path).isFile();
+      } catch {
+        return false;
+      }
+    },
+  };
+  /**
    * ONE fleet mount for this daemon, held as a local because two things now read quota through it:
    * the admin route that answers `GET /v1/fleet/usage`, and the usage feed every session, the
    * advisor, quota-failover and every scraper read. A second mount would assemble a second collector,
@@ -4406,6 +4439,25 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // The same pinner the session file surface uses. A platform that cannot hand an open descriptor
     // to a path-only API fails here rather than falling back to a name that can be re-pointed.
     rootPinner: sessionRootPinner(),
+    /**
+     * What the account form fills itself in from: the same `PATH` resolver the preflight uses, this
+     * host's real harness homes, and a reader that may leave the state home to see them.
+     *
+     * Assembled per call rather than captured once, because every one of those facts can change while
+     * this daemon runs — somebody installs Claude Code, or edits the model in their settings — and a
+     * form that showed the state at boot would be confidently wrong for exactly the person who just
+     * fixed it. The ceiling comes from the asset rules so a document too large to be written is never
+     * offered as though it could be.
+     */
+    harnesses: {
+      report: async () =>
+        await readHarnessDiscovery({
+          layouts: harnessHomeLayouts(homedir()),
+          executables,
+          documents: new NodeHarnessHomeDocuments(),
+          maxDocumentBytes: MAX_ASSET_FILE_BYTES,
+        }),
+    },
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */
@@ -4420,30 +4472,6 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     namePrefix: DAEMON_NAME,
     remoteControlPrefix: DAEMON_NAME,
   });
-  /**
-   * What this host can actually run: a published wrapper by its path, a harness command by name.
-   *
-   * `PATH` is read at the point of the lookup rather than left to the default, which is resolved once
-   * per process: a daemon whose environment gains a harness after it booted must see the harness this
-   * host has now, not the one its startup environment happened to hold. The wrapper half never
-   * consults `PATH` at all — a daemon under a service manager inherits no shell profile, so the
-   * fleet's bin directory is routinely absent from it while the wrappers are perfectly present.
-   */
-  const executables: ExecutableResolverPort = {
-    resolve: name => Bun.which(name, { PATH: process.env.PATH }) ?? undefined,
-    runnable: path => {
-      try {
-        accessSync(path, fsConstants.X_OK);
-        // A DIRECTORY PASSES THE EXECUTE CHECK on every POSIX host — that bit means "may be entered"
-        // there, not "may be run" — so the file half is asked separately. It matters now that a
-        // declared search directory produces candidates: `<dir>/claude` being a directory would
-        // otherwise be reported as the harness, with an absolute path that could never launch.
-        return statSync(path).isFile();
-      } catch {
-        return false;
-      }
-    },
-  };
   /** SHA-256 hex, matching the digest the protocol client computes over the very same body text. */
   const payloadDigests: PayloadDigestPort = {
     hex: payload => createHash('sha256').update(payload, 'utf8').digest('hex'),

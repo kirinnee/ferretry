@@ -19,7 +19,7 @@
  *     exactly what happened while it was copied: the copy allowed `~`, `$HOME` and format controls.
  */
 
-import { fleetAssetRefProblem } from '@ferretry/protocol';
+import { fleetAssetRefProblem, type HarnessDiscovery, type HarnessDiscoveryReport } from '@ferretry/protocol';
 import type {
   FleetApplyOutcome,
   FleetAssetIndex,
@@ -32,7 +32,7 @@ import type {
   FleetWriteOperation,
 } from './fleet-api.ts';
 import type { GrantRefusalNotice } from '../../lib/grants.ts';
-import type { FleetHarnessKind, FleetHarnessView } from './fleet-model.ts';
+import { defaultFleetHarness, type FleetHarnessKind, type FleetHarnessView } from './fleet-model.ts';
 
 /** A read that either produced evidence or produced a stated refusal. There is no third answer. */
 export type FleetProbe<T> =
@@ -596,6 +596,25 @@ export const declaredLayer = (
   return undefined;
 };
 
+/**
+ * A field whose value came from the daemon's detection rather than from the person.
+ *
+ * TRACKED PER FIELD, because "this form filled itself in" is only safe if the screen can say WHICH
+ * parts it filled. A prefilled box nobody can distinguish from a typed one forces a person to re-check
+ * every field, which is exactly the work the prefill was supposed to remove — and if one of them is
+ * wrong, an indistinguishable prefill is worse than an empty box.
+ */
+export type FleetPrefilledField = 'models' | 'defaultModel' | 'instructionsPath' | 'instructionsText';
+
+/**
+ * Where each still-detected value came from, one checkable sentence per field.
+ *
+ * A key present means "this is still what detection put here"; a key absent means the person owns that
+ * field now. So this is both the provenance the screen renders AND the record of what may be refilled
+ * when the harness changes underneath it.
+ */
+export type FleetPrefillNotes = Readonly<Partial<Record<FleetPrefilledField, string>>>;
+
 export interface FleetAccountDraft {
   readonly harness: FleetHarnessKind;
   readonly name: string;
@@ -606,6 +625,7 @@ export interface FleetAccountDraft {
   readonly modelsText: string;
   readonly defaultModel: string;
   readonly layer: FleetLayerDraft;
+  readonly prefilled: FleetPrefillNotes;
 }
 
 export const emptyAccountDraft = (harness: FleetHarnessKind): FleetAccountDraft => ({
@@ -617,6 +637,7 @@ export const emptyAccountDraft = (harness: FleetHarnessKind): FleetAccountDraft 
   modelsText: '',
   defaultModel: '',
   layer: emptyLayerDraft(),
+  prefilled: {},
 });
 
 export const draftModels = (modelsText: string): readonly string[] =>
@@ -628,6 +649,416 @@ export const draftModels = (modelsText: string): readonly string[] =>
 /** The wrapper name the daemon will derive. Shown, never sent: identity stays server-derived. */
 export const derivedWrapper = (draft: FleetAccountDraft): string =>
   draft.variant === 'default' ? `${draft.harness}-${draft.name}` : `${draft.harness}-${draft.variant}-${draft.name}`;
+
+// ─── what the host detected, and what the person chose ─────────────────────────────────────────
+
+/**
+ * The directory a derived instructions document goes in.
+ *
+ * `instructions/` is where the fleet's own scaffold puts them and what the field's placeholder has
+ * always shown, so a derived path lands beside whatever is already there rather than inventing a
+ * second convention.
+ */
+const INSTRUCTIONS_DIRECTORY = 'instructions';
+
+/**
+ * The document a NEW account's instructions are written to, derived from the account being created.
+ *
+ * Empty while the account has no name. Deriving `instructions/claude-.md` from a half-typed form would
+ * be a fabricated path — and worse, a path that stops matching the account the moment the name lands.
+ */
+export const derivedInstructionsPath = (draft: FleetAccountDraft): string =>
+  draft.name.trim() === ''
+    ? ''
+    : `${INSTRUCTIONS_DIRECTORY}/${derivedWrapper({ ...draft, name: draft.name.trim() })}.md`;
+
+/** One harness's discovery, or `undefined` when this report says nothing about that kind. */
+export const discoveredHarness = (
+  discovery: HarnessDiscoveryReport | null,
+  kind: FleetHarnessKind,
+): HarnessDiscovery | undefined => discovery?.harnesses.find(harness => harness.kind === kind);
+
+/**
+ * What this host has, in the shape the ONE default-harness rule already consumes.
+ *
+ * The rule itself — Claude when both, otherwise Codex — is `defaultFleetHarness` and is deliberately
+ * not restated. What differs from `harnessEvidence` above is the EVIDENCE it reads: that one asks the
+ * published manifest which wrappers exist, this one asks the host which harness commands exist. Both
+ * are positive evidence, and they answer different questions — a machine with Claude Code installed and
+ * no account published has the second and none of the first, which is precisely the person adding their
+ * first account.
+ */
+export const harnessPathEvidence = (discovery: HarnessDiscoveryReport): readonly FleetHarnessView[] =>
+  discovery.harnesses.map(harness => ({
+    kind: harness.kind,
+    launchable: harness.command === undefined ? [] : [harness.command],
+    blocked: [],
+  }));
+
+/** What the host said about its harnesses, and what this form did about it. */
+export interface FleetHarnessDetection {
+  /** The harness to preselect, when there is positive evidence for one. Absent is never a guess. */
+  readonly harness?: FleetHarnessKind;
+  /** What was found, in one sentence, said out loud rather than silently applied. */
+  readonly detail: string;
+  /**
+   * No harness command resolved at all.
+   *
+   * The state a person most needs to be told, and the one this form used to hide: it would happily
+   * compose an account for a harness this host cannot launch, and nothing said so until a session
+   * failed to start. It is a WARNING and not a refusal, because installing a harness minutes later is
+   * ordinary and a form that blocked would be strictly worse than one that says what is missing.
+   */
+  readonly noneInstalled: boolean;
+}
+
+const HARNESS_LABEL: Readonly<Record<FleetHarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };
+
+export const harnessDetection = (discovery: HarnessDiscoveryReport | null): FleetHarnessDetection => {
+  if (discovery === null)
+    return {
+      detail: 'This daemon did not say which harnesses this host has, so nothing here was preselected.',
+      noneInstalled: false,
+    };
+  const installed = discovery.harnesses.filter(harness => harness.command !== undefined);
+  if (installed.length === 0)
+    return {
+      detail:
+        'Neither claude nor codex is on this host’s PATH. An account can still be declared here, but no session could start until the harness is installed on this machine.',
+      noneInstalled: true,
+    };
+  const preselected = defaultFleetHarness(harnessPathEvidence(discovery));
+  const found = installed.map(harness => `${harness.kind} at ${harness.command ?? ''}`).join(' and ');
+  return {
+    ...(preselected === undefined ? {} : { harness: preselected }),
+    // Both are NAMED when both are present, rather than one being chosen quietly: the rule is
+    // "prefer Claude", and a person who wanted the other one has to be able to see the choice was made.
+    detail:
+      installed.length === 1
+        ? `Detected ${found}.`
+        : `Detected ${found}. ${HARNESS_LABEL[preselected ?? 'claude']} is preselected; switch if you meant the other.`,
+    noneInstalled: false,
+  };
+};
+
+/** The one sentence a model box carries about where its contents came from. */
+const modelNote = (models: HarnessDiscovery['models']): string =>
+  models.origin === 'detected'
+    ? `Detected — read from ${models.source}.`
+    : `Not detected — ${models.source}. Check it before applying.`;
+
+const instructionsTextNote = (source: string, bytes: number): string =>
+  `Imported — ${source} (${String(bytes)} bytes). Edit it here; nothing is written until you review and authorize the change.`;
+
+const DERIVED_PATH_NOTE = 'Derived — from the wrapper name above. Choose another document, or edit the path.';
+
+/**
+ * Does the person own this field now?
+ *
+ * Two conditions, and both matter. No provenance means they have typed over whatever was there; a
+ * non-empty value means there is something of theirs to protect. A field they deliberately EMPTIED is
+ * not owned — which is what makes clearing the path box a way to get the derived default back, rather
+ * than a state the form can never leave.
+ *
+ * THE HARNESS IS NOT ONE OF THESE FIELDS. Ownership decides what a refill may overwrite, and the harness
+ * is what TRIGGERS a refill — asking whether it may be overwritten is a question with no meaning.
+ */
+const personOwns = (draft: FleetAccountDraft, field: FleetPrefilledField): boolean => {
+  if (draft.prefilled[field] !== undefined) return false;
+  switch (field) {
+    case 'models':
+      return draft.modelsText.trim() !== '';
+    case 'defaultModel':
+      return draft.defaultModel.trim() !== '';
+    case 'instructionsPath':
+      return draft.layer.instructions.path.trim() !== '';
+    default:
+      return draft.layer.instructions.text !== '';
+  }
+};
+
+const without = (notes: FleetPrefillNotes, field: FleetPrefilledField): FleetPrefillNotes => {
+  const next = { ...notes };
+  delete next[field];
+  return next;
+};
+
+/**
+ * Fill the fields the CHOSEN harness can speak for, leaving anything the person owns alone.
+ *
+ * Called when the harness changes, not on every keystroke. A refill that fought a person's typing would
+ * be the worst of both worlds, and the harness is the one field whose change genuinely invalidates the
+ * others: the model Codex reports is not a model a Claude account can serve.
+ */
+const withHarnessDetection = (
+  draft: FleetAccountDraft,
+  discovery: HarnessDiscoveryReport | null,
+  refill: ReadonlySet<FleetPrefilledField>,
+): FleetAccountDraft => {
+  const found = discoveredHarness(discovery, draft.harness);
+  if (found === undefined) return draft;
+  let next = draft;
+  if (refill.has('models')) {
+    next = {
+      ...next,
+      modelsText: found.models.ids.join('\n'),
+      prefilled: { ...next.prefilled, models: modelNote(found.models) },
+    };
+  }
+  if (refill.has('defaultModel')) {
+    next = {
+      ...next,
+      defaultModel: found.models.defaultModel,
+      prefilled: { ...next.prefilled, defaultModel: modelNote(found.models) },
+    };
+  }
+  if (refill.has('instructionsText')) {
+    const instructions = found.instructions;
+    next = {
+      ...next,
+      layer: {
+        ...next.layer,
+        instructions: { ...next.layer.instructions, text: instructions.found ? instructions.text : '' },
+      },
+      // A harness with no document to import leaves an empty box AND no claim about it. Keeping the
+      // previous harness's "imported from" beside empty text would be a false statement.
+      prefilled: instructions.found
+        ? { ...next.prefilled, instructionsText: instructionsTextNote(instructions.source, instructions.bytes) }
+        : without(next.prefilled, 'instructionsText'),
+    };
+  }
+  return next;
+};
+
+/** Keep the derived document name in step with the account, until the person names their own. */
+const withDerivedInstructionsPath = (draft: FleetAccountDraft): FleetAccountDraft => {
+  if (personOwns(draft, 'instructionsPath')) return draft;
+  const path = derivedInstructionsPath(draft);
+  return {
+    ...draft,
+    layer: { ...draft.layer, instructions: { ...draft.layer.instructions, path } },
+    // No path yet means no claim yet. A note beside an empty box would name a derivation that has not
+    // happened, because the account has no name to derive from.
+    prefilled:
+      path === ''
+        ? without(draft.prefilled, 'instructionsPath')
+        : { ...draft.prefilled, instructionsPath: DERIVED_PATH_NOTE },
+  };
+};
+
+/**
+ * Which harness to preselect, from the host when the host answered and from the published fleet when
+ * it did not.
+ *
+ * TWO GRADES OF EVIDENCE, and the weaker one is labelled as weaker. "This host has `claude` on its
+ * PATH" is what a new account actually needs; "this fleet already publishes a Claude account" is a
+ * second-hand inference that happens to be usually right, so it is used only when the first is
+ * unavailable and the sentence says which one is talking.
+ *
+ * A host that answered and has NOTHING installed does not fall through to the manifest. That would
+ * quietly restore a suggestion in the exact case the person most needs to be told nothing is there.
+ */
+export const accountHarnessDetection = (
+  discovery: HarnessDiscoveryReport | null,
+  published: readonly FleetManifestAccountView[],
+): FleetHarnessDetection => {
+  const host = harnessDetection(discovery);
+  if (discovery !== null) return host;
+  const fromManifest = defaultFleetHarness(harnessEvidence(published));
+  return fromManifest === undefined
+    ? host
+    : {
+        harness: fromManifest,
+        detail: `${host.detail} ${HARNESS_LABEL[fromManifest]} is preselected because this fleet already publishes an account for it — which is not evidence that this host can launch it.`,
+        noneInstalled: false,
+      };
+};
+
+/**
+ * The draft a form opens with: everything this host could answer, already answered.
+ *
+ * A daemon that said nothing about its harnesses produces the empty draft it always did — a form with
+ * no detection is the old form, not a form full of guesses.
+ */
+export const detectedAccountDraft = (
+  detection: FleetHarnessDetection,
+  discovery: HarnessDiscoveryReport | null,
+): FleetAccountDraft => {
+  // No note for the harness itself: the detection sentence is rendered once, above the whole form, and
+  // the selected chip carries the marker. A third statement of the same fact is noise.
+  const opened = emptyAccountDraft(detection.harness ?? 'claude');
+  return withDerivedInstructionsPath(
+    withHarnessDetection(opened, discovery, new Set(['models', 'defaultModel', 'instructionsText'])),
+  );
+};
+
+/**
+ * The draft after a person touched it.
+ *
+ * Three things happen here and nowhere else, because a screen is where they get quietly dropped:
+ * a field they edited stops claiming to be detected, a harness change refills what the OLD harness was
+ * speaking for, and the derived document name keeps up with the account until they name their own.
+ */
+export const reconcileAccountDraft = (
+  previous: FleetAccountDraft,
+  next: FleetAccountDraft,
+  discovery: HarnessDiscoveryReport | null,
+): FleetAccountDraft => {
+  let prefilled = next.prefilled;
+  if (next.modelsText !== previous.modelsText) prefilled = without(prefilled, 'models');
+  if (next.defaultModel !== previous.defaultModel) prefilled = without(prefilled, 'defaultModel');
+  if (next.layer.instructions.path !== previous.layer.instructions.path)
+    prefilled = without(prefilled, 'instructionsPath');
+  if (next.layer.instructions.text !== previous.layer.instructions.text)
+    prefilled = without(prefilled, 'instructionsText');
+  const claimed: FleetAccountDraft = { ...next, prefilled };
+  // Ownership is read from what they had BEFORE this edit: switching harness must not be taken as
+  // consent to overwrite the model list they typed a moment ago.
+  const refill = new Set<FleetPrefilledField>(
+    next.harness === previous.harness
+      ? []
+      : (['models', 'defaultModel', 'instructionsText'] as const).filter(field => !personOwns(previous, field)),
+  );
+  return withDerivedInstructionsPath(withHarnessDetection(claimed, discovery, refill));
+};
+
+// ─── more than one instructions document ────────────────────────────────────────────────────────
+
+/**
+ * Skills directories the configuration declares.
+ *
+ * Read so an instructions picker never offers a skill document. The alternative was a naming
+ * convention, which would be this browser guessing at what a path means; the configuration already
+ * states which directories hold skills, so it is asked instead.
+ */
+const declaredSkillsDirectories = (config: FleetConfigView | null): readonly string[] => {
+  const directories: string[] = [];
+  for (const agent of config?.agents ?? []) {
+    for (const route of Object.values(agent.routes)) {
+      const skills = route.layer?.skills;
+      if (typeof skills === 'string' && skills.trim() !== '') directories.push(skills.trim());
+    }
+  }
+  return directories;
+};
+
+/**
+ * Documents already in this fleet's asset tree that an account could use as its instructions.
+ *
+ * THE POINT OF THE FLEET HAVING MORE THAN ONE. A path per account meant every account got its own
+ * document whether or not it wanted one, and two accounts that should read the same house rules had to
+ * keep two copies in step by hand. These are the documents that exist; an account chooses one.
+ */
+export const instructionsAssets = (listed: readonly string[], config: FleetConfigView | null): readonly string[] => {
+  const skills = declaredSkillsDirectories(config);
+  return [...new Set(listed.filter(path => !skills.some(directory => path.startsWith(`${directory}/`))))].sort();
+};
+
+/** A new document at the derived path, seeded from this host's own instructions file. */
+export const IMPORTED_INSTRUCTIONS_CHOICE = 'new-imported';
+/** A new, empty document at the derived path. */
+export const BLANK_INSTRUCTIONS_CHOICE = 'new-blank';
+const EXISTING_INSTRUCTIONS_PREFIX = 'asset:';
+
+/** One option in the instructions picker. `value` is opaque: two options may write the same path. */
+export interface FleetInstructionsChoice {
+  readonly value: string;
+  readonly label: string;
+  /** What choosing this one means, shown for the SELECTED option rather than crowding the list. */
+  readonly detail: string;
+}
+
+const derivedLabel = (draft: FleetAccountDraft): string => {
+  const path = derivedInstructionsPath(draft);
+  return path === '' ? 'a new document for this account' : path;
+};
+
+export const instructionsChoices = (
+  draft: FleetAccountDraft,
+  discovery: HarnessDiscoveryReport | null,
+  assets: readonly string[],
+): readonly FleetInstructionsChoice[] => {
+  const found = discoveredHarness(discovery, draft.harness);
+  const importable = found?.instructions.found === true ? found.instructions : undefined;
+  return [
+    ...(importable === undefined
+      ? []
+      : [
+          {
+            value: IMPORTED_INSTRUCTIONS_CHOICE,
+            label: `New — ${derivedLabel(draft)}, imported`,
+            detail: instructionsTextNote(importable.source, importable.bytes),
+          },
+        ]),
+    {
+      value: BLANK_INSTRUCTIONS_CHOICE,
+      label: `New — ${derivedLabel(draft)}, empty`,
+      detail:
+        found === undefined || found.instructions.found
+          ? 'A new, empty document written at that path.'
+          : `A new, empty document: ${found.instructions.reason} (looked at ${found.instructions.source}).`,
+    },
+    ...assets.map(path => ({
+      value: `${EXISTING_INSTRUCTIONS_PREFIX}${path}`,
+      label: path,
+      detail:
+        'Already in this fleet’s asset tree. This account will read it, and an edit here rewrites the one document every account using it reads.',
+    })),
+  ];
+};
+
+/** Which option the draft currently corresponds to, so the control shows the truth. */
+export const instructionsChoiceValue = (draft: FleetAccountDraft, assets: readonly string[]): string => {
+  const path = draft.layer.instructions.path.trim();
+  if (path !== '' && assets.includes(path)) return `${EXISTING_INSTRUCTIONS_PREFIX}${path}`;
+  return draft.prefilled.instructionsText === undefined ? BLANK_INSTRUCTIONS_CHOICE : IMPORTED_INSTRUCTIONS_CHOICE;
+};
+
+/**
+ * The draft after choosing a document, and the path whose text must still be fetched.
+ *
+ * `load` is returned rather than performed: this module holds no client. An existing document arrives
+ * with EMPTY text on purpose — until the fetch lands, `unseenAssets` blocks staging, so a person cannot
+ * apply a change that would overwrite a document this browser has never seen.
+ */
+export const applyInstructionsChoice = (
+  draft: FleetAccountDraft,
+  value: string,
+  discovery: HarnessDiscoveryReport | null,
+): { readonly draft: FleetAccountDraft; readonly load?: string } => {
+  if (value.startsWith(EXISTING_INSTRUCTIONS_PREFIX)) {
+    const path = value.slice(EXISTING_INSTRUCTIONS_PREFIX.length);
+    return {
+      // Neither field claims to be detected any more: the person chose this document, and the derived
+      // name must stop overwriting the one they picked.
+      draft: {
+        ...draft,
+        prefilled: without(without(draft.prefilled, 'instructionsPath'), 'instructionsText'),
+        layer: { ...draft.layer, instructions: { path, text: '' } },
+      },
+      load: path,
+    };
+  }
+  const instructions = discoveredHarness(discovery, draft.harness)?.instructions;
+  const importing = value === IMPORTED_INSTRUCTIONS_CHOICE && instructions?.found === true;
+  // Both new-document options write the account's OWN document, so the path returns to the derived one
+  // even when the person had picked a shared asset a moment ago. Set rather than left to the helper:
+  // a path they had chosen counts as theirs, and the helper would correctly refuse to touch it.
+  const path = derivedInstructionsPath(draft);
+  return {
+    draft: {
+      ...draft,
+      layer: { ...draft.layer, instructions: { path, text: importing && instructions.found ? instructions.text : '' } },
+      prefilled: {
+        ...without(without(draft.prefilled, 'instructionsPath'), 'instructionsText'),
+        ...(path === '' ? {} : { instructionsPath: DERIVED_PATH_NOTE }),
+        ...(importing && instructions.found
+          ? { instructionsText: instructionsTextNote(instructions.source, instructions.bytes) }
+          : {}),
+      },
+    },
+  };
+};
 
 // ─── validation, against the SHARED asset grammar ─────────────────────────────────────────────
 
@@ -672,11 +1103,24 @@ const settingsProblem = (settingsText: string): string | null => {
   return asRecord(parsed) === undefined ? 'settings must be a JSON object' : null;
 };
 
-export const layerProblems = (layer: FleetLayerDraft): readonly string[] => {
+export interface FleetLayerProblemOptions {
+  /**
+   * The instructions path is DERIVED from an account name that does not exist yet.
+   *
+   * Without this, a form that opens with an imported document and no account name shows two problems —
+   * "name the provider account" and "name the file the instructions are written to" — and only the first
+   * is the person's to fix. The second is a consequence of it, and it points at a box whose contents they
+   * are not supposed to be typing. One cause, one sentence.
+   */
+  readonly instructionsPathPending?: boolean;
+}
+
+export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblemOptions = {}): readonly string[] => {
   const problems: string[] = [];
   const instructionsPath = layer.instructions.path.trim();
   if (instructionsPath === '') {
-    if (layer.instructions.text !== '') problems.push('name the file the instructions are written to');
+    if (layer.instructions.text !== '' && options.instructionsPathPending !== true)
+      problems.push('name the file the instructions are written to');
   } else {
     const problem = assetPathProblem(instructionsPath, 'the instructions path');
     if (problem !== null) problems.push(problem);
@@ -756,7 +1200,9 @@ export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigVie
     problems.push(`the default model "${defaultModel}" is not one of the models listed`);
   }
 
-  return [...problems, ...layerProblems(draft.layer)];
+  // The instructions path is derived from the account name, so an account with no name yet has no path
+  // to complain about: that absence is the missing NAME, which is already the first sentence above.
+  return [...problems, ...layerProblems(draft.layer, { instructionsPathPending: name === '' })];
 };
 
 // ─── drafts to a proposal request ─────────────────────────────────────────────────────────────

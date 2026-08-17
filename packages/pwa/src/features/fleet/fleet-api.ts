@@ -37,6 +37,9 @@ import {
   type FleetRefusalCode,
   FleetRefusalCodeSchema,
   type FleetWriteOperation,
+  type HarnessDiscovery,
+  type HarnessDiscoveryReport,
+  HarnessDiscoveryReportSchema,
   type IFyApiClient,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
@@ -60,6 +63,8 @@ export type {
   FleetProposalRequest,
   FleetProposalView,
   FleetWriteOperation,
+  HarnessDiscovery,
+  HarnessDiscoveryReport,
 };
 
 /** One account as the manifest summary records it. */
@@ -99,6 +104,16 @@ export const readFleetPermissions = async (client: FleetClient): Promise<FleetPe
 
 export const readFleetManifest = async (client: FleetClient): Promise<FleetManifestSummary> =>
   await client.request(`${FLEET_PATH}/accounts`, FleetManifestSummarySchema);
+
+/**
+ * What this HOST has, as opposed to what this fleet publishes.
+ *
+ * Read once when the account form opens, and read fresh: the daemon resolves `PATH` and the harness's
+ * own settings at the moment it is asked, so somebody who installs Claude Code and reopens the form is
+ * told what the machine has now rather than what it had when the daemon started.
+ */
+export const readFleetHarnesses = async (client: FleetClient): Promise<HarnessDiscoveryReport> =>
+  await client.request(`${FLEET_PATH}/harnesses`, HarnessDiscoveryReportSchema);
 
 export const readFleetConfig = async (client: FleetClient): Promise<FleetConfigView> =>
   await client.request(`${FLEET_PATH}/config`, FleetConfigViewSchema);
