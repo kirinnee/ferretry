@@ -5,7 +5,7 @@ title: Should the fleet's proposal flow become the capability system?
 
 # Should the fleet's proposal flow become the capability system?
 
-**Status: proposal. Nothing here is built, and this document deliberately changes no production code.**
+**Status: DECIDED by the owner. Nothing here is built yet, and this document changes no production code.**
 **Verified against `origin/main` at `27509573` (`Brew cask update for ferretry version v0.176.0`).** Every
 claim about current behaviour below cites a file and line at that commit.
 
@@ -15,7 +15,41 @@ It answers the owner's question:
 
 Short answer: **yes for half of it, and the other half must not be touched — but not for the reason you would
 expect.** The obstacle is not that the fleet is special. It is that the capability system, as it stands
-today, would say **yes** to the request the fleet exists to refuse.
+today, would say **yes** to the request the fleet exists to refuse. §0 records what the owner decided to do
+about that.
+
+---
+
+## 0. The decision, and what it overrides
+
+**Decided by the owner, 2026-08-17.** Verbatim:
+
+> fleert configure on should be default!
+
+This is the answer to §8's question, and it **overrules one half of §8's recommendation**. Recorded here at
+the top rather than at the end, because every later section was written before it and reads differently now.
+
+| §8 recommended                                                            | the owner decided                                           |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `fleet.configure` **default-OFF** for governed callers                    | **REJECTED** — it stays **default-ON**, like the other five |
+| per-change confirmation, bound to one exact diff, where a password exists | **ACCEPTED** — kept intact                                  |
+| the transaction half survives untouched                                   | **ACCEPTED**                                                |
+| the authorization half dissolves into the capability model                | **ACCEPTED**                                                |
+
+**The rejection is the more doctrinal answer, not a lapse from it, and §3.2 was wrong to imply otherwise.**
+`docs/grants.md:8-19` and `:59` already state that defaults are permissive and the operator password is the
+opt-in layer. Default-OFF for one capability would have made `fleet` the single exception to a rule the
+other five keep — the patchwork the owner has repeatedly ruled against, arriving in the disguise of caution.
+
+**On a passwordless machine there is therefore no fleet prompt at all.** Not a confirmation with nothing
+behind it: a control that cannot refuse is theatre, and this codebase is explicit that a refusal must name a
+remedy a person can actually perform (`grants/policy.ts:147-179`). Where a password exists, the per-change
+confirmation is real and is the operator password bound to that diff.
+
+**The consequence was put to the owner before they confirmed it, and they accepted it:** with the
+authorization half gone and no operator password set, a paired device can provision the host — writing
+executable wrappers into the user's home — with no per-change step. §5.1 states exactly what that exposes
+and what genuinely bounds it, and §6 records the one property that is lost outright rather than moved.
 
 ---
 
@@ -68,9 +102,13 @@ The fleet proposal flow is that sentence's exception. It is the one capability i
 to be default-permissive, and it built its own machinery to say so because the capability layer had no way
 to express it.
 
-**The unification is therefore possible only if the owner accepts one specific consequence: `fleet` becomes
-the capability whose remote `configure` is default-DENY.** Everything else in this document follows from
-that single decision. §7 states it as the decision to make.
+**The unification therefore forces a choice about that exception, and it cannot be made silently.** This
+document originally framed it as a single option — make `fleet` the capability whose remote `configure` is
+default-DENY — and §3.2 went as far as claiming there was no other answer. **That framing was too narrow and
+§3.2 is corrected there:** it assumed the exposure had to be prevented, and never enumerated the option of
+accepting it. The owner accepted it (§0). Everything below still describes the exposure exactly as measured;
+what changed is that it is now a known and agreed cost rather than a blocker, and §5.1 is where that cost is
+stated in full.
 
 ---
 
@@ -95,7 +133,7 @@ second:
 | a device may not write the fleet environment           | `fleet.ts:1049-1050`                                                   | authority                | yes — §3                                               |
 | approval is bound to ONE exact change                  | `proposals.ts:199-205`, `:224-248`                                     | authority                | **partly** — §3.2                                      |
 | approval expires in 120s, 5 wrong tries                | `protocol/fleet-authorization.ts:26-27`                                | authority                | yes, and it is already there twice — §3.1              |
-| a HUMAN agreed, not a script                           | `cli/src/lib/fleet/controller.ts:259-263`                              | authority                | **no** — §3.2                                          |
+| a HUMAN agreed, not a script                           | `cli/src/lib/fleet/controller.ts:259-263`                              | authority                | **no** — §6, an accepted loss                          |
 | the reviewed artifact is what lands                    | `proposals.ts:58-64`, `fleet.ts:550-552`                               | **transaction**          | no, and it must not try                                |
 | revision conflict refuses a moved config               | `fleet.ts:665-679`, `proposals.ts:53`                                  | **transaction**          | no                                                     |
 | `MISSING_CONFIG_REVISION` distinguishes absent fleet   | `proposals.ts:44`, `fleet.ts:506-512`                                  | **transaction**          | no                                                     |
@@ -161,7 +199,7 @@ over-merge, and it is the thing that would hand a phone the host.
 
 ---
 
-## 3. What the capability model already has, and the one thing it lacks
+## 3. What the capability model already has, and the two things it lacks
 
 ### 3.1 Three of the five authority properties are duplicates outright
 
@@ -210,7 +248,7 @@ locality by being _transcribed from the host's own terminal_. Nothing in the cap
 and nothing can: the model's own locality signal is carrier-derived and a remote caller never has it
 (`policy.ts:77-81`, `relay/tunnel.ts:331-332`).
 
-So on a passwordless machine there are exactly three options, and no fourth:
+So on a passwordless machine there are **four** options:
 
 1. **`fleet.configure` is OFF for governed callers by default.** A person at the machine turns it on — which
    is already the model's one-way door (`service.ts:223-231`). Remote apply then needs no per-change step,
@@ -218,31 +256,52 @@ So on a passwordless machine there are exactly three options, and no fourth:
 2. **Keep a host-transcribed code.** The `fy_fprop_` vocabulary survives and the owner's complaint stands.
 3. **Require an operator password before remote fleet configure is possible at all** — the password stops
    being optional for this one capability.
+4. **Accept the exposure.** `fleet.configure` stays permissive like the other five, a passwordless machine
+   gates nothing, and an operator who wants the per-change gate gets it by setting a password.
 
 (1) and (3) compose: default OFF, and turning it on is where the machine's owner is told what they are
-enabling. (2) is the status quo.
+enabling. (2) is the status quo. **(4) is what the owner chose — see §0.**
+
+> **Correction, left visible rather than edited away.** This section originally read "exactly three options,
+> and no fourth", and option 4 was the one it did not list. The omission was not an oversight of a mechanism
+> but of a stance: the enumeration silently assumed the exposure had to be _prevented_, so "accept it, and
+> keep the capability model's own defaults" was never on the page. That assumption was mine and not the
+> product's — `docs/grants.md:59-73` had already made the opposite choice for all six capabilities, and
+> `grants/policy.ts:15-40` says out loud that a paired device is trusted with `fleet.use` by default and that
+> pairing, not this layer, is where the decision is made. An enumeration that ends in "and no fourth" is a
+> claim about the whole space, and this one was wrong.
 
 ---
 
 ## 4. What a person sees afterwards
 
-Target state, assuming decision (1) from §3.2 plus the per-change confirmation when a password exists:
+Target state under the decision in §0 — option 4 plus the per-change confirmation wherever a password exists.
+There are exactly three things a person can meet, and the fleet no longer has a vocabulary of its own in any
+of them:
 
 **On the machine (loopback), which is the common case and the owner's complaint.** The Fleet panel shows the
 numbered change manifest exactly as it does now (`fleet-change-review.tsx`), and one **Apply** button. No
 `fy_fprop_` id on screen, no "Host authority" section, no command to copy, no code field, no hourglass, no
-120-second sentence — `fleet-change-review.tsx:424-501` and the `approval` arm of `AUTHORITY_COPY`
-(`fleet-configuration-surface.tsx:179-181`) are deleted. This is the same answer `isGovernedCaller` has
-given for every other capability since it shipped (`policy.ts:83-85`).
+120-second sentence — `fleet-change-review.tsx:424-501` (the `approval` arm at `:453-500`) and the `approval`
+arm of `AUTHORITY_COPY` (`fleet-configuration-surface.tsx:179-181`) are deleted. This is the same answer
+`isGovernedCaller` has given for every other capability since it shipped (`policy.ts:83-85`).
 
-**From a phone, with `fleet.configure` off.** The Fleet panel is read-only and says what the grants
-vocabulary already says everywhere else — the operator has not granted the UI permission to change this, and
-the remedy names the command (`policy.ts:169-170`). Turning it on is refused with the existing one-way-door
-sentence (`service.ts:264-268`). One vocabulary, and the fleet stops being the panel with its own words.
+**From a phone, on a machine with no operator password — the DEFAULT.** The same panel, the same single
+**Apply** button, and nothing else in the way. This is the case the decision changed: under the rejected
+recommendation the panel would have been read-only until somebody walked to the machine. There is
+deliberately **no prompt**, because there is no secret behind one — the capability layer already reports this
+state as `ungated` rather than `granted` precisely so a surface can say once, beside the control, that
+nothing is standing behind it (`policy.ts:120-126`). The honest UI here is that one sentence, not a dialog.
 
-**From a phone, with `fleet.configure` on and a password set.** The staged change is shown, and applying
-asks for the operator password — the same unlock prompt the grants surface already has, against this diff.
-No second code, no second lockout, no second TTL.
+**From a phone, on a machine with an operator password set.** The staged change is shown, and applying asks
+for the operator password — the same unlock prompt the grants surface already has, bound to this diff. No
+second code, no second lockout, no second TTL. This is the per-change confirmation, and it is the whole of
+what an operator buys by setting a password.
+
+**And if the operator has narrowed `fleet.configure` themselves,** the panel is read-only with the standard
+sentence and remedy (`policy.ts:169-170`), and turning it back on from that phone is refused by the existing
+one-way door (`service.ts:264-268`). Narrowing stays available to everyone, always, and never needs the
+password — revoking must never be harder than granting.
 
 **What stays on screen either way:** the numbered write manifest, the asset-edit list with byte counts, the
 staleness refusal when the host moved under the change, and every apply outcome
@@ -263,30 +322,88 @@ Four properties carry that today. Each survives, and here is the mechanism:
    boolean through `isGovernedCaller` and adds no new source. A `Host` header, an `x-forwarded-for` or a
    `127.0.0.1` in a URL must remain incapable of moving it, which is what
    `packages/daemon/tests/unit/grants/policy.test.ts:42-74` already pins.
-2. **Pairing alone is not provisioning.** Under (1) the grant is off, so a paired device is refused by the
-   capability layer — a **declared** refusal the UI can render before a click, rather than the invisible
-   inline `if` at `fleet.ts:1087`. This is strictly better observability for the same answer.
-3. **Widening is a local act.** Untouched, and it is what makes (1) safe: a governed caller can never turn
-   `fleet.configure` on, with or without the password (`service.ts:264-268`, `policy.ts:214-221`). A stolen
-   phone cannot restore an access its owner revoked.
+2. **Pairing alone is not provisioning — this one does NOT survive, and §0 accepted that.** It is the whole
+   content of the decision, so it is stated here rather than left implicit: on a default install a paired
+   device will be able to provision the host. See §5.1.
+3. **Widening is a local act.** Untouched (`service.ts:264-268`, `policy.ts:214-221`). A governed caller can
+   never turn a capability on, with or without the password, so a stolen phone cannot restore an access its
+   owner has revoked. Under the decision this is what makes revocation a real remedy rather than a
+   suggestion: an operator who revokes `fleet.configure` from the machine has shut a door the phone cannot
+   reopen.
 4. **An undetermined document refuses.** Untouched (`policy.ts:116`). A daemon that cannot read its grants
    does nothing with the fleet.
 
-**The honest cost, stated so it is agreed to rather than discovered.** Under (1) with no password, a phone
-whose operator has turned `fleet.configure` on can apply **any** number of fleet changes until the grant is
-revoked. Today it can apply exactly one, and only one a human transcribed a code for. **That is a real
-reduction in per-change control, and it is the price of one vocabulary.** Three things bound it: the grant
-is off by default; turning it on happens at the machine, where the person can be told exactly what they are
-enabling; and revocation is never gated (`policy.ts:206-212`, `service.ts:216-221`). Whether that trade is
-acceptable is the owner's call, not this document's — see §7.
+### 5.1 What the decision exposes, exactly
 
-**One property is lost outright and cannot be recovered:** "a human, not a script, agreed to this exact
-change" (`controller.ts:261-263`). A grant is a document; anything holding the credential acts on it. If
-that property is required, decision (2) — keep the code — is the only answer, and the friction stays.
+**Stated in full so it is agreed to rather than discovered.** With the authorization half dissolved and no
+operator password set — the default state of a fresh install — **any paired device can apply any number of
+fleet changes, with no per-change step.** A fleet apply writes executable wrappers into the user's home and
+`prune` removes files carrying Ferretry's marker (`fleet/src/lib/provisioning.ts:33`, `:85`), so this is
+arbitrary code execution on the host by a credential the daemon issued.
+
+Today that same device can apply **exactly one** change, and only one for which a human transcribed a code
+off the host's terminal. **The reduction in per-change control is real, it is larger than the rejected
+recommendation's, and the owner accepted it knowingly.**
+
+What genuinely bounds it, with the overclaims removed:
+
+- **Reaching the daemon at all requires pairing**, and a pairing code lives 120 seconds with a 5-attempt
+  budget (`protocol/src/lib/pairing.ts:8-9`). So the exposed case is not "any phone on the internet"; it is a
+  device that was deliberately paired, which in practice means **a lost or stolen already-paired device**, or
+  somebody who obtained a live code.
+- **Revocation is never gated and never harder than granting.** The `pairing` capability deliberately governs
+  device revocation on its `use` axis rather than `configure`, precisely so that nothing stands between a
+  person and a stolen phone at the moment it matters (`runtime/mounts/pairing.ts:77-88`), and one device's
+  access is taken away by `DELETE /v1/pair/devices/:deviceId` (`:211-223`).
+- **An operator who wants the per-change gate can have it** by setting a password, which is the model's
+  stated shape — the opt-in layer, not the default (`docs/grants.md:167`).
+
+**One bound that is NOT available, and must not be written into the threat model:** physical proximity.
+It would be natural to argue that pairing requires somebody near the machine, so an attacker had to be on the
+local network once. **That is no longer true at this commit.** `docs/relay-protocol.md:1071-1080` records
+relayed pairing as **built** and retires the previous "first contact is always direct" prohibition; `:1473-1486`
+names the error in the old reasoning — the out-of-band enrolment path was always the QR, which pins the
+daemon's fingerprint before any carrier is dialled. The remaining requirement is possession of a
+120-second code, and reading one aloud over a call satisfies it.
 
 ---
 
-## 6. Migration
+## 6. The accepted loss: "a human, not a script"
+
+**This is not a footnote and must not become one.** One property of the current design cannot be expressed in
+any capability form, is not being moved or replaced, and dies with the authorization half. The owner's
+decision is recorded against it here so that a later reader cannot mistake this change for pure
+simplification.
+
+**The property.** `fy fleet authorize` refuses `--json`, and the reason is stated where it is enforced:
+
+> an approval code is a bearer secret for the couple of minutes it lives, and a machine-readable mint is one
+> a script can spend without the human this approval exists to ask — `cli/src/lib/fleet/controller.ts:261-263`
+
+So today a fleet change applied from a browser requires **a person, at a terminal, reading a screen**. Not a
+credential — an act of attention that no automation holds. `fy fleet authorize` is the one verb in the CLI
+that refuses to be scriptable, and it refuses on purpose.
+
+**Why nothing in the capability model can carry it.** A grant is a document, and an unlock is a bearer token
+with a 300-second life (`protocol/src/lib/grants.ts:137`). Anything holding the credential can act on either,
+as many times as it likes, for as long as they last. The per-change confirmation that §0 keeps narrows _which
+change_ is authorised; it cannot make the authoriser a human rather than a process, because the only evidence
+it takes is a secret, and a secret in a config file is exactly what a script has. There is no version of
+"prove you are a person" available to this layer, and inventing one would be the second authority system all
+over again.
+
+**Status: accepted loss.** The owner decided (§0) that one vocabulary is worth more than this property. That
+is a legitimate trade — the property costs the friction the owner complained about in the first place, and it
+protects against a threat model (a script with the device credential and no human nearby) that the same
+decision has already accepted in a larger form via §5.1. It is recorded because a design that quietly drops
+its own strongest guarantee teaches the next reader that it never mattered.
+
+**If it is ever wanted back**, it cannot come back as a capability. It would have to return as what it is: an
+out-of-band act at the host, which is option 2 of §3.2 and brings the `fy_fprop_` vocabulary with it.
+
+---
+
+## 7. Migration
 
 **`fy fleet authorize` is shipped, and the route it dials is reached.** It is absent from
 `scripts/validate/route-agreement-allowlist.txt`, which means the gate currently sees agreement between the
@@ -327,28 +444,39 @@ too; leaving one behind fails the protocol suite rather than passing quietly.
 
 ---
 
-## 7. The decision this document asks for
+## 8. The decision, as asked and as answered
 
-The engineering is not the hard part. The trade is, and it cannot be made by a refactor:
+The engineering was never the hard part. The trade was, and it could not be made by a refactor:
 
-**Do we accept that `fleet.configure` for a caller who is not on this host becomes a grant that is turned on
-once at the machine, instead of an approval transcribed for each individual change?**
+**Do we accept that `fleet.configure` for a caller who is not on this host stops being an approval
+transcribed for each individual change?**
+
+**Answered: yes — and more fully than this document recommended.** §0 has the ruling and the exact
+verbatim wording. The two answers, and which one was taken:
 
 - **Yes** → the fleet joins the capability system completely. One vocabulary, one refusal grammar, one
-  unlock, no `fy_fprop_` ids on any screen. Per-change control is lost for remote callers, bounded by
-  default-off, local-only widening, and ungated revocation. §6 is the work.
+  unlock, no `fy_fprop_` ids on any screen. Per-change control is lost for remote callers. **TAKEN**, with
+  `fleet.configure` staying **default-ON** — so it is bounded by pairing, local-only widening and ungated
+  revocation (§5.1), but **not** by a default-off grant. §7 is the work.
 - **No** → the per-change approval is load-bearing and stays. Then the honest unification is the smaller one:
   keep the code for governed callers, but delete the four inline checks in favour of declared route axes so
   the refusal is visible to `GrantsView` and the UI can explain it before a click (§2.2), and align the two
-  refusal vocabularies. The owner's original complaint about friction is then answered only for loopback
-  callers, which is a strict subset of this and needs none of §6.
+  refusal vocabularies. **NOT taken.**
 
-**Recommendation: Yes, with (1) and (3) from §3.2 together** — `fleet.configure` default-OFF for governed
-callers, and the per-change confirmation retained as an operator-password step whenever a password exists.
-That gives one mental model, keeps the strongest available remote guarantee for operators who want it, and
-puts the decision where the model already puts every other one: at the machine, once, by the person who owns
-it. The reason it is not unconditional is §5's last paragraph — "a human, not a script" genuinely dies here,
-and somebody should say out loud that they are fine with that before the code is written.
+**What this document recommended, for the record, and where it was overruled.** The recommendation was yes
+with options (1) and (3) of §3.2 — `fleet.configure` default-OFF for governed callers plus the
+password-bound per-change confirmation. The owner kept the confirmation and rejected default-OFF. On
+reflection the rejection is the better reading of the product's own doctrine: the recommendation would have
+made `fleet` the one capability that starts closed, which is the exception-shaped patchwork the owner has
+consistently ruled against, and §3.2's enumeration had quietly excluded the option they chose.
+
+**What the recommendation was right about survives:** the authority/transaction split (§2), the per-change
+confirmation where a password exists (§3.2), and the insistence that the loss in §6 be named out loud rather
+than absorbed. That last one is why this section ends where it does — the decision is made, the cost is
+written down beside it, and the next reader can disagree with the trade without having to rediscover it.
+
+**Next: implementation is NOT authorised by this document.** §7 is the work; whether and when it happens is a
+separate call.
 
 ---
 
