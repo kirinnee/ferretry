@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { DaemonSettingsFrame } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import { FleetEnvironmentSettings } from '../../../../src/features/settings/fleet-environment-settings.tsx';
@@ -36,6 +36,12 @@ const selectValue = async (select: HTMLSelectElement, value: string): Promise<vo
 };
 
 const originalFetch = globalThis.fetch;
+const unavailableDaemonFetch = (async () => response({}, 503)) as unknown as typeof fetch;
+
+beforeEach(() => {
+  // The frame's sibling daemon panels are outside these environment assertions.
+  globalThis.fetch = unavailableDaemonFetch;
+});
 
 afterEach(() => {
   globalThis.fetch = originalFetch;

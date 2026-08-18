@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Composer, ComposerMarkdownPreview } from '../../src/components/composer.tsx';
+import {
+  Composer as ProductionComposer,
+  ComposerMarkdownPreview,
+  type ComposerProps,
+} from '../../src/components/composer.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { readMdComposePref, writeMdComposePref } from '../../src/lib/md-compose.ts';
+import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
 /** The preview is deferred so a phone does not re-parse Markdown per keystroke.
@@ -24,7 +29,23 @@ const type = (view: ReactTestRenderer, value: string): void => {
 
 const originalMarkdownPreference = readMdComposePref();
 
-afterEach(() => writeMdComposePref(originalMarkdownPreference));
+const renderers: ReactTestRenderer[] = [];
+const mounted = (element: Parameters<typeof render>[0]): ReactTestRenderer => {
+  const renderer = render(element);
+  renderers.push(renderer);
+  return renderer;
+};
+
+/** This suite is about composer presentation, never a daemon read. */
+const autocompleteFetch: DaemonFetch = async () => Response.json({}, { status: 500 });
+const Composer = (props: ComposerProps) => <ProductionComposer {...props} autocompleteFetcher={autocompleteFetch} />;
+
+afterEach(() => {
+  run(() => {
+    for (const renderer of renderers.splice(0)) renderer.unmount();
+  });
+  writeMdComposePref(originalMarkdownPreference);
+});
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
@@ -34,7 +55,7 @@ const daemon = daemonConnection({
 
 describe('ComposerMarkdownPreview', () => {
   test('renders Markdown in a named, bounded reader', () => {
-    const view = render(<ComposerMarkdownPreview text={'## Preview title\n\n**bold**'} />);
+    const view = mounted(<ComposerMarkdownPreview text={'## Preview title\n\n**bold**'} />);
 
     const preview = view.root.findByProps({ 'data-composer-markdown-preview': '' });
     expect(preview.props['aria-label']).toBe('Rendered Markdown preview');
@@ -44,7 +65,7 @@ describe('ComposerMarkdownPreview', () => {
   });
 
   test('renders nothing for a blank draft', () => {
-    const view = render(
+    const view = mounted(
       <div>
         <ComposerMarkdownPreview text={'  \n'} />
       </div>,
@@ -57,7 +78,7 @@ describe('ComposerMarkdownPreview', () => {
 describe('Composer Markdown preview wiring', () => {
   test('uses the session reference surface without replacing the textarea', async () => {
     writeMdComposePref('on');
-    const view = render(
+    const view = mounted(
       <ReferenceSurfaceProvider
         surface={{
           agentReferenceResolver: lookup =>
@@ -87,7 +108,7 @@ describe('Composer Markdown preview wiring', () => {
 
   test('empties the preview immediately when the draft is cleared, without waiting', async () => {
     writeMdComposePref('on');
-    const view = render(
+    const view = mounted(
       <Composer api={{ send: async () => undefined } as never} daemon={daemon} sessionId="session-a" />,
     );
 
@@ -103,7 +124,7 @@ describe('Composer Markdown preview wiring', () => {
 
   test('never paints another session’s draft, in the textarea or in the preview', async () => {
     writeMdComposePref('on');
-    const view = render(
+    const view = mounted(
       <Composer api={{ send: async () => undefined } as never} daemon={daemon} sessionId="session-a" />,
     );
 
@@ -124,7 +145,7 @@ describe('Composer Markdown preview wiring', () => {
   });
 
   test('gives the remove control its own 44px box rather than one that overlaps its neighbour', () => {
-    const view = render(
+    const view = mounted(
       <Composer api={{ send: async () => undefined } as never} daemon={daemon} sessionId="session-a" />,
     );
 
@@ -144,7 +165,7 @@ describe('Composer Markdown preview wiring', () => {
 
   test('renders authored HTML as text rather than as markup, in the preview and in the strip', async () => {
     writeMdComposePref('on');
-    const view = render(
+    const view = mounted(
       <Composer api={{ send: async () => undefined } as never} daemon={daemon} sessionId="session-a" />,
     );
 
@@ -160,7 +181,7 @@ describe('Composer Markdown preview wiring', () => {
   });
 
   test('removes exactly the token bytes a chip names, leaving the prose around it', () => {
-    const view = render(
+    const view = mounted(
       <Composer api={{ send: async () => undefined } as never} daemon={daemon} sessionId="session-a" />,
     );
 
@@ -176,7 +197,7 @@ describe('Composer Markdown preview wiring', () => {
 
   test('keeps the preview absent when Markdown composition is off', () => {
     writeMdComposePref('off');
-    const view = render(
+    const view = mounted(
       <Composer api={{ send: async () => undefined } as never} daemon={daemon} sessionId="session-a" />,
     );
     const textarea = view.root.findByType('textarea');

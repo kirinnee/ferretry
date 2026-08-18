@@ -57,6 +57,7 @@ import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
+import type { DaemonFetch } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
@@ -124,6 +125,8 @@ export interface SessionChatPageProps {
   readonly composerSuggestions?: ComposerSuggestionSwitches;
   /** Browser-local modal-editing preference for the composer textarea. */
   readonly composerVimMode?: boolean;
+  /** Carrier-bound transport for the composer's daemon-backed autocomplete. */
+  readonly composerFetch?: DaemonFetch;
   readonly onBack: (daemonId: string) => void;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
@@ -382,6 +385,7 @@ export function SessionChatPage({
   composerEnterKey,
   composerSuggestions,
   composerVimMode = false,
+  composerFetch,
   dictationSettings,
   onBack,
   onSessionChange,
@@ -831,6 +835,7 @@ export function SessionChatPage({
                   )}
                   <Composer
                     api={client}
+                    {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
                     {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
                     {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
                     {...(composerCatalogs.attention === undefined

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   InAppBrowserFrame,
   InAppBrowserLink,
@@ -24,6 +24,26 @@ const loopback: BrowserDestination = {
 
 const byLabel = (container: HTMLElement, label: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[aria-label="${label}"]`), `an element labelled ${label}`);
+
+let originalFetch: typeof fetch;
+const preventBrowserNavigation = (event: MouseEvent): void => {
+  if (event.target instanceof HTMLAnchorElement) event.preventDefault();
+};
+
+beforeEach(() => {
+  originalFetch = globalThis.fetch;
+  // Iframes belong to the browser integration, but this unit suite asserts the
+  // embedding contract rather than fetching a public host.
+  globalThis.fetch = (async () => new Response('browser fixture', { status: 200 })) as unknown as typeof fetch;
+  // Modified/download links deliberately retain browser semantics. Stop
+  // happy-dom from turning that default action into a real navigation request.
+  document.addEventListener('click', preventBrowserNavigation);
+});
+
+afterEach(() => {
+  document.removeEventListener('click', preventBrowserNavigation);
+  globalThis.fetch = originalFetch;
+});
 
 describe('the in-app frame', () => {
   it('sandboxes a remote page and sends no referrer', async () => {

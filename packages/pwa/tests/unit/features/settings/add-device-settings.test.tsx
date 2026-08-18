@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type {
   PairedDevice,
   PairedDevicesView,
@@ -23,9 +23,21 @@ const PAIRING_ID = `fy_pair_${'b'.repeat(22)}` as PairingId;
 const DEVICE_ID = `fy_device_id_${'c'.repeat(22)}`;
 const OTHER_DEVICE_ID = `fy_device_id_${'d'.repeat(22)}`;
 const NOW = Date.parse('2026-08-03T12:01:00.000Z');
+const originalFetch = globalThis.fetch;
+const unavailableDaemonFetch = (async () => Response.json({}, { status: 503 })) as unknown as typeof fetch;
 
 const connection = (id = DAEMON_ID) =>
   daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceToken: `token-${id}` });
+
+beforeEach(() => {
+  // Frame composition is the subject here; its other daemon tabs receive a
+  // deterministic unavailable transport instead of the host network.
+  globalThis.fetch = unavailableDaemonFetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 const code = {
   pairingId: PAIRING_ID,

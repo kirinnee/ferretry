@@ -759,6 +759,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           attention={attention}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
+          composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
           // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,

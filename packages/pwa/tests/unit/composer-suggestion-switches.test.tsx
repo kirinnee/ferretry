@@ -11,10 +11,11 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Composer } from '../../src/components/composer.tsx';
+import { Composer as ProductionComposer, type ComposerProps } from '../../src/components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../src/components/composer-autocomplete.ts';
 import type { ComposerSkillsCatalog } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
 const renderers: ReactTestRenderer[] = [];
@@ -33,6 +34,9 @@ const daemon = daemonConnection({
   deviceToken: 'token-a',
 });
 const api = { send: async () => undefined } as never;
+/** These switch assertions exercise menu policy; their daemon reads are fixtures. */
+const autocompleteFetch: DaemonFetch = async () => Response.json({}, { status: 500 });
+const Composer = (props: ComposerProps) => <ProductionComposer {...props} autocompleteFetcher={autocompleteFetch} />;
 
 const ALL_ON: ComposerSuggestionSwitches = {
   mentionSuggestions: true,

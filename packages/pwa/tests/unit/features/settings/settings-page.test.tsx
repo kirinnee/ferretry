@@ -1,5 +1,5 @@
 import type { ConnectionChoice } from '@ferretry/relay';
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
@@ -32,6 +32,8 @@ const daemon = (id: string, baseUrl: string, deviceToken: string, label?: string
 
 const alpha = daemon('daemon-alpha', 'https://alpha.example.test', 'alpha-secret', 'Alpha workstation');
 const beta = daemon('daemon-beta', 'https://beta.example.test', 'beta-secret');
+const originalFetch = globalThis.fetch;
+const unavailableDaemonFetch = (async () => Response.json({}, { status: 503 })) as unknown as typeof fetch;
 
 interface Callbacks {
   readonly selected: string[];
@@ -136,6 +138,13 @@ const settle = async (): Promise<void> => {
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/d/daemon-alpha/settings');
+  // These page-routing assertions mount daemon-owned tabs but do not exercise
+  // their transports. Keep each optional tab on an explicit unavailable fixture.
+  globalThis.fetch = unavailableDaemonFetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 describe('SettingsPage sections', () => {

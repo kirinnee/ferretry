@@ -11,11 +11,12 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Composer } from '../../src/components/composer.tsx';
+import { Composer as ProductionComposer, type ComposerProps } from '../../src/components/composer.tsx';
 import { DictationControl } from '../../src/components/dictation-control.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { composerQuoteTarget } from '../../src/lib/quote.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
+import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
@@ -33,6 +34,9 @@ const daemon = daemonConnection({
 });
 
 const api = { send: async () => undefined } as never;
+/** Keyboard arbitration has no daemon dependency; keep autocomplete local. */
+const autocompleteFetch: DaemonFetch = async () => Response.json({}, { status: 500 });
+const Composer = (props: ComposerProps) => <ProductionComposer {...props} autocompleteFetcher={autocompleteFetch} />;
 
 interface KeyOptions {
   readonly ctrlKey?: boolean;
