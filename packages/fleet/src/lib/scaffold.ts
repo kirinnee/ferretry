@@ -138,8 +138,20 @@ const configTemplate = (
 # generated script. Leave it out if you keep no secrets file.
 # secretsFile: ~/.secrets
 
+# The documents this fleet shares, by name. Declaring one here does not link any
+# account to it — it gives the path a name, so a surface can offer it, say how many
+# accounts use it, and switch one account between the shared document and its own
+# copy. Add a second name to give some accounts different instructions.
+shared:
+  memory:
+    default: ./CLAUDE.md
+  settings:
+    claude: ./templates/claude/settings.json
+    codex: ./templates/codex/config.toml
+
 # Reusable bundles of settings. A profile named "base" is applied to every account
-# before its own, which is the usual place for anything fleet-wide.
+# before its own, which is the usual place for anything fleet-wide. The base profile
+# is what makes the shared documents above the default for every account.
 profiles:
   base:
     # These neutral Ferretry starters make a newly declared account usable.
@@ -262,6 +274,17 @@ absolute path is used as written.
 
 No hooks, MCP servers or skills are installed by default. Those execute code or
 encode workflow preferences, so add only the ones you have chosen and reviewed.
+
+## Shared documents
+
+The \`shared:\` block in \`config.yaml\` gives a name to each document the fleet offers
+to every account — \`memory.default\` is the \`CLAUDE.md\` beside this README. Naming a
+document there changes nothing on its own: an account uses one by referencing it, and
+the base profile is what makes it the default for everybody.
+
+Declare a second name under \`memory:\` and you have two shared instruction documents,
+each account using whichever it references. An account that needs its own copy points
+at a path under \`accounts/<wrapper>/\`, which is what unlinking writes.
 
 ## How overriding works
 

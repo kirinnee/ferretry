@@ -3,6 +3,10 @@ import should from 'should';
 import {
   FleetApplyOutcomeSchema,
   FleetAssetListingSchema,
+  FleetAssetSharingSchema,
+  FleetLinkableFieldSchema,
+  FleetShareableFieldSchema,
+  FleetSharingSchema,
   FleetManifestSummarySchema,
   FleetMutationSchema,
   FleetProposalApplyRequestSchema,
@@ -382,5 +386,128 @@ describe('FleetApplyOutcomeSchema', () => {
 
     // Assert
     should(actual.success).be.true();
+  });
+});
+
+describe('FleetSharingSchema', () => {
+  const origin = { kind: 'base-profile', name: 'base' } as const;
+
+  const sharingOf = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    documents: [{ field: 'memory', name: 'default', path: './CLAUDE.md', accounts: [ACCOUNT_ID] }],
+    accounts: [
+      {
+        accountId: ACCOUNT_ID,
+        kind: 'claude',
+        wrapper: 'claude-kirin',
+        displayName: 'Kirin',
+        fields: {
+          memory: { state: 'shared', name: 'default', path: './CLAUDE.md', origin, referrers: 1 },
+          skills: { state: 'absent' },
+          hooks: { state: 'absent' },
+          hooksDir: { state: 'absent' },
+          mcp: { state: 'local', path: './own.json', origin: { kind: 'account' }, referrers: 1 },
+        },
+        settings: [{ position: 0, kind: 'inline', origin }],
+        linkable: ['memory', 'skills', 'mcp'],
+      },
+    ],
+    ...overrides,
+  });
+
+  it('should accept a report carrying every state a field can be in', () => {
+    // Act / Assert
+    should(FleetSharingSchema.parse(sharingOf())).match({ accounts: [{ fields: { memory: { referrers: 1 } } }] });
+  });
+
+  it('should refuse a field that resolves to a path no account refers to', () => {
+    // Arrange — an account resolving a path IS a referrer, so zero would mean the count and the value
+    // disagree, and a surface would render "shared with -1 other accounts".
+    const zero = sharingOf({
+      accounts: [
+        {
+          ...(sharingOf().accounts as Record<string, unknown>[])[0],
+          fields: {
+            memory: { state: 'shared', name: 'default', path: './CLAUDE.md', origin, referrers: 0 },
+            skills: { state: 'absent' },
+            hooks: { state: 'absent' },
+            hooksDir: { state: 'absent' },
+            mcp: { state: 'absent' },
+          },
+        },
+      ],
+    });
+
+    // Act / Assert
+    should(FleetSharingSchema.safeParse(zero).success).be.false();
+  });
+
+  it('should refuse an absent field that also claims a path', () => {
+    // Act / Assert — the states are a discriminated union, so "absent, but here is what it is" cannot be
+    // expressed at all rather than being accepted and rendered as a contradiction.
+    should(
+      FleetAssetSharingSchema.safeParse({ state: 'absent', path: './CLAUDE.md', origin, referrers: 1 }).success,
+    ).be.false();
+  });
+
+  it('should refuse a field name outside the linkable set', () => {
+    // Act / Assert — `settings` is shareable but never linkable, so it must not appear here.
+    should(FleetLinkableFieldSchema.safeParse('settings').success).be.false();
+    should(FleetShareableFieldSchema.safeParse('settings').success).be.true();
+  });
+});
+
+describe('the sharing mutations', () => {
+  it('should carry the shared document by name rather than by path', () => {
+    // Act
+    const parsed = FleetMutationSchema.parse({
+      kind: 'link-shared-asset',
+      accountId: ACCOUNT_ID,
+      field: 'memory',
+      name: 'default',
+    });
+
+    // Assert — a caller able to send a path would be choosing which of the host's files the next
+    // approved change copies into a home.
+    should(parsed).deepEqual({
+      kind: 'link-shared-asset',
+      accountId: ACCOUNT_ID,
+      field: 'memory',
+      name: 'default',
+    });
+    should(
+      FleetMutationSchema.safeParse({
+        kind: 'link-shared-asset',
+        accountId: ACCOUNT_ID,
+        field: 'memory',
+        path: './CLAUDE.md',
+      }).success,
+    ).be.false();
+  });
+
+  it('should let an unlink carry nothing but the account and the field', () => {
+    // Act / Assert — the destination and the content are derived on the host, so there is no field here
+    // for a caller to aim either one with.
+    should(
+      FleetMutationSchema.parse({ kind: 'unlink-shared-asset', accountId: ACCOUNT_ID, field: 'memory' }),
+    ).deepEqual({ kind: 'unlink-shared-asset', accountId: ACCOUNT_ID, field: 'memory' });
+    should(
+      FleetMutationSchema.safeParse({
+        kind: 'unlink-shared-asset',
+        accountId: ACCOUNT_ID,
+        field: 'memory',
+        content: 'anything',
+      }).success,
+    ).be.false();
+  });
+
+  it('should refuse a sharing mutation aimed at the layered settings field', () => {
+    // Act / Assert
+    should(
+      FleetMutationSchema.safeParse({
+        kind: 'unlink-shared-asset',
+        accountId: ACCOUNT_ID,
+        field: 'settings',
+      }).success,
+    ).be.false();
   });
 });

@@ -3,14 +3,16 @@ import should from 'should';
 import type { z } from 'zod';
 import {
   FLEET_PROPOSALS_PATH,
+  FLEET_SHARING_PATH,
   fleetAuthorizePath,
   ProtocolFleetAuthorizationGateway,
+  ProtocolFleetSharingGateway,
   ProtocolRecommendationGateway,
   RECOMMEND_PATH,
   RECOMMEND_TIMEOUT_MS,
 } from '../../../src/lib/fleet/gateway';
 import type { FleetApiClient } from '../../../src/lib/fleet/ports';
-import { approvalMint, PROPOSAL_ID, recommendation } from './fixtures';
+import { approvalMint, PROPOSAL_ID, recommendation, sharingReport } from './fixtures';
 
 interface Call {
   path: string;
@@ -178,5 +180,33 @@ describe('protocol fleet authorization gateway', () => {
 
     // Act + Assert
     await should(gateway.authorize(PROPOSAL_ID)).be.rejected();
+  });
+});
+
+describe('protocol fleet sharing gateway', () => {
+  it('should read the sharing report on the default deadline', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolFleetSharingGateway(fakeClient(sharingReport(), calls));
+
+    // Act
+    const actual = await gateway.sharing();
+
+    // Assert — a plain read: one address, an explicit GET so the route-agreement gate can prove the
+    // method, and no timeout of its own because it resolves one document and touches no provider.
+    should(calls[0]?.path).equal(FLEET_SHARING_PATH);
+    should(calls[0]?.init?.method).equal('GET');
+    should(calls[0]?.timeoutMs).be.undefined();
+    should(actual.documents[0]?.name).equal('default');
+  });
+
+  it('should parse the report against the shared contract rather than trusting it', async () => {
+    // Arrange — a daemon answering with a state the wire does not describe.
+    const gateway = new ProtocolFleetSharingGateway(
+      fakeClient({ documents: [], accounts: [{ accountId: 'not-a-uuid' }] }),
+    );
+
+    // Act / Assert
+    await should(gateway.sharing()).be.rejected();
   });
 });

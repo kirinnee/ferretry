@@ -449,24 +449,35 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // class of mid-apply failures into a refusal that never touched the host. It also closes a
     // data-loss hole: a copy used to clear its destination and only then discover its source.
     await this.previewOperations(plan.operations, sharedHistory);
-    await this.validateOperationInputs(plan.operations);
+    await this.validateOperationInputs(plan.operations, documents);
   }
 
   /**
    * Prove every source an operation will read is present and usable. Nothing is written and nothing
    * is destroyed, so a configuration naming a missing asset or an unparseable settings layer is
    * refused with the host exactly as it was.
+   *
+   * A source THIS APPLY WRITES is proved from the document rather than from the disk. Documents are
+   * written first and inside the same boundary, so by the time the operation runs the file is there —
+   * and a document write that failed aborts before any operation. Statting it here would refuse a
+   * change whose whole point is to create the asset it then copies: giving one account its own copy of
+   * a shared instructions file writes the copy and copies it into that account's home, in one apply.
    */
-  private async validateOperationInputs(operations: readonly FleetWriteOperation[]): Promise<void> {
+  private async validateOperationInputs(
+    operations: readonly FleetWriteOperation[],
+    documents: readonly FleetDocumentWrite[],
+  ): Promise<void> {
+    const pending = new Map(documents.map(document => [path.resolve(document.path), document.content]));
     for (const operation of operations) {
       if (operation.kind === 'copy') {
-        await stat(operation.source);
+        if (!pending.has(path.resolve(operation.source))) await stat(operation.source);
         continue;
       }
       if (operation.kind !== 'settings') continue;
       for (const layer of operation.layers) {
         if (layer.from === 'inline') continue;
-        parseSettings(await readFile(layer.path, 'utf8'), operation.format);
+        const written = pending.get(path.resolve(layer.path));
+        parseSettings(written ?? (await readFile(layer.path, 'utf8')), operation.format);
       }
     }
   }

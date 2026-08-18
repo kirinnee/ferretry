@@ -18,6 +18,8 @@
  * segment or separator in one would let a configuration write outside the directories it owns.
  */
 import { z } from 'zod';
+import type { AssetField } from './assets.ts';
+import { canonicalAssetReference } from './paths.ts';
 import { AccountIdSchema, AccountModeSchema, FleetManifestModelSchema, HarnessKindSchema } from './manifest.ts';
 import type { SchemaCapabilityDeclaration } from './unimplemented.ts';
 
@@ -89,6 +91,49 @@ export const EnvSchema = z.record(z.string(), EnvValueSchema).check(ctx => {
   }
 });
 export type EnvMap = z.infer<typeof EnvSchema>;
+
+/**
+ * The named documents this fleet offers as shared assets, per asset field.
+ *
+ * A shared asset has always been expressible — several accounts naming one path in the asset tree
+ * get one source copied into each home — but nothing *declared* which paths those were, so no
+ * consumer could tell "the shared default" from "a path this account happens to name". This registry
+ * is that declaration and nothing more: it gives paths names, so a surface can offer them, count who
+ * uses them, and say per account whether an asset is shared or account-local without inferring it.
+ *
+ * It confers no behaviour of its own. Registering a path does not link anybody to it, and an account
+ * still uses a shared document by naming it in the composition chain exactly as before. That is why
+ * declaring the registry is a safe migration for a host that already has one shared CLAUDE.md: every
+ * account that already referenced it becomes *recognised* as sharing it, and nothing moves on disk.
+ *
+ * Names are per field, so `settings` may hold one entry per harness — a Claude `settings.json` and a
+ * Codex `config.toml` are two documents and two names, never one shared file that both would fight
+ * over. See `sharing.ts` for what the names mean and which fields may be linked.
+ */
+const SharedDocumentsSchema = z.record(SafeNameSchema, NonEmptyString);
+
+/**
+ * Annotated over every asset field rather than spelled loosely: a newly added asset field is a
+ * compile error here instead of a field that silently can never be shared.
+ */
+const sharedAssetsShape: Readonly<Record<AssetField, typeof SharedDocumentsSchema>> = {
+  settings: SharedDocumentsSchema,
+  memory: SharedDocumentsSchema,
+  skills: SharedDocumentsSchema,
+  hooks: SharedDocumentsSchema,
+  hooksDir: SharedDocumentsSchema,
+  mcp: SharedDocumentsSchema,
+};
+
+export const SharedAssetsSchema = z.strictObject({
+  settings: sharedAssetsShape.settings.default({}),
+  memory: sharedAssetsShape.memory.default({}),
+  skills: sharedAssetsShape.skills.default({}),
+  hooks: sharedAssetsShape.hooks.default({}),
+  hooksDir: sharedAssetsShape.hooksDir.default({}),
+  mcp: sharedAssetsShape.mcp.default({}),
+});
+export type SharedAssets = z.infer<typeof SharedAssetsSchema>;
 
 /** A settings layer: a path to a base file, or an object of overrides to merge on top of one. */
 export const SettingsLayerSchema = z.union([NonEmptyString, z.record(z.string(), z.unknown())]);
@@ -311,6 +356,8 @@ export const FleetConfigSchema = z
      * Absent means no secrets file is sourced.
      */
     secretsFile: NonEmptyString.optional(),
+    /** Named shared documents, per asset field. Declarative only — see {@link SharedAssetsSchema}. */
+    shared: SharedAssetsSchema.prefault({}),
     profiles: z.record(NonEmptyString, ProfileSchema).default({}),
     variants: z.record(NonEmptyString, VariantSchema).prefault({ default: {} }),
     agents: z.array(AgentSchema).default([]),
@@ -331,6 +378,29 @@ export const FleetConfigSchema = z
     const push = (issue: { code: 'custom'; message: string; input: unknown; path: (string | number)[] }): void => {
       ctx.issues.push(issue);
     };
+
+    // Two names for one path would make "which shared document is this account linked to" a question
+    // with two answers, and the whole point of the registry is that it has one. Refused per field,
+    // because the same document legitimately serves two fields — one file can be both a memory
+    // document and, for another harness, nothing at all.
+    for (const [field, documents] of Object.entries(config.shared)) {
+      const owners = new Map<string, string>();
+      for (const [name, path] of Object.entries(documents)) {
+        // Compared canonically, so `./CLAUDE.md` and `CLAUDE.md` are caught as the one document they
+        // are rather than admitted as two names the sharing report would then disagree about.
+        const owner = owners.get(canonicalAssetReference(path));
+        if (owner !== undefined) {
+          push({
+            code: 'custom',
+            message: `shared ${field} "${name}" names the same document as "${owner}"; one path may carry only one shared name`,
+            input: path,
+            path: ['shared', field, name],
+          });
+          continue;
+        }
+        owners.set(canonicalAssetReference(path), name);
+      }
+    }
 
     const variantNames = new Set(Object.keys(config.variants));
     const profileNames = new Set(Object.keys(config.profiles));

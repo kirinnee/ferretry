@@ -42,6 +42,23 @@ export function expandAssetPath(value: string, userHome: string, assetsDirectory
   return expandPath(value, userHome, assetsDirectory);
 }
 
+/**
+ * One canonical spelling of a configured asset reference, so two spellings of one document compare
+ * equal.
+ *
+ * `./CLAUDE.md` and `CLAUDE.md` are the same file, and the starter configuration writes the first
+ * while a person editing it writes the second — so a raw string compare would report a fleet that
+ * shares one document as two accounts sharing nothing. This collapses exactly the differences that
+ * are decidable without a filesystem, which is why it lives here beside the other expansion rules.
+ *
+ * What it cannot decide is stated rather than hidden: `~/notes.md` and `/home/me/notes.md` may be one
+ * file, and nothing pure can know that. Two references reaching one document by different roots stay
+ * two documents to every caller of this.
+ */
+export function canonicalAssetReference(reference: string): string {
+  return normalize(reference);
+}
+
 /** Join a directory to a child name without doubling or dropping the separator. */
 export function joinPath(directory: string, name: string): string {
   return join(directory, name);

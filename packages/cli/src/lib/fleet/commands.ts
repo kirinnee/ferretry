@@ -101,6 +101,24 @@ export function registerFleetCommands(program: Command, controller: FleetControl
 
   scoped(
     fleet
+      .command('sharing')
+      .description('which documents this fleet shares, and which accounts use one rather than their own')
+      .addHelpText(
+        'after',
+        '\nA shared document is one several accounts reference: declare it under "shared:" in the\n' +
+          'configuration and it has a name, so this can say who is on it and the Fleet tab can offer it.\n\n' +
+          'Per account, each asset is either that shared document, its own copy, or nothing declared —\n' +
+          'and this says which slot supplied it, so you know where to edit. A path several accounts\n' +
+          'share without being declared is called out: that is a fleet sharing something it never said.\n\n' +
+          'It reads the daemon rather than resolving the configuration here, so this terminal and the\n' +
+          'browser cannot disagree about whether an account is sharing something.',
+      ),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.sharing(merged(command));
+  });
+
+  scoped(
+    fleet
       .command('login')
       .description('copy each provider login across the accounts that share it, then ask only for what is missing')
       .argument('[accountId...]', 'only the identities these accounts belong to; default is every identity')

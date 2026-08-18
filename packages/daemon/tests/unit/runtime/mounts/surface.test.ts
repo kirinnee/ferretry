@@ -129,6 +129,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     asset: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    sharing: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     propose: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -412,7 +415,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 128, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -466,6 +469,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/health',
       'POST /v1/fleet/apply',
       'GET /v1/fleet/permissions',
+      'GET /v1/fleet/sharing',
       'GET /v1/fleet/assets',
       'GET /v1/fleet/assets/:assetPath',
       'POST /v1/fleet/proposals',

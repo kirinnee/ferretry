@@ -69,7 +69,8 @@ export interface ResolvedCommand {
   readonly alias: string | undefined;
 }
 
-const asLayers = (settings: BaseProfile['settings']): readonly SettingsLayer[] =>
+/** One slot's settings field as a list, so concatenation is total. A single layer is a list of one. */
+export const settingsLayersOf = (settings: BaseProfile['settings']): readonly SettingsLayer[] =>
   settings === undefined ? [] : Array.isArray(settings) ? settings : [settings];
 
 /** Accumulated flat fields. `flags`/`settings` are always lists so concatenation is total. */
@@ -99,7 +100,7 @@ const emptyAccumulator = (): Accumulated => ({
 const applyLayer = (accumulated: Accumulated, layer: BaseProfile): Accumulated => ({
   env: { ...accumulated.env, ...(layer.env ?? {}) },
   flags: [...accumulated.flags, ...(layer.flags ?? [])],
-  settings: [...accumulated.settings, ...asLayers(layer.settings)],
+  settings: [...accumulated.settings, ...settingsLayersOf(layer.settings)],
   memory: layer.memory ?? accumulated.memory,
   skills: layer.skills ?? accumulated.skills,
   hooks: layer.hooks ?? accumulated.hooks,
@@ -111,17 +112,74 @@ const applyLayer = (accumulated: Accumulated, layer: BaseProfile): Accumulated =
  * Collapse one layer's harness overlay onto its own flat fields and drop both overlay blocks, so
  * the overlay wins within this slot only.
  */
-const flattenForKind = (layer: Profile, kind: HarnessKind): BaseProfile => {
+export const flattenForKind = (layer: Profile, kind: HarnessKind): BaseProfile => {
   const { claude, codex, ...flat } = layer;
   const overlay = kind === 'claude' ? claude : codex;
   return overlay === undefined ? flat : applyLayer(applyLayer(emptyAccumulator(), flat), overlay);
 };
 
-const namedProfiles = (config: FleetConfig, names: readonly string[]): readonly Profile[] =>
+/**
+ * Where one composition slot came from.
+ *
+ * Named, because "is this account's instructions the shared default or its own copy" is a question
+ * about *which slot supplied the value*, and a consumer that had to guess would be reading the
+ * precedence order a second time. Every slot except `account` is shared by construction: an agent's
+ * inline fields reach all of that agent's routes, and a profile reaches every agent that lists it.
+ */
+export type CompositionOrigin =
+  | { readonly kind: 'base-profile'; readonly name: string }
+  | { readonly kind: 'agent-profile'; readonly name: string }
+  | { readonly kind: 'variant-profile'; readonly name: string }
+  | { readonly kind: 'variant'; readonly name: string }
+  | { readonly kind: 'agent'; readonly name: string }
+  | { readonly kind: 'account' };
+
+/** One layer of the composition chain, with the slot that contributed it. */
+export interface CompositionSlot {
+  readonly origin: CompositionOrigin;
+  readonly layer: Profile;
+}
+
+const namedProfileSlots = (
+  config: FleetConfig,
+  names: readonly string[],
+  kind: 'agent-profile' | 'variant-profile',
+): readonly CompositionSlot[] =>
   names.flatMap(name => {
     const profile = config.profiles[name];
-    return profile === undefined ? [] : [profile];
+    // An unknown name is refused by the configuration schema's cross-reference check, so this is
+    // only ever reached by a caller that built a config value by hand rather than by parsing one.
+    return profile === undefined ? [] : [{ origin: { kind, name } as CompositionOrigin, layer: profile }];
   });
+
+/**
+ * The composition chain for one route, in precedence order, left overridden by right.
+ *
+ * The single owner of that order. {@link resolveAccounts} reduces it into flat fields and
+ * `sharing.ts` reduces it into provenance; two hand-written orderings would be two descriptions of
+ * one rule, and the one that drifted would report an account as sharing a document it does not use.
+ */
+export function compositionSlots(
+  config: FleetConfig,
+  agent: Agent,
+  variantName: string,
+  route: AccountRoute,
+): readonly CompositionSlot[] {
+  const baseProfile = config.profiles[BASE_PROFILE_NAME];
+  const variant = config.variants[variantName];
+  return [
+    ...(baseProfile === undefined
+      ? []
+      : [{ origin: { kind: 'base-profile', name: BASE_PROFILE_NAME } as CompositionOrigin, layer: baseProfile }]),
+    ...namedProfileSlots(config, agent.profiles ?? [], 'agent-profile'),
+    ...namedProfileSlots(config, variant?.profiles ?? [], 'variant-profile'),
+    ...(variant === undefined
+      ? []
+      : [{ origin: { kind: 'variant', name: variantName } as CompositionOrigin, layer: inlineOf(variant) }]),
+    { origin: { kind: 'agent', name: agent.name } as CompositionOrigin, layer: inlineOf(agent) },
+    ...(route.layer === undefined ? [] : [{ origin: { kind: 'account' } as CompositionOrigin, layer: route.layer }]),
+  ];
+}
 
 const inlineOf = (source: Agent | (Profile & { profiles?: readonly string[]; mode?: AccountMode })): Profile => {
   const { profiles: _profiles, ...rest } = source as Profile & { profiles?: readonly string[] };
@@ -160,24 +218,12 @@ const modelsOf = (route: AccountRoute): readonly FleetManifestModel[] =>
  */
 export function resolveAccounts(config: FleetConfig): readonly ResolvedAccount[] {
   const accounts: ResolvedAccount[] = [];
-  const baseProfile = config.profiles[BASE_PROFILE_NAME];
 
   for (const agent of config.agents) {
-    const agentInline = inlineOf(agent);
-
     for (const [variantName, route] of Object.entries(agent.routes)) {
       const variant = config.variants[variantName];
-      const slots: readonly Profile[] = [
-        ...(baseProfile === undefined ? [] : [baseProfile]),
-        ...namedProfiles(config, agent.profiles ?? []),
-        ...namedProfiles(config, variant?.profiles ?? []),
-        ...(variant === undefined ? [] : [inlineOf(variant)]),
-        agentInline,
-        ...(route.layer === undefined ? [] : [route.layer]),
-      ];
-
-      const resolved = slots.reduce(
-        (accumulated, slot) => applyLayer(accumulated, flattenForKind(slot, agent.kind)),
+      const resolved = compositionSlots(config, agent, variantName, route).reduce(
+        (accumulated, slot) => applyLayer(accumulated, flattenForKind(slot.layer, agent.kind)),
         emptyAccumulator(),
       );
 

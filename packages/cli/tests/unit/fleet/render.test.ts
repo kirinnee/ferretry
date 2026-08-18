@@ -7,6 +7,7 @@ import {
   renderApplyResult,
   renderFleetApplyFailure,
   renderFleetApproval,
+  renderFleetSharing,
   renderHealth,
   renderIdentityStatus,
   renderLoginResults,
@@ -32,6 +33,8 @@ import {
   ROLLED_BACK,
   recommendation,
   scaffoldResult,
+  sharingAccount,
+  sharingReport,
   usageRow,
   usageSnapshot,
 } from './fixtures';
@@ -1244,5 +1247,129 @@ describe('rendering residue and displacement a failed apply left behind', () => 
 
     // Assert
     should(actual).not.containEql('exclusive apply claim');
+  });
+});
+
+describe('rendering the sharing report', () => {
+  it('should say what is shared, who is on it, and where each value comes from', () => {
+    // Act
+    const actual = renderFleetSharing(sharingReport());
+
+    // Assert — the two questions a person has, in the order they ask them.
+    should(actual).containEql('Shared documents');
+    should(actual).containEql('memory/default  ./CLAUDE.md · 1 account');
+    should(actual).containEql('Claude (primary) (claude-primary, claude)');
+    should(actual).containEql('SHARED "default" · only this account');
+    should(actual).containEql('from the base profile');
+  });
+
+  it('should call out a path several accounts share without it being declared', () => {
+    // Arrange
+    const report = sharingReport({
+      documents: [],
+      accounts: [
+        {
+          accountId: ACCOUNT_ID,
+          kind: 'claude',
+          wrapper: 'claude-primary',
+          displayName: 'Claude (primary)',
+          fields: {
+            memory: {
+              state: 'local',
+              path: './CLAUDE.md',
+              origin: { kind: 'agent', name: 'primary' },
+              referrers: 3,
+            },
+            skills: { state: 'absent' },
+            hooks: { state: 'absent' },
+            hooksDir: { state: 'absent' },
+            mcp: { state: 'absent' },
+          },
+          settings: [
+            { position: 0, kind: 'inline', origin: { kind: 'variant', name: 'auto' } },
+            {
+              position: 1,
+              kind: 'document',
+              path: './base.json',
+              name: 'base',
+              origin: { kind: 'agent-profile', name: 'house' },
+              referrers: 2,
+            },
+          ],
+          linkable: ['memory'],
+        },
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — a fleet sharing something it never declared is a state to offer to fix, not one to hide.
+    should(actual).containEql('own copy · also used by 2 other accounts, undeclared');
+    should(actual).containEql('from the primary agent');
+    should(actual).containEql('[0] inline · from the auto lane');
+    should(actual).containEql('[1] SHARED "base"');
+    should(actual).containEql('This fleet declares no shared documents.');
+  });
+
+  it('should name a declared document nobody uses, and a fleet with no accounts', () => {
+    // Arrange
+    const report = sharingReport({
+      documents: [{ field: 'skills', name: 'default', path: './skills', accounts: [] }],
+      accounts: [],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — an offer nobody has taken up is exactly what a person wants to see.
+    should(actual).containEql('skills/default  ./skills · used by no account');
+    should(actual).containEql('This fleet declares no accounts.');
+  });
+
+  it('should call a genuinely private document an own copy and nothing more', () => {
+    // Arrange
+    const report = sharingReport({
+      documents: [],
+      accounts: [
+        sharingAccount({
+          fields: {
+            memory: {
+              state: 'local',
+              path: 'accounts/claude-primary/CLAUDE.md',
+              origin: { kind: 'account' },
+              referrers: 1,
+            },
+            skills: { state: 'absent' },
+            hooks: { state: 'absent' },
+            hooksDir: { state: 'absent' },
+            mcp: { state: 'absent' },
+          },
+          linkable: ['memory'],
+        }),
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — one account using its own document needs no adjective; "undeclared" belongs only to a
+    // path several accounts share without the fleet having said so.
+    should(actual).containEql('own copy');
+    should(actual).not.containEql('undeclared');
+    should(actual).containEql('accounts/claude-primary/CLAUDE.md · from this account');
+  });
+
+  it('should print an absent field as a dash rather than omitting the row', () => {
+    // Arrange
+    const report = sharingReport({
+      accounts: [sharingAccount({ linkable: ['memory', 'skills'] })],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — a row that is simply missing reads as "I did not look".
+    should(actual).match(/skills {3}—/u);
   });
 });

@@ -85,7 +85,11 @@ import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
-import { ProtocolFleetAuthorizationGateway, ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
+import {
+  ProtocolFleetAuthorizationGateway,
+  ProtocolFleetSharingGateway,
+  ProtocolRecommendationGateway,
+} from '../src/lib/fleet/gateway';
 import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
@@ -760,6 +764,7 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     // is no second selection mechanism and no registry that turns a name into a credential — FY_HOME
     // picks which local daemon, FY_URL plus FY_TOKEN picks a remote one, exactly as every other verb.
     authorizations: new ProtocolFleetAuthorizationGateway(client),
+    sharing: new ProtocolFleetSharingGateway(client),
     out: world.io,
   });
 }

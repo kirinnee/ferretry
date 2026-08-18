@@ -13,7 +13,7 @@ import type {
   FleetUsageSnapshot,
   HarnessKind,
 } from '@ferretry/fleet';
-import type { FleetApprovalMint, IFyApiClient } from '@ferretry/protocol';
+import type { FleetApprovalMint, FleetSharing, IFyApiClient } from '@ferretry/protocol';
 import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
 
 /**
@@ -129,6 +129,18 @@ export interface IRecommendationGateway {
  */
 export interface IFleetAuthorizationGateway {
   authorize(proposalId: string): Promise<FleetApprovalMint>;
+}
+
+/**
+ * Reading which documents this fleet shares and who uses one.
+ *
+ * Read from the daemon rather than derived here, even though this process could load the same
+ * configuration: the daemon owns the resolution the browser and this terminal both have to agree on,
+ * and a second derivation on this side is exactly the pair of descriptions that eventually disagrees
+ * about whether an account is sharing something.
+ */
+export interface IFleetSharingGateway {
+  sharing(): Promise<FleetSharing>;
 }
 
 /** The only client capability either fleet gateway consumes. */
