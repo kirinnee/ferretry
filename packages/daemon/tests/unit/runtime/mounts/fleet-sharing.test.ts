@@ -20,7 +20,7 @@ import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED } from './support.ts';
+import { CREDENTIALS, GRANTED, harnessDiscoveryReader } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-02-02T09:00:00.000Z');
 const CLAUDE_ID = '00000000-0000-4000-8000-0000000000d1';
@@ -53,6 +53,7 @@ async function fixture(): Promise<Fixture> {
     mintUuid: () => `00000000-0000-4000-8000-8${String(minted++).padStart(11, '0')}`,
     mintApprovalCode: () => 'AAAA-BBBB',
     rootPinner: new ProcfsSessionRootPinner(),
+    harnesses: harnessDiscoveryReader(),
   });
   const credentials = {
     ...CREDENTIALS,
