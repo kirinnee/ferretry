@@ -13,7 +13,7 @@ import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED } from './support.ts';
+import { CREDENTIALS, GRANTED, harnessDiscoveryReader } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
@@ -50,6 +50,7 @@ async function fixture(scaffolder?: FleetScaffolder): Promise<Fixture> {
     mintUuid: () => `00000000-0000-4000-8000-9${String(minted++).padStart(11, '0')}`,
     mintApprovalCode: () => 'AAAA-BBBB',
     rootPinner: new ProcfsSessionRootPinner(),
+    harnesses: harnessDiscoveryReader(),
   });
   const credentials = {
     ...CREDENTIALS,
@@ -860,6 +861,7 @@ describe('reading what a credential may do', () => {
       mintUuid: () => '00000000-0000-4000-8000-000000000002',
       mintApprovalCode: () => 'AAAA-BBBB',
       rootPinner: new ProcfsSessionRootPinner(),
+      harnesses: harnessDiscoveryReader(),
     });
 
     // Act
@@ -883,6 +885,7 @@ describe('reading what a credential may do', () => {
       mintUuid: () => '00000000-0000-4000-8000-000000000001',
       mintApprovalCode: () => 'AAAA-BBBB',
       rootPinner: new ProcfsSessionRootPinner(),
+      harnesses: harnessDiscoveryReader(),
     });
 
     // Act

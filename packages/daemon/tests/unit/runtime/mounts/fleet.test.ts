@@ -11,6 +11,7 @@ import {
   FleetManifestSchema,
   FleetUsageSnapshotSchema,
 } from '@ferretry/fleet';
+import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
 import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
@@ -20,7 +21,7 @@ import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, human } from './support.ts';
+import { CREDENTIALS, GRANTED, harnessDiscoveryReader, human } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
@@ -57,6 +58,7 @@ async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}
     mintApprovalCode: () => 'AAAA-BBBB',
     rootPinner: new ProcfsSessionRootPinner(),
     healthProbe: options.healthProbe,
+    harnesses: harnessDiscoveryReader(),
   });
   const credentials = {
     ...CREDENTIALS,
@@ -122,6 +124,7 @@ describe('the daemon fleet mount', () => {
       mintUuid: () => '00000000-0000-4000-8000-000000000001',
       mintApprovalCode: () => 'AAAA-BBBB',
       rootPinner: new ProcfsSessionRootPinner(),
+      harnesses: harnessDiscoveryReader(),
     }) as unknown as { healthProbe(): { probe: unknown } };
     should(subsystem.healthProbe().probe).be.a.Function();
   });
@@ -254,6 +257,39 @@ describe('the daemon fleet mount', () => {
     should(jsonBody(missing).error).match(/apply the fleet first/u);
     should(damaged.status).equal(409);
     should(jsonBody(damaged)).have.property('code', 'fleet_manifest_invalid');
+  });
+
+  it('should serve what this host has, held to the shared contract, without a published fleet', async () => {
+    // Arrange — NO manifest and NO config. This read is deliberately independent of both: somebody
+    // installing Claude Code for the first time has a host that knows something and a fleet that knows
+    // nothing, and they are exactly the person the account form has to fill itself in for.
+    const subject = await fixture();
+
+    // Act
+    const answer = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/harnesses', headers: human }));
+
+    // Assert — parsed through `HarnessDiscoveryReportSchema` on the way out, so this side fails loudly
+    // if the answer ever stops matching the shape the browser reads.
+    should(answer.status).equal(200);
+    const report = jsonBody(answer) as HarnessDiscoveryReport;
+    should(report.harnesses.map(harness => harness.kind)).deepEqual(['claude', 'codex']);
+    should(report.harnesses[0]?.command).equal('/usr/local/bin/claude');
+    should(report.harnesses[1]?.command).be.undefined();
+    should(report.noneInstalled).be.false();
+    should(answer.headers.get('cache-control')).match(/no-store/u);
+  });
+
+  it('should refuse the harness read to a credential that may not read the fleet', async () => {
+    // Arrange — the answer names absolute paths in somebody's home and the text of their instructions
+    // document, which is the same class of disclosure as a wrapper path. So it sits behind the same
+    // capability as every other fleet read rather than being quietly ungated because it is "just a probe".
+    const subject = await fixture();
+
+    // Act
+    const answer = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/harnesses' }));
+
+    // Assert
+    should(answer.status).equal(401);
   });
 
   it('should refuse an absent or damaged declared config before planning or applying', async () => {

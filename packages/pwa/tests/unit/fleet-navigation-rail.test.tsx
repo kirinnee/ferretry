@@ -13,6 +13,21 @@ const setViewport = (width: number): void => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
 };
 
+/**
+ * The width this file INHERITED, restored verbatim after every test.
+ *
+ * Bun runs the tier in one process against one happy-dom window, so `window.innerWidth` is shared by
+ * every FILE — and a file that hands back a hardcoded number is not restoring the window, it is DECIDING
+ * a width for everything that runs after it. That is the defect class that cost this repo two CI rounds
+ * on 2026-08-17: `agent-sidebar.test.tsx` left 390 behind and `AppBar` then rendered no destination row
+ * in a later file, while a leaked partial `matchMedia` made a terminal emulator throw
+ * `addListener is not a function`. Both were invisible locally, because the local discovery order differs.
+ *
+ * This file was the third instance — benign only because its hardcoded 1440 happened to match the
+ * ambient default. Capturing the real value keeps it benign on purpose rather than by luck.
+ */
+const inheritedWidth = window.innerWidth;
+
 const rail = (props: Partial<FleetNavigationRailProps> = {}) => (
   <FleetNavigationRail
     daemon={DAEMON}
@@ -30,7 +45,7 @@ const rail = (props: Partial<FleetNavigationRailProps> = {}) => (
 );
 
 afterEach(() => {
-  setViewport(1_440);
+  setViewport(inheritedWidth);
   document.body.replaceChildren();
 });
 

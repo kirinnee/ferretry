@@ -90,9 +90,23 @@ export interface FleetScaffoldIds {
   readonly codex: string;
 }
 
+/**
+ * The model a first account starts with, per harness.
+ *
+ * EXPORTED because a second consumer needs the same value: when a harness reports no model of its
+ * own, the account form offers this one and says out loud that it is Ferretry's starter rather than
+ * something the host declared. Two copies of a model identifier would drift the first time either
+ * moved, and the drift would be invisible in the worst way — a form offering a model no scaffold
+ * ever wrote, on an account that then claims to serve it.
+ */
+export const FLEET_STARTER_MODELS: Readonly<Record<HarnessKind, string>> = {
+  claude: 'claude-opus-5',
+  codex: 'gpt-5.6',
+};
+
 const starterAccount = (kind: HarnessKind, id: string): string => {
   const label = kind === 'claude' ? 'Claude' : 'Codex';
-  const model = kind === 'claude' ? 'claude-opus-5' : 'gpt-5.6';
+  const model = FLEET_STARTER_MODELS[kind];
   return `agents:
   - name: primary
     kind: ${kind}

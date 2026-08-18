@@ -3,7 +3,9 @@ import { describe, expect, it } from 'bun:test';
 import { fleetAssetRefProblem } from '@ferretry/protocol';
 import type { FleetRefusalKind } from '../../../../src/features/fleet/fleet-api.ts';
 import {
+  accountHarnessDetection,
   accountProblems,
+  applyInstructionsChoice,
   approvalCommand,
   assetPathProblem,
   CHANGE_LIMITS,
@@ -12,6 +14,7 @@ import {
   currentUnreadable,
   declaredLayer,
   derivedWrapper,
+  detectedAccountDraft,
   draftModels,
   editAccountProposal,
   emptyAccountDraft,
@@ -21,12 +24,16 @@ import {
   fleetAuthority,
   harnessEvidence,
   initializeProposal,
+  instructionsAssets,
+  instructionsChoices,
+  instructionsChoiceValue,
   layerDraftFrom,
   layerProblems,
   mayComposeChange,
   mayInitialize,
   operationLedger,
   outcomeSummary,
+  reconcileAccountDraft,
   rosterDiff,
   selectLayerAssets,
   unreadableAssetProblems,
@@ -34,11 +41,14 @@ import {
 } from '../../../../src/features/fleet/fleet-change-model.ts';
 import { defaultFleetHarness } from '../../../../src/features/fleet/fleet-model.ts';
 import {
+  absentCodex,
   account,
   accountId,
   assetIndex,
   config,
+  discovery,
   type FleetAccountFixture,
+  harness,
   manifest,
   permissions,
 } from './fleet-support.ts';
@@ -888,6 +898,414 @@ describe('account problems', () => {
   });
 });
 
+describe('the account form fills itself in from what the host has', () => {
+  const hostWith = (...harnesses: readonly ReturnType<typeof harness>[]) => discovery(harnesses);
+  const opened = (report = discovery(), published: readonly FleetAccountFixture[] = []): FleetAccountDraft =>
+    detectedAccountDraft(accountHarnessDetection(report, published), report);
+
+  it('preselects the only harness on this host and names where it was found', () => {
+    // Arrange — one harness installed. Preselecting is safe here precisely because the sentence says
+    // what was detected: a person can see the choice was made FOR them, and on what evidence.
+    const report = hostWith(harness(), absentCodex());
+
+    // Act
+    const detection = accountHarnessDetection(report, []);
+
+    // Assert
+    expect(detection.harness).toBe('claude');
+    expect(detection.detail).toBe('Detected claude at /usr/local/bin/claude.');
+    expect(detection.noneInstalled).toBe(false);
+  });
+
+  it('still preselects when BOTH are installed, and says both were found rather than choosing quietly', () => {
+    // Arrange — the rule is "prefer Claude", and it is the fleet package's one rule rather than a second
+    // copy of it. What must not happen is a silent choice: somebody who meant Codex has to see it.
+    const report = hostWith(harness(), absentCodex({ command: '/usr/bin/codex' }));
+
+    // Act
+    const detection = accountHarnessDetection(report, []);
+
+    // Assert
+    expect(detection.harness).toBe('claude');
+    expect(detection.detail).toContain('claude at /usr/local/bin/claude and codex at /usr/bin/codex');
+    expect(detection.detail).toContain('switch if you meant the other');
+  });
+
+  it('says plainly that NEITHER harness is installed, and preselects nothing', () => {
+    // Arrange — the state a person most needs told, and the one this form used to hide: it would happily
+    // configure an account for a harness no session on this host could launch.
+    const report = hostWith(harness({ command: undefined }), absentCodex());
+
+    // Act
+    const detection = accountHarnessDetection(report, []);
+
+    // Assert
+    expect(detection.noneInstalled).toBe(true);
+    expect(detection.harness).toBeUndefined();
+    expect(detection.detail).toContain('Neither claude nor codex is on this host’s PATH');
+    expect(detection.detail).toContain('no session could start until the harness is installed');
+  });
+
+  it('does NOT fall back to the published fleet when the host answered and has nothing installed', () => {
+    // Arrange — a fleet that publishes a Claude account on a host where Claude is gone. Falling back
+    // here would restore a suggestion in exactly the case the person needs the warning.
+    const report = hostWith(harness({ command: undefined }), absentCodex());
+
+    // Act
+    const detection = accountHarnessDetection(report, [account()]);
+
+    // Assert
+    expect(detection.harness).toBeUndefined();
+    expect(detection.noneInstalled).toBe(true);
+  });
+
+  it('falls back to the published fleet when the host read failed, and labels it as the weaker evidence', () => {
+    // Arrange — no discovery at all: an older daemon, or a refused read. Something still has to be
+    // preselected, and the sentence has to say it is an inference rather than a PATH lookup.
+    // Act
+    const detection = accountHarnessDetection(null, [account()]);
+
+    // Assert
+    expect(detection.harness).toBe('claude');
+    expect(detection.detail).toContain('did not say which harnesses this host has');
+    expect(detection.detail).toContain('not evidence that this host can launch it');
+    // With no fleet either, nothing is preselected and nothing is claimed.
+    expect(accountHarnessDetection(null, []).harness).toBeUndefined();
+  });
+
+  it('opens with the models and the default model the harness itself reports', () => {
+    // Act
+    const draft = opened();
+
+    // Assert — one model per line, exactly as a person would have typed them, and the default is the
+    // harness's own rather than the first item by accident.
+    expect(draft.modelsText).toBe('claude-opus-5\nclaude-sonnet-5');
+    expect(draft.defaultModel).toBe('claude-opus-5');
+    expect(draft.prefilled.models).toBe('Detected — read from /home/pilot/.claude/settings.json.');
+    expect(draft.prefilled.defaultModel).toBe('Detected — read from /home/pilot/.claude/settings.json.');
+    // And the draft it produces, once it has a name, is one the existing validation already accepts —
+    // reconciled, because that is what derives the document path the imported text is written to.
+    expect(accountProblems(reconcileAccountDraft(draft, { ...draft, name: 'studio' }, discovery()), declared)).toEqual(
+      [],
+    );
+  });
+
+  it('does not nag about a document path it derives itself from an account that has no name yet', () => {
+    // Arrange — the form as opened: an imported document and no account name. RED before this: it showed
+    // "name the file the instructions are written to" beside a box a person is not supposed to type in,
+    // and the real cause — the missing account name — was one line above it.
+    const draft = opened();
+
+    // Assert — one cause, one sentence.
+    expect(accountProblems(draft, declared)).toEqual(['name the provider account this lane belongs to']);
+    // The rule is about the DERIVED path only. A layer editor, where the path IS typed, still says so.
+    expect(layerProblems({ ...draft.layer, instructions: { path: '', text: 'body' } })).toEqual([
+      'name the file the instructions are written to',
+    ]);
+  });
+
+  it('labels a fallback model as NOT detected, carrying the reason the harness said nothing', () => {
+    // Arrange — Codex installed with no config.toml. A model box that cannot be filled blocks the form,
+    // so something is offered; what must never happen is offering it as though the host said it.
+    const report = hostWith(harness({ command: undefined }), absentCodex({ command: '/usr/bin/codex' }));
+
+    // Act
+    const draft = detectedAccountDraft(accountHarnessDetection(report, []), report);
+
+    // Assert
+    expect(draft.harness).toBe('codex');
+    expect(draft.modelsText).toBe('gpt-5.6');
+    expect(draft.prefilled.models).toContain('Not detected');
+    expect(draft.prefilled.models).toContain('there is no /home/pilot/.codex/config.toml on this host');
+  });
+
+  it('imports the instructions document this host already has, marked as imported and still editable', () => {
+    // Act
+    const draft = opened();
+
+    // Assert — the text is HERE, so the person sees what would be written before anything is written,
+    // and the note names the file it came from so the offer is checkable.
+    expect(draft.layer.instructions.text).toBe('# House rules\n');
+    expect(draft.prefilled.instructionsText).toContain('/home/pilot/.claude/CLAUDE.md');
+    expect(draft.prefilled.instructionsText).toContain('nothing is written until you review and authorize');
+  });
+
+  it('claims nothing about the contents when this host has no instructions document', () => {
+    // Arrange — an empty box is correct here. A note saying "imported from" beside it would be false.
+    const report = hostWith(harness({ instructions: { found: false, source: '/x/CLAUDE.md', reason: 'gone' } }));
+
+    // Act
+    const draft = detectedAccountDraft(accountHarnessDetection(report, []), report);
+
+    // Assert
+    expect(draft.layer.instructions.text).toBe('');
+    expect(draft.prefilled.instructionsText).toBeUndefined();
+  });
+
+  it('derives the instructions document name from the account, and only once it has one', () => {
+    // Arrange — the screenshot had a person typing `instructions/claude-studio.md` from nothing.
+    const draft = opened();
+
+    // Assert — nothing derived yet, because there is nothing to derive FROM. `instructions/claude-.md`
+    // would be a fabricated path that stops matching the account the moment a name lands.
+    expect(draft.layer.instructions.path).toBe('');
+    expect(draft.prefilled.instructionsPath).toBeUndefined();
+
+    // Act
+    const named = reconcileAccountDraft(draft, { ...draft, name: 'studio' }, discovery());
+
+    // Assert
+    expect(named.layer.instructions.path).toBe('instructions/claude-studio.md');
+    expect(named.prefilled.instructionsPath).toContain('Derived');
+    // It keeps up with the account: a lane and a harness are part of the wrapper name.
+    const relaned = reconcileAccountDraft(named, { ...named, variant: 'auto' }, discovery());
+    expect(relaned.layer.instructions.path).toBe('instructions/claude-auto-studio.md');
+  });
+
+  it('stops deriving the path the moment a person names their own, and starts again if they clear it', () => {
+    // Arrange
+    const named = reconcileAccountDraft(opened(), { ...opened(), name: 'studio' }, discovery());
+
+    // Act — their own path.
+    const theirs = reconcileAccountDraft(
+      named,
+      { ...named, layer: { ...named.layer, instructions: { ...named.layer.instructions, path: 'shared/rules.md' } } },
+      discovery(),
+    );
+    const renamed = reconcileAccountDraft(theirs, { ...theirs, name: 'atelier' }, discovery());
+
+    // Assert — the note is gone, and renaming the account no longer moves the document.
+    expect(theirs.prefilled.instructionsPath).toBeUndefined();
+    expect(renamed.layer.instructions.path).toBe('shared/rules.md');
+
+    // Act — clearing the box is a request for the default back, not a state the form can never leave.
+    const cleared = reconcileAccountDraft(
+      renamed,
+      { ...renamed, layer: { ...renamed.layer, instructions: { ...renamed.layer.instructions, path: '' } } },
+      discovery(),
+    );
+
+    // Assert
+    expect(cleared.layer.instructions.path).toBe('instructions/claude-atelier.md');
+  });
+
+  it('drops the provenance note for every field the person edits, and keeps the others', () => {
+    // Arrange — this is what makes "prefilled" honest: once they type, the value is theirs and a note
+    // claiming a source for it would be a lie.
+    const draft = opened();
+
+    // Act
+    const edited = reconcileAccountDraft(draft, { ...draft, modelsText: 'my-own-model' }, discovery());
+
+    // Assert
+    expect(edited.prefilled.models).toBeUndefined();
+    expect(edited.prefilled.defaultModel).toBe('Detected — read from /home/pilot/.claude/settings.json.');
+    expect(edited.prefilled.instructionsText).toContain('Imported');
+    // The harness itself carries no per-field note at all: the detection sentence is stated ONCE, above
+    // the whole form, and the selected chip carries the marker. A third copy of it was clutter.
+    expect(Object.keys(opened().prefilled)).not.toContain('harness');
+  });
+
+  it('refills the model and the imported document when the harness changes underneath them', () => {
+    // Arrange — the model Codex reports is not a model a Claude account can serve, so a harness change
+    // genuinely invalidates the fields the old harness was speaking for.
+    const report = hostWith(harness(), absentCodex({ command: '/usr/bin/codex' }));
+    const draft = detectedAccountDraft(accountHarnessDetection(report, []), report);
+
+    // Act
+    const switched = reconcileAccountDraft(draft, { ...draft, harness: 'codex' }, report);
+
+    // Assert
+    expect(switched.modelsText).toBe('gpt-5.6');
+    expect(switched.defaultModel).toBe('gpt-5.6');
+    // Codex has no AGENTS.md here, so the imported text goes AND so does the claim about it.
+    expect(switched.layer.instructions.text).toBe('');
+    expect(switched.prefilled.instructionsText).toBeUndefined();
+    // The derived name follows the harness too, because the wrapper name does.
+    const named = reconcileAccountDraft(switched, { ...switched, name: 'studio' }, report);
+    expect(named.layer.instructions.path).toBe('instructions/codex-studio.md');
+  });
+
+  it('never overwrites a model list the person typed, even when the harness changes', () => {
+    // Arrange — ownership is read from what they had BEFORE the change: switching harness is not consent
+    // to discard the models they just typed.
+    const report = hostWith(harness(), absentCodex({ command: '/usr/bin/codex' }));
+    const draft = detectedAccountDraft(accountHarnessDetection(report, []), report);
+    const theirs = reconcileAccountDraft(draft, { ...draft, modelsText: 'gpt-5.6-terra' }, report);
+
+    // Act
+    const switched = reconcileAccountDraft(theirs, { ...theirs, harness: 'codex' }, report);
+
+    // Assert
+    expect(switched.modelsText).toBe('gpt-5.6-terra');
+    expect(switched.prefilled.models).toBeUndefined();
+  });
+
+  it('keeps a default model the person picked when the harness changes, and says it no longer fits', () => {
+    // Arrange — they chose a specific default, then switched harness. Silently replacing their choice
+    // would be the one thing ownership exists to prevent; keeping it produces a problem they can SEE,
+    // which is the honest outcome of a value that is now for the wrong provider.
+    const report = hostWith(harness(), absentCodex({ command: '/usr/bin/codex' }));
+    const draft = detectedAccountDraft(accountHarnessDetection(report, []), report);
+    const chosen = reconcileAccountDraft(draft, { ...draft, defaultModel: 'claude-sonnet-5' }, report);
+
+    // Act
+    const switched = reconcileAccountDraft(chosen, { ...chosen, harness: 'codex' }, report);
+
+    // Assert
+    expect(switched.defaultModel).toBe('claude-sonnet-5');
+    expect(switched.modelsText).toBe('gpt-5.6');
+    expect(accountProblems({ ...switched, name: 'studio' }, declared)).toEqual([
+      'the default model "claude-sonnet-5" is not one of the models listed',
+    ]);
+  });
+
+  it('prefills nothing at all when the daemon said nothing, rather than guessing', () => {
+    // Arrange — no discovery. The old, unprefilled form is the correct answer here.
+    // Act
+    const draft = detectedAccountDraft(accountHarnessDetection(null, []), null);
+
+    // Assert
+    expect(draft.modelsText).toBe('');
+    expect(draft.defaultModel).toBe('');
+    expect(draft.layer.instructions.text).toBe('');
+    expect(draft.prefilled).toEqual({});
+    // And an edit against a null discovery still reconciles rather than throwing.
+    expect(reconcileAccountDraft(draft, { ...draft, name: 'studio' }, null).layer.instructions.path).toBe(
+      'instructions/claude-studio.md',
+    );
+  });
+});
+
+describe('a fleet with more than one instructions document', () => {
+  const listed = ['instructions/house-rules.md', 'instructions/claude-atelier.md', 'skills/studio/review.md'];
+
+  it('offers every asset that is not part of a declared skills directory', () => {
+    // Arrange — which directories hold skills is something the CONFIGURATION states, so it is asked
+    // rather than guessed from a naming convention.
+    const declaredWithSkills = config({
+      default: { id: account().id, wrapper: 'claude-studio', layer: { skills: 'skills/studio' } },
+    });
+
+    // Act
+    const offered = instructionsAssets(listed, declaredWithSkills);
+
+    // Assert — sorted, deduplicated, and with the skill document excluded.
+    expect(offered).toEqual(['instructions/claude-atelier.md', 'instructions/house-rules.md']);
+    // With no skills directory declared, nothing is excluded: the browser does not invent a convention.
+    expect(instructionsAssets(listed, config())).toHaveLength(3);
+    expect(instructionsAssets(['a.md', 'a.md'], null)).toEqual(['a.md']);
+  });
+
+  it('offers a new document — imported or empty — beside every document the fleet already has', () => {
+    // Arrange
+    const draft = { ...detectedAccountDraft(accountHarnessDetection(discovery(), []), discovery()), name: 'atelier' };
+
+    // Act
+    const choices = instructionsChoices(draft, discovery(), ['instructions/house-rules.md']);
+
+    // Assert
+    expect(choices.map(choice => choice.value)).toEqual([
+      'new-imported',
+      'new-blank',
+      'asset:instructions/house-rules.md',
+    ]);
+    expect(choices[0]?.label).toContain('instructions/claude-atelier.md');
+    expect(choices[0]?.detail).toContain('/home/pilot/.claude/CLAUDE.md');
+    expect(choices[2]?.detail).toContain('rewrites the one document every account using it reads');
+  });
+
+  it('does not offer an import when this host has no document to import', () => {
+    // Arrange — and the empty option says WHY there is nothing to import, rather than leaving a gap
+    // where a person would reasonably expect the offer they were promised.
+    const report = discovery([harness({ instructions: { found: false, source: '/x/CLAUDE.md', reason: 'gone' } })]);
+
+    // Act
+    const choices = instructionsChoices(emptyAccountDraft('claude'), report, []);
+
+    // Assert
+    expect(choices.map(choice => choice.value)).toEqual(['new-blank']);
+    expect(choices[0]?.detail).toContain('gone');
+    expect(choices[0]?.detail).toContain('/x/CLAUDE.md');
+    // With no account name yet, the label still reads as a sentence rather than a broken path.
+    expect(choices[0]?.label).toContain('a new document for this account');
+  });
+
+  it('reports which option the draft currently corresponds to', () => {
+    // Arrange
+    const assets = ['instructions/house-rules.md'];
+    const imported = detectedAccountDraft(accountHarnessDetection(discovery(), []), discovery());
+
+    // Act + Assert
+    expect(instructionsChoiceValue(imported, assets)).toBe('new-imported');
+    expect(instructionsChoiceValue({ ...imported, prefilled: {} }, assets)).toBe('new-blank');
+    expect(
+      instructionsChoiceValue(
+        { ...imported, layer: { ...imported.layer, instructions: { path: 'instructions/house-rules.md', text: '' } } },
+        assets,
+      ),
+    ).toBe('asset:instructions/house-rules.md');
+  });
+
+  it('points the account at an existing document with EMPTY text and asks for it to be read', () => {
+    // Arrange — the empty text is deliberate. Until the fetch lands, `unseenAssets` blocks staging, so a
+    // change cannot quietly replace somebody's house rules with nothing.
+    const draft = { ...detectedAccountDraft(accountHarnessDetection(discovery(), []), discovery()), name: 'atelier' };
+
+    // Act
+    const chosen = applyInstructionsChoice(draft, 'asset:instructions/house-rules.md', discovery());
+
+    // Assert
+    expect(chosen.load).toBe('instructions/house-rules.md');
+    expect(chosen.draft.layer.instructions).toEqual({ path: 'instructions/house-rules.md', text: '' });
+    // Neither field claims a source any more: the person chose this document, and the derived name must
+    // stop moving it.
+    expect(chosen.draft.prefilled.instructionsPath).toBeUndefined();
+    expect(chosen.draft.prefilled.instructionsText).toBeUndefined();
+    expect(
+      unseenAssets(chosen.draft.layer, { listed: ['instructions/house-rules.md'], loaded: [] }).map(
+        entry => entry.path,
+      ),
+    ).toEqual(['instructions/house-rules.md']);
+  });
+
+  it('returns to the account own derived document, imported or empty, and asks for no read', () => {
+    // Arrange — a person who picked a shared document and changed their mind.
+    const draft = { ...detectedAccountDraft(accountHarnessDetection(discovery(), []), discovery()), name: 'atelier' };
+    const shared = applyInstructionsChoice(draft, 'asset:instructions/house-rules.md', discovery()).draft;
+
+    // Act
+    const imported = applyInstructionsChoice(shared, 'new-imported', discovery());
+    const blank = applyInstructionsChoice(shared, 'new-blank', discovery());
+
+    // Assert — the path moves BACK to the derived one in both cases, which is what "new document" means.
+    expect(imported.load).toBeUndefined();
+    expect(imported.draft.layer.instructions).toEqual({
+      path: 'instructions/claude-atelier.md',
+      text: '# House rules\n',
+    });
+    expect(imported.draft.prefilled.instructionsText).toContain('Imported');
+    expect(blank.draft.layer.instructions).toEqual({ path: 'instructions/claude-atelier.md', text: '' });
+    // And the empty option makes NO claim about contents it did not fill in.
+    expect(blank.draft.prefilled.instructionsText).toBeUndefined();
+    expect(blank.draft.prefilled.instructionsPath).toContain('Derived');
+  });
+
+  it('cannot import for a harness that has nothing to import, even if asked to', () => {
+    // Arrange — the option is not offered in that state, but a stale value arriving from a control must
+    // fall back to an empty document rather than to a claim about a file that is not there.
+    const report = discovery([harness({ instructions: { found: false, source: '/x/CLAUDE.md', reason: 'gone' } })]);
+    const draft = { ...emptyAccountDraft('claude'), name: 'atelier' };
+
+    // Act
+    const chosen = applyInstructionsChoice(draft, 'new-imported', report);
+
+    // Assert
+    expect(chosen.draft.layer.instructions.text).toBe('');
+    expect(chosen.draft.prefilled.instructionsText).toBeUndefined();
+  });
+});
+
 describe('drafts become one named mutation', () => {
   it('sends create with the derived fields, the layer and its asset text', () => {
     const request = createAccountProposal({
@@ -906,6 +1324,7 @@ describe('drafts become one named mutation', () => {
         env: [{ id: '1', name: ' FY_LANE ', value: 'studio' }],
         preserved: {},
       },
+      prefilled: {},
     });
     expect(request.mutation).toEqual({
       kind: 'create-account',

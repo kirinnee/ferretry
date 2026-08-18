@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 
@@ -11,6 +11,7 @@ import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../../../support/dom.ts';
 import {
   absent,
+  absentCodex,
   account,
   accountId,
   area,
@@ -19,7 +20,9 @@ import {
   chooser,
   click,
   config,
+  discovery,
   field,
+  harness,
   manifest,
   permissions,
   pick,
@@ -45,6 +48,8 @@ interface Script {
   permissions?: () => unknown;
   accounts?: () => unknown;
   config?: () => unknown;
+  /** What this HOST has. Scripted by default, because every account form now opens from it. */
+  harnesses?: () => unknown;
   assets?: () => unknown;
   asset?: (path: string) => unknown;
   propose?: (body: unknown) => unknown;
@@ -65,6 +70,7 @@ const fakeDaemon = (script: Script) => {
     if (tail === '/permissions') return (script.permissions ?? (() => permissions()))();
     if (tail === '/accounts') return (script.accounts ?? (() => manifest()))();
     if (tail === '/config') return (script.config ?? (() => config()))();
+    if (tail === '/harnesses') return (script.harnesses ?? (() => discovery()))();
     if (tail === '/assets') return (script.assets ?? (() => ({ files: [], complete: true })))();
     if (tail.startsWith('/assets/')) {
       if (script.asset === undefined) throw new Error(`no asset scripted for ${tail}`);
@@ -91,12 +97,25 @@ const fakeDaemon = (script: Script) => {
   return { client, calls, paths: () => calls.map(call => call.path) };
 };
 
+/**
+ * Every surface this file mounts, unmounted whether or not its test got as far as saying so.
+ *
+ * A failing assertion skips the explicit `unmount()`, and the leaked root keeps rendering into a live
+ * document — so the next test fails too and the real failure is buried under consequences of it.
+ */
+const live: Awaited<ReturnType<typeof mount>>[] = [];
+
+afterEach(async () => {
+  for (const mounted of live.splice(0)) await mounted.unmount().catch(() => undefined);
+});
+
 const open = async (script: Script, connection = laptop) => {
   const daemon = fakeDaemon(script);
   const mounted = await mount(
     <FleetConfigurationSurface connection={connection} createClient={async () => daemon.client} />,
   );
-  // The first read is three awaited round trips deep; one more flush settles them all.
+  live.push(mounted);
+  // The first read is several awaited round trips deep; one more flush settles them all.
   await interact(() => undefined);
   return { ...mounted, daemon };
 };
@@ -269,13 +288,134 @@ describe('creating an account', () => {
     await choose(chooser(surface.container, '-account-default-model'), 'claude-opus-5');
   };
 
-  it('suggests the harness the existing evidence points at, without restating the policy', async () => {
-    const surface = await open({ accounts: () => manifest([account({ kind: 'codex', wrapper: 'codex-only' })]) });
+  it('falls back to the published fleet for the harness when the host read was refused, and says so', async () => {
+    // Arrange — an older daemon, or a credential refused the harness read. Something still has to be
+    // preselected, and the sentence has to say it is an inference off the manifest rather than a PATH
+    // lookup on this machine.
+    const surface = await open({
+      accounts: () => manifest([account({ kind: 'codex', wrapper: 'codex-only' })]),
+      harnesses: () => {
+        throw refusal('fleet_asset_refused', 'this credential may not read the fleet');
+      },
+    });
     await click(pick(surface.container, '[data-fleet-start-create]'));
     expect(
       pick(surface.container, '[data-fleet-harness-choice="codex"]').getAttribute('data-fleet-harness-selected'),
     ).toBe('true');
     expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('codex-');
+    expect(pick(surface.container, '[data-fleet-harness-detection="detected"]').textContent).toContain(
+      'not evidence that this host can launch it',
+    );
+    // And NOTHING was prefilled from an absence of evidence: the form is the old, unfilled one.
+    expect(area(surface.container, '-account-models').value).toBe('');
+    expect(area(surface.container, '-instructions-text').value).toBe('');
+    await surface.unmount();
+  });
+
+  it('opens the account form already filled in from what this host has', async () => {
+    // Arrange — the whole point. RED before this: the person typed the harness, both model fields, the
+    // asset path and the entire instructions document by hand, from a daemon that knew all four.
+    const surface = await open({});
+
+    // Act
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+
+    // Assert — harness, models, default model and the imported document, each with its provenance.
+    expect(
+      pick(surface.container, '[data-fleet-harness-choice="claude"]').getAttribute('data-fleet-harness-selected'),
+    ).toBe('true');
+    expect(area(surface.container, '-account-models').value).toBe('claude-opus-5\nclaude-sonnet-5');
+    expect(chooser(surface.container, '-account-default-model').value).toBe('claude-opus-5');
+    expect(area(surface.container, '-instructions-text').value).toBe('# House rules\n');
+    expect(pick(surface.container, '[data-fleet-prefill="instructionsText"]').textContent).toContain(
+      '/home/pilot/.claude/CLAUDE.md',
+    );
+    expect(pick(surface.container, '[data-fleet-harness-detection="detected"]').textContent).toContain(
+      '/usr/local/bin/claude',
+    );
+
+    // Act — the ONE thing left to type. The document path follows it.
+    await type(field(surface.container, '-account-name'), 'atelier');
+
+    // Assert
+    expect(field(surface.container, '-instructions-path').value).toBe('instructions/claude-atelier.md');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    await surface.unmount();
+  });
+
+  it('warns when NO harness is installed on this host, and still lets the account be declared', async () => {
+    // Arrange — the state a person most needs told. It is a warning rather than a refusal: installing a
+    // harness minutes later is ordinary, and the daemon re-reads the manifest on every session start.
+    const surface = await open({
+      harnesses: () => discovery([harness({ command: undefined }), absentCodex()]),
+    });
+
+    // Act
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await type(field(surface.container, '-account-name'), 'atelier');
+
+    // Assert
+    expect(pick(surface.container, '[data-fleet-harness-detection="none-installed"]').textContent).toContain(
+      'Neither claude nor codex is on this host’s PATH',
+    );
+    expect(absent(surface.container, '[data-fleet-prefill="harness"]')).toBe(true);
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    await surface.unmount();
+  });
+
+  it('reads a shared instructions document the account is pointed at, rather than writing over it', async () => {
+    // Arrange — the fleet has a document more than one account can read. Choosing it must load it: until
+    // the text is here, staging would replace somebody's house rules with an empty string.
+    const surface = await open({
+      assets: () => ({ files: [{ path: 'instructions/house-rules.md', bytes: 12, readable: true }], complete: true }),
+      asset: path => ({ path, content: '# Shared rules\n', bytes: 15 }),
+    });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await type(field(surface.container, '-account-name'), 'atelier');
+
+    // Act
+    await choose(chooser(surface.container, '-instructions-choice'), 'asset:instructions/house-rules.md');
+    await interact(() => undefined);
+
+    // Assert — the document's own text is here, the path points at it, and staging is unblocked because
+    // this browser has now SEEN what it would rewrite.
+    expect(field(surface.container, '-instructions-path').value).toBe('instructions/house-rules.md');
+    expect(area(surface.container, '-instructions-text').value).toBe('# Shared rules\n');
+    expect(surface.container.textContent).not.toContain('has not loaded the document already at that path');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    expect(surface.daemon.paths()).toContain('/v1/fleet/assets/instructions%2Fhouse-rules.md');
+    await surface.unmount();
+  });
+
+  it('keeps a shared document that could not be read blocking, in the daemon own words', async () => {
+    // Arrange — a refused read must not leave an empty box that looks like the document's contents.
+    const surface = await open({
+      assets: () => ({ files: [{ path: 'instructions/house-rules.md', bytes: 12, readable: true }], complete: true }),
+      asset: () => {
+        throw refusal('fleet_asset_refused', 'the asset is not a regular file');
+      },
+    });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await type(field(surface.container, '-account-name'), 'atelier');
+
+    // Act
+    await choose(chooser(surface.container, '-instructions-choice'), 'asset:instructions/house-rules.md');
+    await interact(() => undefined);
+
+    // Assert
+    expect(surface.container.textContent).toContain('the asset is not a regular file');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+
+    // Act — going back to this account's own new document clears it: nothing is overwritten any more.
+    await choose(chooser(surface.container, '-instructions-choice'), 'new-imported');
+
+    // Assert
+    expect(field(surface.container, '-instructions-path').value).toBe('instructions/claude-atelier.md');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
     await surface.unmount();
   });
 

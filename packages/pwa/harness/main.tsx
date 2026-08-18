@@ -120,10 +120,15 @@ import type {
   FleetManifestAccountView,
   FleetProposalView,
 } from '../src/features/fleet/fleet-api.ts';
-import { FleetAccountForm, FleetLayerForm } from '../src/features/fleet/fleet-change-forms.tsx';
+import {
+  FleetAccountForm,
+  type FleetInstructionsControl,
+  FleetLayerForm,
+} from '../src/features/fleet/fleet-change-forms.tsx';
 import {
   emptyAccountDraft,
   type FleetAccountDraft,
+  type FleetHarnessDetection,
   type FleetLayerDraft,
 } from '../src/features/fleet/fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster } from '../src/features/fleet/fleet-change-review.tsx';
@@ -388,12 +393,64 @@ const HARNESS_FLEET_ACCOUNTS = [
   },
 ] satisfies readonly FleetManifestAccountView[];
 
+/**
+ * The create form as a person actually meets it: prefilled from a host that HAS Claude Code, with the
+ * provenance visible on every field detection filled in.
+ *
+ * The gallery is the touch-target and both-theme evidence for this screen, so the fixture has to be the
+ * prefilled state rather than a blank form — an empty draft would review a screen nobody sees.
+ */
 const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
   ...emptyAccountDraft('claude'),
   name: 'atelier',
   displayName: 'Atelier Claude',
   modelsText: 'claude-opus-5\nclaude-sonnet-5',
   defaultModel: 'claude-opus-5',
+  layer: {
+    ...emptyAccountDraft('claude').layer,
+    instructions: {
+      path: 'instructions/claude-atelier.md',
+      text: '# Atelier\n\nBe exact. Prefer the smallest change that is provably correct.\n',
+    },
+  },
+  prefilled: {
+    models: 'Detected — read from /home/pilot/.claude/settings.json.',
+    defaultModel: 'Detected — read from /home/pilot/.claude/settings.json.',
+    instructionsPath: 'Derived — from the wrapper name above. Choose another document, or edit the path.',
+    instructionsText:
+      'Imported — /home/pilot/.claude/CLAUDE.md (86 bytes). Edit it here; nothing is written until you review and authorize the change.',
+  },
+};
+
+const HARNESS_FLEET_DETECTION: FleetHarnessDetection = {
+  harness: 'claude',
+  detail: 'Detected claude at /usr/local/bin/claude.',
+  noneInstalled: false,
+};
+
+const HARNESS_FLEET_INSTRUCTIONS: FleetInstructionsControl = {
+  choices: [
+    {
+      value: 'new-imported',
+      label: 'New — instructions/claude-atelier.md, imported',
+      detail:
+        'Imported — /home/pilot/.claude/CLAUDE.md (86 bytes). Edit it here; nothing is written until you review and authorize the change.',
+    },
+    {
+      value: 'new-blank',
+      label: 'New — instructions/claude-atelier.md, empty',
+      detail: 'A new, empty document written at that path.',
+    },
+    {
+      value: 'asset:instructions/house-rules.md',
+      label: 'instructions/house-rules.md',
+      detail:
+        'Already in this fleet’s asset tree. This account will read it, and an edit here rewrites the one document every account using it reads.',
+    },
+  ],
+  value: 'new-imported',
+  onChoose: () => {},
+  loading: false,
 };
 
 const HARNESS_FLEET_LAYER: FleetLayerDraft = {
@@ -5086,7 +5143,8 @@ function Shell() {
                 problems={[]}
                 disabled={false}
                 loading={false}
-                suggestion="claude"
+                detection={HARNESS_FLEET_DETECTION}
+                instructions={HARNESS_FLEET_INSTRUCTIONS}
                 variants={['default', 'auto']}
               />
             </div>
@@ -6755,7 +6813,8 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
             problems={[]}
             disabled={false}
             loading={false}
-            suggestion="claude"
+            detection={HARNESS_FLEET_DETECTION}
+            instructions={HARNESS_FLEET_INSTRUCTIONS}
             variants={['default', 'auto']}
           />
         </section>

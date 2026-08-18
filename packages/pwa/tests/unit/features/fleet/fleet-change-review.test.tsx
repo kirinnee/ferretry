@@ -172,6 +172,52 @@ describe('the staged change', () => {
     return { ...mounted, calls };
   };
 
+  it('never tears a path apart mid-token, and keeps the whole value reachable', async () => {
+    // Arrange — the ugliest thing on this screen was a wrapper path rendered as
+    //     /Users/ern  g/.ferretr  y/fleet/bi  n/claude-pe  rsonal
+    // by `break-all` inside a narrow column: unreadable, and indistinguishable from corruption.
+    const harness = await reviewHarness();
+
+    // Assert — not one break-anywhere rule anywhere in the panel.
+    expect([...harness.container.querySelectorAll('[class*="break-all"]')]).toHaveLength(0);
+
+    // Every path scrolls in its own box instead, which is what keeps the PAGE from scrolling sideways.
+    const paths = [...harness.container.querySelectorAll<HTMLElement>('[data-fleet-path]')];
+    expect(paths.length).toBeGreaterThan(3);
+    for (const path of paths) {
+      expect(path.className).toContain('whitespace-nowrap');
+      expect(path.className).toContain('overflow-x-auto');
+      expect(path.className).toContain('max-w-full');
+      // Clipping must never LOSE the value: the whole thing on hover, and the whole thing in the DOM for
+      // a screen reader and for a copy.
+      expect(path.getAttribute('title')).toBe(path.textContent);
+    }
+
+    // The proposal id is one of them: it is what the host mints an approval AGAINST, so a reader has to
+    // be able to compare it character for character.
+    expect(paths.some(path => path.textContent === 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA')).toBe(true);
+    await harness.unmount();
+  });
+
+  it('keeps uppercase for the eyebrow and the state chip, and nothing else', async () => {
+    // Arrange — uppercase on every label removes the hierarchy it exists to create. The eyebrow role
+    // (`kt-label`) and the shared state chip (`kt-badge`) keep it; no third thing shouts.
+    const harness = await reviewHarness();
+
+    // Assert
+    const shouting = [...harness.container.querySelectorAll<HTMLElement>('[class*="uppercase"]')];
+    for (const node of shouting) {
+      // The approval-code INPUT is a value transform, not a label: a code is typed and shown in caps.
+      expect(node.className).toContain('kt-input');
+    }
+    // The verdict chip is the shared badge rather than a fifth hand-rolled chip design.
+    const verdict = pick(harness.container, '[data-fleet-roster-change="unchanged"] .kt-badge');
+    expect(verdict.getAttribute('data-tone')).toBe('muted');
+    expect(verdict.textContent).toBe('unchanged');
+    expect(harness.container.querySelectorAll('.kt-label').length).toBeGreaterThan(0);
+    await harness.unmount();
+  });
+
   it('numbers every operation, names its action and shows where a copy comes from', async () => {
     const harness = await reviewHarness();
     const rows = [...harness.container.querySelectorAll('[data-fleet-operation]')];

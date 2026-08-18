@@ -3,6 +3,7 @@ import {
   type CapabilityGrants,
   type CreateTerminalRequest,
   DAEMON_CAPABILITIES,
+  type HarnessDiscoveryReport,
   type LearningConfig,
   PIN_SCHEMA_VERSION,
   type Pin,
@@ -1511,6 +1512,59 @@ export function fleetEventSubsystem(events: readonly StoredSessionEvent[] = []):
     },
     { after: () => ({ cancel: () => undefined }) },
   );
+}
+
+/**
+ * A harness discovery a fleet route test can be handed without a filesystem.
+ *
+ * The DEFAULT is the interesting shape rather than the empty one: Claude installed with a detected
+ * model and an importable instructions document, Codex absent and falling back. A fixture where both
+ * harnesses look the same proves nothing about a form whose whole job is to tell them apart.
+ */
+export function harnessDiscoveryReader(report: Partial<HarnessDiscoveryReport> = {}): {
+  report(): Promise<HarnessDiscoveryReport>;
+} {
+  const answer: HarnessDiscoveryReport = {
+    harnesses: [
+      {
+        kind: 'claude',
+        command: '/usr/local/bin/claude',
+        absenceImpact: 'No Claude session could start here.',
+        models: {
+          origin: 'detected',
+          ids: ['claude-opus-5'],
+          defaultModel: 'claude-opus-5',
+          source: '/home/fixture/.claude/settings.json',
+        },
+        instructions: {
+          found: true,
+          source: '/home/fixture/.claude/CLAUDE.md',
+          text: '# Fixture instructions\n',
+          bytes: 24,
+        },
+      },
+      {
+        kind: 'codex',
+        absenceImpact: 'No Codex session could start here.',
+        models: {
+          origin: 'fallback',
+          ids: ['gpt-5.6'],
+          defaultModel: 'gpt-5.6',
+          source:
+            "Ferretry's starter model for codex, because there is no /home/fixture/.codex/config.toml on this host",
+        },
+        instructions: {
+          found: false,
+          source: '/home/fixture/.codex/AGENTS.md',
+          reason: 'this host has no AGENTS.md there',
+        },
+      },
+    ],
+    noneInstalled: false,
+    limitation: 'A PATH lookup proves nothing about being signed in.',
+    ...report,
+  };
+  return { report: async () => answer };
 }
 
 const FAKE_FAILOVER: WardenStatusView['failover'] = {

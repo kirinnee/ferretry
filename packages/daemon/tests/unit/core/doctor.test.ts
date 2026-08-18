@@ -136,6 +136,48 @@ describe('doctor report', () => {
   });
 });
 
+describe('doctor report over the harness commands themselves', () => {
+  it('should keep the per-command facts separate from the manifest verdict above them', () => {
+    // Arrange — the confusing case the whole readiness doctrine exists for: the harness IS installed and
+    // no account is published for it. Those are two different facts and get two different lines.
+    //
+    // The per-command line is asserted through the harness's own resolved LOCATION rather than through a
+    // second PATH lookup: a boolean "on PATH" could not say which `claude` was found or which rule found
+    // it, and the location is the fact the rest of this report is now built from.
+    const result = readDoctorReport({
+      platform: 'linux',
+      harnesses: {
+        ready: false,
+        harnesses: [
+          {
+            kind: 'claude',
+            launchable: [],
+            blocked: [],
+            command: {
+              kind: 'claude',
+              outcome: 'located',
+              path: '/opt/homebrew/bin/claude',
+              rule: 'inherited environment',
+              declaredBy: 'PATH',
+            },
+          },
+          { kind: 'codex', launchable: [], blocked: [], command: { kind: 'codex', outcome: 'absent', searched: [] } },
+        ],
+      },
+      directorySyscalls: true,
+      executables: { resolve: name => (['tmux', 'bash'].includes(name) ? `/bin/${name}` : undefined) },
+    });
+
+    // Assert — "no published wrapper is launchable" AND "claude is right here, at this path".
+    should(result.checks.find(check => check.name === 'claude or codex')?.status).equal('missing');
+    should(result.checks.find(check => check.name === 'claude')?.summary).equal(
+      '/opt/homebrew/bin/claude  (inherited environment — PATH)',
+    );
+    // Rendered, because this is the block a person reads in a terminal rather than in a panel.
+    should(renderDoctorReport(result).join('\n')).match(/ok\s+claude\s+\/opt\/homebrew\/bin\/claude/u);
+  });
+});
+
 describe('doctor report rendering', () => {
   it('should explain impact only for dependencies that are actually missing', () => {
     const subject: DoctorReport = {

@@ -15,11 +15,12 @@ import {
   parseApprovalCode,
   readFleetAsset,
   readFleetConfig,
+  readFleetHarnesses,
   readFleetManifest,
   readFleetPermissions,
   readFleetProposal,
 } from '../../../../src/features/fleet/fleet-api.ts';
-import { config, manifest, permissions, proposal } from './fleet-support.ts';
+import { config, discovery, manifest, permissions, proposal } from './fleet-support.ts';
 
 interface Call {
   readonly path: string;
@@ -43,6 +44,9 @@ describe('the fleet wire client', () => {
       [readFleetPermissions, permissions(), `${FLEET_PATH}/permissions`],
       [readFleetManifest, manifest(), `${FLEET_PATH}/accounts`],
       [readFleetConfig, config(), `${FLEET_PATH}/config`],
+      // The harness read is on its own route and takes no body: it is a fresh look at the HOST rather
+      // than a projection of anything this fleet publishes.
+      [readFleetHarnesses, discovery(), `${FLEET_PATH}/harnesses`],
     ] as const;
     for (const [read, answer, path] of readers) {
       const { client, calls } = clientFor(answer);

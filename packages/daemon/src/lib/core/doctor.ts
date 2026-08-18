@@ -53,15 +53,25 @@ const unavailable = (name: string, summary: string): DoctorCheck => ({
   impact: 'This service manager is not used on this operating system.',
 });
 
+/**
+ * One program, and WHERE it is.
+ *
+ * The resolved absolute path is reported rather than a bare "found". This report's own promise is
+ * "programs this daemon host needs, and what each absence breaks", and a person acting on it needs to
+ * know which `claude` was found: a shell alias, a version manager shim and a stale copy in
+ * `/usr/local/bin` all say "found on PATH" and are three different programs. The path was already
+ * being computed and thrown away for a boolean.
+ */
 function binary(
   input: DoctorReportInput,
   name: string,
   requirement: DoctorCheck['requirement'],
   impact: string,
 ): DoctorCheck {
-  return input.executables.resolve(name) === undefined
+  const resolved = input.executables.resolve(name);
+  return resolved === undefined
     ? missing(name, requirement, 'not found on PATH', impact)
-    : present(name, requirement, 'found on PATH', impact);
+    : present(name, requirement, `found on PATH at ${resolved}`, impact);
 }
 
 /**
@@ -140,6 +150,11 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
           ),
     // Every harness, always, including one nothing is published for: "is Codex set up on this host?"
     // is the question being asked, and a report listing only what it found cannot answer it.
+    //
+    // This states, generally, the fact this branch previously stated with a hardcoded `claude` and
+    // `codex` pair: whether the harness's own command is on this MACHINE, as opposed to whether the
+    // MANIFEST publishes a launchable wrapper for it. Keeping both spellings would have emitted two
+    // rows per harness, so the general one is the one that survives.
     ...input.harnesses.harnesses.map(harnessCommand),
     binary(input, 'tmux', 'required', 'Sessions cannot start or be managed.'),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),

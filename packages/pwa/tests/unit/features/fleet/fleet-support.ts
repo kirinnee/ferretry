@@ -14,6 +14,8 @@ import type {
   FleetPermissions,
   FleetProposalPreview,
   FleetProposalView,
+  HarnessDiscovery,
+  HarnessDiscoveryReport,
 } from '../../../../src/features/fleet/fleet-api.ts';
 import { interact, must } from '../../../support/dom.ts';
 
@@ -56,6 +58,56 @@ export const config = (
 
 /** A parsed asset index, so a suite pins the shared shape rather than casting past it. */
 export const assetIndex = (files: FleetAssetIndex['files'], complete = true): FleetAssetIndex => ({ files, complete });
+
+/** One harness as the daemon's discovery reports it. Typed, so a fixture cannot outgrow the contract. */
+export const harness = (overrides: Partial<HarnessDiscovery> = {}): HarnessDiscovery => ({
+  kind: 'claude',
+  command: '/usr/local/bin/claude',
+  absenceImpact: 'No Claude session can start here.',
+  models: {
+    origin: 'detected',
+    ids: ['claude-opus-5', 'claude-sonnet-5'],
+    defaultModel: 'claude-opus-5',
+    source: '/home/pilot/.claude/settings.json',
+  },
+  instructions: { found: true, source: '/home/pilot/.claude/CLAUDE.md', text: '# House rules\n', bytes: 14 },
+  ...overrides,
+});
+
+/**
+ * The asymmetric host, because it is the common one AND the interesting one: Claude installed with a
+ * detected model and an importable document, Codex absent and falling back to the starter model.
+ *
+ * A fixture where both harnesses look identical could not fail on the one thing this form does — tell
+ * them apart and say which is which.
+ */
+export const discovery = (
+  harnesses: readonly HarnessDiscovery[] = [harness(), absentCodex()],
+): HarnessDiscoveryReport => ({
+  // Copied, because the parsed wire shape is a mutable array and a fixture must be assignable to it.
+  harnesses: [...harnesses],
+  noneInstalled: harnesses.every(entry => entry.command === undefined),
+  limitation: 'A PATH lookup proves nothing about being signed in.',
+});
+
+export function absentCodex(overrides: Partial<HarnessDiscovery> = {}): HarnessDiscovery {
+  return {
+    kind: 'codex',
+    absenceImpact: 'No Codex session can start here.',
+    models: {
+      origin: 'fallback',
+      ids: ['gpt-5.6'],
+      defaultModel: 'gpt-5.6',
+      source: 'Ferretry’s starter model for codex, because there is no /home/pilot/.codex/config.toml on this host',
+    },
+    instructions: {
+      found: false,
+      source: '/home/pilot/.codex/AGENTS.md',
+      reason: 'this host has no AGENTS.md there',
+    },
+    ...overrides,
+  };
+}
 
 export const permissions = (overrides: Partial<FleetPermissions> = {}): FleetPermissions => ({
   mayInspect: true,

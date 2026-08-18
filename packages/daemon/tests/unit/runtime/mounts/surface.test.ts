@@ -35,6 +35,7 @@ import {
   FakeWarden,
   fleetEventSubsystem,
   grantSubsystem,
+  harnessDiscoveryReader,
   healthSubsystem,
   human,
   learningSubsystem,
@@ -97,6 +98,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   ],
   fleet: {
     accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),
+    harnesses: async () => await harnessDiscoveryReader().report(),
     config: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -410,7 +412,7 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 127, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 128, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -455,6 +457,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/health',
       'GET /v1/doctor',
       'GET /v1/fleet/accounts',
+      'GET /v1/fleet/harnesses',
       'GET /v1/fleet/config',
       'GET /v1/fleet/environment',
       'PUT /v1/fleet/environment',
