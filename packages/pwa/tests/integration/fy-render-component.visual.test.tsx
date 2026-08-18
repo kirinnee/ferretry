@@ -302,6 +302,41 @@ const statusText = async (page: Page): Promise<string> =>
 const phase = async (page: Page): Promise<string | null> =>
   await page.locator('[data-fy-render-sandbox-status]').getAttribute('data-fy-render-sandbox-status');
 
+/**
+ * Wait for the actual terminal state rather than spending forty seconds waiting
+ * only for the happy-path element. The sandbox owns a short startup watchdog, so
+ * a frame that has already reported a typed failure is evidence to surface now,
+ * not a reason to burn the rest of the test's budget.
+ */
+const waitForMermaidDiagram = async (page: Page): Promise<void> => {
+  const terminal = await page.waitForFunction(
+    () => {
+      if (document.querySelector('img[data-fy-render-diagram="true"]') !== null) return { kind: 'diagram' };
+      const status = document.querySelector('[data-fy-render-sandbox-status="failed"]');
+      return status === null ? null : { kind: 'failed', status: status.textContent?.trim() ?? '' };
+    },
+    { timeout: 20_000 },
+  );
+  const outcome = (await terminal.jsonValue()) as { readonly kind: 'diagram' | 'failed'; readonly status?: string };
+  if (outcome.kind === 'failed') throw new Error(`Mermaid sandbox failed after preparing: ${outcome.status}`);
+};
+
+/**
+ * The browser may lose a one-shot cross-window notification under contention.
+ * Drop the first advertisement so this journey proves the shell retries until it
+ * receives the port, rather than merely proving the uncontended happy path.
+ */
+const dropFirstShellReady = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    const drop = (event: MessageEvent): void => {
+      if (event.data === null || typeof event.data !== 'object' || event.data.kind !== 'shell-ready') return;
+      event.stopImmediatePropagation();
+      window.removeEventListener('message', drop, true);
+    };
+    window.addEventListener('message', drop, true);
+  });
+};
+
 /** Horizontal overflow of the document, which no viewport may have. */
 const overflow = async (page: Page): Promise<number> =>
   await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -368,6 +403,7 @@ describe('fy-render component evidence — Mermaid', () => {
 
         // Act — consent, with the renderer deliberately slow so the pending state
         // is long enough to photograph. See `libraryStallMs`.
+        await dropFirstShellReady(page);
         libraryStallMs = 2_500;
         await press(page, /Render illustration/);
 
@@ -387,7 +423,7 @@ describe('fy-render component evidence — Mermaid', () => {
         libraryStallMs = 0;
 
         // Assert — THE COMPILED DIAGRAM, back through the measured `<img>` sink.
-        await page.waitForSelector('img[data-fy-render-diagram="true"]', { timeout: 40_000 });
+        await waitForMermaidDiagram(page);
         await page.waitForTimeout(300);
         const diagram = await page.locator('img[data-fy-render-diagram="true"]').boundingBox();
         await shot('mermaid-03-diagram', {
@@ -423,7 +459,7 @@ describe('fy-render component evidence — Mermaid', () => {
 
         // Act / Assert — RELOAD returns to a compiled diagram, not to the offer.
         await press(page, /Reload/);
-        await page.waitForSelector('img[data-fy-render-diagram="true"]', { timeout: 40_000 });
+        await waitForMermaidDiagram(page);
         await page.waitForTimeout(300);
         await shot('mermaid-06-reloaded', { statusText: await statusText(page) });
         should(await statusText(page)).equal('The Mermaid illustration is ready.');
