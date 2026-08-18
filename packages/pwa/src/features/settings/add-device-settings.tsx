@@ -15,15 +15,21 @@
  * is computed in this tab from that state, so the credential reaches no third party either. This is why
  * the harness screenshots use a fixed fake code: a committed PNG of a real one would be a real leak.
  *
- * ## THE FIRST DEVICE REQUIRES AN OPERATOR PASSWORD
+ * ## THE FIRST DEVICE REQUIRES AN OPERATOR PASSWORD — AND THE DAEMON IS WHAT REQUIRES IT
  *
- * Not a prompt and not a nudge: no code is minted until one exists. `fleet.configure` is on by default
- * for a governed caller, so a device paired to a machine with no password can provision the host —
- * writing runnable wrappers into the operator's accounts — with nothing to prove. Requiring the password
- * at the one moment remote access is being created DELETES that state rather than warning about it, and
- * the safe configuration stops depending on somebody noticing a disclosure.
+ * `POST /v1/pair/code` refuses while no operator password exists, whoever asks: this panel, a phone, or
+ * `fy pair` on the host. `fleet.configure` is on by default for a governed caller, so a device paired to
+ * a machine with no password can provision the host — writing runnable wrappers into the operator's
+ * accounts — with nothing to prove. Requiring the password at the one moment remote access is being
+ * created DELETES that state rather than warning about it.
  *
- * IT IS THIS FLOW'S REQUIREMENT, NEVER STARTUP'S AND NEVER LOCAL USE'S. A person setting up on their own
+ * WHAT THIS PANEL DOES IS EXPLAIN IT FIRST, NOT ENFORCE IT. The requirement used to live here, which made
+ * the guarantee "the browser will not create a passwordless remote device" — silent about the command
+ * line, which mints through the same route. So this is a pre-check: where the grant view says there is no
+ * password, the reason and the control that fixes it take the button's place; where this browser cannot
+ * tell, the button is offered and the daemon's own refusal is what a person reads. One rule, one sentence.
+ *
+ * IT IS PAIRING'S REQUIREMENT, NEVER STARTUP'S AND NEVER LOCAL USE'S. A person setting up on their own
  * machine with nothing paired is asked for nothing, because there is no remote caller for a gate to stand
  * in front of. An install that already has devices and no password meets the requirement at its NEXT
  * pairing, which needs no separate nag and cannot lock anybody out.
@@ -57,7 +63,6 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   PAIRING_PASSWORD_REQUIREMENT,
   PAIRING_PASSWORD_REQUIREMENT_REMOTE,
-  PAIRING_PASSWORD_UNDETERMINED,
   type PairingGate,
   pairingGate,
 } from '../../lib/grants.ts';
@@ -388,14 +393,16 @@ export function AddDeviceCard({
           A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
           that reads it becomes a device you can see and revoke below.
         </p>
-        {/* THE PASSWORD IS REQUIRED BEFORE THE FIRST DEVICE, and this is where the requirement belongs:
-            the moment remote access is being created. Not at startup, and not for local use — a person
-            setting up on their own machine with nothing paired has no remote caller for a gate to stand in
-            front of, and asking them to invent a secret first would be friction for nothing.
+        {/* THE PASSWORD IS REQUIRED BEFORE THE FIRST DEVICE, AND THE DAEMON IS WHAT REQUIRES IT.
+            `POST /v1/pair/code` refuses while no operator password exists, for every caller — this panel,
+            a phone, and `fy pair` on the host. What happens here is a PRE-CHECK: when this browser has
+            read the grant view and can see there is no password, it says so and offers the control that
+            fixes it, rather than presenting a button that would be refused. When it cannot tell, it offers
+            the button and renders whatever the machine answers.
 
-            `fleet.configure` is on by default for a governed caller, so a device paired to a machine with
-            no password can provision the host. Requiring the password DELETES that state instead of
-            warning about it. */}
+            The requirement lands at pairing and nowhere else: `fleet.configure` is on by default for a
+            governed caller, so a device paired to a passwordless machine can provision the host. Nothing
+            about using this machine locally is gated, and startup is never blocked. */}
         {gate.kind === 'open' && invite === null ? (
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -420,23 +427,6 @@ export function AddDeviceCard({
             <ShieldAlert size={14} className="mr-1 inline" aria-hidden="true" />
             {gate.local ? PAIRING_PASSWORD_REQUIREMENT : PAIRING_PASSWORD_REQUIREMENT_REMOTE}
           </p>
-        ) : null}
-        {gate.kind === 'undetermined' ? (
-          <>
-            <p
-              role="status"
-              className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-ui leading-base text-err"
-              data-pair-password-undetermined=""
-            >
-              <ShieldAlert size={14} className="mr-1 inline" aria-hidden="true" />
-              {PAIRING_PASSWORD_UNDETERMINED}
-            </p>
-            {/* The daemon's own words, on their own line: they are a message from somewhere else, and
-                appending one mid-paragraph reads as a typo. */}
-            <p className="m-0 text-meta leading-base text-faint" data-pair-password-undetermined-reason="">
-              {gate.reason}
-            </p>
-          </>
         ) : null}
       </section>
 
@@ -595,17 +585,16 @@ export function AddDeviceSurface({
   const [passwordFailure, setPasswordFailure] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => now());
   /**
-   * Whether this machine has an operator password, and what went wrong if that is unknown.
+   * Whether this machine has an operator password — `null` when this browser could not find out.
    *
-   * READ ALONGSIDE THE DEVICE LIST, not lazily when somebody presses the button. The requirement has to
-   * be explained BEFORE the press, which is the same reason the grant view is one call rather than a
-   * probe per control. A failure here is carried rather than swallowed: not knowing is not the same as
-   * knowing there is one.
+   * READ ALONGSIDE THE DEVICE LIST, not lazily when somebody presses the button, because the point of
+   * reading it is to explain BEFORE the press. It carries no failure reason any more: the requirement is
+   * the daemon's, so an unreadable view means this panel has nothing to say in advance rather than a
+   * refusal of its own to compose. Whatever the machine answers is rendered whole when somebody taps.
    */
   const [grants, setGrants] = useState<{
     readonly daemonId: DaemonConnection['daemonId'];
     readonly view: GrantsView | null;
-    readonly reason?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -623,16 +612,16 @@ export function AddDeviceSurface({
       .then(async next => {
         const view = await readPairedDevices(next);
         // Settled rather than awaited together: a grant view this browser could not read must not turn a
-        // working device list into a load failure. It becomes the `undetermined` gate instead, which says
-        // what is unknown rather than pretending the panel is broken.
+        // working device list into a load failure. It becomes a null view, and the pre-check then says
+        // nothing in advance rather than pretending the panel is broken — the daemon still answers the tap.
         const grant = await readGrants(next).then(
-          answer => ({ view: answer }),
-          (cause: unknown) => ({ view: null, reason: pairingFailure(cause).message }),
+          answer => answer,
+          () => null,
         );
         if (!current) return;
         setClient(next);
         setLoaded({ daemonId: connection.daemonId, view });
-        setGrants({ daemonId: connection.daemonId, ...grant });
+        setGrants({ daemonId: connection.daemonId, view: grant });
       })
       .catch((cause: unknown) => {
         if (current) setLoadFailure({ daemonId: connection.daemonId, failure: pairingFailure(cause) });
@@ -735,10 +724,11 @@ export function AddDeviceSurface({
         view={loaded.view}
         gate={
           grants?.daemonId === connection.daemonId
-            ? pairingGate(grants.view, grants.reason)
-            : // Still reading, or an answer that belongs to a daemon this panel has since switched away
-              // from. Either way this browser does not know, and the honest gate is the one that says so.
-              pairingGate(null, 'this browser has not read this machine’s grant view yet')
+            ? pairingGate(grants.view)
+            : // Still reading, or an answer belonging to a daemon this panel has since switched away from.
+              // Either way this browser does not know yet — so it says nothing in advance and lets the
+              // daemon answer the tap. The requirement is enforced there, not here.
+              pairingGate(null)
         }
         invite={invite?.daemonId === connection.daemonId ? invite.minted : null}
         nowMs={nowMs}

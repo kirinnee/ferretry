@@ -35,7 +35,6 @@ import {
   originNote,
   PAIRING_PASSWORD_REQUIREMENT,
   PAIRING_PASSWORD_REQUIREMENT_REMOTE,
-  PAIRING_PASSWORD_UNDETERMINED,
   PASSWORD_ARRIVAL_VS_CREDENTIAL,
   PASSWORD_HOST_CLEAR_COMMAND,
   PASSWORD_HOST_SET_COMMAND,
@@ -467,9 +466,10 @@ describe('the operator password control', () => {
 });
 
 describe('the password a first pairing requires', () => {
-  it('blocks a mint until one exists, and says who can fix it from where', () => {
-    // `fleet.configure` is on by default for a governed caller, so a device paired to a machine with no
-    // password can provision the host. The requirement deletes that state rather than warning about it.
+  it('explains before the tap when it can see there is no password, and says who can fix it from where', () => {
+    // A PRE-CHECK, NOT THE RULE. `POST /v1/pair/code` refuses on a passwordless machine for every caller,
+    // `fy pair` included — that is where the requirement lives and is proved. This decides only whether a
+    // person is told in advance instead of meeting a control that would be refused.
     // Act + Assert
     expect(pairingGate(view({ passwordSet: true }))).toEqual({ kind: 'open' });
     expect(pairingGate(view({ passwordSet: false, hostLocal: true }))).toEqual({
@@ -483,17 +483,15 @@ describe('the password a first pairing requires', () => {
     expect(pairingNeedsPassword(view({ passwordSet: false }))).toBe(true);
   });
 
-  it('fails CLOSED when the answer could not be read, rather than minting on an assumption', () => {
-    // An unreadable answer is not a safe one. Minting anyway would let the requirement silently lapse on
-    // the one machine whose daemon could not answer for itself, which is the damaged-state-as-empty-state
-    // defect the rest of this product refuses.
-    // Act
-    const gate = pairingGate(null, 'the daemon did not answer');
-
-    // Assert — and the copy names a route through that needs no grant read at all.
-    expect(gate).toEqual({ kind: 'undetermined', reason: 'the daemon did not answer' });
-    expect(pairingGate(null).kind).toBe('undetermined');
-    expect(PAIRING_PASSWORD_UNDETERMINED).toContain('fy pair');
+  it('says nothing in advance when it could not read the answer, and leaves the refusal to the daemon', () => {
+    // THIS USED TO FAIL CLOSED, and that was right while the browser was the only thing enforcing the
+    // requirement. It is a dead end now that the daemon enforces it: hiding the button would withhold a
+    // control on the one machine whose grant view could not be read, while the machine that KNOWS is
+    // standing by to answer with the reason and the remedy. So there is no `undetermined` state left to
+    // express — one rule, in one place, and this surface only ever explains what it can already see.
+    // Act + Assert
+    expect(pairingGate(null)).toEqual({ kind: 'open' });
+    // The copy for the state it CAN see still carries the why and the way through.
     expect(PAIRING_PASSWORD_REQUIREMENT).toContain('runnable files');
     expect(PAIRING_PASSWORD_REQUIREMENT_REMOTE).toContain(PASSWORD_HOST_SET_COMMAND);
   });

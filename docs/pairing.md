@@ -123,11 +123,12 @@ facts a UI needs before it offers anything — whether this request arrived on t
 the caller's own — are on `GET /v1/pair/devices` as `hostLocal` and `thisDeviceId`. Both are
 carrier-derived and server-derived respectively; neither may be inferred in a browser.
 
-### The first device requires an operator password
+### Pairing requires an operator password, and the DAEMON is what requires it
 
-**The browser mints no code until one exists.** Not a prompt and not a nudge: the Add-a-device panel reads
-`GET /v1/grants` beside the device list and, while `passwordSet` is false, the requirement and the control
-that satisfies it stand where the button would be.
+**`POST /v1/pair/code` refuses while no operator password exists.** Every caller meets it: a phone, a
+browser on the machine, and `fy pair` on the host — which mints through that same route. The refusal is
+one sentence, composed once, and it names the remedy (`fy daemon password set`, which never asks for an
+old password) at the point of decision.
 
 The reason is `fleet.configure`, which is **on by default** for a governed caller. On a machine with no
 password, any device this exchange creates can therefore provision the host — writing runnable wrappers
@@ -135,23 +136,31 @@ into the operator's accounts — with nothing to prove. Requiring the password a
 access is being created **deletes that state** rather than warning about it, and the safe configuration
 stops depending on somebody noticing a disclosure.
 
+**Why it is here and not in the browser.** It was in the browser first, and the guarantee that bought was
+"the browser will not create a passwordless remote device" — silent about the command line, which could
+still hand out a key before the lock existed. Below both doors there is one rule, so which door somebody
+walks through stops mattering, and there is no second copy to fall out of step.
+
 What it deliberately does **not** do:
 
-- **It is not a startup requirement.** Somebody setting up locally with nothing paired is asked for
-  nothing: there is no remote caller for a gate to stand in front of.
-- **It is not enforced in the daemon.** `POST /v1/pair/code` still mints on a passwordless machine, so
-  `fy pair` on the host is unaffected — a daemon-side rule would demand a password before a local operator
-  could add their own first device from a terminal. The guarantee is "the browser will not create a
-  passwordless remote device", not "no passwordless remote device can exist"; it is a declared GAP in
-  [grants.md](grants.md).
+- **It is not a startup requirement, and it can never block a start.** `fy daemon start` OFFERS to set the
+  first password when there is a terminal and a person to answer; it asks nothing otherwise, and a failure
+  to ask or to store is a warning beside a daemon that is already serving. Service managers run the daemon
+  executable — never a CLI verb — so a systemd or launchd start cannot reach a prompt at all. A daemon
+  that refused to start without a password would silently stop running at boot, which is worse than the
+  problem being solved; that is exactly why the promise lives at pairing instead.
+- **It does not gate local use.** A passwordless machine starts, serves and configures itself exactly as
+  before. Nothing else in the daemon consults the requirement, and no other pairing route is affected —
+  the device list, both revocations, code status and redemption are all untouched.
 - **It does not migrate an existing install.** One that already has devices and no password is not nagged
   and nothing is revoked; the requirement lands at its **next** pairing.
 
-A reader who cannot satisfy it from where they are — a remote browser on a passwordless install — is told
-the two places that can (a browser on the machine, or `fy daemon password set` there) rather than shown a
-button that would be refused. And a browser that could not **read** whether a password exists fails
-closed: it says what is unknown and names `fy pair` on the host, because minting on the friendly
-assumption is how the requirement would silently lapse.
+**The browser explains it first rather than enforcing it.** The Add-a-device panel reads `GET /v1/grants`
+beside the device list and, while `passwordSet` is false, the requirement and the control that satisfies
+it stand where the button would be — a remote reader, who cannot set one from there, is told the two
+places that can. A browser that could not **read** the grant view offers the button and renders whatever
+the daemon answers: it has nothing to add by guessing, because the machine that knows refuses on its own
+account.
 
 ### Who may redeem
 

@@ -423,20 +423,26 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('fy daemon password set');
   });
 
-  it('refuses to mint on an ASSUMPTION when it could not read whether a password exists', () => {
-    // Damaged state is not empty state. Minting anyway would let the requirement silently lapse on the one
-    // machine whose daemon could not answer for itself, so it fails closed and names a route through that
-    // needs no grant read at all.
+  it('offers the button when it cannot tell, and renders the daemon’s refusal whole', () => {
+    // WHERE THE RULE LIVES DECIDES THIS. While the browser was the enforcer, an unreadable grant view had
+    // to fail closed — the requirement would otherwise have lapsed on exactly that machine. The daemon
+    // enforces it now, so withholding the control would only hide a button from somebody whose machine is
+    // standing by to answer. It taps, the daemon refuses, and this panel prints that sentence verbatim —
+    // remedy included — rather than composing a second one of its own.
     // Arrange, Act
-    const renderer = card({ gate: { kind: 'undetermined', reason: 'the daemon did not answer' } });
+    const refusal =
+      'this machine has no operator password, so it will not hand out a pairing code. Set one with ' +
+      '`fy daemon password set` on this machine.';
+    const renderer = card({
+      gate: { kind: 'open' },
+      failure: { message: refusal, code: 'pairing_needs_operator_password' },
+    });
 
     // Assert
-    should(marked(renderer, 'data-pair-mint')).be.empty();
-    should(marked(renderer, 'data-pair-password-undetermined')).have.length(1);
-    // The daemon's own words, on their own line rather than run into the sentence above.
-    should(marked(renderer, 'data-pair-password-undetermined-reason')).have.length(1);
-    expect(text(renderer)).toContain('the daemon did not answer');
-    expect(text(renderer)).toContain('fy pair');
+    should(marked(renderer, 'data-pair-mint')).have.length(1);
+    should(marked(renderer, 'data-pair-failure')).have.length(1);
+    should(marked(renderer, 'data-pair-needs-password')).be.empty();
+    expect(text(renderer)).toContain(refusal);
   });
 });
 
@@ -595,9 +601,11 @@ describe('AddDeviceSurface', () => {
     should(marked(surface, 'data-pair-mint')).be.empty();
   });
 
-  it('will not hand out a code when it could not read whether a password exists', async () => {
-    // The device list read fine; the grant read did not. That is not a broken panel and it is not a machine
-    // with a password — it is a state that says so, and fails closed.
+  it('still offers the button when it could not read whether a password exists', async () => {
+    // The device list read fine; the grant read did not. That does not make the panel broken and it does not
+    // make this browser the authority: the daemon refuses a mint on a passwordless machine on its own
+    // account, with its own sentence. So the honest surface here offers the control and renders whatever
+    // comes back — the alternative hides a button from the one reader whose machine could still answer.
     // Arrange, Act
     let renderer: ReactTestRenderer | undefined;
     await runAsync(async () => {
@@ -611,11 +619,13 @@ describe('AddDeviceSurface', () => {
     });
     const surface = renderer as ReactTestRenderer;
 
-    // Assert — the list rendered, and the mint did not.
+    // Assert — the list rendered, the button is there, and nothing pre-empts the daemon with a guess.
     should(marked(surface, 'data-paired-device')).have.length(1);
-    should(marked(surface, 'data-pair-mint')).be.empty();
-    should(marked(surface, 'data-pair-password-undetermined')).have.length(1);
-    expect(text(surface)).toContain('the daemon did not answer');
+    should(marked(surface, 'data-pair-mint')).have.length(1);
+    should(marked(surface, 'data-pair-needs-password')).be.empty();
+    // The failed grant read is not reported as a pairing failure either: nothing has been asked of the
+    // daemon yet, and an alert about a read this panel recovered from would be noise.
+    should(marked(surface, 'data-pair-failure')).be.empty();
   });
 
   it('mints, shows the code, and revokes it against the id the mint answered with', async () => {

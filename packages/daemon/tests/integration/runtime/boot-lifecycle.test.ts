@@ -905,6 +905,28 @@ describe('daemon boot lifecycle', () => {
         'access-control-request-headers': 'content-type',
       },
     });
+    /*
+     * NO PASSWORD, NO PAIRING — PROVED THROUGH THE REAL COMPOSITION ROOT, on the state a fresh install
+     * actually starts in.
+     *
+     * This is the end-to-end half of the requirement: the daemon that just booted refuses to hand out a
+     * code because this machine has no operator password, and it refuses the HOST'S OWN admin token —
+     * which is the caller a rule living in the browser could never have reached. A unit test can prove
+     * the subsystem answers a refusal; only this can prove the wiring that gives the subsystem its
+     * verifier exists in production.
+     */
+    const beforePassword = await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: admin });
+    const refusal = (await beforePassword.json()) as { readonly error?: string; readonly code?: string };
+    /*
+     * AND THE WAY THROUGH, at the point of decision: the sentence above names this command, and the
+     * admin token may always set a password — the escape hatch the whole design leans on. So the same
+     * journey that meets the requirement also satisfies it, rather than asserting a dead end.
+     */
+    const passwordResponse = await fetch(`${base}/v1/grants/password`, {
+      method: 'PUT',
+      headers: { ...admin, 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'correct horse battery' }),
+    });
     const mintedResponse = await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: admin });
     const minted = PairingCodeMintResponseSchema.parse(await mintedResponse.json());
     /*
@@ -954,6 +976,12 @@ describe('daemon boot lifecycle', () => {
     should(code).equal(0);
     should(preflight.status).equal(204);
     should(preflight.headers.get('access-control-allow-origin')).equal(origin);
+    // The requirement, and its remedy, from the daemon that really booted.
+    should(beforePassword.status).equal(403);
+    should(refusal.code).equal('pairing_needs_operator_password');
+    should(refusal.error).match(/no operator password/u);
+    should(refusal.error).match(/fy daemon password set/u);
+    should(passwordResponse.status).equal(200);
     should(mintedResponse.status).equal(201);
     should(minted.ttlSeconds).equal(120);
     should(new URL(invitation.pairUrl).hash).containEql(minted.code);
@@ -3119,6 +3147,14 @@ describe('daemon boot lifecycle', () => {
     const adminB = (await readFile(join(homeB, 'api-token'), 'utf8')).trim();
     const headersA = { authorization: `Bearer ${adminA}`, 'x-ferretry-client': 'cli' };
     const headersB = { authorization: `Bearer ${adminB}`, 'x-ferretry-client': 'cli' };
+    // A DEVICE TOKEN IS WHAT THIS TEST NEEDS, and a device cannot exist on a machine with no operator
+    // password — the mint refuses, which is proved where that rule lives. So this journey sets one first,
+    // through the host's own always-permitted path, exactly as a person would before adding a phone.
+    await fetch(`${baseA}/v1/grants/password`, {
+      method: 'PUT',
+      headers: { ...headersA, 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'correct horse battery' }),
+    });
     const pairingCode = (await (
       await fetch(`${baseA}/v1/pair/code`, { method: 'POST', headers: headersA })
     ).json()) as {

@@ -327,6 +327,30 @@ describe('fy pair', () => {
     should(h.screen.writes).be.empty();
   });
 
+  it('should refuse without a password by carrying the daemon’s own sentence, remedy included', async () => {
+    // `fy pair` MINTS THROUGH THE DAEMON, so the first-password requirement is not restated here — it is
+    // enforced below this command and reported by it. That is the whole point of moving the rule into the
+    // daemon: this command and the browser meet ONE rule and read ONE sentence, so neither can drift into
+    // saying something the other does not. What this asserts is that the sentence — and the remedy inside
+    // it — reaches the person who typed the command, and that nothing draws a code that was never issued.
+    // Arrange — verbatim what `POST /v1/pair/code` answers on a machine with no password.
+    const refusal =
+      'this machine has no operator password, so it will not hand out a pairing code. A device paired ' +
+      'without one can change the settings of whatever is already switched on here — including the agent ' +
+      'fleet, which writes runnable files into your accounts — and the password is what stands in front ' +
+      'of that. Set one with `fy daemon password set` on this machine, or from Ferretry in a browser on ' +
+      'it, and pairing works again.';
+    const h = harness({}, new ScriptedPairGateway([pending], new Error(refusal)));
+
+    // Act + Assert
+    await should(h.subject.pair({})).be.rejectedWith(refusal);
+    should(refusal).match(/fy daemon password set/u);
+    // No QR, no link, no countdown: this command drew nothing at all.
+    should(h.screen.writes).be.empty();
+    should(h.qr.requests).be.empty();
+    should(h.progress.events).be.empty();
+  });
+
   it('should pass the terminal width through, so a narrow window withholds the QR', async () => {
     // Arrange
     const h = harness(

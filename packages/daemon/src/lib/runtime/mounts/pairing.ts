@@ -12,7 +12,7 @@
  * They now sit at `admin` scope with a `pairing` capability demand, which is the layer that can express
  * the real rule:
  *
- * - **On loopback, nothing gates them.** Somebody at the machine already has the machine; they could
+ * - **On loopback, no GRANT gates them.** Somebody at the machine already has the machine; they could
  *   run the pairing command or read the admin token. A grant there would be friction with no safety,
  *   and `isGovernedCaller` already says so for every capability.
  * - **Off the host, the operator's grant decides.** It is permissive by default, because adding a
@@ -27,6 +27,20 @@
  * can now mint. That is the owner's stated principle for loopback, and the grant cannot narrow it — a
  * grant only ever governs a caller who is not on this host.
  *
+ * ## THE OPERATOR PASSWORD IS A SEPARATE, LOWER RULE — AND IT IS NOT A GRANT
+ *
+ * A grant decides what a caller who is NOT on this host may do. The first-password requirement decides
+ * what this MACHINE may hand out at all, so it sits below the grant layer and applies to every caller
+ * of the mint including the host's own command line: `POST /v1/pair/code` refuses while no operator
+ * password exists, whether the request came from a phone, from a browser on the machine, or from
+ * `fy pair`. The reason is that pairing is the moment access leaves this machine, and a device paired
+ * to a passwordless host arrives with `fleet.configure` and nothing to prove.
+ *
+ * IT IS THE SUBSYSTEM'S RULE, NOT THIS MOUNT'S. `PairingService.mint` answers a union and this route
+ * only renders it, so there is exactly one place the requirement is written down and exactly one
+ * sentence a person can be told — see `docs/grants.md` and `docs/pairing.md`. Nothing else in the
+ * daemon consults it: local use of a passwordless machine is untouched.
+ *
  * ## REDEMPTION STAYS PUBLIC, AND STAYS THE ONLY PUBLIC ROUTE HERE
  *
  * A device redeeming a code has no credential yet — that is the whole point of the exchange — so
@@ -40,7 +54,6 @@ import {
   type PairedDevicesView,
   PairedDevicesViewSchema,
   PairingCodeMintRequestSchema,
-  type PairingCodeMintResponse,
   PairingCodeMintResponseSchema,
   type PairingCodeStatusResponse,
   PairingCodeStatusResponseSchema,
@@ -58,10 +71,17 @@ import {
   jsonResponse,
   parseOptionalBody,
 } from '../../api/index.ts';
-import type { PairingRedemption } from '../../pairing/index.ts';
+import type { PairingMint, PairingRedemption } from '../../pairing/index.ts';
 
 export interface PairingSubsystem {
-  mint(): PairingCodeMintResponse;
+  /**
+   * A live code, or the reason this machine will not hand one out.
+   *
+   * THE UNION IS WHY THIS ROUTE CANNOT FORGET THE FIRST-PASSWORD REQUIREMENT. The rule lives in the
+   * subsystem — see `PairingService.mint` — so both doors into minting meet it: this route serves the
+   * browser AND the host's own pairing command, and there is no third way to a code.
+   */
+  mint(): Promise<PairingMint>;
   status(pairingId: PairingId): PairingCodeStatusResponse | undefined;
   /** Ends a minted code early. `undefined` when this daemon never minted that id. */
   revoke(pairingId: PairingId): PairingCodeStatusResponse | undefined;
@@ -152,7 +172,15 @@ export function pairingRoutes(subsystem: PairingSubsystem): readonly ApiRoute[] 
       noStore: true,
       handle: async ({ request }) => {
         await parseOptionalBody(request, PairingCodeMintRequestSchema);
-        return jsonResponse(PairingCodeMintResponseSchema.parse(subsystem.mint()), 201);
+        const outcome = await subsystem.mint();
+        // 403 WITH THE SUBSYSTEM'S OWN SENTENCE, and a code of its own. It is a refusal about this
+        // MACHINE's state rather than about this caller's credential, so it must not read as "your
+        // grant says no": the remedy is a password somebody sets, and it is the same remedy whether
+        // the request came from a browser or from the host's command line. Nothing here composes
+        // prose — a second author would be a second copy of the rule, drifting.
+        return outcome.kind === 'refused'
+          ? errorResponse(403, outcome.reason, 'pairing_needs_operator_password')
+          : jsonResponse(PairingCodeMintResponseSchema.parse(outcome.response), 201);
       },
     },
     {

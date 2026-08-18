@@ -9,6 +9,7 @@ import type {
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import type { PairingMint } from '../../../../src/lib/pairing/index.ts';
 import { type PairingSubsystem, pairingRoutes } from '../../../../src/lib/runtime/mounts/pairing.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { grantSubsystem } from './support.ts';
@@ -59,8 +60,17 @@ class FakePairing implements PairingSubsystem {
   };
   granted: PairedDevice[] = [device(deviceOneId, 'Pixel 8'), device(deviceTwoId, 'iPad')];
 
-  mint(): PairingCodeMintResponse {
-    return minted;
+  /**
+   * What the subsystem answered, refusal included.
+   *
+   * A FIELD RATHER THAN A FIXED CODE, because the requirement's refusal is the subsystem's answer and
+   * this mount's job is to render it. A fake that could only mint would let a route that dropped the
+   * refusal on the floor pass.
+   */
+  minting: PairingMint = { kind: 'minted', response: minted };
+
+  async mint(): Promise<PairingMint> {
+    return this.minting;
   }
 
   status(): PairingCodeStatusResponse | undefined {
@@ -185,6 +195,70 @@ describe('pairing routes', () => {
     should(fromHostCli.status).equal(201);
     should(fromBrowser.headers.get('cache-control')).equal('no-store');
     should(jsonBody(fromBrowser)).deepEqual(minted);
+  });
+
+  it('should refuse the mint for BOTH doors with the subsystem’s one sentence when no password exists', async () => {
+    // THE TWO-DOORS PROBLEM, DISSOLVED. The requirement used to live in the browser's pairing panel, so
+    // `fy pair` on the host could still hand out a code on a passwordless machine. It is now below both:
+    // the host's own command line and a browser reach the SAME route, get the SAME status, the SAME code
+    // and the SAME sentence — because there is one rule, in the subsystem, and this mount only renders
+    // what it answered. A second check here is what this asserts the absence of.
+    // Arrange
+    const subject = new FakePairing();
+    subject.minting = { kind: 'refused', reason: 'this machine has no operator password, so it will not…' };
+    const surface = await mount(subject);
+
+    // Act
+    const fromHostCli = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
+    );
+    const fromLocalBrowser = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: browser }),
+    );
+    const fromRemoteBrowser = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', loopback: false, headers: browser }),
+    );
+
+    // Assert — byte-identical bodies, which is the strongest available statement that one rule answered.
+    should([fromHostCli.status, fromLocalBrowser.status, fromRemoteBrowser.status]).deepEqual([403, 403, 403]);
+    should([fromLocalBrowser.body, fromRemoteBrowser.body]).deepEqual([fromHostCli.body, fromHostCli.body]);
+    should(jsonBody(fromHostCli)).deepEqual({
+      // NOT `grant_not_granted`. This is a refusal about the MACHINE's state, not about the caller's
+      // credential, so a client can tell "set a password" from "your operator said no".
+      code: 'pairing_needs_operator_password',
+      error: 'this machine has no operator password, so it will not…',
+    });
+    should(fromHostCli.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should leave every other pairing route alone on a machine with no password', async () => {
+    // LOCAL USE IS NEVER BLOCKED BY THIS. The requirement stands in front of the one act that creates
+    // remote access; a daemon with no password still lists its devices, revokes one, reports a code's
+    // fate and redeems. A gate that spread to the rest of this surface would have locked an operator
+    // out of revoking the very device they were worried about.
+    // Arrange
+    const subject = new FakePairing();
+    subject.minting = { kind: 'refused', reason: 'no password' };
+    const surface = await mount(subject);
+    const host = { loopback: true, headers: admin };
+
+    // Act
+    const listed = await surface.dispatch(request({ method: 'GET', path: '/v1/pair/devices', ...host }));
+    const fate = await surface.dispatch(request({ method: 'GET', path: `/v1/pair/code/${pairingId}`, ...host }));
+    const revokedCode = await surface.dispatch(
+      request({ method: 'DELETE', path: `/v1/pair/code/${pairingId}`, ...host }),
+    );
+    const revokedDevice = await surface.dispatch(
+      request({ method: 'DELETE', path: `/v1/pair/devices/${deviceOneId}`, ...host }),
+    );
+    const redeemed = await surface.dispatch(
+      request({ method: 'POST', path: '/v1/pair', body: JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' }) }),
+    );
+
+    // Assert
+    should([listed.status, fate.status, revokedCode.status, revokedDevice.status, redeemed.status]).deepEqual([
+      200, 200, 200, 200, 200,
+    ]);
   });
 
   it('should let a REMOTE browser mint while the operator leaves pairing on, and explain it when they do not', async () => {

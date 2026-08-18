@@ -98,6 +98,19 @@ async function daemon(label: string) {
   const files = new StateFileSystem(paths);
   await files.ensureDirectory(paths.state, 0o700);
 
+  /**
+   * ONE verifier for both subsystems, exactly as the composition root holds one.
+   *
+   * It reports a password because this daemon has to be able to PAIR for anything below to exist —
+   * the mint refuses on a passwordless machine, which is proved where that rule lives. Giving pairing
+   * and the grant subsystem different answers would be a fixture that cannot happen in production.
+   */
+  const operatorPassword = {
+    isSet: async () => true,
+    set: async () => undefined,
+    clear: async () => undefined,
+    verify: async () => false,
+  };
   const cryptography = new NodePairingCryptography();
   const pairingRepository = new StatePairingRepository(paths, files, cryptography);
   const state = await pairingRepository.open('workstation');
@@ -123,6 +136,8 @@ async function daemon(label: string) {
     devices: pairingRepository,
     credentials,
     deviceState: [push],
+    operatorPassword,
+    clientName: 'fy',
   });
 
   const grants = new CapabilityGrantService({
@@ -131,12 +146,7 @@ async function daemon(label: string) {
       written: async () => DAEMON_CAPABILITIES,
       write: async () => undefined,
     },
-    passwords: {
-      isSet: async () => false,
-      set: async () => undefined,
-      clear: async () => undefined,
-      verify: async () => false,
-    },
+    passwords: operatorPassword,
     tokens: { mint: () => `fy_unlock_${'a'.repeat(22)}` },
     clock: { nowMs: () => Date.now() },
     audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },

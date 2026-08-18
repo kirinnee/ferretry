@@ -76,8 +76,9 @@ describe('who the grants govern', () => {
   it('should leave a local browser ungoverned while this machine has no password at all', () => {
     // The state every new user starts in. There is nothing to unlock with and no gate to pass, so a
     // fresh install is useful immediately and nobody is asked to invent a secret before their first run.
-    // The first password is required when the first DEVICE is paired, which is where remote access
-    // begins — not at startup and not for local use.
+    // A password is required to PAIR — the daemon's own mint refuses without one, whichever door the
+    // request came through — because that is where remote access begins. Never at startup, and never
+    // for using this machine, which is the property this case exists to keep.
     // Act + Assert
     should(isGovernedCaller(arrival({ loopback: true, passwordSet: false }))).be.false();
     should(mayChangeOperatorPassword(arrival({ loopback: true, passwordSet: false }))).be.true();

@@ -889,46 +889,50 @@ export const operatorPasswordMismatch = (candidate: string, confirmation: string
 // ─── the password a first pairing requires ─────────────────────────────────────────────────────
 
 /**
- * Whether adding a device must set a password FIRST.
+ * Whether adding a device will be refused until a password exists.
  *
- * ## THE UNSAFE STATE IS DELETED RATHER THAN WARNED ABOUT
+ * ## THIS IS A PRE-CHECK. THE RULE ITSELF IS IN THE DAEMON
+ *
+ * `POST /v1/pair/code` refuses on a machine with no operator password, for every caller — a phone, a
+ * browser on the machine, and the host's own `fy pair`. That refusal is the guarantee; see
+ * `docs/grants.md` and `PairingService.mint`. What this function is for is telling somebody BEFORE they
+ * tap, because a control that fails on press is worse than one that explains itself.
+ *
+ * IT RESTATES THE DAEMON'S ANSWER, IT DOES NOT DECIDE ANYTHING. The requirement used to live here, and
+ * the consequence was a guarantee that only covered the browser: `fy pair` could hand out a key before
+ * the lock existed. Moving it down means one rule, one sentence, and nothing here that can drift out of
+ * step with what the daemon will actually do.
+ *
+ * ## WHY THE REQUIREMENT EXISTS AT PAIRING AND NOWHERE ELSE
  *
  * `fleet.configure` is on by default for a governed caller, so on a machine with no password any paired
  * device may provision the host — writing executable wrappers into the operator's accounts — with
- * nothing to prove. The old answer was a disclosure somebody had to read. This one removes the state:
- * a password exists from the first pairing onward, so every remote change has a gate.
- *
- * IT IS THE PAIRING FLOW THAT REQUIRES IT, NEVER STARTUP AND NEVER LOCAL USE. A person setting up on
- * their own machine with nothing paired is asked for nothing, because there is no remote caller for a
- * gate to stand in front of. The requirement lands at the exact moment remote access is being created.
+ * nothing to prove. Requiring the password at the moment remote access is CREATED deletes that state
+ * rather than warning about it. A person setting up on their own machine with nothing paired is asked
+ * for nothing, because there is no remote caller for a gate to stand in front of.
  */
 export const pairingNeedsPassword = (view: GrantsView): boolean => !view.passwordSet;
 
-/** Whether Add-a-device may offer a code, and what to say when it may not. */
+/** Whether Add-a-device should offer a code, and what to say first when it should not. */
 export type PairingGate =
-  /** A password exists, so every device this mint creates arrives behind a gate. */
+  /** Nothing to say in advance: offer the button and let the daemon answer. */
   | { readonly kind: 'open' }
-  /** No password yet. `local` says whether this browser is the one that can fix it. */
-  | { readonly kind: 'needs-password'; readonly local: boolean }
-  /** Ferretry could not read whether a password exists, which is not the same as knowing there is one. */
-  | { readonly kind: 'undetermined'; readonly reason: string };
+  /** This browser KNOWS the daemon will refuse. `local` says whether it is the one that can fix it. */
+  | { readonly kind: 'needs-password'; readonly local: boolean };
 
 /**
- * The gate, from the grant view — or from the failure to read it.
+ * The pre-check, from the grant view this browser has — or nothing said at all when it has none.
  *
- * AN UNREADABLE ANSWER IS NOT A SAFE ONE. Minting anyway would be exactly the damaged-state-as-empty-
- * state defect the rest of this product refuses: the requirement would silently lapse on the one machine
- * whose daemon could not answer for itself. So it fails closed and names the way through, which is the
- * host's own `fy pair` — a command that needs no browser and no grant read at all.
+ * AN UNREADABLE VIEW IS `open`, AND THAT IS THE CHANGE. This used to fail closed and refuse to offer a
+ * button, which was the right instinct while the browser was the only thing enforcing the requirement
+ * and is a dead end now that it is not: the daemon refuses on its own account, so a browser that cannot
+ * read the grant view has nothing to add by hiding a control. Somebody taps, and the machine that KNOWS
+ * answers — with the reason and the remedy, which this panel renders whole.
  */
-export function pairingGate(view: GrantsView | null, failure?: string): PairingGate {
-  if (view === null) return { kind: 'undetermined', reason: failure ?? 'the grant view could not be read' };
-  if (!pairingNeedsPassword(view)) return { kind: 'open' };
+export function pairingGate(view: GrantsView | null): PairingGate {
+  if (view === null || !pairingNeedsPassword(view)) return { kind: 'open' };
   return { kind: 'needs-password', local: view.hostLocal };
 }
-
-/** Said where the button was, when the daemon could not tell this browser whether a password exists. */
-export const PAIRING_PASSWORD_UNDETERMINED = `Ferretry could not read whether this machine has an operator password, and it will not hand out a pairing code on the assumption that it does — a device added without one can change the settings of whatever is already switched on here. Add the device from the machine instead, with \`fy pair\`.`;
 
 /** Why the Add-a-device button is not the first thing on this panel, said where the button was. */
 export const PAIRING_PASSWORD_REQUIREMENT =

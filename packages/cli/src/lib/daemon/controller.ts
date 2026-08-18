@@ -92,8 +92,22 @@ export interface DaemonControllerDeps {
   readonly daemonVersion?: (path: string) => string | undefined;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
+  /**
+   * The first-operator-password offer, made after a start that a PERSON asked for.
+   *
+   * REQUIRED rather than optional, because an absent one is indistinguishable from a controller that
+   * silently never asks — and "the machine quietly stopped offering" is the failure mode this whole
+   * requirement exists to remove. It decides for itself whether anybody is there to answer; see
+   * `FirstPasswordOffer` for why it can never block a start.
+   */
+  readonly firstPassword: IFirstPasswordOffer;
   readonly readiness?: ReadinessPolicy;
   readonly shutdown?: ShutdownPolicy;
+}
+
+/** Offering to set this machine's first operator password. Satisfied by `FirstPasswordOffer`. */
+interface IFirstPasswordOffer {
+  offer(): Promise<void>;
 }
 
 /**
@@ -128,8 +142,20 @@ export class DaemonController {
     await this.#serialized('uninstall', () => this.#uninstall());
   }
 
+  /**
+   * Brings the daemon up, then — if a person is there — offers to set the machine's first password.
+   *
+   * THE OFFER IS OUTSIDE THE LIFECYCLE CLAIM, and that placement is the point rather than tidiness. A
+   * prompt inside the claim would hold every other `fy daemon …` invocation on this host for as long
+   * as somebody stared at the question: `stop` would appear to hang, and the operator's remedy would
+   * be to kill the terminal that was asking them something. Nothing in the offer touches the state
+   * this verb serialises — it speaks to the daemon that is now serving.
+   *
+   * A FAILED START ASKS NOTHING, because `#serialized` throws before this line.
+   */
   async start(): Promise<void> {
     await this.#serialized('start', () => this.#start());
+    await this.deps.firstPassword.offer();
   }
 
   async stop(): Promise<void> {

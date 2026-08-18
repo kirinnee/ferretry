@@ -33,8 +33,11 @@ open. It does not defend against an attacker with local access.
 
 **A machine with no password cannot ask for one**, so a local browser there is ungoverned as it always
 was. That is the state every new install starts in: **no setup, no questionnaire and no password** to
-be useful. The first password is required when the first **device** is paired
-([pairing](pairing.md)), which is the moment remote access starts existing.
+be useful. A password is required when a **device** is paired ([pairing](pairing.md)), which is the
+moment remote access starts existing — and the **daemon** is what requires it, so it does not matter
+whether the pairing was started from the browser or from `fy pair`. `fy daemon start` also offers to set
+one when a person is watching, but that is convenience: a service-manager start has no terminal to ask
+at, so the refusal at pairing is what makes the requirement a promise rather than a habit.
 
 So the answer has four cases rather than two:
 
@@ -347,11 +350,22 @@ command says so at the moment somebody might be tempted to do that instead.
   gate buys deliberateness against slips and unattended tabs, nothing more, and the escape hatch it
   depends on is the same door that makes it bypassable. There is no version of this that is both
   unbypassable and recoverable, and recoverable is the one that was chosen.
-- **The first-password requirement lives in the PWA's pairing flow, not in the daemon.** `POST
-/v1/pair/code` still mints on a passwordless machine, so `fy pair` on the host is unaffected — which is
-  deliberate, because a daemon-side requirement would demand a password before a local operator could
-  add their own first device from a terminal. The consequence is that the guarantee is "the browser will
-  not create a passwordless remote device", not "no passwordless remote device can exist".
+- ~~The first-password requirement lives in the PWA's pairing flow, not in the daemon.~~ **Closed.**
+  `POST /v1/pair/code` refuses while no operator password exists, for **every** caller — a phone, a
+  browser on the machine, and `fy pair` on the host, which mints through that same route. The guarantee
+  is therefore "**no passwordless remote device can be created**", not "the browser will not create one".
+  The rule is `PairingService.mint`, which answers a refusal instead of a code; the browser's panel is a
+  **pre-check** that explains before somebody taps, and `fy pair` prints the daemon's sentence. One rule,
+  one sentence, and no second copy to drift. What survives as a limit, deliberately: a code minted while
+  a password existed still redeems if the password is cleared inside that code's two minutes — the check
+  is at the mint, and expiring a live code somebody is walking to their phone to scan would be a rule
+  reaching backwards.
+- **A daemon started by a service manager can still come up passwordless, and that is not a hole.**
+  `fy daemon start` offers to set the first password when a person is there to answer — and only then:
+  systemd and launchd run the daemon executable with no terminal, so a prompt there would hang the unit
+  and the machine would silently stop running the daemon at boot. Startup prompting is therefore
+  convenience and can never be the promise; **pairing refusing is the promise**, and it holds however the
+  daemon was started.
 - **An install that already has paired devices and no password is not migrated.** Nothing nags it and
   nothing is revoked; the requirement lands at its **next** pairing, which needs no separate prompt and
   cannot lock anybody out. Such an operator can also set one at any time from a local browser or with
