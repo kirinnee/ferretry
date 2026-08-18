@@ -73,6 +73,7 @@ export class InProcessCliDriver implements CliDriver {
     };
     const prompt: IPrompt = {
       ask: () => Promise.reject(new Error('interactive prompt is unavailable in-process')),
+      askSecret: () => Promise.reject(new Error('interactive prompt is unavailable in-process')),
     };
 
     const program = createProgram();

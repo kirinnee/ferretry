@@ -11,13 +11,21 @@ import type { ApiActor } from './actor.ts';
  * checks have passed,
  * and it can only ever remove what the scope already allowed.
  *
- * ## THE BOUNDARY IS LOOPBACK, AND THAT IS THE WHOLE SIMPLIFICATION
+ * ## THE BOUNDARY IS LOOPBACK, WITH ONE GATE IN FRONT OF A LOCAL BROWSER
  *
  * Somebody on the machine already HAS the machine: they can edit the configuration document, run the
- * command line, or start anything they like. Gating them is theatre — friction with no safety — so a
- * loopback caller is not governed by this layer at all and a fresh install needs no setup, no
- * questionnaire and no password. Every restriction here exists for the caller who is NOT already
- * standing on the host, which is where a boundary is real.
+ * command line, or start anything they like. So the host's own command line is not governed by this
+ * layer at all, and a fresh install needs no setup, no questionnaire and no password.
+ *
+ * A LOCAL BROWSER IS THE ONE EXCEPTION, because a browser is a paired device wherever it runs and an
+ * unattended tab is one tap from provisioning the machine. It is governed until it presents an unlock
+ * and ungoverned afterwards — one gate, then full authority, exactly as `sudo` behaves. That is
+ * FRICTION AND NOT A BOUNDARY: a person at the keyboard can read the admin token and bypass it
+ * entirely, so it buys deliberateness against slips and unattended tabs, and nothing here may claim it
+ * stops an attacker with local access. See `isGovernedCaller` for the whole rule.
+ *
+ * Every other restriction here exists for the caller who is NOT standing on the host, which is where a
+ * boundary is real.
  *
  * ## "LOOPBACK" IS HOW THE REQUEST ARRIVED, NEVER WHAT IT CLAIMS
  *
@@ -63,6 +71,16 @@ export interface CapabilityDemand {
 export interface CapabilityPresentation {
   /** How the request ARRIVED. Carrier-derived; a relayed hop is never loopback. */
   readonly loopback: boolean;
+  /**
+   * Whether the caller authenticated with the HOST's own admin token.
+   *
+   * SERVER-DERIVED FROM THE TOKEN CLASS, never from `actor` — an actor string can be refined by a
+   * self-identification header and is lossy about authority, so deriving a class back out of one would
+   * be guessing at the very question this decides. It is here because arrival stopped being the whole
+   * locality answer: a local BROWSER is a paired device and is gated, while the command line on the
+   * same machine holds the token file and is not.
+   */
+  readonly adminToken: boolean;
   /** Who to attribute a change to. Attribution only — never an input to a decision. */
   readonly actor: ApiActor;
   /** An unlock presented for a `configure` demand. */

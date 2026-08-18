@@ -78,8 +78,16 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
   };
 }
 
-const remote: CapabilityPresentation = { loopback: false, actor: 'device:phone-1' };
-const local: CapabilityPresentation = { loopback: true, actor: 'admin-cli' };
+const remote: CapabilityPresentation = { loopback: false, adminToken: false, actor: 'device:phone-1' };
+/** The host's COMMAND LINE: on the machine and holding the admin token, so ungoverned unconditionally. */
+const local: CapabilityPresentation = { loopback: true, adminToken: true, actor: 'admin-cli' };
+/**
+ * A browser ON the machine — local arrival, a DEVICE credential.
+ *
+ * The caller the whole gate exists for, and the one a single `loopback` boolean could not tell apart from
+ * the command line above.
+ */
+const localBrowser: CapabilityPresentation = { loopback: true, adminToken: false, actor: 'device:this-browser' };
 
 describe('reading the operator decision', () => {
   it('should refuse every governed capability until the decision has been read', () => {
@@ -113,7 +121,8 @@ describe('reading the operator decision', () => {
     should((raised as GrantError).failure).equal('unavailable');
     should(service.enforced()).be.undefined();
     should(service.decide({ capability: 'fleet', axis: 'use' }, remote).refusal).equal('undetermined');
-    // A loopback caller is unaffected: they are not governed by this layer at all.
+    // The host command line is unaffected: it holds the admin token and is not governed by this layer at
+    // all, whatever the document says or fails to say.
     should(service.decide({ capability: 'fleet', axis: 'use' }, local).allowed).be.true();
   });
 });
@@ -351,7 +360,7 @@ describe('the operator password itself', () => {
     const held = outcome.kind === 'unlocked' ? outcome.token : '';
 
     // Act
-    await context.service.setPassword('second-secret');
+    await context.service.setPassword('second-secret', local);
 
     // Assert
     should(
@@ -367,11 +376,203 @@ describe('the operator password itself', () => {
     await context.service.refresh();
 
     // Act
-    await context.service.setPassword(undefined);
+    await context.service.setPassword(undefined, local);
 
     // Assert
     should(context.service.hasPassword()).be.false();
     should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('ungated');
+  });
+
+  it('should let the HOST replace a password nobody knows, which is the escape hatch', async () => {
+    // THE TEST THAT KEEPS THIS FEATURE FROM BEING A LOCKOUT.
+    //
+    // A local browser needs the current password to move it, so a forgotten password would brick the
+    // machine forever if the command line needed one too — no remote path, no local path, nothing. It
+    // does not: the admin token is ungoverned, so `fy daemon password set` replaces an UNKNOWN password
+    // without presenting it or any unlock. Recovery is asserted from exactly that state.
+    // Arrange — a machine whose password this caller cannot produce, and holds no unlock for.
+    const context = world({ password: 'the-one-nobody-remembers' });
+    await context.service.refresh();
+
+    // Act — no password, no unlock, no header of any kind.
+    await context.service.setPassword('a-brand-new-one', local);
+
+    // Assert — and the new one works, so this is recovery rather than merely an accepted call.
+    const outcome = await context.service.unlock('a-brand-new-one');
+    should(outcome.kind).equal('unlocked');
+    should(context.service.hasPassword()).be.true();
+  });
+
+  it('should refuse a LOCAL BROWSER that has not unlocked, so the gate is not one tap wide', async () => {
+    // Local arrival is not the whole answer: a browser is a paired device, and one that could replace
+    // the password it cannot prove would make every sentence about deliberateness false. The refusal
+    // names the way back for the reader who does not have it either — that is the point of it being a
+    // sentence rather than a status.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+
+    // Act
+    const raised = await context.service
+      .setPassword('something-else', localBrowser)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(raised).be.instanceof(GrantError);
+    should((raised as GrantError).failure).equal('forbidden');
+    should((raised as GrantError).message).match(/fy daemon password set/u);
+    should(await context.service.unlock('operator-secret')).have.property('kind', 'unlocked');
+  });
+
+  it('should let a local browser move the password once it holds an unlock', async () => {
+    // One gate at the door, then full authority. The unlock the browser already spent is what proves it,
+    // rather than a second concept with its own lifetime.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+    const outcome = await context.service.unlock('operator-secret');
+    const held = outcome.kind === 'unlocked' ? outcome.token : '';
+
+    // Act
+    await context.service.setPassword('a-newer-secret', { ...localBrowser, unlock: held });
+
+    // Assert
+    should(await context.service.unlock('a-newer-secret')).have.property('kind', 'unlocked');
+  });
+
+  it('should let a local browser set the FIRST password with nothing to prove', async () => {
+    // The state every new user starts in, and the one required at first pairing. There is no password to
+    // unlock with, so demanding one would make the requirement impossible to satisfy from the browser
+    // that is being asked to satisfy it.
+    // Arrange — a fresh machine.
+    const context = world();
+    await context.service.refresh();
+
+    // Act
+    await context.service.setPassword('the-first-one', localBrowser);
+
+    // Assert
+    should(context.service.hasPassword()).be.true();
+  });
+});
+
+describe('a browser standing on the machine', () => {
+  it('should be governed until it unlocks, and ungoverned afterwards', async () => {
+    // The whole change, in one assertion: `configure` on a local browser is refused with `locked` rather
+    // than served, and the unlock — not a second gate — is what opens it.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+
+    // Act
+    const before = context.service.decide({ capability: 'fleet', axis: 'configure' }, localBrowser);
+    const outcome = await context.service.unlock('operator-secret');
+    const held = outcome.kind === 'unlocked' ? outcome.token : '';
+    const after = context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...localBrowser, unlock: held });
+
+    // Assert
+    should(before).deepEqual({ allowed: false, refusal: 'locked' });
+    should(after).deepEqual({ allowed: true, refusal: 'granted' });
+  });
+
+  it('should stay ungoverned on a machine with no password at all', async () => {
+    // A fresh install is useful immediately: there is nothing to unlock with, so there is no gate.
+    // Arrange
+    const context = world();
+    await context.service.refresh();
+
+    // Act
+    const decided = context.service.decide({ capability: 'fleet', axis: 'configure' }, localBrowser);
+
+    // Assert
+    should(decided).deepEqual({ allowed: true, refusal: 'granted' });
+  });
+
+  it('should report itself as ON THIS HOST while still governed, and may widen after unlocking', async () => {
+    // `governed` and `hostLocal` came apart here, and a view that collapsed them would tell somebody
+    // standing at the machine they were remote — and call a switch they can reopen a one-way door.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+
+    // Act
+    const view = context.service.view(localBrowser);
+
+    // Assert
+    should(view.governed).be.true();
+    should(view.hostLocal).be.true();
+    should(view.capabilities.every(entry => entry.mayGrant)).be.true();
+    // And the remote caller is unmoved by any of it.
+    should(context.service.view(remote)).containDeep({ governed: true, hostLocal: false });
+  });
+
+  it('should refuse a widening patch until it unlocks, naming the password rather than the machine', async () => {
+    // The remote sentence ("only from the machine itself") is the wrong one here: this caller IS at the
+    // machine, and sending them to the host to do what they are already doing is the dead end this
+    // surface exists to remove.
+    // Arrange — a capability switched off, on a machine with a password.
+    const context = world({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
+      password: 'operator-secret',
+    });
+    await context.service.refresh();
+
+    // Act
+    const raised = await context.service
+      .patch({ browser: { use: true } }, localBrowser)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(raised).be.instanceof(GrantError);
+    should((raised as GrantError).message).match(/operator password/u);
+    should((raised as GrantError).message).not.match(/no remote caller/u);
+    should(context.written()).be.undefined();
+  });
+
+  it('should name the PASSWORD, not the document, when a local browser is refused a restricted grant', async () => {
+    // Two readers, two remedies. Off the host, the document is the answer and the operator is somebody
+    // else. On the host the reader IS the operator: telling them their own document refuses them — when
+    // the password they already have would let it through — sends them to edit a file for a limit that was
+    // never theirs.
+    // Arrange — a capability the operator excluded the UI from configuring, on a machine with a password.
+    const context = world({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
+      password: 'operator-secret',
+    });
+    await context.service.refresh();
+
+    // Act
+    const locally = await context.service
+      .patch({ warden: { use: false } }, localBrowser)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    const remotely = await context.service
+      .patch({ warden: { use: false } }, remote)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((locally as GrantError).message).match(/operator password/u);
+    should((locally as GrantError).message).match(/fy daemon password set/u);
+    should((remotely as GrantError).message).match(/has not granted the UI permission/u);
+    should((remotely as GrantError).message).not.match(/operator password/u);
+    should(context.written()).be.undefined();
+  });
+
+  it('should let a local browser NARROW without unlocking, because revoking is never gated', async () => {
+    // A prompt between a person and shutting a door is a liability during the incident that made them
+    // reach for it. The gate is on widening and on the password, never on a revoke.
+    // Arrange
+    const context = world({ password: 'operator-secret' });
+    await context.service.refresh();
+
+    // Act
+    await context.service.patch({ terminal: { use: false } }, localBrowser);
+
+    // Assert
+    should(context.written()).containDeep({ terminal: { use: false } });
   });
 });
 

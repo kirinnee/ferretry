@@ -131,7 +131,9 @@ export function describeConfiguration(report: ConfigurationReport): readonly Res
  *
  * THE ROW SAYS WHO IT APPLIES TO. `--print-config` is read by somebody trying to work out why
  * something is refused, and the commonest wrong answer would be to see `configure off` and conclude
- * their own command line is blocked. Loopback is ungoverned, so the heading says so once.
+ * their own command line is blocked. It is not — the admin token is ungoverned — so the heading says so
+ * once, and says the other half too: a BROWSER on this machine is a paired device and is governed by
+ * these rows until it enters the operator password. Arrival alone stopped being the answer.
  */
 function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
   const document = (report.document ?? {}) as { readonly grants?: Record<string, Record<string, unknown>> };
@@ -155,10 +157,14 @@ function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
 /**
  * Whether anything OFF this host can reach this daemon at all.
  *
- * IT DECIDES WHETHER THE GRANTS MATTER, which is why `--check` asks it before printing them. A daemon
- * bound to loopback with no relay is reachable only by callers the grant layer does not govern, so
- * reciting five capabilities at that operator would be noise dressed as security — and worse, it
- * would imply a boundary that is not doing anything.
+ * IT DECIDES WHETHER THE GRANTS MATTER TO ANOTHER MACHINE, which is why `--check` asks it before
+ * printing them. A daemon bound to loopback with no relay can be reached by nothing off this host, so
+ * reciting five capabilities at that operator as a REMOTE boundary would be noise dressed as security.
+ *
+ * IT IS NOT THE SAME AS "nothing is governed here". A browser on this very machine is a paired device
+ * and is governed by those rows until it enters the operator password — the gate that makes an
+ * unattended tab deliberate rather than one tap from the fleet. What this predicate answers is the
+ * narrower question it has always answered: can anything reach this daemon from somewhere else.
  *
  * TWO WAYS IN, and the second is the one people forget. The bind address is the obvious one. The
  * relay is the other: the daemon DIALS OUT to a rendezvous, so a loopback bind is still reachable
@@ -205,8 +211,17 @@ export function describeGrantPosture(input: {
   readonly carrier?: RelayCarrierSource;
 }): readonly string[] {
   const reach = reachableOffHost(input.config, input.carrier);
+  // Nothing off this host can reach it — so the rows are not a REMOTE boundary today, and reciting five
+  // capabilities as one would be noise dressed as security. It no longer says "no grant applies": a
+  // browser on this machine is a paired device and is governed until it enters the password, so the line
+  // names the gate that IS doing something rather than claiming there is none.
   if (!reach.reachable)
-    return [`grants       nothing off this host can reach this daemon (${reach.how}), so no grant applies today`];
+    return [
+      `grants       nothing off this host can reach this daemon (${reach.how}), so no grant governs another machine today`,
+      input.passwordSet
+        ? `             a browser on this machine still enters the operator password once before it changes anything`
+        : `             a browser on this machine is ungoverned too, because there is no operator password to enter`,
+    ];
   const used = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.use === true);
   const configurable = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.configure === true);
   const lines = [
@@ -247,7 +262,11 @@ export function renderConfiguration(rows: readonly ResolvedValue[], config: Daem
   // Stated ONCE, beneath the rows rather than repeated on each of them: the grant rows are meaningless
   // without it, and a person reading five identical parentheticals stops reading them.
   if (rows.some(row => row.name.startsWith('grants.')))
-    lines.push('', 'grants apply to callers that are NOT on this host; a loopback caller is ungoverned.');
+    lines.push(
+      '',
+      'grants apply to callers that are NOT on this host; this command line is ungoverned, and a browser on',
+      'this machine is governed until it enters the operator password once.',
+    );
   if (advertisesForeignAddress(config))
     lines.push('', `! ${foreignAdvertisementNotice(config.bindUrl, config.publicUrl, configFile)}`);
   return lines.join('\n');

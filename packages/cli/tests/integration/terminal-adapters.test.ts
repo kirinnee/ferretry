@@ -61,4 +61,23 @@ describe('terminal and system adapters', () => {
 
     expect(await new InquirerPrompt(client).ask('value?')).toBe('chosen');
   });
+
+  it('should ask for a password without echoing it, and without disclosing its length', async () => {
+    // TWO PROPERTIES, BOTH ASSERTED ON THE QUESTION ITSELF. `type: 'password'` is what suppresses the
+    // echo — an `input` question here would print the operator password into the scrollback of whoever
+    // was looking at that terminal, and nothing takes it back out. And NO `mask`: a row of asterisks
+    // discloses the length to somebody watching the screen, which is the one thing they would otherwise
+    // have to guess.
+    const questions: Array<ReadonlyArray<Record<string, unknown>>> = [];
+    const client = {
+      prompt: async (asked: ReadonlyArray<Record<string, unknown>>) => {
+        questions.push(asked);
+        return { answer: 'correct horse' };
+      },
+    } as unknown as Pick<typeof inquirer, 'prompt'>;
+
+    expect(await new InquirerPrompt(client).askSecret('Operator password: ')).toBe('correct horse');
+    expect(questions).toEqual([[{ type: 'password', name: 'answer', message: 'Operator password: ' }]]);
+    expect(questions[0]?.[0]).not.toHaveProperty('mask');
+  });
 });

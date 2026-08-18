@@ -37,6 +37,17 @@ export function registerDaemonCommands(
   daemon
     .command('start')
     .description('start the daemon and wait until it serves')
+    .addHelpText(
+      'after',
+      `
+When run at a terminal on a machine that has no operator password, this offers
+to set one after the daemon is up. It is asked once, it can be skipped with
+Enter, and nothing about using this machine locally depends on it — what needs
+it is pairing another device, which the daemon refuses without one.
+
+Nothing is ever asked when there is no terminal, so a service-managed start at
+login is untouched: a unit runs the daemon executable, never this command.`,
+    )
     .action(async () => {
       await controller().start();
     });

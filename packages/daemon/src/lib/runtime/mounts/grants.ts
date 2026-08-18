@@ -31,12 +31,19 @@ import type { UnlockOutcome } from '../../grants/types.ts';
  * is a per-capability question the subsystem answers per capability in the patch — a route-level
  * demand could only name one.
  *
- * ## THE PASSWORD ROUTE IS `host` SCOPE
+ * ## THE PASSWORD ROUTE IS LOCAL-ONLY, AND LOCAL IS NOT THE SAME AS UNGATED
  *
  * Setting or clearing the operator password is the one action that decides whether the security layer
  * exists at all, so a remote caller must never reach it: a paired device that could clear the password
- * could remove its own gate. `host` is the host's admin token only — never a device, never a warden —
- * which is the same reasoning that already puts fleet authorization there.
+ * could remove its own gate. `privilegedOnly` is what refuses that, and it is a fact about the CARRIER
+ * rather than about the token — the relay terminates on this host, so nothing weaker would do.
+ *
+ * ARRIVAL AND CREDENTIAL ARE SEPARATE FACTS, which is why the route's `minimum: 'operator'` is not the
+ * whole answer either. A local BROWSER reaches this route and is a paired device; it needs an unlock
+ * before it may move the password, or the gate it is standing behind would be one tap wide. The host's
+ * ADMIN TOKEN needs none, and that asymmetry is the escape hatch a forgotten password is repaired
+ * through — see `GrantService.setPassword`. The subsystem decides it, not this file: the mount hands
+ * over the server-derived evidence and renders the refusal it is given.
  *
  * ## NOTHING HERE RETURNS A PASSWORD
  *
@@ -60,7 +67,8 @@ export interface GrantSubsystem {
   view(presentation: CapabilityPresentation): GrantsView;
   unlock(password: string): Promise<UnlockOutcome>;
   patch(patch: GrantsPatch, presentation: CapabilityPresentation): Promise<GrantsView>;
-  setPassword(password: string | undefined): Promise<void>;
+  /** Takes the presentation because WHICH local caller decides it: see the header above. */
+  setPassword(password: string | undefined, presentation: CapabilityPresentation): Promise<void>;
 }
 
 const REFUSALS: Readonly<Record<'invalid' | 'forbidden' | 'unavailable', { status: number; code: string }>> = {
@@ -90,6 +98,10 @@ function refuse(error: unknown): never {
 function presentationOf(context: RouteContext): CapabilityPresentation {
   return {
     loopback: context.request.loopback,
+    // The TOKEN CLASS, which the dispatcher derived from the credential that authenticated the request —
+    // never the actor, which a self-identification header can refine. Absent means not the admin token,
+    // which is the direction that adds a gate rather than removing one.
+    adminToken: context.credential?.tokenClass === 'admin',
     actor: context.actor ?? 'unknown',
     unlock: headerValue(context.request, OPERATOR_UNLOCK_HEADER),
   };
@@ -142,7 +154,7 @@ async function unlock(subsystem: GrantSubsystem, context: RouteContext): Promise
  */
 async function setPassword(subsystem: GrantSubsystem, context: RouteContext): Promise<ApiResponse> {
   const body = await parseBody(context.request, GrantPasswordRequestSchema);
-  await subsystem.setPassword(body.password).catch(refuse);
+  await subsystem.setPassword(body.password, presentationOf(context)).catch(refuse);
   return jsonResponse({ passwordSet: body.password !== undefined });
 }
 

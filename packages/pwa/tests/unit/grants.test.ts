@@ -6,10 +6,12 @@ import {
   GRANT_REFUSALS,
   type GrantRefusal,
   type GrantsView,
+  OPERATOR_PASSWORD_MIN_LENGTH,
 } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
   axisAllowed,
+  axisChangeLocked,
   axisGuidance,
   axisLabel,
   axisQuestion,
@@ -17,14 +19,30 @@ import {
   capabilityLabel,
   capabilityNoun,
   capabilityReach,
+  connectionPosture,
   grantAlreadyReads,
   grantChangeNeedsUnlock,
   grantGuidance,
   grantPatch,
   grantRefusalNotice,
+  grantScopeKey,
+  grantScopeNote,
   NO_PASSWORD_DISCLOSURE,
+  OPERATOR_PASSWORD_RULE_NOTE,
+  operatorPasswordMismatch,
+  operatorPasswordProblem,
   operatorUnlockFailure,
   originNote,
+  PAIRING_PASSWORD_REQUIREMENT,
+  PAIRING_PASSWORD_REQUIREMENT_REMOTE,
+  PASSWORD_ARRIVAL_VS_CREDENTIAL,
+  PASSWORD_HOST_CLEAR_COMMAND,
+  PASSWORD_HOST_SET_COMMAND,
+  PASSWORD_RECOVERY_NOTE,
+  PASSWORD_REMOTE_UNAVAILABLE,
+  pairingGate,
+  pairingNeedsPassword,
+  passwordControlState,
   UNLOCK_LIMIT_NOTE,
   unlockSecondsRemaining,
   usableUnlock,
@@ -47,9 +65,10 @@ const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantVie
 
 const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability })),
-  // Governed by default: these fixtures stand for a caller who is NOT on the host, which is the only
-  // caller the grants apply to.
+  // Governed by default, and NOT on the host: these fixtures stand for a paired device somewhere else.
+  // The two are separate facts now — a browser ON the machine is governed too until it unlocks.
   governed: true,
+  hostLocal: false,
   passwordSet: false,
   unlocked: false,
   ...overrides,
@@ -312,5 +331,168 @@ describe('operatorUnlockFailure', () => {
 
   it('keeps an unrecognised failure retryable rather than declaring a dead end', () => {
     expect(operatorUnlockFailure(httpError(500, 'internal', 'the daemon fell over')).retryable).toBe(true);
+  });
+});
+
+describe('the posture, from two facts rather than one', () => {
+  it('names the connection ON the machine but not yet unlocked, which neither old posture covered', () => {
+    // `governed` used to be the exact inverse of "at the machine". `local-locked` is what happened when it
+    // stopped being: a browser is a paired device wherever it runs. Collapsing this into either neighbour
+    // is a lie in a different direction — "Remote" to somebody standing at the machine, or "Direct" over a
+    // gate they have not passed.
+    // Act + Assert
+    expect(connectionPosture(false, true)).toBe('direct-local');
+    expect(connectionPosture(true, true)).toBe('local-locked');
+    expect(connectionPosture(true, false)).toBe('governed-remote');
+    expect(connectionPosture(false, false)).toBe('governed-remote');
+  });
+
+  it('keeps “cannot tell” for a daemon that said nothing, rather than assuming the flattering answer', () => {
+    // Absence has to mean something, and "no answer means loopback" would paint a remote phone as standing
+    // at the machine — the one inversion this module exists to prevent.
+    // Act + Assert
+    expect(connectionPosture(undefined)).toBe('unknown');
+    expect(connectionPosture(undefined, true)).toBe('unknown');
+  });
+
+  it('reads an OLDER daemon’s single answer as locality, because there it was one', () => {
+    // A daemon from before the split gates no local browser, so `!governed` really was "at the machine"
+    // there. Trusting it is not a guess about the new state; it is the only state that daemon has.
+    // Act + Assert
+    expect(connectionPosture(false)).toBe('direct-local');
+    expect(connectionPosture(true)).toBe('governed-remote');
+  });
+
+  it('says something different to each connection about who the limits apply to', () => {
+    // One sentence served every caller and stopped being true. Each branch is keyed so a screen and a
+    // screenshot can name which one is on the page.
+    // Act + Assert
+    expect(grantScopeKey('governed-remote')).toBe('this-browser');
+    expect(grantScopeNote('governed-remote')).toContain('reached the machine from somewhere else');
+    expect(grantScopeKey('local-locked')).toBe('this-browser-until-unlocked');
+    expect(grantScopeNote('local-locked')).toContain('paired device wherever it runs');
+    expect(grantScopeKey('direct-local')).toBe('not-on-this-machine');
+    expect(grantScopeNote('direct-local')).toContain('none of them apply to it right now');
+    expect(grantScopeKey('unknown')).toBe('cannot-tell');
+    expect(grantScopeNote('unknown')).toContain('safe reading');
+  });
+});
+
+describe('a switch a local browser may press only after unlocking', () => {
+  it('holds a WIDENING press until the unlock, and never a narrowing one', () => {
+    // A prompt between a person and shutting a door is a liability during the incident that made them
+    // reach for it. The gate is on widening; revoking is never gated.
+    // Arrange
+    const local = view({ governed: true, hostLocal: true, passwordSet: true });
+    const widenable = entry({ mayGrant: true });
+
+    // Act + Assert — `recorded: false` is the widening press, `true` the narrowing one.
+    expect(axisChangeLocked(local, widenable, false)).toBe(true);
+    expect(axisChangeLocked(local, widenable, true)).toBe(false);
+  });
+
+  it('holds nothing once the browser has unlocked, or on a machine with no password', () => {
+    // One gate at the door, then full authority: there is no second question after the unlock, and none at
+    // all on a machine that has nothing to unlock with.
+    // Arrange
+    const widenable = entry({ mayGrant: true });
+    const unlocked = view({ governed: false, hostLocal: true, passwordSet: true, unlocked: true });
+    const noPassword = view({ governed: false, hostLocal: true, passwordSet: false });
+
+    // Act + Assert
+    expect(axisChangeLocked(unlocked, widenable, false)).toBe(false);
+    expect(axisChangeLocked(noPassword, widenable, false)).toBe(false);
+  });
+
+  it('leaves a caller that may never widen to the one-way notice instead', () => {
+    // `mayGrant: false` is not a control at all, and the "only at the machine" sentence already says so.
+    // Painting the password over it would offer a remedy that cannot help.
+    // Arrange
+    const remote = view({ governed: true, hostLocal: false, passwordSet: true });
+
+    // Act + Assert
+    expect(axisChangeLocked(remote, entry({ mayGrant: false }), false)).toBe(false);
+  });
+});
+
+describe('the operator password control', () => {
+  it('offers itself only where the daemon would accept it', () => {
+    // Both halves of the daemon's rule, restated rather than invented: the route is refused off the host,
+    // and a local browser is a paired device that must unlock before it may move an existing password.
+    // Act + Assert
+    expect(passwordControlState(view({ hostLocal: false }))).toEqual({ kind: 'remote' });
+    expect(passwordControlState(view({ hostLocal: true, passwordSet: true, unlocked: false }))).toEqual({
+      kind: 'locked',
+    });
+    expect(passwordControlState(view({ hostLocal: true, passwordSet: true, unlocked: true }))).toEqual({
+      kind: 'ready',
+      first: false,
+    });
+    // The state every new user starts in: nothing to prove, and a first password to set.
+    expect(passwordControlState(view({ hostLocal: true, passwordSet: false }))).toEqual({ kind: 'ready', first: true });
+  });
+
+  it('reads the minimum from the protocol rather than keeping a second copy of the number', () => {
+    // A hint that said "eight" while the schema wanted ten would be a lie told at the exact moment somebody
+    // is trying to comply with it.
+    // Act + Assert
+    expect(operatorPasswordProblem('')).toContain('Enter a password');
+    expect(operatorPasswordProblem('short')).toContain(String(OPERATOR_PASSWORD_MIN_LENGTH));
+    expect(operatorPasswordProblem('a'.repeat(OPERATOR_PASSWORD_MIN_LENGTH))).toBeUndefined();
+    expect(OPERATOR_PASSWORD_RULE_NOTE).toContain(String(OPERATOR_PASSWORD_MIN_LENGTH));
+  });
+
+  it('catches two entries that disagree, and stays quiet until both are typed', () => {
+    // There is no way to read this value back, so a mistyped password is a password nobody knows.
+    // Act + Assert
+    expect(operatorPasswordMismatch('a-good-password', 'a-good-passwrod')).toBe(true);
+    expect(operatorPasswordMismatch('a-good-password', 'a-good-password')).toBe(false);
+    expect(operatorPasswordMismatch('a-good-password', '')).toBe(false);
+    expect(operatorPasswordMismatch('', 'a-good-password')).toBe(false);
+  });
+
+  it('names the host recovery path in the copy a stranded reader meets', () => {
+    // THE SENTENCE THAT KEEPS THIS FROM BEING A LOCKOUT. A local browser needs the current password to
+    // replace it, so the reader who has forgotten theirs is exactly the reader the control refuses.
+    // Act + Assert
+    expect(PASSWORD_RECOVERY_NOTE).toContain(PASSWORD_HOST_SET_COMMAND);
+    expect(PASSWORD_RECOVERY_NOTE).toContain(PASSWORD_HOST_CLEAR_COMMAND);
+    expect(PASSWORD_RECOVERY_NOTE).toContain('without asking for the old one');
+    // And the remote refusal names where it CAN be done rather than only that it cannot be done here.
+    expect(PASSWORD_REMOTE_UNAVAILABLE).toContain(PASSWORD_HOST_SET_COMMAND);
+    // Arrival versus credential, before the tap.
+    expect(PASSWORD_ARRIVAL_VS_CREDENTIAL).toContain('same desk');
+  });
+});
+
+describe('the password a first pairing requires', () => {
+  it('explains before the tap when it can see there is no password, and says who can fix it from where', () => {
+    // A PRE-CHECK, NOT THE RULE. `POST /v1/pair/code` refuses on a passwordless machine for every caller,
+    // `fy pair` included — that is where the requirement lives and is proved. This decides only whether a
+    // person is told in advance instead of meeting a control that would be refused.
+    // Act + Assert
+    expect(pairingGate(view({ passwordSet: true }))).toEqual({ kind: 'open' });
+    expect(pairingGate(view({ passwordSet: false, hostLocal: true }))).toEqual({
+      kind: 'needs-password',
+      local: true,
+    });
+    expect(pairingGate(view({ passwordSet: false, hostLocal: false }))).toEqual({
+      kind: 'needs-password',
+      local: false,
+    });
+    expect(pairingNeedsPassword(view({ passwordSet: false }))).toBe(true);
+  });
+
+  it('says nothing in advance when it could not read the answer, and leaves the refusal to the daemon', () => {
+    // THIS USED TO FAIL CLOSED, and that was right while the browser was the only thing enforcing the
+    // requirement. It is a dead end now that the daemon enforces it: hiding the button would withhold a
+    // control on the one machine whose grant view could not be read, while the machine that KNOWS is
+    // standing by to answer with the reason and the remedy. So there is no `undetermined` state left to
+    // express — one rule, in one place, and this surface only ever explains what it can already see.
+    // Act + Assert
+    expect(pairingGate(null)).toEqual({ kind: 'open' });
+    // The copy for the state it CAN see still carries the why and the way through.
+    expect(PAIRING_PASSWORD_REQUIREMENT).toContain('runnable files');
+    expect(PAIRING_PASSWORD_REQUIREMENT_REMOTE).toContain(PASSWORD_HOST_SET_COMMAND);
   });
 });

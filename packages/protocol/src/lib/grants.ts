@@ -1,13 +1,26 @@
 /**
  * CAPABILITY GRANTS — what the operator has decided the UI may do on THIS machine.
  *
- * ## LOOPBACK IS UNGOVERNED; THIS IS ABOUT THE CALLER WHO IS NOT ON THE HOST
+ * ## THE HOST IS UNGOVERNED; A LOCAL BROWSER IS UNGOVERNED ONCE IT UNLOCKS
  *
- * Somebody on the machine already HAS the machine — they can edit the configuration, run the command
- * line, or start anything. Gating them would be friction with no safety, so a loopback caller is
- * subject to none of this and the common case needs no setup at all. Everything below applies to a
- * caller who reached this daemon from somewhere else: a paired phone, a browser across the network, a
- * session carried over the rendezvous.
+ * The command line on the machine is subject to none of this: it authenticates with the admin token,
+ * and reading that file already requires being on the host, so gating it would be friction with no
+ * safety and would slam shut the one door a forgotten password can still be repaired through.
+ *
+ * A LOCAL BROWSER IS DIFFERENT, and this is the one place the model asks something of somebody who is
+ * standing at the machine. A browser is a paired device wherever it runs; a tab left open on an
+ * unattended desk is the accident this defends against. So a local browser holding a device credential
+ * is governed by everything below UNTIL it presents an unlock, and ungoverned — fully, with no second
+ * gate — after that. It is exactly what `sudo` provides, and exactly as bypassable: somebody at the
+ * keyboard can open a terminal. It buys deliberateness, not a boundary, and no sentence in this
+ * codebase may claim otherwise.
+ *
+ * A MACHINE WITH NO PASSWORD CANNOT ASK FOR ONE, so a local browser there is ungoverned as it always
+ * was — a fresh install needs no setup to be useful, and the first password is set when the first
+ * device is paired.
+ *
+ * Everything below still exists for the caller who is NOT on the host: a paired phone, a browser
+ * across the network, a session carried over the rendezvous. That is where a boundary is real.
  *
  * "Loopback" means how the request ARRIVED, decided from the carrier — never a peer address, a `Host`
  * header, or a URL that happens to say `127.0.0.1`. The relay terminates on the host it serves, so a
@@ -211,6 +224,11 @@ export const CapabilityGrantViewSchema = z.strictObject({
    * second time, and so an off capability can render as "only from the machine" instead of a dead
    * toggle that fails when somebody presses it.
    *
+   * IT FOLLOWS `hostLocal`, NOT `governed`. A local browser that has not unlocked yet is governed and
+   * still may widen — after it unlocks — so reporting `false` there would tell somebody standing at the
+   * machine that a switch can never come back, which is the one thing this field exists to get right.
+   * The remaining step is named by the `locked` refusal on the axis, where the password can be entered.
+   *
    * It is also the warning a remote caller needs BEFORE switching something off: this is a one-way
    * door, and the moment to say so is before it closes.
    */
@@ -238,22 +256,37 @@ export type CapabilityGrantView = z.infer<typeof CapabilityGrantViewSchema>;
 export const GrantsViewSchema = z.strictObject({
   capabilities: z.array(CapabilityGrantViewSchema).readonly(),
   /**
-   * Whether the operator's grants GOVERN this caller at all — false for a loopback caller.
+   * Whether the operator's grants GOVERN this caller at all.
+   *
+   * NO LONGER THE INVERSE OF `hostLocal`, and the two fields are separate precisely because they came
+   * apart. A local browser is a paired device and is governed until it presents an unlock, so `governed`
+   * and `hostLocal` can both be true at once: at the machine, and still asked for the password. The
+   * host's own command line, and a local browser on a machine with no password at all, are ungoverned.
    *
    * SERVED RATHER THAN INFERRED, because the browser cannot work it out and the two ways it would try
    * are both wrong. A page loaded from a loopback address can be reaching this daemon through the relay,
    * whose tunnel sets `loopback: false` unconditionally, so anything derived from a URL or a hostname
    * would tell a remote phone it is standing at the machine — the exact inversion this whole layer
-   * exists to prevent. Nor can it be read off the refusals: a loopback caller sees `granted` on every
+   * exists to prevent. Nor can it be read off the refusals: an ungoverned caller sees `granted` on every
    * axis, and so does a remote caller holding a valid unlock on a fully granted machine.
    *
-   * It is what lets a UI say WHICH sentence is true — "you have this because you are at the machine" or
-   * "you have this because it was granted" — instead of picking one and being wrong for a real
-   * configuration. The same carrier fact reaches the pairing surface as `PairedDevicesView.hostLocal`,
-   * spelled from that screen's point of view; there is one source, `ApiRequest.loopback`, and neither
-   * view re-derives it.
+   * It is what lets a UI say WHICH sentence is true — "you have this because you are at the machine",
+   * "you have this because you unlocked", or "you have this because it was granted" — instead of picking
+   * one and being wrong for a real configuration.
    */
   governed: z.boolean(),
+  /**
+   * Whether this request ARRIVED on the machine the daemon runs on.
+   *
+   * THE LOCALITY FACT, ON ITS OWN, because `governed` stopped carrying it. Widening is a local act and
+   * no password buys it, so this is what decides whether a switch can ever travel back — and it is what
+   * a screen reads to say "you are at this machine" rather than inferring locality from a gate that a
+   * local browser can also be sitting behind.
+   *
+   * It is the SAME carrier fact `PairedDevicesView.hostLocal` carries, spelled the same way, from one
+   * source: `ApiRequest.loopback`. Neither view re-derives it, and no header can move it.
+   */
+  hostLocal: z.boolean(),
   /** Whether an operator password exists at all. NEVER the password, its hash, or its length. */
   passwordSet: z.boolean(),
   /** Whether the caller currently holds a valid unlock. */

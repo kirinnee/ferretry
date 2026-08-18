@@ -77,6 +77,7 @@ import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
+import { FirstPasswordOffer } from '../src/lib/daemon/first-password';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
@@ -406,7 +407,9 @@ function daemonBinaryVersion(path: string): string | undefined {
  * print `--help`. The live daemon executable is resolved later still, only if a snapshot build needs
  * it; retained snapshots remain operable after the source installation disappears.
  */
-function buildDaemonController(environment: Record<string, string | undefined>, out: ICliIo): DaemonController {
+function buildDaemonController(world: CliWorld, client: SharedDaemonClient): DaemonController {
+  const environment = world.environment;
+  const out = world.io;
   const daemonName = `${BINARY_NAME}d`;
   const layout: DaemonLayout = resolveDaemonLayout({
     platform: process.platform,
@@ -462,6 +465,29 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     daemonVersion: daemonBinaryVersion,
     clock,
     out,
+    /**
+     * The first-password offer, made after a start somebody typed.
+     *
+     * IT SPEAKS TO THE DAEMON THIS VERB JUST STARTED, through the shared lazy client — which connects
+     * on first use, and its first use is after the readiness wait. That ordering is why the daemon
+     * group can hold a client at all: the address and the admin token both exist by the time this asks
+     * anything. It is the SAME gateway `fy daemon password set` uses, so a password set from the prompt
+     * is one that command can replace.
+     */
+    firstPassword: new FirstPasswordOffer({
+      passwords: {
+        passwordSet: async () => (await new ProtocolGrantGateway(client).read()).passwordSet,
+        setPassword: async password => {
+          await new ProtocolGrantGateway(client).setPassword(password);
+        },
+      },
+      prompt: world.prompt,
+      out,
+      // Read when the question is asked rather than captured at build time, and it is the same answer
+      // every other prompt in this CLI uses: both ends of the terminal, or nobody is there.
+      interactive: () => world.io.interactive(),
+      clientName: BINARY_NAME,
+    }),
   });
 }
 
@@ -581,12 +607,17 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new ExactTmuxAttacher(new BunTmuxAttachProcess(), world.environment),
       ),
     ),
-  // The daemon group is the one group that does NOT take the shared client: it manages a local
-  // process, and it must answer "is the daemon up?" on a host that has no token yet.
-  ({ program, world }) =>
+  // The daemon group manages a LOCAL PROCESS, so nothing in it may depend on a token existing: it has
+  // to answer "is the daemon up?" on a host that has none, which is exactly what a fresh
+  // `daemon install` leaves behind. Its health probe therefore has its own unauthenticated client.
+  //
+  // It does hold the shared one, for the first-password offer alone. That is safe because the shared
+  // client is LAZY — it resolves the address and the admin token on first use, and the only thing here
+  // that uses it runs after a start has already waited for the daemon to serve.
+  ({ program, world, client }) =>
     registerDaemonCommands(
       program,
-      () => buildDaemonController(world.environment, world.io),
+      () => buildDaemonController(world, client),
       () => buildStateHomeController(world),
     ),
   // The grant verbs mount onto the group above and DO take the shared client, because unlike every

@@ -3,9 +3,9 @@ import { CAPABILITY_AXES, type GrantAuditView, type GrantsView } from '@ferretry
 /**
  * What a person is told, once, when this machine has no operator password.
  *
- * ONE SENTENCE, where the decision is actually visible. Not a modal, not repeated, and never a
- * question somebody has to answer to use their own machine over loopback — somebody on the host is
- * governed by none of this. It appears here because this report is where remote access is inspected.
+ * ONE SENTENCE, where the decision is actually visible. Not a modal, not repeated, and never a question
+ * somebody has to answer to use their own command line — the admin token is governed by none of this.
+ * It appears here because this report is where remote access is inspected.
  */
 export const NO_PASSWORD_NOTE =
   'no operator password is set, so any paired device can change this machine’s fleet and settings without one';
@@ -24,7 +24,8 @@ export const NO_PASSWORD_NOTE =
 export function renderGrants(view: GrantsView, clientName: string): string {
   const nameWidth = Math.max(...view.capabilities.map(entry => entry.capability.length));
   const lines = [
-    'These apply to callers that are NOT on this host. A loopback caller is ungoverned.',
+    'These apply to callers that are NOT on this host. This command line is ungoverned; a browser on this',
+    'machine is governed until it enters the operator password once.',
     '',
     ...view.capabilities.map(entry => {
       const axes = CAPABILITY_AXES.map(axis => `${axis}=${entry.granted[axis] ? 'on ' : 'off'}`).join('  ');

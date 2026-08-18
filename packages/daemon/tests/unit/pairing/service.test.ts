@@ -124,6 +124,24 @@ class RecordingDeviceState {
   }
 }
 
+/**
+ * Whether this machine has an operator password — the ONE fact the first-password requirement reads.
+ *
+ * It can also RAISE, because the real verifier does: a truncated file is not a machine with no
+ * password, and a fake that could only answer `false` would let "damage read as absence" pass here.
+ */
+class FakeOperatorPassword {
+  constructor(
+    private readonly present: boolean,
+    private readonly failure?: Error,
+  ) {}
+
+  async isSet(): Promise<boolean> {
+    if (this.failure !== undefined) throw this.failure;
+    return this.present;
+  }
+}
+
 function fixture(
   options: {
     readonly limiter?: PairingRateLimiter;
@@ -135,6 +153,13 @@ function fixture(
     readonly carriers?: readonly DaemonCarrier[];
     /** The rendezvous the composition root proved a fresh device could discover, if any. */
     readonly discoveredRelayUrl?: string;
+    /**
+     * Whether this machine has an operator password. TRUE by default, because every case below is
+     * about the code rather than about the requirement — the requirement's own cases say so out loud.
+     */
+    readonly passwordSet?: boolean;
+    /** A verifier this daemon cannot read, for the case that must not be treated as "no password". */
+    readonly passwordFailure?: Error;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -158,15 +183,29 @@ function fixture(
     rateLimiter: options.limiter,
     compare: options.compare,
     deviceState: options.deviceState,
+    operatorPassword: new FakeOperatorPassword(options.passwordSet ?? true, options.passwordFailure),
+    clientName: 'fy',
   });
-  return { clock, cryptography, devices, credentials, service };
+  /**
+   * The minted code, with the requirement's answer already read.
+   *
+   * Every case that is about a CODE goes through this, so none of them can accidentally assert against
+   * a refusal object; the cases that are about the REQUIREMENT call `service.mint()` directly and read
+   * the union themselves.
+   */
+  const mint = async () => {
+    const outcome = await service.mint();
+    if (outcome.kind !== 'minted') throw new Error(`expected a minted code, got a refusal: ${outcome.reason}`);
+    return outcome.response;
+  };
+  return { clock, cryptography, devices, credentials, service, mint };
 }
 
 describe('PairingService minting and status', () => {
-  it('should mint the fixed-TTL code and daemon-owned fragment URL', () => {
-    const { service } = fixture();
+  it('should mint the fixed-TTL code and daemon-owned fragment URL', async () => {
+    const { service, mint } = fixture();
 
-    const minted = service.mint();
+    const minted = await mint();
 
     should(minted).deepEqual({
       pairingId: PAIRING_ID,
@@ -192,6 +231,83 @@ describe('PairingService minting and status', () => {
     });
   });
 
+  it('should refuse to mint on a machine with no operator password, and name the way through', async () => {
+    // THE GUARANTEE, AND IT IS HERE RATHER THAN IN A CLIENT. Pairing is the moment access leaves this
+    // machine, and a device paired to a passwordless host arrives able to configure the fleet. The rule
+    // used to live in the browser, which left `fy pair` handing out a key before the lock existed —
+    // this is the same rule below BOTH doors, so which one somebody walks through does not matter.
+    // Arrange
+    const { service } = fixture({ passwordSet: false });
+
+    // Act
+    const refused = await service.mint();
+
+    // Assert — a refusal, and one that carries the remedy at the point of decision.
+    should(refused.kind).equal('refused');
+    if (refused.kind !== 'refused') throw new Error('expected a refusal');
+    should(refused.reason).match(/no operator password/u);
+    should(refused.reason).match(/fy daemon password set/u);
+    // NOTHING WAS MINTED. Not a code that is then withheld, not an observation somebody can poll: the
+    // check runs before any state moves, so there is no pairing to find.
+    should(service.status(PAIRING_ID)).be.undefined();
+  });
+
+  it('should refuse to mint when it cannot READ whether a password exists, rather than assuming one', async () => {
+    // DAMAGE IS NOT ABSENCE AND IT IS NOT PRESENCE EITHER. A truncated verifier read as "no password"
+    // would silently disarm the requirement on the one machine whose state is already known to be
+    // broken; read as "password present" it would mint on an assumption. Both fail closed, and the two
+    // refusals say different things because the remedies are different.
+    // Arrange
+    const { service } = fixture({ passwordFailure: new Error('operator-password.json is not JSON') });
+
+    // Act
+    const refused = await service.mint();
+
+    // Assert
+    if (refused.kind !== 'refused') throw new Error('expected a refusal');
+    should(refused.reason).match(/could not read whether it has an operator password/u);
+    // The daemon's own words about the damage travel with it, so an operator has something to repair.
+    should(refused.reason).match(/operator-password\.json is not JSON/u);
+    should(refused.reason).match(/fy daemon password set/u);
+    should(service.status(PAIRING_ID)).be.undefined();
+  });
+
+  it('should leave a live code alone when the password is removed underneath it', async () => {
+    // The requirement is checked BEFORE anything moves, which is why this holds: an operator who
+    // clears the password while a code is on screen has refused the NEXT mint, not destroyed the code
+    // somebody is already walking to their phone to scan. Expiring it here would be a rule that
+    // reaches backwards.
+    // Arrange — a machine whose verifier answers differently on the second read.
+    const answers = [true, false];
+    const { service } = fixture();
+    const shifting = new PairingService({
+      daemonId: DAEMON_ID,
+      daemonName: 'workstation',
+      advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
+      carriers: CARRIERS,
+      clock: new FakeClock(),
+      cryptography: new FakeCryptography(),
+      devices: new RecordingDevices(),
+      credentials: new PairingDeviceRegistry(DAEMON_ID, new FakeCryptography()),
+      operatorPassword: { isSet: async () => answers.shift() ?? false },
+      clientName: 'fy',
+    });
+    const first = await shifting.mint();
+    if (first.kind !== 'minted') throw new Error('expected a minted code');
+
+    // Act — the password is gone by the time the second code is asked for.
+    const second = await shifting.mint();
+
+    // Assert
+    should(second.kind).equal('refused');
+    should(shifting.status(first.response.pairingId)).containDeep({ status: 'pending' });
+    // And the code still redeems, because it was minted while the machine had its gate.
+    const redeemed = await shifting.redeem({ code: first.response.code, deviceName: 'phone' }, 'peer');
+    should(redeemed.kind).equal('paired');
+    // The unrelated fixture is untouched — this case invents no shared state.
+    should(service.status(PAIRING_ID)).be.undefined();
+  });
+
   it('should disclose the discovered rendezvous and never a published one, whatever it publishes', async () => {
     // THE GAP, PINNED AS BEHAVIOUR. This used to read the FIRST published relay of any provenance,
     // which is wrong in exactly the case that matters: an operator's own rendezvous is published and
@@ -205,7 +321,7 @@ describe('PairingService minting and status', () => {
     ];
     const selfHosted = fixture({ carriers });
 
-    const mintedWithoutDiscovery = selfHosted.service.mint();
+    const mintedWithoutDiscovery = await selfHosted.mint();
     const redemption = await selfHosted.service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
 
     should(mintedWithoutDiscovery.discoveredRelayUrl).be.undefined();
@@ -214,10 +330,10 @@ describe('PairingService minting and status', () => {
     should(redemption.response.carriers).deepEqual(carriers);
 
     const discovered = fixture({ carriers, discoveredRelayUrl: 'wss://hosted.example.test/fy' });
-    should(discovered.service.mint().discoveredRelayUrl).equal('wss://hosted.example.test/fy');
+    should((await discovered.mint()).discoveredRelayUrl).equal('wss://hosted.example.test/fy');
   });
 
-  it('should mint the same fragment whether or not a rendezvous is discoverable', () => {
+  it('should mint the same fragment whether or not a rendezvous is discoverable', async () => {
     // BYTE-IDENTICAL, AND THAT IS THE POINT OF THE NARROWING. The disclosure is host-facing; the link
     // is the one every daemon has ever written, so no reader anywhere is asked to learn a new form.
     const expected =
@@ -225,8 +341,8 @@ describe('PairingService minting and status', () => {
     const direct = fixture({ carriers: [{ kind: 'direct', url: 'https://workstation.example.test' }] });
     const relayed = fixture({ discoveredRelayUrl: 'wss://hosted.example.test/fy' });
 
-    const withoutRelay = direct.service.mint();
-    const withRelay = relayed.service.mint();
+    const withoutRelay = await direct.mint();
+    const withRelay = await relayed.mint();
 
     should(withoutRelay.pairUrl).equal(expected);
     should(withoutRelay.discoveredRelayUrl).be.undefined();
@@ -234,15 +350,15 @@ describe('PairingService minting and status', () => {
     should(withRelay.pairUrl).not.containEql('relay');
   });
 
-  it('should draw no QR for a loopback bind whose only rendezvous is self-hosted, and one when it is discovered', () => {
+  it('should draw no QR for a loopback bind whose only rendezvous is self-hosted, and one when it is discovered', async () => {
     // The user-visible half of the same gap, read through the protocol's single narrowing so this
     // agrees with `fy pair` and the Add-a-device panel rather than re-deciding.
     const local: Advertisement = { kind: 'local-only', url: 'http://127.0.0.1:7431' };
     const selfHosted = fixture({ advertisement: local });
     const discovered = fixture({ advertisement: local, discoveredRelayUrl: 'wss://hosted.example.test/fy' });
 
-    const withoutDiscovery = pairingMintOutcome(selfHosted.service.mint());
-    const withDiscovery = pairingMintOutcome(discovered.service.mint());
+    const withoutDiscovery = pairingMintOutcome(await selfHosted.mint());
+    const withDiscovery = pairingMintOutcome(await discovered.mint());
 
     if (withoutDiscovery.kind !== 'invitation' || withDiscovery.kind !== 'invitation')
       throw new Error('expected two invitations');
@@ -250,39 +366,39 @@ describe('PairingService minting and status', () => {
     should(invitationRedeemableByAnotherDevice(withDiscovery)).be.true();
   });
 
-  it('should mint a link for a loopback advertisement and say only this machine can redeem it', () => {
+  it('should mint a link for a loopback advertisement and say only this machine can redeem it', async () => {
     // THE DEFAULT INSTALL. A loopback bind is not a misconfiguration and its code is not refused — a
     // browser on this machine pairs with it perfectly. What the response must carry is the audience,
     // so the surface drawing it knows not to offer it to a phone.
-    const { service } = fixture({ advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7431' } });
+    const { mint } = fixture({ advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7431' } });
 
-    const minted = service.mint();
+    const minted = await mint();
 
     should(minted).containDeep({ reach: 'local-only', daemonUrl: 'http://127.0.0.1:7431/' });
     should('refusal' in minted).be.false();
   });
 
-  it('should mint the valid local-only link derived from a raw IPv6 loopback host', () => {
+  it('should mint the valid local-only link derived from a raw IPv6 loopback host', async () => {
     // The shared decision accepts operator host spellings, including raw IPv6. This crosses the next
     // boundary too: the service normalises the URL and the protocol verifies its fragment, so an
     // unbracketed authority cannot hide behind a kind-only decision test.
     const advertisement = decideAdvertisement({ host: '::1', port: 7_431 });
-    const { service } = fixture({ advertisement });
+    const { mint } = fixture({ advertisement });
 
-    const minted = service.mint();
+    const minted = await mint();
 
     should(minted).containDeep({ reach: 'local-only', daemonUrl: 'http://[::1]:7431/' });
     if (minted.pairUrl === undefined) throw new Error('a local-only advertisement must still mint its link');
     should(new URL(minted.pairUrl).hash).containEql(encodeURIComponent('http://[::1]:7431/'));
   });
 
-  it('should mint a code with no link at all when there is no address to hand out', () => {
+  it('should mint a code with no link at all when there is no address to hand out', async () => {
     // A wildcard bind serves normally and has nothing to advertise. The CODE is still minted, because
     // somebody who points a browser at this machine themselves can still redeem it; only the link is
     // withheld, with the reason attached.
-    const { service } = fixture({ advertisement: { kind: 'none', refusal: 'wildcard-bind' } });
+    const { service, mint } = fixture({ advertisement: { kind: 'none', refusal: 'wildcard-bind' } });
 
-    const minted = service.mint();
+    const minted = await mint();
 
     should(minted).containDeep({ code: CODE, refusal: 'wildcard-bind' });
     should('daemonUrl' in minted).be.false();
@@ -292,26 +408,26 @@ describe('PairingService minting and status', () => {
     should(service.status(PAIRING_ID)).containDeep({ status: 'pending' });
   });
 
-  it('should answer every caller identically, because the minter is not the redeemer', () => {
+  it('should answer every caller identically, because the minter is not the redeemer', async () => {
     // THE TRAP. `ApiRequest.loopback` names who is MINTING, and the commonest case there is is
     // somebody standing at the machine minting a code to scan with their phone — minter local,
     // redeemer not. A mint that read the requester's carrier would call that address fine and re-ship
     // the dead QR, passing every test written on one machine. `mint()` takes no argument, and this is
     // the assertion that keeps it that way: two mints from one configuration agree on the audience.
-    const { service } = fixture({ advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7431' } });
+    const { service, mint } = fixture({ advertisement: { kind: 'local-only', url: 'http://127.0.0.1:7431' } });
 
-    const first = service.mint();
-    const second = service.mint();
+    const first = await mint();
+    const second = await mint();
 
     should('reach' in first && first.reach).equal('local-only');
     should('reach' in second && second.reach).equal('local-only');
     should(service.mint.length).equal(0);
   });
 
-  it('should expire a superseded or timed-out mint and refuse an unknown status handle', () => {
-    const { clock, service } = fixture();
-    service.mint();
-    service.mint();
+  it('should expire a superseded or timed-out mint and refuse an unknown status handle', async () => {
+    const { clock, service, mint } = fixture();
+    await mint();
+    await mint();
 
     should(service.status(PAIRING_ID)?.status).equal('expired');
     clock.nowMs += 120_000;
@@ -322,8 +438,8 @@ describe('PairingService minting and status', () => {
 
 describe('PairingService redemption', () => {
   it('should atomically consume a code, persist only its hash, and acknowledge the bounded name', async () => {
-    const { credentials, devices, service } = fixture();
-    service.mint();
+    const { credentials, devices, service, mint } = fixture();
+    await mint();
 
     const result = await service.redeem({ code: CODE, deviceName: '  Ernest phone  ' }, '198.51.100.2');
 
@@ -371,8 +487,8 @@ describe('PairingService redemption', () => {
     // must carry the set.
     // Arrange
     const resolved: readonly DaemonCarrier[] = [{ kind: 'relay', url: 'wss://elsewhere.example.test/fy' }];
-    const { service } = fixture({ carriers: resolved });
-    service.mint();
+    const { service, mint } = fixture({ carriers: resolved });
+    await mint();
 
     // Act
     const result = await service.redeem({ code: CODE, deviceName: 'phone' }, '198.51.100.9');
@@ -402,6 +518,8 @@ describe('PairingService redemption', () => {
         cryptography: new FakeCryptography(),
         devices,
         credentials,
+        operatorPassword: new FakeOperatorPassword(true),
+        clientName: 'fy',
       });
 
     // Act / Assert — it throws where a boot can report it, not where a request would, and it throws
@@ -431,12 +549,12 @@ describe('PairingService redemption', () => {
     // The check is a BOOT check, so it must not have become a per-request one: two redemptions from one
     // service both publish, and the second does not pay for the first's validation or fail on it.
     // Arrange
-    const { service } = fixture();
+    const { service, mint } = fixture();
 
     // Act
-    service.mint();
+    await mint();
     const first = await service.redeem({ code: CODE, deviceName: 'first' }, '198.51.100.3');
-    service.mint();
+    await mint();
     const second = await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, '198.51.100.4');
 
     // Assert
@@ -446,14 +564,14 @@ describe('PairingService redemption', () => {
 
   it('should give wrong, malformed, expired, and already-consumed codes the same refusal', async () => {
     const wrong = fixture();
-    wrong.service.mint();
+    await wrong.mint();
     const malformed = fixture();
-    malformed.service.mint();
+    await malformed.mint();
     const expired = fixture();
-    expired.service.mint();
+    await expired.mint();
     expired.clock.nowMs += 120_000;
     const consumed = fixture();
-    consumed.service.mint();
+    await consumed.mint();
     await consumed.service.redeem({ code: CODE, deviceName: 'phone' }, 'one');
 
     const refusals = await Promise.all([
@@ -467,8 +585,8 @@ describe('PairingService redemption', () => {
   });
 
   it('should kill the code after five failed attempts so the sixth cannot redeem it', async () => {
-    const { devices, service } = fixture();
-    service.mint();
+    const { devices, service, mint } = fixture();
+    await mint();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       should((await service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, `peer-${attempt}`)).kind).equal(
@@ -483,8 +601,8 @@ describe('PairingService redemption', () => {
   });
 
   it('should not let malformed uploads spend the daemon-wide code-guess budget', async () => {
-    const { service } = fixture();
-    service.mint();
+    const { service, mint } = fixture();
+    await mint();
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       should((await service.redeem(undefined, `garbage-peer-${attempt}`)).kind).equal('refused');
@@ -514,8 +632,11 @@ describe('PairingService redemption', () => {
       cryptography: base.cryptography,
       devices,
       credentials: base.credentials,
+      operatorPassword: new FakeOperatorPassword(true),
+      clientName: 'fy',
     });
-    service.mint();
+    const minted = await service.mint();
+    if (minted.kind !== 'minted') throw new Error('expected a minted code');
 
     const first = service.redeem({ code: CODE, deviceName: 'first' }, 'peer-one');
     const second = service.redeem({ code: CODE, deviceName: 'second' }, 'peer-two');
@@ -529,7 +650,7 @@ describe('PairingService redemption', () => {
     const clock = new FakeClock();
     const limiter = new PairingRateLimiter(clock, 1, 60_000);
     const current = fixture({ limiter });
-    current.service.mint();
+    await current.mint();
 
     await current.service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, 'same-peer');
     const limited = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'same-peer');
@@ -554,7 +675,7 @@ describe('PairingService redemption', () => {
   it('should consume the code and refuse when durable credential storage fails', async () => {
     const current = fixture();
     current.devices.failure = new Error('disk unavailable');
-    current.service.mint();
+    await current.mint();
 
     const failed = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
     const retried = await current.service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-two');
@@ -574,7 +695,7 @@ describe('PairingService redemption', () => {
     });
 
     await current.service.redeem({ deviceName: 'phone' }, 'peer-one');
-    current.service.mint();
+    await current.mint();
     await current.service.redeem({ code: SECOND_CODE, deviceName: 'phone' }, 'peer-two');
 
     should(comparisons).deepEqual([
@@ -587,8 +708,8 @@ describe('PairingService redemption', () => {
 describe('PairingService revocation', () => {
   it('should end a live code early, leaving nothing to redeem', async () => {
     // Arrange
-    const { service } = fixture();
-    const minted = service.mint();
+    const { service, mint } = fixture();
+    const minted = await mint();
 
     // Act
     const revoked = service.revoke(minted.pairingId);
@@ -607,8 +728,8 @@ describe('PairingService revocation', () => {
     // A revoke arriving after a device got in must not tell the operator nobody did. The code is
     // already spent either way; what differs is the answer, and only one of them is true.
     // Arrange
-    const { service } = fixture();
-    service.mint();
+    const { service, mint } = fixture();
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
@@ -618,10 +739,10 @@ describe('PairingService revocation', () => {
     should(revoked).containDeep({ status: 'redeemed', deviceName: 'phone' });
   });
 
-  it('should be idempotent for a code it knows and silent about one it never minted', () => {
+  it('should be idempotent for a code it knows and silent about one it never minted', async () => {
     // Arrange
-    const { service } = fixture();
-    service.mint();
+    const { service, mint } = fixture();
+    await mint();
 
     // Act
     const first = service.revoke(PAIRING_ID);
@@ -635,8 +756,8 @@ describe('PairingService revocation', () => {
 
   it('should project paired devices without their token digests', async () => {
     // Arrange
-    const { devices, service } = fixture();
-    service.mint();
+    const { devices, service, mint } = fixture();
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
 
     // Act
@@ -661,10 +782,10 @@ describe('PairingService revocation', () => {
     // dropping the live grant decides whether the next request is served, which is the only one the
     // person holding the lost phone is making.
     // Arrange
-    const { credentials, devices, service } = fixture();
-    service.mint();
+    const { credentials, devices, service, mint } = fixture();
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'first' }, 'peer-one');
-    service.mint();
+    await mint();
     await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, 'peer-two');
 
     // Act
@@ -682,8 +803,8 @@ describe('PairingService revocation', () => {
 
   it('should stop authenticating the revoked device when nothing else is paired', async () => {
     // Arrange
-    const { credentials, service } = fixture();
-    service.mint();
+    const { credentials, service, mint } = fixture();
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
@@ -705,8 +826,8 @@ describe('PairingService revocation', () => {
     // cosmetic one, so revocation is one act across every owner of per-device state.
     // Arrange
     const push = new RecordingDeviceState();
-    const { devices, service } = fixture({ deviceState: [push] });
-    service.mint();
+    const { devices, service, mint } = fixture({ deviceState: [push] });
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
@@ -723,8 +844,8 @@ describe('PairingService revocation', () => {
     // where revoking first would leave a phone that is unpaired and still being notified.
     // Arrange
     const push = new RecordingDeviceState(new Error('the enrolment document could not be written'));
-    const { credentials, devices, service } = fixture({ deviceState: [push] });
-    service.mint();
+    const { credentials, devices, service, mint } = fixture({ deviceState: [push] });
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
 
     // Act
@@ -750,8 +871,8 @@ describe('PairingService revocation', () => {
     // way round, a failed write leaves a phone that stops working now and works again after a
     // restart — the least explainable outcome available.
     // Arrange
-    const { credentials, devices, service } = fixture();
-    service.mint();
+    const { credentials, devices, service, mint } = fixture();
+    await mint();
     await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
     devices.failure = new Error('disk unavailable');
 
@@ -902,8 +1023,8 @@ describe('PairingDeviceRegistry refusals', () => {
 describe('PairingService redemption over a relay', () => {
   it('should pair through a port that takes no request, and answer with the whole published set', async () => {
     // Arrange
-    const { devices, service } = fixture();
-    service.mint();
+    const { devices, service, mint } = fixture();
+    await mint();
 
     // Act
     const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });
@@ -922,8 +1043,8 @@ describe('PairingService redemption over a relay', () => {
 
   it('should spend a relay budget that can never expire a code a LAN device could still redeem', async () => {
     // Arrange
-    const { devices, service } = fixture();
-    service.mint();
+    const { devices, service, mint } = fixture();
+    await mint();
 
     // Act — five wrong guesses from the internet, which is the direct budget's whole size.
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -940,8 +1061,8 @@ describe('PairingService redemption over a relay', () => {
 
   it('should close only the relay path once its own budget is spent', async () => {
     // Arrange
-    const { service } = fixture();
-    service.mint();
+    const { service, mint } = fixture();
+    await mint();
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await service.redeemOverRelay({ code: SECOND_CODE, deviceName: 'phone' });
     }
@@ -956,8 +1077,8 @@ describe('PairingService redemption over a relay', () => {
 
   it('should never spend the relay budget from the direct path either', async () => {
     // Arrange
-    const { service } = fixture();
-    service.mint();
+    const { service, mint } = fixture();
+    await mint();
 
     // Act — the direct budget is exhausted, which expires the code entirely.
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -974,10 +1095,10 @@ describe('PairingService redemption over a relay', () => {
     // Arrange — nothing has ever been minted, so there is nothing to guess.
     const never = fixture();
     const expired = fixture();
-    expired.service.mint();
+    await expired.mint();
     expired.clock.nowMs += 120_000;
     const unusable = fixture();
-    unusable.service.mint();
+    await unusable.mint();
 
     // Act
     const refusals = await Promise.all([
@@ -1012,9 +1133,9 @@ describe('PairingService redemption over a relay', () => {
 
   it('should consume the code and refuse when durable storage fails a relayed redemption', async () => {
     // Arrange
-    const { devices, service } = fixture();
+    const { devices, service, mint } = fixture();
     devices.failure = new Error('the state home is read-only');
-    service.mint();
+    await mint();
 
     // Act
     const redemption = await service.redeemOverRelay({ code: CODE, deviceName: 'phone' });

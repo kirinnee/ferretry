@@ -4286,6 +4286,17 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // that currently hold the shared profile rather than racing their lease.
   let closeAgentBrowsers: () => Promise<void> = async () => undefined;
   const daemonConfigMutations = new KeyedSerialExecutor();
+  /**
+   * THE OPERATOR PASSWORD'S VERIFIER, held once for this daemon, read by three collaborators.
+   *
+   * The grant subsystem asks it whether a candidate matches, the boot disclosure asks whether one
+   * exists, and PAIRING asks the same question before it hands out a code. Hoisted so all three ask
+   * ONE object about one file: the class is stateless and a second instance would answer identically
+   * today, but "how many places read this fact" is exactly the question that goes wrong later, and
+   * this is the fact that decides whether a new device may exist. Nothing here can read a password —
+   * see `FileOperatorPassword` for why that is structural rather than a convention.
+   */
+  const operatorPassword = new FileOperatorPassword(paths.operatorPassword, stateFiles);
   const stateHomeDaemonConfigStore = new FileDaemonConfig(paths, stateFiles);
   // An operator's own document when they named one, and the state home's otherwise. The confined
   // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -4843,8 +4854,8 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
     // and wrong for a file a person named, so the two are different adapters.
     config: daemonConfigStore,
-    // The same verifier the grant service asks. Reading it here creates nothing.
-    operatorPassword: new FileOperatorPassword(paths.operatorPassword, stateFiles),
+    // The same verifier the grant service and the pairing mint ask. Reading it here creates nothing.
+    operatorPassword,
     overrides,
     stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
     // The SAME two collaborators a start resolves an account from, so the preflight cannot report
@@ -5018,6 +5029,14 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
           // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
           deviceState: [push],
+          // WHY PAIRING HOLDS THE VERIFIER. A machine with no operator password will not hand out a
+          // pairing code, because pairing is the moment access leaves this host and a device paired
+          // without one arrives able to configure the fleet. It is the SAME object the grant subsystem
+          // verifies against, so the requirement and the gate cannot disagree about whether a password
+          // exists. Nothing about local use is gated by it — see `PairingService.mint`.
+          operatorPassword,
+          // So the refusal names the command a person actually types rather than inventing one.
+          clientName: CLIENT_NAME,
         }),
       };
     },
@@ -5900,7 +5919,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
          */
         grants: new CapabilityGrantService({
           document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
-          passwords: new FileOperatorPassword(paths.operatorPassword, stateFiles),
+          passwords: operatorPassword,
           tokens: new RandomUnlockTokens(),
           clock: new SystemGrantClock(),
           audit: new JournalGrantAudit(paths.grantAudit, stateFiles),

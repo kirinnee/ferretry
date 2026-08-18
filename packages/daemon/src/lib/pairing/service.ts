@@ -38,6 +38,27 @@ export interface PairingClock {
   now(): number;
 }
 
+/**
+ * WHETHER THIS MACHINE HAS AN OPERATOR PASSWORD. Never the password itself.
+ *
+ * One method, and it answers a question rather than handing anything back — the same use-never-read
+ * shape the verifier itself is built on, narrowed to the single fact pairing needs. A port that could
+ * READ a password would put one inside the subsystem that hands out credentials, which is the last
+ * place it belongs.
+ *
+ * IT IS ASYNCHRONOUS AND IT IS NOT CACHED HERE, deliberately. The verifier's own file is the owner of
+ * this fact; a copy held in this service would answer from whenever it was last refreshed, and the
+ * refresh it would be missing is precisely the one an operator performs in order to be allowed to
+ * pair. Minting happens once per pairing, so the read costs nothing worth saving.
+ *
+ * A THROW IS NOT A `false`. The verifier raises rather than reporting absence when it cannot read
+ * itself, and {@link PairingService.mint} keeps that distinction: a damaged file refuses to mint with
+ * its own sentence instead of quietly being treated as a machine that has no password.
+ */
+export interface OperatorPasswordPresence {
+  isSet(): Promise<boolean>;
+}
+
 export interface PairingCryptography {
   pairingCode(): string;
   pairingId(): string;
@@ -259,6 +280,21 @@ interface PairingServiceOptions {
   readonly devices: PairingDeviceStore;
   readonly credentials: PairingDeviceRegistry;
   /**
+   * THE FIRST-PASSWORD REQUIREMENT'S ONE OWNER, and it is required rather than optional.
+   *
+   * An optional port would default to "no gate", which is the same as not shipping the requirement —
+   * and it would do so silently, on the machines that never wired it. A daemon that cannot say whether
+   * it has an operator password has no business handing out credentials for itself, so this is the
+   * shape that makes that unstatable. See {@link PairingService.mint}.
+   */
+  readonly operatorPassword: OperatorPasswordPresence;
+  /**
+   * What a person types to run the command line, so a refusal names the remedy in the words of the
+   * reader rather than inventing a binary. The composition root owns the value — see the two-name
+   * model — and nothing here spells it.
+   */
+  readonly clientName: string;
+  /**
    * Everything else that is keyed by a device, purged when its grant is revoked.
    *
    * OPTIONAL, and the reason it can safely be is worth stating: each owner ALSO refuses to act on a
@@ -275,6 +311,19 @@ interface PairingServiceOptions {
 export type PairingRedemption =
   | { readonly kind: 'paired'; readonly response: PairingResponse }
   | { readonly kind: 'refused' };
+
+/**
+ * ONE MINT ATTEMPT: a live code, or the reason there is none.
+ *
+ * IT IS A UNION RATHER THAN A THROW OR A NULLABLE CODE, and the shape is the enforcement. A caller
+ * cannot reach the code without having read which of the two answers it got, so the requirement below
+ * cannot be skipped by a route that forgot to ask first — and a refusal carries the sentence a person
+ * needs rather than a status somebody else has to write prose for.
+ */
+export type PairingMint =
+  | { readonly kind: 'minted'; readonly response: PairingCodeMintResponse }
+  /** Why this machine will not hand out a code, addressed to whoever asked for one. */
+  | { readonly kind: 'refused'; readonly reason: string };
 
 const REFUSED = { kind: 'refused' } as const;
 
@@ -315,7 +364,52 @@ export class PairingService {
     this.compare = options.compare ?? secretsMatch;
   }
 
-  mint(): PairingCodeMintResponse {
+  /**
+   * A code, or the reason this machine will not hand one out.
+   *
+   * ## NO PASSWORD, NO PAIRING — AND THIS IS WHERE THAT LIVES
+   *
+   * Pairing is the moment something OUTSIDE this machine gets access, and a device paired to a machine
+   * with no operator password arrives with nothing to prove: `fleet.configure` is permissive by
+   * default, so it can write runnable wrappers into the operator's own accounts. Requiring the
+   * password here DELETES that state rather than warning about it.
+   *
+   * IT IS HERE RATHER THAN IN A CLIENT, and that is the whole point of the placement. The requirement
+   * used to live in the browser's pairing panel, which made the guarantee "the browser will not create
+   * a passwordless remote device" — true, and silent about `fy pair`, which mints through the same
+   * route. Below both doors there is one rule, so it does not matter which one somebody walks through.
+   *
+   * IT IS NOT A GATE ON LOCAL USE. Nothing else in this daemon consults it: a person on their own
+   * machine with no password starts the daemon, uses it and configures it exactly as before, right up
+   * until they ask for a credential for something that is not this machine.
+   *
+   * AN UNREADABLE VERIFIER REFUSES TOO, with its own sentence. Reading damage as "no password" would
+   * silently disarm the requirement on the one machine whose state is already known to be broken;
+   * reading it as "password present" would mint on an assumption. Neither is an answer, so both fail
+   * closed — and the refusal names the way through.
+   *
+   * THE CHECK RUNS BEFORE ANY STATE MOVES. A refusal leaves a live code untouched, so an operator who
+   * clears the password while a code is in flight does not also destroy the code they are watching.
+   */
+  async mint(): Promise<PairingMint> {
+    const refusal = await this.#firstPasswordRefusal();
+    if (refusal !== undefined) return { kind: 'refused', reason: refusal };
+    return { kind: 'minted', response: this.#mintCode() };
+  }
+
+  /** Why this machine may not hand out a code, or nothing when it may. */
+  async #firstPasswordRefusal(): Promise<string | undefined> {
+    let present: boolean;
+    try {
+      present = await this.options.operatorPassword.isSet();
+    } catch (error) {
+      return `this machine could not read whether it has an operator password, and it will not hand out a pairing code on the assumption that it has one: ${error instanceof Error ? error.message : String(error)}. Repair or replace it with \`${this.options.clientName} daemon password set\` on this machine, which never asks for the old one.`;
+    }
+    if (present) return undefined;
+    return `this machine has no operator password, so it will not hand out a pairing code. A device paired without one can change the settings of whatever is already switched on here — including the agent fleet, which writes runnable files into your accounts — and the password is what stands in front of that. Set one with \`${this.options.clientName} daemon password set\` on this machine, or from Ferretry in a browser on it, and pairing works again.`;
+  }
+
+  #mintCode(): PairingCodeMintResponse {
     if (this.active !== undefined) this.expire(this.active);
     while (this.observations.size >= OBSERVATION_LIMIT) {
       const oldest = this.observations.keys().next().value;

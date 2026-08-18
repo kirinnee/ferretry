@@ -17,6 +17,7 @@ import {
   FakeSupervisor,
   health,
   layout,
+  RecordingFirstPassword,
   runningReport,
   SteppingClock,
   stoppedReport,
@@ -68,6 +69,7 @@ function run(
         snapshots,
         clock: new SteppingClock(),
         out,
+        firstPassword: new RecordingFirstPassword(),
         readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
         shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
       });

@@ -251,6 +251,49 @@ describe('the operator password route', () => {
     should(remoteDevice.status).equal(403);
   });
 
+  it('should refuse a LOCAL BROWSER holding no unlock, and serve the host token in the same state', async () => {
+    // Both halves of the escape hatch, at the ROUTE rather than only in the subsystem, because this is
+    // the boundary a real browser and a real `fy` meet.
+    //
+    // The browser is refused so the gate is not one tap wide. The admin token is served from the same
+    // state — a password nobody presented and no unlock — because that is the door a FORGOTTEN password
+    // is repaired through, and a design where both were closed would brick the machine forever.
+    // Arrange — a machine with a password, and a device credential this dispatcher can identify.
+    const { subsystem } = await mount({ password: 'the-one-nobody-remembers' });
+    const credentials = {
+      ...CREDENTIALS,
+      devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+    };
+    const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials, NO_GOVERNED_ROUTES_GUARD);
+    const put = (headers: Record<string, string>, password: string) =>
+      withDevices.dispatch(
+        request({
+          method: 'PUT',
+          path: '/v1/grants/password',
+          headers,
+          loopback: true,
+          body: JSON.stringify({ password }),
+        }),
+      );
+
+    // Act
+    const browser = await put({ authorization: 'Bearer device-secret' }, 'a-browser-tried-this');
+    const hostToken = await put(human, 'the-host-repaired-it');
+
+    // Assert
+    should(browser.status).equal(403);
+    should(jsonBody(browser)).have.property('code', 'grant_forbidden');
+    // The refusal names the way back rather than saying only "forbidden".
+    should(browser.body).match(/fy daemon password set/u);
+    should(hostToken.status).equal(200);
+    should(jsonBody(hostToken)).deepEqual({ passwordSet: true });
+    // Recovery, proved: the password the host just set is the one that now unlocks.
+    should(await subsystem.unlock('the-host-repaired-it')).have.property('kind', 'unlocked');
+    // And nothing anywhere echoed either value back.
+    should(browser.body).not.match(/a-browser-tried-this/u);
+    should(hostToken.body).not.match(/the-host-repaired-it/u);
+  });
+
   it('should clear the password when none is supplied, and refuse an empty one', async () => {
     // Absence clears; `""` is a client bug and must fail the minimum-length rule rather than
     // silently disarming the gate.
@@ -332,7 +375,7 @@ describe('the audit read', () => {
       ) as typeof DEFAULT_CAPABILITY_GRANTS,
     });
     await subsystem.refresh();
-    await subsystem.patch({ fleet: { use: true } }, { loopback: true, actor: 'admin-cli' });
+    await subsystem.patch({ fleet: { use: true } }, { loopback: true, adminToken: true, actor: 'admin-cli' });
     const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act

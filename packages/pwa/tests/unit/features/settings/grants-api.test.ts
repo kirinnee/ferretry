@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { type GrantsView, OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
-import { changeGrants, GRANTS_PATH, readGrants, unlockGrants } from '../../../../src/features/settings/grants-api.ts';
+import {
+  changeGrants,
+  GRANTS_PATH,
+  readGrants,
+  setOperatorPassword,
+  unlockGrants,
+} from '../../../../src/features/settings/grants-api.ts';
 
 interface Call {
   readonly path: string;
@@ -21,8 +27,10 @@ const view: GrantsView = {
       mayGrant: false,
     },
   ],
-  // Governed: this fixture stands for a caller who is NOT on the host, the only one grants apply to.
+  // Governed AND off the host: this fixture stands for a paired device somewhere else, which is what a
+  // `locked` configure axis implies. The two facts are separate fields now.
   governed: true,
+  hostLocal: false,
   passwordSet: true,
   unlocked: false,
   attemptsRemaining: 5,
@@ -110,5 +118,62 @@ describe('unlockGrants', () => {
   it('rejects a token the daemon did not mint in the declared shape', async () => {
     const { client } = recorder({ token: 'not-an-unlock', expiresAt: '2026-01-01T00:05:00.000Z', ttlSeconds: 300 });
     await expect(unlockGrants(client, 'operator-secret')).rejects.toThrow();
+  });
+});
+
+describe('setOperatorPassword', () => {
+  it('PUTs the password in a BODY, because a URL reaches every proxy access log', async () => {
+    // The credential rule, at the one call that carries a new password. A query parameter would outlive
+    // every reason the value was worth protecting, and it would do so in somebody else's log file.
+    // Arrange
+    const { calls, client } = recorder({ passwordSet: true });
+
+    // Act
+    const answered = await setOperatorPassword(client, 'correct-horse-battery');
+
+    // Assert
+    expect(answered).toBe(true);
+    expect(calls[0]?.path).toBe(`${GRANTS_PATH}/password`);
+    expect(calls[0]?.init?.method).toBe('PUT');
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ password: 'correct-horse-battery' });
+    // Not in the path, not in a query, and not in a header either.
+    expect(calls[0]?.path).not.toContain('correct-horse-battery');
+    expect(JSON.stringify([...new Headers(calls[0]?.init?.headers)])).not.toContain('correct-horse-battery');
+  });
+
+  it('spells CLEARING as absence, so a client bug producing an empty string is refused', async () => {
+    // `''` must fail the minimum-length rule rather than silently disarming the gate, and the schema is
+    // what refuses it — here, before the call, rather than as a 400 nobody explains.
+    // Arrange
+    const { calls, client } = recorder({ passwordSet: false });
+
+    // Act
+    const answered = await setOperatorPassword(client, undefined);
+
+    // Assert
+    expect(answered).toBe(false);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({});
+    await expect(setOperatorPassword(recorder({ passwordSet: true }).client, '')).rejects.toThrow();
+  });
+
+  it('presents the unlock in a header when replacing a password, and omits it when there is none', async () => {
+    // Replacing an existing password is a privileged change, so the daemon asks a local browser to prove
+    // the current one. The unlock travels exactly where a grant change puts it.
+    // Arrange, Act
+    const replacing = recorder({ passwordSet: true });
+    await setOperatorPassword(replacing.client, 'a-newer-secret', 'fy_unlock_aaaaaaaaaaaaaaaaaaaaaaaa');
+    const first = recorder({ passwordSet: true });
+    await setOperatorPassword(first.client, 'the-first-one');
+
+    // Assert
+    expect(headerOf(replacing.calls[0], OPERATOR_UNLOCK_HEADER)).toBe('fy_unlock_aaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(headerOf(first.calls[0], OPERATOR_UNLOCK_HEADER)).toBeNull();
+  });
+
+  it('reads only the one boolean the route answers with', async () => {
+    // NOTHING ELSE IS DISCLOSED. A length, a masked form or a fingerprint would be the first crack in
+    // "never rendered back", so a response carrying one is refused rather than quietly accepted.
+    // Arrange, Act, Assert
+    await expect(setOperatorPassword(recorder({ passwordSet: 'yes' }).client, 'a-good-password')).rejects.toThrow();
   });
 });

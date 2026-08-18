@@ -313,8 +313,10 @@ describe('push routes', () => {
     const remote = await surface.dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', headers: browser, body: JSON.stringify(body) }),
     );
-    // Loopback is ungoverned: somebody at the machine already has the machine, and a grant only ever
-    // governs a caller who is not standing on this host.
+    // A LOCAL caller on a machine with NO OPERATOR PASSWORD is ungoverned, which is what this fixture is:
+    // there is nothing to unlock with, so there is no gate to pass. It is not "loopback is ungoverned"
+    // any more — a local browser on a machine that HAS a password is governed until it enters it — and the
+    // distinction matters here because this route carries a `pairing` demand.
     const local = await surface.dispatch(
       request({
         method: 'POST',

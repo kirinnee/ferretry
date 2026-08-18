@@ -9,6 +9,13 @@ Ferretry already filled in.
 
 The device names itself when it redeems, so there is nothing to name here.
 
+This machine will not hand out a code until it has an operator password. A
+paired device can change the settings of whatever is already switched on
+here, and the password is what stands in front of that; the daemon refuses
+the mint and says so, whether the request came from here or from a browser.
+Set one with \`fy daemon password set\` — using this machine locally needs no
+password at all.
+
 When the daemon and the browser are the SAME machine there is nobody to
 scan anything, so --open hands the link to this host's browser and the
 reader lands in Ferretry already paired. It is opt-in: opening a window

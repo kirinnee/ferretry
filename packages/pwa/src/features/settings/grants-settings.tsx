@@ -49,29 +49,36 @@ import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
+  axisChangeLocked,
   axisGuidance,
   axisLabel,
   axisQuestion,
   capabilityLabel,
   capabilityReach,
+  connectionPosture,
   type GrantGuidance,
   grantAlreadyReads,
   grantChangeNeedsUnlock,
+  grantGuidance,
   grantOnlyAtMachine,
   grantPatch,
+  grantScopeKey,
+  grantScopeNote,
   type HeldUnlock,
   NO_PASSWORD_DISCLOSURE,
   type OperatorUnlockFailure,
   operatorUnlockFailure,
   originNote,
   PASSWORD_SET_DISCLOSURE,
+  passwordControlState,
   remoteRevokeWarning,
   UNLOCK_LIMIT_NOTE,
   unlockSecondsRemaining,
   usableUnlock,
 } from '../../lib/grants.ts';
 import { CapabilityList } from './capability-list.tsx';
-import { changeGrants, type GrantClient, readGrants, unlockGrants } from './grants-api.ts';
+import { changeGrants, type GrantClient, readGrants, setOperatorPassword, unlockGrants } from './grants-api.ts';
+import { OperatorPasswordCard } from './operator-password.tsx';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
 const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
@@ -93,6 +100,7 @@ function AxisControl({
   axis,
   changeable,
   oneWay,
+  lockedUntilUnlock,
   busy,
   onChange,
 }: {
@@ -102,6 +110,8 @@ function AxisControl({
   readonly changeable: boolean;
   /** True when this caller may switch the capability off but never back on. */
   readonly oneWay: boolean;
+  /** True when this press would widen and this browser has not proved the password yet. */
+  readonly lockedUntilUnlock: boolean;
   readonly busy: boolean;
   readonly onChange: (next: boolean) => void;
 }) {
@@ -114,7 +124,7 @@ function AxisControl({
    * the owner's rule made structural: "do not render a control that always fails."
    */
   const deadWideningSwitch = oneWay && !recorded;
-  const disabled = busy || !changeable || deadWideningSwitch;
+  const disabled = busy || !changeable || deadWideningSwitch || lockedUntilUnlock;
   const describedBy = useId();
   /**
    * The one sentence that keeps this from being a greyed switch.
@@ -130,7 +140,12 @@ function AxisControl({
         explanation: grantOnlyAtMachine(entry.capability),
         offersUnlock: false,
       }
-    : axisGuidance(entry, axis, changeable);
+    : // A widening press this browser may make ONCE IT UNLOCKS. It is not the `not-granted` sentence —
+      // that one sends a person to the host to turn on something they can turn on right here — and it is
+      // not a live switch either, because it would be refused. It is the password, named.
+      lockedUntilUnlock
+      ? grantGuidance('locked', entry.capability)
+      : axisGuidance(entry, axis, changeable);
 
   return (
     <div className="min-w-0">
@@ -239,6 +254,7 @@ function CapabilityCard({
             axis={axis}
             changeable={changeable}
             oneWay={oneWay}
+            lockedUntilUnlock={axisChangeLocked(view, entry, entry.granted[axis])}
             busy={busy}
             onChange={next => onChange(axis, next)}
           />
@@ -276,6 +292,7 @@ export function GrantUnlockPrompt({
   nowMs,
   failure,
   busy,
+  hostLocal = false,
   onUnlock,
 }: {
   readonly held: HeldUnlock | null;
@@ -283,6 +300,15 @@ export function GrantUnlockPrompt({
   readonly nowMs: number;
   readonly failure: OperatorUnlockFailure | null;
   readonly busy: boolean;
+  /**
+   * Whether this browser is ON the machine, which changes WHAT the password buys here.
+   *
+   * "Turning a capability on from off this host needs it" was the whole story while a local browser was
+   * ungoverned. It is now false for the reader most likely to meet this prompt — a browser on the
+   * machine, which needs the unlock for its own changes — so the sentence branches rather than saying
+   * something true of somebody else.
+   */
+  readonly hostLocal?: boolean;
   readonly onUnlock: (password: string) => void;
 }) {
   const fieldId = useId();
@@ -327,8 +353,10 @@ export function GrantUnlockPrompt({
         <Lock size={15} className="text-accent" aria-hidden="true" />
         Operator password
       </p>
-      <p className="m-0 text-meta leading-base text-muted">
-        Turning a capability on from off this host needs it. Turning one off never does.
+      <p className="m-0 text-meta leading-base text-muted" data-grant-unlock-purpose={hostLocal ? 'local' : 'remote'}>
+        {hostLocal
+          ? 'Enter it once and this browser is ungoverned for five minutes — a browser is a paired device even on the machine. Turning something off never needs it.'
+          : 'Turning a capability on from off this host needs it. Turning one off never does.'}
       </p>
       <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
         <label className="sr-only" htmlFor={fieldId}>
@@ -378,8 +406,13 @@ export interface GrantsCardProps {
   readonly unlockFailure?: OperatorUnlockFailure | null;
   /** A refusal the daemon answered a change with, rendered whole. */
   readonly changeFailure?: string | null;
+  /** A refusal the daemon answered a password change with, kept apart so one alert is not two. */
+  readonly passwordFailure?: string | null;
   readonly onChange: (capability: DaemonCapability, axis: CapabilityAxis, next: boolean) => void;
   readonly onUnlock: (password: string) => void;
+  /** `undefined` clears the password. The value is passed through and never held by this component. */
+  readonly onSetPassword: (password: string) => void;
+  readonly onClearPassword: () => void;
 }
 
 /**
@@ -396,8 +429,11 @@ export function GrantsCard({
   held = null,
   unlockFailure: failure = null,
   changeFailure = null,
+  passwordFailure = null,
   onChange,
   onUnlock,
+  onSetPassword,
+  onClearPassword,
 }: GrantsCardProps) {
   const headingId = useId();
   /**
@@ -412,6 +448,15 @@ export function GrantsCard({
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
   /** Whether anything here could need the password, so the prompt is not offered where it is inert. */
   const unlockUseful = view.passwordSet && view.lockedUntil === undefined;
+  /**
+   * Which of the four connections this is, from the DAEMON's two facts rather than one.
+   *
+   * `governed` and `hostLocal` are independent now: a browser on the machine is governed until it
+   * unlocks. Deriving locality from `governed` alone would call somebody standing at the machine remote
+   * the moment their unlock expired.
+   */
+  const posture = connectionPosture(view.governed, view.hostLocal);
+  const passwordState = passwordControlState(view);
 
   return (
     <section
@@ -429,7 +474,12 @@ export function GrantsCard({
           moment it is not. It is never inferred from this page's address, which would invert the answer
           over a relay. The fallback stays for a browser meeting an OLDER daemon that does not send the
           field. */}
-      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
+      <CapabilityList
+        connection={connection}
+        capabilities={view.capabilities}
+        governed={view.governed}
+        hostLocal={view.hostLocal}
+      />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
@@ -446,11 +496,12 @@ export function GrantsCard({
             {view.passwordSet ? 'operator password set' : 'no operator password'}
           </span>
         </div>
-        {/* The line that stops the commonest wrong reading of this whole screen. */}
-        <p className="m-0 text-ui leading-base text-muted">
-          These apply to callers that are <strong className="text-fg">not on this machine</strong> — a paired phone, a
-          browser across the network, a session carried over the relay. A browser running on the machine itself is
-          governed by none of it, because somebody at the machine already has the machine.
+        {/* The line that stops the commonest wrong reading of this whole screen, BRANCHED because one
+            sentence can no longer be true for every connection: a browser on the machine is governed too
+            until it unlocks, and telling that reader the limits are somebody else’s would send them
+            hunting for a permission problem they do not have. */}
+        <p className="m-0 text-ui leading-base text-muted" data-grant-scope={grantScopeKey(posture)}>
+          {grantScopeNote(posture)}
         </p>
         {/* The disclosure, ONCE, next to the configure controls it is about. Not a modal, not a
             recurring warning, and not a question anybody has to answer. */}
@@ -484,9 +535,21 @@ export function GrantsCard({
           nowMs={nowMs}
           failure={failure}
           busy={busy}
+          hostLocal={view.hostLocal}
           onUnlock={onUnlock}
         />
       ) : null}
+
+      {/* THE GATE ITSELF, beside the unlock that spends it rather than on another screen. It is rendered
+          in every posture: where it cannot succeed it renders the reason and the host command, because a
+          setting that silently disappears on a phone is a setting somebody goes looking for. */}
+      <OperatorPasswordCard
+        state={passwordState}
+        busy={busy}
+        failure={passwordFailure}
+        onSet={onSetPassword}
+        onClear={onClearPassword}
+      />
 
       {entries.map(entry => (
         <CapabilityCard
@@ -548,6 +611,7 @@ export function GrantsSurface({
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [changeFailure, setChangeFailure] = useState<string | null>(null);
+  const [passwordFailure, setPasswordFailure] = useState<string | null>(null);
   /** The unlock, in component state. Never a store, never storage. It dies with this screen. */
   const [held, setHeld] = useState<HeldUnlock | null>(null);
   const [failure, setFailure] = useState<OperatorUnlockFailure | null>(null);
@@ -558,6 +622,7 @@ export function GrantsSurface({
     setLoaded(null);
     setLoadFailure(null);
     setChangeFailure(null);
+    setPasswordFailure(null);
     // A held unlock belongs to the daemon that minted it, so switching machines drops it rather than
     // carrying a credential across a boundary everything else here is keyed by.
     setHeld(null);
@@ -601,6 +666,34 @@ export function GrantsSurface({
     [client, connection.daemonId, held, loaded, now],
   );
 
+  /**
+   * Sets, replaces or clears the password. `undefined` clears it.
+   *
+   * THE VALUE IS AN ARGUMENT AND NOTHING ELSE. It is not put in state, not logged, and not echoed back;
+   * the held unlock travels in a header because replacing an existing password is a privileged change,
+   * and the view is re-read afterwards because `passwordSet` decides what every other control on this
+   * screen may do. Every unlock is void once the password moves — the daemon drops them, so a stale
+   * `held` here would claim an authority the machine has already withdrawn.
+   */
+  const movePassword = useCallback(
+    async (password: string | undefined) => {
+      if (client === null || loaded?.daemonId !== connection.daemonId) return;
+      setBusy(true);
+      setPasswordFailure(null);
+      try {
+        await setOperatorPassword(client, password, usableUnlock(held, connection.daemonId, now()));
+        setHeld(null);
+        setFailure(null);
+        setLoaded({ daemonId: connection.daemonId, view: await readGrants(client) });
+      } catch (cause) {
+        setPasswordFailure(message(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, connection.daemonId, held, loaded?.daemonId, now],
+  );
+
   const unlock = useCallback(
     async (password: string) => {
       if (client === null || loaded?.daemonId !== connection.daemonId) return;
@@ -636,8 +729,11 @@ export function GrantsSurface({
         held={held}
         unlockFailure={failure}
         changeFailure={changeFailure}
+        passwordFailure={passwordFailure}
         onChange={(capability, axis, next) => void change(capability, axis, next)}
         onUnlock={password => void unlock(password)}
+        onSetPassword={password => void movePassword(password)}
+        onClearPassword={() => void movePassword(undefined)}
       />
     );
   if (loadFailure?.daemonId === connection.daemonId)

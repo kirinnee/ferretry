@@ -11,6 +11,7 @@ import {
 import type { CapabilityDemand, CapabilityGuard, CapabilityPresentation, GrantDecision } from '../api/capability.ts';
 import {
   applyGrantPatch,
+  type CallerArrival,
   decideCapability,
   describeGrantRefusal,
   type GrantEvaluation,
@@ -18,6 +19,7 @@ import {
   INITIAL_UNLOCK_ATTEMPTS,
   isGovernedCaller,
   isUnlockLocked,
+  mayChangeOperatorPassword,
   patchedCapabilities,
   recordUnlockFailure,
   recordUnlockSuccess,
@@ -160,9 +162,13 @@ export class CapabilityGrantService implements CapabilityGuard {
     const lockedUntilMs = isUnlockLocked(this.attempts, now) ? this.attempts.lockedUntilMs : undefined;
     return {
       capabilities,
-      // Projected, never re-derived: it is the same `isGovernedCaller(request.loopback)` every decision
-      // above was made with, so a view can never disagree with the enforcement it describes.
+      // Projected, never re-derived: it is the same `isGovernedCaller` answer every decision above was
+      // made with, so a view can never disagree with the enforcement it describes.
       governed: evaluation.governed,
+      // The SECOND, independent fact. A local browser that has not unlocked is governed AND on this
+      // host, so a screen needs both to say which sentence is true; collapsing them would tell somebody
+      // at the machine they were remote the moment their unlock expired.
+      hostLocal: evaluation.hostLocal,
       passwordSet: this.passwordSet,
       unlocked: held !== undefined,
       ...(held === undefined ? {} : { unlockExpiresAt: new Date(held.expiresAtMs).toISOString() }),
@@ -261,10 +267,19 @@ export class CapabilityGrantService implements CapabilityGuard {
     const widened = widenedBy(current, next);
     // Computed over the WHOLE patch and refused before anything is written, so a mixed patch takes
     // neither half. The password is deliberately not consulted: it cannot buy this.
-    if (widened.length > 0 && evaluation.governed)
+    if (widened.length > 0 && !evaluation.hostLocal)
       throw new GrantError(
         'forbidden',
         `${widened.join(', ')} can only be turned on from the machine itself — no remote caller may, with or without the operator password. Run \`${this.deps.clientName} daemon config set ${widened[0]?.split('.')[0] ?? 'fleet'} --${widened[0]?.split('.')[1] ?? 'use'}\` on the host.`,
+      );
+    // ON the host and still governed means a local browser that has not unlocked yet. Its remedy is the
+    // password, NOT the sentence above: telling somebody standing at the machine that only the machine
+    // may do this is the dead end this surface exists to remove. The way back is named for the reader
+    // who does not have the password either, because this is the point they would get stuck at.
+    if (widened.length > 0 && evaluation.governed)
+      throw new GrantError(
+        'forbidden',
+        `turning ${widened.join(', ')} on needs this machine's operator password — enter it to unlock, and the change goes through. If you do not have it, replace it on this machine with \`${this.deps.clientName} daemon password set\`, which never asks for the old one.`,
       );
     if (evaluation.governed && !evaluation.unlockHeld) {
       for (const capability of patchedCapabilities(patch)) {
@@ -274,7 +289,13 @@ export class CapabilityGrantService implements CapabilityGuard {
         if (!grant.use || !grant.configure)
           throw new GrantError(
             'forbidden',
-            `the operator of this machine has not granted the UI permission to change the ${capability} grant`,
+            // TWO READERS, TWO REMEDIES. Off the host, the document is the answer and the operator is
+            // somebody else. ON the host, the reader IS the operator: telling them their own document
+            // refuses them, when entering the password they already have would let it through, sends them
+            // to edit a file for a limit that was never theirs.
+            evaluation.hostLocal
+              ? `changing the ${capability} grant needs this machine's operator password, because the document does not grant the UI permission to change it. Enter it to unlock, or replace it on this machine with \`${this.deps.clientName} daemon password set\`, which never asks for the old one.`
+              : `the operator of this machine has not granted the UI permission to change the ${capability} grant`,
           );
       }
     }
@@ -292,14 +313,30 @@ export class CapabilityGrantService implements CapabilityGuard {
   }
 
   /**
-   * Sets or clears the operator password from the HOST.
+   * Sets, replaces or clears the operator password. LOCAL ONLY, and only past the gate.
    *
-   * Deliberately not reachable from a governed caller — the mount serves it on a `host` route — so a
-   * browser can never rotate or remove the secret that gates it. Every held unlock is dropped: a
-   * password that changed must invalidate what the old one bought, or rotating it after a device is
-   * lost achieves nothing.
+   * ## THE HOST'S COMMAND LINE MAY ALWAYS DO THIS, AND THAT IS THE ESCAPE HATCH
+   *
+   * A local browser needs an unlock here, exactly as it needs one to change a grant — otherwise the
+   * gate would be one tap wide and would buy nothing. But that alone would let a FORGOTTEN password
+   * brick a machine forever: no remote path, no local path, nothing. So the admin token is ungoverned
+   * (`isGovernedCaller`) and `fy daemon password set` never asks for the old one. That door is
+   * load-bearing and must stay open; a change that closes it produces the one outcome this design says
+   * must never occur.
+   *
+   * A remote caller never arrives here at all — the route is `privilegedOnly` — so this check is about
+   * WHICH local caller, not about locality.
+   *
+   * Every held unlock is dropped: a password that changed must invalidate what the old one bought, or
+   * rotating it after a device is lost achieves nothing.
    */
-  async setPassword(password: string | undefined): Promise<void> {
+  async setPassword(password: string | undefined, presentation: CapabilityPresentation): Promise<void> {
+    const held = this.heldUnlock(presentation.unlock, this.deps.clock.nowMs()) !== undefined;
+    if (!mayChangeOperatorPassword(this.arrival(presentation, held)))
+      throw new GrantError(
+        'forbidden',
+        `changing this machine's operator password needs the password it already has — enter it to unlock first. If you do not have it, replace it from a terminal on this machine with \`${this.deps.clientName} daemon password set\`, which never asks for the old one.`,
+      );
     if (password === undefined) await this.deps.passwords.clear();
     else await this.deps.passwords.set(password);
     this.passwordSet = password !== undefined;
@@ -348,20 +385,40 @@ export class CapabilityGrantService implements CapabilityGuard {
       granted,
       useRefusal: use.refusal,
       configureRefusal: configure.refusal,
-      // Locality decides it, and nothing else can: a governed caller never widens.
-      mayGrant: !evaluation.governed,
+      // LOCALITY decides it, and nothing else can: no caller off this host ever widens. It is
+      // deliberately not `!governed` any more — a local browser waiting to unlock is governed and may
+      // still widen once it has, and reporting `false` there would call a door one-way that is not.
+      mayGrant: evaluation.hostLocal,
       origin: this.writtenDown.includes(capability) ? 'config file' : 'default',
     };
   }
 
   private evaluate(presentation: CapabilityPresentation): GrantEvaluation {
     const now = this.deps.clock.nowMs();
+    const unlockHeld = this.heldUnlock(presentation.unlock, now) !== undefined;
     return {
       grants: this.grants,
       passwordSet: this.passwordSet,
-      unlockHeld: this.heldUnlock(presentation.unlock, now) !== undefined,
+      unlockHeld,
       rateLimited: isUnlockLocked(this.attempts, now),
-      governed: isGovernedCaller(presentation.loopback),
+      governed: isGovernedCaller(this.arrival(presentation, unlockHeld)),
+      hostLocal: presentation.loopback,
+    };
+  }
+
+  /**
+   * The four facts governance reads, gathered in ONE place.
+   *
+   * Assembled here rather than at each question so `decide`, `view`, `patch` and `setPassword` cannot
+   * come to different answers about the same request — a view that disagreed with the enforcement it
+   * describes is the defect this whole surface is written to avoid.
+   */
+  private arrival(presentation: CapabilityPresentation, unlockHeld: boolean): CallerArrival {
+    return {
+      loopback: presentation.loopback,
+      adminToken: presentation.adminToken,
+      passwordSet: this.passwordSet,
+      unlockHeld,
     };
   }
 

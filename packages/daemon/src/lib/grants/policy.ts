@@ -62,26 +62,82 @@ export const NO_PASSWORD_DISCLOSURE =
   'no operator password is set, so any paired device can change the settings of whatever is already turned on here — it still cannot turn anything on, which only this machine can do';
 
 /**
+ * Everything the governance question reads about ONE caller. None of it is self-reported.
+ *
+ * `loopback` is the transport's own account of where the socket came from. `adminToken` is the
+ * SERVER-DERIVED token class, not an actor string — an actor can be refined by a header and is lossy
+ * about authority, and this decision must not be movable by a header. The other two are this daemon's
+ * own state and its own minted unlocks.
+ */
+export interface CallerArrival {
+  /** How the request ARRIVED. Carrier-derived; a relayed hop is never loopback. */
+  readonly loopback: boolean;
+  /** Whether the caller authenticated with the HOST's own admin token — never a device, never a warden. */
+  readonly adminToken: boolean;
+  /** Whether this machine has an operator password at all. */
+  readonly passwordSet: boolean;
+  /** Whether the caller presented an unlock this daemon minted and that has not expired. */
+  readonly unlockHeld: boolean;
+}
+
+/**
  * Whether the operator's grants govern THIS caller.
  *
- * ONE INPUT, AND IT IS THE TRANSPORT'S. A loopback caller is already standing on the machine: they
- * can edit the configuration document, run the command line, or start anything they like. A
- * permission model that gated them would add friction and no safety, and it would make a document
- * that refuses everything a document nobody can edit back. So loopback is ungoverned, full stop, and
- * a fresh install needs no setup and no password to be useful.
+ * ## ONE GATE AT THE DOOR, THEN FULL AUTHORITY
  *
- * EVERY RESTRICTION IN THIS FILE EXISTS FOR THE CALLER WHO IS NOT ON THE HOST — a paired phone, a
- * browser across the network, a session carried over the rendezvous. That is where a boundary is
- * real, because possession of the machine is exactly what such a caller does not have.
+ * Arrival on the host is no longer the whole answer, and the reason is that a BROWSER IS A PAIRED
+ * DEVICE WHEREVER IT RUNS. A tab left open on an unattended desk was one tap from provisioning the
+ * machine, so a local browser is governed by everything below until it presents an unlock and
+ * ungoverned — completely, with no second gate and no per-action prompt — once it has. That is what
+ * `sudo` provides.
  *
- * THE VALUE MUST BE CARRIER-DERIVED, and it is: the transport adapter sets `ApiRequest.loopback` from
- * the socket's actual remote address, and the relay tunnel — which terminates on this very host —
- * sets it to `false` unconditionally, whatever address the hop appears to carry. Deciding this from
- * a peer address, a `Host` header or a URL containing `127.0.0.1` would hand a remote phone the
- * machine, and that is the worst bug this design could produce. Nothing here re-derives it.
+ * IT IS FRICTION, NOT A BOUNDARY, and this file will not pretend otherwise. Somebody at the keyboard
+ * can open a terminal, read the admin token and do all of it anyway. What the gate buys is that a
+ * destructive change is deliberate rather than accidental: it defends against a slip, casual misuse
+ * and an unattended tab. It does not defend against a person with local access, and no comment or
+ * sentence anywhere may claim it does.
+ *
+ * ## TWO CALLERS ARE UNGOVERNED ON ARRIVAL, AND BOTH ARE LOAD-BEARING
+ *
+ * - **The host's own admin token.** Reading that file already requires being on the machine, so gating
+ *   it would add friction with no safety — and it would close the one door a FORGOTTEN password can
+ *   still be repaired through. `fy daemon password set` must always work without the old password;
+ *   that escape hatch is why a local browser gate cannot brick a machine, and it must never close.
+ * - **A machine with no password.** There is nothing to unlock with and no gate to pass, so a fresh
+ *   install is useful immediately and nobody is asked to invent a secret before their first run. The
+ *   first password is set when the first device is paired, which is where remote access begins.
+ *
+ * ## EVERY OTHER RESTRICTION IN THIS FILE IS FOR THE CALLER WHO IS NOT ON THE HOST
+ *
+ * A paired phone, a browser across the network, a session carried over the rendezvous. That is where a
+ * boundary is real, because possession of the machine is exactly what such a caller does not have.
+ *
+ * THE ARRIVAL VALUE MUST BE CARRIER-DERIVED, and it is: the transport adapter sets
+ * `ApiRequest.loopback` from the socket's actual remote address, and the relay tunnel — which
+ * terminates on this very host — sets it to `false` unconditionally, whatever address the hop appears
+ * to carry. Deciding this from a peer address, a `Host` header or a URL containing `127.0.0.1` would
+ * hand a remote phone the machine, and that is the worst bug this design could produce. Nothing here
+ * re-derives it.
  */
-export function isGovernedCaller(loopback: boolean): boolean {
-  return !loopback;
+export function isGovernedCaller(arrival: CallerArrival): boolean {
+  if (!arrival.loopback) return true;
+  if (arrival.adminToken) return false;
+  if (!arrival.passwordSet) return false;
+  return !arrival.unlockHeld;
+}
+
+/**
+ * Whether this caller may set, replace or clear the operator password.
+ *
+ * THE SAME QUESTION AS "is this caller ungoverned", delegated rather than restated so the two answers
+ * cannot drift: the password is the thing the gate is made of, and a caller who is already past the
+ * gate is the only one who may move it. It resolves to the three cases that matter — the host's admin
+ * token always may (the escape hatch), a local browser may once it has unlocked, and a machine with no
+ * password yet may set the first one — while a remote caller never does, which the route's
+ * `privilegedOnly` declaration has already refused before this is asked.
+ */
+export function mayChangeOperatorPassword(arrival: CallerArrival): boolean {
+  return !isGovernedCaller(arrival);
 }
 
 /** Everything the per-request decision reads, gathered so none of it comes from a global. */
@@ -93,8 +149,17 @@ export interface GrantEvaluation {
   readonly unlockHeld: boolean;
   /** Set while the daemon is refusing to check passwords at all. */
   readonly rateLimited: boolean;
-  /** False for a loopback caller — somebody already standing on this host. See `isGovernedCaller`. */
+  /** Whether the operator's grants apply to this caller at all. See {@link isGovernedCaller}. */
   readonly governed: boolean;
+  /**
+   * Whether the request ARRIVED on this host — the locality fact, kept separate from `governed`.
+   *
+   * The two came apart when a local browser stopped being ungoverned on arrival, and they must stay
+   * apart: locality is what decides whether a capability can ever be turned back ON, and reading that
+   * off `governed` would tell somebody standing at the machine that a switch is a one-way door merely
+   * because they have not typed the password yet.
+   */
+  readonly hostLocal: boolean;
 }
 
 /**

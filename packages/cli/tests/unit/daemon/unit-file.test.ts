@@ -134,6 +134,24 @@ describe('systemd unit rendering', () => {
     // Act + Assert
     should(() => renderSystemdUnit({ ...spec, logFile: '/tmp/a\nb' })).throw(/may not contain a newline/u);
   });
+
+  it('should run the daemon EXECUTABLE, so a supervised start can never reach an interactive prompt', () => {
+    // WHY THIS IS ASSERTED AND NOT ASSUMED. `fy daemon start` offers to set the machine's first operator
+    // password when a person is there to answer. A unit whose `ExecStart` ran that command instead of the
+    // daemon would put that offer inside a systemd start — with no terminal, and nobody to answer — and
+    // the machine would silently stop running the daemon at login. Both service managers launch the
+    // executable and nothing else, which is what makes that structurally impossible rather than careful.
+    // Act
+    const unit = renderSystemdUnit(spec);
+    const plist = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
+
+    // Assert — one argument, and it is the daemon.
+    should(unit).match(/^ExecStart="\/opt\/fy\/bin\/fyd"$/mu);
+    should(plist).containEql('<array><string>/opt/fy/bin/fyd</string></array>');
+    // No CLI verb anywhere in either definition: not as the program, not as an argument to it.
+    should(unit).not.match(/daemon start/u);
+    should(plist).not.match(/daemon start/u);
+  });
 });
 
 describe('launch agent rendering', () => {

@@ -22,6 +22,7 @@ import {
   failedReport,
   health,
   layout,
+  RecordingFirstPassword,
   runningReport,
   SteppingClock,
   stoppedReport,
@@ -29,6 +30,7 @@ import {
 
 interface Harness {
   readonly controller: DaemonController;
+  readonly firstPassword: RecordingFirstPassword;
   readonly out: CapturedOutput;
   readonly service: FakeSupervisor;
   readonly direct: FakeSupervisor;
@@ -66,6 +68,7 @@ function harness(options: {
   const clock = new SteppingClock(options.step ?? 100);
   const nix = options.nix ?? new FakeNixGcRoot();
   const lifecycle = options.lifecycle ?? new FakeLifecycleLock();
+  const firstPassword = new RecordingFirstPassword();
   const controller = new DaemonController({
     layout: layout(),
     service: options.withoutService === true ? undefined : service,
@@ -77,11 +80,12 @@ function harness(options: {
     snapshots,
     clock,
     out,
+    firstPassword,
     readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, snapshots, clock, nix, lifecycle };
+  return { controller, out, service, direct, logs, snapshots, clock, nix, lifecycle, firstPassword };
 }
 
 describe('daemon install', () => {
@@ -323,6 +327,63 @@ describe('daemon start', () => {
     // Assert
     should(caught).be.instanceof(DaemonStartupFailedError);
     should((caught as Error).message).match(/did not become ready within 1s; inspect .*logs\/fyd\.log/u);
+  });
+
+  it('should offer the first operator password after the transaction, and only after a start', async () => {
+    // WHY IT IS AFTER THE RELEASE. The offer can put a question in front of a person, and a question
+    // asked while the lifecycle claim is held would block every other `fy daemon …` invocation on this
+    // host until somebody answered it — so `daemon stop` in another terminal would look wedged, and the
+    // remedy would be killing the terminal that was asking. The trail is the only way to state that.
+    // Arrange — the offer writes into the LOCK's own trail, which is the only way to state ordering.
+    const lifecycle = new FakeLifecycleLock();
+    const offer = new RecordingFirstPassword(lifecycle.trail);
+    const started = harness({
+      probes: [undefined, health()],
+      serviceFallback: stoppedReport,
+      lifecycle,
+      overrides: { firstPassword: offer },
+    });
+    const claims = layout().lifecycleLocks.length;
+
+    // Act
+    await started.controller.start();
+
+    // Assert — every claim is released before the question is asked.
+    should(offer.offers).equal(1);
+    should(lifecycle.trail).deepEqual([
+      ...Array.from({ length: claims }, () => 'acquire:start'),
+      ...Array.from({ length: claims }, () => 'release:start'),
+      'offer:first-password',
+    ]);
+
+    // And no OTHER verb asks. `restart` in particular meets an operator who is mid-incident, and a
+    // prompt between them and a daemon that is down is the last thing that surface should add.
+    const installed = harness({ probes: [undefined, health()] });
+    await installed.controller.install();
+    const restarted = harness({
+      probes: [health(), undefined, health()],
+      serviceReports: [stoppedReport],
+      serviceFallback: stoppedReport,
+    });
+    await restarted.controller.restart();
+    const stopped = harness({ probes: [health(), undefined], serviceFallback: stoppedReport });
+    await stopped.controller.stop();
+    should([installed.firstPassword.offers, restarted.firstPassword.offers, stopped.firstPassword.offers]).deepEqual([
+      0, 0, 0,
+    ]);
+  });
+
+  it('should ask nothing when the daemon never came up', async () => {
+    // A daemon that did not start is not a machine anybody is finishing the setup of, and the person in
+    // front of it has a failure to read. `start` throws before the offer, which is what proves it.
+    // Arrange
+    const { controller, firstPassword } = harness({ probes: [undefined], serviceFallback: stoppedReport });
+
+    // Act
+    await controller.start().catch(() => undefined);
+
+    // Assert
+    should(firstPassword.offers).equal(0);
   });
 });
 
@@ -1386,6 +1447,7 @@ describe('daemon controller defaults', () => {
       snapshots: new FakeSnapshots(),
       clock: new SteppingClock(),
       out: new CapturedOutput(),
+      firstPassword: new RecordingFirstPassword(),
     });
 
     // Act
