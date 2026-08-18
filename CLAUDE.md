@@ -131,6 +131,18 @@ adding a getter would delete the feature. The threat model, the `${secret:NAME}`
 declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
 against, because the useful property is narrower than people assume.
 
+`packages/daemon` locates the harness commands (`claude`, `codex`) through **one** rule an operator can
+change: an explicit per-harness path, then declared search directories, then the inherited
+environment — the contract is [docs/harness-paths.md](docs/harness-paths.md). It exists because a
+daemon started by systemd or launchd inherits a minimal environment, so a harness that works in the
+operator's terminal is invisible to their daemon. **Both surfaces exist deliberately** — a `harness`
+block in `config/daemon.json` and `FY_CLAUDE_BIN` / `FY_CODEX_BIN` / `FY_HARNESS_PATH`, the
+environment winning per harness — because a unit file cannot edit a JSON document. **A named path
+that resolves to nothing fails loudly and searches no further**, since a silent fallback leaves an
+operator believing they configured something they did not. Boot, `fyd --check` and the doctor report
+each name the resolved path AND the rule that produced it, and **nothing is ever launched to find
+out**. It is discovery only: a start still launches the absolute wrapper the manifest publishes.
+
 `packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
 (`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **A
 loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"

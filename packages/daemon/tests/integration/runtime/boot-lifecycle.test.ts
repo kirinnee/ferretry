@@ -4143,6 +4143,71 @@ describe('daemon boot lifecycle', () => {
     should(said.stated.filter(message => message.includes('no agent harness is ready'))).be.empty();
   });
 
+  /**
+   * THE SERVICE-MANAGER CASE, END TO END.
+   *
+   * A daemon started by systemd or launchd at login inherits a minimal environment rather than the
+   * operator's interactive shell, so `claude` works perfectly in their terminal and is invisible
+   * here. This runs the REAL composition root: the declaration is read off `config/daemon.json` by
+   * the same loader a boot uses, and the milestone it produces is the one an operator will read.
+   *
+   * A unit test cannot prove this. It proves the decision; only a boot proves the key an operator
+   * writes actually reaches it.
+   */
+  it('should find a harness in a declared directory and say which rule found it', async () => {
+    // Arrange: a directory nothing has put on this daemon's `PATH`, holding a file named exactly as
+    // the harness command is — plus an override for the OTHER harness that names nothing.
+    const home = await tempDirectory('fyd-harness-declared');
+    const port = await freeLoopbackPort();
+    await seedHome(home, port);
+    const tools = join(home, 'tools');
+    await mkdir(tools, { recursive: true });
+    await writeFile(join(tools, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    await writeFile(
+      join(home, 'config', 'daemon.json'),
+      JSON.stringify({
+        host: '127.0.0.1',
+        port,
+        harness: { searchPaths: [tools], paths: { codex: join(tools, 'not-installed') } },
+      }),
+      { mode: 0o600 },
+    );
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    let release = (): void => {};
+    const stopped = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+    // Act
+    const booting = start(world, cleanups);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(25);
+    }
+    release();
+    const code = await booting;
+    await runCleanups(cleanups);
+
+    // Assert — the declared directory wins over whatever this host happened to inherit, and the
+    // milestone names the file AND the rule. An operator who has just written that line has no other
+    // way to find out whether this daemon read it.
+    should(code).equal(0);
+    should(said.steps.join('\n')).match(
+      new RegExp(
+        `harness commands located — claude: ${tools.replaceAll('/', '\\/')}\\/claude {2}\\(extra search path — harness\\.searchPaths\\)`,
+        'u',
+      ),
+    );
+    // And the override that names nothing is STATED rather than quietly searched around, so a person
+    // who configured something is never left believing it took.
+    const failure = said.stated.find(message => message.includes('harness.paths.codex'));
+    should(failure).be.a.String();
+    should(failure).match(/nothing else was searched/u);
+    should(failure).match(/no codex session can start on this host/u);
+  });
+
   it('should trace every boot milestone so a stall names the step it stalled on', async () => {
     // Arrange
     const home = await tempDirectory('fyd-journal');

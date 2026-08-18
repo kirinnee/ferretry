@@ -49,6 +49,10 @@ const REPORTED_KEYS = [
   'usage',
   'analyticsPricing',
   'projectRoots',
+  // Reported like every other key, and NOT the last word on where a harness was found: an operator
+  // can also declare one in the environment, which no document key can show. The row says what this
+  // file holds; `fyd --check` and the doctor report say what the resolution actually did with it.
+  'harness',
 ] as const;
 
 /** Which override, if any, replaced a document key for this run. */

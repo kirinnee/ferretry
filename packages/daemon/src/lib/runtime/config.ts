@@ -14,6 +14,7 @@ import {
 } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
+import { HarnessDiscoveryDocumentSchema } from '../core/harness-readiness.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import type { RunOverrides } from './arguments.ts';
 import {
@@ -209,6 +210,20 @@ export const DaemonConfigDocumentSchema = z
      */
     analyticsPricingSources: ConfiguredAnalyticsPricingSourcesSchema.default([]),
     projectRoots: z.array(z.string().trim().min(1)).readonly().default(['~/Workspace', '~/.config']),
+    /**
+     * WHERE `claude` AND `codex` ARE, when this daemon cannot see them for itself.
+     *
+     * IT BELONGS IN THIS DOCUMENT for the same reason `grants` does: it is a thing an operator
+     * decides about this host, and `--print-config` reports it beside every other effective value
+     * with the same provenance treatment. A file of its own would be a second place to look for a
+     * setting nobody remembers the name of.
+     *
+     * THE SHAPE IS THE CORE DOMAIN'S, not a second declaration here. `harness-readiness.ts` owns both
+     * what an operator may write and what this daemon does with it, because a document that could say
+     * something the resolution ignores is exactly the silent misconfiguration this block was added to
+     * end.
+     */
+    harness: HarnessDiscoveryDocumentSchema,
     /**
      * Reusable environment recipes for the use-without-read primitive, holding REFERENCES only.
      *
