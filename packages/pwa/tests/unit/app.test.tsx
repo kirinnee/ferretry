@@ -35,7 +35,7 @@ import {
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
-import { StrictMode } from 'react';
+import { type ReactElement, StrictMode } from 'react';
 
 import {
   App,
@@ -57,8 +57,9 @@ import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
-import { interact, mount, must, pressKey } from '../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
+import { settleUntil } from '../support/settle.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -234,7 +235,23 @@ const sessionSearchFixture = (url: URL): Response | null => {
   return null;
 };
 
+/**
+ * THE WIDTH THIS SHELL IS ASSERTED AT, said out loud rather than inherited.
+ *
+ * `useLayoutMode` reads `window.innerWidth`, which is one process-wide happy-dom window shared by
+ * every file in the tier — so a file that mounts a phone and does not hand the viewport back decides
+ * what the NEXT file's shell looks like. This suite asserts a desktop app bar (the destination row
+ * exists only above 768px), and it was failing on CI and nowhere else purely because CI walks the
+ * tree in a different order and reached this file while a sidebar suite's 390px was still installed.
+ *
+ * A suite that depends on a global states it. 1440px is the width the other shell suites pin, and it
+ * is handed back afterwards so this file cannot do to another what was done to it.
+ */
+const DESKTOP_WIDTH = 1_440;
+let restoreInnerWidth: (() => void) | undefined;
+
 beforeAll(() => {
+  restoreInnerWidth = patchGlobal(window, 'innerWidth', DESKTOP_WIDTH);
   restoreFetch = patchGlobal(globalThis, 'fetch', async (input: unknown) => {
     const raw = String(input instanceof Request ? input.url : input);
     requestedUrls.push(raw);
@@ -242,9 +259,49 @@ beforeAll(() => {
   });
 });
 
-afterAll(() => restoreFetch?.());
+afterAll(() => {
+  restoreFetch?.();
+  restoreInnerWidth?.();
+});
 
-afterEach(() => {
+/**
+ * Every shell this file has mounted and not yet torn down.
+ *
+ * Each test unmounts its own view on its last line, which is the right thing to read and is not a
+ * guarantee: an assertion that throws first skips that line, and the abandoned root stays mounted in
+ * the live document with its effects, intervals and subscriptions running, for whatever runs next.
+ *
+ * This is hygiene, not a repair of a known failure — and the distinction is worth writing down,
+ * because the obvious story here is wrong. The three CI failures this file used to produce LOOKED
+ * like exactly that cascade and were not: the terminal-deck test already unmounts in a `finally`, so
+ * it never leaked a mount at all, and forcing a genuine leak from the first finder test leaves the
+ * second one passing. They were two leaked browser globals, fixed at their leakers. So do not read
+ * this net as the thing that keeps those green.
+ *
+ * A test's own `unmount` deregisters, so the teardown below only ever fires for a test that already
+ * failed, and it keeps that failure local to the test that caused it.
+ */
+const liveMounts = new Set<Mounted>();
+
+const mountShell = async (element: ReactElement): Promise<Mounted> => {
+  const view = await mount(element);
+  liveMounts.add(view);
+  return {
+    ...view,
+    unmount: async () => {
+      liveMounts.delete(view);
+      await view.unmount();
+    },
+  };
+};
+
+afterEach(async () => {
+  // Before the module state below is reset, because unmounting runs the effect cleanups that read it.
+  // Newest first: a shell mounted later can only be over the top of an earlier one.
+  for (const view of [...liveMounts].reverse()) {
+    liveMounts.delete(view);
+    await view.unmount();
+  }
   setPath('/');
   localStorage.clear();
   requestedUrls.length = 0;
@@ -439,7 +496,7 @@ const renderShell = async (
     else store.connections.add(daemon === alpha.daemonId ? alpha : beta);
   }
   setPath(path);
-  const view = await mount(
+  const view = await mountShell(
     <RouterProvider>
       <StoreProvider store={store}>
         <AppShell />
@@ -454,25 +511,6 @@ const settle = async (): Promise<void> => {
     await Promise.resolve();
     await Promise.resolve();
   });
-};
-
-/**
- * Settles a surface whose effects cross REAL task boundaries, not just microtasks.
- *
- * The terminal deck loads its emulator through a dynamic `import()` and only then attaches, so the
- * chain is module load → listing → ticket → socket, with a task between the links and a first module
- * load that is measurably slower than the rest. `settle` flushes two microtasks, which is right for
- * everything else here and is not enough for that.
- *
- * It stops on the CONDITION rather than after a fixed count, so a loaded machine waits longer instead
- * of failing; the ceiling is only there so a genuine regression fails in a second rather than hanging.
- */
-const settleUntil = async (ready: () => boolean, turns = 60): Promise<void> => {
-  for (let turn = 0; turn < turns && !ready(); turn += 1) {
-    await interact(async () => {
-      await new Promise(resolve => setTimeout(resolve, 5));
-    });
-  }
 };
 
 /**
@@ -1042,6 +1080,47 @@ describe('AppShell', () => {
    * carrier's fetcher, at the daemon the route named, for the terminal the daemon listed.
    */
   it('gives the production terminal deck the measured carrier its direct attach is gated on', async () => {
+    // THE EMULATOR IS LOADED FIRST, AND ITS FAILURE IS REPORTED RATHER THAN SWALLOWED.
+    //
+    // The deck loads `@xterm/xterm` through a dynamic `import()` inside an effect and, if that
+    // rejects, deliberately has nowhere to go: "The emulator could not be loaded at all. There is
+    // nothing to retry into", so it sets `refused` and drops the reason on the floor. Correct for a
+    // reader, blinding for a test — CI showed exactly that state (one canvas mounted, lamp `refused`,
+    // the terminal listing sent and no ticket ever bought) with no way to see why.
+    //
+    // Awaiting the same modules here answers it: the module registry is per process, so the deck's
+    // own `loadXterm` resolves from what this line loaded, and a rejection fails the test with the
+    // real reason instead of a silent `refused`. What the test is about — the ROOT passing the
+    // measured-carrier getter its direct attach is gated on — is untouched; this only stops a module
+    // load from being measured as part of the attach.
+    //
+    // The load is only half of it. That `.catch` sits on the END of the chain, so it also swallows
+    // anything the `.then` throws — `new Terminal(...)`, `loadAddon`, `open(host)` — and CI proved the
+    // modules themselves import cleanly, which leaves the construction. So both halves are exercised
+    // here, and each reports its own reason.
+    const emulator = await (async () => {
+      try {
+        return await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+      } catch (cause) {
+        throw new Error(`the terminal emulator modules could not be loaded in this environment: ${String(cause)}`, {
+          cause,
+        });
+      }
+    })();
+    const probeHost = document.createElement('div');
+    document.body.appendChild(probeHost);
+    try {
+      const probe = new emulator[0].Terminal();
+      probe.loadAddon(new emulator[1].FitAddon());
+      probe.open(probeHost);
+      probe.dispose();
+    } catch (cause) {
+      throw new Error(`the terminal emulator could not be constructed in this environment: ${String(cause)}`, {
+        cause,
+      });
+    } finally {
+      probeHost.remove();
+    }
     const sockets: string[] = [];
     const restoreSocket = patchGlobal(globalThis, 'WebSocket', recordingSocket(sockets));
     const { carrierRequests, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
@@ -1058,7 +1137,35 @@ describe('AppShell', () => {
           'the Terminal pane launcher',
         ).click(),
       );
-      await settleUntil(() => sockets.length > 0);
+      // ACROSS REAL TASK BOUNDARIES, not just microtasks. The chain is module load → listing →
+      // ticket → socket, with a task between the links; `settle` flushes two microtasks, which is
+      // right for everything else in this file and is not enough for this. The socket is what the
+      // assertions below are about, so it is what the wait is gated on — and if it never opens, THIS
+      // line says so rather than leaving the next assertion to report an absent URL.
+      //
+      // WHICH of those links the carrier was asked for is the diagnosis, so the expiry carries it:
+      // nothing at all means the deck never listed; a listing without a ticket puts the stall at the
+      // emulator, because the attach effect only runs once `loadXterm` has produced one; a ticket
+      // without a socket is the attach itself. An expiry that only said "no socket" leaves that to be
+      // guessed on a runner nobody can attach a debugger to — which cost two CI rounds before it said
+      // this much.
+      await settleUntil(
+        () => sockets.length > 0,
+        () =>
+          [
+            'the terminal deck to open its stream socket',
+            `(terminal requests reached: ${JSON.stringify(carrierRequests.filter(url => url.includes('/terminals')))}`,
+            // The deck's own lamp is the state machine's answer: `idle` means the attach effect found
+            // no emulator, so `loadXterm` has not resolved; `refused` means it or the attach rejected
+            // and no retry is coming; `connecting` means the ticket purchase is in flight. Without it
+            // a missing ticket cannot tell "still loading" from "gave up".
+            `link lamps: ${JSON.stringify(
+              [...view.container.querySelectorAll<HTMLElement>('.kt-webterm__lamp')].map(lamp => lamp.dataset.state),
+            )}`,
+            `canvases: ${view.container.querySelectorAll('[data-terminal-canvas]').length})`,
+          ].join(', '),
+        interact,
+      );
 
       expect(carrierRequests).toContain('https://alpha.example.test/v1/sessions/shared/terminals');
       expect(carrierRequests).toContain(
@@ -1312,7 +1419,7 @@ describe('route change accessibility', () => {
     const store = await appStore(reads);
     store.connections.add(alpha);
     setPath('/d/alpha');
-    const view = await mount(
+    const view = await mountShell(
       <StrictMode>
         <RouterProvider>
           <StoreProvider store={store}>
@@ -1720,8 +1827,26 @@ const touchEvent = (type: string, clientY: number, count = 1): Event => {
   return event;
 };
 
+/**
+ * The finder, or a failure that says WHY it is not there.
+ *
+ * "expected the destination finder to be present" is true and useless: the button is absent from a
+ * shell that rendered the not-paired fallback instead of the workspace, and absent again from a
+ * workspace whose app bar decided it was on a phone — `AppBar` only lays out the destination row when
+ * `useLayoutMode` reads a viewport at least 768px wide. Those are opposite defects with one symptom, so
+ * the absence reports the measured viewport, whether the app bar rendered at all, whether the
+ * destination row did, and what the shell actually says. It was the SECOND of those that turned out to
+ * be true, and reading it off a CI log took one push.
+ */
 const finderButton = (container: HTMLElement): HTMLButtonElement =>
-  must(container.querySelector<HTMLButtonElement>('[data-app-bar-destination-search]'), 'the destination finder');
+  must(
+    container.querySelector<HTMLButtonElement>('[data-app-bar-destination-search]'),
+    `the destination finder (window.innerWidth ${window.innerWidth}, app bar ${
+      container.querySelector('header') === null ? 'absent' : 'present'
+    }, destination row ${
+      container.querySelector('[data-app-bar-destination-row]') === null ? 'absent' : 'present'
+    }, shell reads ${JSON.stringify(container.textContent?.slice(0, 160) ?? '')})`,
+  );
 
 describe('the global destination and settings finder', () => {
   it('finds an individual setting by a keyword that is in neither its label nor its description', async () => {
@@ -2472,7 +2597,7 @@ describe('the fleet notification watch', () => {
 describe('App', () => {
   it('mounts the public root with its own router and store', async () => {
     setPath('/');
-    const view = await mount(<App />);
+    const view = await mountShell(<App />);
     await settle();
 
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
