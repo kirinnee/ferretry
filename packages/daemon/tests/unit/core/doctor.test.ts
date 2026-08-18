@@ -7,8 +7,19 @@ import type { HarnessPreflight } from '../../../src/lib/core/harness-readiness.t
 const harnesses: HarnessPreflight = {
   ready: true,
   harnesses: [
-    { kind: 'claude', launchable: ['claude-auto-one'], blocked: [], commandOnPath: true },
-    { kind: 'codex', launchable: [], blocked: [], commandOnPath: false },
+    {
+      kind: 'claude',
+      launchable: ['claude-auto-one'],
+      blocked: [],
+      command: {
+        kind: 'claude',
+        outcome: 'located',
+        path: '/usr/bin/claude',
+        rule: 'inherited environment',
+        declaredBy: 'PATH',
+      },
+    },
+    { kind: 'codex', launchable: [], blocked: [], command: { kind: 'codex', outcome: 'absent', searched: [] } },
   ],
 };
 
@@ -28,6 +39,58 @@ describe('doctor report', () => {
     should(result.checks.find(check => check.name === 'launchctl')?.status).equal('missing');
     should(result.checks.find(check => check.name === 'systemctl')?.status).equal('not_applicable');
     should(result.checks.some(check => check.status === 'unavailable_by_design')).be.false();
+  });
+
+  it('should name each harness command, where it is, and which rule found it', () => {
+    // Act
+    const result = report('linux', ['tmux', 'bash']);
+    const claude = result.checks.find(check => check.name === 'claude');
+    const codex = result.checks.find(check => check.name === 'codex');
+
+    // Assert — this report's own promise is "programs this daemon host needs, and what each absence
+    // breaks", and "found on PATH" answers neither which `claude` nor whether an override took.
+    should(claude?.status).equal('present');
+    should(claude?.summary).equal('/usr/bin/claude  (inherited environment — PATH)');
+    should(codex?.status).equal('missing');
+    should(codex?.impact).match(/no codex session can start on this host/u);
+    // A host with only Claude installed is a working host, so neither may be `required`.
+    should([claude?.requirement, codex?.requirement]).deepEqual(['alternative', 'alternative']);
+    should(result.ready).be.true();
+  });
+
+  it('should call an override that names nothing a misconfiguration rather than an absence', () => {
+    // Arrange: the operator declared a path and it is wrong. Nothing was searched after it.
+    const result = readDoctorReport({
+      platform: 'linux',
+      directorySyscalls: true,
+      executables: { resolve: name => (['tmux', 'bash'].includes(name) ? `/bin/${name}` : undefined) },
+      harnesses: {
+        ...harnesses,
+        harnesses: [
+          {
+            kind: 'claude',
+            launchable: ['claude-auto-one'],
+            blocked: [],
+            command: {
+              kind: 'claude',
+              outcome: 'override-absent',
+              path: '/opt/typo/claude',
+              declaredBy: 'FY_CLAUDE_BIN',
+              reason: 'FY_CLAUDE_BIN names /opt/typo/claude for claude and this host cannot run that file',
+            },
+          },
+          harnesses.harnesses[1] as (typeof harnesses.harnesses)[number],
+        ],
+      },
+    });
+
+    // Assert — the operator has already done the thing a plain "install it" would tell them to do,
+    // so their own declaration leads and the key to fix is named.
+    const claude = result.checks.find(check => check.name === 'claude');
+    should(claude?.status).equal('missing');
+    should(claude?.summary).equal('declared, and unusable');
+    should(claude?.impact).match(/^FY_CLAUDE_BIN names \/opt\/typo\/claude/u);
+    should(claude?.impact).match(/no claude session can start on this host/u);
   });
 
   it('should report the Linux service manager and omit macOS-only launchd', () => {
@@ -65,7 +128,10 @@ describe('doctor report', () => {
     should(linux.checks.find(check => check.name === 'systemctl')?.status).equal('present');
     should(linux.checks.find(check => check.name === 'launchctl')?.status).equal('not_applicable');
     should(noConfinement.checks.find(check => check.name === 'directory syscalls')?.status).equal('missing');
-    should(renderDoctorReport(noConfinement).join('\n')).match(/PATH presence is all this report proves/u);
+    // The limit is stated every time, and it now has two halves: nothing here was launched, and
+    // resolving a program is not evidence that it is signed in.
+    should(renderDoctorReport(noConfinement).join('\n')).match(/nothing here was launched/u);
+    should(renderDoctorReport(noConfinement).join('\n')).match(/does not prove a harness is signed in/u);
     should(renderDoctorReport(noConfinement).join('\n')).match(/note\s+jq/u);
   });
 });
@@ -130,8 +196,30 @@ describe('doctor report over a manifest the daemon could not read', () => {
     ready: false,
     manifestRefusal: refusal,
     harnesses: [
-      { kind: 'claude', launchable: [], blocked: [], commandOnPath: true },
-      { kind: 'codex', launchable: [], blocked: [], commandOnPath: true },
+      {
+        kind: 'claude',
+        launchable: [],
+        blocked: [],
+        command: {
+          kind: 'claude',
+          outcome: 'located',
+          path: '/usr/bin/claude',
+          rule: 'inherited environment',
+          declaredBy: 'PATH',
+        },
+      },
+      {
+        kind: 'codex',
+        launchable: [],
+        blocked: [],
+        command: {
+          kind: 'codex',
+          outcome: 'located',
+          path: '/usr/bin/codex',
+          rule: 'inherited environment',
+          declaredBy: 'PATH',
+        },
+      },
     ],
   };
 

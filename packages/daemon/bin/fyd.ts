@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash, randomInt } from 'node:crypto';
-import { accessSync, constants as fsConstants, existsSync, writeSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, statSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -352,11 +352,15 @@ import {
   type HandoverReceiptStore,
   HandoverReconcileLoop,
   SessionHandoverService,
+  type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
   harnessQuirks,
   harnessAbsentWarning,
+  harnessDiscoveryPolicy,
+  harnessLocationSummary,
   harnessMigrationRefusal,
+  harnessOverrideFailures,
   harnessPreflightSummary,
   InitialAttachmentError,
   InvalidDeadlineRefused,
@@ -981,6 +985,12 @@ export interface DaemonWorld {
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
     socketTickets: SocketTicketBroker,
+    /**
+     * Where this operator has said the harnesses are, passed IN for the same reason the usage feed
+     * is: it is read from the configuration this boot loaded, and the doctor route must report the
+     * resolution the boot milestone reported rather than a second one built from its own reading.
+     */
+    harnessDiscovery: HarnessDiscoveryPolicy,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -1319,13 +1329,35 @@ function composeOpeningMessage(
 async function readHarnesses(
   accounts: AccountInventoryPort,
   executables: ExecutableResolverPort,
+  policy: HarnessDiscoveryPolicy,
 ): Promise<HarnessPreflight> {
   try {
-    return readHarnessPreflight(await accounts.accounts(), executables);
+    return readHarnessPreflight(await accounts.accounts(), executables, policy);
   } catch (error) {
     if (!(error instanceof FleetManifestUnreadableError)) throw error;
-    return unreadableManifestPreflight(fleetManifestRefusal(error, CLIENT_NAME), executables);
+    return unreadableManifestPreflight(fleetManifestRefusal(error, CLIENT_NAME), executables, policy);
   }
+}
+
+/**
+ * What this operator has said about where the harnesses are, read once per invocation.
+ *
+ * BOTH SURFACES ARE READ HERE, in the composition root, because only here are both available: the
+ * document comes off the configuration this boot loaded, and the environment is this host's. A daemon
+ * started by a service manager inherits a minimal environment, which is the whole reason the two
+ * surfaces exist — the unit file can set a variable and cannot edit a JSON document.
+ *
+ * THE DECLARATIONS ARE READ ONCE AND THE LOOKUP IS NOT. A declaration is configuration and changes
+ * when the daemon is restarted, exactly like every other value in that document; whether a harness is
+ * installed right now is asked at the moment of the lookup, so a harness installed after this daemon
+ * came up is still found.
+ */
+function harnessDeclarations(config: DaemonConfig): HarnessDiscoveryPolicy {
+  return harnessDiscoveryPolicy({
+    document: config.harness,
+    environment: name => process.env[name],
+    homeDirectory: homedir(),
+  });
 }
 
 /**
@@ -4402,7 +4434,11 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     runnable: path => {
       try {
         accessSync(path, fsConstants.X_OK);
-        return true;
+        // A DIRECTORY PASSES THE EXECUTE CHECK on every POSIX host — that bit means "may be entered"
+        // there, not "may be run" — so the file half is asked separately. It matters now that a
+        // declared search directory produces candidates: `<dir>/claude` being a directory would
+        // otherwise be reported as the harness, with an absolute path that could never launch.
+        return statSync(path).isFile();
       } catch {
         return false;
       }
@@ -5018,6 +5054,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       push,
       carriers,
       socketTickets,
+      harnessDiscovery,
     ) => {
       // ONE durable ledger and ONE per-session queue for BOTH answer execution and monitor
       // reprojection. Observation never waits behind a live drive: that drive owns the freshest
@@ -5495,7 +5532,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
             return readDoctorReport({
               platform: process.platform,
               executables,
-              harnesses: await readHarnesses(accounts, executables),
+              harnesses: await readHarnesses(accounts, executables, harnessDiscovery),
               directorySyscalls,
             });
           },
@@ -5918,6 +5955,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     return decided.exitCode;
   }
   const config = decided.config;
+  // Read ONCE for this boot and handed to every surface that reports a harness, so the milestone
+  // below and the doctor route this daemon serves cannot disagree about which `claude` is here.
+  const harnessDiscovery = harnessDeclarations(config);
   for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: config.carriers })) {
     world.notices.state(
       `the legacy "${key}" key in ${world.config.path} is superseded by its explicit carriers entry and has no effect`,
@@ -5969,8 +6009,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * It is a `state` rather than a `step` when nothing is ready, so no log level can filter away the
    * one line that explains why launching a session will fail.
    */
-  const harnesses = await readHarnesses(world.harnesses.accounts, world.harnesses.executables);
+  const harnesses = await readHarnesses(world.harnesses.accounts, world.harnesses.executables, harnessDiscovery);
   world.notices.step('harnesses checked', harnessPreflightSummary(harnesses));
+  // WHERE each command was found and WHICH RULE found it, every boot. An operator who has just
+  // written down a path or a search directory has no other way to see whether this daemon read it,
+  // and "it works in my terminal" is precisely the state a service-managed daemon does not share.
+  world.notices.step('harness commands located', harnessLocationSummary(harnesses));
+  // A named path that resolves to nothing is a `state`, so no log level can hide it: the operator
+  // configured something, this daemon did NOT fall back to a search, and both halves of that have to
+  // be said or they are left believing the opposite.
+  for (const failure of harnessOverrideFailures(harnesses)) world.notices.state(failure);
   if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
 
   const usage = await world.createUsageFeed(config);
@@ -6041,6 +6089,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.push,
     carriers,
     world.createSocketTickets(),
+    harnessDiscovery,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
@@ -6482,7 +6531,11 @@ export async function checkConfiguration(
    * it cannot do is launch a session, which is a different sentence and is printed as one. Refusing
    * here would also contradict the boot, which warns and starts.
    */
-  const harnesses = await readHarnesses(world.harnesses.accounts, world.harnesses.executables);
+  const harnesses = await readHarnesses(
+    world.harnesses.accounts,
+    world.harnesses.executables,
+    harnessDeclarations(config),
+  );
   for (const line of renderHarnessPreflight(harnesses, CLIENT_NAME)) say(line);
   const directorySyscalls = (() => {
     try {

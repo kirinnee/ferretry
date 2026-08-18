@@ -18,6 +18,7 @@ import {
   accountLaunchability,
   createFoundationPaths,
   type ExecutableResolverPort,
+  NO_HARNESS_DECLARATIONS,
   readHarnessPreflight,
   resolveStateHome,
 } from '../../../src/lib/index.ts';
@@ -143,7 +144,7 @@ describe('fleet apply and the daemon inventory', () => {
       // Act — nothing is added to PATH, deliberately: a service-managed daemon has no fleet PATH,
       // and the wrapper this apply wrote is still perfectly runnable at the path it published.
       const launchability = accountLaunchability(accounts[0] as (typeof accounts)[number], thisHost);
-      const preflight = readHarnessPreflight(accounts, thisHost);
+      const preflight = readHarnessPreflight(accounts, thisHost, NO_HARNESS_DECLARATIONS);
 
       // Assert — this is the owner's report: `fyd --check` said no wrapper was launchable
       should(launchability.kind).equal('launchable');

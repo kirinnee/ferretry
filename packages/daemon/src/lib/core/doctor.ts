@@ -1,5 +1,10 @@
 import type { DoctorCheck, DoctorReport } from '@ferretry/protocol';
-import type { HarnessPreflight } from './harness-readiness.ts';
+import {
+  harnessAbsenceImpact,
+  type HarnessPreflight,
+  type HarnessReadiness,
+  harnessLocationLine,
+} from './harness-readiness.ts';
 
 export interface DoctorExecutableResolver {
   resolve(name: string): string | undefined;
@@ -60,9 +65,38 @@ function binary(
 }
 
 /**
- * The complete dependency inventory, derived from the direct process call sites and generated
- * Claude wrapper. This performs PATH checks only; it deliberately never claims a harness is signed
- * in or provider-reachable. Harness readiness itself comes from the start path's existing rule.
+ * ONE HARNESS COMMAND, BY PATH AND BY RULE — a different fact from the `claude or codex` line above.
+ *
+ * That line is about the MANIFEST: whether a published wrapper is launchable. This one is about this
+ * MACHINE: whether the harness's own command is here at all, which file it is, and which rule chose
+ * it. The confusion between them is the one this whole class of check exists to stop shipping —
+ * somebody installs Claude Code, is told no harness is ready, and is right to object.
+ *
+ * THE RULE IS PART OF THE ANSWER. "found on PATH" cannot tell an operator whether the override they
+ * wrote is in effect, and a report they cannot act on is the reason this daemon's own detection went
+ * unfixed: a service-managed daemon inherits a minimal environment, so the interesting cases are
+ * exactly the ones a boolean flattens.
+ *
+ * `alternative`, NEVER `required`: a host with only Claude installed is a perfectly working host, so
+ * a missing Codex must not make this report say a required dependency is absent.
+ */
+function harnessCommand(harness: HarnessReadiness): DoctorCheck {
+  const impact = harnessAbsenceImpact(harness.kind);
+  const location = harness.command;
+  if (location.outcome === 'located')
+    return present(harness.kind, 'alternative', harnessLocationLine(location), impact);
+  // An override that names nothing is a MISCONFIGURATION rather than an absence, and its own reason
+  // leads: the operator has already done the thing this check would otherwise tell them to do.
+  if (location.outcome === 'override-absent')
+    return missing(harness.kind, 'alternative', 'declared, and unusable', `${location.reason}. ${impact}`);
+  return missing(harness.kind, 'alternative', harnessLocationLine(location), impact);
+}
+
+/**
+ * The complete dependency inventory, derived from the direct call sites that spawn a child and the
+ * generated Claude wrapper. This performs lookups and stats only; it deliberately never claims a
+ * harness is signed in or provider-reachable, and it launches nothing to find out. Harness readiness
+ * itself comes from the start path's existing rule.
  */
 export function readDoctorReport(input: DoctorReportInput): DoctorReport {
   const harnesses = input.harnesses.harnesses.map(({ kind, launchable, blocked }) => ({
@@ -104,6 +138,9 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
             'no wrapper could be resolved, because the fleet manifest could not be read',
             'No agent session can start. Repair the fleet manifest reported above; this line is not evidence about any account.',
           ),
+    // Every harness, always, including one nothing is published for: "is Codex set up on this host?"
+    // is the question being asked, and a report listing only what it found cannot answer it.
+    ...input.harnesses.harnesses.map(harnessCommand),
     binary(input, 'tmux', 'required', 'Sessions cannot start or be managed.'),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),
     binary(input, 'git', 'capability', 'Worktrees, project inspection, and repository features are unavailable.'),
@@ -153,7 +190,7 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     ready:
       checks.every(check => check.requirement !== 'required' || check.status !== 'missing') && input.harnesses.ready,
     limitation:
-      'PATH presence is all this report proves. It does not prove a harness is signed in, has credit, or can reach its provider.',
+      'Resolving a program and stating that this host could run it is all this report proves — nothing here was launched. It does not prove a harness is signed in, has credit, or can reach its provider.',
   };
 }
 
