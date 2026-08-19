@@ -72,7 +72,11 @@ export * from '../features/fleet/fleet-configuration-surface.tsx';
 export * from '../features/fleet/fleet-model.ts';
 export * from '../features/fleet/fleet-stepper-model.ts';
 export * from '../features/fleet/fleet-surface.tsx';
-export * from '../features/fleet/remote-login-surface.tsx';
+export * from '../features/fleet/claude-login-panel.tsx';
+export * from '../features/fleet/codex-login-panel.tsx';
+export * from '../features/fleet/fleet-sign-in-section.tsx';
+export * from '../features/fleet/harness-login-api.ts';
+export * from '../features/fleet/harness-login-model.ts';
 export * from '../features/learning/learning-header.tsx';
 export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
 export {

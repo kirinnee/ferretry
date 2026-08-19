@@ -26,6 +26,7 @@ import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
+import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
@@ -110,6 +111,13 @@ export interface MountedSubsystems {
   readonly carriers: readonly DaemonCarrier[];
   /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
   readonly fleet: FleetSubsystem;
+  /** Driving a harness's OWN sign-in from a browser, holding no token. The daemon launches the
+   *  account's own wrapper with piped stdio, publishes a verification URL — and for Codex a device
+   *  code — accepts one short-lived authorization code straight into that child's stdin, and lets the
+   *  harness write its own credential into its own store. A mount of its own because it is a different
+   *  authority question: the fleet table above is mostly reads on `use`, and every route here but the
+   *  readiness read is `configure` with the operator password proved against the start. */
+  readonly harnessLogin: HarnessLoginSubsystem;
   /** How much of this machine the managed fleet may take: the aggregate every agent shares, the
    *  ceiling on any one of them, and whether either is enforced. It is the read side of the same
    *  seam the session launch uses — one saved document, one conversion to host-manager properties —
@@ -306,6 +314,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
     // so their mount owns the admin scope and cannot shadow any session route below.
     ...fleetRoutes(subsystems.fleet),
+    // The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed
+    // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
+    // the fleet table above.
+    ...harnessLoginRoutes(subsystems.harnessLogin),
     // Resource limits register beside the fleet they bound, and are governed by the same capability
     // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
     // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this

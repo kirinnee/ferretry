@@ -1215,46 +1215,19 @@ try {
             await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
             process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
 
-            // The remote login is deliberately reviewed as its whole journey:
-            // start, link-out, a rejected callback with nothing echoed, then a
-            // verified identity. The phone capture uses PHONE_CONTEXT above so
-            // its touch layout and user agent are the real mobile branch.
+            // BOTH SIGN-INS, at the state worth reviewing: the one where a person has to act.
+            //
+            // It used to be a click-through journey against one generic panel. There are two panels
+            // now — one per harness — and the shapes they differ in are exactly what a capture has to
+            // show: Claude's paste field, and Codex's device code with NO field at all. Driving them
+            // through clicks would only re-render the same two states the fixtures already mount, so
+            // the capture reads them directly and stays honest about what it is proving.
             const remoteLogin = page.locator('[data-harness="remote-login"]');
-            for (const [state, settle] of [
-              ['start', async () => {}],
-              [
-                'url',
-                async () => {
-                  await remoteLogin.getByRole('button', { name: 'Log in to Claude Code' }).click();
-                  await remoteLogin.getByText('Open this URL anywhere').waitFor({ state: 'visible' });
-                },
-              ],
-              [
-                'rejected',
-                async () => {
-                  await remoteLogin
-                    .locator('textarea[name="remote-login-callback"]')
-                    .fill('http://127.0.0.1:43123/oauth/callback?rejected=fixture');
-                  await remoteLogin.getByRole('button', { name: 'Finish sign-in' }).click();
-                  await remoteLogin.getByRole('alert').waitFor({ state: 'visible' });
-                },
-              ],
-              [
-                'success',
-                async () => {
-                  await remoteLogin
-                    .locator('textarea[name="remote-login-callback"]')
-                    .fill('http://127.0.0.1:43123/oauth/callback?accepted=fixture');
-                  await remoteLogin.getByRole('button', { name: 'Finish sign-in' }).click();
-                  await remoteLogin.getByRole('status').waitFor({ state: 'visible' });
-                },
-              ],
-            ] as const) {
-              await settle();
-              const target = join(outDir, `remote-login-${state}-${viewport.name}.png`);
-              await remoteLogin.screenshot({ path: target });
-              process.stdout.write(`📸 remote login ${state} -> ${target}\n`);
-            }
+            await remoteLogin.getByText('Paste the code Claude showed you').waitFor({ state: 'visible' });
+            await remoteLogin.locator('[data-codex-login-user-code]').waitFor({ state: 'visible' });
+            const loginTarget = join(outDir, `harness-login-${viewport.name}.png`);
+            await remoteLogin.screenshot({ path: loginTarget });
+            process.stdout.write(`📸 harness login -> ${loginTarget}\n`);
             const learningTarget = join(outDir, `learning-${viewport.name}.png`);
             await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
             process.stdout.write(`📸 learning -> ${learningTarget}\n`);
