@@ -197,7 +197,7 @@ describe('FyApiClient session start', () => {
     should(actual instanceof FyTransportError).be.true();
     should((actual as FyTransportError).path).equal('/v1/sessions');
     should((actual as FyTransportError).message).equal(
-      'fyd is unavailable at http://daemon.test/api (connection refused)',
+      'could not reach fyd at http://daemon.test/api (connection refused)',
     );
     should(transport.calls).have.length(9);
     should(transport.calls[8]?.url).startWith(`${BASE_URL}/v1/sessions/by-request/request-1?payload=`);

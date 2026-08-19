@@ -334,7 +334,7 @@ describe('FyApiClient transport and HTTP failures', () => {
     should(error instanceof FyTransportError).be.true();
     const typed = error as FyTransportError;
     should(typed.cause).equal('offline');
-    should(typed.message).equal('fyd is unavailable at http://daemon.test/api');
+    should(typed.message).equal('could not reach fyd at http://daemon.test/api');
   });
 
   it('should expose structured and fallback HTTP errors without retrying', async () => {
