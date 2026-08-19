@@ -1,0 +1,15 @@
+# CORS-header-agreement exemptions — one exact "<unadmitted|unsent> <header> # <reason>" per line.
+#
+#   unadmitted  the browser code can send it and the preflight refuses it. A shipped dead route.
+#               A line here is a defect being recorded, not a decision being made.
+#   unsent      the transport admits it and no browser code sends it. Legitimate when a loopback
+#               caller is the only sender, because CORS never applies to one.
+#
+# THE LIST MAY ONLY SHRINK. An entry that no longer describes a real disagreement is a hard failure,
+# so closing a gap costs its line in the same change. Nothing may be added here to widen the admitted
+# set in advance of a sender: that is the wish-list failure this gate exists to prevent, and the same
+# rule `route-agreement-allowlist.txt` holds its own unreached routes to.
+#
+# 1 LINE AT SEEDING.
+
+unsent x-ferretry-session-id # the pane's own session id, presented by the in-pane CLI over loopback (packages/cli/src/lib/session/connection.ts) where CORS never applies; admitted so a paired caller reaching the same route through the transport is not refused for carrying it

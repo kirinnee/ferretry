@@ -155,6 +155,20 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A header the browser code can present must be one the daemon's CORS preflight admits, in both
+    # directions. `x-ferretry-operator-unlock` shipped missing from that set, which did not degrade the
+    # request — it made every governed mutation the operator password authorizes unreachable from a
+    # browser, with both halves' tests green. Runs on the client trees and the transport together,
+    # because the finding is a disagreement between them rather than a property of either file.
+    a-cors-header-agreement = {
+      enable = true;
+      name = "Client and transport CORS header agreement";
+      entry = validator "scripts/validate/cors-header-agreement.sh";
+      files = "^(packages/(pwa|protocol)/src/.*\\.tsx?|packages/daemon/src/adapters/api/bun-api-server\\.ts|scripts/validate/cors-header-agreement\\.(sh|ts)|scripts/validate/cors-header-agreement-allowlist\\.txt)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # One browser, several paired daemons: the ids a daemon mints are unique only within it, so
     # anything the bundle remembers about daemon-owned data has to be keyed by (daemonId, …). Runs
     # on the whole PWA rather than the touched files because two of its three passes are questions

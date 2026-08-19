@@ -36,6 +36,7 @@ laundered a defect into something every gate was right to pass.
 | `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root             |
 | `conflict-markers.sh`         | `a-conflict-markers`                     | marker shapes occur only in explicitly declared teaching docs     |
 | `contract-registry.sh`        | `a-contract-registry`                    | executable, documented and wired contract inventories agree       |
+| `cors-header-agreement.sh`    | `a-cors-header-agreement`                | the transport admits every header the browser code can send       |
 | `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's            |
 | `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                |
 | `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is used as a value in the PWA          |
