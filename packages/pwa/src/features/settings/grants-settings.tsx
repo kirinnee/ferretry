@@ -83,7 +83,7 @@ import { OperatorPasswordCard } from './operator-password.tsx';
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
 const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
   ok: 'border-ok-border bg-ok-bg text-ok',
-  disclosure: 'border-border-soft bg-surface-2 text-muted',
+  disclosure: 'border-border-strong bg-surface-2 text-muted',
   limit: 'border-warn-border bg-warn-bg text-warn',
   fault: 'border-err-border bg-err-bg text-err',
 };
@@ -238,7 +238,7 @@ function CapabilityCard({
           {capabilityLabel(entry.capability)}
         </h4>
         <span
-          className="rounded-control border border-border-soft bg-surface-2 px-2 py-0.5 text-meta text-faint"
+          className="rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta text-faint"
           data-grant-origin={entry.origin}
         >
           {entry.origin === 'config file' ? 'set by the operator' : 'product default'}
@@ -480,7 +480,7 @@ export function GrantsCard({
       />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
             <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
             What a paired device may do
           </h3>
@@ -498,7 +498,7 @@ export function GrantsCard({
             sentence can no longer be true for every connection: a browser on the machine is governed too
             until it unlocks, and telling that reader the limits are somebody else’s would send them
             hunting for a permission problem they do not have. */}
-        <p className="m-0 text-ui leading-base text-muted" data-grant-scope={grantScopeKey(posture)}>
+        <p className="m-0 text-cell leading-base text-muted" data-grant-scope={grantScopeKey(posture)}>
           {grantScopeNote(posture)}
         </p>
         {/* The disclosure, ONCE, next to the configure controls it is about. Not a modal, not a
@@ -730,8 +730,8 @@ export function GrantsSurface({
   if (loadFailure?.daemonId === connection.daemonId)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Capability grants unavailable">
-        <h3 className="m-0 text-title font-semibold text-fg">Capability limits unavailable</h3>
-        <p className="mb-0 mt-1 text-ui leading-base text-muted">
+        <h3 className="m-0 text-row font-semibold text-fg">Capability limits unavailable</h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">
           This daemon did not say what a paired device may do on it, so Ferretry will not show a limit or claim there is
           none. Nothing here is evidence that this machine is unrestricted.
         </p>
@@ -744,7 +744,7 @@ export function GrantsSurface({
     );
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Loading capability grants">
-      <p className="m-0 text-ui leading-base text-muted">Reading what this machine allows a paired device to do…</p>
+      <p className="m-0 text-cell leading-base text-muted">Reading what this machine allows a paired device to do…</p>
     </section>
   );
 }

@@ -1,11 +1,10 @@
 import { type HealthView, HealthViewSchema } from '@ferretry/protocol';
+import type { InstalledDaemonBinary } from '../../../src/lib/daemon/binary';
 import type { DaemonEnvironmentInput, DaemonLayout } from '../../../src/lib/daemon/layout';
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import type {
   CommandOutcome,
   DaemonLifecycleClaimRequest,
-  DaemonSnapshot,
-  DaemonSnapshotBuild,
   DaemonStartHandle,
   DaemonSupervisorReport,
   DetachedLaunch,
@@ -17,12 +16,12 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonProcessPort,
-  IDaemonSnapshotPort,
   INixGcRootPort,
+  IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
   IStateHomeClaimPort,
-  RetainedSnapshotInventory,
+  RetiredArtifactOutcome,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
 
@@ -72,17 +71,9 @@ export function health(overrides: Partial<HealthView> = {}): HealthView {
   });
 }
 
-export function daemonSnapshot(overrides: Partial<DaemonSnapshot> = {}): DaemonSnapshot {
-  const id = `sha256-${'a'.repeat(64)}`;
-  return {
-    id,
-    daemon: { product: 'ferretry', name: 'fyd' },
-    sourceBinary: '/opt/fy/bin/fyd',
-    binaryPath: `${HOME}/.local/state/ferretry/daemon-snapshots/fyd/snapshots/${id}/fyd`,
-    bytes: 1024,
-    createdAt: '2026-08-04T12:00:00.000Z',
-    ...overrides,
-  };
+/** The daemon a host has installed: ABSOLUTE, because a unit file cannot name anything else. */
+export function installedDaemon(overrides: Partial<InstalledDaemonBinary> = {}): InstalledDaemonBinary {
+  return { path: '/opt/fy/bin/fyd', source: 'PATH', version: '1.2.3', ...overrides };
 }
 
 /** Captured terminal output, in the order it was written. */
@@ -320,54 +311,20 @@ export class FakeLogs implements IDaemonLogPort {
   }
 }
 
-export class FakeSnapshots implements IDaemonSnapshotPort {
-  readonly calls: string[] = [];
-  currentAnswer: DaemonSnapshot | undefined = daemonSnapshot();
-  buildAnswer: DaemonSnapshotBuild = { ...daemonSnapshot(), created: true };
-  listAnswer: readonly DaemonSnapshot[] = [daemonSnapshot()];
-  currentError: Error | undefined;
-  /**
-   * The cheap inventory, which defaults to naming exactly what `listAnswer` holds.
-   *
-   * Overridable on its own because the two answers are allowed to disagree: a damaged sibling is
-   * precisely the case where the verifying listing fails and the inventory still names the healthy
-   * entries. A store that cannot be read at all is `retainedError`.
-   */
-  retainedAnswer: RetainedSnapshotInventory | undefined;
-  retainedError: Error | undefined;
+/**
+ * Records which retired artifact trees a verb asked to remove, and can answer for each of them.
+ *
+ * The DEFAULT is `absent`, because that is what every host gets that never ran the release with the
+ * snapshot store: the ordinary path has to be the one that needs no arranging, or a test proves the
+ * cleanup only in the world where there is something to clean.
+ */
+export class FakeRetiredArtifacts implements IRetiredArtifactPort {
+  readonly retired: string[] = [];
+  readonly answers = new Map<string, RetiredArtifactOutcome>();
 
-  build(): Promise<DaemonSnapshotBuild> {
-    this.calls.push('build');
-    return Promise.resolve(this.buildAnswer);
-  }
-
-  promote(id: string): Promise<DaemonSnapshot> {
-    this.calls.push(`promote:${id}`);
-    const snapshot = this.listAnswer.find(candidate => candidate.id === id) ?? { ...this.buildAnswer, id };
-    this.currentAnswer = snapshot;
-    return Promise.resolve(snapshot);
-  }
-
-  current(): Promise<DaemonSnapshot | undefined> {
-    this.calls.push('current');
-    return this.currentError === undefined ? Promise.resolve(this.currentAnswer) : Promise.reject(this.currentError);
-  }
-
-  list(): Promise<readonly DaemonSnapshot[]> {
-    this.calls.push('list');
-    return Promise.resolve(this.listAnswer);
-  }
-
-  retained(): Promise<RetainedSnapshotInventory> {
-    this.calls.push('retained');
-    if (this.retainedError !== undefined) return Promise.reject(this.retainedError);
-    return Promise.resolve(
-      this.retainedAnswer ?? {
-        snapshots: this.listAnswer.map(snapshot => ({ id: snapshot.id, sourceBinary: snapshot.sourceBinary })),
-        complete: true,
-        unreadable: [],
-      },
-    );
+  retire(path: string): Promise<RetiredArtifactOutcome> {
+    this.retired.push(path);
+    return Promise.resolve(this.answers.get(path) ?? { kind: 'absent' });
   }
 }
 

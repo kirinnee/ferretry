@@ -74,10 +74,10 @@ import {
   PAIRING_SCAN_HINT,
   PAIRING_TICK_MS,
   PAIRING_TYPE_HINT,
+  type PairingOfferKind,
   pairedDeviceSummary,
   pairingCodeDisclosure,
   pairingCountdown,
-  type PairingOfferKind,
   pairingRefusal,
   revokeConsequence,
 } from '../../lib/pairing-invite.ts';
@@ -378,18 +378,18 @@ export function AddDeviceCard({
     >
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
             <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
             Devices on this machine
           </h3>
           <span
-            className="rounded-control border border-border-soft bg-surface-2 px-2 py-0.5 text-meta text-faint"
+            className="rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta text-faint"
             data-pair-host-local={view.hostLocal ? 'yes' : 'no'}
           >
             {view.hostLocal ? 'you are at this machine' : 'you are away from this machine'}
           </span>
         </div>
-        <p className="m-0 text-ui leading-base text-muted">
+        <p className="m-0 text-cell leading-base text-muted">
           A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
           that reads it becomes a device you can see and revoke below.
         </p>
@@ -475,12 +475,12 @@ export function AddDeviceCard({
               {/* The code in words as well as in the link: a person reading a QR out loud reads this,
                   and it is the ONLY thing left to read when there is no link to hand out. */}
               <p className="m-0 flex flex-wrap items-baseline gap-2 text-ui text-fg">
-                <span className="text-meta uppercase tracking-label text-faint">Code</span>
+                <span className="text-meta text-faint">Code</span>
                 <code data-pair-code="" className="select-all font-mono text-title font-semibold tracking-widest">
                   {invite.code}
                 </code>
               </p>
-              <p className="m-0 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
+              <p className="m-0 rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
                 {pairingCodeDisclosure(offerKindOf(pairingMintOutcome(invite)))}
               </p>
             </>
@@ -745,15 +745,15 @@ export function AddDeviceSurface({
   if (loadFailure?.daemonId === connection.daemonId)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Adding a device unavailable">
-        <h3 className="m-0 text-title font-semibold text-fg">Adding a device is unavailable here</h3>
-        <p className="mb-0 mt-1 text-ui leading-base text-muted" data-pair-refusal="">
+        <h3 className="m-0 text-row font-semibold text-fg">Adding a device is unavailable here</h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted" data-pair-refusal="">
           {pairingRefusal(loadFailure.failure.message)}
         </p>
       </section>
     );
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Loading paired devices">
-      <p className="m-0 text-ui leading-base text-muted">Reading which devices may reach this machine…</p>
+      <p className="m-0 text-cell leading-base text-muted">Reading which devices may reach this machine…</p>
     </section>
   );
 }

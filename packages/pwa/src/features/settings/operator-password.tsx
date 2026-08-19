@@ -131,14 +131,14 @@ export function OperatorPasswordCard({
       data-operator-password={state.kind}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h4 id={headingId} className="m-0 flex min-w-0 items-center gap-1.5 text-title font-semibold text-fg">
+        <h4 id={headingId} className="m-0 flex min-w-0 items-center gap-1.5 text-row font-semibold text-fg">
           <ShieldCheck size={15} className="shrink-0 text-accent" aria-hidden="true" />
           {heading ?? defaultHeading(state)}
         </h4>
         {state.kind === 'remote' ? null : <PasswordStateChip set={exists} />}
       </div>
 
-      <p className="m-0 text-ui leading-base text-muted">
+      <p className="m-0 text-cell leading-base text-muted">
         {intro ??
           'It gates changes made from any device that is not this machine, and it is what this browser proves before it can change anything here. It is not your computer’s login: nothing in Ferretry uses it to run anything as another user.'}
       </p>

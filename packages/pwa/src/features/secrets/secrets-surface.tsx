@@ -111,8 +111,8 @@ export function SecretsSurface({
   if (loadFailure !== null && loadFailure.daemonId === connection.daemonId)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Secrets unavailable">
-        <h3 className="m-0 text-title font-semibold text-fg">Secrets unavailable</h3>
-        <p className="mb-0 mt-1 text-ui leading-base text-muted">
+        <h3 className="m-0 text-row font-semibold text-fg">Secrets unavailable</h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">
           This browser could not read this daemon’s secret store: {loadFailure.reason}. That is not the same as an empty
           store, and Ferretry will not show it as one.
         </p>

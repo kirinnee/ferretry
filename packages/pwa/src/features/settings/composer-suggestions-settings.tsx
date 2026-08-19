@@ -123,7 +123,7 @@ export function ComposerSuggestionsSettings({
           />
         ))}
       </fieldset>
-      <p className="m-0 text-ui leading-base text-muted">{COMPOSER_SUGGESTIONS_EXPLANATION}</p>
+      <p className="m-0 text-cell leading-base text-muted">{COMPOSER_SUGGESTIONS_EXPLANATION}</p>
       <p className="m-0 text-meta leading-base text-faint">{COMPOSER_SUGGESTIONS_UNGOVERNED_NOTE}</p>
     </div>
   );
