@@ -18,6 +18,7 @@ import type {
   HarnessDiscovery,
   HarnessDiscoveryReport,
 } from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetStagedChange } from '../../../../src/features/fleet/fleet-change-review.tsx';
 import { interact, must } from '../../../support/dom.ts';
 
 /** The shared account shape, so a fixture cannot drift from what the daemon actually sends. */
@@ -197,6 +198,25 @@ export const proposal = (overrides: Partial<FleetProposalView> = {}): FleetPropo
   ...overrides,
 });
 
+/**
+ * The same fixture, narrowed to a change that HAS A PLAN.
+ *
+ * The review panel takes exactly that now: a first run is a different operation with a different panel,
+ * so the type says which one this is rather than the component branching on it at render time.
+ */
+export const stagedChange = (overrides: Partial<FleetProposalView> = {}): FleetStagedChange => {
+  const view = proposal(overrides);
+  if (view.preview.kind !== 'apply') throw new Error('a staged-change fixture must carry a plan');
+  return { ...view, preview: view.preview };
+};
+
+/** What a first run creates, as the daemon's own initialize preview carries it. */
+export const scaffoldPreview = (): Extract<FleetProposalPreview, { kind: 'initialize' }> => {
+  const preview = scaffoldProposal().preview;
+  if (preview.kind !== 'initialize') throw new Error('the first-run fixture must carry a scaffold');
+  return preview;
+};
+
 export const scaffoldProposal = (): FleetProposalView =>
   proposal({
     summary: 'prepare this host for a fleet',
@@ -281,3 +301,18 @@ export const pick = (container: HTMLElement, selector: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(selector), `an element matching ${selector}`);
 
 export const absent = (container: HTMLElement, selector: string): boolean => container.querySelector(selector) === null;
+
+/**
+ * The operator password field, wherever the SHARED prompt puts it.
+ *
+ * `[data-grant-unlock-field]` rather than a fleet-specific hook, because there is one prompt now and the
+ * grants panel raises the same one. A fleet-private selector here would be the first step back to two.
+ */
+export const unlockField = (container: HTMLElement): HTMLInputElement =>
+  must(container.querySelector<HTMLInputElement>('[data-grant-unlock-field]'), 'the operator password field');
+
+/** Types the password into the raised prompt and submits it, which is what a person does. */
+export const unlockWith = async (container: HTMLElement, password: string): Promise<void> => {
+  await type(unlockField(container), password);
+  await click(must(container.querySelector<HTMLElement>('[data-operator-unlock-submit]'), 'the unlock button'));
+};

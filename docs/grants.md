@@ -256,6 +256,36 @@ right about the artefact it was handed, and the formatter had changed the artefa
   if what the old one bought survives it, so the browser drops its own held token too rather than
   presenting an authority the machine has already withdrawn.
 
+### Where the browser asks for it
+
+**One prompt, and it is a modal raised at the moment authority is needed** —
+`features/settings/operator-unlock-dialog.tsx`, which the grants surface and the fleet cockpit both use.
+There is deliberately no second implementation: two inline password fields worded differently is how one
+capability came to describe its own authority in terms no other capability used.
+
+**The shape is what the presentation gets wrong, and it got it wrong once already.** The mechanism has
+behaved like `sudo` since `#362` — one typed password mints the unlock, rides the request that needed it,
+and is not asked for again while the unlock is held. What a person MET was an inline password field inside
+a staged-change card, under an expiry and a config revision, beside Confirm-and-Apply. So the screen said
+_authorisation for this one action_ while the code said _unlock this machine_, and the owner read it the
+way it was drawn. A prompt that arrives on the click, names what it unlocks, and leaves is the same
+mechanism told truthfully.
+
+- **The scope and the lifetime are stated once, in the prompt** (`UNLOCK_HOLDING_NOTE`): the window, that
+  it covers everything changed inside it, that this screen holds it, and that closing the page ends it.
+  **Not repeated beside each control the unlock then covers** — a note at every control teaches people
+  the product nags and re-creates the per-action framing.
+- **A per-change confirmation says something different, because it IS different.** It mints nothing and is
+  spent inside the request that carries it, so the prompt for one must not promise a window: the dialog
+  branches on whether the value becomes a held unlock.
+- **Past the gate, the panel stops advertising a gate.** A surface that has just minted an unlock re-reads
+  its own permissions WITH the token, so what it renders is what the daemon would now answer — otherwise
+  it goes on claiming a password is owed while the apply beside it needs none, which is the one-gate model
+  reported wrongly.
+- **The prompt appears only where an unlock would help.** Where no password exists there is nothing to
+  unlock and no prompt at all, and a refusal an unlock cannot fix gets its sentence and no prompt
+  (`GrantGuidance.offersUnlock`).
+
 ## The per-change confirmation: `fleet.configure` asks once more
 
 **One route asks a governed caller to prove the operator password again, against one exact staged change:

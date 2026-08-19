@@ -9,6 +9,7 @@ import {
 } from '../../../../src/features/settings/grants-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { NO_PASSWORD_DISCLOSURE, PASSWORD_SET_DISCLOSURE } from '../../../../src/lib/grants.ts';
+import { must } from '../../../support/dom.ts';
 import { render, run, runAsync } from '../../../support/react.ts';
 
 const connection = (id = 'alpha') =>
@@ -62,6 +63,44 @@ const marked = (renderer: ReactTestRenderer, attribute: string) =>
 
 const axisSwitch = (renderer: ReactTestRenderer, id: string) =>
   renderer.root.findAll(node => typeof node.type === 'string' && node.props['data-grant-axis'] === id)[0];
+
+/**
+ * Raises the SHARED unlock prompt, which is where the password field lives now.
+ *
+ * The panel carries a trigger and a sentence; the field is in the modal both this surface and the fleet
+ * cockpit raise, so a test that reached straight for the field would be asserting against a shape that no
+ * longer exists — and would go on passing if the trigger stopped working.
+ */
+const raisePrompt = (renderer: ReactTestRenderer): void => {
+  run(() => marked(renderer, 'data-grant-unlock-open')[0]?.props.onClick());
+};
+
+/**
+ * The prompt's own form, found THROUGH the dialog.
+ *
+ * Not `findAllByType('form')[0]`: this surface has more than one form now — the password card has its
+ * own — and submitting whichever comes first in the tree is how a test passes while driving the wrong
+ * control.
+ */
+const promptForm = (renderer: ReactTestRenderer) =>
+  must(marked(renderer, 'data-operator-unlock-dialog')[0]?.findAllByType('form')[0], "the unlock prompt's form");
+
+/** The nearest form ABOVE a control, which is the one that submits when somebody presses Enter in it. */
+const enclosingForm = (node: ReturnType<typeof marked>[number] | undefined) => {
+  let walker = node?.parent;
+  while (walker !== null && walker !== undefined && walker.type !== 'form') walker = walker.parent;
+  return must(walker, 'a form enclosing that control');
+};
+
+/** Raises the prompt, types the password into it and submits it, exactly as a person does. */
+const unlockThrough = async (renderer: ReactTestRenderer, password: string): Promise<void> => {
+  raisePrompt(renderer);
+  const field = marked(renderer, 'data-grant-unlock-field')[0];
+  run(() => field?.props.onChange({ target: { value: password } }));
+  await runAsync(async () => {
+    promptForm(renderer)?.props.onSubmit({ preventDefault: () => {} });
+  });
+};
 
 describe('GrantsCard', () => {
   it('states who the rows apply to, and says something DIFFERENT to each connection', () => {
@@ -647,13 +686,17 @@ describe('GrantsCard', () => {
 describe('GrantUnlockPrompt', () => {
   const daemon = connection().daemonId;
 
-  it('states the limiter before a try is spent', () => {
-    const rendered = text(
-      render(
-        <GrantUnlockPrompt held={null} daemonId={daemon} nowMs={NOW} failure={null} busy={false} onUnlock={() => {}} />,
-      ),
+  it('states the limiter where the password is typed, and nowhere else', () => {
+    const renderer = render(
+      <GrantUnlockPrompt held={null} daemonId={daemon} nowMs={NOW} failure={null} busy={false} onUnlock={() => {}} />,
     );
-    expect(rendered).toContain('per machine');
+    // Not beside the switches: a note repeated at every control the unlock covers is what made a one-gate
+    // mechanism read as per-action authorisation.
+    expect(text(renderer)).not.toContain('per machine');
+    raisePrompt(renderer);
+    expect(text(renderer)).toContain('per machine');
+    // And the scope and lifetime are said once, in the same place.
+    expect(marked(renderer, 'data-operator-unlock-holding')).toHaveLength(1);
   });
 
   it('submits the typed password and clears the field', () => {
@@ -668,10 +711,10 @@ describe('GrantUnlockPrompt', () => {
         onUnlock={password => attempts.push(password)}
       />,
     );
+    raisePrompt(renderer);
     const field = marked(renderer, 'data-grant-unlock-field')[0];
     run(() => field?.props.onChange({ target: { value: 'operator-secret' } }));
-    const form = renderer.root.findAllByType('form')[0];
-    run(() => form?.props.onSubmit({ preventDefault: () => {} }));
+    run(() => promptForm(renderer)?.props.onSubmit({ preventDefault: () => {} }));
     expect(attempts).toEqual(['operator-secret']);
     expect(marked(renderer, 'data-grant-unlock-field')[0]?.props.value).toBe('');
   });
@@ -688,8 +731,8 @@ describe('GrantUnlockPrompt', () => {
         onUnlock={password => attempts.push(password)}
       />,
     );
-    const form = renderer.root.findAllByType('form')[0];
-    run(() => form?.props.onSubmit({ preventDefault: () => {} }));
+    raisePrompt(renderer);
+    run(() => promptForm(renderer)?.props.onSubmit({ preventDefault: () => {} }));
     expect(attempts).toEqual([]);
 
     const busy = render(
@@ -702,9 +745,12 @@ describe('GrantUnlockPrompt', () => {
         onUnlock={password => attempts.push(password)}
       />,
     );
+    // While something is in flight the trigger itself is refused, so a second attempt cannot be started.
+    expect(marked(busy, 'data-grant-unlock-open')[0]?.props.disabled).toBe(true);
+    raisePrompt(busy);
     const busyField = marked(busy, 'data-grant-unlock-field')[0];
     run(() => busyField?.props.onChange({ target: { value: 'operator-secret' } }));
-    run(() => busy.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} }));
+    run(() => promptForm(busy)?.props.onSubmit({ preventDefault: () => {} }));
     expect(attempts).toEqual([]);
   });
 
@@ -732,7 +778,12 @@ describe('GrantUnlockPrompt', () => {
     expect(marked(remote, 'data-grant-unlock-purpose')[0]?.props['data-grant-unlock-purpose']).toBe('remote');
     expect(text(remote)).toContain('from off this host needs it');
     expect(marked(local, 'data-grant-unlock-purpose')[0]?.props['data-grant-unlock-purpose']).toBe('local');
-    expect(text(local)).toContain('ungoverned for five minutes');
+    expect(text(local)).toContain('paired device even on the machine');
+    // The SAME sentence travels into the prompt, so the reader is not told two different things.
+    raisePrompt(local);
+    expect(marked(local, 'data-operator-unlock-purpose')[0]?.children.join('')).toContain(
+      'paired device even on the machine',
+    );
     // Neither reader is told a revoke needs it, because it never does.
     for (const rendered of [text(remote), text(local)]) expect(rendered).toContain('never');
   });
@@ -741,6 +792,7 @@ describe('GrantUnlockPrompt', () => {
     const renderer = render(
       <GrantUnlockPrompt held={null} daemonId={daemon} nowMs={NOW} failure={null} busy={false} onUnlock={() => {}} />,
     );
+    raisePrompt(renderer);
     const field = marked(renderer, 'data-grant-unlock-field')[0];
     expect(field?.props.type).toBe('password');
     expect(field?.props.autoComplete).toBe('off');
@@ -900,12 +952,8 @@ describe('GrantsSurface', () => {
     await runAsync(async () => {
       renderer = render(<GrantsSurface connection={connection()} createClient={recorder.create} now={() => NOW} />);
     });
-    // Earn an unlock first.
-    const field = marked(renderer as ReactTestRenderer, 'data-grant-unlock-field')[0];
-    run(() => field?.props.onChange({ target: { value: 'operator-secret' } }));
-    await runAsync(async () => {
-      (renderer as ReactTestRenderer).root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
+    // Earn an unlock first, through the prompt a person actually meets.
+    await unlockThrough(renderer as ReactTestRenderer, 'operator-secret');
     // Widen: `fleet.use` is recorded off, so this turns it on and must carry the token.
     await runAsync(async () => {
       axisSwitch(renderer as ReactTestRenderer, 'fleet.use')?.props.onClick();
@@ -954,11 +1002,7 @@ describe('GrantsSurface', () => {
     await runAsync(async () => {
       renderer = render(<GrantsSurface connection={connection()} createClient={recorder.create} now={() => NOW} />);
     });
-    const field = marked(renderer as ReactTestRenderer, 'data-grant-unlock-field')[0];
-    run(() => field?.props.onChange({ target: { value: 'wrong' } }));
-    await runAsync(async () => {
-      (renderer as ReactTestRenderer).root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
+    await unlockThrough(renderer as ReactTestRenderer, 'wrong');
     expect(text(renderer as ReactTestRenderer)).toContain('4 attempts remaining');
     expect(marked(renderer as ReactTestRenderer, 'data-grant-unlock')[0]?.props['data-grant-unlock']).toBe('prompt');
   });
@@ -969,11 +1013,7 @@ describe('GrantsSurface', () => {
     await runAsync(async () => {
       renderer = render(<GrantsSurface connection={connection()} createClient={recorder.create} now={() => NOW} />);
     });
-    const field = marked(renderer as ReactTestRenderer, 'data-grant-unlock-field')[0];
-    run(() => field?.props.onChange({ target: { value: 'operator-secret' } }));
-    await runAsync(async () => {
-      (renderer as ReactTestRenderer).root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
+    await unlockThrough(renderer as ReactTestRenderer, 'operator-secret');
     const reads = recorder.calls.filter(call => call.method === 'GET');
     expect(reads.length).toBe(2);
   });
@@ -986,11 +1026,7 @@ describe('GrantsSurface', () => {
         <GrantsSurface connection={connection('alpha')} createClient={recorder.create} now={() => NOW} />,
       );
     });
-    const field = marked(renderer as ReactTestRenderer, 'data-grant-unlock-field')[0];
-    run(() => field?.props.onChange({ target: { value: 'operator-secret' } }));
-    await runAsync(async () => {
-      (renderer as ReactTestRenderer).root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
+    await unlockThrough(renderer as ReactTestRenderer, 'operator-secret');
     expect(marked(renderer as ReactTestRenderer, 'data-grant-unlock')[0]?.props['data-grant-unlock']).toBe('held');
 
     await runAsync(async () => {
@@ -1042,11 +1078,7 @@ describe('GrantsSurface — moving the operator password', () => {
 
   /** Unlocks, then types a new password into the control the unlock opened, and submits. */
   const replacePassword = async (renderer: ReactTestRenderer, next: string) => {
-    const unlockField = marked(renderer, 'data-grant-unlock-field')[0];
-    run(() => unlockField?.props.onChange({ target: { value: 'operator-secret' } }));
-    await runAsync(async () => {
-      renderer.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
-    });
+    await unlockThrough(renderer, 'operator-secret');
     await runAsync(async () => {
       marked(renderer, 'data-password-field')[0]?.props.onChange({ target: { value: next } });
     });
@@ -1054,7 +1086,10 @@ describe('GrantsSurface — moving the operator password', () => {
       marked(renderer, 'data-password-confirm-field')[0]?.props.onChange({ target: { value: next } });
     });
     await runAsync(async () => {
-      renderer.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
+      // The password card's OWN form, walked up from its field. Tree ORDER stopped being a reliable way to
+      // name a form here the moment the unlock got a modal of its own, and a field's nearest enclosing
+      // form is the only description that cannot pick the wrong one.
+      enclosingForm(marked(renderer, 'data-password-field')[0]).props.onSubmit({ preventDefault: () => {} });
     });
   };
 

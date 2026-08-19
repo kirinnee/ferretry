@@ -10,7 +10,7 @@ import {
 } from '../../../../src/features/fleet/fleet-configuration-surface.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { grantGuidance, UNLOCK_LIMIT_NOTE } from '../../../../src/lib/grants.ts';
-import { interact, mount, must } from '../../../support/dom.ts';
+import { interact, mount } from '../../../support/dom.ts';
 import {
   absent,
   absentCodex,
@@ -33,7 +33,9 @@ import {
   proposal,
   scaffoldProposal,
   type,
+  unlockField,
   unlockView,
+  unlockWith,
 } from './fleet-support.ts';
 
 const laptop = daemonConnection({
@@ -303,6 +305,161 @@ describe('reading one daemon fleet', () => {
       'locked',
     );
     await locked.unmount();
+  });
+});
+
+/**
+ * A HOST THAT HAS NEVER HAD A FLEET, answering exactly as a real `fyd` does.
+ *
+ * Both sentences and both codes are copied from a live 3.0.0 boot on a throwaway `FY_HOME` with no
+ * proposals in existence. They arrive as HTTP 409 — `respond()` maps every `FleetRefusal` to that one
+ * status — so a browser that read the status would render the first screen of every new install as a
+ * conflict. The panel branches on the CODE, and the state it reaches is a first run.
+ */
+describe('a host that has never been configured', () => {
+  const first = async () =>
+    await open({
+      config: () => {
+        throw refusal(
+          'fleet_config_missing',
+          'no fleet config at /tmp/fy-home/fleet/config.yaml; write the declared config before applying the fleet',
+        );
+      },
+      accounts: () => {
+        throw refusal(
+          'fleet_not_applied',
+          'no published fleet manifest at /tmp/fy-home/fleet/manifest.json; apply the fleet first',
+        );
+      },
+      propose: () => scaffoldProposal(),
+    });
+
+  it('is a first run rather than a failure, with the daemon’s own sentences kept', async () => {
+    const surface = await first();
+    expect(pick(surface.container, '[data-fleet-state]').getAttribute('data-fleet-state')).toBe('uninitialized');
+    // NOT an error: no alert, no refusal, and the two words in the header say where the host stands.
+    expect(absent(surface.container, '[role="alert"]')).toBe(true);
+    expect(absent(surface.container, '[data-fleet-refusal]')).toBe(true);
+    expect(pick(surface.container, '[data-fleet-state-badge]').getAttribute('data-fleet-state-badge')).toBe(
+      'uninitialized',
+    );
+    expect(surface.container.textContent).not.toContain('refused');
+    // The daemon's sentences are better copy than anything a browser would invent, so they stay whole —
+    // including the exact path and the exact remedy.
+    expect(surface.container.textContent).toContain('write the declared config before applying the fleet');
+    expect(surface.container.textContent).toContain('/tmp/fy-home/fleet/config.yaml');
+    // And the one thing to do about it is offered.
+    expect(button(surface.container, 'Prepare this host')).toBeDefined();
+    await surface.unmount();
+  });
+
+  it('offers preparing the host as ONE action, with the list it will write', async () => {
+    const surface = await first();
+    await click(pick(surface.container, '[data-fleet-start-initialize]'));
+    expect(absent(surface.container, '[data-fleet-first-run]')).toBe(false);
+    expect(pick(surface.container, '[data-fleet-apply]').textContent).toContain('Create these files');
+    expect(surface.container.textContent).not.toContain('Staged change');
+    await surface.unmount();
+  });
+});
+
+/**
+ * THE OWNER'S SCREENSHOT, as a test. The daemon could not be reached and the panel offered a password
+ * field, an attempt-limit warning and Confirm-and-Apply — three controls that could not possibly work,
+ * in front of a limiter nothing could ask a question of.
+ *
+ * The failure is spelled the way a browser spells it: a plain `Error`, no status, no code. That is what
+ * `Failed to fetch` arrives as, and it is why the panel must not word it as a refusal.
+ */
+describe('a daemon this browser could not reach', () => {
+  const dead = 'fyd is unavailable at http://127.0.0.1:9999 (Failed to fetch)';
+  const loopback = daemonConnection({
+    daemonId: 'daemon/home',
+    baseUrl: 'http://127.0.0.1:9999',
+    deviceToken: 'token-home',
+  });
+
+  const openUnreachable = async (connection = laptop, pageScheme = 'http:') => {
+    const mounted = await mount(
+      <FleetConfigurationSurface
+        connection={connection}
+        createClient={async () => {
+          throw new Error(dead);
+        }}
+        now={() => NOW}
+        pageScheme={pageScheme}
+      />,
+    );
+    live.push(mounted);
+    await interact(() => undefined);
+    return mounted;
+  };
+
+  it('says what it knows, names the address, and offers no control at all', async () => {
+    const surface = await openUnreachable();
+    const state = pick(surface.container, '[data-fleet-state]');
+    expect(state.getAttribute('data-fleet-state')).toBe('unreachable');
+    expect(pick(surface.container, '[data-fleet-unreachable]').textContent).toContain('could not reach this daemon');
+    // The transport's own sentence, whole: it is the only thing here that names the exact URL tried.
+    expect(state.textContent).toContain(dead);
+    // NOT "start the daemon". The owner's daemon was serving when they read this.
+    expect(surface.container.textContent?.toLowerCase()).not.toContain('start the daemon');
+    expect(state.textContent).toContain('fy daemon status');
+    expect(state.textContent).toContain('/healthz');
+    // Nothing on this screen is a control, because nothing a click could do would help.
+    expect(surface.container.querySelectorAll('button')).toHaveLength(0);
+    await surface.unmount();
+  });
+
+  it('names the mixed request for an https page reaching an http daemon, and not otherwise', async () => {
+    const mixed = await openUnreachable(loopback, 'https:');
+    expect(pick(mixed.container, '[data-fleet-unreachable]').textContent).toContain('Safari');
+    await mixed.unmount();
+
+    const plain = await openUnreachable(loopback, 'http:');
+    expect(pick(plain.container, '[data-fleet-unreachable]').textContent).not.toContain('Safari');
+    await plain.unmount();
+  });
+
+  /**
+   * The exact shape in the screenshot: a change staged while the host answered, then an apply whose
+   * request never arrives. The proposal survives, so the review is still on screen — and everything on
+   * it that needs a reachable daemon must be gone rather than merely disabled.
+   */
+  it('takes the password field and the apply off a staged change it can no longer send', async () => {
+    const surface = await open({
+      permissions: () => lockedPermissions(),
+      propose: () => proposal(),
+      apply: () => {
+        throw new Error(dead);
+      },
+      unlock: () => {
+        throw new Error(dead);
+      },
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+    await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
+    await click(button(surface.container, 'Preview this change'));
+    // While the daemon answered, the action raised the prompt. That part is #362 and stays.
+    await click(pick(surface.container, '[data-fleet-apply]'));
+    expect(absent(surface.container, '[role="dialog"]')).toBe(false);
+
+    await unlockWith(surface.container, 'hunter2');
+    await interact(() => undefined);
+
+    // The prompt is gone with the authority question it was asking: nothing can be proved to a daemon
+    // that is not answering, so there is nothing left to type into.
+    expect(absent(surface.container, '[role="dialog"]')).toBe(true);
+    expect(absent(surface.container, 'input')).toBe(true);
+    expect(absent(surface.container, '[data-fleet-apply]')).toBe(true);
+    expect(surface.container.textContent).not.toContain(UNLOCK_LIMIT_NOTE);
+    expect(pick(surface.container, '[data-fleet-apply-unreachable]').textContent).toContain('cannot be applied');
+    // The change is still held and this browser's own act still works.
+    expect(absent(surface.container, '[data-fleet-side="proposed"]')).toBe(false);
+    await click(button(surface.container, 'Discard'));
+    expect(absent(surface.container, '[data-fleet-side="proposed"]')).toBe(true);
+    await surface.unmount();
   });
 });
 
@@ -889,9 +1046,17 @@ describe('applying one exact proposal', () => {
     result: { accountCount: 1, operationCount: 4, manifestPath: '/m', prunedWrappers: [], sharedHistory: [] },
   };
 
-  /** The one password field this panel ever renders. */
-  const password = (container: HTMLElement): HTMLInputElement =>
-    must(container.querySelector<HTMLInputElement>('[data-fleet-operator-password]'), 'the operator password field');
+  /**
+   * Takes the action, then answers the prompt it raises.
+   *
+   * TWO STEPS, because that is now the shape: the panel carries no password field, and the modal arrives
+   * at the moment authority is needed rather than sitting inside the staged-change card.
+   */
+  const applyWith = async (surface: Awaited<ReturnType<typeof staged>>, secret: string): Promise<void> => {
+    await click(pick(surface.container, '[data-fleet-apply]'));
+    await unlockWith(surface.container, secret);
+    await interact(() => undefined);
+  };
 
   const applyCall = (surface: Awaited<ReturnType<typeof staged>>) =>
     surface.daemon.calls.find(call => call.path.endsWith('/apply'));
@@ -912,7 +1077,7 @@ describe('applying one exact proposal', () => {
     expect(text).not.toContain('fy fleet authorize');
     expect(text).not.toContain('Approval');
     expect(text).not.toContain('Host authority');
-    expect(absent(surface.container, '[data-fleet-operator-password]')).toBe(true);
+    expect(absent(surface.container, 'input')).toBe(true);
     expect(text).not.toContain('token-laptop');
     await surface.unmount();
   });
@@ -948,9 +1113,7 @@ describe('applying one exact proposal', () => {
     const surface = await staged({ permissions: () => confirmingPermissions(), apply: () => COMMITTED });
 
     // Act — typed once.
-    await type(password(surface.container), 'correct horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'correct horse battery');
 
     // Assert — in the body, and in nothing else. There is no unlock to mint: this caller is not locked,
     // so spending an attempt on one would be a second round trip for no authority.
@@ -973,14 +1136,14 @@ describe('applying one exact proposal', () => {
     // Arrange — locked AND owing a confirmation, which is a remote caller on a machine with a password.
     const surface = await staged({ permissions: () => lockedPermissions(), apply: () => COMMITTED });
     expect(surface.container.textContent).toContain(grantGuidance('locked', 'fleet').explanation);
-    expect(surface.container.textContent).toContain(UNLOCK_LIMIT_NOTE);
+    // The limiter is stated ONCE, where the password is typed — not beside every control the unlock
+    // then covers. A note at each control is what made a `sudo` gate read as per-action authorisation.
+    expect(surface.container.textContent).not.toContain(UNLOCK_LIMIT_NOTE);
     // ONE field on the whole panel, so the human cannot be asked twice.
-    expect(surface.container.querySelectorAll('[data-fleet-operator-password]')).toHaveLength(1);
+    expect(surface.container.querySelector('input')).toBeNull();
 
     // Act — typed once, clicked once.
-    await type(password(surface.container), 'correct horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'correct horse battery');
 
     // Assert — the mint spent the password, in a body, on the shared grants route.
     const minted = surface.daemon.calls.find(call => call.path === '/v1/grants/unlock');
@@ -995,7 +1158,7 @@ describe('applying one exact proposal', () => {
 
     // The change landed, and the panel never asked for the password a second time.
     expect(pick(surface.container, '[data-fleet-outcome]').getAttribute('data-fleet-outcome')).toBe('committed');
-    expect(absent(surface.container, '[data-fleet-operator-password]')).toBe(true);
+    expect(absent(surface.container, 'input')).toBe(true);
     await surface.unmount();
   });
 
@@ -1009,9 +1172,7 @@ describe('applying one exact proposal', () => {
     });
 
     // Act
-    await type(password(surface.container), 'correct horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'correct horse battery');
 
     // Assert — minted, header sent, body empty.
     expect(surface.daemon.calls.find(call => call.path === '/v1/grants/unlock')).toBeDefined();
@@ -1028,9 +1189,7 @@ describe('applying one exact proposal', () => {
     // keeps reporting `locked` here on purpose, which is the harsher case: even a permissions read that
     // has not caught up must not cost a second mint while the token this screen holds is still live.
     const surface = await staged({ permissions: () => lockedPermissions(), apply: () => COMMITTED });
-    await type(password(surface.container), 'correct horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'correct horse battery');
     expect(surface.daemon.paths().filter(path => path === '/v1/grants/unlock')).toHaveLength(1);
 
     // Act — a SECOND change, staged and applied with the same screen.
@@ -1038,9 +1197,7 @@ describe('applying one exact proposal', () => {
     await interact(() => undefined);
     await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(surface.container, 'Preview this change'));
-    await type(password(surface.container), 'correct horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'correct horse battery');
 
     // Assert — STILL one mint. The held token is presented again; the confirmation is still per-change.
     expect(surface.daemon.paths().filter(path => path === '/v1/grants/unlock')).toHaveLength(1);
@@ -1066,18 +1223,16 @@ describe('applying one exact proposal', () => {
     });
 
     // Act
-    await type(password(surface.container), 'wrong horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'wrong horse battery');
 
     // Assert — no apply was attempted, the daemon's own sentence is on screen with its number, and the
     // change is still staged with a field to retype into.
     expect(surface.daemon.paths().some(path => path.endsWith('/apply'))).toBe(false);
-    expect(pick(surface.container, '[data-fleet-operator-password-failure]').textContent).toContain(
-      '4 attempts remaining',
-    );
+    expect(pick(surface.container, '[data-grant-unlock-failure]').textContent).toContain('4 attempts remaining');
     expect(pick(surface.container, '[data-fleet-proposal-id]')).toBeDefined();
-    expect(pick(surface.container, '[data-fleet-operator-password]')).toBeDefined();
+    // The prompt STAYS UP with the reason inside it, so the retype happens where the failure is read.
+    expect(pick(surface.container, '[role="dialog"]')).toBeDefined();
+    expect(unlockField(surface.container).value).toBe('');
     await surface.unmount();
   });
 
@@ -1088,14 +1243,10 @@ describe('applying one exact proposal', () => {
         throw refusal('grant_rate_limited', 'too many wrong operator passwords; try again in 15 minutes', 429);
       },
     });
-    await type(password(surface.container), 'wrong horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
-    expect(
-      pick(surface.container, '[data-fleet-operator-password-failure]').getAttribute(
-        'data-fleet-operator-password-failure',
-      ),
-    ).toBe('final');
+    await applyWith(surface, 'wrong horse battery');
+    expect(pick(surface.container, '[data-grant-unlock-failure]').getAttribute('data-grant-unlock-failure')).toBe(
+      'final',
+    );
     expect(surface.container.textContent).toContain('15 minutes');
     await surface.unmount();
   });
@@ -1110,7 +1261,7 @@ describe('applying one exact proposal', () => {
 
     // Assert
     expect(surface.container.textContent).toContain(grantGuidance('not-granted', 'fleet').explanation);
-    expect(absent(surface.container, '[data-fleet-operator-password]')).toBe(true);
+    expect(absent(surface.container, 'input')).toBe(true);
     expect(pick(surface.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
     // And pressing it does nothing at all, rather than producing a refusal round trip.
     await click(pick(surface.container, '[data-fleet-apply]'));
@@ -1259,7 +1410,7 @@ describe('applying one exact proposal', () => {
       proposal: () => proposal(),
     });
     // It really did start with no field, so the one below is the re-read's doing.
-    expect(absent(surface.container, '[data-fleet-operator-password]')).toBe(true);
+    expect(absent(surface.container, 'input')).toBe(true);
 
     // Act
     await click(pick(surface.container, '[data-fleet-apply]'));
@@ -1268,16 +1419,13 @@ describe('applying one exact proposal', () => {
     // Assert — the refusal is worded as the FLEET refusal it is (the guard refused the request; nobody
     // typed anything wrong), and the panel now offers the unlock that resolves it.
     expect(pick(surface.container, '[data-fleet-refusal]').textContent).toContain('needs the operator password');
-    expect(absent(surface.container, '[data-fleet-operator-password-failure]')).toBe(true);
-    expect(pick(surface.container, '[data-fleet-operator-password]')).toBeDefined();
+    expect(absent(surface.container, '[data-grant-unlock-failure]')).toBe(true);
     expect(pick(surface.container, '[data-fleet-authority-mode]').getAttribute('data-fleet-authority-mode')).toBe(
       'locked',
     );
 
     // And the way out works from there: one password, one mint, one apply.
-    await type(password(surface.container), 'correct horse battery');
-    await click(pick(surface.container, '[data-fleet-apply]'));
-    await interact(() => undefined);
+    await applyWith(surface, 'correct horse battery');
     expect(surface.daemon.calls.find(call => call.path === '/v1/grants/unlock')?.body).toEqual({
       password: 'correct horse battery',
     });
@@ -1393,8 +1541,20 @@ describe('a first run', () => {
     expect(surface.daemon.calls.find(call => call.path.endsWith('/proposals'))?.body).toEqual({
       mutation: { kind: 'initialize' },
     });
-    expect(surface.container.textContent).toContain('First run');
-    expect(surface.container.textContent).toContain('never replaces a file');
+    // ONE ACTION AND A LIST. Not the review panel: no expiry, no revision, no staged-change framing —
+    // and the paths it will write, because that is the disclosure rather than the ceremony.
+    expect(absent(surface.container, '[data-fleet-first-run]')).toBe(false);
+    expect(absent(surface.container, '[data-fleet-side="proposed"]')).toBe(true);
+    const staged = surface.container.textContent ?? '';
+    expect(staged).toContain('Prepare this host');
+    expect(staged).toContain('never replaces a file');
+    expect(staged).toContain('/home/pilot/.ferretry/fleet/bin');
+    expect(staged).not.toContain('Staged change');
+    expect(staged).not.toContain('Expires');
+    expect(staged).not.toContain('Config revision');
+    // The live region says what is true of a first run rather than announcing a review.
+    expect(pick(surface.container, '[data-fleet-announcement]').textContent).toContain('ready to be prepared');
+    expect(pick(surface.container, '[data-fleet-apply]').textContent).toContain('Create these files');
 
     await click(pick(surface.container, '[data-fleet-apply]'));
     await interact(() => undefined);
@@ -1436,11 +1596,8 @@ describe('two daemons', () => {
     await type(field(mounted.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(mounted.container, 'Preview this change'));
     // Unlock and apply against the LAPTOP, so a live token is genuinely held.
-    await type(
-      must(mounted.container.querySelector<HTMLInputElement>('[data-fleet-operator-password]'), 'the password field'),
-      'correct horse battery',
-    );
     await click(pick(mounted.container, '[data-fleet-apply]'));
+    await unlockWith(mounted.container, 'correct horse battery');
     await interact(() => undefined);
     expect(laptopDaemon.paths().filter(path => path === '/v1/grants/unlock')).toHaveLength(1);
 
@@ -1467,11 +1624,8 @@ describe('two daemons', () => {
     await interact(() => undefined);
     await type(field(mounted.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(mounted.container, 'Preview this change'));
-    await type(
-      must(mounted.container.querySelector<HTMLInputElement>('[data-fleet-operator-password]'), 'the password field'),
-      'correct horse battery',
-    );
     await click(pick(mounted.container, '[data-fleet-apply]'));
+    await unlockWith(mounted.container, 'correct horse battery');
     await interact(() => undefined);
     expect(workstationDaemon.paths().filter(path => path === '/v1/grants/unlock')).toHaveLength(1);
     await mounted.unmount();

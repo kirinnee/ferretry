@@ -27,7 +27,7 @@
  * happened would be the most convincing possible lie about a host it cannot see.
  */
 
-import { Layers3, Lock, Plus, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CloudOff, Layers3, Lock, Plus, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -64,6 +64,7 @@ import {
   classifyInventory,
   createAccountProposal,
   currentUnreadable,
+  daemonOutOfReach,
   declaredLayer,
   detectedAccountDraft,
   editAccountProposal,
@@ -87,10 +88,18 @@ import {
   outcomeSummary,
   reconcileAccountDraft,
   selectLayerAssets,
+  unreachableDiagnosis,
   unreadableAssetProblems,
   unseenAssets,
 } from './fleet-change-model.ts';
-import { FleetApplyReport, FleetChangeReview, FleetLiveRoster, FleetRefusalAlert } from './fleet-change-review.tsx';
+import {
+  FleetApplyReport,
+  FleetChangeReview,
+  FleetFirstRunPlan,
+  FleetLiveRoster,
+  FleetRefusalAlert,
+  FleetUnreachableNotice,
+} from './fleet-change-review.tsx';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
@@ -235,8 +244,8 @@ const ATTEMPT_FAILURE_CODES: ReadonlySet<string> = new Set([
  * about the HOST's fleet, this is about this REQUEST's authority, and a failure here has to leave the
  * authority unreadable rather than leave a stale `open` on screen beside a refusal.
  */
-const reReadPermissions = async (client: FleetClient): Promise<Partial<FleetSession>> => {
-  const read = await probe(() => readFleetPermissions(client));
+const reReadPermissions = async (client: FleetClient, unlock?: string): Promise<Partial<FleetSession>> => {
+  const read = await probe(() => readFleetPermissions(client, unlock));
   return { permissions: read.ok ? read.value : null };
 };
 
@@ -276,7 +285,17 @@ const STATE_BADGE: Readonly<Record<FleetInventory['kind'], { label: string; tone
   unreachable: { label: 'no answer', tone: 'err' },
 };
 
-const INVENTORY_COPY: Readonly<Record<Exclude<FleetInventory['kind'], 'live'>, { title: string; body: string }>> = {
+/**
+ * The sentence each non-live state gets, EXCEPT the one that is not a state of the host at all.
+ *
+ * `unreachable` is deliberately not here. It is the only entry in this table that would be a claim
+ * about a machine this browser got no answer from, and the flat sentence it used to carry ("This daemon
+ * did not answer") reads as a verdict on the daemon when the daemon may be serving perfectly. It is
+ * worded by `unreachableDiagnosis`, which names the possibilities and the check that separates them.
+ */
+const INVENTORY_COPY: Readonly<
+  Record<Exclude<FleetInventory['kind'], 'live' | 'unreachable'>, { title: string; body: string }>
+> = {
   uninitialized: {
     title: 'This host has no fleet yet',
     body: 'There is no fleet configuration on this daemon. That is a first run, not a damaged one: preparing the host creates what is missing and never replaces a file that already exists.',
@@ -293,10 +312,6 @@ const INVENTORY_COPY: Readonly<Record<Exclude<FleetInventory['kind'], 'live'>, {
     title: 'This credential may not read the fleet',
     body: 'The daemon refused this browser the fleet read. Nothing about the host is known from here.',
   },
-  unreachable: {
-    title: 'This daemon did not answer',
-    body: 'The fleet read did not complete, so nothing about this host is known from here. It is not an empty fleet.',
-  },
 };
 
 export interface FleetConfigurationSurfaceProps {
@@ -310,12 +325,23 @@ export interface FleetConfigurationSurfaceProps {
    * will reject.
    */
   readonly now?: () => number;
+  /**
+   * The scheme this page is served over, exactly as `location.protocol` spells it.
+   *
+   * Supplied so both halves of the unreachable diagnosis can be driven in a test, and read from the
+   * page by default. IT DECIDES COPY AND NOTHING ELSE: an `https` page fetching an `http` address is a
+   * mixed request some browsers refuse, which is worth saying to somebody staring at a failure that
+   * looks like a stopped daemon. Nothing about authority, locality or governance is derived from it —
+   * `src/lib/grants.ts` states why that would be the worst bug in this feature.
+   */
+  readonly pageScheme?: string;
 }
 
 export function FleetConfigurationSurface({
   connection,
   createClient = daemonApiClient,
   now = Date.now,
+  pageScheme = window.location.protocol,
 }: FleetConfigurationSurfaceProps) {
   // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
   // four. Module-global ids there left three sections labelled by another daemon's heading and put four
@@ -577,8 +603,10 @@ export function FleetConfigurationSurface({
       if (authority.kind === 'refused' || (fleetApplyNeedsPassword(authority) && operatorPassword === undefined))
         return;
       patch(generation, { busy: true, refusal: null, unlockFailure: null });
+      // Hoisted out of the `try` so the failure path can re-read authority AS the caller this browser now
+      // is: a mint that succeeded before an apply that did not still moved this caller past the gate.
+      let unlock = usableUnlock(session.held, connection.daemonId, now());
       try {
-        let unlock = usableUnlock(session.held, connection.daemonId, now());
         if (authority.kind === 'locked' && unlock === undefined) {
           // `operatorPassword` is defined here: `fleetApplyNeedsPassword` is true for `locked`, and the
           // guard above returned for an absent one.
@@ -598,7 +626,18 @@ export function FleetConfigurationSurface({
           ...(unlock === undefined ? {} : { unlock }),
         });
         // Positive evidence, re-read. The list on screen is what the daemon holds, never what we hoped.
-        patch(generation, { outcome, proposal: null, mode: { kind: 'idle' }, ...(await readEvidence(client)) });
+        patch(generation, {
+          outcome,
+          proposal: null,
+          mode: { kind: 'idle' },
+          ...(await readEvidence(client)),
+          // AND WHAT THIS CALLER MAY DO NOW, asked WITH the unlock this screen holds. This is the second
+          // half of the sudo shape: past the gate, the panel must stop advertising a gate. Without this
+          // read the permissions on screen are the ones from before the unlock existed, so the next change
+          // would prompt for a password the daemon would no longer ask for — the mechanism getting out of
+          // the way while the presentation did not, which is the whole defect being repaired here.
+          ...(await reReadPermissions(client, unlock)),
+        });
       } catch (cause) {
         const refusal = fleetRefusal(cause);
         // A failed PASSWORD ATTEMPT is worded by the grants vocabulary rather than as a fleet refusal,
@@ -614,7 +653,7 @@ export function FleetConfigurationSurface({
           // and leaving the old answer up would leave a person with a refusal and no control to resolve
           // it, which is the dead end this feature exists to remove. It is a probe: a permissions read
           // that fails leaves `unreadable` rather than a claim about the operator's decisions.
-          ...(await reReadPermissions(client)),
+          ...(await reReadPermissions(client, unlock)),
           // TWO INDEPENDENT WAYS TO LEARN THE CHANGE IS DEAD, and both are read. The refusal itself says so
           // when the daemon refused BECAUSE the proposal is gone or stale; the re-read catches the other
           // case, where the apply was refused for something else — a wrong password, a held lock — and the
@@ -658,6 +697,33 @@ export function FleetConfigurationSurface({
   const variants = Object.keys(session.config?.variants ?? {});
   const detection = accountHarnessDetection(session.discovery, live);
   const composing = mode.kind !== 'idle' || session.proposal !== null;
+  /**
+   * ONE ANSWER TO "can this browser reach the daemon", read by every control that needs one.
+   *
+   * Computed here rather than asked per control, because the shape of the defect this repairs is a
+   * panel where one place knew and the others did not: the read said `unreachable` and the staged
+   * change went on offering a password field to a limiter nothing could ask.
+   */
+  const unreachable = daemonOutOfReach(inventory, session.refusal)
+    ? unreachableDiagnosis(connection.baseUrl, pageScheme)
+    : null;
+  /** Bound to a local so the preview's discriminant narrows into the two panels below. */
+  const staged = session.proposal;
+  /**
+   * ONE SET OF AUTHORITY CONTROLS, handed to whichever panel is offering the action.
+   *
+   * The two panels must ask for the operator password identically. Spelling the same six props twice is
+   * how the second one ends up a version behind — which is the shape of every divergence this feature
+   * has already been repaired for.
+   */
+  const applyControls = {
+    authority,
+    busy: session.busy,
+    unlockFailure: session.unlockFailure,
+    unreachable,
+    onApply: (operatorPassword?: string) => void apply(operatorPassword),
+    onDiscard: () => dismissed({ proposal: null, refusal: null, unlockFailure: null }),
+  };
 
   /**
    * Open the create form, with the daemon's answer to what is already in the asset tree.
@@ -762,7 +828,11 @@ export function FleetConfigurationSurface({
           : session.outcome === null
             ? session.proposal === null
               ? ''
-              : 'A change is staged and waiting for review.'
+              : // A first run is not staged for review, and saying it is would announce the ceremony
+                // this panel no longer shows to anybody reading it with their eyes.
+                session.proposal.preview.kind === 'initialize'
+                ? 'This host is ready to be prepared, showing every file it would create.'
+                : 'A change is staged and waiting for review.'
             : outcomeSummary(session.outcome).title}
       </p>
       <header className="kt-panel overflow-hidden">
@@ -832,42 +902,54 @@ export function FleetConfigurationSurface({
             <span className="mt-0.5 shrink-0 text-warn">
               {inventory.kind === 'uninitialized' ? (
                 <ServerCog size={16} aria-hidden="true" />
+              ) : inventory.kind === 'unreachable' ? (
+                <CloudOff size={16} aria-hidden="true" />
               ) : (
                 <TriangleAlert size={16} aria-hidden="true" />
               )}
             </span>
-            <div className="min-w-0">
-              <h3 id={id('-state-heading')} className="m-0 text-title font-semibold text-fg">
-                {INVENTORY_COPY[inventory.kind].title}
-              </h3>
-              <p className="mb-0 mt-1 text-ui leading-base text-muted">{INVENTORY_COPY[inventory.kind].body}</p>
-              {/* WHICH refusal this is, when the operator is the one refusing. "This credential may
+            {inventory.kind === 'unreachable' ? (
+              // The one state whose remedy is never on this screen, so it gets the checks and no
+              // control at all — not even a re-read, which is what reopening the tab already does.
+              <FleetUnreachableNotice
+                diagnosis={unreachableDiagnosis(connection.baseUrl, pageScheme)}
+                detail={inventory.detail}
+                headingId={id('-state-heading')}
+              />
+            ) : (
+              <div className="min-w-0">
+                <h3 id={id('-state-heading')} className="m-0 text-title font-semibold text-fg">
+                  {INVENTORY_COPY[inventory.kind].title}
+                </h3>
+                <p className="mb-0 mt-1 text-ui leading-base text-muted">{INVENTORY_COPY[inventory.kind].body}</p>
+                {/* WHICH refusal this is, when the operator is the one refusing. "This credential may
                   not read the fleet" is true of all three and actionable for none of them: switched
                   off on the host, needs the operator password, and a daemon that has lost its own
                   decision send a person three different places. */}
-              {inventory.kind === 'forbidden' && inventory.grant !== undefined ? (
-                <p
-                  className="mb-0 mt-2 text-ui font-semibold leading-base text-fg"
-                  data-fleet-state-grant={inventory.grant.refusal}
-                >
-                  {inventory.grant.guidance.explanation}
-                </p>
-              ) : null}
-              <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
-                {inventory.detail}
-              </pre>
-              {mayInitialize(inventory) && session.permissions?.mayPropose === true && session.proposal === null ? (
-                <button
-                  type="button"
-                  className="kt-btn mt-3"
-                  data-variant="primary"
-                  data-fleet-start-initialize=""
-                  onClick={() => void stage(initializeProposal())}
-                >
-                  Prepare this host
-                </button>
-              ) : null}
-            </div>
+                {inventory.kind === 'forbidden' && inventory.grant !== undefined ? (
+                  <p
+                    className="mb-0 mt-2 text-ui font-semibold leading-base text-fg"
+                    data-fleet-state-grant={inventory.grant.refusal}
+                  >
+                    {inventory.grant.guidance.explanation}
+                  </p>
+                ) : null}
+                <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
+                  {inventory.detail}
+                </pre>
+                {mayInitialize(inventory) && session.permissions?.mayPropose === true && session.proposal === null ? (
+                  <button
+                    type="button"
+                    className="kt-btn mt-3"
+                    data-variant="primary"
+                    data-fleet-start-initialize=""
+                    onClick={() => void stage(initializeProposal())}
+                  >
+                    Prepare this host
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -900,20 +982,29 @@ export function FleetConfigurationSurface({
           />
         ) : null}
 
-        {session.proposal !== null ? (
+        {staged === null ? null : (
           <div ref={reviewRef} tabIndex={-1} className="min-w-0">
-            <FleetChangeReview
-              proposal={session.proposal}
-              live={live}
-              authority={authority}
-              onApply={operatorPassword => void apply(operatorPassword)}
-              onDiscard={() => dismissed({ proposal: null, refusal: null, unlockFailure: null })}
-              busy={session.busy}
-              refusal={session.refusal}
-              unlockFailure={session.unlockFailure}
-            />
+            {/* TWO OPERATIONS, TWO PANELS. A first run creates what is missing and can replace nothing,
+                so it is one action and the list it will write; a change to a configuration that exists
+                is a diff somebody has to read and a revision a concurrent writer can move underneath.
+                Rendering both through one component is what dressed "create these directories" in an
+                expiry, a revision and a review step. */}
+            {staged.preview.kind === 'initialize' ? (
+              <FleetFirstRunPlan
+                scaffold={staged.preview.scaffold}
+                documents={staged.preview.documents}
+                {...applyControls}
+              />
+            ) : (
+              <FleetChangeReview
+                proposal={{ ...staged, preview: staged.preview }}
+                live={live}
+                refusal={session.refusal}
+                {...applyControls}
+              />
+            )}
           </div>
-        ) : null}
+        )}
 
         {/* A named region rather than a bare div: `aria-label` on an element with no role names nothing,
             and this element exists to BE the landing place focus is sent to when the panel opens. */}

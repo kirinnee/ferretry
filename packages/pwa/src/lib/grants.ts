@@ -38,6 +38,7 @@ import {
   type CapabilityGrantView,
   type DaemonCapability,
   GRANT_UNLOCK_MAX_ATTEMPTS,
+  GRANT_UNLOCK_TTL_SECONDS,
   type GrantRefusal,
   type GrantsPatch,
   type GrantsView,
@@ -470,8 +471,11 @@ const GUIDANCE = {
   locked: {
     tone: 'limit',
     badge: 'Needs the password',
+    // NOT "unlock below" any more. The prompt is a modal raised at the moment authority is needed, so a
+    // sentence pointing DOWN describes a field that is not there — and pointing anywhere is the wrong job
+    // for this copy, whose business is what is true rather than where the control is.
     explanation:
-      'Changing this needs the operator password for this machine. Unlock below, then try again. (Switching a capability on is a separate matter and is only ever done at the machine.)',
+      'Changing this needs the operator password for this machine, typed once to unlock it. (Switching a capability on is a separate matter and is only ever done at the machine.)',
     offersUnlock: true,
   },
   'rate-limited': {
@@ -508,7 +512,7 @@ export function grantGuidance(refusal: GrantRefusal, capability?: DaemonCapabili
   if (refusal === 'locked')
     return {
       ...base,
-      explanation: `Changing ${capabilityNoun(capability)} needs the operator password for this machine. Unlock below, then try again.`,
+      explanation: `Changing ${capabilityNoun(capability)} needs the operator password for this machine, typed once to unlock it.`,
     };
   return base;
 }
@@ -786,6 +790,20 @@ export function operatorUnlockFailure(error: unknown): OperatorUnlockFailure {
 
 /** The limiter, stated before anybody has spent a try, so five is a known budget rather than a surprise. */
 export const UNLOCK_LIMIT_NOTE = `Five wrong passwords and this daemon stops checking for fifteen minutes. It counts per machine, not per browser, so a colleague’s wrong guesses spend the same ${String(GRANT_UNLOCK_MAX_ATTEMPTS)}.`;
+
+/**
+ * WHAT THE UNLOCK COVERS AND HOW LONG IT LASTS, said once where the password is typed.
+ *
+ * It is the sentence the inline field never carried, and its absence is what made a `sudo`-shaped
+ * mechanism read as authorisation for one action: a person met a password box beside one button and
+ * concluded, reasonably, that it belonged to that button. So the scope goes in the prompt — the window,
+ * what happens inside it, and the two facts that stop it being a standing grant: it belongs to this
+ * screen, and closing the page ends it.
+ *
+ * Deliberately NOT repeated beside each control the unlock then covers. A note at every control is a
+ * note that teaches people the product nags, and it re-creates the per-action framing this removes.
+ */
+export const UNLOCK_HOLDING_NOTE = `It lasts ${String(GRANT_UNLOCK_TTL_SECONDS / 60)} minutes and covers everything you change here in that time — nothing asks again. It is held by this screen only, for this machine only, is never saved, and closing the page ends it.`;
 
 // ─── setting the operator password ─────────────────────────────────────────────────────────────
 

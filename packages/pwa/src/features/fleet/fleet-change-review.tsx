@@ -17,24 +17,33 @@ import {
   CircleAlert,
   CircleCheck,
   ClipboardList,
+  CloudOff,
   FileCog,
   ListOrdered,
   Lock,
   ServerCog,
   TriangleAlert,
 } from 'lucide-react';
-import { type FormEvent, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
-import { EYEBROW, FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
-import { type OperatorUnlockFailure, UNLOCK_LIMIT_NOTE } from '../../lib/grants.ts';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
+import type { OperatorUnlockFailure } from '../../lib/grants.ts';
+import { OperatorUnlockDialog } from '../settings/operator-unlock-dialog.tsx';
 import { absoluteTime } from '../../lib/session-screens.ts';
-import type { FleetApplyOutcome, FleetManifestAccountView, FleetProposalView, FleetRefusalView } from './fleet-api.ts';
+import type {
+  FleetApplyOutcome,
+  FleetManifestAccountView,
+  FleetProposalPreview,
+  FleetProposalView,
+  FleetRefusalView,
+} from './fleet-api.ts';
 import {
   type FleetApplyAuthority,
   fleetApplyCopy,
   fleetApplyNeedsPassword,
   type FleetRosterChange,
   type FleetRosterRow,
+  type FleetUnreachableDiagnosis,
   operationLedger,
   outcomeSummary,
   rosterDiff,
@@ -166,6 +175,10 @@ const REFUSAL_HEADLINE: Readonly<Partial<Record<FleetRefusalView['kind'], string
   // The daemon answered; the answer did not match the contract. Calling that "the daemon refused" would
   // send a person looking for a permission or a policy that does not exist.
   malformed: 'This daemon answered something this browser cannot read',
+  // NOTHING ANSWERED AT ALL, so nobody refused anything. This one was reading "The daemon refused" over
+  // a fetch that never completed — a sentence that sends a person to look for a permission on a host
+  // this browser could not even reach, which is what happened to the owner who reported it.
+  unreachable: 'This browser could not reach this daemon',
 };
 
 /** The daemon's refusal, whole. Multiline by design: the second line is usually the actionable one. */
@@ -201,13 +214,63 @@ export function FleetRefusalAlert({ refusal }: { readonly refusal: FleetRefusalV
   );
 }
 
-export interface FleetChangeReviewProps {
-  readonly proposal: FleetProposalView;
-  /** The live accounts the ledger is compared against. */
-  readonly live: readonly FleetManifestAccountView[];
+/**
+ * WHAT THIS BROWSER KNOWS WHEN NOTHING ANSWERED, and the checks that tell the possibilities apart.
+ *
+ * No control, because there is nothing here a click could achieve: every remedy is somewhere else — a
+ * terminal on that machine, or the same address opened in a tab. Rendering a button that re-tried the
+ * read would be the third version of the same mistake this panel is being repaired for, since a retry
+ * is the one thing a reader will do anyway by reopening the tab, and a failing one teaches them the
+ * panel is broken rather than that the request is not arriving.
+ *
+ * `detail` is the transport's own sentence, kept whole. It names the exact URL the attempt used, which
+ * is the one fact the diagnosis below cannot derive — a connection may carry more than one carrier.
+ */
+export function FleetUnreachableNotice({
+  diagnosis,
+  detail,
+  headingId,
+}: {
+  readonly diagnosis: FleetUnreachableDiagnosis;
+  readonly detail?: string;
+  /** The id the owning section names itself by, so this heading IS that name rather than a second one. */
+  readonly headingId?: string;
+}) {
+  return (
+    <div className="min-w-0" data-fleet-unreachable="">
+      <h3 id={headingId} className="m-0 text-title font-semibold text-fg">
+        {diagnosis.headline}
+      </h3>
+      <p className="mb-0 mt-1 text-ui leading-base text-muted">{diagnosis.body}</p>
+      {detail === undefined ? null : (
+        <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
+          {detail}
+        </pre>
+      )}
+      {/* AN ORDERED LIST, because the order is the discrimination: the first check rules out the cause
+          a person is most likely to be told about, and only then is the second one informative. */}
+      <ol className="m-0 mt-3 list-decimal space-y-1 pl-5" aria-label="Checks that tell these causes apart">
+        {diagnosis.checks.map(check => (
+          <li key={check} className="text-ui leading-base text-fg-soft">
+            {check}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/**
+ * EVERY WAY A PANEL HERE TURNS SOMETHING REVIEWED INTO HOST STATE, in one shape.
+ *
+ * Two panels offer an action now — the change review and the first run — and they must ask for
+ * authority IDENTICALLY. A second copy of "does this need the password, is it out of reach, what does a
+ * refusal say" is how the fleet grew an authority vocabulary of its own the first time.
+ */
+export interface FleetApplyControls {
   readonly authority: FleetApplyAuthority;
   /**
-   * Applies the change, with the operator password when one was asked for.
+   * Performs the action, with the operator password when one was asked for.
    *
    * ONE ARGUMENT, because there is one secret. The panel does not decide whether it becomes an unlock,
    * a confirmation or both — the surface does, from the same authority this component renders — and a
@@ -217,9 +280,285 @@ export interface FleetChangeReviewProps {
   readonly onApply: (operatorPassword?: string) => void;
   readonly onDiscard: () => void;
   readonly busy: boolean;
-  readonly refusal: FleetRefusalView | null;
   /** Why the last operator password was refused, so a wrong one is retyped rather than re-guessed at. */
   readonly unlockFailure?: OperatorUnlockFailure | null;
+  /**
+   * Set while this browser cannot reach the daemon this change was staged against.
+   *
+   * IT REMOVES THE PASSWORD FIELD AND THE ACTION, rather than disabling them. Neither can do anything:
+   * the password would be checked by a limiter on the far side of a request that is not arriving, and
+   * the action would spend one of that limiter's five attempts on a round trip nobody receives. What is
+   * left is Discard, which is this browser's own act and works either way.
+   */
+  readonly unreachable?: FleetUnreachableDiagnosis | null;
+}
+
+/** The words on the two buttons. The action's own name, because "Apply" does not describe a first run. */
+export interface FleetApplyLabels {
+  readonly action: string;
+  /** The same action, when the click also proves the operator password. */
+  readonly confirming: string;
+  readonly working: string;
+  readonly discard: string;
+}
+
+/**
+ * THE ONE PLACE A FLEET PANEL ASKS FOR AUTHORITY, whatever it is about to do.
+ *
+ * There is no heading over it and deliberately so: a "Host authority" section was the fleet advertising
+ * an authority system of its own, and what is left is the ordinary thing every other governed control
+ * does — say what is true when it is not a plain yes, and offer the one step that resolves it.
+ */
+function FleetApplyForm({
+  authority,
+  onApply,
+  onDiscard,
+  busy,
+  unlockFailure = null,
+  unreachable = null,
+  labels,
+}: FleetApplyControls & { readonly labels: FleetApplyLabels }) {
+  /**
+   * Whether the prompt is up. NOT the password, which this component never holds at all.
+   *
+   * The typed value lives inside the dialog for the one submit that spends it and passes through here
+   * only as an argument on its way to `onApply`. A secret in a panel's state outlives the click that
+   * needed it and shows up in anything that inspects that state.
+   */
+  const [asking, setAsking] = useState(false);
+  const copy = fleetApplyCopy(authority);
+  // A daemon that is not answering makes the authority question moot: there is nothing to prove a
+  // password to. So the prompt is not merely blocked here, it can never be raised.
+  const needsPassword = fleetApplyNeedsPassword(authority) && unreachable === null;
+  const blocked = busy || authority.kind === 'refused';
+
+  /**
+   * ONE CLICK, and the prompt comes to the person rather than the person coming to the prompt.
+   *
+   * A caller that owes nothing acts immediately; a caller that owes the password meets the modal AT THIS
+   * MOMENT. That is the difference between "this machine needs unlocking before its settings change" and
+   * "authorise this one change" — and the second is what the owner was reading off a password field
+   * sitting inside a staged-change card, under an expiry, beside Confirm-and-Apply.
+   */
+  const act = (): void => {
+    if (blocked) return;
+    if (needsPassword) {
+      setAsking(true);
+      return;
+    }
+    onApply(undefined);
+  };
+
+  return (
+    <div className="border-t border-border-soft bg-surface-2 px-panel py-3" data-fleet-apply-authority={authority.kind}>
+      {unreachable !== null ? (
+        <p
+          className="m-0 flex min-w-0 items-start gap-2 text-ui leading-base text-warn"
+          data-fleet-apply-unreachable=""
+        >
+          <CloudOff size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            This cannot be applied while this browser cannot reach {unreachable.target}. Nothing has been sent and no
+            password would be checked, so it simply stays here until that address answers.
+          </span>
+        </p>
+      ) : copy.explanation === '' ? null : (
+        // ONE SENTENCE, and no field under it. Saying what applying will ask for BEFORE the click is
+        // what `confirmation` on the permissions read exists for; the prompt itself arrives on the click.
+        <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base text-muted">
+          <Lock size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+          <span data-fleet-apply-explanation="">{copy.explanation}</span>
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {/*
+          ABSENT ENTIRELY while the daemon is out of reach. A disabled action is still an action on
+          screen: it says "this is the control, come back to it", when what is true is that this screen
+          has nothing left to offer until the address answers.
+        */}
+        {unreachable !== null ? null : (
+          <button
+            type="button"
+            className="kt-btn"
+            data-variant="primary"
+            data-fleet-apply=""
+            disabled={blocked}
+            onClick={act}
+          >
+            {busy ? labels.working : labels.action}
+          </button>
+        )}
+        <button type="button" className="kt-btn" data-variant="ghost" disabled={busy} onClick={onDiscard}>
+          {labels.discard}
+        </button>
+      </div>
+
+      {/* THE SHARED PROMPT, not a fleet-specific one: the grants panel raises the same component, so an
+          unlock reads the same wherever somebody meets it. It stays open while `busy`, so a refused
+          password reports itself where the password was typed rather than behind the panel. */}
+      <OperatorUnlockDialog
+        open={asking && needsPassword}
+        purpose={copy.explanation}
+        // `locked` is the only case that MINTS an unlock. A per-change confirmation is spent inside the
+        // one request that carries it, so promising a five-minute window there would be false.
+        holding={authority.kind === 'locked'}
+        busy={busy}
+        failure={unlockFailure}
+        submitLabel={labels.confirming}
+        onSubmit={password => onApply(password)}
+        onClose={() => setAsking(false)}
+      />
+    </div>
+  );
+}
+
+/** Writes the daemon named that are not plan operations. Reviewing every write has to include these. */
+function FleetDocumentList({
+  documents,
+  headingId,
+}: {
+  readonly documents: readonly { readonly path: string; readonly bytes: number }[];
+  readonly headingId: string;
+}) {
+  if (documents.length === 0) return null;
+  return (
+    <section className="border-t border-border-soft" aria-labelledby={headingId}>
+      <div className="flex min-w-0 items-center gap-2 px-panel py-2">
+        <FileCog size={16} className="shrink-0 text-accent" aria-hidden="true" />
+        <h3 id={headingId} className="m-0 text-ui font-semibold text-fg">
+          Files written outside the plan
+        </h3>
+        <span className="kt-badge ml-auto">{documents.length} documents</span>
+      </div>
+      <ul
+        className="m-0 list-none p-0"
+        aria-label="Documents this change writes"
+        data-fleet-documents={String(documents.length)}
+      >
+        {documents.map(document => (
+          <li key={document.path} className="flex min-w-0 gap-3 border-t border-border-soft px-panel py-1.5 text-meta">
+            <PanelPath value={document.path} className="min-w-0 flex-1 text-fg" />
+            <span className="shrink-0 tabular-nums text-muted">{document.bytes} B</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** What a first run creates, exactly as the daemon derived it. Never a browser's idea of the paths. */
+type FleetScaffoldSummary = Extract<FleetProposalPreview, { readonly kind: 'initialize' }>['scaffold'];
+
+/**
+ * A FIRST RUN, WHICH IS ONE ACTION AND A LIST — not a staged change.
+ *
+ * ## WHY THIS IS NOT THE REVIEW PANEL
+ *
+ * Preparing a host creates what is missing and never replaces a file that already exists, and it has no
+ * plan to preview because there is no configuration to plan from. The transaction machinery it used to
+ * be dressed in was answering questions this operation does not raise: an EXPIRES timestamp, for a
+ * review nobody can be too slow to read; a CONFIG REVISION, printed as `absent` because there is no
+ * configuration to have a revision; a "Staged change" heading with a `pending` badge over a proposal
+ * state; and Confirm-and-Apply, the second step of a two-step review. Four pieces of ceremony for
+ * "create these directories".
+ *
+ * ## WHAT IT KEEPS, AND WHY THAT IS NOT CEREMONY
+ *
+ * The list of what will be created stays, and so does the shell line, because they are the disclosure
+ * rather than the ritual: nothing here is written before a person has seen the paths it will be written
+ * to. The transaction underneath is untouched — this is still one derived artifact, held by the daemon
+ * and consumed unchanged — because that is what makes the list on screen the thing that actually runs.
+ *
+ * The plan-then-apply flow stays exactly as it was for a real EDIT, where a person must see a diff and
+ * a concurrent writer has to be detected.
+ */
+export function FleetFirstRunPlan({
+  scaffold,
+  documents = [],
+  ...controls
+}: FleetApplyControls & {
+  readonly scaffold: FleetScaffoldSummary;
+  /** Anything the daemon says a first run writes beyond the scaffold. Empty today; rendered if not. */
+  readonly documents?: readonly { readonly path: string; readonly bytes: number }[];
+}) {
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
+  return (
+    <section
+      className="kt-panel overflow-hidden border-l-4 border-l-accent"
+      data-fleet-first-run=""
+      aria-labelledby={id('-first-run-heading')}
+      aria-busy={controls.busy}
+    >
+      <header className="border-b border-border-soft bg-surface-2 px-panel py-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <ServerCog size={16} className="shrink-0 text-accent" aria-hidden="true" />
+          <h2 id={id('-first-run-heading')} className="m-0 text-title font-semibold text-fg">
+            Prepare this host
+          </h2>
+        </div>
+        <p className="m-0 mt-1 text-ui leading-base text-muted">
+          Creates what is missing and never replaces a file that already exists. Nothing here is a change to something
+          you have: this is everything it will write.
+        </p>
+      </header>
+
+      <section className="px-panel py-3" aria-labelledby={id('-scaffold-heading')}>
+        <p className={EYEBROW} id={id('-scaffold-heading')}>
+          Directories ({scaffold.directories.length})
+        </p>
+        <ul className="m-0 mt-1 list-none space-y-1 p-0" aria-label="Directories created">
+          {scaffold.directories.map(directory => (
+            <li key={directory} className="min-w-0">
+              <PanelPath value={directory} className="text-meta text-muted" />
+            </li>
+          ))}
+        </ul>
+        <p className={cn(EYEBROW, 'mt-3')}>Files ({scaffold.files.length})</p>
+        <ul className="m-0 mt-1 list-none space-y-1 p-0" aria-label="Files seeded">
+          {scaffold.files.map(file => (
+            <li key={file.path} className="min-w-0">
+              <PanelPath value={file.path} className="text-meta text-fg" />
+            </li>
+          ))}
+        </ul>
+        <p className="m-0 mt-3 text-meta leading-base text-muted">
+          Add to your shell profile afterwards: <PanelPath value={scaffold.pathEntry} className="text-meta text-fg" />
+        </p>
+      </section>
+
+      <FleetDocumentList documents={documents} headingId={id('-documents-heading')} />
+
+      <FleetApplyForm
+        {...controls}
+        labels={{
+          action: 'Create these files',
+          confirming: 'Confirm and create',
+          working: 'Creating…',
+          discard: 'Not now',
+        }}
+      />
+    </section>
+  );
+}
+
+/**
+ * A staged change WITH A PLAN. A first run is not one of these and has `FleetFirstRunPlan` instead.
+ *
+ * Narrowed at the type level rather than branched inside the panel, because the branch is what let one
+ * component render two operations that need different screens — and the review's own header, the part
+ * the owner called ceremony, is meaningless for the other one.
+ */
+export type FleetStagedChange = Omit<FleetProposalView, 'preview'> & {
+  readonly preview: Extract<FleetProposalPreview, { readonly kind: 'apply' }>;
+};
+
+export interface FleetChangeReviewProps extends FleetApplyControls {
+  readonly proposal: FleetStagedChange;
+  /** The live accounts the ledger is compared against. */
+  readonly live: readonly FleetManifestAccountView[];
+  readonly refusal: FleetRefusalView | null;
 }
 
 /**
@@ -232,43 +571,13 @@ export interface FleetChangeReviewProps {
  * it is a transaction handle the browser sends back in a path — so showing it would be a 30-character
  * opaque string a reader has no use for, in the place the change itself should be.
  */
-export function FleetChangeReview({
-  proposal,
-  live,
-  authority,
-  onApply,
-  onDiscard,
-  busy,
-  refusal,
-  unlockFailure = null,
-}: FleetChangeReviewProps) {
+export function FleetChangeReview({ proposal, live, refusal, ...controls }: FleetChangeReviewProps) {
   // Instance-local for the same reason as the roster above.
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
-  /**
-   * The typed password, held HERE and nowhere above.
-   *
-   * It is the one value on this screen that must not reach the session state the surface keys by
-   * connection: a secret in there outlives the click that needed it, survives every unrelated re-render,
-   * and shows up in anything that inspects the state. It lives for one submit and is cleared by it.
-   */
-  const [password, setPassword] = useState('');
   const preview = proposal.preview;
-  const ledger = preview.kind === 'apply' ? operationLedger(preview.plan.operations) : [];
-  const rows = preview.kind === 'apply' ? rosterDiff(live, preview.plan.manifest.accounts) : [];
-  const copy = fleetApplyCopy(authority);
-  const needsPassword = fleetApplyNeedsPassword(authority);
-  const applyBlocked = busy || authority.kind === 'refused' || (needsPassword && password === '');
-
-  const submit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    if (applyBlocked) return;
-    onApply(needsPassword ? password : undefined);
-    // Cleared on submit rather than on success, exactly as the grants surface clears its own: a wrong
-    // password is retyped, and holding the last attempt in a field is one more place the value sits
-    // while somebody walks away from the screen.
-    setPassword('');
-  };
+  const ledger = operationLedger(preview.plan.operations);
+  const rows = rosterDiff(live, preview.plan.manifest.accounts);
 
   return (
     <section
@@ -276,7 +585,7 @@ export function FleetChangeReview({
       data-fleet-side="proposed"
       data-fleet-proposal-id={proposal.id}
       aria-labelledby={id('-change-heading')}
-      aria-busy={busy}
+      aria-busy={controls.busy}
     >
       <header className="border-b border-border-soft bg-surface-2 px-panel py-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -304,135 +613,78 @@ export function FleetChangeReview({
         </dl>
       </header>
 
-      {preview.kind === 'initialize' ? (
-        <section className="px-panel py-3" aria-labelledby={id('-scaffold-heading')}>
-          <h3 id={id('-scaffold-heading')} className="m-0 text-ui font-semibold text-fg">
-            First run
+      <section className="border-b border-border-soft" aria-labelledby={id('-proposed-roster-heading')}>
+        <div className="flex min-w-0 items-center gap-2 px-panel py-2">
+          <ArrowRight size={16} className="shrink-0 text-accent" aria-hidden="true" />
+          <h3 id={id('-proposed-roster-heading')} className="m-0 text-ui font-semibold text-fg">
+            Host after this change
           </h3>
-          <p className="m-0 mt-1 text-meta leading-base text-muted">
-            Creates what is missing and never replaces a file that already exists. There is no plan to preview yet
-            because this host has no fleet configuration to plan from.
-          </p>
-          <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Directories created">
-            {preview.scaffold.directories.map(directory => (
-              <li key={directory} className="min-w-0">
-                <PanelPath value={directory} className="text-meta text-muted" />
-              </li>
-            ))}
-          </ul>
-          <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Files seeded">
-            {preview.scaffold.files.map(file => (
-              <li key={file.path} className="min-w-0">
-                <PanelPath value={file.path} className="text-meta text-fg" />
-              </li>
-            ))}
-          </ul>
-          <p className="m-0 mt-2 text-meta leading-base text-muted">
-            Add to your shell profile afterwards:{' '}
-            <PanelPath value={preview.scaffold.pathEntry} className="text-meta text-fg" />
-          </p>
-        </section>
-      ) : (
-        <>
-          <section className="border-b border-border-soft" aria-labelledby={id('-proposed-roster-heading')}>
-            <div className="flex min-w-0 items-center gap-2 px-panel py-2">
-              <ArrowRight size={16} className="shrink-0 text-accent" aria-hidden="true" />
-              <h3 id={id('-proposed-roster-heading')} className="m-0 text-ui font-semibold text-fg">
-                Host after this change
-              </h3>
-            </div>
-            <RosterDiffRows rows={rows} />
-          </section>
+        </div>
+        <RosterDiffRows rows={rows} />
+      </section>
 
-          <section aria-labelledby={id('-ledger-heading')}>
-            <div className="flex min-w-0 items-center gap-2 border-b border-border-soft px-panel py-2">
-              <ListOrdered size={16} className="shrink-0 text-accent" aria-hidden="true" />
-              <h3 id={id('-ledger-heading')} className="m-0 text-ui font-semibold text-fg">
-                Operation ledger
-              </h3>
-              <span className="kt-badge ml-auto">{ledger.length} operations</span>
-            </div>
-            {/* A phone stacks each action over its path: a fixed label column leaves a gutter so narrow
+      <section aria-labelledby={id('-ledger-heading')}>
+        <div className="flex min-w-0 items-center gap-2 border-b border-border-soft px-panel py-2">
+          <ListOrdered size={16} className="shrink-0 text-accent" aria-hidden="true" />
+          <h3 id={id('-ledger-heading')} className="m-0 text-ui font-semibold text-fg">
+            Operation ledger
+          </h3>
+          <span className="kt-badge ml-auto">{ledger.length} operations</span>
+        </div>
+        {/* A phone stacks each action over its path: a fixed label column leaves a gutter so narrow
                 that every path wraps character by character and stops being readable. */}
-            <ol className="m-0 list-none p-0" aria-label="Operations this change performs">
-              {ledger.map(entry => (
-                <li
-                  key={entry.index}
-                  className="flex min-w-0 flex-wrap items-baseline gap-x-3 border-b border-border-soft px-panel py-1.5 last:border-b-0 sm:flex-nowrap"
-                  data-fleet-operation={entry.kind}
-                >
-                  <span className="shrink-0 font-mono text-meta tabular-nums text-faint">
-                    {String(entry.index).padStart(2, '0')}
+        <ol className="m-0 list-none p-0" aria-label="Operations this change performs">
+          {ledger.map(entry => (
+            <li
+              key={entry.index}
+              className="flex min-w-0 flex-wrap items-baseline gap-x-3 border-b border-border-soft px-panel py-1.5 last:border-b-0 sm:flex-nowrap"
+              data-fleet-operation={entry.kind}
+            >
+              <span className="shrink-0 font-mono text-meta tabular-nums text-faint">
+                {String(entry.index).padStart(2, '0')}
+              </span>
+              <span className="shrink-0 text-meta font-semibold text-fg-soft sm:w-[10.5rem]">{entry.action}</span>
+              <span className="min-w-0 flex-1 basis-full pl-6 sm:basis-0 sm:pl-0">
+                <PanelPath value={entry.path} className="block text-meta text-fg" />
+                {entry.source === undefined ? null : (
+                  <span className="block min-w-0 text-meta text-muted">
+                    from <PanelPath value={entry.source} className="text-meta text-muted" />
                   </span>
-                  <span className="shrink-0 text-meta font-semibold text-fg-soft sm:w-[10.5rem]">{entry.action}</span>
-                  <span className="min-w-0 flex-1 basis-full pl-6 sm:basis-0 sm:pl-0">
-                    <PanelPath value={entry.path} className="block text-meta text-fg" />
-                    {entry.source === undefined ? null : (
-                      <span className="block min-w-0 text-meta text-muted">
-                        from <PanelPath value={entry.source} className="text-meta text-muted" />
+                )}
+                {entry.details.length === 0 ? null : (
+                  <span
+                    className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-meta text-faint"
+                    data-fleet-operation-details=""
+                  >
+                    {entry.details.map(detail => (
+                      <span key={detail} className="break-words">
+                        {detail}
                       </span>
-                    )}
-                    {entry.details.length === 0 ? null : (
-                      <span
-                        className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-meta text-faint"
-                        data-fleet-operation-details=""
-                      >
-                        {entry.details.map(detail => (
-                          <span key={detail} className="break-words">
-                            {detail}
-                          </span>
-                        ))}
-                      </span>
-                    )}
+                    ))}
                   </span>
-                </li>
-              ))}
-            </ol>
-            {preview.plan.sharedHistory.length === 0 ? null : (
-              <ul
-                className="m-0 list-none border-t border-border-soft p-0"
-                aria-label="Shared history migrations this change performs"
-              >
-                {preview.plan.sharedHistory.map(history => (
-                  <li key={history.kind} className="px-panel py-2 text-meta leading-base text-muted">
-                    <span className="font-semibold text-fg-soft">{history.kind} history</span> · pool{' '}
-                    <PanelPath value={history.pool} className="text-meta" /> · {history.migrated} moved, {history.links}{' '}
-                    linked, {history.conflicts} kept as-is. This step runs AFTER the manifest is published and is not
-                    rolled back with it.
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </>
-      )}
-
-      {preview.documents.length === 0 ? null : (
-        <section className="border-t border-border-soft" aria-labelledby={id('-documents-heading')}>
-          <div className="flex min-w-0 items-center gap-2 px-panel py-2">
-            <FileCog size={16} className="shrink-0 text-accent" aria-hidden="true" />
-            <h3 id={id('-documents-heading')} className="m-0 text-ui font-semibold text-fg">
-              Files written outside the plan
-            </h3>
-            <span className="kt-badge ml-auto">{preview.documents.length} documents</span>
-          </div>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+        {preview.plan.sharedHistory.length === 0 ? null : (
           <ul
-            className="m-0 list-none p-0"
-            aria-label="Documents this change writes"
-            data-fleet-documents={String(preview.documents.length)}
+            className="m-0 list-none border-t border-border-soft p-0"
+            aria-label="Shared history migrations this change performs"
           >
-            {preview.documents.map(document => (
-              <li
-                key={document.path}
-                className="flex min-w-0 gap-3 border-t border-border-soft px-panel py-1.5 text-meta"
-              >
-                <PanelPath value={document.path} className="min-w-0 flex-1 text-fg" />
-                <span className="shrink-0 tabular-nums text-muted">{document.bytes} B</span>
+            {preview.plan.sharedHistory.map(history => (
+              <li key={history.kind} className="px-panel py-2 text-meta leading-base text-muted">
+                <span className="font-semibold text-fg-soft">{history.kind} history</span> · pool{' '}
+                <PanelPath value={history.pool} className="text-meta" /> · {history.migrated} moved, {history.links}{' '}
+                linked, {history.conflicts} kept as-is. This step runs AFTER the manifest is published and is not rolled
+                back with it.
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
+
+      <FleetDocumentList documents={preview.documents} headingId={id('-documents-heading')} />
 
       {proposal.assetEdits.length === 0 ? null : (
         <ul
@@ -451,72 +703,15 @@ export function FleetChangeReview({
 
       {refusal === null ? null : <FleetRefusalAlert refusal={refusal} />}
 
-      {/*
-        ONE FORM, ONE FIELD, ONE BUTTON. There is no heading over it and deliberately so: a "Host
-        authority" section was the fleet advertising an authority system of its own, and what is left is
-        the ordinary thing every other governed control does — say what is true when it is not a plain
-        yes, and offer the one step that resolves it.
-      */}
-      <form
-        className="border-t border-border-soft bg-surface-2 px-panel py-3"
-        data-fleet-apply-authority={authority.kind}
-        onSubmit={submit}
-      >
-        {copy.explanation === '' ? null : (
-          <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base text-muted">
-            <Lock size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
-            <span data-fleet-apply-explanation="">{copy.explanation}</span>
-          </p>
-        )}
-
-        {needsPassword ? (
-          <>
-            <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-operator-password')}>
-              Operator password for this machine
-            </label>
-            <input
-              id={id('-operator-password')}
-              type="password"
-              className="kt-input"
-              value={password}
-              disabled={busy}
-              autoComplete="off"
-              spellCheck={false}
-              data-fleet-operator-password=""
-              onChange={event => setPassword(event.target.value)}
-            />
-            {unlockFailure === null ? (
-              <p className="m-0 mt-1 text-meta leading-base text-faint">{UNLOCK_LIMIT_NOTE}</p>
-            ) : (
-              <p
-                role="alert"
-                className={cn(
-                  'm-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base',
-                  unlockFailure.retryable
-                    ? 'border-warn-border bg-warn-bg text-warn'
-                    : 'border-err-border bg-err-bg text-err',
-                )}
-                data-fleet-operator-password-failure={unlockFailure.retryable ? 'retryable' : 'final'}
-              >
-                {unlockFailure.message}
-              </p>
-            )}
-          </>
-        ) : null}
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          {/*
-            A SUBMIT, not a click handler, so Enter in the password field applies the change rather than
-            doing nothing — which is what a person types after a password every time.
-          */}
-          <button type="submit" className="kt-btn" data-variant="primary" data-fleet-apply="" disabled={applyBlocked}>
-            {busy ? 'Applying…' : needsPassword ? 'Confirm and apply' : 'Apply this change'}
-          </button>
-          <button type="button" className="kt-btn" data-variant="ghost" disabled={busy} onClick={onDiscard}>
-            Discard
-          </button>
-        </div>
-      </form>
+      <FleetApplyForm
+        {...controls}
+        labels={{
+          action: 'Apply this change',
+          confirming: 'Confirm and apply',
+          working: 'Applying…',
+          discard: 'Discard',
+        }}
+      />
     </section>
   );
 }

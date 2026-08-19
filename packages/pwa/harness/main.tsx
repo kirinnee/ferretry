@@ -131,7 +131,12 @@ import {
   type FleetHarnessDetection,
   type FleetLayerDraft,
 } from '../src/features/fleet/fleet-change-model.ts';
-import { FleetApplyReport, FleetChangeReview, FleetLiveRoster } from '../src/features/fleet/fleet-change-review.tsx';
+import {
+  FleetApplyReport,
+  FleetChangeReview,
+  FleetFirstRunPlan,
+  FleetLiveRoster,
+} from '../src/features/fleet/fleet-change-review.tsx';
 import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
@@ -467,6 +472,27 @@ const HARNESS_FLEET_LAYER: FleetLayerDraft = {
   // Fields this editor does not offer, carried through the change exactly as declared.
   preserved: { flags: ['--dangerously-skip-permissions'], mcp: 'mcp/studio.json' },
 };
+
+/**
+ * What a FIRST RUN creates on a host with no fleet at all, as the daemon derives it.
+ *
+ * Real paths under a real state home, because the panel exists to show a person exactly where its
+ * files land — a fixture of placeholders would capture a screen nobody could check.
+ */
+const HARNESS_FLEET_SCAFFOLD = {
+  directories: [
+    '/home/pilot/.ferretry/fleet',
+    '/home/pilot/.ferretry/fleet/bin',
+    '/home/pilot/.ferretry/fleet/homes',
+    '/home/pilot/.ferretry/fleet/assets/instructions',
+    '/home/pilot/.ferretry/fleet/assets/skills',
+  ],
+  files: [
+    { path: '/home/pilot/.ferretry/fleet/config.yaml' },
+    { path: '/home/pilot/.ferretry/fleet/assets/instructions/.keep' },
+  ],
+  pathEntry: 'export PATH="$HOME/.ferretry/fleet/bin:$PATH"',
+} as const;
 
 const HARNESS_FLEET_PROPOSAL = {
   id: 'fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb',
@@ -6776,7 +6802,10 @@ type HarnessFleetFrame =
   | 'layer'
   | 'cockpit'
   | 'cockpit-staged'
-  | 'states';
+  | 'states'
+  | 'first-run'
+  | 'unlock'
+  | 'unreachable';
 
 /**
  * The COCKPIT itself, driven by a stub daemon rather than by fixtures handed to a leaf.
@@ -7010,6 +7039,68 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
           />
         </section>
       )}
+      {frame !== 'unlock' ? null : (
+        /**
+         * THE PASSWORD PROMPT AS A PERSON MEETS IT: a modal, raised by the action, saying that it unlocks
+         * changing settings on this machine.
+         *
+         * The capture is taken with the dialog OPEN, driven by clicking the real control — a posed overlay
+         * would prove nothing about the component that has to produce one. It is the same dialog the grants
+         * panel raises; there is only one.
+         */
+        <section aria-label="Fleet operator unlock" id="harness-fleet-unlock-page">
+          <FleetChangeReview
+            proposal={HARNESS_FLEET_PROPOSAL}
+            live={HARNESS_FLEET_ACCOUNTS}
+            authority={{ kind: 'locked', alsoConfirms: true }}
+            onApply={() => {}}
+            onDiscard={() => {}}
+            busy={false}
+            refusal={null}
+          />
+        </section>
+      )}
+      {frame !== 'first-run' ? null : (
+        /**
+         * PREPARING A HOST: one action and the list it will write.
+         *
+         * This frame exists to be compared with `preview` beside it. There is no EXPIRES row, no CONFIG
+         * REVISION printed as `absent`, no "Staged change" heading over a `pending` badge and no
+         * Confirm-and-Apply — four pieces of transaction ceremony that were on screen for an operation
+         * which creates what is missing and can replace nothing. The paths stay, because they are the
+         * disclosure rather than the ritual.
+         */
+        <section aria-label="Fleet first run" className="kt-panel overflow-hidden" id="harness-fleet-first-run-page">
+          <FleetFirstRunPlan
+            scaffold={HARNESS_FLEET_SCAFFOLD}
+            authority={{ kind: 'open' }}
+            onApply={() => {}}
+            onDiscard={() => {}}
+            busy={false}
+          />
+        </section>
+      )}
+      {frame !== 'unreachable' ? null : (
+        /**
+         * THE OWNER'S SCREENSHOT. A daemon this browser could not reach — which is NOT a daemon that is
+         * stopped, and the whole point of the frame is that the panel no longer says or implies it is.
+         *
+         * The failure is a plain `Error`, because that is what a fetch that never completed throws:
+         * no status, no code, nothing the daemon worded. The page is served over http here, so the
+         * mixed-request sentence is deliberately absent — `pageScheme` decides that, and the state with
+         * it present has its own unit coverage rather than a second near-identical capture.
+         */
+        <section aria-label="Fleet daemon unreachable" id="harness-fleet-unreachable-page">
+          <FleetConfigurationSurface
+            connection={daemon}
+            createClient={async () => {
+              // The SAME address the fixture pairs on, because the real client names the address it dialled:
+              // two different ones on one screen is the confusion this panel exists to remove.
+              throw new Error(`fyd is unavailable at ${daemon.baseUrl} (Failed to fetch)`);
+            }}
+          />
+        </section>
+      )}
       {frame !== 'states' ? null : (
         <section aria-label="Fleet host states" className="space-y-panel" id="harness-fleet-states-page">
           {HARNESS_FLEET_STATE_ANSWERS.map(state => (
@@ -7046,6 +7137,9 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-cockpit': 'cockpit',
   '#fleet-cockpit-staged': 'cockpit-staged',
   '#fleet-states': 'states',
+  '#fleet-first-run': 'first-run',
+  '#fleet-unlock': 'unlock',
+  '#fleet-unreachable': 'unreachable',
 };
 
 /**

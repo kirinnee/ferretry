@@ -1,25 +1,29 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  FleetApplyOutcome,
-  FleetManifestAccountView,
-  FleetProposalView,
-} from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetApplyOutcome, FleetManifestAccountView } from '../../../../src/features/fleet/fleet-api.ts';
 import {
   FleetApplyReport,
   FleetChangeReview,
+  FleetFirstRunPlan,
   FleetLiveRoster,
   FleetRefusalAlert,
+  type FleetStagedChange,
 } from '../../../../src/features/fleet/fleet-change-review.tsx';
-import { type FleetApplyAuthority, fleetApplyCopy } from '../../../../src/features/fleet/fleet-change-model.ts';
+import {
+  type FleetApplyAuthority,
+  fleetApplyCopy,
+  type FleetUnreachableDiagnosis,
+  unreachableDiagnosis,
+} from '../../../../src/features/fleet/fleet-change-model.ts';
 import {
   type GrantRefusalNotice,
   grantGuidance,
   grantRefusalNotice,
   type OperatorUnlockFailure,
+  UNLOCK_HOLDING_NOTE,
   UNLOCK_LIMIT_NOTE,
 } from '../../../../src/lib/grants.ts';
 import { absoluteTime } from '../../../../src/lib/session-screens.ts';
-import { mount, must } from '../../../support/dom.ts';
+import { mount } from '../../../support/dom.ts';
 import {
   account,
   accountId,
@@ -29,10 +33,12 @@ import {
   manifest,
   pick,
   plan,
-  proposal,
-  scaffoldProposal,
+  scaffoldPreview,
+  stagedChange,
   submit,
   type,
+  unlockField,
+  unlockWith,
 } from './fleet-support.ts';
 
 const noop = (): void => undefined;
@@ -145,7 +151,7 @@ describe('a daemon refusal', () => {
 describe('the staged change', () => {
   const reviewHarness = async (
     overrides: {
-      readonly proposal?: FleetProposalView;
+      readonly proposal?: FleetStagedChange;
       readonly authority?: FleetApplyAuthority;
       readonly busy?: boolean;
       readonly unlockFailure?: OperatorUnlockFailure | null;
@@ -153,7 +159,7 @@ describe('the staged change', () => {
   ) => {
     /** Every password this panel handed back, so a suite can count how many times one was asked for. */
     const calls = { applied: [] as (string | undefined)[], discarded: 0 };
-    const view = overrides.proposal ?? proposal();
+    const view = overrides.proposal ?? stagedChange();
     const mounted = await mount(
       <FleetChangeReview
         proposal={view}
@@ -172,10 +178,6 @@ describe('the staged change', () => {
     );
     return { ...mounted, calls };
   };
-
-  /** The one password field, or a failure naming what a test was actually looking at. */
-  const passwordField = (container: HTMLElement): HTMLInputElement =>
-    must(container.querySelector<HTMLInputElement>('[data-fleet-operator-password]'), 'the operator password field');
 
   it('never tears a path apart mid-token, and keeps the whole value reachable', async () => {
     // Arrange — the ugliest thing on this screen was a wrapper path rendered as
@@ -248,7 +250,7 @@ describe('the staged change', () => {
   });
 
   it('marks the proposed roster against the live one and warns that history is not rolled back', async () => {
-    const changed = proposal({
+    const changed = stagedChange({
       preview: {
         kind: 'apply',
         plan: plan([account({ displayName: 'Renamed' }), account({ id: accountId(4), wrapper: 'claude-new' })]),
@@ -270,16 +272,6 @@ describe('the staged change', () => {
     expect(pick(harness.container, '[data-fleet-documents]').getAttribute('data-fleet-documents')).toBe('2');
     expect(harness.container.textContent).toContain('/home/pilot/.ferretry/fleet/config.yaml');
     expect(harness.container.textContent).toContain('512 B');
-    await harness.unmount();
-  });
-
-  it('shows the first-run scaffold instead of a plan when there is nothing to plan from', async () => {
-    const harness = await reviewHarness({ proposal: scaffoldProposal() });
-    expect(harness.container.textContent).toContain('First run');
-    expect(harness.container.textContent).toContain('/home/pilot/.ferretry/fleet/bin');
-    expect(harness.container.textContent).toContain('config.yaml');
-    expect(harness.container.textContent).toContain('export PATH=');
-    expect(harness.container.querySelector('[data-fleet-operation]')).toBeNull();
     await harness.unmount();
   });
 
@@ -307,9 +299,12 @@ describe('the staged change', () => {
     // refusal blocks are the only other `<pre>`s and neither is rendered here.)
     expect(text).not.toContain('fy fleet authorize');
     expect(harness.container.querySelector('pre')).toBeNull();
-    // No code field and no password field: this caller proves nothing.
-    expect(harness.container.querySelector('[data-fleet-operator-password]')).toBeNull();
+    // No code field, no password field and no prompt behind the button: this caller proves nothing, so
+    // pressing the action applies the change rather than asking for something first.
     expect(harness.container.querySelector('input')).toBeNull();
+    await click(apply);
+    expect(harness.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(harness.calls.applied).toEqual([undefined]);
     // No TTL, no attempt budget, no hourglass sentence, and no heading claiming the fleet has an
     // authority of its own.
     expect(text).not.toContain('seconds');
@@ -321,32 +316,47 @@ describe('the staged change', () => {
     await harness.unmount();
   });
 
-  /** PROOF 3 — the per-change confirmation: ONE field, and the value reaches `onApply` once. */
+  /**
+   * PROOF 3 — the per-change confirmation: ONE prompt, raised on the click, and the value reaches
+   * `onApply` once.
+   *
+   * The panel carries NO password field. That is the shape change: a field sitting inside a staged-change
+   * card, under an expiry, beside Confirm-and-Apply, reads as authorisation for that one button.
+   */
   it('asks a confirming caller for the password once, and hands exactly that value to the apply', async () => {
     // Arrange
     const harness = await reviewHarness({ authority: { kind: 'confirm' } });
 
-    // Assert — the standard sentence, the shared limit note, and one field.
+    // Assert — the standard sentence before the click, and nothing to type into yet.
     expect(pick(harness.container, '[data-fleet-apply-authority]').getAttribute('data-fleet-apply-authority')).toBe(
       'confirm',
     );
     expect(pick(harness.container, '[data-fleet-apply-explanation]').textContent).toBe(
       fleetApplyCopy({ kind: 'confirm' }).explanation,
     );
-    expect(harness.container.textContent).toContain(UNLOCK_LIMIT_NOTE);
-    expect(harness.container.querySelectorAll('input')).toHaveLength(1);
-    // A password, so the browser does not paint it on screen.
-    expect(passwordField(harness.container).type).toBe('password');
-    // Apply is refused until something is typed, and refused HERE rather than by a round trip.
-    expect(pick(harness.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
+    expect(harness.container.querySelector('input')).toBeNull();
+    expect(harness.container.textContent).not.toContain(UNLOCK_LIMIT_NOTE);
+    // The action is LIVE rather than disabled-until-typed: there is nothing to type into, and a control
+    // that is refused with no visible reason is the dead end this whole feature removes.
+    const action = pick(harness.container, '[data-fleet-apply]');
+    expect(action.hasAttribute('disabled')).toBe(false);
 
-    // Act
-    await type(passwordField(harness.container), 'correct horse battery');
-    await click(pick(harness.container, '[data-fleet-apply]'));
+    // Act — the click raises the prompt, at the moment authority is actually needed.
+    await click(action);
+    const dialog = pick(harness.container, '[role="dialog"]');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    // A per-change confirmation MINTS NOTHING, so the prompt must not promise five ungoverned minutes.
+    expect(dialog.getAttribute('data-operator-unlock-dialog')).toBe('confirm');
+    expect(dialog.textContent).toContain(UNLOCK_LIMIT_NOTE);
+    // A password, so the browser does not paint it on screen.
+    expect(unlockField(harness.container).type).toBe('password');
+    expect(harness.calls.applied).toEqual([]);
+
+    await unlockWith(harness.container, 'correct horse battery');
 
     // Assert — asked once, delivered once, and the field is cleared rather than left holding a secret.
     expect(harness.calls.applied).toEqual(['correct horse battery']);
-    expect(passwordField(harness.container).value).toBe('');
+    expect(unlockField(harness.container).value).toBe('');
     await harness.unmount();
   });
 
@@ -355,15 +365,20 @@ describe('the staged change', () => {
     // Arrange — locked AND owing a confirmation, which is the case that produced two prompts.
     const harness = await reviewHarness({ authority: { kind: 'locked', alsoConfirms: true } });
 
-    // Assert — the grants surface's own sentence, verbatim, and one field for both steps.
+    // Assert — the grants surface's own sentence, verbatim, and no field until it is needed.
     expect(pick(harness.container, '[data-fleet-apply-explanation]').textContent).toBe(
       grantGuidance('locked', 'fleet').explanation,
     );
-    expect(harness.container.querySelectorAll('input')).toHaveLength(1);
+    expect(harness.container.querySelector('input')).toBeNull();
 
-    // Act — typed once.
-    await type(passwordField(harness.container), 'correct horse battery');
+    // Act — typed once, in the prompt the click raised.
     await click(pick(harness.container, '[data-fleet-apply]'));
+    const dialog = pick(harness.container, '[role="dialog"]');
+    // THIS one mints an unlock, so it says so — the scope and the lifetime, once, where it is typed.
+    expect(dialog.getAttribute('data-operator-unlock-dialog')).toBe('unlock');
+    expect(dialog.textContent).toContain('Unlock settings on this machine');
+    expect(pick(harness.container, '[data-operator-unlock-holding]').textContent).toBe(UNLOCK_HOLDING_NOTE);
+    await unlockWith(harness.container, 'correct horse battery');
 
     // Assert — ONE handback. The surface spends it on the mint and the apply; the panel never asks twice.
     expect(harness.calls.applied).toEqual(['correct horse battery']);
@@ -371,13 +386,14 @@ describe('the staged change', () => {
   });
 
   it('applies on Enter in the password field, because that is what a person types after one', async () => {
-    // Arrange — the field is inside a form whose submit is the Apply button, so this is the behaviour a
-    // click handler on a bare button would silently not have.
+    // Arrange — the field is inside the prompt's own form, so Enter submits it. A click handler on a bare
+    // button would silently not have this.
     const harness = await reviewHarness({ authority: { kind: 'confirm' } });
-    await type(passwordField(harness.container), 'correct horse battery');
+    await click(pick(harness.container, '[data-fleet-apply]'));
+    await type(unlockField(harness.container), 'correct horse battery');
 
     // Act
-    await submit(form(harness.container, '[data-fleet-apply-authority]'));
+    await submit(form(harness.container, '[role="dialog"] form'));
 
     // Assert
     expect(harness.calls.applied).toEqual(['correct horse battery']);
@@ -391,14 +407,13 @@ describe('the staged change', () => {
       authority: { kind: 'locked', alsoConfirms: true },
       unlockFailure: { message: 'that is not this machine’s operator password; 4 attempts remaining', retryable: true },
     });
+    await click(pick(retryable.container, '[data-fleet-apply]'));
 
-    // Assert — the failure REPLACES the limit note rather than stacking under it, and the field is still
-    // there to retype into.
-    expect(pick(retryable.container, '[data-fleet-operator-password-failure]').textContent).toContain(
-      '4 attempts remaining',
-    );
+    // Assert — the failure lands WHERE THE PASSWORD WAS TYPED, replaces the limit note rather than
+    // stacking under it, and the field is still there to retype into.
+    expect(pick(retryable.container, '[data-grant-unlock-failure]').textContent).toContain('4 attempts remaining');
     expect(retryable.container.textContent).not.toContain(UNLOCK_LIMIT_NOTE);
-    expect(pick(retryable.container, '[data-fleet-operator-password-failure]').getAttribute('role')).toBe('alert');
+    expect(pick(retryable.container, '[data-grant-unlock-failure]').getAttribute('role')).toBe('alert');
     expect(retryable.container.querySelectorAll('input')).toHaveLength(1);
     await retryable.unmount();
 
@@ -406,12 +421,27 @@ describe('the staged change', () => {
       authority: { kind: 'locked', alsoConfirms: true },
       unlockFailure: { message: 'this daemon has stopped checking passwords', retryable: false, attemptsRemaining: 0 },
     });
-    expect(
-      pick(final.container, '[data-fleet-operator-password-failure]').getAttribute(
-        'data-fleet-operator-password-failure',
-      ),
-    ).toBe('final');
+    await click(pick(final.container, '[data-fleet-apply]'));
+    expect(pick(final.container, '[data-grant-unlock-failure]').getAttribute('data-grant-unlock-failure')).toBe(
+      'final',
+    );
     await final.unmount();
+  });
+
+  it('takes the prompt away again when it is dismissed, and keeps the typed value out of the panel', async () => {
+    const harness = await reviewHarness({ authority: { kind: 'confirm' } });
+    await click(pick(harness.container, '[data-fleet-apply]'));
+    await type(unlockField(harness.container), 'half typed');
+    await click(button(harness.container, 'Cancel'));
+
+    // Nothing applied, no dialog, and the panel behind it is an ordinary screen again.
+    expect(harness.calls.applied).toEqual([]);
+    expect(harness.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(harness.container.querySelector('input')).toBeNull();
+    // Re-raised, the field is empty: a dismissal takes the secret with it.
+    await click(pick(harness.container, '[data-fleet-apply]'));
+    expect(unlockField(harness.container).value).toBe('');
+    await harness.unmount();
   });
 
   /** PROOF 4 — a refusal an unlock would not fix gets the sentence and NO field. */
@@ -468,7 +498,7 @@ describe('the staged change', () => {
     expect(pick(harness.container, '[data-fleet-side="proposed"]').getAttribute('aria-busy')).toBe('true');
     await harness.unmount();
 
-    const consumed = await reviewHarness({ proposal: proposal({ state: 'consumed' }) });
+    const consumed = await reviewHarness({ proposal: stagedChange({ state: 'consumed' }) });
     expect(consumed.container.textContent).toContain('consumed');
     await consumed.unmount();
   });
@@ -476,7 +506,7 @@ describe('the staged change', () => {
   it('renders a refusal inside the review it belongs to', async () => {
     const mounted = await mount(
       <FleetChangeReview
-        proposal={proposal()}
+        proposal={stagedChange()}
         live={[]}
         authority={{ kind: 'open' }}
         onApply={noop}
@@ -492,7 +522,7 @@ describe('the staged change', () => {
   });
 
   it('renders a plan with no shared history and no asset edits without inventing either', async () => {
-    const bare = proposal({
+    const bare = stagedChange({
       assetEdits: [],
       preview: { kind: 'apply', plan: { ...plan(), sharedHistory: [] }, documents: [] },
     });
@@ -501,6 +531,100 @@ describe('the staged change', () => {
     expect(harness.container.querySelector('[data-fleet-documents]')).toBeNull();
     expect(harness.container.textContent).not.toContain('not rolled back with it');
     await harness.unmount();
+  });
+});
+
+/**
+ * A FIRST RUN IS ONE ACTION AND A LIST.
+ *
+ * The owner's second complaint: preparing a host was staged as a proposal, with an EXPIRES timestamp, a
+ * CONFIG REVISION printed as `absent`, a `pending` state badge and a Confirm-and-Apply — four pieces of
+ * transaction ceremony over an operation that creates what is missing and replaces nothing. Each is
+ * named separately below, because a single "no ceremony" assertion would go green the day one of them
+ * came back on its own.
+ */
+describe('a first run', () => {
+  const firstRun = async (
+    overrides: {
+      readonly authority?: FleetApplyAuthority;
+      readonly unreachable?: FleetUnreachableDiagnosis | null;
+    } = {},
+  ) => {
+    const calls = { applied: [] as (string | undefined)[], discarded: 0 };
+    const preview = scaffoldPreview();
+    const mounted = await mount(
+      <FleetFirstRunPlan
+        scaffold={preview.scaffold}
+        documents={preview.documents}
+        authority={overrides.authority ?? { kind: 'open' }}
+        onApply={operatorPassword => {
+          calls.applied.push(operatorPassword);
+        }}
+        onDiscard={() => {
+          calls.discarded += 1;
+        }}
+        busy={false}
+        unlockFailure={null}
+        unreachable={overrides.unreachable ?? null}
+      />,
+    );
+    return { ...mounted, calls };
+  };
+
+  it('shows everything it will write, and none of the transaction it is held in', async () => {
+    const panel = await firstRun();
+    const text = panel.container.textContent ?? '';
+    // The disclosure the owner never objected to: every path, before anything is written.
+    expect(text).toContain('/home/pilot/.ferretry/fleet/bin');
+    expect(text).toContain('config.yaml');
+    expect(text).toContain('export PATH=');
+    expect(text).toContain('never replaces a file that already exists');
+
+    // The ceremony, named one piece at a time.
+    expect(text).not.toContain('Staged change');
+    expect(text).not.toContain('Expires');
+    expect(text).not.toContain('Config revision');
+    expect(text).not.toContain('absent');
+    expect(text).not.toContain('pending');
+    expect(text).not.toContain(absoluteTime('2026-08-05T06:15:00.000Z'));
+    expect(text).not.toContain('fy_fprop_');
+    // No plan, no ledger, no roster diff: a first run has nothing to compare against.
+    expect(panel.container.querySelector('[data-fleet-operation]')).toBeNull();
+    expect(panel.container.querySelector('[data-fleet-roster-change]')).toBeNull();
+    await panel.unmount();
+  });
+
+  it('is one action for an ungoverned caller, and the action names what it does', async () => {
+    const panel = await firstRun();
+    const action = pick(panel.container, '[data-fleet-apply]');
+    expect(action.textContent).toContain('Create these files');
+    expect(action.hasAttribute('disabled')).toBe(false);
+    // No password, because this caller proves nothing — and no second step of any kind.
+    expect(panel.container.querySelector('input')).toBeNull();
+    await click(action);
+    expect(panel.calls.applied).toEqual([undefined]);
+    await panel.unmount();
+  });
+
+  it('asks a governed caller for the operator password once, through the SAME shared prompt', async () => {
+    const panel = await firstRun({ authority: { kind: 'locked', alsoConfirms: true } });
+    // Nothing to type into until the action is taken: the prompt is raised where authority is needed.
+    expect(panel.container.querySelector('input')).toBeNull();
+    await click(pick(panel.container, '[data-fleet-apply]'));
+    expect(pick(panel.container, '[role="dialog"]').getAttribute('data-operator-unlock-dialog')).toBe('unlock');
+    await unlockWith(panel.container, 'hunter2');
+    expect(panel.calls.applied).toEqual(['hunter2']);
+    await panel.unmount();
+  });
+
+  it('offers nothing at all while the daemon is out of reach', async () => {
+    const panel = await firstRun({
+      unreachable: unreachableDiagnosis('http://127.0.0.1:9999', 'http:'),
+    });
+    expect(panel.container.querySelector('[data-fleet-apply]')).toBeNull();
+    expect(panel.container.querySelector('input')).toBeNull();
+    expect(pick(panel.container, '[data-fleet-apply-unreachable]').textContent).toContain('cannot be applied');
+    await panel.unmount();
   });
 });
 
