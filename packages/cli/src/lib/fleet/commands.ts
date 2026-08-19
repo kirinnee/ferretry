@@ -124,9 +124,15 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       .argument('[accountId...]', 'only the identities these accounts belong to; default is every identity')
       .option('--status', 'report what credential each home holds and change nothing')
       .option('--sync-only', 'copy credentials across identities but never ask for a browser approval')
+      .option('--no-refresh', 'do not let an expired credential renew itself first; start no harness')
       .addHelpText(
         'after',
-        '\nEvery lane of one provider account keeps its own credential copy, so most of this is copying:\n' +
+        '\nAn expired credential that still holds a refresh token renews itself first, with no browser and\n' +
+          'nobody asked: the harness is driven down a path that invokes no model and rotates its own\n' +
+          'token. It fires only for an identity where no home holds a valid token, because a rotating\n' +
+          'refresh token is spent by being used — a speculative renewal is how one gets burnt. Pass\n' +
+          '--no-refresh to run the pass without starting a harness at all.\n\n' +
+          'Every lane of one provider account keeps its own credential copy, so most of this is copying:\n' +
           'the freshest credential in an identity is cloned onto the siblings that need one, and only an\n' +
           'identity with no usable credential anywhere costs a human an approval. Naming one account\n' +
           'therefore selects its whole identity — the credential is shared, so half an identity is not a\n' +

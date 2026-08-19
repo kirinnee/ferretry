@@ -8,4 +8,5 @@ export * from './file-scaffolder.ts';
 export * from './mutation-journal.ts';
 export * from './process-login.ts';
 export * from './process-health-probe.ts';
+export * from './process-token-refresh.ts';
 export * from './system-clock.ts';

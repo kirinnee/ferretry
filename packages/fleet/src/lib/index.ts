@@ -40,6 +40,7 @@ export {
   type SharedHistorySymbolicLinkNode,
   sharedHistoryEntries,
 } from './shared-history.ts';
+export * from './token-refresh.ts';
 export * from './unimplemented.ts';
 export * from './usage.ts';
 export * from './wrappers.ts';

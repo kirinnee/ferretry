@@ -50,12 +50,14 @@ export interface FleetRecommendOptions extends FleetCommandOptions {
   readonly usage?: boolean;
 }
 
-/** Flags that shape a login. Both narrow what it may do; neither widens it. */
+/** Flags that shape a login. Each narrows what it may do; none widens it. */
 export interface FleetLoginOptions extends FleetCommandOptions {
   /** Report what each home holds and change nothing — no copy, no browser. */
   readonly status?: boolean;
   /** Copy credentials across identities, but never ask a human to approve one. */
   readonly syncOnly?: boolean;
+  /** commander's `--no-refresh` sets this false; absent means let expired credentials renew themselves. */
+  readonly refresh?: boolean;
 }
 
 /** The collaborators the fleet group is wired with. */
@@ -211,6 +213,11 @@ export class FleetController {
    * request. Most of the work is copying — only an identity with no usable credential anywhere costs a
    * human an approval, which is what turns thirty browser approvals into one per provider account.
    *
+   * Before any of that, an identity whose token has expired but can still renew itself does so, with
+   * no browser and nobody asked. That is what keeps the *next* run from costing an approval too: a
+   * refresh token left unused long enough expires as well, and the copy every sibling was handed is
+   * spent by whichever lane happens to run first. `--no-refresh` starts no harness at all.
+   *
    * Sequential and in the foreground, because an approval is something a human does in this terminal
    * and two at once race for both.
    */
@@ -228,6 +235,7 @@ export class FleetController {
       identities,
       ...(accountIds.length === 0 ? {} : { accountIds }),
       mode: options.syncOnly === true ? 'sync-only' : 'full',
+      refresh: options.refresh !== false,
     });
     this.#report(results, options, () => renderLoginResults(results));
   }
