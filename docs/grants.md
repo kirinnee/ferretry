@@ -228,6 +228,15 @@ right about the artefact it was handed, and the formatter had changed the artefa
   ungoverned for exactly this reason (`isGovernedCaller`), the UI names the command wherever somebody
   could get stuck, and `packages/daemon/tests/unit/{grants/service,runtime/mounts/grants}.test.ts`
   assert recovery from a state where the password is unknown.
+- **`fy daemon reset` is the second escape hatch, and it never asks for the password either.** It stops
+  the daemon and removes both trees this installation occupies — the state home, and the client-owned
+  artifacts under `XDG_STATE_HOME` — so the machine comes back with no password, no paired devices and
+  no secrets at all. Gating it on the password would close the door it exists to open. It is destructive
+  rather than a repair, so it prints every path, its size, and how many secrets, devices and sessions
+  are about to go before it asks for a typed confirmation; `--yes` is for scripts. **The browser has no
+  equivalent**, and that is not an omission: a reset destroys the device grant the browser is
+  authenticated by and stops the daemon serving it, so the request could never be answered. Reset is a
+  thing somebody does at the machine.
 - **Every held unlock dies when the password moves.** Rotating after a device is lost achieves nothing
   if what the old one bought survives it, so the browser drops its own held token too rather than
   presenting an authority the machine has already withdrawn.
@@ -330,6 +339,7 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 | the password verifier      | `<FY_HOME>/state/operator-password.json` (mode 0600)                    |
 | the change record          | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history` |
 | the command line           | `fy daemon config`, `fy daemon password`                                |
+| all of it, removed         | `fy daemon reset` on the host — both roots, no password required        |
 
 `fyd --print-config` reports every capability with its **origin** — `default` or `config file` — the
 same provenance treatment every other value gets, because a person reading a permission report is

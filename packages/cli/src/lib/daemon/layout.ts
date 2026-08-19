@@ -42,7 +42,28 @@ export interface DaemonLayout {
   readonly daemonName: string;
   /** Product namespace this installation's CLI-owned directories are keyed by. */
   readonly product: string;
+  /**
+   * The invoking user's home directory, as this invocation resolved it.
+   *
+   * Carried on the layout rather than re-read because one verb has to REFUSE against it: a reset
+   * derives the trees it destroys from this layout, and an `FY_HOME` pointing at the home directory
+   * itself would make that verb delete everything the user owns. A guard cannot compare against a
+   * value it was never given, and re-reading the home here would be a second derivation of the fact
+   * the state home was already resolved from.
+   */
+  readonly homeDirectory: string;
   readonly stateHome: string;
+  /**
+   * The one tree of CLI-owned installation artifacts, keyed by `XDG_STATE_HOME` and the product.
+   *
+   * **Every other state-directory path below is derived from this one**, and that is the fix rather
+   * than tidiness: three of them were spelled independently from `stateDirectory` and `product`, so a
+   * fourth reader — a verb that removes them — would have been a fourth spelling with nothing making
+   * the four agree. This is also the SECOND of the two roots a Ferretry installation occupies, and the
+   * one nobody looks in: an owner who cleared only the state home kept running an ancient daemon,
+   * because the pinned executable lived here.
+   */
+  readonly stateArtifactRoot: string;
   readonly logDirectory: string;
   readonly logFile: string;
   /**
@@ -211,7 +232,8 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const logDirectory = join(stateHome, 'logs');
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
-  const legacySnapshotRoot = join(stateDirectory, product, 'daemon-snapshots', daemonName);
+  const stateArtifactRoot = join(stateDirectory, product);
+  const legacySnapshotRoot = join(stateArtifactRoot, 'daemon-snapshots', daemonName);
   const manager = managerForPlatform(input.platform);
   const systemdUnitName = `${daemonName}.service`;
   const systemdUnitFile = join(configHome, 'systemd', 'user', systemdUnitName);
@@ -221,7 +243,9 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     manager,
     daemonName,
     product,
+    homeDirectory,
     stateHome,
+    stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
     legacySnapshotRoot,
@@ -232,8 +256,8 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     launchdDomain,
     launchdServiceTarget: `${launchdDomain}/${launchdLabel}`,
     launchAgentFile,
-    nixGcRoot: join(stateDirectory, product, 'nix', daemonName),
-    legacySnapshotGcRootDirectory: join(stateDirectory, product, 'nix', 'snapshots', daemonName),
+    nixGcRoot: join(stateArtifactRoot, 'nix', daemonName),
+    legacySnapshotGcRootDirectory: join(stateArtifactRoot, 'nix', 'snapshots', daemonName),
     lifecycleLocks: lifecycleLocksFor(manager, {
       systemdUnitName,
       systemdUnitFile,

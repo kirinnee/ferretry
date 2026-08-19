@@ -6,6 +6,7 @@ import type { HealthView } from '@ferretry/protocol';
 import should from 'should';
 import { NixStoreGcRoot } from '../../../src/adapters/daemon/nix-gc-root.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
+import { FileResetTrees } from '../../../src/adapters/daemon/reset-trees.ts';
 import { FileRetiredArtifacts } from '../../../src/adapters/daemon/retired-artifacts.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
@@ -227,6 +228,13 @@ function deps(
     },
     installedDaemon: () => ({ path: NOTHING, source: 'PATH', version: '1.2.3' }),
     retired: new FileRetiredArtifacts(),
+    // The real tree port, because it is real everywhere else in this file. No verb this suite drives
+    // calls it; `reset` has its own integration file, which boots the daemon on what it left behind.
+    resetTrees: new FileResetTrees(),
+    resetInventory: { count: () => Promise.resolve(undefined) },
+    prompt: { ask: () => Promise.resolve('') },
+    interactive: () => false,
+    clientName: 'fy',
     clock: new ImmediateClock(),
     out,
     firstPassword: { offer: () => Promise.resolve() },

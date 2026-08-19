@@ -4,10 +4,12 @@ import should from 'should';
 import {
   DaemonController,
   type DaemonControllerDeps,
+  DaemonResetRefusedError,
   DaemonShutdownFailedError,
   DaemonStartupFailedError,
 } from '../../../src/lib/daemon/controller';
 import type { DaemonSupervisorReport } from '../../../src/lib/daemon/ports';
+import { ResetRefusedError } from '../../../src/lib/daemon/reset';
 import { UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervisor';
 import {
   absentReport,
@@ -16,6 +18,9 @@ import {
   FakeLifecycleLock,
   FakeLogs,
   FakeNixGcRoot,
+  FakePrompt,
+  FakeResetInventory,
+  FakeResetTrees,
   FakeRetiredArtifacts,
   FakeSupervisor,
   failedReport,
@@ -40,6 +45,8 @@ interface Harness {
   readonly nix: FakeNixGcRoot;
   readonly retired: FakeRetiredArtifacts;
   readonly lifecycle: FakeLifecycleLock;
+  readonly resetTrees: FakeResetTrees;
+  readonly prompt: FakePrompt;
 }
 
 function harness(options: {
@@ -55,6 +62,10 @@ function harness(options: {
   nix?: FakeNixGcRoot;
   retired?: FakeRetiredArtifacts;
   lifecycle?: FakeLifecycleLock;
+  resetTrees?: FakeResetTrees;
+  inventory?: { readonly secrets: number; readonly devices: number } | undefined;
+  prompt?: FakePrompt;
+  interactive?: boolean;
   overrides?: Partial<DaemonControllerDeps>;
 }): Harness {
   const service = new FakeSupervisor('systemd', options.serviceFallback ?? runningReport);
@@ -70,6 +81,8 @@ function harness(options: {
   const retired = options.retired ?? new FakeRetiredArtifacts();
   const lifecycle = options.lifecycle ?? new FakeLifecycleLock();
   const firstPassword = new RecordingFirstPassword();
+  const resetTrees = options.resetTrees ?? new FakeResetTrees();
+  const prompt = options.prompt ?? new FakePrompt();
   const controller = new DaemonController({
     layout: layout(),
     service: options.withoutService === true ? undefined : service,
@@ -80,6 +93,13 @@ function harness(options: {
     lifecycle,
     installedDaemon: () => installedDaemon(),
     retired,
+    resetTrees,
+    // `in` rather than `??`: an explicit `undefined` is the meaningful case — a daemon that is up but
+    // will not answer the inventory routes — so it must not fall back to the default counts.
+    resetInventory: new FakeResetInventory('inventory' in options ? options.inventory : { secrets: 3, devices: 2 }),
+    prompt,
+    interactive: () => options.interactive ?? true,
+    clientName: 'fy',
     clock,
     out,
     firstPassword,
@@ -87,7 +107,7 @@ function harness(options: {
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, clock, nix, retired, lifecycle, firstPassword };
+  return { controller, out, service, direct, logs, clock, nix, retired, lifecycle, firstPassword, resetTrees, prompt };
 }
 
 /** A host with no daemon executable: the resolver refuses, as it does for a relative FY_DAEMON_BIN. */
@@ -491,6 +511,356 @@ describe('daemon stop', () => {
 
     // Act + Assert
     await should(controller.stop()).be.rejectedWith(/did not stop within 1s; inspect .*logs\/fyd\.log/u);
+  });
+});
+
+/**
+ * A reset harness whose daemon is up and stops when asked.
+ *
+ * The shared harness defaults its supervisor to `running` forever, which is a shutdown that never
+ * takes — correct for the stop suite and wrong as the baseline here, where the interesting cases are
+ * about the confirmation and the two trees rather than about a stubborn daemon. Every test that IS about
+ * a stop that will not take arranges that explicitly.
+ */
+function resetSubject(options: Parameters<typeof harness>[0] = {}): Harness {
+  return harness({
+    probes: [health(), undefined],
+    serviceFallback: stoppedReport,
+    serviceReports: [stoppedReport],
+    ...options,
+  });
+}
+
+/** Both roots, populated, so a reset has something to find and to report. */
+function populatedTrees(trail: string[] = []): FakeResetTrees {
+  const trees = new FakeResetTrees(trail);
+  const resolved = layout();
+  trees.answers.set(resolved.stateHome, { kind: 'measured', files: 40, bytes: 2_000_000, escapingLinks: [] });
+  trees.answers.set(resolved.stateArtifactRoot, {
+    kind: 'measured',
+    files: 12,
+    bytes: 98_000_000,
+    escapingLinks: ['nix/fyd -> /nix/store/abc-fyd'],
+  });
+  return trees;
+}
+
+describe('daemon reset', () => {
+  it('should remove BOTH roots, not just the state home everybody looks in', async () => {
+    // Arrange — the defect this verb exists for: an owner cleared the state home by hand, kept the
+    // artifact tree, and went on running the pinned daemon executable inside it.
+    const resolved = layout();
+    const subject = resetSubject({ resetTrees: populatedTrees(), probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.resetTrees.removed).deepEqual([resolved.stateHome, resolved.stateArtifactRoot]);
+    should(subject.out.text).containEql(`removed ${resolved.stateHome}`);
+    should(subject.out.text).containEql(`removed ${resolved.stateArtifactRoot}`);
+    should(subject.out.text).containEql('removed 2 path(s), 52 files, 100.0MB');
+  });
+
+  it('should show the paths, the sizes and the unrecoverable counts BEFORE it destroys anything', async () => {
+    // Arrange
+    const trail: string[] = [];
+    const subject = resetSubject({ resetTrees: populatedTrees(trail), probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert — measured first, removed after, and the preflight names what cannot come back. Health
+    // reports 3 sessions and the inventory 3 secrets and 2 devices.
+    should(trail.filter(entry => entry.startsWith('measure:'))).have.length(2);
+    should(trail.indexOf('measure:/tmp/fy-home/.ferretry')).be.below(trail.indexOf('remove:/tmp/fy-home/.ferretry'));
+    should(subject.out.text).containEql('3 secret(s)');
+    should(subject.out.text).containEql('2 paired device(s)');
+    should(subject.out.text).containEql('3 session(s)');
+    should(subject.out.text).containEql('100.0MB');
+  });
+
+  it('should stop the daemon before it removes anything', async () => {
+    // Arrange — the order is the safety argument. Moving state out from under a running daemon is
+    // exactly the half-state this verb exists to stop people reaching by hand.
+    const trail: string[] = [];
+    const trees = populatedTrees(trail);
+    const subject = resetSubject({
+      resetTrees: trees,
+      probes: [health(), undefined],
+      serviceFallback: stoppedReport,
+      serviceReports: [stoppedReport],
+    });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.service.stops).deepEqual([{ pidHint: 4242, escalate: false }]);
+    should(subject.service.calls.indexOf('stop')).be.above(-1);
+    should(trail.filter(entry => entry.startsWith('remove:'))).have.length(2);
+  });
+
+  it('should refuse the whole reset when the daemon cannot be stopped, having removed nothing', async () => {
+    // Arrange — health keeps answering, so the daemon refuses to go. A reset that carried on would
+    // delete the state a live daemon is still writing into.
+    const trees = populatedTrees();
+    const subject = resetSubject({ resetTrees: trees, probes: [health()], serviceFallback: runningReport, step: 600 });
+
+    // Act
+    let caught: unknown;
+    try {
+      await subject.controller.reset({ yes: true });
+    } catch (error) {
+      caught = error;
+    }
+
+    // Assert — the refusal is the shutdown failure, and NOTHING was removed. The measurement happened,
+    // because it happens before the stop and touches nothing.
+    should(caught).be.instanceof(DaemonShutdownFailedError);
+    should(trees.removed).be.empty();
+    should(trees.measured).have.length(2);
+  });
+
+  it('should reset a daemon that is already stopped, without pressing a stop', async () => {
+    // Arrange — the ordinary recovery case: somebody whose daemon will not start.
+    const subject = resetSubject({
+      resetTrees: populatedTrees(),
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+    });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.service.stops).be.empty();
+    should(subject.resetTrees.removed).have.length(2);
+  });
+
+  it('should say the counts are unavailable, never guess, when the daemon is not answering', async () => {
+    // Arrange — the daemon owns those counts. It is down, so there is nobody to ask, and the CLI does
+    // not read its state to find out.
+    const subject = resetSubject({ resetTrees: populatedTrees(), probes: [undefined], serviceFallback: stoppedReport });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.out.text).containEql('fyd is not running,');
+    should(subject.out.text).containEql('cannot be counted');
+  });
+
+  it('should still reset when the daemon is up but will not answer the inventory routes', async () => {
+    // Arrange — a damaged secret store, or a daemon mid-bootstrap. Counting is a courtesy; the reset is
+    // the point, and a reset that failed because it could not count would be unreachable exactly when
+    // it is needed.
+    const subject = resetSubject({
+      resetTrees: populatedTrees(),
+      probes: [health(), undefined],
+      inventory: undefined,
+      serviceFallback: stoppedReport,
+      serviceReports: [stoppedReport],
+    });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.out.text).containEql('cannot be counted');
+    should(subject.resetTrees.removed).have.length(2);
+  });
+
+  it('should require a typed confirmation at a terminal, and remove nothing until it arrives', async () => {
+    // Arrange
+    const trees = populatedTrees();
+    const prompt = new FakePrompt('reset');
+    const subject = resetSubject({ resetTrees: trees, prompt, probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({});
+
+    // Assert
+    should(prompt.asked).deepEqual(['Type "reset" to confirm:']);
+    should(trees.removed).have.length(2);
+  });
+
+  it('should cancel on any answer that is not the word, having removed nothing', async () => {
+    // Arrange — a bare `y` is precisely the answer this refuses. Something deliberate has to be typed.
+    const trees = populatedTrees();
+    const subject = resetSubject({ resetTrees: trees, prompt: new FakePrompt('y'), probes: [health(), undefined] });
+
+    // Act
+    let caught: unknown;
+    try {
+      await subject.controller.reset({});
+    } catch (error) {
+      caught = error;
+    }
+
+    // Assert
+    should(caught).be.instanceof(DaemonResetRefusedError);
+    should((caught as Error).message).equal('reset cancelled');
+    should(trees.removed).be.empty();
+    should(subject.service.stops).be.empty();
+  });
+
+  it('should accept the word with surrounding whitespace, which is what a terminal delivers', async () => {
+    // Arrange
+    const subject = resetSubject({
+      resetTrees: populatedTrees(),
+      prompt: new FakePrompt(' reset \n'),
+      probes: [health(), undefined],
+    });
+
+    // Act
+    await subject.controller.reset({});
+
+    // Assert
+    should(subject.resetTrees.removed).have.length(2);
+  });
+
+  it('should refuse off a terminal unless --yes was passed, rather than skip the guard', async () => {
+    // Arrange — the failure mode that makes a safety prompt decorative: no TTY, so nobody could type,
+    // so the guard silently does not apply. An unattended run has to say so out loud.
+    const trees = populatedTrees();
+    const subject = resetSubject({ resetTrees: trees, interactive: false, probes: [health(), undefined] });
+
+    // Act
+    let caught: unknown;
+    try {
+      await subject.controller.reset({});
+    } catch (error) {
+      caught = error;
+    }
+
+    // Assert
+    should(caught).be.instanceof(DaemonResetRefusedError);
+    should((caught as Error).message).equal(
+      'refusing to reset fyd without a confirmation — pass --yes to authorize it',
+    );
+    should(trees.removed).be.empty();
+  });
+
+  it('should not ask anything when --yes was passed, on a terminal or off one', async () => {
+    // Arrange
+    const prompt = new FakePrompt();
+    const subject = resetSubject({ resetTrees: populatedTrees(), prompt, probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(prompt.asked).be.empty();
+  });
+
+  it('should refuse a root that cannot be a Ferretry directory before it measures anything', async () => {
+    // Arrange — FY_HOME pointing at the home directory itself. The refusal has to land while nothing
+    // has been touched, which means before the first measurement.
+    const trees = new FakeResetTrees();
+    const subject = resetSubject({
+      resetTrees: trees,
+      probes: [health(), undefined],
+      overrides: { layout: layout({ stateHome: HOME }) },
+    });
+
+    // Act
+    let caught: unknown;
+    try {
+      await subject.controller.reset({ yes: true });
+    } catch (error) {
+      caught = error;
+    }
+
+    // Assert
+    should(caught).be.instanceof(ResetRefusedError);
+    should((caught as Error).message).match(/resolves to the home directory itself/u);
+    should(trees.measured).be.empty();
+    should(trees.removed).be.empty();
+  });
+
+  it('should surface a removal that failed rather than report a clean slate', async () => {
+    // Arrange — a tree that cannot be removed. Half a reset reported as a whole one is the one outcome
+    // worse than a refusal, because the person walks away believing it worked.
+    const trees = populatedTrees();
+    trees.removalFailure = new Error('EACCES: permission denied');
+    const subject = resetSubject({ resetTrees: trees, probes: [health(), undefined], serviceReports: [stoppedReport] });
+
+    // Act + Assert
+    await should(subject.controller.reset({ yes: true })).be.rejectedWith(/EACCES/);
+    should(subject.out.text).not.containEql('clean slate');
+  });
+
+  it('should report plainly when there was nothing on this host to remove', async () => {
+    // Arrange — a second reset, or a host that never started the daemon.
+    const subject = resetSubject({
+      resetTrees: new FakeResetTrees(),
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+    });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.out.text).containEql('fyd had no persistent data on this host; nothing was removed');
+  });
+
+  it('should name the command that brings the machine back, and the password it will offer', async () => {
+    // Arrange
+    const subject = resetSubject({ resetTrees: populatedTrees(), probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert — a clean slate is only useful if somebody knows the next move.
+    should(subject.out.text).containEql('Run `fy daemon start` to bring fyd up on a clean slate');
+    should(subject.out.text).containEql('operator password');
+  });
+
+  it('should name the links inside the trees that point out of them', async () => {
+    // Arrange — the artifact tree holds garbage-collection links into the Nix store, and following one
+    // would recursively delete a store output.
+    const subject = resetSubject({ resetTrees: populatedTrees(), probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.out.text).containEql('nix/fyd -> /nix/store/abc-fyd');
+    should(subject.out.text).containEql('NOTHING it points at is read, followed or removed');
+  });
+
+  it('should hold the lifecycle claims across the prompt and the removal, as one transaction', async () => {
+    // Arrange — a peer `start` between the answer and the deletion would recreate the state home under
+    // a removal that had already been authorized. The prompt is inside the claim for that reason, and
+    // the cost — a peer waiting while somebody reads — is the right trade for this one verb.
+    const lifecycle = new FakeLifecycleLock();
+    const trail: string[] = [];
+    const trees = new FakeResetTrees(trail);
+    const subject = resetSubject({ lifecycle, resetTrees: trees, probes: [undefined], serviceFallback: stoppedReport });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(lifecycle.requests.map(request => request.verb)).deepEqual(['reset', 'reset', 'reset', 'reset']);
+    should(lifecycle.trail[0]).equal('acquire:reset');
+    should(lifecycle.trail.at(-1)).equal('release:reset');
+    should(trail).have.length(4);
+  });
+
+  it('should never ask for the operator password, because forgetting it is a reason to reset', async () => {
+    // Arrange — the second escape hatch alongside `fy daemon password set`. A reset gated on the
+    // password would close the door it exists to open.
+    const subject = resetSubject({ resetTrees: populatedTrees(), probes: [health(), undefined] });
+
+    // Act
+    await subject.controller.reset({});
+
+    // Assert — the only thing asked for is the confirmation word.
+    should(subject.prompt.asked).deepEqual(['Type "reset" to confirm:']);
+    should(subject.firstPassword.offers).equal(0);
   });
 });
 
@@ -1229,6 +1599,11 @@ describe('daemon controller defaults', () => {
       lifecycle: new FakeLifecycleLock(),
       installedDaemon: () => installedDaemon(),
       retired: new FakeRetiredArtifacts(),
+      resetTrees: new FakeResetTrees(),
+      resetInventory: new FakeResetInventory(undefined),
+      prompt: new FakePrompt(),
+      interactive: () => false,
+      clientName: 'fy',
       clock: new SteppingClock(),
       out: new CapturedOutput(),
       firstPassword: new RecordingFirstPassword(),

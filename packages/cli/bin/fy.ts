@@ -45,6 +45,8 @@ import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
+import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
+import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
@@ -460,6 +462,21 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     lifecycle: new FileDaemonLifecycleLock(processes, clock),
     installedDaemon: () => resolveDaemonBinary(environment, daemonName),
     retired: new FileRetiredArtifacts(),
+    resetTrees: new FileResetTrees(),
+    /**
+     * The reset inventory, over the AUTHENTICATED shared client rather than the health probe.
+     *
+     * The secret store and the device registry both sit behind the host's admin credential, which the
+     * probe token is not. It is only ever asked when the daemon answered a health probe, so the
+     * connection it opens is one that already exists, and every failure is `undefined` — the counts are
+     * a courtesy to somebody deciding, never a precondition of the recovery path.
+     */
+    resetInventory: new ProtocolResetInventory(client),
+    prompt: world.prompt,
+    // Read when the reset would have to ask, not when this controller was built — the same answer every
+    // other prompt in this CLI uses: both ends of the terminal, or nobody is there.
+    interactive: () => world.io.interactive(),
+    clientName: BINARY_NAME,
     clock,
     out,
     /**
