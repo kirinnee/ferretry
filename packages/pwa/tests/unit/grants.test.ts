@@ -36,8 +36,8 @@ import {
   PAIRING_PASSWORD_REQUIREMENT,
   PAIRING_PASSWORD_REQUIREMENT_REMOTE,
   PASSWORD_ARRIVAL_VS_CREDENTIAL,
-  PASSWORD_HOST_CLEAR_COMMAND,
   PASSWORD_HOST_SET_COMMAND,
+  PASSWORD_ONE_WAY_NOTE,
   PASSWORD_RECOVERY_NOTE,
   PASSWORD_REMOTE_UNAVAILABLE,
   pairingGate,
@@ -456,8 +456,11 @@ describe('the operator password control', () => {
     // replace it, so the reader who has forgotten theirs is exactly the reader the control refuses.
     // Act + Assert
     expect(PASSWORD_RECOVERY_NOTE).toContain(PASSWORD_HOST_SET_COMMAND);
-    expect(PASSWORD_RECOVERY_NOTE).toContain(PASSWORD_HOST_CLEAR_COMMAND);
     expect(PASSWORD_RECOVERY_NOTE).toContain('without asking for the old one');
+    // It is the ONLY way back now that nothing removes a password, so the copy must not send a
+    // stranded reader to a verb that no longer exists.
+    expect(PASSWORD_RECOVERY_NOTE).not.toContain('password clear');
+    expect(PASSWORD_ONE_WAY_NOTE).toContain('cannot be undone');
     // And the remote refusal names where it CAN be done rather than only that it cannot be done here.
     expect(PASSWORD_REMOTE_UNAVAILABLE).toContain(PASSWORD_HOST_SET_COMMAND);
     // Arrival versus credential, before the tap.

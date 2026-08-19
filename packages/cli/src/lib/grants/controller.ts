@@ -102,26 +102,14 @@ export class GrantController {
    * The VALUE comes from stdin and is never echoed, never logged and never rendered back. What the
    * daemon stores is an argon2id verifier; nothing on either side can recover the password from it,
    * which is why there is no command to show one.
+   *
+   * IT IS ALSO THE ONLY WAY BACK. There is no companion verb that removes the password — removing one
+   * left every already-paired device on an ungated machine — so this replaces without ever asking for
+   * the old one, and a forgotten password is repaired here rather than being a lockout.
    */
   async setPassword(): Promise<void> {
-    const set = await this.deps.gateway.setPassword(await this.deps.passwords.read());
-    this.deps.out.success(
-      set ? 'operator password set — changing any grant from off this host now needs it' : 'operator password cleared',
-    );
-  }
-
-  /**
-   * Removes the operator password.
-   *
-   * A REAL OPERATION, not an accident to be guarded against: an operator may decide their machine no
-   * longer needs the layer. The message says exactly what that now means rather than letting somebody
-   * discover it later.
-   */
-  async clearPassword(): Promise<void> {
-    await this.deps.gateway.setPassword(undefined);
-    this.deps.out.success(
-      'operator password cleared — any paired device can now change this machine’s fleet and settings without one',
-    );
+    await this.deps.gateway.setPassword(await this.deps.passwords.read());
+    this.deps.out.success('operator password set — changing any grant from off this host now needs it');
   }
 
   /** Whether this change turns anything ON, which is the only case that needs the password. */

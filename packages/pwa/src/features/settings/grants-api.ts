@@ -26,8 +26,9 @@
  * here retains it, echoes it or logs it, and there is no reader for it anywhere in this system — the
  * response is a single boolean saying whether one is now set, which is the entire disclosure.
  *
- * CLEARING IS SPELLED AS ABSENCE. `undefined` sends `{}`, so a client bug producing `''` is refused by
- * the minimum-length rule instead of silently disarming the gate.
+ * THERE IS NO REMOVAL TO SPELL. This surface once sent an absent password to mean "remove it"; the
+ * protocol schema now requires the field, because a removal revokes no paired device and would leave
+ * this machine with devices paired and nothing gating them.
  */
 
 import {
@@ -86,24 +87,20 @@ export async function changeGrants(client: GrantClient, patch: GrantsPatch, unlo
 const PasswordOutcomeSchema = GrantsViewSchema.pick({ passwordSet: true });
 
 /**
- * Sets, replaces or clears the operator password. `undefined` CLEARS it.
+ * Sets or replaces the operator password. There is no call that removes one.
  *
  * The unlock goes in the same header a grant change uses, because replacing an existing password is a
  * privileged change and the daemon asks a local browser to prove the current one first. It is passed in
  * and forgotten, exactly as `changeGrants` treats it.
  */
-export async function setOperatorPassword(
-  client: GrantClient,
-  password: string | undefined,
-  unlock?: string,
-): Promise<boolean> {
+export async function setOperatorPassword(client: GrantClient, password: string, unlock?: string): Promise<boolean> {
   const outcome = await client.request(`${GRANTS_PATH}/password`, PasswordOutcomeSchema, {
     method: 'PUT',
     headers: {
       'content-type': 'application/json',
       ...(unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock }),
     },
-    body: JSON.stringify(GrantPasswordRequestSchema.parse(password === undefined ? {} : { password })),
+    body: JSON.stringify(GrantPasswordRequestSchema.parse({ password })),
   });
   return outcome.passwordSet;
 }

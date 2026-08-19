@@ -99,6 +99,10 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
         '',
         'It is stored as an argon2id verifier, never in plaintext, and no route, command or report can',
         'read it back. Set it, or replace it — there is no way to see it.',
+        '',
+        'SETTING ONE IS ONE-WAY. There is no verb that removes it, because removing it while devices are',
+        'paired leaves this machine with paired devices and nothing gating them. Replacing it never asks',
+        'for the old one, so a forgotten password is repaired here rather than being a lockout.',
       ].join('\n'),
     );
 
@@ -108,12 +112,5 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
     .addHelpText('after', '\n  printf %s "$FY_OPERATOR_PASSWORD" | fy daemon password set\n')
     .action(async () => {
       await controller().setPassword();
-    });
-
-  password
-    .command('clear')
-    .description('remove the operator password, so nothing gates a remote configuration change')
-    .action(async () => {
-      await controller().clearPassword();
     });
 }

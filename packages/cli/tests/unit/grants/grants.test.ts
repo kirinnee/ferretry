@@ -70,7 +70,7 @@ class RecordingOutput implements IGrantOutput {
 class FakeGateway implements IGrantGateway {
   changed: { patch: GrantsPatch; unlock: string | undefined } | undefined;
   unlocked: string | undefined;
-  password: string | undefined | 'cleared';
+  password: string | undefined;
 
   constructor(
     private current: GrantsView = view(),
@@ -97,9 +97,9 @@ class FakeGateway implements IGrantGateway {
     return 'fy_unlock_aaaaaaaaaaaaaaaaaaaaaa';
   }
 
-  async setPassword(password: string | undefined): Promise<boolean> {
-    this.password = password ?? 'cleared';
-    return password !== undefined;
+  async setPassword(password: string): Promise<boolean> {
+    this.password = password;
+    return true;
   }
 }
 
@@ -331,36 +331,22 @@ describe('the operator password commands', () => {
     expect(out.messages[0]).toContain('now needs it');
   });
 
-  it('should say exactly what clearing the password means, rather than letting it be discovered', async () => {
-    // Arrange
-    const gateway = new FakeGateway();
+  it('should replace an existing password without ever being told the old one', async () => {
+    // THE ESCAPE HATCH, and the only one there is: nothing removes a password, so a person who has
+    // forgotten theirs recovers by replacing it here or not at all. The controller reads ONE value —
+    // the new password — and there is no parameter, prompt or gateway call for a current one, which is
+    // what keeps a forgotten password a repair rather than a permanently bricked daemon.
+    // Arrange — a machine that already has a password nobody present knows.
+    const gateway = new FakeGateway(view({ passwordSet: true }));
     const { instance, out } = controller(gateway);
-
-    // Act
-    await instance.clearPassword();
-
-    // Assert
-    expect(gateway.password).toBe('cleared');
-    expect(out.messages[0]).toContain('any paired device can now change');
-  });
-
-  it('should report a cleared password when the daemon says none is set', async () => {
-    // Arrange
-    const gateway = new FakeGateway();
-    const out = new RecordingOutput();
-    const instance = new GrantController({
-      gateway,
-      passwords: { read: async () => 'ignored' },
-      out,
-      clientName: 'fy',
-    });
-    gateway.setPassword = async () => false;
 
     // Act
     await instance.setPassword();
 
     // Assert
-    expect(out.messages[0]).toBe('operator password cleared');
+    expect(gateway.password).toBe('operator-secret');
+    expect(gateway.unlocked).toBeUndefined();
+    expect(out.messages[0]).toContain('now needs it');
   });
 });
 
@@ -419,16 +405,13 @@ describe('the daemon grant routes as the client speaks them', () => {
     // Act
     await gateway.unlock('operator-secret');
     await gateway.setPassword('operator-secret');
-    await gateway.setPassword(undefined);
 
     // Assert — the password is in a body every time, and never a path segment.
     expect(seen.map(entry => `${String(entry.method)} ${entry.path}`)).toEqual([
       'POST /v1/grants/unlock',
       'PUT /v1/grants/password',
-      'PUT /v1/grants/password',
     ]);
     for (const entry of seen) expect(entry.path).not.toContain('operator-secret');
-    expect(seen[2]?.body).toBe('{}');
   });
 
   it('should read the report with no request options at all', async () => {
@@ -513,7 +496,7 @@ describe('the command surface', () => {
     expect(gateway.changed?.patch).toEqual({ warden: { configure: false } });
   });
 
-  it('should drive the password verbs from the command line too', async () => {
+  it('should drive setting the password from the command line, and offer no verb that removes one', async () => {
     // Arrange
     const program = new Command();
     program.command('daemon').description('manage the daemon');
@@ -523,12 +506,14 @@ describe('the command surface', () => {
 
     // Act
     await program.parseAsync(['daemon', 'password', 'set'], { from: 'user' });
-    const afterSet = gateway.password;
-    await program.parseAsync(['daemon', 'password', 'clear'], { from: 'user' });
 
-    // Assert
-    expect(afterSet).toBe('operator-secret');
-    expect(gateway.password).toBe('cleared');
+    // Assert — `set` is the only verb. A removal revokes no paired device, so a machine that had one
+    // would keep it and lose the gate; the CLI must not offer that under any spelling.
+    expect(gateway.password).toBe('operator-secret');
+    const password = program.commands
+      .find(command => command.name() === 'daemon')
+      ?.commands.find(command => command.name() === 'password');
+    expect(password?.commands.map(command => command.name())).toEqual(['set']);
   });
 
   it('should read the report through the default subcommand', async () => {

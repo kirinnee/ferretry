@@ -313,7 +313,15 @@ export class CapabilityGrantService implements CapabilityGuard {
   }
 
   /**
-   * Sets, replaces or clears the operator password. LOCAL ONLY, and only past the gate.
+   * Sets or replaces the operator password. LOCAL ONLY, and only past the gate.
+   *
+   * ## THERE IS NO REMOVAL, AND THAT ASYMMETRY IS DELIBERATE
+   *
+   * This once accepted an absent password as "remove it". Removal revokes no device, so a machine that
+   * had paired one — and `PairingService.mint` refuses to pair without a password, so every paired
+   * machine had one — was left with paired devices and nothing in front of them. Setting a password is
+   * therefore ONE-WAY. The cost is accepted knowingly: somebody who sets one and pairs nothing has no
+   * route back to a passwordless machine and unlocks to change local settings from a browser.
    *
    * ## THE HOST'S COMMAND LINE MAY ALWAYS DO THIS, AND THAT IS THE ESCAPE HATCH
    *
@@ -330,16 +338,15 @@ export class CapabilityGrantService implements CapabilityGuard {
    * Every held unlock is dropped: a password that changed must invalidate what the old one bought, or
    * rotating it after a device is lost achieves nothing.
    */
-  async setPassword(password: string | undefined, presentation: CapabilityPresentation): Promise<void> {
+  async setPassword(password: string, presentation: CapabilityPresentation): Promise<void> {
     const held = this.heldUnlock(presentation.unlock, this.deps.clock.nowMs()) !== undefined;
     if (!mayChangeOperatorPassword(this.arrival(presentation, held)))
       throw new GrantError(
         'forbidden',
         `changing this machine's operator password needs the password it already has — enter it to unlock first. If you do not have it, replace it from a terminal on this machine with \`${this.deps.clientName} daemon password set\`, which never asks for the old one.`,
       );
-    if (password === undefined) await this.deps.passwords.clear();
-    else await this.deps.passwords.set(password);
-    this.passwordSet = password !== undefined;
+    await this.deps.passwords.set(password);
+    this.passwordSet = true;
     this.attempts = INITIAL_UNLOCK_ATTEMPTS;
     this.unlocks = [];
   }

@@ -5926,7 +5926,6 @@ function Shell() {
             onChange={() => {}}
             onUnlock={() => {}}
             onSetPassword={() => {}}
-            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5944,7 +5943,6 @@ function Shell() {
             onChange={() => {}}
             onUnlock={() => {}}
             onSetPassword={() => {}}
-            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5963,7 +5961,6 @@ function Shell() {
             onChange={() => {}}
             onUnlock={() => {}}
             onSetPassword={() => {}}
-            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -5983,7 +5980,6 @@ function Shell() {
             onChange={() => {}}
             onUnlock={() => {}}
             onSetPassword={() => {}}
-            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -6009,7 +6005,6 @@ function Shell() {
             onChange={() => {}}
             onUnlock={() => {}}
             onSetPassword={() => {}}
-            onClearPassword={() => {}}
           />
         </div>
       ),
@@ -6027,7 +6022,6 @@ function Shell() {
             onChange={() => {}}
             onUnlock={() => {}}
             onSetPassword={() => {}}
-            onClearPassword={() => {}}
           />
         </div>
       ),

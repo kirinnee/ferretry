@@ -177,21 +177,38 @@ describe('the operator password verifier', () => {
     should(await passwords.verify('anything')).be.false();
   });
 
-  it('should leave a visible trace when the password is cleared', async () => {
-    // A file that simply vanished is indistinguishable from one that was never created, and those
-    // are very different histories for a machine that gates remote configuration.
+  it('should keep a verifier on disk through every write, offering nothing that removes one', async () => {
+    // THE MISSING METHOD IS THE CONTRACT. Removing a verifier revokes no paired device, so it would
+    // leave a machine with devices paired and nothing gating them — the state pairing exists to make
+    // unreachable. This asserts the shape rather than trusting the absence: every write this adapter
+    // can perform leaves a password set.
     // Arrange
     const world = tree();
     const passwords = new FileOperatorPassword(paths.operatorPassword, world.port);
-    await passwords.set('operator-secret');
 
     // Act
-    await passwords.clear();
+    await passwords.set('operator-secret');
+    await passwords.set('the-replacement');
 
     // Assert
-    should(world.files.get(paths.operatorPassword)?.trim()).equal('{}');
-    should(await passwords.isSet()).be.false();
+    should(await passwords.isSet()).be.true();
+    should(await passwords.verify('the-replacement')).be.true();
     should(await passwords.verify('operator-secret')).be.false();
+    should(passwords).not.have.property('clear');
+  });
+
+  it('should read a passwordless file written by an earlier daemon as an ABSENCE, not as damage', async () => {
+    // `{}` is what removing a password used to leave behind. The verb is gone, but the file is not: a
+    // machine that ran an older daemon still has one, and it must come up passwordless rather than
+    // refusing every governed capability as undetermined.
+    // Arrange
+    const world = tree();
+    world.files.set(paths.operatorPassword, '{}\n');
+    const passwords = new FileOperatorPassword(paths.operatorPassword, world.port);
+
+    // Act + Assert
+    should(await passwords.isSet()).be.false();
+    should(await passwords.verify('anything')).be.false();
   });
 
   it('should RAISE on a damaged verifier rather than reading it as absent', async () => {

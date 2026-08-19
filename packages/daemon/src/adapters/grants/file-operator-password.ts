@@ -34,8 +34,10 @@ const VerifierDocumentSchema = z.strictObject({ argon2id: z.string().min(1) });
  * ## USE, NEVER READ
  *
  * There is no getter, and that is the feature rather than an omission. This class can answer "does a
- * verifier exist" and "does this candidate match", and it can replace or remove the verifier. It
- * cannot hand anything back, so no route, log line, report or error above it can leak a password —
+ * verifier exist" and "does this candidate match", and it can replace the verifier. It cannot remove
+ * one — that verb was deleted, because a removal revokes no paired device and would leave a machine
+ * with devices paired and nothing gating them. It cannot hand anything back either, so no route, log
+ * line, report or error above it can leak a password —
  * not because callers are careful, but because they are never given one. Adding a reader here would
  * delete that property for the whole product, exactly as it would in the secret store.
  *
@@ -67,18 +69,6 @@ export class FileOperatorPassword implements OperatorPasswordPort {
   }
 
   /**
-   * Removing the verifier turns the security layer off for this machine.
-   *
-   * It writes an ABSENT verifier rather than deleting the file, so the act leaves a trace on disk
-   * that a person can see; a file that simply vanished is indistinguishable from one that was never
-   * created, and those are very different histories for a machine that gates remote configuration.
-   */
-  async clear(): Promise<void> {
-    await this.files.writeTextAtomic(this.path, '{}\n');
-    await this.files.setMode(this.path, SECRET_MODE);
-  }
-
-  /**
    * Whether a candidate matches.
    *
    * A MACHINE WITH NO VERIFIER ANSWERS `false`, never `true`. "There is nothing to check" must never
@@ -95,8 +85,10 @@ export class FileOperatorPassword implements OperatorPasswordPort {
     const text = (await this.files.readText(this.path))?.trim();
     if (text === undefined || text === '') return undefined;
     const parsed: unknown = JSON.parse(text);
-    // `{}` is the cleared state and means "no password", which is different from a file whose
-    // contents are wrong — the first is a decision an operator made, the second is damage.
+    // `{}` means "no password", which is different from a file whose contents are wrong — the first
+    // is an absence, the second is damage. Nothing writes that shape any more: it was what removing a
+    // password left behind, and the verb that produced it is gone. It is still READ, because a machine
+    // that ran an earlier daemon has one on disk and must come up passwordless rather than damaged.
     if (typeof parsed === 'object' && parsed !== null && !('argon2id' in parsed)) return undefined;
     return VerifierDocumentSchema.parse(parsed).argon2id;
   }

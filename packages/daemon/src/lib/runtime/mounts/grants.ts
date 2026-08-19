@@ -33,10 +33,14 @@ import type { UnlockOutcome } from '../../grants/types.ts';
  *
  * ## THE PASSWORD ROUTE IS LOCAL-ONLY, AND LOCAL IS NOT THE SAME AS UNGATED
  *
- * Setting or clearing the operator password is the one action that decides whether the security layer
- * exists at all, so a remote caller must never reach it: a paired device that could clear the password
- * could remove its own gate. `privilegedOnly` is what refuses that, and it is a fact about the CARRIER
+ * Setting the operator password is the one action that decides whether the security layer exists at
+ * all, so a remote caller must never reach it: a paired device that could rewrite the password could
+ * rewrite its own gate. `privilegedOnly` is what refuses that, and it is a fact about the CARRIER
  * rather than about the token — the relay terminates on this host, so nothing weaker would do.
+ *
+ * THE ROUTE ONLY EVER SETS. It once read an absent `password` as "remove it", which is how a machine
+ * could end up with paired devices and no gate; the schema now requires the field, so there is no body
+ * that says otherwise.
  *
  * ARRIVAL AND CREDENTIAL ARE SEPARATE FACTS, which is why the route's `minimum: 'operator'` is not the
  * whole answer either. A local BROWSER reaches this route and is a paired device; it needs an unlock
@@ -68,7 +72,7 @@ export interface GrantSubsystem {
   unlock(password: string): Promise<UnlockOutcome>;
   patch(patch: GrantsPatch, presentation: CapabilityPresentation): Promise<GrantsView>;
   /** Takes the presentation because WHICH local caller decides it: see the header above. */
-  setPassword(password: string | undefined, presentation: CapabilityPresentation): Promise<void>;
+  setPassword(password: string, presentation: CapabilityPresentation): Promise<void>;
 }
 
 const REFUSALS: Readonly<Record<'invalid' | 'forbidden' | 'unavailable', { status: number; code: string }>> = {
@@ -146,16 +150,17 @@ async function unlock(subsystem: GrantSubsystem, context: RouteContext): Promise
 }
 
 /**
- * Setting or clearing the operator password.
+ * Setting or replacing the operator password.
  *
  * The RESPONSE says only whether one is now set. Echoing anything else — a length, a masked form, a
  * fingerprint — would be the first crack in "never rendered back", and there is no version of that
- * information a client needs.
+ * information a client needs. It is a constant `true` rather than a derived boolean because this route
+ * has one outcome: the schema requires a password, so a request that reached here set one.
  */
 async function setPassword(subsystem: GrantSubsystem, context: RouteContext): Promise<ApiResponse> {
   const body = await parseBody(context.request, GrantPasswordRequestSchema);
   await subsystem.setPassword(body.password, presentationOf(context)).catch(refuse);
-  return jsonResponse({ passwordSet: body.password !== undefined });
+  return jsonResponse({ passwordSet: true });
 }
 
 export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {

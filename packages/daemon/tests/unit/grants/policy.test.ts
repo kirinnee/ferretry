@@ -381,7 +381,10 @@ describe('the one refusal whose reader may not be the operator', () => {
     // Assert
     should(said).match(/Enter it to unlock/u);
     should(said).match(/fy daemon password set/u);
-    should(said).match(/fy daemon password clear/u);
+    // And it names no verb that removes the password: none exists, and a refusal that sent somebody to
+    // one would be a dead end wearing the clothes of an instruction.
+    should(said).not.match(/password clear/u);
+    should(said).match(/never asks for the old one/u);
     // And it never implies the operator refused something they in fact allowed.
     should(said).not.match(/has not granted/u);
   });

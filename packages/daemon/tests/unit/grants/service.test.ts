@@ -48,9 +48,6 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
       set: async password => {
         stored = password;
       },
-      clear: async () => {
-        stored = undefined;
-      },
       verify: async candidate => stored !== undefined && candidate === stored,
     },
     tokens: {
@@ -369,18 +366,22 @@ describe('the operator password itself', () => {
     should(context.service.hasPassword()).be.true();
   });
 
-  it('should turn the security layer off when the password is cleared', async () => {
-    // A real operation: an operator may decide their machine no longer needs one.
+  it('should keep the security layer on across every move of the password, because nothing turns it off', async () => {
+    // SETTING ONE IS ONE-WAY, and this is the assertion that says so. Removal used to be spelled as an
+    // absent password; it revokes no paired device, so a machine that had paired one — and pairing
+    // refuses without a password — was left with paired devices and no gate. There is now no argument,
+    // no second call and no port method that reaches that state.
     // Arrange
     const context = world({ password: 'first-secret' });
     await context.service.refresh();
 
-    // Act
-    await context.service.setPassword(undefined, local);
+    // Act — every move this service offers, one after another.
+    await context.service.setPassword('second-secret', local);
+    await context.service.setPassword('third-secret', local);
 
-    // Assert
-    should(context.service.hasPassword()).be.false();
-    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('ungated');
+    // Assert — a remote caller is still gated, and the layer never went off in between.
+    should(context.service.hasPassword()).be.true();
+    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('locked');
   });
 
   it('should let the HOST replace a password nobody knows, which is the escape hatch', async () => {

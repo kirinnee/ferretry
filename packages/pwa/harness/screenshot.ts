@@ -1566,7 +1566,7 @@ try {
           // AND THE PASSWORD FRAMES IN LIGHT. This panel is the one control on the screen that can lock
           // somebody out, so its warn and danger tones have to be legible in both themes rather than
           // designed in dark and inverted — a hairline that vanishes on `surface-2` takes a boundary with
-          // it, and the "remove the password" warning is the last place to lose contrast.
+          // it, and the locked panel's warn tone is the last place to lose contrast.
           await page.evaluate(() => {
             document.documentElement.dataset.theme = 'studio-light';
           });

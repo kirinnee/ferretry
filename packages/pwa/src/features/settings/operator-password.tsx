@@ -25,7 +25,7 @@
  * back: no masked form, no length, no fingerprint. There is no reader for it anywhere in this system.
  */
 
-import { CircleAlert, KeyRound, Lock, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react';
+import { CircleAlert, KeyRound, Lock, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
@@ -34,7 +34,7 @@ import {
   operatorPasswordMismatch,
   operatorPasswordProblem,
   PASSWORD_ARRIVAL_VS_CREDENTIAL,
-  PASSWORD_CLEAR_WARNING,
+  PASSWORD_ONE_WAY_NOTE,
   PASSWORD_RECOVERY_NOTE,
   PASSWORD_REMOTE_UNAVAILABLE,
   type PasswordControlState,
@@ -87,15 +87,6 @@ export interface OperatorPasswordCardProps {
   /** The lead sentence, when the surface around this control needs to say why it is being asked. */
   readonly intro?: string;
   readonly onSet: (password: string) => void;
-  /**
-   * Removing the password, when the surface offering this control is a place that may.
-   *
-   * OPTIONAL, AND ABSENT MEANS THE ROW IS NOT DRAWN. The pairing flow renders this card to satisfy a
-   * requirement — "no code until a password exists" — so offering "remove the password" inside it would
-   * put the undo for the requirement beside the requirement. A no-op handler would be worse: a control
-   * that silently does nothing is exactly the dead end this panel exists to remove.
-   */
-  readonly onClear?: () => void;
 }
 
 /**
@@ -111,12 +102,10 @@ export function OperatorPasswordCard({
   heading,
   intro,
   onSet,
-  onClear,
 }: OperatorPasswordCardProps) {
   const headingId = useId();
   const fieldId = useId();
   const confirmId = useId();
-  const clearNoteId = useId();
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
 
@@ -239,12 +228,15 @@ export function OperatorPasswordCard({
               <KeyRound size={14} aria-hidden="true" />
               {exists ? 'Replace the password' : 'Set the password'}
             </button>
-            {exists ? null : (
-              <span className="text-meta leading-base text-faint">
-                Once one is set, this browser is asked for it before it changes anything here.
-              </span>
-            )}
           </div>
+          {/* THE IRREVERSIBILITY IS SAID BEFORE THE FIRST PRESS, not discovered by hunting for an undo
+              that does not exist. It is only shown to somebody about to set the first one: a reader
+              replacing a password they already have is not making this decision again. */}
+          {exists ? null : (
+            <p className="m-0 text-meta leading-base text-faint" data-password-one-way="">
+              {PASSWORD_ONE_WAY_NOTE}
+            </p>
+          )}
         </form>
       ) : null}
 
@@ -254,29 +246,6 @@ export function OperatorPasswordCard({
       <p className="m-0 text-meta leading-base text-muted" data-password-recovery="">
         {PASSWORD_RECOVERY_NOTE}
       </p>
-
-      {/* Removing it is the one action here that makes the machine less protected, so the consequence is
-          in the same breath as the button — the treatment a device revoke already gets — rather than in
-          a confirmation somebody clicks through. */}
-      {state.kind === 'ready' && exists && onClear !== undefined ? (
-        <div className="flex min-w-0 flex-col gap-1 border-t border-border-strong pt-3">
-          <button
-            type="button"
-            disabled={busy}
-            data-variant="danger"
-            data-password-clear=""
-            aria-describedby={clearNoteId}
-            onClick={onClear}
-            className="kt-btn self-start disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            Remove the password
-          </button>
-          <p id={clearNoteId} className="m-0 text-meta leading-base text-warn" data-password-clear-warning="">
-            {PASSWORD_CLEAR_WARNING}
-          </p>
-        </div>
-      ) : null}
 
       {failure === null ? null : (
         <p
