@@ -62,11 +62,15 @@ function LimitInput({
   const id = useId();
   const Icon = icon === 'cpu' ? Cpu : MemoryStick;
   return (
-    <label className="grid min-w-0 gap-1 text-ui font-medium text-fg" htmlFor={id}>
+    <label className="grid min-w-0 gap-1 text-cell font-medium text-fg" htmlFor={id}>
       <span className="flex items-center gap-1.5">
         <Icon size={14} aria-hidden="true" />
         {label}
       </span>
+      {/* A FIELD AS WIDE AS ITS VALUE. This stretched to fill its grid column, so a two-digit
+          percentage sat in a 400px box with 380px of empty space and its `%` suffix stranded at the
+          far end — the field stopped reading as a number and read as a broken text input. It is
+          capped at the width three digits need, and the `%` sits against it where a unit belongs. */}
       <span className="flex items-center gap-2">
         <input
           id={id}
@@ -77,9 +81,9 @@ function LimitInput({
           value={value}
           disabled={disabled}
           onChange={event => onChange(Number(event.target.value))}
-          className="h-control min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-control w-[5.5rem] min-w-0 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <span className="text-ui text-muted" aria-hidden="true">
+        <span className="text-cell text-muted" aria-hidden="true">
           %
         </span>
       </span>
