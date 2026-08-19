@@ -166,7 +166,11 @@ export function OperatorUnlockDialog({
               {failure.message}
             </p>
           )}
-          <div className="mt-1 flex flex-wrap gap-2">
+          {/* STACKED ON A PHONE, side by side from `sm:` up. Measured at 390px: two `flex-1` buttons give
+              the action about 160px, and the theme renders button labels in caps — so "CONFIRM AND APPLY"
+              was clipped mid-word at the right edge. A full-width action cannot be clipped by a label
+              this or any other panel chooses. */}
+          <div className="mt-1 flex flex-col gap-2 sm:flex-row">
             {/* 44px is the touch floor, not a look: this is the last control between a finger and a
                 change to somebody's machine. */}
             <button

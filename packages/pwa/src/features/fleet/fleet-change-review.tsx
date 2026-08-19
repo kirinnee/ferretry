@@ -534,7 +534,7 @@ export function FleetFirstRunPlan({
         {...controls}
         labels={{
           action: 'Create these files',
-          confirming: 'Confirm and create these files',
+          confirming: 'Confirm and create',
           working: 'Creating…',
           discard: 'Not now',
         }}

@@ -7094,7 +7094,9 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
           <FleetConfigurationSurface
             connection={daemon}
             createClient={async () => {
-              throw new Error('fyd is unavailable at http://127.0.0.1:9999 (Failed to fetch)');
+              // The SAME address the fixture pairs on, because the real client names the address it dialled:
+              // two different ones on one screen is the confusion this panel exists to remove.
+              throw new Error(`fyd is unavailable at ${daemon.baseUrl} (Failed to fetch)`);
             }}
           />
         </section>
