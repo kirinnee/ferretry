@@ -571,9 +571,14 @@ export interface BrowserSession {
   stop(): Promise<void>;
 }
 
+interface BrowserContextLike {
+  newPage(): Promise<BrowserPage>;
+  grantPermissions(permissions: readonly string[], options?: { origin?: string }): Promise<void>;
+}
+
 interface ChromiumLauncher {
   launch(options: { executablePath: string; headless: boolean; args: string[] }): Promise<{
-    newContext(options?: Record<string, unknown>): Promise<{ newPage(): Promise<BrowserPage> }>;
+    newContext(options?: Record<string, unknown>): Promise<BrowserContextLike>;
     close(): Promise<void>;
   }>;
 }
@@ -623,6 +628,33 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
     viewport: { width: 1_280, height: 900 },
     ...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
   });
+  /**
+   * LOCAL NETWORK ACCESS, GRANTED FOR EVERY JOURNEY, BEFORE THE FIRST NAVIGATION.
+   *
+   * READ THIS BEFORE DEBUGGING A JOURNEY WHOSE SERVER RECEIVED NOTHING. Measured against Google
+   * Chrome 150 with a logging loopback server: a page on a PUBLIC origin fetching
+   * `http://127.0.0.1:<port>` is refused by the browser before any request is sent. The server sees
+   * ZERO requests — no preflight, not even a connection — and the only evidence is one console line,
+   * "Permission was denied for this request to access the `loopback` address space". A headless
+   * browser has no UI to prompt in, so the permission is denied by default, and the journey fails
+   * for a reason that has nothing to do with the code under test. It is indistinguishable from a
+   * routing defect, a CORS defect, or a daemon that never bound its port, which is why this is
+   * granted here for everyone rather than documented for whoever reads the right test file.
+   *
+   * IT IS A PERMISSION, NOT A HEADER, so no daemon change can substitute for it: nothing can be sent
+   * back to rescue a request that never left the browser, and `Access-Control-Allow-Private-Network:
+   * true` on every response was measured to change nothing in either the denied or the granted case.
+   * Granted, the preflight arrives carrying no private-network request header at all and ordinary
+   * CORS applies — so a daemon needs nothing extra and a browser needs exactly this.
+   *
+   * Today's journeys serve their page from loopback too, and local-to-local is not gated, so this
+   * grants nothing they do not already have. It is here for the FIRST journey driven from a public
+   * origin, which would otherwise be debugged against the wrong package for a day.
+   *
+   * A browser that does not know the permission name cannot be enforcing it, so a refusal to grant
+   * is not a reason to fail a run that would have worked.
+   */
+  await context.grantPermissions(['local-network-access']).catch(() => undefined);
   const page = await context.newPage();
 
   const consoleLines: string[] = [];
