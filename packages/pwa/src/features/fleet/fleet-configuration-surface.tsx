@@ -34,7 +34,9 @@ import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
 import { type LocalNetworkAccess, readLocalNetworkAccess } from '../../lib/local-network-access.ts';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import { unlockGrants } from '../settings/grants-api.ts';
+import { FleetAccountStepper } from './fleet-account-stepper.tsx';
 import {
   applyFleetProposal,
   createFleetProposal,
@@ -56,10 +58,9 @@ import {
   readFleetPermissions,
   readFleetProposal,
 } from './fleet-api.ts';
-import { FleetAccountForm, FleetLayerForm, FleetProblems } from './fleet-change-forms.tsx';
+import { FleetLayerForm, FleetProblems } from './fleet-change-forms.tsx';
 import {
   accountHarnessDetection,
-  accountProblems,
   applyInstructionsChoice,
   CHANGE_LIMITS,
   classifyInventory,
@@ -70,14 +71,14 @@ import {
   detectedAccountDraft,
   editAccountProposal,
   type FleetAccountDraft,
-  fleetApplyAuthority,
-  fleetApplyCopy,
-  fleetApplyNeedsPassword,
   type FleetAssetKnowledge,
   type FleetInventory,
   type FleetLayerDraft,
   type FleetProbe,
   type FleetUnreadableAsset,
+  fleetApplyAuthority,
+  fleetApplyCopy,
+  fleetApplyNeedsPassword,
   initializeProposal,
   instructionsAssets,
   instructionsChoices,
@@ -101,7 +102,14 @@ import {
   FleetRefusalAlert,
   FleetUnreachableNotice,
 } from './fleet-change-review.tsx';
-import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
+import {
+  type FleetInstructionsSource,
+  type FleetStepId,
+  instructionsChoiceFor,
+  openingInstructionsSource,
+  skillsStoreItems,
+  withMode,
+} from './fleet-stepper-model.ts';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
 
@@ -111,6 +119,21 @@ type FleetComposeMode =
   | {
       readonly kind: 'create';
       readonly draft: FleetAccountDraft;
+      /**
+       * Which question the person is on.
+       *
+       * Here rather than inside the stepper because it is part of what they are composing: the surface
+       * re-renders on every daemon read, and a position owned privately by the component would be reset
+       * by one — sending somebody back to step one because a manifest poll landed.
+       */
+      readonly step: FleetStepId;
+      /**
+       * Which of the three answers the instructions step is on.
+       *
+       * HELD rather than re-derived from the draft's path: naming a new document the store already has
+       * would otherwise silently become "point at that one" instead of refusing the collision.
+       */
+      readonly instructionsSource: FleetInstructionsSource;
       /**
        * A new account writes asset text too, so it needs the same knowledge an edit does. Nothing is ever
        * READ here — a new account has no declared layer to load — so `loaded` stays empty and every
@@ -780,13 +803,18 @@ export function FleetConfigurationSurface({
    * refused or stopped at a bound leaves an unconditional `tree` blocker behind.
    */
   const startCreate = (): void => {
+    // Opened ALREADY FILLED IN from what the daemon detected, rather than opened blank and then
+    // patched: a form that flickers from empty to prefilled is a form whose first frame is a lie about
+    // what a person has to type. The lane is DERIVED from how the account runs, so the first frame also
+    // agrees with itself — a draft opening on "auto" against a fleet that declares an "auto" lane must
+    // not simultaneously claim "default".
+    const detected = detectedAccountDraft(detection, session.discovery);
     patch(generation, {
       mode: {
         kind: 'create',
-        // Opened ALREADY FILLED IN from what the daemon detected, rather than opened blank and then
-        // patched: a form that flickers from empty to prefilled is a form whose first frame is a lie
-        // about what a person has to type.
-        draft: detectedAccountDraft(detection, session.discovery),
+        draft: withMode(detected, detected.mode, variants),
+        step: 'harness',
+        instructionsSource: openingInstructionsSource(detected),
         unreadable: [],
         assets: { listed: [], loaded: [] },
         loading: client !== null,
@@ -821,11 +849,23 @@ export function FleetConfigurationSurface({
    * staging on exactly those terms: the alternative is a change that quietly replaces somebody's house
    * rules with nothing. A refusal is kept as the daemon's own sentence, so the blocker says WHY.
    */
-  const chooseInstructions = (create: Extract<FleetComposeMode, { readonly kind: 'create' }>, value: string): void => {
+  const chooseInstructions = (
+    create: Extract<FleetComposeMode, { readonly kind: 'create' }>,
+    value: string,
+    source: FleetInstructionsSource = create.instructionsSource,
+  ): void => {
     const chosen = applyInstructionsChoice(create.draft, value, session.discovery);
     const path = chosen.load;
+    // ONE patch for both halves. Answering the source question and pointing the draft at the document
+    // that answer implies are the same act; as two patches the second spread a `mode` captured before
+    // the first and threw its change away.
     patch(generation, {
-      mode: { ...create, draft: chosen.draft, reading: path !== undefined && client !== null },
+      mode: {
+        ...create,
+        instructionsSource: source,
+        draft: chosen.draft,
+        reading: path !== undefined && client !== null,
+      },
     });
     if (path === undefined || client === null) return;
 
@@ -1056,8 +1096,18 @@ export function FleetConfigurationSurface({
             and this element exists to BE the landing place focus is sent to when the panel opens. */}
         {session.proposal === null && mode.kind === 'create' ? (
           <section className="kt-panel overflow-hidden" ref={createRef} tabIndex={-1} aria-label="New account">
-            <FleetAccountForm
+            <FleetAccountStepper
               draft={mode.draft}
+              step={mode.step}
+              onStep={step => patch(generation, { mode: { ...mode, step } })}
+              instructionsSource={mode.instructionsSource}
+              onInstructionsSource={source =>
+                chooseInstructions(
+                  mode,
+                  instructionsChoiceFor(source, instructionsAssets(mode.assets.listed, session.config)[0]),
+                  source,
+                )
+              }
               // Every edit goes through ONE reconciliation: the field they touched stops claiming to be
               // detected, a harness change refills what the old harness was speaking for, and the
               // derived document name keeps up with the account until they name their own.
@@ -1068,17 +1118,18 @@ export function FleetConfigurationSurface({
               }
               onSubmit={() => void stage(createAccountProposal(mode.draft))}
               onCancel={() => dismissed({ mode: { kind: 'idle' }, refusal: null })}
-              problems={[
-                // The same one filter an edit goes through. A new account has loaded nothing, so any
-                // document the daemon already lists is text this browser has never seen.
-                ...unreadableAssetProblems(
-                  currentUnreadable(
-                    [...mode.unreadable, ...unseenAssets(mode.draft.layer, mode.assets)],
-                    mode.draft.layer,
-                  ),
-                ),
-                ...accountProblems(mode.draft, session.config),
-              ]}
+              // The ENTRIES rather than the sentences, because the stepper routes each one to the step
+              // whose field names that path. The same one filter an edit goes through: a new account has
+              // loaded nothing, so any document the daemon already lists is text nobody here has seen.
+              assetBlockers={currentUnreadable(
+                [...mode.unreadable, ...unseenAssets(mode.draft.layer, mode.assets)],
+                mode.draft.layer,
+              )}
+              config={session.config}
+              discovery={session.discovery}
+              published={live}
+              skillsStore={skillsStoreItems(session.config, mode.assets.listed)}
+              storeDocuments={instructionsAssets(mode.assets.listed, session.config)}
               disabled={session.busy || mode.loading}
               loading={mode.loading}
               detection={detection}

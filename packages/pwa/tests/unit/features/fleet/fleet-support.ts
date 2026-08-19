@@ -316,3 +316,58 @@ export const unlockWith = async (container: HTMLElement, password: string): Prom
   await type(unlockField(container), password);
   await click(must(container.querySelector<HTMLElement>('[data-operator-unlock-submit]'), 'the unlock button'));
 };
+
+// ─── driving the new-account stepper ──────────────────────────────────────────────────────────
+
+/** Which question the open stepper is showing. */
+export const stepperStep = (container: HTMLElement): string =>
+  pick(container, '[data-fleet-account-stepper]').getAttribute('data-fleet-account-stepper') ?? '';
+
+/**
+ * The input inside one card of a radio or checkbox group.
+ *
+ * The card is a `<label>` wrapping an `sr-only` input, so a person clicks the card and the platform
+ * changes the input. A test clicks the INPUT, which is what the card's click resolves to anyway —
+ * going through the label would only prove happy-dom forwards label clicks.
+ */
+export const card = (container: HTMLElement, group: string, id: string): HTMLInputElement =>
+  must(
+    container.querySelector<HTMLInputElement>(
+      `[data-fleet-choice-group="${group}"] [data-fleet-choice="${id}"] input, [data-fleet-check-group="${group}"] [data-fleet-check="${id}"] input`,
+    ),
+    `the "${id}" card in the ${group} group`,
+  );
+
+/** Whether that card reads as chosen, from the attribute it renders rather than from a class. */
+export const cardChosen = (container: HTMLElement, group: string, id: string): boolean => {
+  const node = must(
+    container.querySelector<HTMLElement>(
+      `[data-fleet-choice-group="${group}"] [data-fleet-choice="${id}"], [data-fleet-check-group="${group}"] [data-fleet-check="${id}"]`,
+    ),
+    `the "${id}" card in the ${group} group`,
+  );
+  return (
+    node.getAttribute('data-fleet-choice-selected') === 'true' ||
+    node.getAttribute('data-fleet-check-selected') === 'true'
+  );
+};
+
+/** Press Next once, which is the only way forward through the sequence. */
+export const next = async (container: HTMLElement): Promise<void> => {
+  await click(button(container, 'Next'));
+};
+
+/**
+ * Walk forward to a named step.
+ *
+ * Forward only, and one press at a time, because that is the whole claim being tested: a step a draft
+ * cannot leave stops the walk here rather than somewhere later. A step that will not advance therefore
+ * fails with the step it stuck on rather than with a missing element three screens away.
+ */
+export const walkTo = async (container: HTMLElement, step: string): Promise<void> => {
+  for (let pressed = 0; pressed < 8; pressed += 1) {
+    if (stepperStep(container) === step) return;
+    await next(container);
+  }
+  throw new Error(`the stepper stopped at "${stepperStep(container)}" and never reached "${step}"`);
+};

@@ -19,6 +19,8 @@ import {
   accountId,
   area,
   button,
+  card,
+  cardChosen,
   choose,
   chooser,
   click,
@@ -29,14 +31,17 @@ import {
   harness,
   lockedPermissions,
   manifest,
+  next,
   permissions,
   pick,
   proposal,
   scaffoldProposal,
+  stepperStep,
   type,
   unlockField,
   unlockView,
   unlockWith,
+  walkTo,
 } from './fleet-support.ts';
 
 const laptop = daemonConnection({
@@ -540,16 +545,20 @@ describe('a daemon this browser could not reach', () => {
 });
 
 describe('creating an account', () => {
-  /** Fills a draft that resolves every problem, so the preview control is actually reachable. */
+  /**
+   * Opens the stepper and walks it to the recap, which is the only place a change can be previewed.
+   *
+   * ONE thing is typed. Everything else on the way — the harness, both model fields, the document name
+   * and the imported text — is what the host already told the daemon, which is the whole point of the
+   * sequence: a step whose answer is known shows the answer and asks nothing.
+   */
   const draftIn = async (surface: Awaited<ReturnType<typeof open>>): Promise<void> => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
-    // A new account writes asset text too, so the form waits for the asset listing before it is usable.
+    // A new account writes asset text too, so the stepper waits for the asset listing before it is usable.
     await interact(() => undefined);
-    await type(field(surface.container, '-account-name'), 'atelier');
-    await type(area(surface.container, '-account-models'), 'claude-opus-5');
-    await type(field(surface.container, '-instructions-path'), 'instructions/atelier.md');
-    await type(area(surface.container, '-instructions-text'), '# atelier');
-    await choose(chooser(surface.container, '-account-default-model'), 'claude-opus-5');
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'review');
   };
 
   it('falls back to the published fleet for the harness when the host read was refused, and says so', async () => {
@@ -563,20 +572,23 @@ describe('creating an account', () => {
       },
     });
     await click(pick(surface.container, '[data-fleet-start-create]'));
-    expect(
-      pick(surface.container, '[data-fleet-harness-choice="codex"]').getAttribute('data-fleet-harness-selected'),
-    ).toBe('true');
-    expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('codex-');
+
+    expect(cardChosen(surface.container, 'harness', 'codex')).toBe(true);
     expect(pick(surface.container, '[data-fleet-harness-detection="detected"]').textContent).toContain(
       'not evidence that this host can launch it',
     );
-    // And NOTHING was prefilled from an absence of evidence: the form is the old, unfilled one.
-    expect(area(surface.container, '-account-models').value).toBe('');
-    expect(area(surface.container, '-instructions-text').value).toBe('');
+
+    // And NOTHING was prefilled from an absence of evidence. The model step offers what the fleet's own
+    // published account serves — real, declared models — and nothing is selected.
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'models');
+    expect(absent(surface.container, '[data-fleet-prefill="models"]')).toBe(true);
+    expect(chooser(surface.container, '-default-model').value).toBe('');
     await surface.unmount();
   });
 
-  it('opens the account form already filled in from what this host has', async () => {
+  it('opens the stepper already filled in from what this host has', async () => {
     // Arrange — the whole point. RED before this: the person typed the harness, both model fields, the
     // asset path and the entire instructions document by hand, from a daemon that knew all four.
     const surface = await open({});
@@ -585,26 +597,169 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
 
-    // Assert — harness, models, default model and the imported document, each with its provenance.
-    expect(
-      pick(surface.container, '[data-fleet-harness-choice="claude"]').getAttribute('data-fleet-harness-selected'),
-    ).toBe('true');
-    expect(area(surface.container, '-account-models').value).toBe('claude-opus-5\nclaude-sonnet-5');
-    expect(chooser(surface.container, '-account-default-model').value).toBe('claude-opus-5');
-    expect(area(surface.container, '-instructions-text').value).toBe('# House rules\n');
-    expect(pick(surface.container, '[data-fleet-prefill="instructionsText"]').textContent).toContain(
-      '/home/pilot/.claude/CLAUDE.md',
-    );
+    // Assert — the harness step is answered, and says on what evidence.
+    expect(stepperStep(surface.container)).toBe('harness');
+    expect(cardChosen(surface.container, 'harness', 'claude')).toBe(true);
     expect(pick(surface.container, '[data-fleet-harness-detection="detected"]').textContent).toContain(
       '/usr/local/bin/claude',
     );
 
-    // Act — the ONE thing left to type. The document path follows it.
-    await type(field(surface.container, '-account-name'), 'atelier');
+    // Act — the ONE thing left to type.
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+
+    // Assert — the wrapper the daemon will derive, shown rather than asked for.
+    expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-atelier');
+
+    // Assert — the models the host named are already chosen, with their provenance.
+    await walkTo(surface.container, 'models');
+    expect(cardChosen(surface.container, 'models', 'claude-opus-5')).toBe(true);
+    expect(cardChosen(surface.container, 'models', 'claude-sonnet-5')).toBe(true);
+    expect(chooser(surface.container, '-default-model').value).toBe('claude-opus-5');
+    expect(pick(surface.container, '[data-fleet-prefill="models"]').textContent).toContain(
+      '/home/pilot/.claude/settings.json',
+    );
+
+    // Assert — the document is this host's own, under a name derived from the account and the lane.
+    await walkTo(surface.container, 'instructions');
+    expect(cardChosen(surface.container, 'instructions-source', 'import')).toBe(true);
+    expect(area(surface.container, '-text').value).toBe('# House rules\n');
+    expect(field(surface.container, '-middle').value).toBe('atelier');
+    expect(pick(surface.container, '[data-fleet-instructions-name-note]').textContent).toContain(
+      'instructions/CLAUDE-atelier.md',
+    );
+    expect(pick(surface.container, '[data-fleet-prefill="instructionsText"]').textContent).toContain(
+      '/home/pilot/.claude/CLAUDE.md',
+    );
+    await surface.unmount();
+  });
+
+  it('asks one question per step, and refuses to move on before this step is answered', async () => {
+    // The rule the whole sequence rests on: Next is blocked by something on THIS screen, never by a
+    // field three steps away. RED before the stepper: one screen, ten fields, and a submit control
+    // disabled by whichever of them was empty.
+    const surface = await open({});
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+
+    // Act — the harness step has a preselected answer, so it advances.
+    await next(surface.container);
+
+    // Assert — the account step does not, because it has no name yet, and it says so HERE.
+    expect(stepperStep(surface.container)).toBe('identity');
+    expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
+    expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('name the provider account');
+
+    // Act
+    await type(field(surface.container, '-name'), 'atelier');
 
     // Assert
-    expect(field(surface.container, '-instructions-path').value).toBe('instructions/claude-atelier.md');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(false);
+    await next(surface.container);
+    expect(stepperStep(surface.container)).toBe('models');
+    await surface.unmount();
+  });
+
+  it('keeps every entry when a person goes back, and lets them jump back to a step they answered', async () => {
+    // Going back must be free, or nobody uses it and the sequence becomes a one-way form with extra
+    // clicks. Every step reads and writes the ONE draft the surface holds, which is what makes it free.
+    const surface = await open({});
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await type(field(surface.container, '-display-name'), 'Atelier Claude');
+    await walkTo(surface.container, 'instructions');
+    await type(field(surface.container, '-middle'), 'house');
+
+    // Act — back, twice.
+    await click(button(surface.container, 'Back'));
+    await click(button(surface.container, 'Back'));
+
+    // Assert — the account step still holds both entries.
+    expect(stepperStep(surface.container)).toBe('identity');
+    expect(field(surface.container, '-name').value).toBe('atelier');
+    expect(field(surface.container, '-display-name').value).toBe('Atelier Claude');
+
+    // Act — the progress indicator jumps back to an answered step, and forward again.
+    await walkTo(surface.container, 'instructions');
+    expect(field(surface.container, '-middle').value).toBe('house');
+    await click(pick(surface.container, '[data-fleet-step-jump="harness"]'));
+
+    // Assert
+    expect(stepperStep(surface.container)).toBe('harness');
+    await walkTo(surface.container, 'instructions');
+    expect(field(surface.container, '-middle').value).toBe('house');
+    await surface.unmount();
+  });
+
+  it('asks how the account runs, and derives the lane and the wrapper from the answer', async () => {
+    // `lane` and `mode` are two fields expressing one thing on an ordinary fleet, and `lane` is a word
+    // nobody outside the configuration schema has. One control, and the lane follows.
+    const surface = await open({ config: () => ({ variants: { default: {}, auto: {} }, agents: [] }) });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+
+    // Assert — the fleet declares an `auto` lane and the draft opens on `auto`, so that is the lane.
+    expect(cardChosen(surface.container, 'mode', 'auto')).toBe(true);
+    expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-auto-atelier');
+
+    // Act
+    await click(card(surface.container, 'mode', 'interactive'));
+
+    // Assert — no lane control was ever shown, and the wrapper moved with the answer.
+    expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-atelier');
+    expect(absent(surface.container, '[data-fleet-other-lanes]')).toBe(true);
+    await surface.unmount();
+  });
+
+  it('offers a lane control only when this fleet declares one no answer would derive', async () => {
+    // A surface that cannot express what the configuration can is the reason somebody edits YAML by
+    // hand. A `review` lane is not derivable from "interactive or auto", so the escape appears.
+    const surface = await open({ config: () => ({ variants: { default: {}, review: {} }, agents: [] }) });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+
+    expect(pick(surface.container, '[data-fleet-other-lanes]')).toBeDefined();
+    await choose(chooser(surface.container, '-lane'), 'review');
+    expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-review-atelier');
+    await surface.unmount();
+  });
+
+  it('accepts a model this host has never heard of, and marks it unverified', async () => {
+    // "What if it is a custom model?" A person running something we do not know about must not be
+    // blocked — and an identifier nothing on this host names must not be presented as if it were checked.
+    const surface = await open({});
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'models');
+
+    // Act
+    await type(field(surface.container, '-custom-model'), 'my-local-llm');
+    expect(pick(surface.container, '[data-fleet-custom-model-note]').textContent).toContain('marked unverified');
+    await click(pick(surface.container, '[data-fleet-add-model]'));
+
+    // Assert — it is selected, it is offered as a card like any other, and it says what it is.
+    expect(cardChosen(surface.container, 'models', 'my-local-llm')).toBe(true);
+    expect(pick(surface.container, '[data-fleet-unverified]').textContent).toContain('my-local-llm');
+    expect(
+      pick(surface.container, '[data-fleet-check-group="models"] [data-fleet-check="my-local-llm"]').textContent,
+    ).toContain('unverified');
+    // A detected one carries no such marker: the difference is the whole point of the word.
+    expect(
+      pick(surface.container, '[data-fleet-check-group="models"] [data-fleet-check="claude-opus-5"]').textContent,
+    ).not.toContain('unverified');
+
+    // And the same value cannot be added twice, which would produce two identical-looking rows.
+    await type(field(surface.container, '-custom-model'), 'my-local-llm');
+    expect(pick(surface.container, '[data-fleet-custom-model-note]').textContent).toContain('already listed');
+    expect(pick(surface.container, '[data-fleet-add-model]').hasAttribute('disabled')).toBe(true);
     await surface.unmount();
   });
 
@@ -618,43 +773,49 @@ describe('creating an account', () => {
     // Act
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
-    await type(field(surface.container, '-account-name'), 'atelier');
 
     // Assert
     expect(pick(surface.container, '[data-fleet-harness-detection="none-installed"]').textContent).toContain(
       'Neither claude nor codex is on this host’s PATH',
     );
-    expect(absent(surface.container, '[data-fleet-prefill="harness"]')).toBe(true);
+
+    // Act — and it does not block: the sequence still reaches the recap.
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'review');
     expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
     await surface.unmount();
   });
 
-  it('reads a shared instructions document the account is pointed at, rather than writing over it', async () => {
-    // Arrange — the fleet has a document more than one account can read. Choosing it must load it: until
-    // the text is here, staging would replace somebody's house rules with an empty string.
+  it('reads a store document the account is pointed at, rather than writing over it', async () => {
+    // Arrange — the fleet has a document more than one account can read. Pointing at it must load it:
+    // until the text is here, staging would replace somebody's house rules with an empty string.
     const surface = await open({
       assets: () => ({ files: [{ path: 'instructions/house-rules.md', bytes: 12, readable: true }], complete: true }),
       asset: path => ({ path, content: '# Shared rules\n', bytes: 15 }),
     });
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
-    await type(field(surface.container, '-account-name'), 'atelier');
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'instructions');
 
-    // Act
-    await choose(chooser(surface.container, '-instructions-choice'), 'asset:instructions/house-rules.md');
+    // Act — "use one already in the store", which lands on the one that is there.
+    await click(card(surface.container, 'instructions-source', 'existing'));
     await interact(() => undefined);
 
-    // Assert — the document's own text is here, the path points at it, and staging is unblocked because
-    // this browser has now SEEN what it would rewrite.
-    expect(field(surface.container, '-instructions-path').value).toBe('instructions/house-rules.md');
-    expect(area(surface.container, '-instructions-text').value).toBe('# Shared rules\n');
+    // Assert — the document's own text is here, and the consequence of sharing it was said at the point
+    // of choice rather than after the fact.
+    expect(area(surface.container, '-text').value).toBe('# Shared rules\n');
+    expect(surface.container.textContent).toContain('Editing it changes every account linked to it, on the next apply');
     expect(surface.container.textContent).not.toContain('has not loaded the document already at that path');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
     expect(surface.daemon.paths()).toContain('/v1/fleet/assets/instructions%2Fhouse-rules.md');
+    await walkTo(surface.container, 'review');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
     await surface.unmount();
   });
 
-  it('keeps a shared document that could not be read blocking, in the daemon own words', async () => {
+  it('keeps a store document that could not be read blocking, in the daemon own words', async () => {
     // Arrange — a refused read must not leave an empty box that looks like the document's contents.
     const surface = await open({
       assets: () => ({ files: [{ path: 'instructions/house-rules.md', bytes: 12, readable: true }], complete: true }),
@@ -664,22 +825,78 @@ describe('creating an account', () => {
     });
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
-    await type(field(surface.container, '-account-name'), 'atelier');
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'instructions');
 
     // Act
-    await choose(chooser(surface.container, '-instructions-choice'), 'asset:instructions/house-rules.md');
+    await click(card(surface.container, 'instructions-source', 'existing'));
     await interact(() => undefined);
 
-    // Assert
+    // Assert — the blocker lands on THIS step, because this step's field is what names the path.
     expect(surface.container.textContent).toContain('the asset is not a regular file');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
 
     // Act — going back to this account's own new document clears it: nothing is overwritten any more.
-    await choose(chooser(surface.container, '-instructions-choice'), 'new-imported');
+    await click(card(surface.container, 'instructions-source', 'import'));
 
     // Assert
-    expect(field(surface.container, '-instructions-path').value).toBe('instructions/claude-atelier.md');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    expect(field(surface.container, '-middle').value).toBe('atelier');
+    expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(false);
+    await surface.unmount();
+  });
+
+  it('refuses a document name that collides with one the store already has, and names it', async () => {
+    // RED before the stepper: the create form let a person type any path, so `instructions/shared.md`
+    // staged a new lane's text over a shared document. Now the name is refused where it is typed, and
+    // the sentence points at the one control that resolves it.
+    const surface = await open({
+      assets: () => ({ files: [{ path: 'instructions/CLAUDE-shared.md', bytes: 9, readable: true }], complete: true }),
+    });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'instructions');
+
+    // Act
+    await type(field(surface.container, '-middle'), 'shared');
+
+    // Assert
+    const note = pick(surface.container, '[data-fleet-instructions-name-note]');
+    expect(note.textContent).toContain('instructions/CLAUDE-shared.md');
+    expect(note.textContent).toContain('is already in the store');
+    expect(note.textContent).toContain('Use an existing one');
+
+    // A name that is not there yet is the ordinary case: a new account writing its own instructions.
+    await type(field(surface.container, '-middle'), 'atelier');
+    expect(pick(surface.container, '[data-fleet-instructions-name-note]').textContent).toContain(
+      'Added to the store as instructions/CLAUDE-atelier.md',
+    );
+    await surface.unmount();
+  });
+
+  it('fixes the CLAUDE- and AGENTS- prefix rather than asking a person to type it', async () => {
+    // The owner asked for the prefix fixed and the middle theirs. Which prefix follows from the harness,
+    // so a store somebody can read is a property of the scheme rather than of everyone's discipline.
+    const surface = await open({});
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'instructions');
+    expect(pick(surface.container, '[data-fleet-instructions-prefix]').textContent).toBe('CLAUDE-');
+
+    // Act — the other harness names its document the other way, and nobody chose that either.
+    await click(pick(surface.container, '[data-fleet-step-jump="harness"]'));
+    await click(card(surface.container, 'harness', 'codex'));
+    await walkTo(surface.container, 'instructions');
+
+    // Assert
+    expect(pick(surface.container, '[data-fleet-instructions-prefix]').textContent).toBe('AGENTS-');
+    expect(pick(surface.container, '[data-fleet-instructions-name-note]').textContent).toContain(
+      'instructions/AGENTS-atelier.md',
+    );
     await surface.unmount();
   });
 
@@ -697,11 +914,11 @@ describe('creating an account', () => {
       harness: 'claude',
       name: 'atelier',
       variant: 'default',
-      models: ['claude-opus-5'],
+      models: ['claude-opus-5', 'claude-sonnet-5'],
       defaultModel: 'claude-opus-5',
-      layer: { memory: 'instructions/atelier.md' },
+      layer: { memory: 'instructions/CLAUDE-atelier.md' },
     });
-    expect(sent.assetEdits).toEqual([{ path: 'instructions/atelier.md', content: '# atelier' }]);
+    expect(sent.assetEdits).toEqual([{ path: 'instructions/CLAUDE-atelier.md', content: '# House rules\n' }]);
     // No account id is ever sent: the daemon mints identity.
     expect(Object.keys(sent.mutation)).not.toContain('id');
     expect(pick(surface.container, '[data-fleet-proposal-id]')).toBeDefined();
@@ -709,27 +926,16 @@ describe('creating an account', () => {
     await surface.unmount();
   });
 
-  it('refuses to let a new account write over a document that is already there', async () => {
-    const surface = await open({
-      propose: () => proposal(),
-      // A new account never READS anything — it has no declared layer — so every document the daemon
-      // already lists is text this browser has not seen.
-      assets: () => ({ files: [{ path: 'instructions/shared.md', bytes: 9, readable: true }], complete: true }),
-    });
+  it('recaps every answer before asking the daemon for a plan', async () => {
+    // The recap is not the review — the daemon's preview is, and it is unchanged. This is the last look
+    // at the answers, so a wrong turn six steps back is visible before a round trip rather than after.
+    const surface = await open({ propose: () => proposal() });
     await draftIn(surface);
-    expect(surface.daemon.paths()).toContain('/v1/fleet/assets');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
-
-    // RED before this: the create form staged `{path: "instructions/shared.md", content: "# atelier"}`,
-    // overwriting a shared document with a new lane's text.
-    await type(field(surface.container, '-instructions-path'), 'instructions/shared.md');
-    expect(surface.container.textContent).toContain('has not loaded the document already at that path');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
-
-    // A path that is not there yet is the ordinary case: a new account writing its own instructions.
-    await type(field(surface.container, '-instructions-path'), 'instructions/atelier.md');
-    expect(surface.container.textContent).not.toContain('has not loaded the document already at that path');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    const recap = pick(surface.container, '[data-fleet-recap]').textContent ?? '';
+    expect(recap).toContain('claude-atelier');
+    expect(recap).toContain('claude-opus-5');
+    expect(recap).toContain('instructions/CLAUDE-atelier.md');
+    expect(recap).toContain('the fleet’s, unchanged');
     await surface.unmount();
   });
 
@@ -755,19 +961,75 @@ describe('creating an account', () => {
     await truncated.unmount();
   });
 
-  it('refuses a draft that writes two texts to one path', async () => {
-    const surface = await open({ propose: () => proposal() });
-    await draftIn(surface);
-    await type(field(surface.container, '-skills-directory'), 'instructions');
-    await click(button(surface.container, 'Add skill document'));
-    // The same path as the instructions file. `assetEdits` used to send both and let the last one win,
-    // so the review showed two texts for one document and no way to tell which would survive.
-    await type(field(surface.container, '-skill-path-0'), 'instructions/atelier.md');
-    expect(surface.container.textContent).toContain('is written twice by this change');
-    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+  it('offers the skills store per item, with who already links each one, and says what is not possible yet', async () => {
+    const surface = await open({
+      config: () =>
+        config({
+          default: { id: account().id, wrapper: 'claude-studio', layer: { skills: 'skills/studio' } },
+        }),
+      assets: () => ({
+        files: [
+          { path: 'skills/studio/review.md', bytes: 12, readable: true },
+          { path: 'skills/research/read.md', bytes: 12, readable: true },
+        ],
+        complete: true,
+      }),
+    });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'skills');
 
-    await type(field(surface.container, '-skill-path-0'), 'instructions/review.md');
-    expect(surface.container.textContent).not.toContain('is written twice by this change');
+    // Assert — a declared directory carries its linkers; one that is only in the tree is offered as an
+    // item nothing links yet, which is exactly the item a new account most wants.
+    expect(
+      pick(surface.container, '[data-fleet-check-group="skills"] [data-fleet-check="skills/studio"]').textContent,
+    ).toContain('claude-studio');
+    expect(
+      pick(surface.container, '[data-fleet-check-group="skills"] [data-fleet-check="skills/research"]').textContent,
+    ).toContain('linked by nothing yet');
+    // The gap is stated where it bites, and it is careful about WHOSE gap it is: #373 made the fleet
+    // able to give an account several items, so a sentence blaming the fleet would now be false.
+    const limit = pick(surface.container, '[data-fleet-skills-limit]').textContent ?? '';
+    expect(limit).toContain('One store item at a time, on this screen');
+    expect(limit).toContain('not a limit of the fleet');
+
+    // Act
+    await click(card(surface.container, 'skills', 'skills/research'));
+
+    // Assert
+    expect(cardChosen(surface.container, 'skills', 'skills/research')).toBe(true);
+    await walkTo(surface.container, 'review');
+    expect(pick(surface.container, '[data-fleet-recap]').textContent).toContain('skills/research');
+    await surface.unmount();
+  });
+
+  it('asks whether to change settings at all, rather than showing a layer', async () => {
+    // `layer` is a real mechanism and the wrong thing to put in front of a person. Two answers, and the
+    // stack stays underneath both of them.
+    const surface = await open({});
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await walkTo(surface.container, 'settings');
+
+    // Assert — the default answer changes nothing, and there is no JSON box to be frightened by.
+    expect(cardChosen(surface.container, 'settings', 'fleet')).toBe(true);
+    expect(surface.container.querySelector('[id$="-settings"]')).toBeNull();
+    // Scoped to the sequence: the roster behind it still offers "Edit layer" for an account that exists,
+    // and that control is not what the owner objected to.
+    expect(pick(surface.container, '[data-fleet-account-stepper]').textContent).not.toContain('layer');
+
+    // Act
+    await click(card(surface.container, 'settings', 'own'));
+
+    // Assert — the box appears, seeded with something that parses.
+    expect(area(surface.container, '-settings').value).toBe('{}');
+    await type(area(surface.container, '-settings'), '{ not json');
+    expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('settings must be valid JSON');
+    expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
     await surface.unmount();
   });
 
@@ -1577,7 +1839,8 @@ describe('applying one exact proposal', () => {
     await interact(() => undefined);
     expect(document.activeElement === panel).toBe(true);
     // And it does not fight the person once they are typing in it.
-    const name = field(surface.container, '-account-name');
+    await walkTo(surface.container, 'identity');
+    const name = field(surface.container, '-name');
     name.focus();
     await type(name, 'atelier');
     expect(document.activeElement === name).toBe(true);

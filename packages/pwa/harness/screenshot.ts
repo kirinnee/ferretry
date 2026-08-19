@@ -99,8 +99,12 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Thirty-five: nineteen at `mobile` and sixteen at `desktop`. Sixteen at both viewports — three
- * Settings sections (Appearance, Behaviour, Daemons), the healthy daemon's ten panels, the unreachable
+ * Forty-nine: twenty-six at `mobile` and twenty-three at `desktop`. Twenty-three at both viewports —
+ * the sixteen below plus SEVEN for the new-account sequence, one per step. A sequence is not one
+ * surface: each step is a different layout, the model step is a card per model beside a custom-value
+ * row, and the recap is a two-column definition list. Capturing only the first would have proved that
+ * the harness question fits a phone and nothing at all about the six screens after it. The sixteen
+ * are three Settings sections (Appearance, Behaviour, Daemons), the healthy daemon's ten panels, the unreachable
  * daemon's Warden and Carrier, and the one-daemon route — plus THREE MOBILE-ONLY open bottom sheets,
  * which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry is
  * the product's, not an omission.
@@ -119,7 +123,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 35;
+const SETTINGS_SIDEWAYS_CHECKS = 49;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -268,6 +272,8 @@ const TOUCH_TARGET_MINIMUM = 44;
  * The failed apply is in the list on purpose: a gallery of happy paths proves nothing about the one
  * screen a person actually reads while something is wrong.
  */
+const ACCOUNT_STEPS = ['harness', 'identity', 'models', 'instructions', 'skills', 'settings', 'review'] as const;
+
 const FLEET_FRAMES = [
   'cockpit',
   'cockpit-staged',
@@ -1582,6 +1588,34 @@ try {
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+
+            // THE NEW-ACCOUNT SEQUENCE, one check per step.
+            //
+            // It is reached by a click rather than by a route, so a gate that only visited panels never
+            // saw it — and it is the Settings surface a person spends longest in. Driving the real
+            // control is also the only way to reach the states: the step is a value the surface holds,
+            // and there is no address that opens it half way through.
+            if (slug === 'fleet') {
+              await wardenFrame.locator('[data-fleet-start-create]').click();
+              const sequence = wardenFrame.locator('[data-fleet-account-stepper]');
+              await sequence.waitFor({ state: 'visible' });
+              for (const step of ACCOUNT_STEPS) {
+                await sequence.locator(`[data-fleet-step-question="${step}"]`).waitFor({ state: 'visible' });
+                // The account name is the ONE thing the host cannot answer, and every step after it is
+                // unreachable until it is there. Typed rather than skipped, because a sequence walked
+                // with an empty draft would be measuring the refusal, not the screen.
+                if (step === 'identity')
+                  await sequence.getByRole('textbox', { name: 'Provider account name' }).fill('atelier');
+                await assertNoSidewaysScroll(page, `the new-account "${step}" step at ${viewport.name}`);
+                const stepTarget = join(outDir, `settings-fleet-new-account-${step}-${viewport.name}.png`);
+                await page.screenshot({ path: stepTarget });
+                process.stdout.write(`📸 Settings new account ${step} ${viewport.name} -> ${stepTarget}\n`);
+                if (step !== 'review') await sequence.getByRole('button', { name: 'Next' }).click();
+              }
+              // Put the panel back the way the next iteration expects to find it.
+              await sequence.getByRole('button', { name: 'Discard draft' }).click();
+              await wardenFrame.locator('[data-fleet-start-create]').waitFor({ state: 'visible' });
+            }
           }
 
           await selectDaemon('Travel laptop');
@@ -2225,10 +2259,13 @@ try {
             // The create frame is the A2 evidence: it has to be captured WITH keyboard focus on the
             // harness radio, because the defect was that focus was not locatable there at all.
             if (frame === 'create') {
-              await page.locator('[data-fleet-harness-selected="true"] input').evaluate(node => {
-                (node as HTMLElement).focus();
-                node.matches(':focus-visible');
-              });
+              await page
+                .locator('[data-fleet-choice-selected="true"] input')
+                .first()
+                .evaluate(node => {
+                  (node as HTMLElement).focus();
+                  node.matches(':focus-visible');
+                });
               await page.keyboard.press('ArrowRight');
               await page.keyboard.press('ArrowLeft');
             }
