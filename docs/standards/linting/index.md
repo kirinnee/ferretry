@@ -38,6 +38,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs
 | `a-composition-reachability` | production modules are used by their package's composition root            |
 | `a-conflict-markers`         | marker shapes appear only in declared teaching documents                   |
 | `a-contract-registry`        | executable, documented and wired contract inventories agree                |
+| `a-cors-header-agreement`    | the CORS preflight admits every header the browser code can send           |
 | `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon               |
 | `a-fetch-binding`            | the PWA never stores an unbound browser `fetch` builtin                    |
 | `a-git-hooks-worktree`       | commit linting works from a linked worktree, concurrently and repeatedly   |
