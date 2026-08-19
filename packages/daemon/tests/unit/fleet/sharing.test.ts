@@ -356,16 +356,32 @@ describe('giving an account its own copy', () => {
     ).match(/already uses its own "memory" at "\.\/own\.md"/u);
   });
 
-  it('should refuse a directory field with the manual remedy', () => {
+  it('should refuse a per-item selection because no single document is being left', () => {
     // Arrange
     const config = configOf({
-      shared: { skills: { default: './skills' } },
-      profiles: { base: { skills: './skills' } },
+      shared: { skills: { default: './skills/review' } },
+      profiles: { base: { skills: ['./skills/review'] } },
       agents: [{ name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one') } }],
     });
 
-    // Act / Assert
+    // Act / Assert — reached before the directory refusal below, and the better sentence of the two:
+    // an item is dropped from the list, never copied to a path this account then owns privately.
     should(refusalOf(() => planSharedAssetUnlink(config, ID_ONE, 'skills'))).match(
+      /"skills" holds a per-item selection rather than one document/u,
+    );
+  });
+
+  it('should refuse a directory field with the manual remedy', () => {
+    // Arrange — hooksDir is the remaining directory-shaped field, and Codex is the harness that has a
+    // destination for it.
+    const config = configOf({
+      shared: { hooksDir: { default: './hooks' } },
+      profiles: { base: { hooksDir: './hooks' } },
+      agents: [{ name: 'two', kind: 'codex', routes: { default: route(ID_TWO, 'codex-two') } }],
+    });
+
+    // Act / Assert
+    should(refusalOf(() => planSharedAssetUnlink(config, ID_TWO, 'hooksDir'))).match(
       /names a directory, and a private copy of a directory is not something the reviewed asset editor can write/u,
     );
   });
@@ -407,5 +423,61 @@ describe('giving an account its own copy', () => {
     should(refusalOf(() => planSharedAssetUnlink(sharedFleet(), ID_ABSENT, 'memory'))).match(
       /declares no account with id/u,
     );
+  });
+});
+
+describe('projecting a per-item selection onto the wire', () => {
+  const storeFleet = (): FleetConfig =>
+    configOf({
+      shared: { skills: { review: './skills/review' } },
+      agents: [
+        {
+          name: 'one',
+          kind: 'claude',
+          routes: {
+            default: route(ID_ONE, 'claude-one', { layer: { skills: ['./skills/review', './skills/mine'] } }),
+          },
+        },
+        {
+          name: 'two',
+          kind: 'claude',
+          routes: { default: route(ID_TWO, 'claude-two', { layer: { skills: ['./skills/review'] } }) },
+        },
+      ],
+    });
+
+  it('should carry every item, its store name, and how many accounts are on it', () => {
+    // Act — parsed on the way out exactly as the route does it.
+    const summary = FleetSharingSchema.parse(sharingSummary(resolveFleetSharing(storeFleet())));
+
+    // Assert — the second item is this account's own, so it carries no shared name at all rather than a
+    // null the wire shape has no branch for.
+    should(summary.accounts[0]?.fields.skills).deepEqual({
+      state: 'selection',
+      origin: { kind: 'account' },
+      items: [
+        { name: 'review', path: './skills/review', sharedName: 'review', referrers: 2 },
+        { name: 'mine', path: './skills/mine', referrers: 1 },
+      ],
+    });
+  });
+
+  it('should carry a selection of nothing as an empty list rather than as absent', () => {
+    // Arrange
+    const config = configOf({
+      agents: [
+        { name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one', { layer: { skills: [] } }) } },
+      ],
+    });
+
+    // Act
+    const summary = FleetSharingSchema.parse(sharingSummary(resolveFleetSharing(config)));
+
+    // Assert
+    should(summary.accounts[0]?.fields.skills).deepEqual({
+      state: 'selection',
+      origin: { kind: 'account' },
+      items: [],
+    });
   });
 });

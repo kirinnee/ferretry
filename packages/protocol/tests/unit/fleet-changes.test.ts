@@ -247,6 +247,39 @@ describe('FleetMutationSchema', () => {
     should(issuesFor(actual)).match(/asset path "~\/\.ssh"/u);
   });
 
+  it('should accept a per-item skills selection as a list, and a bare reference as one', () => {
+    // Act
+    const asList = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: { skills: ['skills/review', 'skills/deploy'] },
+    });
+    const asOne = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: { skills: 'skills/review' },
+    });
+
+    // Assert
+    should(asList.success && asList.data.kind === 'edit-account' && asList.data.layer).deepEqual({
+      skills: ['skills/review', 'skills/deploy'],
+    });
+    should(asOne.success).be.true();
+  });
+
+  it('should refuse an escape inside a skills selection, naming the entry that earned it', () => {
+    // Act
+    const actual = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: { skills: ['skills/review', '../../../../etc/shadow'] },
+    });
+
+    // Assert — the grammar is applied per entry, so the refusal says which path was refused rather than
+    // reporting the whole field as the wrong shape.
+    should(issuesFor(actual)).match(/contains a path traversal segment/u);
+  });
+
   it('should refuse an escape hidden in a list of settings layers', () => {
     // Act — a settings string is a reference to a file, so it is one of these fields too.
     const actual = FleetMutationSchema.safeParse({
@@ -452,6 +485,32 @@ describe('FleetSharingSchema', () => {
     should(
       FleetAssetSharingSchema.safeParse({ state: 'absent', path: './CLAUDE.md', origin, referrers: 1 }).success,
     ).be.false();
+  });
+
+  it('should carry a per-item selection, with the store name of each item that has one', () => {
+    // Act
+    const actual = FleetAssetSharingSchema.safeParse({
+      state: 'selection',
+      origin,
+      items: [
+        { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2 },
+        { name: 'mine', path: 'skills/mine', referrers: 1 },
+      ],
+    });
+
+    // Assert — an item with no store name omits the key rather than sending a null.
+    should(actual.success).be.true();
+  });
+
+  it('should accept a selection of nothing, which is not the same as an absent field', () => {
+    // Act / Assert
+    should(FleetAssetSharingSchema.safeParse({ state: 'selection', origin, items: [] }).success).be.true();
+  });
+
+  it('should refuse a selection that claims one path instead of naming its items', () => {
+    // Act / Assert — the arm carries items and nothing else, so a client cannot be handed a selection
+    // shaped like a single document and render it as one.
+    should(FleetAssetSharingSchema.safeParse({ state: 'selection', origin, path: 'skills' }).success).be.false();
   });
 
   it('should refuse a field name outside the linkable set', () => {

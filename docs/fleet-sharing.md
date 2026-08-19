@@ -40,7 +40,9 @@ shared:
     default: ./CLAUDE.md
     terse: ./memory/terse.md
   skills:
-    default: ./skills
+    review: ./skills/review
+    deploy: ./skills/deploy
+    research: ./skills/research
   settings:
     claude: ./templates/claude/settings.json
     codex: ./templates/codex/config.toml
@@ -50,6 +52,38 @@ shared:
 move or copy a file. It gives the path a name so that a surface can offer it, count who uses it, and
 switch one account between it and a private copy. What makes a shared document the _default_ for
 every account is still the `base` profile, which is applied before every account's own slots.
+
+**`skills` is registered per item, and selected per item.** The store holds one entry per skill rather
+than one directory of them, and an account takes the subset it needs:
+
+```yaml
+profiles:
+  base:
+    skills: [./skills/review] # everybody gets the review skill
+agents:
+  - name: personal
+    kind: claude
+    routes:
+      default:
+        layer:
+          skills: [./skills/review, ./skills/deploy] # this account adds one
+```
+
+Each selected item is materialized under its own name inside the harness's skills destination, so
+`./skills/review` lands at `<home>/skills/review`. Two accounts selecting one item read one source, and
+neither can see what the other also selected. The rules that follow from that are worth stating plainly:
+
+- **A list, and a bare reference is the list of one.** `skills: ./skills/review` means the same as
+  `skills: [./skills/review]`, exactly as a single settings layer means a stack of one.
+- **A later slot replaces the whole list**, like every other non-settings field. That is what lets one
+  account drop an item the `base` profile handed it; concatenation could add but never remove.
+- **An empty list is a declared selection of nothing**, which is not the same as declaring no skills at
+  all. The first empties the account's skills directory; the second leaves the field alone.
+- **An item dropped from a selection is removed from the home** on the next apply. A skill executes
+  code, so an account told to give one up must not keep it.
+- **Two items whose last path segment is the same are refused while planning**, naming both sources:
+  they would claim one destination, and a refusal naming only the collision would send somebody to
+  correct the wrong one.
 
 More than one name per field is the point: two shared instruction documents, each account using
 whichever it references. Names are per field, so `settings` carries one entry per harness — a Claude
@@ -185,11 +219,25 @@ could edit in the Fleet tab, which is most of what the tab is for.
 
 These are declared, not hidden. Each is a thing a reader might reasonably assume works.
 
-- **A directory asset cannot be privately materialized.** `skills` and `hooksDir` are directories, and
-  the reviewed asset surface writes text documents — one path, one body, one expected digest. Unlink
-  refuses them with the manual remedy. A plan operation that copied a directory into the asset tree on
-  every apply would also have to decide what to do when the account has since edited its copy, which
-  is a destructive question nobody has asked yet.
+- **A directory asset cannot be privately materialized.** `hooksDir` is a directory, and the reviewed
+  asset surface writes text documents — one path, one body, one expected digest. Unlink refuses it with
+  the manual remedy. A plan operation that copied a directory into the asset tree on every apply would
+  also have to decide what to do when the account has since edited its copy, which is a destructive
+  question nobody has asked yet.
+- **`skills` cannot be unlinked, because there is no one document to leave.** A selection is items, and
+  each item is separately the store's or the account's own; "give this account its own copy" has no
+  referent. Dropping an item is an edit to the list, which is the operation that means what it says.
+- **Deleting a store item accounts still use is refused, naming them.** `orphanedSharedDocuments`
+  compares the offers before a change against the offers after, so a change that stops offering
+  something still in use is rejected with the account ids on it rather than leaving them pointing at a
+  path the store no longer names. There is no verb that deletes a store item yet; the guard sits on the
+  mutation path so the verb that does cannot arrive without it.
+- **Account homes get copies, not symlinks — for now.** An edit to a store item therefore reaches every
+  account that selected it on the **next apply**, not immediately. Real symlinks would make it
+  immediate, and the exemption in `StateFileSystem` admits a link under `fleet/homes` only when it
+  resolves inside `fleet/shared`; the asset store is `fleet/assets`, so the flip waits on relocating the
+  store. It is one line per entry in `HARNESS_ASSETS` once it can be made, and nothing above depends on
+  which of the two it is.
 - **A settings layer cannot be linked or unlinked**, for the reason above. It is reported.
 - **Renaming a shared document does not follow.** Accounts reference the path, so changing
   `shared.memory.default` to a different path leaves referrers on the old one, and the next apply fails

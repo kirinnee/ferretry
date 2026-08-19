@@ -36,6 +36,7 @@ function operationTarget(operation: FleetWriteOperation): string {
       return sources.length === 0 ? operation.path : `${operation.path} ← ${sources.join(' + ')}`;
     }
     case 'prune':
+    case 'prune-directory':
       return `${operation.path} (keeping ${operation.keep.length})`;
     case 'codex-sqlite-ownership':
       return operation.enabled
@@ -601,8 +602,29 @@ function originLabel(origin: FleetCompositionOrigin): string {
   return `the ${origin.name} profile`;
 }
 
+/**
+ * One selection, said as one line per item.
+ *
+ * Per item rather than summarized, because the account's selection IS the list and a count of it
+ * ("4 skills") answers none of the questions a person opens this screen with: which ones, which of
+ * those are the store's, and who else is on each.
+ */
+function selectionLines(field: string, sharing: Extract<FleetAssetSharing, { state: 'selection' }>): string[] {
+  if (sharing.items.length === 0) {
+    return [`  ${field.padEnd(9)}none selected · from ${originLabel(sharing.origin)}`];
+  }
+  const lines = [`  ${field.padEnd(9)}${plural(sharing.items.length, 'item')} · from ${originLabel(sharing.origin)}`];
+  for (const item of sharing.items) {
+    const others = item.referrers - 1;
+    const shared = item.sharedName === undefined ? 'own' : `SHARED "${item.sharedName}"`;
+    const also = others === 0 ? 'only this account' : `with ${plural(others, 'other account')}`;
+    lines.push(`  ${' '.repeat(9)}${item.name}  ${shared} · ${also} · ${item.path}`);
+  }
+  return lines;
+}
+
 /** One field's state, said in one line: shared with how many, its own, or nothing declared. */
-function sharingLine(field: string, sharing: FleetAssetSharing): string {
+function sharingLine(field: string, sharing: Exclude<FleetAssetSharing, { state: 'selection' }>): string {
   if (sharing.state === 'absent') return `  ${field.padEnd(9)}—`;
   const others = sharing.referrers - 1;
   const state =
@@ -636,7 +658,11 @@ export function renderFleetSharing(sharing: FleetSharing): string {
   }
   for (const account of sharing.accounts) {
     lines.push(`${account.displayName} (${account.wrapper}, ${account.kind})`);
-    for (const field of account.linkable) lines.push(sharingLine(field, account.fields[field]));
+    for (const field of account.linkable) {
+      const sharing = account.fields[field];
+      if (sharing.state === 'selection') lines.push(...selectionLines(field, sharing));
+      else lines.push(sharingLine(field, sharing));
+    }
     for (const layer of account.settings) {
       lines.push(
         layer.kind === 'inline'

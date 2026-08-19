@@ -46,11 +46,23 @@
  *
  * Pure throughout: no filesystem, no clock, no environment.
  */
-import { ASSET_FIELD_SHAPES, type AssetField, HARNESS_ASSETS, unsupportedAssetFields } from './assets.ts';
+import {
+  ASSET_FIELD_SHAPES,
+  type AssetField,
+  HARNESS_ASSETS,
+  skillItemName,
+  unsupportedAssetFields,
+} from './assets.ts';
 import type { FleetConfig, SettingsLayer } from './config.ts';
 import type { HarnessKind } from './manifest.ts';
 import { canonicalAssetReference } from './paths.ts';
-import { type CompositionOrigin, compositionSlots, flattenForKind, settingsLayersOf } from './profiles.ts';
+import {
+  type CompositionOrigin,
+  compositionSlots,
+  flattenForKind,
+  settingsLayersOf,
+  skillSelectionOf,
+} from './profiles.ts';
 
 /**
  * The asset fields a shared document may supply. Every one of them is a `Profile` field, which is
@@ -73,6 +85,14 @@ export const SHAREABLE_FIELDS: readonly AssetField[] = ['settings', 'memory', 's
 export type LinkableField = Exclude<AssetField, 'settings'>;
 
 export const LINKABLE_FIELDS: readonly LinkableField[] = ['memory', 'skills', 'hooks', 'hooksDir', 'mcp'];
+
+/**
+ * The linkable fields whose value is ONE document. `skills` is the exception: it holds a selection of
+ * items, so every question asked of the others once is asked of it per item.
+ */
+export type ScalarLinkableField = Exclude<LinkableField, 'skills'>;
+
+export const SCALAR_LINKABLE_FIELDS: readonly ScalarLinkableField[] = ['memory', 'hooks', 'hooksDir', 'mcp'];
 
 /**
  * Everything that is an account's own and can never come from a shared slot.
@@ -115,6 +135,17 @@ export interface SharedAssetDocument {
   readonly accounts: readonly string[];
 }
 
+/** One item of a per-item selection, and what the fleet knows about that one item. */
+export interface SelectedAssetItem {
+  /** The name this item takes inside the account's destination directory. */
+  readonly name: string;
+  readonly path: string;
+  /** The shared name this item carries, or `undefined` when it is not a declared shared document. */
+  readonly sharedName: string | undefined;
+  /** How many accounts in the fleet select this same item. */
+  readonly referrers: number;
+}
+
 /**
  * What one account's asset field is.
  *
@@ -122,6 +153,12 @@ export interface SharedAssetDocument {
  * account uses it". `referrers` is how many accounts in the fleet resolve this field to this same
  * path, so `local` with more than one referrer is a document a fleet is already sharing without
  * having said so, and exactly the thing "declare this as the shared default" would fix.
+ *
+ * `selection` is the state of a field that holds ITEMS rather than one document, and `skills` is the
+ * only such field: it is either `absent` or a `selection`, never `shared` or `local`. That asymmetry is
+ * carried in the state rather than in a per-field type because a surface reads these five fields
+ * through one shape — and because "shared or its own copy" is the wrong question to ask about a
+ * selection, where each item answers it separately.
  */
 export type AssetSharing =
   | { readonly state: 'absent' }
@@ -137,6 +174,17 @@ export type AssetSharing =
       readonly path: string;
       readonly origin: CompositionOrigin;
       readonly referrers: number;
+    }
+  | {
+      readonly state: 'selection';
+      /**
+       * The one slot that supplied this selection. A later slot replaces the whole list rather than
+       * adding to it, so there is exactly one origin to name — and an account can therefore drop an
+       * item a shared slot handed it, which concatenation could never express.
+       */
+      readonly origin: CompositionOrigin;
+      /** In declaration order. Empty means this account declared a selection of nothing. */
+      readonly items: readonly SelectedAssetItem[];
     };
 
 /** One layer of an account's settings stack, in stack order. Reported, never linkable. */
@@ -214,12 +262,20 @@ interface ResolvedSettingsLayer {
   readonly origin: CompositionOrigin;
 }
 
+/** One account's winning skills selection, and the single slot that supplied the whole list. */
+interface ResolvedSelection {
+  readonly items: readonly string[];
+  readonly origin: CompositionOrigin;
+}
+
 interface ResolvedSharingSource {
   readonly accountId: string;
   readonly kind: HarnessKind;
   readonly wrapper: string;
   readonly displayName: string;
-  readonly fields: ReadonlyMap<LinkableField, ResolvedField>;
+  readonly fields: ReadonlyMap<ScalarLinkableField, ResolvedField>;
+  /** Absent when no slot declared a selection. An empty list is a declared selection of nothing. */
+  readonly skills: ResolvedSelection | undefined;
   readonly settings: readonly ResolvedSettingsLayer[];
 }
 
@@ -233,14 +289,18 @@ function resolveWithOrigins(config: FleetConfig): readonly ResolvedSharingSource
   const sources: ResolvedSharingSource[] = [];
   for (const agent of config.agents) {
     for (const [variantName, route] of Object.entries(agent.routes)) {
-      const fields = new Map<LinkableField, ResolvedField>();
+      const fields = new Map<ScalarLinkableField, ResolvedField>();
       const settings: ResolvedSettingsLayer[] = [];
+      let skills: ResolvedSelection | undefined;
       for (const slot of compositionSlots(config, agent, variantName, route)) {
         const flat = flattenForKind(slot.layer, agent.kind);
-        for (const field of LINKABLE_FIELDS) {
+        for (const field of SCALAR_LINKABLE_FIELDS) {
           const value = flat[field];
           if (value !== undefined) fields.set(field, { value, origin: slot.origin });
         }
+        // A selection replaces the whole list, so the last slot that declared one is the only origin.
+        const selection = skillSelectionOf(flat.skills);
+        if (selection !== undefined) skills = { items: selection, origin: slot.origin };
         // Settings accumulate rather than replace, so every slot's layers are kept in merge order.
         for (const layer of settingsLayersOf(flat.settings)) settings.push({ layer, origin: slot.origin });
       }
@@ -250,6 +310,7 @@ function resolveWithOrigins(config: FleetConfig): readonly ResolvedSharingSource
         wrapper: route.wrapper,
         displayName: route.displayName ?? route.wrapper,
         fields,
+        skills,
         settings,
       });
     }
@@ -269,12 +330,32 @@ function referrerCounts(sources: readonly ResolvedSharingSource[]): ReadonlyMap<
     // A settings document counted twice for one account would report a fleet of one as a fleet of two.
     const documents = new Set(source.settings.flatMap(entry => (typeof entry.layer === 'string' ? [entry.layer] : [])));
     for (const path of documents) bump('settings', path);
+    // Counted per ITEM, which is what makes "how many accounts use this one skill" answerable at all.
+    // Deduplicated for the same reason as settings: one account naming an item twice is one user of it.
+    for (const item of new Set((source.skills?.items ?? []).map(canonicalAssetReference))) bump('skills', item);
   }
   return counts;
 }
 
 const referrersOf = (counts: ReadonlyMap<string, number>, field: string, path: string): number =>
   counts.get(`${field}:${canonicalAssetReference(path)}`) ?? 0;
+
+/**
+ * Whether one account uses one document for one field.
+ *
+ * Three different questions, which is why they are answered in one place rather than inline at each
+ * caller. A scalar field uses a document when its winning value IS that document. `settings` uses it
+ * when any layer of the stack is it. `skills` uses it when the selection CONTAINS it — set membership
+ * rather than value equality, and the whole reason "which accounts link this item" is a free fact:
+ * several items can be in one account's list and one item can be in several accounts' lists.
+ */
+function usesDocument(source: ResolvedSharingSource, field: AssetField, path: string): boolean {
+  if (field === 'settings') {
+    return source.settings.some(entry => typeof entry.layer === 'string' && sameReference(entry.layer, path));
+  }
+  if (field === 'skills') return (source.skills?.items ?? []).some(item => sameReference(item, path));
+  return sameReference(source.fields.get(field)?.value, path);
+}
 
 /**
  * The whole sharing picture for one configuration: what is offered, and who uses it.
@@ -290,20 +371,14 @@ export function resolveFleetSharing(config: FleetConfig): FleetSharing {
   const documents: SharedAssetDocument[] = [];
   for (const field of SHAREABLE_FIELDS) {
     for (const [name, path] of Object.entries(config.shared[field])) {
-      const accounts = sources
-        .filter(source =>
-          field === 'settings'
-            ? source.settings.some(entry => typeof entry.layer === 'string' && sameReference(entry.layer, path))
-            : sameReference(source.fields.get(field)?.value, path),
-        )
-        .map(source => source.accountId);
+      const accounts = sources.filter(source => usesDocument(source, field, path)).map(source => source.accountId);
       documents.push({ field, name, path, accounts });
     }
   }
 
   const accounts = sources.map(source => {
     const unsupported = new Set(unsupportedAssetFields(HARNESS_ASSETS, source.kind));
-    const sharingOf = (field: LinkableField): AssetSharing => {
+    const sharingOf = (field: ScalarLinkableField): AssetSharing => {
       const resolved = source.fields.get(field);
       if (resolved === undefined) return { state: 'absent' };
       const name = sharedAssetNameOf(config, field, resolved.value);
@@ -312,11 +387,30 @@ export function resolveFleetSharing(config: FleetConfig): FleetSharing {
         ? { state: 'local', path: resolved.value, origin: resolved.origin, referrers }
         : { state: 'shared', name, path: resolved.value, origin: resolved.origin, referrers };
     };
+    const selectionSharing = (): AssetSharing => {
+      if (source.skills === undefined) return { state: 'absent' };
+      const seen = new Set<string>();
+      const items: SelectedAssetItem[] = [];
+      for (const path of source.skills.items) {
+        // One item named twice is one item. It is deduplicated here rather than left for a reader to
+        // notice, so the report says the same thing the apply will materialize.
+        const canonical = canonicalAssetReference(path);
+        if (seen.has(canonical)) continue;
+        seen.add(canonical);
+        items.push({
+          name: skillItemName(path),
+          path,
+          sharedName: sharedAssetNameOf(config, 'skills', path),
+          referrers: referrersOf(counts, 'skills', path),
+        });
+      }
+      return { state: 'selection', origin: source.skills.origin, items };
+    };
     // Annotated and spelled out, so a newly added linkable field is a compile error here rather than
     // a field silently missing from every report.
     const fields: Readonly<Record<LinkableField, AssetSharing>> = {
       memory: sharingOf('memory'),
-      skills: sharingOf('skills'),
+      skills: selectionSharing(),
       hooks: sharingOf('hooks'),
       hooksDir: sharingOf('hooksDir'),
       mcp: sharingOf('mcp'),
@@ -349,6 +443,67 @@ export function resolveFleetSharing(config: FleetConfig): FleetSharing {
 /** One account's sharing report, or `undefined` when this fleet declares no such account. */
 export function accountSharing(sharing: FleetSharing, accountId: string): AccountSharing | undefined {
   return sharing.accounts.find(account => account.accountId === accountId);
+}
+
+/** A store item a change would stop offering while accounts are still using it. */
+export interface OrphanedSharedDocument {
+  readonly field: AssetField;
+  readonly name: string;
+  readonly path: string;
+  /** The account ids still using it, in fleet order. */
+  readonly accounts: readonly string[];
+}
+
+/**
+ * Store items a change would delete out from under the accounts using them.
+ *
+ * Deletion is the one store operation that cannot be judged from one configuration: a path an account
+ * names is legal whether or not the registry declares it, so "this item was removed" is only visible by
+ * comparing what the fleet offered BEFORE with what it offers after. Both are passed in for that
+ * reason, and neither is read from disk.
+ *
+ * Per item rather than per field, which is what per-item selection makes possible: deleting one skill
+ * out of a store of twelve names the accounts that selected THAT one, instead of everybody whose skills
+ * happen to come from the same directory.
+ *
+ * Read as evidence for a refusal — see the caller that turns a non-empty answer into one — because the
+ * alternative is silent. Nothing rewrites an account to stop using a deleted item: the reference stays,
+ * the fleet simply stops calling it shared, and the next apply fails on a path the person did not name
+ * while the surface still shows the account as configured.
+ */
+export function orphanedSharedDocuments(before: FleetConfig, after: FleetConfig): readonly OrphanedSharedDocument[] {
+  const offered = resolveFleetSharing(before).documents;
+  const orphaned: OrphanedSharedDocument[] = [];
+  for (const document of offered) {
+    if (document.accounts.length === 0) continue;
+    if (sharedAssetPath(after, document.field, document.name) !== undefined) continue;
+    // Still offered under a different name is not a deletion: the item is there and every account
+    // using it still reaches it. Only a document the store stops holding at all is one.
+    if (sharedAssetNameOf(after, document.field, document.path) !== undefined) continue;
+    orphaned.push({
+      field: document.field,
+      name: document.name,
+      path: document.path,
+      // Recomputed against `after`, so an account the same change also stopped pointing at this item is
+      // not named as a casualty of it. A change that deletes an item AND moves its last user off it is
+      // coherent, and refusing it would make the two-step remedy impossible to perform in one step.
+      accounts: resolveFleetSharing(after)
+        .accounts.filter(account => usesSharedPath(account, document.field, document.path))
+        .map(account => account.accountId),
+    });
+  }
+  return orphaned.filter(document => document.accounts.length > 0);
+}
+
+/** Whether one reported account still uses one path for one field, read from the report's own shapes. */
+function usesSharedPath(account: AccountSharing, field: AssetField, path: string): boolean {
+  if (field === 'settings') {
+    return account.settings.some(layer => layer.kind === 'document' && sameReference(layer.path, path));
+  }
+  const sharing = account.fields[field];
+  if (sharing.state === 'selection') return sharing.items.some(item => sameReference(item.path, path));
+  if (sharing.state === 'absent') return false;
+  return sameReference(sharing.path, path);
 }
 
 /**

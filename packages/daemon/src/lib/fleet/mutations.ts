@@ -11,7 +11,7 @@
  * declared account name for the same reason, and every derivation is checked by the shared
  * configuration schema before it can be previewed.
  */
-import { type FleetConfig, FleetConfigSchema, SafeNameSchema } from '@ferretry/fleet';
+import { type FleetConfig, FleetConfigSchema, orphanedSharedDocuments, SafeNameSchema } from '@ferretry/fleet';
 import { type FleetMutation, FleetMutationSchema } from '@ferretry/protocol';
 import { planSharedAssetUnlink, sharedAssetLinkPath } from './sharing.ts';
 
@@ -197,9 +197,9 @@ function layerWithAsset(
   route: Record<string, unknown>,
   kind: string,
   field: string,
-  path: string,
+  value: string | readonly string[],
 ): Record<string, unknown> {
-  const layer = mergedLayer((route.layer ?? {}) as Record<string, unknown>, { [field]: path });
+  const layer = mergedLayer((route.layer ?? {}) as Record<string, unknown>, { [field]: value });
   const overlay = layer[kind] as Record<string, unknown> | undefined;
   if (overlay !== undefined && field in overlay) {
     const { [field]: _replaced, ...rest } = overlay;
@@ -249,7 +249,13 @@ function linkSharedAsset(
   mutation: Extract<FleetMutation, { kind: 'link-shared-asset' }>,
 ): unknown {
   const path = sharedAssetLinkPath(config, mutation.accountId, mutation.field, mutation.name);
-  return withRoute(config, mutation.accountId, (route, kind) => layerWithAsset(route, kind, mutation.field, path));
+  // `skills` holds a selection, so a link there means "select exactly this one item" and is written as
+  // the one-entry list it is. Spelling the list out rather than leaving a bare string for the schema to
+  // normalize is what keeps the stored configuration saying what happened: this verb names ONE
+  // document, so it can only ever produce a selection of one, and a surface adding a second item edits
+  // the list rather than sending a second link.
+  const value = mutation.field === 'skills' ? [path] : path;
+  return withRoute(config, mutation.accountId, (route, kind) => layerWithAsset(route, kind, mutation.field, value));
 }
 
 /**
@@ -271,6 +277,39 @@ function unlinkSharedAsset(
 }
 
 /**
+ * Refuse a change that stops offering a store item accounts are still using.
+ *
+ * The schema cannot catch this and neither can the plan builder: a path an account names is legal
+ * whether or not the registry declares it, so a deleted item leaves a configuration that parses, plans,
+ * and then fails the apply on a path nobody typed — or, worse, plans cleanly while the surface goes on
+ * showing those accounts as configured. It is checked here because this is the one place that holds BOTH
+ * the configuration as it is and the one a change would produce, which is what makes a deletion visible
+ * at all.
+ *
+ * The refusal names the accounts rather than counting them: the remedy is to move each of them off the
+ * item first, and a count sends somebody looking for who they are.
+ *
+ * Exported as well as called below, and deliberately so. No verb removes a store item today, so the
+ * call in {@link applyFleetMutation} is a guard that cannot yet fire — it is there so that the verb
+ * which does, whenever it arrives, cannot arrive without it. The export is for a surface that wants to
+ * refuse before it builds a proposal at all, and it is the named thing to call rather than a rule to
+ * re-derive.
+ */
+export function assertNoOrphanedSharedDocuments(before: FleetConfig, after: FleetConfig): void {
+  const orphaned = orphanedSharedDocuments(before, after);
+  if (orphaned.length === 0) return;
+  const described = orphaned
+    .map(
+      document =>
+        `shared ${document.field} "${document.name}" (${document.path}), used by ${document.accounts.join(', ')}`,
+    )
+    .join('; ');
+  throw new FleetMutationRefusal(
+    `this change would stop offering ${described}; point those accounts at another document, or give each its own copy, before removing it`,
+  );
+}
+
+/**
  * Derive the configuration a mutation asks for, validated by the shared schema.
  *
  * Every cross-reference the schema checks — duplicate ids, duplicate wrappers, duplicate homes,
@@ -287,6 +326,9 @@ export function applyFleetMutation(config: FleetConfig, mutation: FleetMutation,
     const issues = parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('\n');
     throw new FleetMutationRefusal(`the resulting fleet configuration would be invalid:\n${issues}`);
   }
+  // After the parse, because it compares two parsed configurations — and every verb reaches it, so a
+  // store-item deletion cannot arrive through a new verb that forgot to ask.
+  assertNoOrphanedSharedDocuments(config, parsed.data);
   return parsed.data;
 }
 

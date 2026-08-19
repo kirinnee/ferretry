@@ -1193,6 +1193,52 @@ describe('rendering the sharing report', () => {
     should(actual).containEql('from the base profile');
   });
 
+  it('should list a skills selection item by item rather than as a count', () => {
+    // Arrange — one store item two accounts are on, and one path the store never declared.
+    const report = sharingReport({
+      accounts: [
+        sharingAccount({
+          fields: {
+            ...sharingAccount().fields,
+            skills: {
+              state: 'selection',
+              origin: { kind: 'account' },
+              items: [
+                { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2 },
+                { name: 'mine', path: 'skills/mine', referrers: 1 },
+              ],
+            },
+          },
+        }),
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — which ones, which are the store's, and who else is on each: a count answers none of it.
+    should(actual).containEql('skills   2 items · from this account');
+    should(actual).containEql('review  SHARED "review" · with 1 other account · skills/review');
+    should(actual).containEql('mine  own · only this account · skills/mine');
+  });
+
+  it('should say an empty selection is empty rather than printing nothing', () => {
+    // Arrange
+    const report = sharingReport({
+      accounts: [
+        sharingAccount({
+          fields: {
+            ...sharingAccount().fields,
+            skills: { state: 'selection', origin: { kind: 'account' }, items: [] },
+          },
+        }),
+      ],
+    });
+
+    // Act / Assert — an account that dropped every item said something, and the screen has to show it.
+    should(renderFleetSharing(report)).containEql('skills   none selected · from this account');
+  });
+
   it('should call out a path several accounts share without it being declared', () => {
     // Arrange
     const report = sharingReport({

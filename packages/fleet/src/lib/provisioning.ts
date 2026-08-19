@@ -30,8 +30,9 @@ export interface FleetLayout {
 
 /**
  * One write. `settings` carries unresolved layers because reading a referenced file is IO; the
- * adapter resolves them and merges with the rules in `settings.ts`. `prune` is the only destructive
- * operation, and it is bounded twice: to one directory, and to files carrying the managed marker.
+ * adapter resolves them and merges with the rules in `settings.ts`. Two operations remove things
+ * rather than write them — `prune` and `prune-directory` — and each states its own bound where it is
+ * declared, because they sweep destinations the fleet owns to different degrees.
  */
 export type FleetWriteOperation =
   | {
@@ -88,6 +89,26 @@ export type FleetWriteOperation =
       /** Marker a file must contain before it may be removed. */
       readonly marker: string;
       /** Names to keep, whether or not they carry the marker. */
+      readonly keep: readonly string[];
+    }
+  | {
+      /**
+       * Remove every direct child of a directory this plan materialized entry by entry.
+       *
+       * The second destructive operation, and bounded differently from `prune` because what it sweeps
+       * is different. `prune` sweeps a directory Ferretry shares with the user's own `PATH` files, so
+       * it may only remove files carrying the managed marker. This sweeps a destination the fleet owns
+       * outright: an account's skills directory was REPLACED wholesale on every apply before the field
+       * became per-item, so every direct child of it is this plan's own work from an earlier run. The
+       * keep list is the bound, and it is exactly the selection.
+       *
+       * Without it, per-item selection would be write-only: deselecting a skill would leave the
+       * account still holding — and still able to run — the item it was just told to give up.
+       */
+      readonly kind: 'prune-directory';
+      /** Directory to sweep. Only its direct children are considered. */
+      readonly path: string;
+      /** Names this plan materialized. Every other direct child is removed, file or directory. */
       readonly keep: readonly string[];
     };
 

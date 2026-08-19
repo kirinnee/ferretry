@@ -34,6 +34,20 @@ import { FleetMutationRefusal } from './mutations.ts';
 
 const sharingSummaryOf = (sharing: AssetSharing): FleetAssetSharing => {
   if (sharing.state === 'absent') return { state: 'absent' };
+  if (sharing.state === 'selection') {
+    return {
+      state: 'selection',
+      origin: sharing.origin,
+      items: sharing.items.map(item => ({
+        name: item.name,
+        path: item.path,
+        // Omitted rather than sent as null, because the wire schema states absence by absence — an
+        // item with no shared name is account-local, and there is no name to render for it.
+        ...(item.sharedName === undefined ? {} : { sharedName: item.sharedName }),
+        referrers: item.referrers,
+      })),
+    };
+  }
   if (sharing.state === 'shared') {
     return {
       state: 'shared',
@@ -158,6 +172,14 @@ export function planSharedAssetUnlink(config: FleetConfig, accountId: string, fi
   if (current.state === 'local') {
     throw new FleetMutationRefusal(
       `${account.wrapper} already uses its own "${field}" at "${current.path}" rather than a shared document`,
+    );
+  }
+  if (current.state === 'selection') {
+    // Refused ahead of the directory refusal below, which would also refuse it but for the shallower
+    // reason. "Give this account its own copy" has no referent for a selection: there is no one
+    // document being left, and each item is separately shared or not. Dropping an item is a list edit.
+    throw new FleetMutationRefusal(
+      `"${field}" holds a per-item selection rather than one document, so there is nothing for ${account.wrapper} to take a private copy of; add or drop items in this account's own layer instead`,
     );
   }
   const directory = unlinkableReason(field);
