@@ -5,11 +5,16 @@
  * obvious implementation walks the accounts and runs a login for each, which costs a human one browser
  * approval per wrapper — thirty wrappers, thirty approvals. This one walks **identities**:
  *
- * 1. **Sync first.** Read every home in the identity, pick the freshest usable credential as donor,
+ * 1. **Renew what can renew itself.** An identity whose token has expired but still holds a refresh
+ *    token needs no human at all: the harness will rotate it down a path that invokes no model. It
+ *    happens first — for a pass composed with a renewal — so the donor the next step picks is a
+ *    *valid* credential rather than an expired one whose refresh token every sibling would then be
+ *    handed a spent copy of.
+ * 2. **Sync.** Read every home in the identity, pick the freshest usable credential as donor,
  *    and copy it onto the siblings that need one. Most "logins" are this and nothing more.
- * 2. **Ask a human only when nobody has one.** An identity with no usable credential anywhere is the
+ * 3. **Ask a human only when nobody has one.** An identity with no usable credential anywhere is the
  *    only thing that costs an approval, and one approval covers all of its lanes.
- * 3. **Fan the fresh credential out.** After the approval, re-read the identity and copy the new
+ * 4. **Fan the fresh credential out.** After the approval, re-read the identity and copy the new
  *    credential to the siblings, so the approval is not spent again next time.
  *
  * Thirty wrappers on six provider accounts therefore cost six approvals.
@@ -27,6 +32,7 @@ import {
   selectIdentities,
 } from './identity.ts';
 import type { HarnessKind } from './manifest.ts';
+import type { FleetTokenRefreshResult, FleetTokenRenewal } from './token-refresh.ts';
 
 /** What one account's wrapper needs to be launched for an interactive login. */
 export interface FleetLoginTarget {
@@ -55,6 +61,8 @@ export interface FleetLoginPort {
 export type FleetLoginStatus =
   /** A human approved a provider login for this account. */
   | 'logged-in'
+  /** Its expired token renewed itself, with no browser and nobody asked. */
+  | 'renewed'
   /** It received the identity's credential from a sibling. */
   | 'synced'
   /** Its own credential was already usable; nothing was done. */
@@ -85,11 +93,27 @@ export interface FleetLoginRequest {
   /** Selects whole identities. Empty or absent means every identity. */
   readonly accountIds?: readonly string[];
   readonly mode: FleetLoginMode;
+  /**
+   * Whether an expired-but-renewable credential may renew itself first. Absent means yes.
+   *
+   * A narrowing, like every other flag here. It exists because the renewal spawns the harness, and an
+   * operator diagnosing a fleet is entitled to a pass that starts nothing.
+   */
+  readonly refresh?: boolean;
 }
 
 export interface FleetLoginServiceDeps {
   readonly identities: FleetIdentityService;
   readonly loginPort: FleetLoginPort;
+  /**
+   * Renewing an expired credential before anybody is asked for anything.
+   *
+   * Optional, and absent means the pass behaves exactly as it did before this existed. The renewal
+   * starts harness processes, so an embedder gets it by deciding to rather than by upgrading: a login
+   * driven from a browser and a login driven from a terminal are entitled to different answers about
+   * whether spawning a CLI is acceptable, and that decision belongs to whoever composed the service.
+   */
+  readonly renewal?: FleetTokenRenewal;
 }
 
 const SYNC_ONLY_MESSAGE = 'no usable credential in this identity — rerun without --sync-only to log it in';
@@ -111,30 +135,87 @@ export class FleetLoginService {
         : selectIdentities(request.identities, request.accountIds);
 
     const results: FleetLoginResult[] = [];
-    for (const identity of selected) results.push(...(await this.#runIdentity(identity, request.mode)));
+    for (const identity of selected) {
+      results.push(...(await this.#runIdentity(identity, request.mode, request.refresh !== false)));
+    }
     return results;
   }
 
-  async #runIdentity(identity: FleetIdentity, mode: FleetLoginMode): Promise<readonly FleetLoginResult[]> {
-    const status = await this.deps.identities.surveyOne(identity);
+  async #runIdentity(
+    identity: FleetIdentity,
+    mode: FleetLoginMode,
+    refresh: boolean,
+  ): Promise<readonly FleetLoginResult[]> {
+    const surveyed = await this.deps.identities.surveyOne(identity);
+    const renewal = await this.#renew(identity, surveyed, refresh);
+    // A renewal that ran may have moved the credential in either direction — renewed, or its refresh
+    // token spent and gone. Either way the survey that chose it is now history, and every decision
+    // below is about what the homes hold *now*.
+    const status = renewal?.ran === true ? await this.deps.identities.surveyOne(identity) : surveyed;
     const skipped = status.unavailable.map(member =>
       row(identity, member.accountId, 'unavailable', member.unavailableReason ?? undefined),
     );
 
+    const rows = await this.#decide(status, mode);
+    return [...skipped, ...this.#withRenewal(rows, renewal)];
+  }
+
+  async #decide(status: FleetIdentityStatus, mode: FleetLoginMode): Promise<readonly FleetLoginResult[]> {
     switch (status.verdict.kind) {
       case 'no-login':
-        return [...skipped, ...this.#uniform(status, 'not-required', status.verdict.reason)];
+        return this.#uniform(status, 'not-required', status.verdict.reason);
       case 'indeterminate':
-        return [...skipped, ...this.#refusals(status, status.verdict.reason)];
+        return this.#refusals(status, status.verdict.reason);
       case 'complete':
-        return [...skipped, ...this.#settled(status)];
+        return this.#settled(status);
       case 'sync':
-        return [...skipped, ...(await this.#sync(status))];
+        return await this.#sync(status);
       default:
         return mode === 'sync-only'
-          ? [...skipped, ...this.#uniform(status, 'login-needed', SYNC_ONLY_MESSAGE)]
-          : [...skipped, ...(await this.#interactive(status))];
+          ? this.#uniform(status, 'login-needed', SYNC_ONLY_MESSAGE)
+          : await this.#interactive(status);
     }
+  }
+
+  /**
+   * Let the identity renew itself, when it can and when it was allowed to.
+   *
+   * Nothing is decided here: which home is eligible, and whether firing at it is safe, belong to the
+   * renewal itself — a single-use refresh token is not something two modules get to have opinions
+   * about. This asks, and reports what came back.
+   */
+  async #renew(
+    identity: FleetIdentity,
+    status: FleetIdentityStatus,
+    refresh: boolean,
+  ): Promise<FleetTokenRefreshResult | undefined> {
+    const renewal = this.deps.renewal;
+    if (renewal === undefined || !refresh) return undefined;
+    return await renewal.renew(identity, status.members);
+  }
+
+  /**
+   * Fold what the renewal did into the account it was done to.
+   *
+   * A renewed account reports `renewed` rather than `usable`, because "already had a usable
+   * credential" would hide the one thing worth knowing: this run kept a browser approval from being
+   * needed. A renewal that ran and failed leaves the row the flow decided — it may well now read
+   * `logged-in` — and lends it the renewal's own sentence when the row has nothing else to say, so a
+   * spent refresh token is never silent. A row that already failed is never rewritten: a failure
+   * outranks anything that went right earlier.
+   */
+  #withRenewal(
+    rows: readonly FleetLoginResult[],
+    renewal: FleetTokenRefreshResult | undefined,
+  ): readonly FleetLoginResult[] {
+    if (renewal === undefined || !renewal.ran) return rows;
+    return rows.map(result => {
+      if (result.accountId !== renewal.accountId || result.status === 'failed') return result;
+      if (renewal.status === 'renewed') return { ...result, status: 'renewed' as const };
+      return result.message === undefined && renewal.reason !== undefined
+        ? { ...result, message: renewal.reason }
+        : result;
+    });
   }
 
   /**

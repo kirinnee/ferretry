@@ -325,7 +325,21 @@ describe('logging accounts in', () => {
     should(logins.requests).have.length(1);
     should(logins.requests[0]?.accountIds).be.undefined();
     should(logins.requests[0]?.mode).equal('full');
+    // An expired credential renews itself unless somebody said not to.
+    should(logins.requests[0]?.refresh).be.true();
     should(out.text).containEql('logged in');
+  });
+
+  it('should start no harness when --no-refresh was passed', async () => {
+    // Arrange — commander spells the negated flag as `refresh: false`.
+    const logins = new RecordingLoginService();
+    const { subject } = controller({ logins });
+
+    // Act
+    await subject.login([], { refresh: false });
+
+    // Assert
+    should(logins.requests[0]?.refresh).be.false();
   });
 
   it('should pass only the named accounts through', async () => {
