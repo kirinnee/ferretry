@@ -8,6 +8,7 @@ import {
   groupByIdentity,
   resolveAccounts,
   resolveCommands,
+  skillSelectionOf,
   toManifestAccounts,
 } from '../../src/lib/profiles.ts';
 import { FleetManifestAccountSchema } from '../../src/lib/manifest.ts';
@@ -581,8 +582,9 @@ describe('resolveAccounts route layer', () => {
     // Assert
     should(actual[0]?.memory).equal('./default.md');
     should(actual[1]?.memory).equal('./auto.md');
-    should(actual[0]?.skills).equal('./skills-default');
-    should(actual[1]?.skills).equal('./skills-auto');
+    // A selection, so a bare reference resolves to the list of one rather than to the string.
+    should(actual[0]?.skills).deepEqual(['./skills-default']);
+    should(actual[1]?.skills).deepEqual(['./skills-auto']);
     should(actual[0]?.settings).deepEqual([{ lane: 'default' }]);
     should(actual[1]?.settings).deepEqual([{ lane: 'auto' }]);
     should(actual[0]?.env).deepEqual({ SHARED: 'yes', LANE: 'default' });
@@ -639,5 +641,73 @@ describe('resolveAccounts route layer', () => {
 
     // Assert
     should(actual[0]?.memory).equal('./codex.md');
+  });
+});
+
+describe('skillSelectionOf', () => {
+  it('should read an absent field as absent rather than as an empty selection', () => {
+    // Act / Assert — the two mean different things: absent keeps what an earlier slot selected.
+    should(skillSelectionOf(undefined)).be.undefined();
+  });
+
+  it('should read a bare reference as the selection of one', () => {
+    // Act / Assert
+    should(skillSelectionOf('skills/review')).deepEqual(['skills/review']);
+  });
+
+  it('should read a list as itself, empty list included', () => {
+    // Act / Assert
+    should(skillSelectionOf(['skills/review', 'skills/deploy'])).deepEqual(['skills/review', 'skills/deploy']);
+    should(skillSelectionOf([])).deepEqual([]);
+  });
+});
+
+describe('resolveAccounts skills selection', () => {
+  /** A base profile selecting two items, with one account free to override the whole list. */
+  const fleet = (layer: unknown): FleetConfig =>
+    parse({
+      variants: { default: {} },
+      profiles: { base: { skills: ['skills/review', 'skills/deploy'] } },
+      agents: [
+        {
+          name: 'one',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-one',
+              home: 'claude-one',
+              defaultModel: 'm',
+              models: ['m'],
+              ...(layer === undefined ? {} : { layer: { skills: layer } }),
+            },
+          },
+        },
+      ],
+    });
+
+  it('should inherit the shared selection when the account declares none', () => {
+    // Act
+    const actual = resolveAccounts(fleet(undefined));
+
+    // Assert
+    should(actual[0]?.skills).deepEqual(['skills/review', 'skills/deploy']);
+  });
+
+  it('should replace the whole selection rather than adding to it', () => {
+    // Act
+    const actual = resolveAccounts(fleet(['skills/research']));
+
+    // Assert — the account's own list wins outright, so it can drop an item the base handed it.
+    // Concatenation would leave `review` and `deploy` in place with no way to ever remove them.
+    should(actual[0]?.skills).deepEqual(['skills/research']);
+  });
+
+  it('should let an account select nothing at all', () => {
+    // Act
+    const actual = resolveAccounts(fleet([]));
+
+    // Assert
+    should(actual[0]?.skills).deepEqual([]);
   });
 });

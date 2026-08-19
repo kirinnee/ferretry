@@ -1,6 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ASSET_FIELDS, HARNESS_ASSETS, harnessAsset, unsupportedAssetFields } from '../../src/lib/assets.ts';
+import {
+  ASSET_FIELDS,
+  HARNESS_ASSETS,
+  harnessAsset,
+  isUsableSkillItemName,
+  skillItemName,
+  unsupportedAssetFields,
+} from '../../src/lib/assets.ts';
 
 describe('HARNESS_ASSETS', () => {
   it.each(['claude', 'codex'] as const)('should give %s harness assets distinct destinations', kind => {
@@ -85,5 +92,33 @@ describe('harnessAsset', () => {
 
     // Assert
     should(actual?.dest).equal('NOTES.md');
+  });
+});
+
+describe('skillItemName', () => {
+  it.each([
+    ['skills/review', 'review'],
+    ['./skills/review', 'review'],
+    ['skills/review/', 'review'],
+    ['skills/a/../b/deploy', 'deploy'],
+    ['review', 'review'],
+  ])('should read %s as the item %s', (reference, expected) => {
+    // Act
+    const actual = skillItemName(reference);
+
+    // Assert — two spellings of one document must claim one destination, not two.
+    should(actual).equal(expected);
+  });
+});
+
+describe('isUsableSkillItemName', () => {
+  it('should accept a single path component', () => {
+    // Act / Assert
+    should(isUsableSkillItemName('review')).be.true();
+  });
+
+  it.each(['', '.', '..', 'a/b'])('should refuse %s as a destination name', name => {
+    // Act / Assert — each of these would compose a destination outside the item it names.
+    should(isUsableSkillItemName(name)).be.false();
   });
 });

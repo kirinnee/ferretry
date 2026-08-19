@@ -53,7 +53,12 @@ export interface ResolvedAccount {
   readonly flags: readonly string[];
   readonly settings: readonly SettingsLayer[];
   readonly memory: string | undefined;
-  readonly skills: string | undefined;
+  /**
+   * The skill items this account selected, in declaration order, or `undefined` when no slot declared
+   * any. An empty list is a declared selection of nothing and is not the same as `undefined`: the
+   * first materializes an empty skills destination, the second leaves the field alone entirely.
+   */
+  readonly skills: readonly string[] | undefined;
   readonly hooks: string | undefined;
   readonly hooksDir: string | undefined;
   readonly mcp: string | undefined;
@@ -73,13 +78,25 @@ export interface ResolvedCommand {
 export const settingsLayersOf = (settings: BaseProfile['settings']): readonly SettingsLayer[] =>
   settings === undefined ? [] : Array.isArray(settings) ? settings : [settings];
 
+/**
+ * One slot's skills field as a selection list, or `undefined` when the slot declares none.
+ *
+ * A bare reference is the selection of one, exactly as {@link settingsLayersOf} treats a single
+ * settings layer — so every consumer reads one shape and no downstream module has to know that the
+ * field is spellable two ways. Absent and empty stay distinguishable because they mean different
+ * things: absent leaves whatever an earlier slot selected, empty replaces it with nothing.
+ */
+export const skillSelectionOf = (skills: BaseProfile['skills']): readonly string[] | undefined =>
+  skills === undefined ? undefined : typeof skills === 'string' ? [skills] : skills;
+
 /** Accumulated flat fields. `flags`/`settings` are always lists so concatenation is total. */
 interface Accumulated {
   env: EnvMap;
   flags: string[];
   settings: SettingsLayer[];
   memory: string | undefined;
-  skills: string | undefined;
+  /** Already normalized to a list, so a slot's shorthand is resolved once rather than at every read. */
+  skills: string[] | undefined;
   hooks: string | undefined;
   hooksDir: string | undefined;
   mcp: string | undefined;
@@ -102,7 +119,10 @@ const applyLayer = (accumulated: Accumulated, layer: BaseProfile): Accumulated =
   flags: [...accumulated.flags, ...(layer.flags ?? [])],
   settings: [...accumulated.settings, ...settingsLayersOf(layer.settings)],
   memory: layer.memory ?? accumulated.memory,
-  skills: layer.skills ?? accumulated.skills,
+  // Replaced whole rather than merged: a later slot's selection is the selection. Concatenating would
+  // make an account unable to drop an item an earlier slot handed it, and there would be no way to say
+  // "none of them" at all.
+  skills: layer.skills === undefined ? accumulated.skills : [...(skillSelectionOf(layer.skills) ?? [])],
   hooks: layer.hooks ?? accumulated.hooks,
   hooksDir: layer.hooksDir ?? accumulated.hooksDir,
   mcp: layer.mcp ?? accumulated.mcp,

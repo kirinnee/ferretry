@@ -141,12 +141,29 @@ export type SettingsLayer = z.infer<typeof SettingsLayerSchema>;
 
 const SettingsFieldSchema = z.union([SettingsLayerSchema, z.array(SettingsLayerSchema).min(1)]);
 
+/**
+ * The skill items this layer selects, each one individually addressable.
+ *
+ * A **list**, because the shared pool is a store of items rather than a folder-shaped blob: the store
+ * holds `skills/review`, `skills/deploy`, `skills/research`, and an account takes the subset it needs.
+ * One directory string could only ever say "take all of it", which is why per-item selection could not
+ * be expressed before. Each selected item is materialized under its own name inside the harness's
+ * skills destination, so two accounts selecting one item read one source and neither can see the
+ * other's picks.
+ *
+ * A bare reference is the selection of one — the same shorthand `settings` accepts for a single layer —
+ * so the field has exactly one shape downstream and nothing has to branch on how it was written. An
+ * empty list is a *declared* selection of nothing, which is how one account drops every item an
+ * earlier composition slot handed it; that is why it is accepted rather than refused.
+ */
+const SkillsFieldSchema = z.union([NonEmptyString, z.array(NonEmptyString)]);
+
 const profileFieldShape = {
   env: EnvSchema.optional(),
   flags: z.array(NonEmptyString).optional(),
   settings: SettingsFieldSchema.optional(),
   memory: NonEmptyString.optional(),
-  skills: NonEmptyString.optional(),
+  skills: SkillsFieldSchema.optional(),
   hooks: NonEmptyString.optional(),
   hooksDir: NonEmptyString.optional(),
   mcp: NonEmptyString.optional(),

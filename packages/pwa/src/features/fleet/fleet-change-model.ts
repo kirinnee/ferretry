@@ -327,6 +327,9 @@ const OPERATION_ACTIONS: Readonly<Record<FleetWriteOperation['kind'], string>> =
   settings: 'merge settings',
   'codex-sqlite-ownership': 'take codex history ownership',
   prune: 'remove unclaimed wrappers',
+  // Said as what it removes rather than as "prune", because this is the line a person reads before
+  // approving the removal of a skill an account is no longer selecting.
+  'prune-directory': 'remove unselected items',
 };
 
 /** One numbered line of the change manifest. */

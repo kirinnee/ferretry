@@ -1,7 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
-import { declaredAssetFields, FleetPlan, UnknownDefaultHomeError, UnsupportedAssetError } from '../../src/lib/plan.ts';
+import {
+  declaredAssetFields,
+  FleetPlan,
+  SkillItemCollisionError,
+  UnknownDefaultHomeError,
+  UnnamedSkillItemError,
+  UnsupportedAssetError,
+} from '../../src/lib/plan.ts';
 import type { ResolvedAccount } from '../../src/lib/profiles.ts';
 import type { FleetLayout, FleetWriteOperation } from '../../src/lib/provisioning.ts';
 import { MANAGED_MARKER } from '../../src/lib/wrappers.ts';
@@ -75,6 +82,177 @@ describe('declaredAssetFields', () => {
 
     // Assert
     should([...actual]).deepEqual(['memory', 'hooks', 'mcp']);
+  });
+
+  it('should report a skills selection in the fields own declaration order', () => {
+    // Act
+    const actual = declaredAssetFields(resolved({ mcp: '.mcp.json', skills: ['skills/review'], memory: 'CLAUDE.md' }));
+
+    // Assert — skills sits between memory and mcp wherever the three checks happened to run.
+    should([...actual]).deepEqual(['memory', 'skills', 'mcp']);
+  });
+
+  it('should treat a selection of nothing as declared, because the account said something about it', () => {
+    // Act
+    const actual = declaredAssetFields(resolved({ skills: [] }));
+
+    // Assert
+    should([...actual]).deepEqual(['skills']);
+  });
+});
+
+describe('FleetPlan skills selection', () => {
+  /** Two accounts of one agent, each with its own layer, so a selection can differ per account. */
+  const twoAccounts = (first: unknown, second: unknown): FleetConfig =>
+    config({
+      variants: { default: {}, auto: {} },
+      agents: [
+        {
+          name: 'work',
+          kind: 'claude',
+          routes: {
+            default: route({ layer: { skills: first } }),
+            auto: route({ id: ID_CODEX, wrapper: 'fy-claude-auto', home: 'claude-auto', layer: { skills: second } }),
+          },
+        },
+      ],
+    });
+
+  const copiesFor = (built: { operations: readonly FleetWriteOperation[] }, home: string): readonly string[] =>
+    built.operations.flatMap(operation =>
+      operation.kind === 'copy' && operation.path.startsWith(`/state/fleet/homes/${home}/skills/`)
+        ? [`${operation.path} ← ${operation.source}`]
+        : [],
+    );
+
+  it('should materialize exactly the items an account selected and none of the others', () => {
+    // Arrange — the store offers three items; this account takes two of them.
+    const input = config({
+      shared: { skills: { review: 'skills/review', deploy: 'skills/deploy', research: 'skills/research' } },
+      agents: [
+        {
+          name: 'work',
+          kind: 'claude',
+          routes: { default: route({ layer: { skills: ['skills/review', 'skills/deploy'] } }) },
+        },
+      ],
+    });
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert — one operation per selected item, under its own name, and nothing for `research`.
+    should(copiesFor(actual, 'claude-work')).deepEqual([
+      '/state/fleet/homes/claude-work/skills/review ← /state/fleet/assets/skills/review',
+      '/state/fleet/homes/claude-work/skills/deploy ← /state/fleet/assets/skills/deploy',
+    ]);
+    // And the sweep names those two, so anything a previous apply left beside them is removed rather
+    // than silently retained — which is what makes "none of the others" true of the home and not only
+    // of this plan.
+    should(operationsOf(actual, 'prune-directory')).deepEqual([
+      { kind: 'prune-directory', path: '/state/fleet/homes/claude-work/skills', keep: ['review', 'deploy'] },
+    ]);
+  });
+
+  it('should let two accounts select one item without either seeing the other selection', () => {
+    // Arrange — both take `review`; each adds one the other does not.
+    const input = twoAccounts(['skills/review', 'skills/deploy'], ['skills/review', 'skills/research']);
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert — one source, two destinations, and neither home holds the other's extra item.
+    should(copiesFor(actual, 'claude-work')).deepEqual([
+      '/state/fleet/homes/claude-work/skills/review ← /state/fleet/assets/skills/review',
+      '/state/fleet/homes/claude-work/skills/deploy ← /state/fleet/assets/skills/deploy',
+    ]);
+    should(copiesFor(actual, 'claude-auto')).deepEqual([
+      '/state/fleet/homes/claude-auto/skills/review ← /state/fleet/assets/skills/review',
+      '/state/fleet/homes/claude-auto/skills/research ← /state/fleet/assets/skills/research',
+    ]);
+  });
+
+  it('should create the skills directory privately rather than leaving it to the umask', () => {
+    // Act
+    const actual = subject.build(twoAccounts(['skills/review'], []), LAYOUT, GENERATED_AT);
+
+    // Assert
+    should(operationsOf(actual, 'directory')).containEql({
+      kind: 'directory',
+      path: '/state/fleet/homes/claude-work/skills',
+      mode: 0o700,
+    });
+  });
+
+  it('should empty the skills directory for an account that selected nothing', () => {
+    // Act
+    const actual = subject.build(twoAccounts([], []), LAYOUT, GENERATED_AT);
+
+    // Assert — a declared selection of nothing still sweeps, so dropping every item takes effect.
+    should(operationsOf(actual, 'prune-directory')).deepEqual([
+      { kind: 'prune-directory', path: '/state/fleet/homes/claude-work/skills', keep: [] },
+      { kind: 'prune-directory', path: '/state/fleet/homes/claude-auto/skills', keep: [] },
+    ]);
+    should(copiesFor(actual, 'claude-work')).deepEqual([]);
+  });
+
+  it('should plan nothing for skills when no slot declared a selection', () => {
+    // Act
+    const actual = subject.build(config(), LAYOUT, GENERATED_AT);
+
+    // Assert — absent is not the same as empty: the field is left alone entirely.
+    should(operationsOf(actual, 'prune-directory')).deepEqual([]);
+    should(operationsOf(actual, 'directory')).not.containEql({
+      kind: 'directory',
+      path: '/state/fleet/homes/claude-work/skills',
+      mode: 0o700,
+    });
+  });
+
+  it('should treat one item named twice as one item', () => {
+    // Act — the same document, spelled two ways the canonical form collapses.
+    const actual = subject.build(twoAccounts(['skills/review', './skills/review'], []), LAYOUT, GENERATED_AT);
+
+    // Assert
+    should(copiesFor(actual, 'claude-work')).deepEqual([
+      '/state/fleet/homes/claude-work/skills/review ← /state/fleet/assets/skills/review',
+    ]);
+  });
+
+  it('should refuse two different items that would claim one destination, naming both sources', () => {
+    // Arrange — two store items whose last segment is the same, which a browser shows as two cards.
+    const input = twoAccounts(['skills/a/review', 'skills/b/review'], []);
+
+    // Act / Assert
+    should(() => subject.build(input, LAYOUT, GENERATED_AT)).throw(SkillItemCollisionError);
+    should(() => subject.build(input, LAYOUT, GENERATED_AT)).throw(
+      /would all be materialized as "review": skills\/a\/review, skills\/b\/review/u,
+    );
+  });
+
+  it('should refuse a selection entry that names no item', () => {
+    // Act / Assert — `.` would compose the skills directory itself and replace the whole thing.
+    should(() => subject.build(twoAccounts(['.'], []), LAYOUT, GENERATED_AT)).throw(UnnamedSkillItemError);
+  });
+
+  it('should honour a link destination table that asks for a symlink rather than a copy', () => {
+    // Arrange — the destination table is a policy, and per-item selection is agnostic to which one it
+    // is. A build with links must produce one link per item at the same destinations.
+    const linking = new FleetPlan({
+      claude: [{ field: 'skills', dest: 'skills', mode: 'link' }],
+      codex: [],
+    });
+
+    // Act
+    const actual = linking.build(twoAccounts(['skills/review'], []), LAYOUT, GENERATED_AT);
+
+    // Assert
+    should(operationsOf(actual, 'symlink')).containEql({
+      kind: 'symlink',
+      source: '/state/fleet/assets/skills/review',
+      path: '/state/fleet/homes/claude-work/skills/review',
+    });
+    should(operationsOf(actual, 'copy')).deepEqual([]);
   });
 });
 
@@ -183,7 +361,9 @@ describe('FleetPlan', () => {
     // Assert
     should(operationsOf(actual, 'copy')).deepEqual([
       { kind: 'copy', source: '/state/fleet/assets/CLAUDE.md', path: '/state/fleet/homes/claude-work/CLAUDE.md' },
-      { kind: 'copy', source: '/home/tester/assets/skills', path: '/state/fleet/homes/claude-work/skills' },
+      // One selected item, materialized under its own name inside the skills directory rather than
+      // replacing the directory with the source tree.
+      { kind: 'copy', source: '/home/tester/assets/skills', path: '/state/fleet/homes/claude-work/skills/skills' },
     ]);
     should(operationsOf(actual, 'settings')).deepEqual([
       {

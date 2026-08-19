@@ -3,6 +3,7 @@ import { type FleetConfig, FleetConfigSchema } from '@ferretry/fleet';
 import should from 'should';
 import {
   applyFleetMutation,
+  assertNoOrphanedSharedDocuments,
   derivedWrapperName,
   type FleetMutation,
   FleetMutationRefusal,
@@ -407,5 +408,133 @@ describe('applyFleetMutation initializing', () => {
 
     // Assert
     should(actual).match(/does not derive a configuration/u);
+  });
+});
+
+describe('applyFleetMutation refusing to orphan a store item', () => {
+  /** One store item, selected by the one account, so any change dropping it is observable. */
+  const withStore = (store: Record<string, string>, selection: readonly string[]): FleetConfig =>
+    configOf({
+      shared: { skills: store },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-kirin',
+              home: 'claude-kirin',
+              defaultModel: 'model-one',
+              models: ['model-one'],
+              layer: { skills: selection },
+            },
+          },
+        },
+      ],
+    });
+
+  it('should refuse a change that stops offering a selected item, naming the accounts on it', () => {
+    // Arrange — the store drops `review` while the account still selects it.
+    const before = withStore({ review: 'skills/review' }, ['skills/review']);
+    const after = withStore({}, ['skills/review']);
+
+    // Act / Assert — the account id, the item name and its path, so the refusal says who to move and
+    // what off. No verb removes a store item yet; the guard on the mutation path is what makes the verb
+    // that does unable to arrive without it.
+    should(refusalOf(() => assertNoOrphanedSharedDocuments(before, after))).match(
+      new RegExp(`stop offering shared skills "review" \\(skills/review\\), used by ${ID_ONE}`, 'u'),
+    );
+  });
+
+  it('should accept a change that leaves every offer in place', () => {
+    // Arrange
+    const config = withStore({ review: 'skills/review' }, ['skills/review']);
+
+    // Act / Assert — the guard every mutation passes through must be silent on the ordinary case.
+    should(() => assertNoOrphanedSharedDocuments(config, config)).not.throw();
+  });
+
+  it('should let every ordinary verb through, because none of them removes an offer', () => {
+    // Arrange
+    const config = withStore({ review: 'skills/review' }, ['skills/review']);
+
+    // Act — an edit beside the selection keeps the store intact.
+    const actual = applyFleetMutation(
+      config,
+      mutationOf({ kind: 'edit-account', accountId: ID_ONE, displayName: 'K' }),
+      mintId,
+    );
+
+    // Assert
+    should(actual.shared.skills).deepEqual({ review: 'skills/review' });
+    should(routeOf(actual, ID_ONE).displayName).equal('K');
+  });
+});
+
+describe('applyFleetMutation linking a shared skill', () => {
+  const storeFleet = (): FleetConfig =>
+    configOf({
+      shared: { skills: { review: 'skills/review' } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-kirin',
+              home: 'claude-kirin',
+              defaultModel: 'model-one',
+              models: ['model-one'],
+            },
+          },
+        },
+      ],
+    });
+
+  it('should write the one-entry list a link means rather than a bare reference', () => {
+    // Act
+    const actual = applyFleetMutation(
+      storeFleet(),
+      mutationOf({ kind: 'link-shared-asset', accountId: ID_ONE, field: 'skills', name: 'review' }),
+      mintId,
+    );
+
+    // Assert — the verb names one document, so it can only ever produce a selection of one, and the
+    // stored configuration says so instead of leaving the schema to normalize a string.
+    should((routeOf(actual, ID_ONE).layer as Record<string, unknown>).skills).deepEqual(['skills/review']);
+  });
+
+  it('should still write a bare reference for a field that holds one document', () => {
+    // Arrange
+    const config = configOf({
+      shared: { memory: { default: './CLAUDE.md' } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-kirin',
+              home: 'claude-kirin',
+              defaultModel: 'model-one',
+              models: ['model-one'],
+            },
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = applyFleetMutation(
+      config,
+      mutationOf({ kind: 'link-shared-asset', accountId: ID_ONE, field: 'memory', name: 'default' }),
+      mintId,
+    );
+
+    // Assert
+    should((routeOf(actual, ID_ONE).layer as Record<string, unknown>).memory).equal('./CLAUDE.md');
   });
 });
