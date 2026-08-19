@@ -90,7 +90,7 @@ export function ChatWidthControl({ value, onChange }: ChatWidthControlProps) {
             <label
               key={option.id}
               className={cn(
-                'flex min-h-[44px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
+                'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
                 'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
                 checked
                   ? 'border-accent bg-accent-soft text-accent'

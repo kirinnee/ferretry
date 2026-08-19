@@ -42,6 +42,18 @@ const PHONE_CONTEXT = {
     'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
 } as const;
 
+/**
+ * WHICH COLOUR SCHEME THE CAPTURE RUNS IN, because both themes are a review
+ * state and only one of them was ever reachable here.
+ *
+ * `pre-paint.js` resolves the theme from `prefers-color-scheme` before first
+ * paint, so a light capture is a different first frame rather than a class
+ * toggle — it has to be emulated at the CONTEXT, exactly as `app-screenshot.ts`
+ * already does. The captures keep their existing names: a two-theme review is
+ * two runs into two directories, not two filename conventions.
+ */
+const SCHEME: 'light' | 'dark' = process.argv.includes('--light') ? 'light' : 'dark';
+
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
@@ -799,7 +811,7 @@ try {
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
           : { viewport: { width: viewport.width, height: viewport.height } }),
-        colorScheme: 'dark',
+        colorScheme: SCHEME,
         reducedMotion: 'reduce',
       });
       // Every capture below runs against this one context and page. Closing them

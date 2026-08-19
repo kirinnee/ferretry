@@ -35,9 +35,15 @@ import { nextDetailsTab } from './sheet-tabs.tsx';
 export interface ChoiceRailItem<T extends string = string> {
   readonly id: T;
   readonly label: string;
-  /** The second line. A row without one is a single-line row. */
+  /** The second line, when the rail is showing one. */
   readonly detail?: string | undefined;
-  /** Drawn before the label; supply it already marked `aria-hidden`. */
+  /**
+   * Drawn before the label, in the rail's own fixed slot; supply it already marked `aria-hidden`.
+   *
+   * ALL THE ROWS OR NONE OF THEM. Three of ten panels carrying one read as unfinished, which is
+   * exactly what it was, and the rail cannot fix that for a caller — it can only guarantee that the
+   * icons it IS given line up. See {@link ICON_SLOT_CLASS}.
+   */
   readonly icon?: ReactNode;
 }
 
@@ -54,6 +60,21 @@ interface ChoiceRailBaseProps<T extends string> {
    * long, opaque, and already repeated in full inside the panel.
    */
   readonly truncate?: boolean;
+  /**
+   * ONE HEIGHT RULE PER RAIL, chosen by whether the reader can see the panel from the row.
+   *
+   * `two-line`  Label and `detail`. What a PICKER needs: a sheet row is being chosen blind, so the
+   *             description is the only thing distinguishing ten rows a reader cannot see behind it.
+   * `single-line`  Label only. What a rail BESIDE its own panel needs. Ten two-line rows made the
+   *             desktop rail 900px tall next to a 250px panel — the rail was the tallest thing on
+   *             the page — and rows whose descriptions ran to two, three and four lines had no shared
+   *             height at all. The description is not dropped: the panel it opens carries it as its
+   *             own heading text, where the reader is looking once they arrive.
+   *
+   * The row's height is a FLOOR (`min-h-row`, the pointer-derived token), never a fixed height: a
+   * theme that scales its type up, or a reader who scales text up, must be able to make a row taller.
+   */
+  readonly rows?: 'two-line' | 'single-line';
 }
 
 /**
@@ -71,14 +92,41 @@ type ChoiceRailProps<T extends string> =
       readonly panelIdPrefix: string;
     });
 
+/**
+ * ONE HEIGHT RULE AND ONE GAP, both from the scale.
+ *
+ * `min-h-row` is the pointer-derived floor — `max(--row-min-h-desktop, --target-floor)` — so a coarse
+ * pointer gets its 44px without this component knowing what a pointer is, and a theme that runs denser
+ * or looser moves with it. The literal `52px` it replaces was neither: it was above the touch floor on
+ * a phone and below the content height of a two-line row anyway, so it never actually decided anything.
+ *
+ * Vertical space is `py-2` plus the row gap and NOTHING ELSE. Margins on the rows are what collapse and
+ * double; `gap` on the flex parent cannot.
+ */
 const ROW_CLASS =
-  'flex min-h-[52px] w-full items-center gap-2 rounded-control border px-control-x py-2 text-left transition-colors focus-visible:outline-focus focus-visible:outline-offset-focus';
+  'flex min-h-row w-full items-center gap-sm rounded-control border px-control-x py-2 text-left transition-colors focus-visible:outline-focus focus-visible:outline-offset-focus';
 const SELECTED_ROW_CLASS = 'border-accent bg-accent-soft text-accent';
 const IDLE_ROW_CLASS = 'border-transparent text-muted hover:border-border hover:bg-surface-2 hover:text-fg';
+/** The gap between rows, once, so both presentations cannot drift apart. */
+const RAIL_CLASS = 'flex flex-col gap-xs';
+
+/**
+ * THE FIXED ICON BOX — 16px, the app's HEADING optical size, drawn for EVERY row once ANY row has an icon.
+ *
+ * Without it each row indented its own label by whatever glyph it happened to carry, so a rail where
+ * three of ten panels had icons had a left edge that alternated between two x positions down the whole
+ * column. That ragged edge is what reads as "the icons were uneven" — the icons themselves were already
+ * one size. A caller that supplies no icons at all gets no slot and no indent, so a plain rail is
+ * unchanged.
+ */
+const ICON_SLOT_CLASS = 'flex w-4 shrink-0 items-center justify-center';
 
 export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
-  const { items, activeId, onSelect, marker, truncate = false } = props;
+  const { items, activeId, onSelect, marker, truncate = false, rows = 'two-line' } = props;
   const refs = useRef(new Map<T, HTMLButtonElement>());
+  // Read from the ITEMS rather than taken as a prop: whether this rail is a column of icons is a fact
+  // about what it was given, and a caller that had to declare it as well could contradict itself.
+  const hasIcons = items.some(item => item.icon !== undefined);
 
   // Focus follows selection, but ONLY when this rail already holds focus — an
   // unrelated re-render must never pull focus off the panel the reader is in.
@@ -96,10 +144,14 @@ export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
 
   const row = (item: ChoiceRailItem<T>, selected: boolean): ReactNode => (
     <>
-      {item.icon}
+      {hasIcons ? (
+        <span className={ICON_SLOT_CLASS} aria-hidden="true">
+          {item.icon}
+        </span>
+      ) : null}
       <span className="min-w-0 flex-1">
         <span className={cn('block text-ui font-semibold', truncate && 'truncate')}>{item.label}</span>
-        {item.detail === undefined ? null : (
+        {rows === 'single-line' || item.detail === undefined ? null : (
           <span className={cn('mt-0.5 block text-meta leading-tight text-faint', truncate && 'truncate')}>
             {item.detail}
           </span>
@@ -111,7 +163,7 @@ export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
 
   if (props.presentation !== 'tabs')
     return (
-      <ul className="m-0 flex list-none flex-col gap-1 p-0">
+      <ul className={cn('m-0 list-none p-0', RAIL_CLASS)}>
         {items.map(item => {
           const selected = item.id === activeId;
           return (
@@ -138,7 +190,7 @@ export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
   const focusStop = order.includes(activeId) ? activeId : order[0];
 
   return (
-    <div role="tablist" aria-orientation="vertical" aria-label={props.label} className="flex flex-col gap-1">
+    <div role="tablist" aria-orientation="vertical" aria-label={props.label} className={RAIL_CLASS}>
       {items.map(item => {
         const selected = item.id === activeId;
         return (

@@ -8,7 +8,7 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { ChevronDown, ChevronLeft, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, Palette, Server, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
@@ -21,6 +21,7 @@ import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
+import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
@@ -67,6 +68,22 @@ const sectionFromHash = (): SettingsSectionId | null => {
 };
 
 /**
+ * ONE ICON PER SECTION, for the same reason the daemon panel rail has one per panel: all the rows or
+ * none of them, at one size, from the one set this app already draws from.
+ *
+ * Three rows is few enough that iconless was defensible on its own — but it is not on its own. It sits
+ * beside a ten-row rail that now has them, and the two rails are the same component at two levels of the
+ * same screen; one of them being a column of glyphs and the other a column of bare text is the
+ * inconsistency, not the fix for it.
+ */
+const SETTINGS_SECTION_ICONS: Readonly<Record<SettingsSectionId, ReactNode>> = {
+  appearance: <Palette size={16} aria-hidden="true" />,
+  behaviour: <SlidersHorizontal size={16} aria-hidden="true" />,
+  // The machines, not the pairing: this section is where a reader picks WHICH host they are configuring.
+  daemons: <Server size={16} aria-hidden="true" />,
+};
+
+/**
  * Level one of the shared rail. The section catalogue is a constant, not runtime
  * state, so the rows are built once at module scope rather than per render.
  */
@@ -74,6 +91,7 @@ const SETTINGS_SECTION_ITEMS: readonly ChoiceRailItem<SettingsSectionId>[] = SET
   id: section.id,
   label: section.label,
   detail: section.description,
+  icon: SETTINGS_SECTION_ICONS[section.id],
 }));
 
 function MobileSettingsSectionPicker({
@@ -94,22 +112,19 @@ function MobileSettingsSectionPicker({
   const titleId = useId();
   return (
     <div className="md:hidden">
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-controls="settings-section-picker"
-        onClick={onOpen}
-        data-settings-section-trigger=""
-        className="flex min-h-[52px] w-full items-center gap-2 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left shadow-panel focus-visible:outline-focus focus-visible:outline-offset-focus"
-      >
-        <SlidersHorizontal size={17} className="shrink-0 text-accent" aria-hidden="true" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-meta font-semibold uppercase tracking-label text-faint">Settings section</span>
-          <span className="block text-ui font-semibold text-fg">{definition.label}</span>
-        </span>
-        <ChevronDown size={17} className="shrink-0 text-muted" aria-hidden="true" />
-      </button>
+      <PickerTrigger
+        eyebrow="Settings section"
+        value={definition.label}
+        icon={
+          <span className="flex w-4 shrink-0 items-center justify-center text-accent" aria-hidden="true">
+            {SETTINGS_SECTION_ICONS[definition.id]}
+          </span>
+        }
+        open={open}
+        controls="settings-section-picker"
+        marker="data-settings-section-trigger"
+        onOpen={onOpen}
+      />
       <BottomSheet
         id="settings-section-picker"
         open={open}
@@ -124,7 +139,7 @@ function MobileSettingsSectionPicker({
           <h2 id={titleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
             Choose a settings section
           </h2>
-          <p className="mb-3 mt-1 text-ui leading-base text-muted">
+          <p className="mb-3 mt-1 text-cell leading-base text-muted">
             Pick one area; the settings underneath stay on this page.
           </p>
           <nav aria-label="Settings sections">
@@ -151,6 +166,23 @@ export interface SettingsSectionProps {
   readonly children: ReactNode;
 }
 
+/**
+ * FOUR LEVELS, and they have to be four different sizes.
+ *
+ * Everything on this page used to read at `text-title`/`text-ui`: the page title, the section heading,
+ * every panel heading, every description, every warning and every path. Uppercase had been sprinkled on
+ * top to try to buy back a hierarchy that the type scale was not providing, which is why removing the
+ * capitals is only half the fix. The scale, top down:
+ *
+ *   text-display bold     the page — "Settings"
+ *   text-title   bold     the section — "Daemons"
+ *   text-row     semibold THIS, a panel inside that section
+ *   text-cell    muted    its explanation, the least legible thing in the panel
+ *
+ * STATE is not on this ladder on purpose. A value, a badge or a verdict is `text-fg` at semibold against
+ * muted prose, so the thing a reader came to check is the most legible element in the panel while the
+ * sentence explaining it is the quietest — which is the opposite of how these panels read before.
+ */
 export function SettingsSection({ definition, children }: SettingsSectionProps) {
   const headingId = `settings-${definition.id}-heading`;
   return (
@@ -161,10 +193,10 @@ export function SettingsSection({ definition, children }: SettingsSectionProps) 
       className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
       aria-labelledby={headingId}
     >
-      <h3 id={headingId} className="m-0 text-title font-semibold text-fg">
+      <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
         {definition.label}
       </h3>
-      <p className="mt-1 text-ui leading-base text-muted">{definition.description}</p>
+      <p className="mt-1 text-cell leading-base text-muted">{definition.description}</p>
       <div className="mt-3">{children}</div>
     </section>
   );
@@ -184,7 +216,7 @@ export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
           <label
             key={option.id}
             className={cn(
-              'flex min-h-[44px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
+              'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
               'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
               checked
                 ? 'border-accent bg-accent-soft text-accent'
@@ -354,7 +386,7 @@ export function SettingsPage({
                 <label
                   key={option.id}
                   className={cn(
-                    'flex min-h-[44px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
+                    'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
                     'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
                     checked
                       ? 'border-accent bg-accent-soft text-accent'
@@ -436,7 +468,13 @@ export function SettingsPage({
         className,
       )}
     >
-      <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-3 py-2">
+      {/* WIDER, because the wrapped paths and the four-line rail rows were the SAME defect as the empty
+          gutters either side of this column. At 1440 the old 1080px cap left ~180px unused on both sides
+          while a 200px rail tore `/Users/…/claude-personal` into five fragments; the content column is
+          what was short of room, not the page. 1320px keeps a measure that is still readable — the prose
+          inside every panel is capped by its own card, not by this — and hands the rest to the rail and
+          the values. */}
+      <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-3 py-2">
         <header className="flex min-w-0 flex-wrap items-center gap-2">
           <RouteLink
             to={`/d/${encodeURIComponent(daemonId)}`}
@@ -453,9 +491,15 @@ export function SettingsPage({
           </div>
         </header>
 
-        <div className="grid min-w-0 grid-cols-1 items-start gap-3 md:grid-cols-[224px_minmax(0,1fr)] md:gap-5">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-3 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-5">
+          {/* NO CARD, and a single rule instead. As a bordered box this was a short floating panel beside
+              a much taller bordered panel, then a THIRD bordered rail inside that one — three cards at one
+              depth, each drawing its own edge. Navigation is not a thing being read, so it is separated
+              from the content by a rule and the grid gap, which is what every settings sidebar the reader
+              already knows looks like. `border-strong`, not `border-soft`: a soft hairline is invisible
+              against these surfaces, which is how the rail ended up needing a whole card to be seen. */}
           <nav
-            className="sticky top-2 hidden rounded-panel border border-border bg-surface p-2 shadow-panel md:block"
+            className="sticky top-2 hidden md:block md:border-r md:border-border-strong md:pr-3"
             aria-label="Settings sections"
           >
             <ChoiceRail
@@ -463,6 +507,9 @@ export function SettingsPage({
               activeId={activeSection}
               marker="data-settings-section-choice"
               onSelect={setActiveSection}
+              // The section's own description is already the panel heading's second line, one column to
+              // the right and visible at the same time, so a second copy in the row was pure repetition.
+              rows="single-line"
             />
           </nav>
 
@@ -489,7 +536,7 @@ export function SettingsPage({
                 >
                   {section.label}
                 </h2>
-                <p className="mb-0 mt-1 text-ui leading-base text-muted">{section.description}</p>
+                <p className="mb-0 mt-1 text-cell leading-base text-muted">{section.description}</p>
               </header>
 
               <div className="flex min-w-0 flex-col gap-3">

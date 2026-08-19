@@ -17,6 +17,8 @@ import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts'
 import { sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
+import { PanelPath } from '../../shell/panel-typography.tsx';
+import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 
 const DAEMON_REACHABILITY_INTERVAL_MS = 30_000;
 
@@ -177,15 +179,15 @@ function DaemonManagement({
   };
 
   return (
-    <details className="group rounded-control border border-border-soft bg-surface px-control-x">
+    <details className="group rounded-control border border-border-strong bg-surface px-control-x">
       <summary
         aria-label={`Manage ${name}`}
-        className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-2 text-ui font-semibold text-muted marker:content-none hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
+        className="flex min-h-control cursor-pointer list-none items-center justify-between gap-2 text-cell font-semibold text-muted marker:content-none hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
       >
         <span>Manage daemon</span>
         <ChevronDown size={15} className="shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
       </summary>
-      <div className="space-y-3 border-t border-border-soft py-3">
+      <div className="space-y-3 border-t border-border-strong py-3">
         <form className="space-y-2" onSubmit={submit}>
           <label className="block text-ui font-medium text-fg" htmlFor={nameId}>
             Display name
@@ -214,10 +216,10 @@ function DaemonManagement({
           ) : null}
         </form>
 
-        <div className="border-t border-border-soft pt-3">
-          <p className="mt-0 text-ui leading-base text-muted">
+        <div className="border-t border-border-strong pt-3">
+          <p className="mt-0 text-cell leading-base text-muted">
             Removing this pairing only forgets it in this browser. It does not stop Ferretry or uninstall anything on
-            that machine at <code className="break-all font-mono text-fg">{connection.baseUrl}</code>.
+            that machine at <PanelPath value={connection.baseUrl} className="text-fg" />.
           </p>
           <button
             type="button"
@@ -308,23 +310,14 @@ export function DaemonSettings({
       </div>
 
       <div className="md:hidden" data-daemon-subtabs="mobile">
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={pickerOpen}
-          aria-controls="daemon-subtab-picker"
-          data-daemon-subtab-trigger=""
-          onClick={() => setPickerOpen(true)}
-          className="flex min-h-[52px] w-full items-center gap-2 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left shadow-panel focus-visible:outline-focus focus-visible:outline-offset-focus"
-        >
-          <span className="min-w-0 flex-1">
-            <span className="block text-meta font-semibold uppercase tracking-label text-faint">
-              Configuring daemon
-            </span>
-            <span className="block truncate text-ui font-semibold text-fg">{activeName}</span>
-          </span>
-          <ChevronDown size={17} className="shrink-0 text-muted" aria-hidden="true" />
-        </button>
+        <PickerTrigger
+          eyebrow="Configuring daemon"
+          value={activeName}
+          open={pickerOpen}
+          controls="daemon-subtab-picker"
+          marker="data-daemon-subtab-trigger"
+          onOpen={() => setPickerOpen(true)}
+        />
         <BottomSheet
           id="daemon-subtab-picker"
           open={pickerOpen}
@@ -388,24 +381,29 @@ export function DaemonHostChecks({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 id="settings-host-checks-heading" className="m-0 text-title font-semibold text-fg">
+          <h3 id="settings-host-checks-heading" className="m-0 text-row font-semibold text-fg">
             Host checks
           </h3>
-          <p className="mb-0 mt-1 text-ui leading-base text-muted">
+          <p className="mb-0 mt-1 text-cell leading-base text-muted">
             Reachability and this browser’s pairing record for {name}.
           </p>
         </div>
         <ReachabilityBadge connection={connection} name={name} probe={probeDaemon} carrier={carrier} />
       </div>
-      <details className="mt-3 rounded-control border border-border-soft bg-surface-2 px-control-x">
-        <summary className="flex min-h-[44px] cursor-pointer items-center text-ui font-semibold text-muted hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus">
+      {/* `border-strong`, not `border-soft`: this box sits on `surface-2`, where the soft hairline is
+          invisible — a disclosure whose edge cannot be seen reads as loose text, not as a control. */}
+      <details className="mt-3 rounded-control border border-border-strong bg-surface-2 px-control-x">
+        <summary className="flex min-h-control cursor-pointer items-center text-cell font-semibold text-muted hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus">
           Technical identity
         </summary>
-        <div className="border-t border-border-soft py-3 text-meta leading-base text-muted">
+        {/* THE TWO VALUES THE OWNER SAW TORN IN HALF. An address and a fingerprint are single tokens, and
+            `fy_daemon_LhGT7RTh8w-RuBminOE2wLDWDga0Nj57q…` broken at whatever column the box happened to
+            end at cannot be told apart from a corrupted one. Each scrolls in its own box instead. */}
+        <div className="border-t border-border-strong py-3 text-meta leading-base text-muted">
           <p className="m-0">Address</p>
-          <code className="mt-1 block break-all font-mono text-fg">{connection.baseUrl}</code>
+          <PanelPath value={connection.baseUrl} className="mt-1 block text-fg" label="Address" />
           <p className="mb-0 mt-3">Daemon fingerprint</p>
-          <code className="mt-1 block break-all font-mono text-fg">{String(connection.daemonId)}</code>
+          <PanelPath value={String(connection.daemonId)} className="mt-1 block text-fg" label="Daemon fingerprint" />
         </div>
       </details>
       <div className="mt-3">
