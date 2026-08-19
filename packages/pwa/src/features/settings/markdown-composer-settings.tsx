@@ -87,7 +87,7 @@ export function MarkdownComposerSettings({
           detail="Native textarea · no editor swap"
           onChange={next => writeMdComposePref(next ? 'on' : 'off')}
         />
-        <p className="m-0 text-ui leading-base text-muted">{MARKDOWN_COMPOSER_EXPLANATION}</p>
+        <p className="m-0 text-cell leading-base text-muted">{MARKDOWN_COMPOSER_EXPLANATION}</p>
         {MD_COMPOSE_DEFAULT === 'off' && (
           <p className="m-0 text-meta leading-base text-faint">
             Off by default while this experience receives a real-device mobile Safari pass. Enabling it changes
@@ -102,7 +102,7 @@ export function MarkdownComposerSettings({
           detail="Physical keyboard · native textarea keeps input"
           onChange={onChangeVim}
         />
-        <p className="m-0 text-ui leading-base text-muted">{VIM_COMPOSER_EXPLANATION}</p>
+        <p className="m-0 text-cell leading-base text-muted">{VIM_COMPOSER_EXPLANATION}</p>
       </div>
     </div>
   );

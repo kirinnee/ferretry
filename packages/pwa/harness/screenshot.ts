@@ -42,6 +42,18 @@ const PHONE_CONTEXT = {
     'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
 } as const;
 
+/**
+ * WHICH COLOUR SCHEME THE CAPTURE RUNS IN, because both themes are a review
+ * state and only one of them was ever reachable here.
+ *
+ * `pre-paint.js` resolves the theme from `prefers-color-scheme` before first
+ * paint, so a light capture is a different first frame rather than a class
+ * toggle — it has to be emulated at the CONTEXT, exactly as `app-screenshot.ts`
+ * already does. The captures keep their existing names: a two-theme review is
+ * two runs into two directories, not two filename conventions.
+ */
+const SCHEME: 'light' | 'dark' = process.argv.includes('--light') ? 'light' : 'dark';
+
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
@@ -258,6 +270,35 @@ function fail(message: string): never {
   process.stderr.write(`❌ ${message}\n`);
   process.exit(1);
 }
+
+/**
+ * THE PAGE BODY MUST NEVER SCROLL SIDEWAYS, checked rather than eyeballed.
+ *
+ * This is the failure that a screenshot is worst at showing: a capture is clipped to the viewport, so a
+ * panel whose widest value pushes the document 40px past the right edge looks completely fine in the
+ * PNG. What gives it away on a real phone is that the whole app slides under your thumb.
+ *
+ * `Settings` owns its own scrollport (`data-settings-scroller`), so BOTH are asserted: the document, and
+ * that scroller. A long path or identifier is allowed to scroll inside its own box — that is exactly what
+ * `PanelPath` is for — and this is what keeps that promise honest, because a box that forgot its
+ * `max-w-full` widens its ancestors instead of scrolling.
+ *
+ * One pixel of slack: sub-pixel layout rounding at fractional device ratios can leave `scrollWidth` a
+ * hair over `clientWidth` on an element that does not actually scroll.
+ */
+const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
+  const overflow = await page.evaluate(() => {
+    const boxes: Array<{ name: string; scroll: number; client: number }> = [
+      { name: 'document', scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth },
+    ];
+    const scroller = document.querySelector('[data-settings-scroller]');
+    if (scroller !== null)
+      boxes.push({ name: 'settings scroller', scroll: scroller.scrollWidth, client: scroller.clientWidth });
+    return boxes.filter(box => box.scroll > box.client + 1);
+  });
+  for (const box of overflow)
+    fail(`${where}: the ${box.name} scrolls sideways — ${box.scroll}px of content in a ${box.client}px box`);
+};
 
 function run(command: string, args: readonly string[]): void {
   const result = spawnSync(command, [...args], { cwd: packageDir, stdio: 'inherit' });
@@ -799,7 +840,7 @@ try {
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
           : { viewport: { width: viewport.width, height: viewport.height } }),
-        colorScheme: 'dark',
+        colorScheme: SCHEME,
         reducedMotion: 'reduce',
       });
       // Every capture below runs against this one context and page. Closing them
@@ -1211,6 +1252,7 @@ try {
               // settled state so the row we left cannot read as selected too.
               await page.waitForTimeout(200);
             }
+            await assertNoSidewaysScroll(page, `the ${label} section at ${viewport.name}`);
           };
 
           await selectSettingsSection('behaviour');
@@ -1352,6 +1394,9 @@ try {
             await selectDaemonPanel(wardenFrame, label);
             const readySurface = wardenFrame.locator(ready).first();
             await readySurface.waitFor({ state: 'visible' });
+            // Every panel, at both widths, with its real values on it — this is the one check that
+            // catches the widest value in a panel widening the whole page instead of scrolling itself.
+            await assertNoSidewaysScroll(page, `the ${label} panel at ${viewport.name}`);
             if (slug === 'resource-limits') {
               // Keep a top frame as navigation context, then compose the acceptance frame at the
               // native viewport. The compact two-column mobile editors leave enough room between

@@ -37,10 +37,8 @@ import {
   type FleetPrefillNotes,
 } from './fleet-change-model.ts';
 import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
-import { FIELD_LABEL as FLEET_FIELD_LABEL, FleetPath } from './fleet-typography.tsx';
+import { FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
 
-/** One import, so the label scale is the panel's and not this file's. */
-const FIELD_LABEL = FLEET_FIELD_LABEL;
 const SECTION = 'border-t border-border-soft px-panel py-3 first:border-t-0';
 
 /**
@@ -716,7 +714,7 @@ export function FleetAccountForm({
           <FlaskConical size={14} className="shrink-0" aria-hidden="true" />
           Wrapper the daemon will derive:
           <span className="min-w-0" data-fleet-derived-wrapper="">
-            <FleetPath value={derivedWrapper(draft)} className="text-meta text-fg" label="Derived wrapper" />
+            <PanelPath value={derivedWrapper(draft)} className="text-meta text-fg" label="Derived wrapper" />
           </span>
         </p>
       </section>

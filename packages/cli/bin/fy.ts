@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
   buildFleetHealthCollector,
@@ -36,7 +37,6 @@ import type { z } from 'zod';
 import root from '../../../package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
-import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
@@ -45,8 +45,8 @@ import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
+import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
-import { FileDaemonSnapshotStore } from '../src/adapters/daemon/snapshot-store';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
 import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
 import { SystemUsageClock } from '../src/adapters/fleet/usage-probe';
@@ -59,6 +59,7 @@ import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/t
 import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
 import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
+import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
@@ -75,6 +76,7 @@ import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
+import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
 import { FirstPasswordOffer } from '../src/lib/daemon/first-password';
@@ -124,9 +126,9 @@ import {
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
-import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
+import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
@@ -375,17 +377,33 @@ function lazyHealthClient(environment: Record<string, string | undefined>, state
 }
 
 /**
- * Where the daemon executable lives. `systemd` requires an absolute `ExecStart`, so a bare name on
- * `PATH` is resolved here rather than written into a unit file that would fail to load with 203/EXEC.
+ * Where the daemon executable lives, and what version it is.
+ *
+ * `FY_DAEMON_BIN` first, then `PATH`. Both answers go through `resolveDaemonBinaryPath`, which is
+ * where the absolute-path rule lives — `systemd` requires an absolute `ExecStart` and fails a unit
+ * that has anything else with 203/EXEC, and `launchd` behaves the same way.
  */
-function resolveDaemonBinary(environment: Record<string, string | undefined>, daemonName: string): string {
-  const pinned = environment.FY_DAEMON_BIN?.trim() ?? '';
-  if (pinned !== '') return pinned;
-  const found = Bun.which(daemonName, { PATH: environment.PATH ?? '' });
-  if (found === null) {
-    throw new Error(`cannot find ${daemonName} on PATH — install it or point FY_DAEMON_BIN at the executable`);
+function resolveDaemonBinary(
+  environment: Record<string, string | undefined>,
+  daemonName: string,
+): InstalledDaemonBinary {
+  const located = resolveDaemonBinaryPath({
+    daemonName,
+    pinned: environment.FY_DAEMON_BIN,
+    found: Bun.which(daemonName, { PATH: environment.PATH ?? '' }) ?? undefined,
+    executable: isExecutableFile,
+  });
+  return { ...located, version: daemonBinaryVersion(located.path) };
+}
+
+/** Is this an executable regular file? `statSync` follows links, which is what a launcher does. */
+function isExecutableFile(path: string): boolean {
+  try {
+    const state = statSync(path);
+    return state.isFile() && (state.mode & 0o111) !== 0;
+  } catch {
+    return false;
   }
-  return found;
 }
 
 function daemonBinaryVersion(path: string): string | undefined {
@@ -400,8 +418,8 @@ function daemonBinaryVersion(path: string): string | undefined {
  *
  * Constructed lazily, per invocation: resolving the layout can fail (for example, on a nonsensical
  * `FY_HOME`) and that must surface as an error from `fy daemon …`, never as a CLI that cannot even
- * print `--help`. The live daemon executable is resolved later still, only if a snapshot build needs
- * it; retained snapshots remain operable after the source installation disappears.
+ * print `--help`. The daemon executable is resolved later still, when a verb actually needs to record
+ * or launch one — `fy daemon status` and `fy daemon logs` work on a host that has no daemon at all.
  */
 function buildDaemonController(world: CliWorld, client: SharedDaemonClient): DaemonController {
   const environment = world.environment;
@@ -440,25 +458,8 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
     // and the bound a peer may legitimately hold are measured against one source of time.
     lifecycle: new FileDaemonLifecycleLock(processes, clock),
-    snapshots: new FileDaemonSnapshotStore({
-      root: layout.snapshotRoot,
-      daemon: { product: layout.product, name: layout.daemonName },
-      sourceBinary: () => resolveDaemonBinary(environment, daemonName),
-    }),
-    installedDaemon: () => {
-      try {
-        const path = resolveDaemonBinary(environment, daemonName);
-        return {
-          path,
-          source: (environment.FY_DAEMON_BIN?.trim() ?? '') === '' ? ('PATH' as const) : ('FY_DAEMON_BIN' as const),
-          version: daemonBinaryVersion(path),
-        };
-      } catch {
-        // A service-managed launch may not inherit a login shell or PATH. Its promoted snapshot is valid.
-        return undefined;
-      }
-    },
-    daemonVersion: daemonBinaryVersion,
+    installedDaemon: () => resolveDaemonBinary(environment, daemonName),
+    retired: new FileRetiredArtifacts(),
     clock,
     out,
     /**

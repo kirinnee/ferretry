@@ -108,24 +108,24 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
   return (
     <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel" aria-labelledby="fleet-environment-heading">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="fleet-environment-heading" className="m-0 text-title font-semibold text-fg">
+        <h2 id="fleet-environment-heading" className="m-0 text-row font-semibold text-fg">
           Environment inspection
         </h2>
         <button type="button" className="kt-btn kt-btn--sm ml-auto" onClick={() => void reload()} disabled={loading}>
           <RefreshCw size={14} aria-hidden="true" /> Refresh
         </button>
       </div>
-      <p className="m-0 text-ui leading-base text-muted">
+      <p className="m-0 text-cell leading-base text-muted">
         Inspect this daemon’s fleet profile environment and compare it with another daemon’s. Entries are shown exactly
         as each daemon publishes them; nothing here changes the target.
       </p>
-      <p className="m-0 rounded-control border border-border-soft bg-surface-2 p-3 text-ui text-muted">
+      <p className="m-0 rounded-control border border-border-strong bg-surface-2 p-3 text-cell text-muted">
         This view is read-only. A paired device may inspect fleet environment but cannot change it — device authority
         never covers Fleet mutation. To change environment, open the Fleet tab, review the daemon’s proposal, and
         approve it on the host.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
-        <label className="text-ui text-muted">
+        <label className="text-cell font-medium text-fg">
           Compare with daemon
           <select
             className="kt-input mt-1 min-h-[44px] w-full"
@@ -139,7 +139,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
             ))}
           </select>
         </label>
-        <label className="text-ui text-muted">
+        <label className="text-cell font-medium text-fg">
           Profile
           <select
             className="kt-input mt-1 min-h-[44px] w-full"
@@ -159,18 +159,18 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
       ) : null}
       {target ? (
         <section
-          className="rounded-control border border-border-soft bg-surface-2 p-3"
+          className="rounded-control border border-border-strong bg-surface-2 p-3"
           aria-label="Target environment entries"
         >
           {profile === '' ? (
-            <p className="m-0 text-ui text-muted">This daemon publishes no fleet profiles.</p>
+            <p className="m-0 text-cell text-muted">This daemon publishes no fleet profiles.</p>
           ) : (
             <>
               <p className="m-0 text-ui font-semibold text-fg">
                 {profile} on this daemon ({targetEntries.length})
               </p>
               {targetEntries.length === 0 ? (
-                <p className="mb-0 mt-1 text-ui text-muted">This profile publishes no environment entries.</p>
+                <p className="mb-0 mt-1 text-cell text-muted">This profile publishes no environment entries.</p>
               ) : (
                 <ul className="mb-0 mt-2 list-none space-y-1 p-0 mono text-meta text-muted">
                   {targetEntries.map(([key, value]) => (
@@ -186,14 +186,14 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
       ) : null}
       {target ? (
         <section
-          className="rounded-control border border-border-soft bg-surface-2 p-3"
+          className="rounded-control border border-border-strong bg-surface-2 p-3"
           aria-label="Environment comparison"
         >
           <p className="m-0 text-ui font-semibold text-fg">
             Differences vs {sourceId} ({diff.length})
           </p>
           {diff.length === 0 ? (
-            <p className="mb-0 mt-1 text-ui text-muted">No differences — the two daemons publish the same entries.</p>
+            <p className="mb-0 mt-1 text-cell text-muted">No differences — the two daemons publish the same entries.</p>
           ) : (
             <ul className="mb-0 mt-2 list-none space-y-1 p-0 mono text-meta text-muted">
               {diff.map(difference => {

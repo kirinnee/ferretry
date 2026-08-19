@@ -83,11 +83,11 @@ export interface IDaemonHealthPort {
  * One garbage-collection root that exists right now, reported with the path it was found at.
  *
  * The path travels back with the name so a caller that wants to drop a root passes back what
- * discovery returned. Re-deriving it would make this the second place a snapshot identity becomes a
- * root path, and `daemonSnapshotGcRoot` is deliberately the only one.
+ * discovery returned rather than re-deriving it. Only the retired per-snapshot root directory an
+ * earlier release wrote is still enumerated this way; the live root is one known path.
  */
 export interface HeldGcRoot {
-  /** Directory entry name, which for a root this CLI wrote is the snapshot id it protects. */
+  /** Directory entry name, exactly as the root directory reported it. */
   readonly name: string;
   readonly path: string;
 }
@@ -97,9 +97,10 @@ export interface HeldGcRoot {
  *
  * A daemon installed with `nix shell` has no garbage-collection root of its own: the store path is
  * live only while that shell is open, so a later `nix-collect-garbage` deletes the executable out
- * from under an installed service, which then breaks with no user action. Running from an ephemeral
- * `nix shell` is a supported way to use this, so the fix is to hold the root ourselves rather than to
- * refuse the install.
+ * from under an installed service, which then breaks with no user action. That is why the root
+ * survives the snapshot store: a person's own shell breaking afterwards is an accepted cost, but a
+ * user service that cannot launch at the next login is a failure nobody is present to see, and the
+ * absolute path a unit file must record is the exact path a collection can delete.
  *
  * Every method reports rather than throws. A daemon that runs but is unpinned is strictly better than
  * a daemon that refuses to start because a pin did not take, and a root directory that cannot be read
@@ -121,14 +122,7 @@ export interface INixGcRootPort {
 }
 
 /** The mutating daemon-lifecycle commands, named in a claim so a refusal can say what is running. */
-export type DaemonLifecycleVerb =
-  | 'install'
-  | 'uninstall'
-  | 'start'
-  | 'stop'
-  | 'restart'
-  | 'snapshot build'
-  | 'snapshot promote';
+export type DaemonLifecycleVerb = 'install' | 'uninstall' | 'start' | 'stop' | 'restart';
 
 /** What a lifecycle claim is asked for, so the wait bound stays the caller's policy rather than the adapter's. */
 export interface DaemonLifecycleClaimRequest {
@@ -156,8 +150,8 @@ export interface IDaemonLifecycleClaim {
  *
  * Two `fy daemon` invocations are unrelated to each other, so an in-object queue orders nothing: one
  * could write the service definition between another's garbage-collection root update and its own
- * definition write, leaving a unit that names one snapshot while the roots protect a different one.
- * The daemon they contend for is identified by a path, so the claim lives at a path too.
+ * definition write, leaving a unit that names one executable while the root holds a different one's
+ * closure. The daemon they contend for is identified by a path, so the claim lives at a path too.
  *
  * `acquire` throws when the claim cannot be taken; refusing a lifecycle command is safe, whereas
  * proceeding without exclusion is what produces the mismatch above.
@@ -166,91 +160,30 @@ export interface IDaemonLifecycleLockPort {
   acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim>;
 }
 
-/** The daemon identity persisted in a snapshot, never inferred from its containing directory. */
-export interface DaemonSnapshotIdentity {
-  readonly product: string;
-  readonly name: string;
-}
-
-/** One verified immutable daemon snapshot. */
-export interface DaemonSnapshot {
-  /** Content address: `sha256-` plus the executable's lowercase digest. */
-  readonly id: string;
-  readonly daemon: DaemonSnapshotIdentity;
-  /** The resolved artifact that was complete and stable while this snapshot was built. */
-  readonly sourceBinary: string;
-  /** The canonical immutable executable inside this snapshot, independent of ancestor aliases. */
-  readonly binaryPath: string;
-  readonly bytes: number;
-  readonly createdAt: string;
-}
-
-/** Building an identical executable reuses its already-verified immutable snapshot. */
-export interface DaemonSnapshotBuild extends DaemonSnapshot {
-  readonly created: boolean;
-}
-
-/** One retained snapshot as garbage-collection reconciliation needs it: NAMED, never proven. */
-export interface RetainedSnapshot {
-  readonly id: string;
-  /** The source recorded in its manifest, which is the closure a root has to hold. */
-  readonly sourceBinary: string;
-}
-
-/** One retained-store entry that could not be trusted, as adapter facts rather than rendered prose. */
-export interface RetainedSnapshotIssue {
-  readonly path: string;
-  readonly reason: string;
-}
+/**
+ * What removing one retired artifact tree did.
+ *
+ * Total on purpose, and `failed` is a VALUE rather than a rejection. Reclaiming disk an earlier
+ * release left behind is tidying, and tidying may never fail a lifecycle verb — the daemon in front
+ * of the operator is the thing that has to keep working. `absent` is the ordinary answer on every
+ * host that never ran the release this cleans up after, and it says nothing to anybody.
+ */
+export type RetiredArtifactOutcome =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'removed'; readonly files: number; readonly bytes: number }
+  | { readonly kind: 'failed'; readonly reason: string };
 
 /**
- * What the store still retains, read cheaply and per entry.
+ * Removing a CLI-owned artifact tree an earlier release wrote and this one no longer keeps.
  *
- * Two properties the verifying listing cannot have, and both are load-bearing:
- *
- * 1. **Per-entry tolerance.** An interrupted build leaves a directory that no later build repairs, by
- *    design. A listing that fails on the first such entry put one damaged sibling on the critical path
- *    of every mutating verb — `restart` stopped the daemon and then refused to start it again.
- * 2. **No proof.** Reconciliation needs an id and a source, never a verified executable. Digesting
- *    every retained binary made `start` cost more the longer a host had been building snapshots, and
- *    spent the lifecycle claim's budget on hashing.
- *
- * The discriminant is the whole point of the shape: it says whether these entries are the WHOLE
- * retained set. A caller may only ever ADD protection from an incomplete inventory, because an entry
- * that could not be read is a snapshot that still exists. The union makes two dangerous lies
- * unrepresentable: a complete inventory with skipped entries, and an incomplete one with no evidence
- * explaining why it cannot be trusted.
+ * Separate from `IServiceFilePort` because it makes a promise that port must never make: it forces
+ * write permission back onto directories on the way down. The retired daemon snapshot store sealed
+ * every snapshot directory read-only, so an ordinary recursive remove cannot unlink anything inside
+ * one, and a store nobody can delete is the 100MB an operator is stuck with forever.
  */
-export type RetainedSnapshotInventory =
-  | {
-      readonly snapshots: readonly RetainedSnapshot[];
-      readonly complete: true;
-      readonly unreadable: readonly [];
-    }
-  | {
-      readonly snapshots: readonly RetainedSnapshot[];
-      readonly complete: false;
-      readonly unreadable: readonly [RetainedSnapshotIssue, ...RetainedSnapshotIssue[]];
-    };
-
-/**
- * Immutable daemon artifacts and their atomic promoted pointer.
- *
- * `undefined` from `current` means durable evidence says this store has never been promoted. A
- * missing or malformed pointer after promotion, manifest, marker or artifact throws: damaged durable
- * state must never be mistaken for an empty store and bootstrapped over.
- *
- * `list` is the OPERATOR REPORT and stays fully verified — a listing that says a snapshot is there is
- * saying it can be run. `retained` is the cheap inventory the lifecycle reconciles against, and the
- * two are kept apart because they answer different questions.
- */
-export interface IDaemonSnapshotPort {
-  build(): Promise<DaemonSnapshotBuild>;
-  promote(id: string): Promise<DaemonSnapshot>;
-  current(): Promise<DaemonSnapshot | undefined>;
-  list(): Promise<readonly DaemonSnapshot[]>;
-  /** Names every retained snapshot without proving any of them; never fails for one bad entry. */
-  retained(): Promise<RetainedSnapshotInventory>;
+export interface IRetiredArtifactPort {
+  /** Remove `path` and everything under it; an absent path is `absent`, never a failure. */
+  retire(path: string): Promise<RetiredArtifactOutcome>;
 }
 
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */
@@ -294,10 +227,10 @@ export interface IDaemonSupervisor {
   readonly manager: DaemonManagerKind;
   /** Is a service definition installed for this host? */
   installed(): Promise<boolean>;
-  /** Install supervision and launch this exact verified immutable artifact. */
+  /** Install supervision and launch this exact absolute executable. */
   install(executable: string): Promise<void>;
   uninstall(): Promise<void>;
-  /** Bring this exact verified immutable artifact up; the controller guards healthy incumbents. */
+  /** Bring this exact absolute executable up; the controller guards healthy incumbents. */
   start(executable: string): Promise<DaemonStartHandle>;
   stop(request: StopRequest): Promise<void>;
   /** `handle` lets the direct supervisor watch the child it just started. */

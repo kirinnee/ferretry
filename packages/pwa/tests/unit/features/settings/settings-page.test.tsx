@@ -87,6 +87,22 @@ const settingIds = (view: ReactTestRenderer): string[] =>
     .findAll(node => node.props['data-setting-id'] !== undefined)
     .map(section => String(section.props['data-setting-id']));
 
+/**
+ * One `ChoiceRail` row's visible label.
+ *
+ * By the class the rail styles the label with, NOT by span position: the row also holds a fixed icon
+ * slot and, when the rail is showing them, a second line, so "the second span" is a fact about today's
+ * markup rather than about which row this is.
+ */
+const railRowLabel = (row: {
+  findAll: (predicate: (node: { props: Record<string, unknown> }) => boolean) => unknown[];
+}) =>
+  (
+    row.findAll(
+      node => typeof node.props.className === 'string' && node.props.className.includes('text-ui font-semibold'),
+    )[0] as { children: unknown[] } | undefined
+  )?.children.join('');
+
 /** Every switch inside one setting's own panel, in rendered order. */
 const settingSwitches = (view: ReactTestRenderer, id: string) =>
   view.root.findByProps({ 'data-setting-id': id }).findAllByProps({ role: 'switch' });
@@ -154,11 +170,10 @@ describe('SettingsPage sections', () => {
     const tabs = view.root.findAll(node => node.props['data-settings-section-choice'] !== undefined);
 
     expect(scroller.props.className).toContain('overflow-y-auto');
-    expect(tabs.map(tab => tab.findAllByType('span')[1]?.children.join(''))).toEqual([
-      'Appearance',
-      'Behaviour',
-      'Daemons',
-    ]);
+    // The LABEL, found by the class the rail gives it, rather than by counting spans. The row's spans
+    // are an implementation detail — adding the fixed icon slot that straightens the rail's left edge
+    // renumbered them — and a positional read of them silently asserted layout, not order.
+    expect(tabs.map(tab => railRowLabel(tab))).toEqual(['Appearance', 'Behaviour', 'Daemons']);
     expect(tabs.map(tab => tab.props['aria-current'])).toEqual(['page', undefined, undefined]);
     expect(settingIds(view)).toEqual(['text-size', 'theme', 'density', 'chat-width']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
@@ -238,7 +253,7 @@ describe('SettingsPage sections', () => {
     );
 
     expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(trigger.className).toContain('min-h-[52px]');
+    expect(trigger.className).toContain('min-h-control');
     expect(trigger.parentElement?.className).toContain('md:hidden');
     expect(desktop.className).toContain('hidden');
     expect(desktop.className).toContain('md:block');
@@ -766,15 +781,24 @@ describe('daemon settings', () => {
     ]);
     for (const panel of panels) {
       expect(panel.getAttribute('role')).toBe('tab');
-      expect(panel.className).toContain('min-h-[52px]');
-      // A description that clips is a description a reader cannot use.
-      expect(must(panel.querySelector('span span:last-of-type'), 'the panel description').className).not.toContain(
-        'truncate',
-      );
+      expect(panel.className).toContain('min-h-row');
+      // EVERY ROW HAS AN ICON, which is the whole of the defect this rail was reported for: three of
+      // them had one, so the labels indented to two different x positions down the column and the list
+      // read as unfinished. All of them or none of them — never some.
+      expect(panel.querySelector('svg')).not.toBeNull();
     }
-    expect(panels.map(panel => panel.textContent)).toContain(
-      'WardenSupervision, account failover, and policy for this daemon.',
-    );
+    // ONE LINE PER ROW beside the panel, so ten rows share one height and one rhythm. The description
+    // is not lost — the panel one column right opens with its own, the phone sheet below still lists
+    // them, and Cmd/Ctrl+K searches them — but it is not repeated in a row a reader has already left.
+    expect(panels.map(panel => panel.textContent)).toEqual([
+      'Warden',
+      'Secrets',
+      'Add a device',
+      'What devices may do',
+      'Environment',
+      'Carrier',
+      'Host checks',
+    ]);
 
     // The rail comes before the phone trigger, and the panel after both.
     expect(
@@ -833,7 +857,7 @@ describe('daemon settings', () => {
 
     expect(triggers).toHaveLength(1);
     expect(trigger.parentElement?.getAttribute('data-daemon-settings-tabs')).toBe('mobile');
-    expect(trigger.className).toContain('min-h-[52px]');
+    expect(trigger.className).toContain('min-h-control');
     expect(trigger.textContent).toContain('Daemon panel');
     expect(trigger.textContent).toContain('Warden');
     expect(view.container.querySelector('[data-bottom-sheet="daemon-panel-picker"]')).toBeNull();
@@ -861,6 +885,20 @@ describe('daemon settings', () => {
     ]);
     expect(sheet.querySelectorAll('[role="tab"]')).toHaveLength(0);
     expect(sheet.querySelectorAll('[role="tablist"]')).toHaveLength(0);
+
+    // THE DESCRIPTION THE DESKTOP RAIL STOPPED REPEATING IS STILL HERE, and this is where it is load
+    // bearing: a sheet row is chosen with the panel hidden behind the sheet, so the label alone would
+    // leave a reader picking between ten names blind. The desktop rail may drop it because the panel is
+    // beside the row, already explaining itself; the sheet may not.
+    for (const choice of choices) {
+      expect(choice.querySelector('svg')).not.toBeNull();
+      expect(must(choice.textContent, 'a sheet row with no text').length).toBeGreaterThan(
+        must(choice.getAttribute('data-daemon-panel-choice'), 'a sheet row with no id').length,
+      );
+    }
+    expect(must(choices[0], 'the Warden choice').textContent).toBe(
+      'WardenSupervision, account failover, and policy for this daemon.',
+    );
     expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual([
       'page',
       null,

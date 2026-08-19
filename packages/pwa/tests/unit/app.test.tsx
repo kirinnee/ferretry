@@ -2202,7 +2202,16 @@ describe('browserPushEnrolment', () => {
 /* ---------- the picker, the settings host, and the public root ------------ */
 
 describe('the settings route composition', () => {
-  it('mounts the iconless Model pricing tab through the production Settings composition', async () => {
+  /**
+   * The panel the icon table can most easily be missing an entry for, through the REAL composition.
+   *
+   * Model pricing does not come from the frame's own tab list — the composition root passes it in
+   * `additionalTabs` — so it is the row that regresses when somebody adds a panel and not its glyph.
+   * This assertion used to be `toBeNull()`, back when three of the ten rows had an icon and the rest
+   * were called deliberately iconless; a row without one does not indent its label, so the rail's left
+   * edge alternated between two x positions and the list read as unfinished. All of them or none.
+   */
+  it('mounts the Model pricing tab, with its icon, through the production Settings composition', async () => {
     const { view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId]);
     await settle();
 
@@ -2214,7 +2223,9 @@ describe('the settings route composition', () => {
     );
 
     expect(tab.getAttribute('aria-controls')).toBe('daemon-settings-tab-model-pricing');
-    expect(tab.querySelector('svg')).toBeNull();
+    expect(tab.querySelector('svg')).not.toBeNull();
+    // Its OWN glyph, not the fallback the rail draws for an id the table does not name.
+    expect(tab.querySelector('svg')?.getAttribute('class')).toContain('lucide-circle-dollar-sign');
     await view.unmount();
   });
 

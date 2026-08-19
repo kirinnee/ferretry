@@ -9,21 +9,37 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { ChevronDown, KeyRound, Lock, ShieldCheck } from 'lucide-react';
+import {
+  CircleDollarSign,
+  Gauge,
+  KeyRound,
+  Lock,
+  Radar,
+  Route,
+  ShieldCheck,
+  SlidersHorizontal,
+  Smartphone,
+  Stethoscope,
+  Users,
+  Variable,
+} from 'lucide-react';
 import { type ComponentType, type ReactNode, useId, useMemo, useState } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
+import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
+import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
-import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
-import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
-import { type DaemonReachabilityProbe, DaemonHostChecks } from './daemon-settings.tsx';
+import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
+import { DaemonHostChecks, type DaemonReachabilityProbe } from './daemon-settings.tsx';
 import { FleetEnvironmentSettings } from './fleet-environment-settings.tsx';
+import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
@@ -44,18 +60,54 @@ const DAEMON_PANEL_TAB_ID = 'daemon-panel-tab-';
 const PANEL_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
 
 /**
- * Icons for the two panels that had them before this rail existed. Every other
- * panel is deliberately iconless: an invented glyph reads as a category that
- * does not exist. Nothing here encodes health — there is no per-panel health
- * read on the daemon, so a status dot would be a colour with no evidence.
+ * ONE ICON PER PANEL — EVERY panel, from one set, at one size.
+ *
+ * Three of ten rows carrying a glyph is not restraint, it is an unfinished list, and it read as one:
+ * the rail's left edge alternated between two x positions all the way down, because a row without an
+ * icon does not indent its label. The earlier rule here — "an invented glyph reads as a category that
+ * does not exist" — was answering the wrong question. The glyph is not naming a category; it is a
+ * per-row landmark, which is what makes a ten-row rail scannable at a glance, and every settings
+ * sidebar the reader already uses has one on every row.
+ *
+ * The whole table is here, in the frame that owns the rail, INCLUDING the ids the composition root
+ * supplies through `additionalTabs`. That is deliberate: spreading the choices across `App.tsx`,
+ * `pricing-settings.tsx`, `fleet-configuration-surface.tsx` and the harness is how a set ends up
+ * mixing sources and sizes, and no `additionalTabs` caller has to know this rail draws icons at all.
+ *
+ * lucide at 16px — the app's HEADING optical size, per `panel-typography.tsx` — laid out by the rail's
+ * own fixed slot, so nothing here sets a width or an alignment. Nothing here encodes health either:
+ * there is no per-panel health read on the daemon, so a status dot would be a colour with no evidence.
  */
 const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
-  warden: <ShieldCheck size={16} className="shrink-0" aria-hidden="true" />,
-  secrets: <KeyRound size={16} className="shrink-0" aria-hidden="true" />,
+  warden: <ShieldCheck size={16} aria-hidden="true" />,
+  secrets: <KeyRound size={16} aria-hidden="true" />,
+  // A phone, because the panel's subject is the other device — the thing being added, not this one.
+  devices: <Smartphone size={16} aria-hidden="true" />,
   // A lock, because this panel is where a refused control is explained — the one glyph that reads as
   // "permission" rather than as an invented category.
-  grants: <Lock size={16} className="shrink-0" aria-hidden="true" />,
+  grants: <Lock size={16} aria-hidden="true" />,
+  // The environment is a set of NAMED VALUES, which is what this glyph is; a gear would say
+  // "configuration", and every panel in this rail is configuration.
+  environment: <Variable size={16} aria-hidden="true" />,
+  'resource-limits': <Gauge size={16} aria-hidden="true" />,
+  doctor: <Stethoscope size={16} aria-hidden="true" />,
+  'model-pricing': <CircleDollarSign size={16} aria-hidden="true" />,
+  // Accounts on the host, so the glyph is the accounts rather than the machine.
+  fleet: <Users size={16} aria-hidden="true" />,
+  // The measured PATH the traffic is on, which is exactly what a route is.
+  carrier: <Route size={16} aria-hidden="true" />,
+  'host-checks': <Radar size={16} aria-hidden="true" />,
 };
+
+/**
+ * The glyph a panel gets when this table has never heard of its id.
+ *
+ * `additionalTabs` is an open seam, so a panel can arrive here that {@link PANEL_ICONS} does not name.
+ * The failure mode that matters is the one being fixed: a rail where SOME rows have icons. A neutral
+ * fallback keeps the column complete and the left edge straight, and the unit suite asserts every panel
+ * the composition root actually mounts has a real entry — so this is a safety net, not a licence.
+ */
+const FALLBACK_PANEL_ICON: ReactNode = <SlidersHorizontal size={16} aria-hidden="true" />;
 
 const unavailableWardenStatus: WardenStatusReader = async () => {
   throw new Error('No Warden status reader was supplied.');
@@ -70,8 +122,8 @@ function WardenStatusSurface({
   if (status !== null) return <WardenStrip status={status} />;
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Warden status unavailable">
-      <h3 className="m-0 text-title font-semibold text-fg">Warden status unavailable</h3>
-      <p className="mb-0 mt-1 text-ui leading-base text-muted">
+      <h3 className="m-0 text-row font-semibold text-fg">Warden status unavailable</h3>
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
         This daemon did not provide a Warden status. Ferretry will not treat a missing read as a clean fleet or a
         default policy.
       </p>
@@ -82,10 +134,10 @@ function WardenStatusSurface({
 function WardenVerdictsUnavailable() {
   return (
     <section className="kt-panel p-panel" aria-labelledby="warden-verdicts-unavailable-heading">
-      <h3 id="warden-verdicts-unavailable-heading" className="m-0 text-title font-semibold text-fg">
+      <h3 id="warden-verdicts-unavailable-heading" className="m-0 text-row font-semibold text-fg">
         Recent verdicts unavailable
       </h3>
-      <p className="mb-0 mt-1 text-ui leading-base text-muted">
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
         This daemon does not expose a verdict feed yet, so report provenance is unavailable too. No empty history is
         presented as evidence that the fleet is healthy.
       </p>
@@ -254,8 +306,8 @@ export function DaemonSettingsFrame({
             );
           return (
             <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
-              <h3 className="m-0 text-title font-semibold text-fg">Host checks unavailable</h3>
-              <p className="mb-0 mt-1 text-ui leading-base text-muted">
+              <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
+              <p className="mb-0 mt-1 text-cell leading-base text-muted">
                 This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
                 offer pairing changes.
               </p>
@@ -305,8 +357,9 @@ export function DaemonSettingsFrame({
     id: tab.id,
     label: tab.label,
     detail: tab.description,
-    icon: PANEL_ICONS[tab.id],
+    icon: PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON,
   }));
+  const activeIcon = PANEL_ICONS[active.id] ?? FALLBACK_PANEL_ICON;
 
   return (
     <section
@@ -315,32 +368,42 @@ export function DaemonSettingsFrame({
       id={`daemon-subtab-panel-${String(connection.daemonId)}`}
       aria-labelledby="daemon-settings-heading"
     >
-      <header className="mb-3 rounded-panel border border-border bg-surface p-panel shadow-panel">
-        <p className="m-0 text-meta font-semibold uppercase tracking-label text-accent">This daemon</p>
+      {/* ONE LEVEL OF CONTAINMENT. This was a bordered card, and everything it introduces — the rail
+          beside it and every panel below it — is also a bordered card, so three of them competed at the
+          same depth. It is now separated by TONE and a single rule instead, which is what a header at
+          the top of a column is: the panels keep the borders, because they are the things being read. */}
+      <header className="mb-3 border-b border-border pb-3">
+        <p className={cn(EYEBROW, 'text-accent')}>This daemon</p>
+        {/* The machine's name stays at SECTION level. Every card below it stepped down to `text-row`,
+            and this heading is one rung above them: it names the thing all ten panels belong to. */}
         <h3 id="daemon-settings-heading" className="mt-1 text-title font-semibold text-fg">
           {name}
         </h3>
         {/* The saved name identifies the machine; the address disambiguates it.
             An unnamed daemon already shows its address as the name, so it is not
-            repeated. The fingerprint stays inside Host checks' disclosure. */}
+            repeated. The fingerprint stays inside Host checks' disclosure.
+
+            An address is ONE TOKEN: `break-all` tore it into a stack of fragments
+            that reads as a corrupted value rather than a wrapped one. */}
         {name === connection.baseUrl ? null : (
-          <p className="m-0 mt-0.5 break-all font-mono text-meta leading-tight text-faint">{connection.baseUrl}</p>
+          <PanelPath value={connection.baseUrl} className="mt-0.5 text-meta leading-tight text-faint" />
         )}
-        <p className="mb-0 mt-2 text-ui leading-base text-muted">
+        <p className="mb-0 mt-2 text-cell leading-base text-muted">
           These settings change only this machine. They are shared by browsers paired to it, not this browser’s
           appearance or behaviour preferences.
         </p>
       </header>
 
-      <div className="md:grid md:grid-cols-[200px_minmax(0,1fr)] md:items-start md:gap-3">
+      <div className="md:grid md:grid-cols-[13rem_minmax(0,1fr)] md:items-start md:gap-md">
         {/* The tablist precedes the trigger that replaces it on a narrow screen,
             so document order is reading order: the control that owns the panel
-            comes before its alternative, and before the panel itself. */}
-        <div
-          data-daemon-settings-tabs="desktop"
-          className="hidden rounded-panel border border-border bg-surface p-2 shadow-panel md:sticky md:top-2 md:block"
-        >
-          <p className="m-0 mb-1 px-1 text-meta font-semibold uppercase tracking-label text-faint">Panels</p>
+            comes before its alternative, and before the panel itself.
+
+            NO CARD AROUND IT, for the same reason the header above lost its own: a
+            bordered box of rows beside a bordered panel of content is two cards at
+            one depth, and the rail is navigation rather than a thing being read. */}
+        <div data-daemon-settings-tabs="desktop" className="hidden md:sticky md:top-2 md:block">
+          <p className={cn(EYEBROW, 'mb-1 px-control-x')}>Panels</p>
           <ChoiceRail
             presentation="tabs"
             items={items}
@@ -350,27 +413,27 @@ export function DaemonSettingsFrame({
             label={`${name} settings panels`}
             tabIdPrefix={DAEMON_PANEL_TAB_ID}
             panelIdPrefix={DAEMON_PANEL_ID}
+            // SINGLE LINE beside the panel. Ten two-line rows made this rail 900px tall next to a 250px
+            // panel — the rail was the tallest thing on the page — and the descriptions ran to two, three
+            // and four lines, so there was no shared row height to have a rhythm with. The sentence is not
+            // lost: the panel one column to the right opens with its own heading and its own explanation,
+            // the sheet on a phone still carries it, and Cmd/Ctrl+K searches all ten by description.
+            rows="single-line"
           />
         </div>
 
         {/* A phone gets no tablist at all: one touch-safe trigger names the open
             panel and opens the app's shared sheet to change it. */}
         <div className="md:hidden" data-daemon-settings-tabs="mobile">
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={panelPickerOpen}
-            aria-controls="daemon-panel-picker"
-            data-daemon-panel-trigger=""
-            onClick={() => setPanelPickerOpen(true)}
-            className="flex min-h-[52px] w-full items-center gap-2 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left shadow-panel focus-visible:outline-focus focus-visible:outline-offset-focus"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block text-meta font-semibold uppercase tracking-label text-faint">Daemon panel</span>
-              <span className="block truncate text-ui font-semibold text-fg">{active.label}</span>
-            </span>
-            <ChevronDown size={17} className="shrink-0 text-muted" aria-hidden="true" />
-          </button>
+          <PickerTrigger
+            eyebrow="Daemon panel"
+            value={active.label}
+            icon={activeIcon}
+            open={panelPickerOpen}
+            controls="daemon-panel-picker"
+            marker="data-daemon-panel-trigger"
+            onOpen={() => setPanelPickerOpen(true)}
+          />
           <BottomSheet
             id="daemon-panel-picker"
             open={panelPickerOpen}
@@ -385,8 +448,10 @@ export function DaemonSettingsFrame({
               <h2 id={pickerTitleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
                 Choose a panel
               </h2>
-              <p className="mb-3 mt-1 text-ui leading-base text-muted">Every setting below belongs to {name}.</p>
+              <p className="mb-3 mt-1 text-cell leading-base text-muted">Every setting below belongs to {name}.</p>
               <nav aria-label={`${name} settings panels`}>
+                {/* Two-line rows HERE, unlike the desktop rail: a sheet row is being chosen blind, so
+                    the description is the only thing telling ten rows apart behind a closed sheet. */}
                 <ChoiceRail
                   items={items}
                   activeId={active.id}
@@ -407,6 +472,15 @@ export function DaemonSettingsFrame({
           aria-labelledby={`${DAEMON_PANEL_TAB_ID}${active.id}`}
           className="mt-3 min-w-0 md:mt-0"
         >
+          {/* NO PANEL HEADER HERE, and that was tried first.
+              Repeating the rail row's label and description above the surface looked like the honest way
+              to pay for the desktop rail going single-line. It is not: every one of these ten surfaces
+              already opens with its own heading and its own sentence, so the header made a THIRD title
+              for the same panel and added height to a page whose complaint was clutter — the harness's
+              own "does the resource-limit evidence still fit one screen" check failed on it, which is how
+              it got caught. The rail's second line is redundant on desktop rather than missing: the panel
+              is beside the row, already explaining itself. On a phone it is not redundant, because the
+              sheet is chosen with the panel hidden behind it, so the sheet keeps it. */}
           <Surface connection={connection} />
         </div>
       </div>

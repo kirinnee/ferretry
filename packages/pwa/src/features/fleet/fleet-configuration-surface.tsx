@@ -91,7 +91,7 @@ import {
   unseenAssets,
 } from './fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster, FleetRefusalAlert } from './fleet-change-review.tsx';
-import { EYEBROW, FleetPath } from './fleet-typography.tsx';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
 
@@ -781,7 +781,7 @@ export function FleetConfigurationSurface({
             </h2>
             {/* WHICH HOST. A browser can be paired to several, and every path, wrapper and operation
                 below belongs to exactly this one. */}
-            <FleetPath value={String(connection.daemonId)} className="text-meta text-muted" label="Daemon" />
+            <PanelPath value={String(connection.daemonId)} className="text-meta text-muted" label="Daemon" />
           </div>
           <span
             className="kt-badge"
