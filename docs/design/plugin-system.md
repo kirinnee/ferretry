@@ -6,7 +6,7 @@ title: Can a capability and its user interface be a plugin?
 # Can a capability and its user interface be a plugin?
 
 **Status: PROPOSED. Nothing here is built, and this document changes no production code.**
-**Verified against `origin/main` at `19405223` (`feat(fleet)!: govern the fleet by the capability model (#362)`).**
+**Verified against `origin/main` at `635cf559` (`Brew cask update for ferretry version v3.0.0`).**
 Every claim about current behaviour below cites a file and line at that commit.
 
 It answers the owner's request:
@@ -302,12 +302,12 @@ the operator's existing grants for those capabilities, against the credential of
 invoked it.** A plugin that wants to open a terminal consumes `terminal.use`; if the operator has
 switched `terminal` off for remote callers, the plugin's terminal action is refused for a remote
 caller, in the same words, from the same decision — and the refusal already names the remedy
-(`docs/grants.md:340-348`).
+(`docs/grants.md:365-373`).
 
 Two invariants that fall straight out of the existing model and must be stated rather than assumed:
 
 - **A plugin can never hold more than the caller who invoked it.** The grant layer _"only ever
-  narrows"_ (`docs/grants.md:304-309`), and a plugin call is one more thing inside a request that has
+  narrows"_ (`docs/grants.md:328-333`), and a plugin call is one more thing inside a request that has
   already passed authentication, the route's credential minimum and the operator's grant.
 - **A plugin's declared consumption can only narrow further.** A manifest that names nothing gets
   nothing; a manifest that names `terminal` still gets whatever the operator's `terminal` grant says
@@ -333,7 +333,7 @@ is the answer:
 
 And yes to the brief's question 2: it appears in "What devices may do" like every other capability,
 because it **is** one — one row, two switches, the same sentences, the same one-way widen rule
-(`docs/grants.md:280-289`). What it does **not** get is a row per plugin.
+(`docs/grants.md:304-313`). What it does **not** get is a row per plugin.
 
 ---
 
@@ -472,7 +472,7 @@ every gate in the repository and do nothing.
 
 §4. One member, two axes, the same decision path, the same refusal vocabulary, and the widen
 asymmetry untouched: a caller who is not on the host can switch `plugin` off and can never switch it
-back on (`docs/grants.md:280-289`).
+back on (`docs/grants.md:304-313`).
 
 ### 6.6 The warden — §3.4, and the answer is "not today"
 
@@ -509,17 +509,17 @@ already run any program they like (`docs/grants.md:14-19`), so this adds no expo
 a program here._
 
 **Option B — remote install under `plugin.configure`, confirmed by the operator password against the
-exact artifact.** This is no longer a mechanism to design. `docs/grants.md:235-264` describes the
+exact artifact.** This is no longer a mechanism to design. `docs/grants.md:259-288` describes the
 per-change confirmation as shipped: the **same** secret, the **same** five-try budget and
 fifteen-minute lockout, checked by `CapabilityGrantService.confirmChange`, minting nothing and spent
-inside the one request that carries it (`:241-250`). And the section closes with an invitation this
+inside the one request that carries it (`:265-274`). And the section closes with an invitation this
 document is the first caller of:
 
 > **Why only the fleet.** … a fleet apply is a discrete, reviewable artifact — a numbered manifest of
 > writes a person reads before agreeing — so there is something for a confirmation to be _bound to_.
 > `terminal.use` is a stream of arbitrary code with no such boundary … If a second capability ever
 > grows a reviewable artifact, the machinery is `CallerGovernance.confirmChange` and it is not
-> fleet-specific. — `docs/grants.md:266-271`
+> fleet-specific. — `docs/grants.md:290-295`
 
 **A plugin install is exactly that artifact**: a manifest, a digest, a declared capability list and a
 path — a thing a person can read before agreeing. **A plugin action is not**, and the distinction
@@ -527,7 +527,7 @@ matters more than it looks: confirming every plugin call would be the per-keystr
 section rules out by name. So if Option B is ever taken, the confirmation belongs on **install**, and
 nowhere else.
 
-Its one inherited limitation is unchanged and stated at `docs/grants.md:255-258`: on a machine with
+Its one inherited limitation is unchanged and stated at `docs/grants.md:279-282`: on a machine with
 no operator password — the default — there is no secret to bind an artifact to, and a control that
 cannot refuse is theatre.
 
@@ -541,7 +541,7 @@ Three further v1 refusals, each because it converts one decision into a standing
 - **No auto-update.** An installed plugin is the bytes that were installed. A plugin that updates
   itself is a plugin whose review expired silently.
 - **A plugin is enabled explicitly after install, and disabling is never harder than enabling** —
-  the asymmetry the whole grant model rests on (`docs/grants.md:300-302`).
+  the asymmetry the whole grant model rests on (`docs/grants.md:324-326`).
 
 ---
 
@@ -566,7 +566,7 @@ from the existing doctrine rather than from taste:
 
 1. **A manifest declares an ABI major.** The host implements a set of majors and **refuses** a plugin
    outside it — loudly, by name, with a remedy, the way an undetermined grant document refuses
-   everything rather than guessing (`docs/grants.md:313-319`).
+   everything rather than guessing (`docs/grants.md:337-343`).
 2. **Plugin-facing messages are additive within a major**, which means they must not be
    `strictObject` in the plugin direction. That is a deliberate departure from the device-facing rule
    above, and the reason is the sentence in bold two paragraphs up.
