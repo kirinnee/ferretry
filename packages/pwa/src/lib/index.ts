@@ -251,6 +251,7 @@ export * from './highlight.ts';
 export * from './learning-api.ts';
 export * from './ledger-placement.ts';
 export * from './lineage.ts';
+export * from './local-network-access.ts';
 export * from './md-compose.ts';
 export * from './notification-ledger.ts';
 export * from './notification-preferences.ts';

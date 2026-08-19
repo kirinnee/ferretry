@@ -309,11 +309,16 @@ export class FyApiClient implements IFyApiClient {
 
     if (response === undefined) {
       const detail = lastError instanceof Error ? ` (${lastError.message})` : '';
+      // WHAT WAS ATTEMPTED, NEVER WHAT IT PROVES. This used to read "fyd is unavailable at <url>", and
+      // that is a claim this code cannot support: a browser that refuses a request before sending it
+      // produces exactly this failure with the daemon serving and answering — no status, no body, and
+      // not one line in the daemon's log. The sentence shipped in a panel and cost an owner and two
+      // agents an afternoon, spent on the cause it named rather than on the one they had.
       const message = cancelled
         ? `fyd request ${path} was cancelled${detail}`
         : timedOut
           ? `fyd did not answer ${path} within ${Math.round(timeoutMs / 1_000)}s${detail}; it may still have applied the request`
-          : `fyd is unavailable at ${this.#baseUrl}${detail}`;
+          : `could not reach fyd at ${this.#baseUrl}${detail}`;
       throw new FyTransportError(message, path, timedOut, lastError);
     }
 

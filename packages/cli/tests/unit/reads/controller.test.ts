@@ -469,7 +469,7 @@ describe('fy wait', () => {
 
   it('should exit 69 when the daemon goes away', async () => {
     // Arrange
-    const failure = new FyTransportError('fyd is unavailable at http://daemon.test', '/v1/sessions/s1', false, {});
+    const failure = new FyTransportError('could not reach fyd at http://daemon.test', '/v1/sessions/s1', false, {});
     const { controller, io } = build({ getError: failure });
 
     // Act
