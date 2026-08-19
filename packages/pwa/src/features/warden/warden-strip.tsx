@@ -15,6 +15,15 @@
  * KEPT — SELF-HIDING. A daemon too old to serve `/v1/warden/status` must not
  * put an error on the reader's dashboard: no status means no strip. Rendering
  * `null` here IS the design, not a missing loading state.
+ *
+ * PINNED — `border-soft` ON `surface-2`, ON PURPOSE, AND IT IS INVISIBLE.
+ * Every other box in Settings that sits on `surface-2` moved to `border-strong`,
+ * because a hairline nobody can see makes a bordered box read as loose text. This
+ * one did not: `tests/integration/features/task-surfaces.visual.test.tsx` requires
+ * this strip to be BYTE-IDENTICAL to a verbatim transcription of kteam's own JSX,
+ * whose references differ from the port in ARIA only. Restyling it is therefore a
+ * decision about that migration contract rather than about this box, so it is left
+ * to whoever wants to retire the contract — change both or neither.
  */
 
 import type { WardenStatusView } from '@ferretry/protocol';
@@ -57,7 +66,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   const accounts = status.failover?.accounts ?? [];
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-[12px]">
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-soft bg-surface-2 px-3 py-2 text-[12px]">
       <span className="inline-flex items-center gap-1.5 font-medium text-fg-soft">
         {healthy ? (
           <ShieldCheck size={14} className="text-ok" aria-hidden="true" />
