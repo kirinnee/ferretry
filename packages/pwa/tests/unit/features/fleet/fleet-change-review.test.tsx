@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  FleetApplyOutcome,
-  FleetManifestAccountView,
-  FleetProposalView,
-} from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetApplyOutcome, FleetManifestAccountView } from '../../../../src/features/fleet/fleet-api.ts';
 import {
   FleetApplyReport,
   FleetChangeReview,
+  FleetFirstRunPlan,
   FleetLiveRoster,
   FleetRefusalAlert,
+  type FleetStagedChange,
 } from '../../../../src/features/fleet/fleet-change-review.tsx';
-import { type FleetApplyAuthority, fleetApplyCopy } from '../../../../src/features/fleet/fleet-change-model.ts';
+import {
+  type FleetApplyAuthority,
+  fleetApplyCopy,
+  type FleetUnreachableDiagnosis,
+  unreachableDiagnosis,
+} from '../../../../src/features/fleet/fleet-change-model.ts';
 import {
   type GrantRefusalNotice,
   grantGuidance,
@@ -29,8 +32,8 @@ import {
   manifest,
   pick,
   plan,
-  proposal,
-  scaffoldProposal,
+  scaffoldPreview,
+  stagedChange,
   submit,
   type,
 } from './fleet-support.ts';
@@ -145,7 +148,7 @@ describe('a daemon refusal', () => {
 describe('the staged change', () => {
   const reviewHarness = async (
     overrides: {
-      readonly proposal?: FleetProposalView;
+      readonly proposal?: FleetStagedChange;
       readonly authority?: FleetApplyAuthority;
       readonly busy?: boolean;
       readonly unlockFailure?: OperatorUnlockFailure | null;
@@ -153,7 +156,7 @@ describe('the staged change', () => {
   ) => {
     /** Every password this panel handed back, so a suite can count how many times one was asked for. */
     const calls = { applied: [] as (string | undefined)[], discarded: 0 };
-    const view = overrides.proposal ?? proposal();
+    const view = overrides.proposal ?? stagedChange();
     const mounted = await mount(
       <FleetChangeReview
         proposal={view}
@@ -248,7 +251,7 @@ describe('the staged change', () => {
   });
 
   it('marks the proposed roster against the live one and warns that history is not rolled back', async () => {
-    const changed = proposal({
+    const changed = stagedChange({
       preview: {
         kind: 'apply',
         plan: plan([account({ displayName: 'Renamed' }), account({ id: accountId(4), wrapper: 'claude-new' })]),
@@ -270,16 +273,6 @@ describe('the staged change', () => {
     expect(pick(harness.container, '[data-fleet-documents]').getAttribute('data-fleet-documents')).toBe('2');
     expect(harness.container.textContent).toContain('/home/pilot/.ferretry/fleet/config.yaml');
     expect(harness.container.textContent).toContain('512 B');
-    await harness.unmount();
-  });
-
-  it('shows the first-run scaffold instead of a plan when there is nothing to plan from', async () => {
-    const harness = await reviewHarness({ proposal: scaffoldProposal() });
-    expect(harness.container.textContent).toContain('First run');
-    expect(harness.container.textContent).toContain('/home/pilot/.ferretry/fleet/bin');
-    expect(harness.container.textContent).toContain('config.yaml');
-    expect(harness.container.textContent).toContain('export PATH=');
-    expect(harness.container.querySelector('[data-fleet-operation]')).toBeNull();
     await harness.unmount();
   });
 
@@ -468,7 +461,7 @@ describe('the staged change', () => {
     expect(pick(harness.container, '[data-fleet-side="proposed"]').getAttribute('aria-busy')).toBe('true');
     await harness.unmount();
 
-    const consumed = await reviewHarness({ proposal: proposal({ state: 'consumed' }) });
+    const consumed = await reviewHarness({ proposal: stagedChange({ state: 'consumed' }) });
     expect(consumed.container.textContent).toContain('consumed');
     await consumed.unmount();
   });
@@ -476,7 +469,7 @@ describe('the staged change', () => {
   it('renders a refusal inside the review it belongs to', async () => {
     const mounted = await mount(
       <FleetChangeReview
-        proposal={proposal()}
+        proposal={stagedChange()}
         live={[]}
         authority={{ kind: 'open' }}
         onApply={noop}
@@ -492,7 +485,7 @@ describe('the staged change', () => {
   });
 
   it('renders a plan with no shared history and no asset edits without inventing either', async () => {
-    const bare = proposal({
+    const bare = stagedChange({
       assetEdits: [],
       preview: { kind: 'apply', plan: { ...plan(), sharedHistory: [] }, documents: [] },
     });
@@ -501,6 +494,98 @@ describe('the staged change', () => {
     expect(harness.container.querySelector('[data-fleet-documents]')).toBeNull();
     expect(harness.container.textContent).not.toContain('not rolled back with it');
     await harness.unmount();
+  });
+});
+
+/**
+ * A FIRST RUN IS ONE ACTION AND A LIST.
+ *
+ * The owner's second complaint: preparing a host was staged as a proposal, with an EXPIRES timestamp, a
+ * CONFIG REVISION printed as `absent`, a `pending` state badge and a Confirm-and-Apply — four pieces of
+ * transaction ceremony over an operation that creates what is missing and replaces nothing. Each is
+ * named separately below, because a single "no ceremony" assertion would go green the day one of them
+ * came back on its own.
+ */
+describe('a first run', () => {
+  const firstRun = async (
+    overrides: {
+      readonly authority?: FleetApplyAuthority;
+      readonly unreachable?: FleetUnreachableDiagnosis | null;
+    } = {},
+  ) => {
+    const calls = { applied: [] as (string | undefined)[], discarded: 0 };
+    const preview = scaffoldPreview();
+    const mounted = await mount(
+      <FleetFirstRunPlan
+        scaffold={preview.scaffold}
+        documents={preview.documents}
+        authority={overrides.authority ?? { kind: 'open' }}
+        onApply={operatorPassword => {
+          calls.applied.push(operatorPassword);
+        }}
+        onDiscard={() => {
+          calls.discarded += 1;
+        }}
+        busy={false}
+        unlockFailure={null}
+        unreachable={overrides.unreachable ?? null}
+      />,
+    );
+    return { ...mounted, calls };
+  };
+
+  it('shows everything it will write, and none of the transaction it is held in', async () => {
+    const panel = await firstRun();
+    const text = panel.container.textContent ?? '';
+    // The disclosure the owner never objected to: every path, before anything is written.
+    expect(text).toContain('/home/pilot/.ferretry/fleet/bin');
+    expect(text).toContain('config.yaml');
+    expect(text).toContain('export PATH=');
+    expect(text).toContain('never replaces a file that already exists');
+
+    // The ceremony, named one piece at a time.
+    expect(text).not.toContain('Staged change');
+    expect(text).not.toContain('Expires');
+    expect(text).not.toContain('Config revision');
+    expect(text).not.toContain('absent');
+    expect(text).not.toContain('pending');
+    expect(text).not.toContain(absoluteTime('2026-08-05T06:15:00.000Z'));
+    expect(text).not.toContain('fy_fprop_');
+    // No plan, no ledger, no roster diff: a first run has nothing to compare against.
+    expect(panel.container.querySelector('[data-fleet-operation]')).toBeNull();
+    expect(panel.container.querySelector('[data-fleet-roster-change]')).toBeNull();
+    await panel.unmount();
+  });
+
+  it('is one action for an ungoverned caller, and the action names what it does', async () => {
+    const panel = await firstRun();
+    const action = pick(panel.container, '[data-fleet-apply]');
+    expect(action.textContent).toContain('Create these files');
+    expect(action.hasAttribute('disabled')).toBe(false);
+    // No password, because this caller proves nothing — and no second step of any kind.
+    expect(panel.container.querySelector('input')).toBeNull();
+    await click(action);
+    expect(panel.calls.applied).toEqual([undefined]);
+    await panel.unmount();
+  });
+
+  it('asks a governed caller for the operator password once, through the same one field', async () => {
+    const panel = await firstRun({ authority: { kind: 'locked', alsoConfirms: true } });
+    expect(panel.container.querySelectorAll('input')).toHaveLength(1);
+    await type(pick(panel.container, '[data-fleet-operator-password]') as HTMLInputElement, 'hunter2');
+    await submit(form(panel.container, '[data-fleet-apply-authority]'));
+    expect(panel.calls.applied).toEqual(['hunter2']);
+    await panel.unmount();
+  });
+
+  it('offers nothing at all while the daemon is out of reach', async () => {
+    const panel = await firstRun({
+      unreachable: unreachableDiagnosis('http://127.0.0.1:9999', 'http:'),
+    });
+    expect(panel.container.querySelector('[data-fleet-apply]')).toBeNull();
+    expect(panel.container.querySelector('[data-fleet-operator-password]')).toBeNull();
+    expect(pick(panel.container, '[data-fleet-apply-unreachable]').textContent).toContain('cannot be applied');
+    await panel.unmount();
   });
 });
 

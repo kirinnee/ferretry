@@ -131,7 +131,12 @@ import {
   type FleetHarnessDetection,
   type FleetLayerDraft,
 } from '../src/features/fleet/fleet-change-model.ts';
-import { FleetApplyReport, FleetChangeReview, FleetLiveRoster } from '../src/features/fleet/fleet-change-review.tsx';
+import {
+  FleetApplyReport,
+  FleetChangeReview,
+  FleetFirstRunPlan,
+  FleetLiveRoster,
+} from '../src/features/fleet/fleet-change-review.tsx';
 import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
@@ -467,6 +472,27 @@ const HARNESS_FLEET_LAYER: FleetLayerDraft = {
   // Fields this editor does not offer, carried through the change exactly as declared.
   preserved: { flags: ['--dangerously-skip-permissions'], mcp: 'mcp/studio.json' },
 };
+
+/**
+ * What a FIRST RUN creates on a host with no fleet at all, as the daemon derives it.
+ *
+ * Real paths under a real state home, because the panel exists to show a person exactly where its
+ * files land — a fixture of placeholders would capture a screen nobody could check.
+ */
+const HARNESS_FLEET_SCAFFOLD = {
+  directories: [
+    '/home/pilot/.ferretry/fleet',
+    '/home/pilot/.ferretry/fleet/bin',
+    '/home/pilot/.ferretry/fleet/homes',
+    '/home/pilot/.ferretry/fleet/assets/instructions',
+    '/home/pilot/.ferretry/fleet/assets/skills',
+  ],
+  files: [
+    { path: '/home/pilot/.ferretry/fleet/config.yaml' },
+    { path: '/home/pilot/.ferretry/fleet/assets/instructions/.keep' },
+  ],
+  pathEntry: 'export PATH="$HOME/.ferretry/fleet/bin:$PATH"',
+} as const;
 
 const HARNESS_FLEET_PROPOSAL = {
   id: 'fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb',
@@ -6777,6 +6803,7 @@ type HarnessFleetFrame =
   | 'cockpit'
   | 'cockpit-staged'
   | 'states'
+  | 'first-run'
   | 'unreachable';
 
 /**
@@ -7011,6 +7038,26 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
           />
         </section>
       )}
+      {frame !== 'first-run' ? null : (
+        /**
+         * PREPARING A HOST: one action and the list it will write.
+         *
+         * This frame exists to be compared with `preview` beside it. There is no EXPIRES row, no CONFIG
+         * REVISION printed as `absent`, no "Staged change" heading over a `pending` badge and no
+         * Confirm-and-Apply — four pieces of transaction ceremony that were on screen for an operation
+         * which creates what is missing and can replace nothing. The paths stay, because they are the
+         * disclosure rather than the ritual.
+         */
+        <section aria-label="Fleet first run" className="kt-panel overflow-hidden" id="harness-fleet-first-run-page">
+          <FleetFirstRunPlan
+            scaffold={HARNESS_FLEET_SCAFFOLD}
+            authority={{ kind: 'open' }}
+            onApply={() => {}}
+            onDiscard={() => {}}
+            busy={false}
+          />
+        </section>
+      )}
       {frame !== 'unreachable' ? null : (
         /**
          * THE OWNER'S SCREENSHOT. A daemon this browser could not reach — which is NOT a daemon that is
@@ -7066,6 +7113,7 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-cockpit': 'cockpit',
   '#fleet-cockpit-staged': 'cockpit-staged',
   '#fleet-states': 'states',
+  '#fleet-first-run': 'first-run',
   '#fleet-unreachable': 'unreachable',
 };
 

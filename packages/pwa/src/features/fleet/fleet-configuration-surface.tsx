@@ -95,6 +95,7 @@ import {
 import {
   FleetApplyReport,
   FleetChangeReview,
+  FleetFirstRunPlan,
   FleetLiveRoster,
   FleetRefusalAlert,
   FleetUnreachableNotice,
@@ -693,6 +694,23 @@ export function FleetConfigurationSurface({
   const unreachable = daemonOutOfReach(inventory, session.refusal)
     ? unreachableDiagnosis(connection.baseUrl, pageScheme)
     : null;
+  /** Bound to a local so the preview's discriminant narrows into the two panels below. */
+  const staged = session.proposal;
+  /**
+   * ONE SET OF AUTHORITY CONTROLS, handed to whichever panel is offering the action.
+   *
+   * The two panels must ask for the operator password identically. Spelling the same six props twice is
+   * how the second one ends up a version behind — which is the shape of every divergence this feature
+   * has already been repaired for.
+   */
+  const applyControls = {
+    authority,
+    busy: session.busy,
+    unlockFailure: session.unlockFailure,
+    unreachable,
+    onApply: (operatorPassword?: string) => void apply(operatorPassword),
+    onDiscard: () => dismissed({ proposal: null, refusal: null, unlockFailure: null }),
+  };
 
   /**
    * Open the create form, with the daemon's answer to what is already in the asset tree.
@@ -797,7 +815,11 @@ export function FleetConfigurationSurface({
           : session.outcome === null
             ? session.proposal === null
               ? ''
-              : 'A change is staged and waiting for review.'
+              : // A first run is not staged for review, and saying it is would announce the ceremony
+                // this panel no longer shows to anybody reading it with their eyes.
+                session.proposal.preview.kind === 'initialize'
+                ? 'This host is ready to be prepared, showing every file it would create.'
+                : 'A change is staged and waiting for review.'
             : outcomeSummary(session.outcome).title}
       </p>
       <header className="kt-panel overflow-hidden">
@@ -947,21 +969,29 @@ export function FleetConfigurationSurface({
           />
         ) : null}
 
-        {session.proposal !== null ? (
+        {staged === null ? null : (
           <div ref={reviewRef} tabIndex={-1} className="min-w-0">
-            <FleetChangeReview
-              proposal={session.proposal}
-              live={live}
-              authority={authority}
-              onApply={operatorPassword => void apply(operatorPassword)}
-              onDiscard={() => dismissed({ proposal: null, refusal: null, unlockFailure: null })}
-              busy={session.busy}
-              refusal={session.refusal}
-              unlockFailure={session.unlockFailure}
-              unreachable={unreachable}
-            />
+            {/* TWO OPERATIONS, TWO PANELS. A first run creates what is missing and can replace nothing,
+                so it is one action and the list it will write; a change to a configuration that exists
+                is a diff somebody has to read and a revision a concurrent writer can move underneath.
+                Rendering both through one component is what dressed "create these directories" in an
+                expiry, a revision and a review step. */}
+            {staged.preview.kind === 'initialize' ? (
+              <FleetFirstRunPlan
+                scaffold={staged.preview.scaffold}
+                documents={staged.preview.documents}
+                {...applyControls}
+              />
+            ) : (
+              <FleetChangeReview
+                proposal={{ ...staged, preview: staged.preview }}
+                live={live}
+                refusal={session.refusal}
+                {...applyControls}
+              />
+            )}
           </div>
-        ) : null}
+        )}
 
         {/* A named region rather than a bare div: `aria-label` on an element with no role names nothing,
             and this element exists to BE the landing place focus is sent to when the panel opens. */}

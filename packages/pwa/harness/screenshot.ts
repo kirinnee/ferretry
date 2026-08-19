@@ -281,6 +281,9 @@ const FLEET_FRAMES = [
   // Confirm-and-Apply in front of a limiter nothing could ask a question of. A screen whose every
   // control is gone is exactly the kind of change a capture is the only honest review of.
   'unreachable',
+  // Preparing a host, which is one action and the list it will write. Captured beside `preview` on
+  // purpose: the difference between the two frames IS the ceremony this change removes.
+  'first-run',
 ] as const;
 
 /**

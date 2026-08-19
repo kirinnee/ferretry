@@ -1490,8 +1490,20 @@ describe('a first run', () => {
     expect(surface.daemon.calls.find(call => call.path.endsWith('/proposals'))?.body).toEqual({
       mutation: { kind: 'initialize' },
     });
-    expect(surface.container.textContent).toContain('First run');
-    expect(surface.container.textContent).toContain('never replaces a file');
+    // ONE ACTION AND A LIST. Not the review panel: no expiry, no revision, no staged-change framing —
+    // and the paths it will write, because that is the disclosure rather than the ceremony.
+    expect(absent(surface.container, '[data-fleet-first-run]')).toBe(false);
+    expect(absent(surface.container, '[data-fleet-side="proposed"]')).toBe(true);
+    const staged = surface.container.textContent ?? '';
+    expect(staged).toContain('Prepare this host');
+    expect(staged).toContain('never replaces a file');
+    expect(staged).toContain('/home/pilot/.ferretry/fleet/bin');
+    expect(staged).not.toContain('Staged change');
+    expect(staged).not.toContain('Expires');
+    expect(staged).not.toContain('Config revision');
+    // The live region says what is true of a first run rather than announcing a review.
+    expect(pick(surface.container, '[data-fleet-announcement]').textContent).toContain('ready to be prepared');
+    expect(pick(surface.container, '[data-fleet-apply]').textContent).toContain('Create these files');
 
     await click(pick(surface.container, '[data-fleet-apply]'));
     await interact(() => undefined);

@@ -18,6 +18,7 @@ import type {
   HarnessDiscovery,
   HarnessDiscoveryReport,
 } from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetStagedChange } from '../../../../src/features/fleet/fleet-change-review.tsx';
 import { interact, must } from '../../../support/dom.ts';
 
 /** The shared account shape, so a fixture cannot drift from what the daemon actually sends. */
@@ -196,6 +197,25 @@ export const proposal = (overrides: Partial<FleetProposalView> = {}): FleetPropo
   },
   ...overrides,
 });
+
+/**
+ * The same fixture, narrowed to a change that HAS A PLAN.
+ *
+ * The review panel takes exactly that now: a first run is a different operation with a different panel,
+ * so the type says which one this is rather than the component branching on it at render time.
+ */
+export const stagedChange = (overrides: Partial<FleetProposalView> = {}): FleetStagedChange => {
+  const view = proposal(overrides);
+  if (view.preview.kind !== 'apply') throw new Error('a staged-change fixture must carry a plan');
+  return { ...view, preview: view.preview };
+};
+
+/** What a first run creates, as the daemon's own initialize preview carries it. */
+export const scaffoldPreview = (): Extract<FleetProposalPreview, { kind: 'initialize' }> => {
+  const preview = scaffoldProposal().preview;
+  if (preview.kind !== 'initialize') throw new Error('the first-run fixture must carry a scaffold');
+  return preview;
+};
 
 export const scaffoldProposal = (): FleetProposalView =>
   proposal({
