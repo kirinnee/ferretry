@@ -1,5 +1,5 @@
 import type { ApiActor } from './actor.ts';
-import type { CapabilityDemand } from './capability.ts';
+import type { CallerGovernance, CapabilityDemand } from './capability.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 import type { AuthenticatedCredential } from './socket-ticket.ts';
 
@@ -76,6 +76,23 @@ export interface RouteContext {
    * means "not acting as a warden" rather than "acting as one, unrecorded".
    */
   readonly wardenRemedy?: WardenRemedyGrant;
+  /**
+   * Where this caller stands relative to the OPERATOR's gate — server-derived exactly like `actor`.
+   *
+   * PRESENT ON EVERY ROUTE THAT DECLARES A {@link ScopedRoute.capability}, and absent on every route
+   * that does not, because a route the operator was never asked about has no answer here to give.
+   *
+   * A HANDLER CANNOT MINT ONE, and that is why it travels here rather than being re-derived. Both
+   * facts it carries — whether the grants govern this caller, and whether this machine has an
+   * operator password — are the boundary's, made from the transport's own account of where the socket
+   * came from. A handler that recomputed either from `request.loopback` or from a token class would
+   * be writing a second, quieter definition of locality, which is the failure this whole layer is
+   * built to prevent. The fleet mount did exactly that in four places before this existed.
+   *
+   * IT ADDS A STEP AND NEVER REMOVES ONE. It is populated only for a request the capability demand
+   * already allowed, so nothing read from it can serve a caller the boundary refused.
+   */
+  readonly governance?: CallerGovernance;
 }
 
 /**

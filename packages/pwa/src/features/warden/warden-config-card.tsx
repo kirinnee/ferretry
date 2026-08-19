@@ -136,7 +136,7 @@ export function WardenConfigCard({
       data-testid="warden-config-card"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="warden-config-heading" className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+        <h2 id="warden-config-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
           Warden accounts &amp; failover
         </h2>
@@ -146,7 +146,7 @@ export function WardenConfigCard({
           </span>
         )}
       </div>
-      <p className="m-0 text-ui leading-base text-muted">
+      <p className="m-0 text-cell leading-base text-muted">
         Ordered warden account list. Changes apply live — no daemon restart. Under Fallback the first healthy account
         wins.
       </p>
@@ -180,7 +180,7 @@ export function WardenConfigCard({
           return (
             <li
               key={account.agent}
-              className="flex flex-wrap items-center gap-2 rounded-control border border-border-soft bg-surface-2 px-3 py-2"
+              className="flex flex-wrap items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
             >
               <span className="mono text-ui font-medium text-fg">
                 {index + 1}. {account.agent}
@@ -269,7 +269,7 @@ export function WardenConfigCard({
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-ui text-muted">
+        <label className="flex flex-col gap-1 text-cell font-medium text-fg">
           Failure threshold
           <input
             type="number"
@@ -280,7 +280,7 @@ export function WardenConfigCard({
             onChange={event => update({ ...draft, failureThreshold: Number(event.target.value) })}
           />
         </label>
-        <label className="flex flex-col gap-1 text-ui text-muted">
+        <label className="flex flex-col gap-1 text-cell font-medium text-fg">
           Cooldown (minutes)
           <input
             type="number"
@@ -413,8 +413,8 @@ export function WardenConfigSurface({
     if (unavailable === 'message' && loadFailure?.daemonId === connection.daemonId)
       return (
         <section className="kt-panel p-panel" role="status" aria-label="Warden policy unavailable">
-          <h3 className="m-0 text-title font-semibold text-fg">Warden policy unavailable</h3>
-          <p className="mb-0 mt-1 text-ui leading-base text-muted">
+          <h3 className="m-0 text-row font-semibold text-fg">Warden policy unavailable</h3>
+          <p className="mb-0 mt-1 text-cell leading-base text-muted">
             This daemon did not provide an editable Warden policy. No controls are shown because a change cannot be
             confirmed here.
           </p>

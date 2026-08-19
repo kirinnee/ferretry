@@ -12,27 +12,27 @@
  * in a candidate configuration, every path a rollback could not verify — and the reader needs all of it.
  */
 
-import { FLEET_APPROVAL_MAX_ATTEMPTS, FLEET_APPROVAL_TTL_SECONDS } from '@ferretry/protocol';
 import {
   ArrowRight,
   CircleAlert,
   CircleCheck,
   ClipboardList,
   FileCog,
-  Hourglass,
   ListOrdered,
   Lock,
   ServerCog,
-  ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
-import { useId } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
-import { EYEBROW, FIELD_LABEL, FleetPath } from './fleet-typography.tsx';
+import { EYEBROW, FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
+import { type OperatorUnlockFailure, UNLOCK_LIMIT_NOTE } from '../../lib/grants.ts';
 import { absoluteTime } from '../../lib/session-screens.ts';
 import type { FleetApplyOutcome, FleetManifestAccountView, FleetProposalView, FleetRefusalView } from './fleet-api.ts';
 import {
-  type FleetAuthorityMode,
+  type FleetApplyAuthority,
+  fleetApplyCopy,
+  fleetApplyNeedsPassword,
   type FleetRosterChange,
   type FleetRosterRow,
   operationLedger,
@@ -64,7 +64,7 @@ const CHANGE_LABEL: Readonly<Record<FleetRosterChange, string>> = {
 function AccountLine({ account }: { readonly account: FleetManifestAccountView }) {
   return (
     <div className="min-w-0 flex-1 basis-[12rem]">
-      <FleetPath value={account.wrapper} className="block text-ui font-semibold text-fg" />
+      <PanelPath value={account.wrapper} className="block text-ui font-semibold text-fg" />
       {/* Wraps rather than truncates: a clipped default model is the one fact a reader came for. */}
       <p className="m-0 text-meta leading-base text-muted">
         {account.displayName} · {account.mode} · {account.defaultModel ?? 'no default model'}
@@ -205,46 +205,70 @@ export interface FleetChangeReviewProps {
   readonly proposal: FleetProposalView;
   /** The live accounts the ledger is compared against. */
   readonly live: readonly FleetManifestAccountView[];
-  readonly authority: FleetAuthorityMode;
-  /** The exact command a person runs on the host. Server-derived; never a guess. */
-  readonly command: string;
-  readonly code: string;
-  readonly onCodeChange: (code: string) => void;
-  readonly onApply: () => void;
-  readonly onRecheck: () => void;
+  readonly authority: FleetApplyAuthority;
+  /**
+   * Applies the change, with the operator password when one was asked for.
+   *
+   * ONE ARGUMENT, because there is one secret. The panel does not decide whether it becomes an unlock,
+   * a confirmation or both — the surface does, from the same authority this component renders — and a
+   * component that split it into two callbacks would be the second place that decision could be made
+   * differently.
+   */
+  readonly onApply: (operatorPassword?: string) => void;
   readonly onDiscard: () => void;
   readonly busy: boolean;
   readonly refusal: FleetRefusalView | null;
+  /** Why the last operator password was refused, so a wrong one is retyped rather than re-guessed at. */
+  readonly unlockFailure?: OperatorUnlockFailure | null;
 }
 
 /**
- * The change manifest: numbered, exact, and bound to one proposal id.
+ * The change manifest: numbered, exact, and one Apply.
  *
- * The id is on screen because it is what the approval is minted against. A person authorizing a
- * change on their host is authorizing THAT id, and being able to compare the two is the whole point of
- * showing it.
+ * ## THE PROPOSAL ID IS NOT ON SCREEN
+ *
+ * It was, and the reason it was is gone with the authorization half: a person used to read it off this
+ * panel to compare against the id in `fy fleet authorize <id>`. Nothing mints anything against it now —
+ * it is a transaction handle the browser sends back in a path — so showing it would be a 30-character
+ * opaque string a reader has no use for, in the place the change itself should be.
  */
 export function FleetChangeReview({
   proposal,
   live,
   authority,
-  command,
-  code,
-  onCodeChange,
   onApply,
-  onRecheck,
   onDiscard,
   busy,
   refusal,
+  unlockFailure = null,
 }: FleetChangeReviewProps) {
   // Instance-local for the same reason as the roster above.
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
+  /**
+   * The typed password, held HERE and nowhere above.
+   *
+   * It is the one value on this screen that must not reach the session state the surface keys by
+   * connection: a secret in there outlives the click that needed it, survives every unrelated re-render,
+   * and shows up in anything that inspects the state. It lives for one submit and is cleared by it.
+   */
+  const [password, setPassword] = useState('');
   const preview = proposal.preview;
   const ledger = preview.kind === 'apply' ? operationLedger(preview.plan.operations) : [];
   const rows = preview.kind === 'apply' ? rosterDiff(live, preview.plan.manifest.accounts) : [];
-  const approvalOutstanding = proposal.approval !== undefined;
-  const applyBlocked = busy || (authority === 'approval' && code.trim() === '') || authority === 'read-only';
+  const copy = fleetApplyCopy(authority);
+  const needsPassword = fleetApplyNeedsPassword(authority);
+  const applyBlocked = busy || authority.kind === 'refused' || (needsPassword && password === '');
+
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (applyBlocked) return;
+    onApply(needsPassword ? password : undefined);
+    // Cleared on submit rather than on success, exactly as the grants surface clears its own: a wrong
+    // password is retyped, and holding the last attempt in a field is one more place the value sits
+    // while somebody walks away from the screen.
+    setPassword('');
+  };
 
   return (
     <section
@@ -266,17 +290,16 @@ export function FleetChangeReview({
         </div>
         <p className="m-0 mt-1 text-ui font-semibold text-fg">{proposal.summary}</p>
         <dl className="m-0 mt-2 grid gap-x-4 gap-y-1 text-meta sm:grid-cols-[auto_minmax(0,1fr)]">
-          <dt className={EYEBROW}>Proposal</dt>
-          {/* Wrapped, never truncated: this id is what the host mints the approval AGAINST, so it is
-              the one fact a reader came for. */}
-          <dd className="m-0 min-w-0">
-            <FleetPath value={proposal.id} className="text-meta text-fg" />
-          </dd>
+          {/* NO PROPOSAL ID ROW. Nothing is minted against it any more, so it is an opaque handle a
+              reader cannot act on — and the expiry and revision are the two facts that decide whether
+              this review is still worth applying. It used to be here, wrapped rather than truncated,
+              because it was "the one fact a reader came for": they read it off this panel to match the
+              id in `fy fleet authorize <id>`. That is the sentence this change makes false. */}
           <dt className={EYEBROW}>Expires</dt>
           <dd className="m-0 font-mono text-meta text-muted">{absoluteTime(proposal.expiresAt)}</dd>
           <dt className={EYEBROW}>Config revision</dt>
           <dd className="m-0 min-w-0">
-            <FleetPath value={proposal.revision} className="text-meta text-muted" />
+            <PanelPath value={proposal.revision} className="text-meta text-muted" />
           </dd>
         </dl>
       </header>
@@ -293,20 +316,20 @@ export function FleetChangeReview({
           <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Directories created">
             {preview.scaffold.directories.map(directory => (
               <li key={directory} className="min-w-0">
-                <FleetPath value={directory} className="text-meta text-muted" />
+                <PanelPath value={directory} className="text-meta text-muted" />
               </li>
             ))}
           </ul>
           <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Files seeded">
             {preview.scaffold.files.map(file => (
               <li key={file.path} className="min-w-0">
-                <FleetPath value={file.path} className="text-meta text-fg" />
+                <PanelPath value={file.path} className="text-meta text-fg" />
               </li>
             ))}
           </ul>
           <p className="m-0 mt-2 text-meta leading-base text-muted">
             Add to your shell profile afterwards:{' '}
-            <FleetPath value={preview.scaffold.pathEntry} className="text-meta text-fg" />
+            <PanelPath value={preview.scaffold.pathEntry} className="text-meta text-fg" />
           </p>
         </section>
       ) : (
@@ -343,10 +366,10 @@ export function FleetChangeReview({
                   </span>
                   <span className="shrink-0 text-meta font-semibold text-fg-soft sm:w-[10.5rem]">{entry.action}</span>
                   <span className="min-w-0 flex-1 basis-full pl-6 sm:basis-0 sm:pl-0">
-                    <FleetPath value={entry.path} className="block text-meta text-fg" />
+                    <PanelPath value={entry.path} className="block text-meta text-fg" />
                     {entry.source === undefined ? null : (
                       <span className="block min-w-0 text-meta text-muted">
-                        from <FleetPath value={entry.source} className="text-meta text-muted" />
+                        from <PanelPath value={entry.source} className="text-meta text-muted" />
                       </span>
                     )}
                     {entry.details.length === 0 ? null : (
@@ -373,7 +396,7 @@ export function FleetChangeReview({
                 {preview.plan.sharedHistory.map(history => (
                   <li key={history.kind} className="px-panel py-2 text-meta leading-base text-muted">
                     <span className="font-semibold text-fg-soft">{history.kind} history</span> · pool{' '}
-                    <FleetPath value={history.pool} className="text-meta" /> · {history.migrated} moved, {history.links}{' '}
+                    <PanelPath value={history.pool} className="text-meta" /> · {history.migrated} moved, {history.links}{' '}
                     linked, {history.conflicts} kept as-is. This step runs AFTER the manifest is published and is not
                     rolled back with it.
                   </li>
@@ -403,7 +426,7 @@ export function FleetChangeReview({
                 key={document.path}
                 className="flex min-w-0 gap-3 border-t border-border-soft px-panel py-1.5 text-meta"
               >
-                <FleetPath value={document.path} className="min-w-0 flex-1 text-fg" />
+                <PanelPath value={document.path} className="min-w-0 flex-1 text-fg" />
                 <span className="shrink-0 tabular-nums text-muted">{document.bytes} B</span>
               </li>
             ))}
@@ -419,7 +442,7 @@ export function FleetChangeReview({
         >
           {proposal.assetEdits.map(edit => (
             <li key={edit.path} className="flex min-w-0 gap-3 px-panel py-1.5 text-meta">
-              <FleetPath value={edit.path} className="min-w-0 flex-1 text-fg" />
+              <PanelPath value={edit.path} className="min-w-0 flex-1 text-fg" />
               <span className="shrink-0 tabular-nums text-muted">{edit.bytes} B</span>
             </li>
           ))}
@@ -428,82 +451,72 @@ export function FleetChangeReview({
 
       {refusal === null ? null : <FleetRefusalAlert refusal={refusal} />}
 
-      <section
+      {/*
+        ONE FORM, ONE FIELD, ONE BUTTON. There is no heading over it and deliberately so: a "Host
+        authority" section was the fleet advertising an authority system of its own, and what is left is
+        the ordinary thing every other governed control does — say what is true when it is not a plain
+        yes, and offer the one step that resolves it.
+      */}
+      <form
         className="border-t border-border-soft bg-surface-2 px-panel py-3"
-        aria-labelledby={id('-authority-heading')}
+        data-fleet-apply-authority={authority.kind}
+        onSubmit={submit}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          {authority === 'direct' ? (
-            <ShieldCheck size={16} className="shrink-0 text-ok" aria-hidden="true" />
-          ) : (
-            <Lock size={16} className="shrink-0 text-accent" aria-hidden="true" />
-          )}
-          <h3 id={id('-authority-heading')} className="m-0 text-ui font-semibold text-fg">
-            Host authority
-          </h3>
-        </div>
-
-        {authority === 'direct' ? (
-          <p className="m-0 mt-1 text-meta leading-base text-muted" data-fleet-authority="direct">
-            This credential is the host's own, so it may apply this proposal directly.
+        {copy.explanation === '' ? null : (
+          <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base text-muted">
+            <Lock size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+            <span data-fleet-apply-explanation="">{copy.explanation}</span>
           </p>
-        ) : null}
+        )}
 
-        {authority === 'read-only' ? (
-          <p className="m-0 mt-1 text-meta leading-base text-warn" data-fleet-authority="read-only">
-            This credential may inspect the fleet and stage a change, but nothing here may apply one. Run the change
-            from the host.
-          </p>
-        ) : null}
-
-        {authority === 'approval' ? (
-          <div data-fleet-authority="approval">
-            <p className="m-0 mt-1 text-meta leading-base text-muted">
-              A paired browser cannot provision a host on the strength of having paired. Run this on the host to mint a
-              single-use approval for <span className="font-semibold text-fg">this exact proposal</span>:
-            </p>
-            <pre className="kt-code-block m-0 mt-2 overflow-x-auto whitespace-pre font-mono text-code">{command}</pre>
-            <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-approval-code')}>
-              Approval code
+        {needsPassword ? (
+          <>
+            <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-operator-password')}>
+              Operator password for this machine
             </label>
             <input
-              id={id('-approval-code')}
-              className="kt-input font-mono uppercase"
-              value={code}
+              id={id('-operator-password')}
+              type="password"
+              className="kt-input"
+              value={password}
               disabled={busy}
               autoComplete="off"
               spellCheck={false}
-              placeholder="XXXX-XXXX"
-              onChange={event => onCodeChange(event.target.value)}
+              data-fleet-operator-password=""
+              onChange={event => setPassword(event.target.value)}
             />
-            <p className="m-0 mt-1 flex flex-wrap items-center gap-1 text-meta text-muted">
-              <Hourglass size={14} className="shrink-0" aria-hidden="true" />
-              {approvalOutstanding
-                ? `An approval is outstanding until ${absoluteTime(proposal.approval?.expiresAt)}.`
-                : `No approval is outstanding yet. A code lasts ${FLEET_APPROVAL_TTL_SECONDS} seconds, is single-use, and this proposal accepts ${FLEET_APPROVAL_MAX_ATTEMPTS} wrong ones before it stops taking any.`}
-            </p>
-            <button type="button" className="kt-btn kt-btn--sm mt-2" disabled={busy} onClick={onRecheck}>
-              Check for approval
-            </button>
-          </div>
+            {unlockFailure === null ? (
+              <p className="m-0 mt-1 text-meta leading-base text-faint">{UNLOCK_LIMIT_NOTE}</p>
+            ) : (
+              <p
+                role="alert"
+                className={cn(
+                  'm-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base',
+                  unlockFailure.retryable
+                    ? 'border-warn-border bg-warn-bg text-warn'
+                    : 'border-err-border bg-err-bg text-err',
+                )}
+                data-fleet-operator-password-failure={unlockFailure.retryable ? 'retryable' : 'final'}
+              >
+                {unlockFailure.message}
+              </p>
+            )}
+          </>
         ) : null}
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="kt-btn"
-            data-variant="primary"
-            data-fleet-apply=""
-            disabled={applyBlocked}
-            onClick={onApply}
-          >
-            {busy ? 'Applying…' : 'Apply this change'}
+          {/*
+            A SUBMIT, not a click handler, so Enter in the password field applies the change rather than
+            doing nothing — which is what a person types after a password every time.
+          */}
+          <button type="submit" className="kt-btn" data-variant="primary" data-fleet-apply="" disabled={applyBlocked}>
+            {busy ? 'Applying…' : needsPassword ? 'Confirm and apply' : 'Apply this change'}
           </button>
           <button type="button" className="kt-btn" data-variant="ghost" disabled={busy} onClick={onDiscard}>
             Discard
           </button>
         </div>
-      </section>
+      </form>
     </section>
   );
 }
@@ -531,7 +544,7 @@ function PathList({ label, paths }: { readonly label: string; readonly paths: re
       <ul className="m-0 mt-1 list-none space-y-0.5 p-0">
         {paths.map(path => (
           <li key={path} className="min-w-0">
-            <FleetPath value={path} className="text-meta" />
+            <PanelPath value={path} className="text-meta" />
           </li>
         ))}
       </ul>
@@ -578,7 +591,7 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
       {outcome.outcome === 'committed' ? (
         <>
           <p className="m-0 mt-2 text-meta leading-base">
-            Manifest published at <FleetPath value={outcome.result.manifestPath} className="text-meta" />
+            Manifest published at <PanelPath value={outcome.result.manifestPath} className="text-meta" />
           </p>
           {outcome.result.prunedWrappers.length > 0 ? (
             <p className="m-0 mt-2 text-meta leading-base">
@@ -589,7 +602,7 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
               preview, and the preview is gone the moment the change is applied. */}
           {outcome.result.sharedHistory.map(history => (
             <p key={history.kind} className="m-0 mt-2 text-meta leading-base">
-              {history.kind} history · pool <FleetPath value={history.pool} /> · {history.migrated} moved,{' '}
+              {history.kind} history · pool <PanelPath value={history.pool} /> · {history.migrated} moved,{' '}
               {history.links} linked, {history.conflicts} kept as-is
             </p>
           ))}
@@ -615,7 +628,7 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
         <>
           <Reason label="Why it stopped" text={outcome.reason} />
           <p className="m-0 mt-2 text-meta leading-base">
-            It stopped at <FleetPath value={outcome.failedPath} />.
+            It stopped at <PanelPath value={outcome.failedPath} />.
           </p>
           <PathList label="Created" paths={outcome.created} />
           <PathList label="Kept, because they already existed" paths={outcome.kept} />
@@ -627,7 +640,7 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
         <ul className="m-0 mt-2 list-none space-y-1 p-0" aria-label="Moved-aside files left on the host">
           {outcome.result.backupResidue.map(path => (
             <li key={path} className="min-w-0">
-              <FleetPath value={path} className="text-meta" />
+              <PanelPath value={path} className="text-meta" />
             </li>
           ))}
         </ul>
@@ -656,8 +669,8 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
                   {/* A TYPOGRAPHIC apostrophe, and not only for looks: the daemon-scope gate lexer reads
                       a bare quote in JSX text as the start of a string literal, and the next {' '} closes it —
                       every bracket after that point stops balancing and the gate reports itself desynced. */}
-                  <FleetPath value={entry.path} /> was not this apply’s to delete, so it was moved to{' '}
-                  <FleetPath value={entry.movedTo} />.
+                  <PanelPath value={entry.path} /> was not this apply’s to delete, so it was moved to{' '}
+                  <PanelPath value={entry.movedTo} />.
                 </li>
               ))}
             </ul>
@@ -665,11 +678,11 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
           <ul className="m-0 mt-2 list-none space-y-2 p-0" aria-label="Paths whose prior state could not be verified">
             {outcome.unrestored.map(entry => (
               <li key={entry.path} className="rounded-control border border-current/40 p-2">
-                <FleetPath value={entry.path} className="block text-meta font-semibold" />
+                <PanelPath value={entry.path} className="block text-meta font-semibold" />
                 <p className="m-0 mt-0.5 text-meta leading-base">{entry.reason}</p>
                 {entry.backup === undefined ? null : (
                   <p className="m-0 mt-0.5 text-meta leading-base">
-                    The only remaining copy of the original is at <FleetPath value={entry.backup} />. Do not delete it.
+                    The only remaining copy of the original is at <PanelPath value={entry.backup} />. Do not delete it.
                   </p>
                 )}
               </li>

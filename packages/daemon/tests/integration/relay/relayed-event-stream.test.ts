@@ -110,7 +110,16 @@ function socketDispatcher(events: FleetEventStreamService): ApiSocketDispatcher 
     new SocketTicketRegistry({ now: () => Date.now() }, { ticket: () => 'unused' }),
     // `/v1/events` names no capability, so the boundary never asks — and a guard that refuses
     // everything proves that, because a route that DID demand one would fail this test loudly.
-    { decide: () => ({ allowed: false, refusal: 'undetermined' as const }), explain: () => undefined },
+    {
+      decide: () => ({ allowed: false, refusal: 'undetermined' as const }),
+      governance: () => ({
+        governed: true,
+        passwordSet: false,
+        confirmChange: true,
+        decide: () => ({ allowed: false, refusal: 'undetermined' as const }),
+      }),
+      explain: () => undefined,
+    },
   );
 }
 

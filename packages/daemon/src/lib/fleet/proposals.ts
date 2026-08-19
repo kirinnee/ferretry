@@ -1,5 +1,5 @@
 /**
- * The proposal lifecycle: a reviewed change that exists only in memory until it is authorized.
+ * The proposal lifecycle: a reviewed change that exists only in memory until it is applied.
  *
  * The alternative — save the configuration, then apply a plan rebuilt from disk — cannot honour
  * "review before anything changes", because by the time the plan is rebuilt the host has already
@@ -8,14 +8,22 @@
  * candidate configuration the daemon derived, and the exact preview that was shown. Applying
  * consumes that stored value and never re-reads a request body.
  *
- * Everything a paired client controls is bounded — how many proposals may exist, how long they
- * live, how many approval attempts each tolerates — because a client that can make a daemon hold
- * memory indefinitely has found a way to take the daemon down without any credential at all.
+ * ## THIS IS A TRANSACTION AND NOT AN AUTHORITY, AND IT USED TO BE BOTH
+ *
+ * It once carried a second system: a single-use eight-character code the host minted for one
+ * proposal, a 120-second life, and a five-wrong-try budget per proposal. That was a parallel answer
+ * to "who may turn a reviewed change into host state" — the question `docs/grants.md` already
+ * answers, asked again in a vocabulary no other capability shared, and it is deleted. What is left
+ * here decides nothing about a caller. It stages, it expires, it refuses a moved input and it hands
+ * back exactly the artifact that was reviewed; every one of those is optimistic concurrency control,
+ * and no capability toggle can express any of them.
+ *
+ * Everything a paired client controls is still bounded — how many proposals may exist and how long
+ * they live — because a client that can make a daemon hold memory indefinitely has found a way to
+ * take the daemon down without any credential at all. Those are resource bounds, not permissions.
  *
  * Pure apart from injected identity and time.
  */
-import { FLEET_APPROVAL_MAX_ATTEMPTS, FLEET_APPROVAL_TTL_SECONDS, FleetApprovalCodeSchema } from '@ferretry/protocol';
-import { secretsMatch } from '../api/authentication.ts';
 import type { FleetAssetEdit, FleetAssetRevision } from './assets.ts';
 import type { FleetMutation } from './mutations.ts';
 
@@ -27,18 +35,6 @@ const MAX_CONSUMED_TOMBSTONES = 16;
 const ID_MINT_ATTEMPTS = 4;
 /** How long a reviewed change stays applicable. Long enough to read, short enough to be current. */
 export const PROPOSAL_TTL_SECONDS = 15 * 60;
-
-/**
- * Read what a person actually typed — spaces, lower case, a missing dash — and check the grammar.
- *
- * The grammar is the shared one from the protocol package. A second copy here would be a second
- * description of the code the command line prints and the browser submits, and three descriptions
- * of one thing are three things waiting to disagree.
- */
-export function normalizeApprovalCode(candidate: string): string | undefined {
-  const parsed = FleetApprovalCodeSchema.safeParse(candidate);
-  return parsed.success ? parsed.data : undefined;
-}
 
 /** The sentinel revision for a host that has no fleet configuration at all. */
 export const MISSING_CONFIG_REVISION = 'absent';
@@ -62,13 +58,12 @@ export interface FleetProposalRecord<Payload> {
    * be what was reviewed.
    */
   readonly payload: Payload;
-  /** One-line, server-derived description of what is being approved. */
+  /** One-line, server-derived description of what this change does, for the person reviewing it. */
   readonly summary: string;
   state: FleetProposalState;
-  approval: { code: string; expiresAt: number; attempts: number } | undefined;
 }
 
-/** What a caller may see about a proposal. Never the approval code — see `redact`. */
+/** What a caller may see about a proposal. */
 export interface FleetProposalView<View> {
   readonly id: string;
   readonly revision: string;
@@ -78,11 +73,13 @@ export interface FleetProposalView<View> {
   readonly state: FleetProposalState;
   readonly assetEdits: readonly { readonly path: string; readonly bytes: number }[];
   readonly preview: View;
-  /** Whether an approval is outstanding, and until when. The value itself is never disclosed. */
-  readonly approval: { readonly outstanding: true; readonly expiresAt: string } | undefined;
 }
 
-export type FleetProposalProblem = 'unknown' | 'expired' | 'consumed' | 'unauthorized' | 'exhausted';
+/**
+ * Why a staged change cannot be used. EVERY MEMBER IS A FACT ABOUT THE CHANGE, never about the
+ * caller — `unauthorized` used to sit here, and its removal is the whole point of this file's split.
+ */
+export type FleetProposalProblem = 'unknown' | 'expired' | 'consumed' | 'exhausted';
 
 export class FleetProposalRefusal extends Error {
   constructor(
@@ -98,12 +95,6 @@ export interface FleetProposalStoreOptions {
   readonly now: () => number;
   /** 22 URL-safe characters, supplied so identity is never derived from a clock. */
   readonly mintId: () => string;
-  /**
-   * One approval code in the shared grammar. Required, and supplied by the composition root: this
-   * layer is not allowed to reach for randomness, and generating a code here would also put the
-   * choice of *how* the randomness maps onto the alphabet somewhere nobody reviews it.
-   */
-  readonly mintCode: () => string;
 }
 
 /**
@@ -139,7 +130,6 @@ export class FleetProposalStore<Payload> {
       createdAt,
       expiresAt: createdAt + PROPOSAL_TTL_SECONDS * 1000,
       state: 'pending',
-      approval: undefined,
     };
     this.#proposals.set(record.id, record);
     return record;
@@ -149,9 +139,8 @@ export class FleetProposalStore<Payload> {
    * A handle nothing already holds.
    *
    * Storing under a repeated identifier would silently replace a change somebody else is reviewing
-   * — and, worse, hand them an approval for a proposal that is no longer the one they read. A few
-   * retries cover the accident; beyond that the identity source is broken and saying so is better
-   * than looping.
+   * — so the apply they authorised would land a change they never read. A few retries cover the
+   * accident; beyond that the identity source is broken and saying so is better than looping.
    */
   private freeId(): string {
     for (let attempt = 0; attempt < ID_MINT_ATTEMPTS; attempt += 1) {
@@ -191,72 +180,17 @@ export class FleetProposalStore<Payload> {
   }
 
   /**
-   * Mint an approval for one proposal, replacing any previous one.
+   * Spend one staged change, synchronously.
    *
-   * Replacing matters: two live codes for one change means a code a person abandoned still works,
-   * and the attempt budget of the one they are using no longer bounds anything.
+   * SYNCHRONOUS IS THE WHOLE OF "SINGLE USE". The state moves before the caller can await anything,
+   * so two applies arriving together cannot both find it pending and both run. Whether the caller
+   * was ALLOWED to spend it is decided before this is reached and is not this store's question —
+   * that separation is what let the fleet's parallel approval system be deleted without touching
+   * anything the transaction guarantees.
    */
-  authorize(id: string): { record: FleetProposalRecord<Payload>; code: string; expiresAt: number } {
-    const record = this.require(id);
-    const code = this.options.mintCode();
-    const expiresAt = this.options.now() + FLEET_APPROVAL_TTL_SECONDS * 1000;
-    record.approval = { code, expiresAt, attempts: 0 };
-    return { record, code, expiresAt };
-  }
-
-  /**
-   * Check a presented code and consume the proposal in the same synchronous step.
-   *
-   * Consuming before the caller can await anything is what makes "single use" true: two applies
-   * arriving together would otherwise both pass the check and both run.
-   */
-  consume(id: string, presented: string | undefined): FleetProposalRecord<Payload> {
-    const record = this.require(id);
-    // Offering nothing is not a guess. Spending a try on it would let a client that never had a
-    // code burn the budget of the person who does, which is a denial of the approval, not of the
-    // client.
-    if (presented === undefined || presented === '') {
-      throw new FleetProposalRefusal(
-        'unauthorized',
-        `applying fleet proposal "${id}" from this device needs an approval code minted on the host`,
-      );
-    }
-    const approval = record.approval;
-    if (approval === undefined) {
-      throw new FleetProposalRefusal(
-        'unauthorized',
-        `fleet proposal "${id}" has no approval outstanding; run the authorize command on the host to mint one`,
-      );
-    }
-    if (approval.attempts >= FLEET_APPROVAL_MAX_ATTEMPTS) {
-      throw new FleetProposalRefusal(
-        'exhausted',
-        `fleet proposal "${id}" refused ${FLEET_APPROVAL_MAX_ATTEMPTS} approval codes and accepts no more; mint a new approval`,
-      );
-    }
-    // At the instant it expires it is expired. A boundary that admits one more millisecond is a
-    // boundary nobody can state, and the test that pins it would have to encode the same slack.
-    if (this.options.now() >= approval.expiresAt) {
-      record.approval = undefined;
-      throw new FleetProposalRefusal('expired', `the approval for fleet proposal "${id}" has expired; mint a new one`);
-    }
-    // Counted before the comparison, so a wrong guess costs a try whichever way the compare goes.
-    approval.attempts += 1;
-    const offered = normalizeApprovalCode(presented);
-    if (offered === undefined || !secretsMatch(offered, approval.code)) {
-      throw new FleetProposalRefusal('unauthorized', `that approval code is not the one minted for proposal "${id}"`);
-    }
-    record.state = 'consumed';
-    record.approval = undefined;
-    this.retireOldestConsumed();
-    return record;
-  }
-
-  /** Consume without a code, for a caller whose credential already authorises the change. */
-  consumeAsHost(id: string): FleetProposalRecord<Payload> {
+  consume(id: string): FleetProposalRecord<Payload> {
     const record = this.require(id);
     record.state = 'consumed';
-    record.approval = undefined;
     this.retireOldestConsumed();
     return record;
   }
@@ -298,7 +232,7 @@ export class FleetProposalStore<Payload> {
   }
 }
 
-/** The disclosable view of a proposal. The approval code is structurally absent, not filtered. */
+/** The disclosable view of a proposal. */
 export function redactProposal<Payload, View>(
   record: FleetProposalRecord<Payload>,
   viewOf: (payload: Payload) => View,
@@ -315,9 +249,5 @@ export function redactProposal<Payload, View>(
       bytes: new TextEncoder().encode(edit.content).length,
     })),
     preview: viewOf(record.payload),
-    approval:
-      record.approval === undefined
-        ? undefined
-        : { outstanding: true, expiresAt: new Date(record.approval.expiresAt).toISOString() },
   };
 }

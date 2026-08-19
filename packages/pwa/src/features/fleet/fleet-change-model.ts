@@ -19,7 +19,12 @@
  *     exactly what happened while it was copied: the copy allowed `~`, `$HOME` and format controls.
  */
 
-import { fleetAssetRefProblem, type HarnessDiscovery, type HarnessDiscoveryReport } from '@ferretry/protocol';
+import {
+  fleetAssetRefProblem,
+  type GrantRefusal,
+  type HarnessDiscovery,
+  type HarnessDiscoveryReport,
+} from '@ferretry/protocol';
 import type {
   FleetApplyOutcome,
   FleetAssetIndex,
@@ -31,7 +36,7 @@ import type {
   FleetRefusalView,
   FleetWriteOperation,
 } from './fleet-api.ts';
-import type { GrantRefusalNotice } from '../../lib/grants.ts';
+import { type GrantRefusalNotice, grantGuidance } from '../../lib/grants.ts';
 import { defaultFleetHarness, type FleetHarnessKind, type FleetHarnessView } from './fleet-model.ts';
 
 /** A read that either produced evidence or produced a stated refusal. There is no third answer. */
@@ -84,18 +89,110 @@ export const mayComposeChange = (inventory: FleetInventory): boolean =>
 
 export const mayInitialize = (inventory: FleetInventory): boolean => inventory.kind === 'uninitialized';
 
-/** How this credential may change the host, before it tries. A 403 race is still handled where it lands. */
-export type FleetAuthorityMode = 'direct' | 'approval' | 'read-only';
+/**
+ * How this caller may turn a reviewed change into host state, before it tries.
+ *
+ * ## THE FLEET HAS NO AUTHORITY OF ITS OWN ANY MORE
+ *
+ * This used to name three fleet-private modes — `direct`, `approval`, `read-only` — over a wire shape
+ * that carried a command for minting single-use codes. There is no second authority system now:
+ * `mayApply` is `fleet.configure` as `decideCapability` decided it, `applyRefusal` is the SAME
+ * `GrantRefusal` every other capability reports, and the only thing left that is specific to a change
+ * is `confirmation` — the operator password proved once more against this exact diff.
+ *
+ * ## ONE PASSWORD, TYPED AT MOST ONCE
+ *
+ * `locked` and a confirmation can both be true at the same moment: a remote caller on a machine with a
+ * password, which is locked AND owes a per-change confirmation. Two prompts for one click is the disease
+ * this change exists to cure, so `locked` carries `alsoConfirms` and the panel spends ONE typed value on
+ * both steps — mint the unlock with it, then send it as the confirmation on the apply.
+ */
+export type FleetApplyAuthority =
+  /** Apply now, and nothing else is asked. The host's own token, or a local browser that has unlocked. */
+  | { readonly kind: 'open' }
+  /** Allowed, and applying proves the operator password once against this one change. */
+  | { readonly kind: 'confirm' }
+  /**
+   * Refused until this browser unlocks, which it can do from here.
+   *
+   * `alsoConfirms` is the load-bearing field: true when the same secret must also be spent as this
+   * change's confirmation, which is what lets one field serve both steps.
+   */
+  | { readonly kind: 'locked'; readonly alsoConfirms: boolean }
+  /**
+   * Refused for a reason an unlock would not fix — switched off, rate-limited, or an unreadable grant
+   * document. Offering a password field here is the theatre a refusal that names no remedy amounts to.
+   */
+  | { readonly kind: 'refused'; readonly refusal: GrantRefusal }
+  /**
+   * This browser never learned what it may do here, because the permissions read itself failed.
+   *
+   * DELIBERATELY NOT `refused`. Rendering it as one would put a sentence about the operator's decisions
+   * on screen on the strength of no answer at all — and `undetermined`, the closest refusal, says the
+   * DAEMON could not read its grant document, which is a claim about the host this browser cannot make.
+   */
+  | { readonly kind: 'unreadable' };
 
-export const fleetAuthority = (permissions: FleetPermissions | null): FleetAuthorityMode => {
-  if (permissions === null) return 'read-only';
-  if (permissions.mayApplyDirectly) return 'direct';
-  return permissions.mayApplyWithApproval ? 'approval' : 'read-only';
+export const fleetApplyAuthority = (permissions: FleetPermissions | null): FleetApplyAuthority => {
+  if (permissions === null) return { kind: 'unreadable' };
+  const alsoConfirms = permissions.confirmation === 'operator-password';
+  if (!permissions.mayApply)
+    return permissions.applyRefusal === 'locked'
+      ? { kind: 'locked', alsoConfirms }
+      : { kind: 'refused', refusal: permissions.applyRefusal };
+  return alsoConfirms ? { kind: 'confirm' } : { kind: 'open' };
 };
 
-/** The exact command a person runs on the host to mint an approval for one exact proposal. */
-export const approvalCommand = (permissions: FleetPermissions, proposalId: string): string =>
-  `${permissions.approvalCommand} ${proposalId}`;
+/** Whether the panel should render an operator-password field at all. */
+export const fleetApplyNeedsPassword = (authority: FleetApplyAuthority): boolean =>
+  authority.kind === 'confirm' || authority.kind === 'locked';
+
+/** What the panel says about this authority, and how loudly. */
+export interface FleetApplyCopy {
+  /** Two or three words, for the header chip. */
+  readonly badge: string;
+  /** The shared badge's own tone vocabulary, so this chip is not a fifth chip design. */
+  readonly tone: 'ok' | 'accent' | 'warn' | 'err';
+  /** What is true and what to do about it. Empty for `open`, where there is nothing to say. */
+  readonly explanation: string;
+}
+
+/**
+ * The sentence and the chip, taken from the SHARED grant vocabulary wherever it has an answer.
+ *
+ * `grantGuidance` is the one browser-side rendering of every refusal (`src/lib/grants.ts`), so a fleet
+ * refusal reads exactly as the same refusal reads on the grants surface beside it. Only two states need
+ * words of their own: the per-change confirmation, which no capability but this one asks for, and a
+ * permissions read that never landed.
+ */
+export const fleetApplyCopy = (authority: FleetApplyAuthority): FleetApplyCopy => {
+  if (authority.kind === 'open') return { badge: grantGuidance('granted').badge, tone: 'ok', explanation: '' };
+  if (authority.kind === 'confirm')
+    return {
+      badge: grantGuidance('locked').badge,
+      tone: 'accent',
+      explanation:
+        'Applying this change asks for this machine’s operator password once. It is spent on this exact change and on nothing else — a password entered for one change does not carry over to the next.',
+    };
+  if (authority.kind === 'locked') {
+    const guidance = grantGuidance('locked', 'fleet');
+    return { badge: guidance.badge, tone: 'warn', explanation: guidance.explanation };
+  }
+  if (authority.kind === 'refused') {
+    const guidance = grantGuidance(authority.refusal, 'fleet');
+    return {
+      badge: guidance.badge,
+      tone: guidance.tone === 'fault' ? 'err' : 'warn',
+      explanation: guidance.explanation,
+    };
+  }
+  return {
+    badge: 'Cannot tell',
+    tone: 'err',
+    explanation:
+      'This daemon did not say what this browser may change here, so nothing is claimed either way. Applying may still be refused, and the refusal will say why.',
+  };
+};
 
 // ─── the operation ledger ─────────────────────────────────────────────────────────────────────
 

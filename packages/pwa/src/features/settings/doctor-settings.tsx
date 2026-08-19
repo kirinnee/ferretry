@@ -1,8 +1,8 @@
 import type { DoctorReport } from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { defaultFleetHarness } from '../fleet/fleet-model.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { defaultFleetHarness } from '../fleet/fleet-model.ts';
 
 export type DoctorReportReader = (connection: DaemonConnection) => Promise<DoctorReport>;
 
@@ -34,8 +34,8 @@ export function DoctorSettings({
   if (report === null)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Doctor report unavailable">
-        <h3 className="m-0 text-title font-semibold text-fg">Host checks unavailable</h3>
-        <p className="mb-0 mt-1 text-ui leading-base text-muted">
+        <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">
           This daemon did not provide a dependency report. No missing evidence is treated as a healthy host.
         </p>
       </section>
@@ -49,11 +49,11 @@ export function DoctorSettings({
     >
       <div className="flex items-center gap-2">
         <Stethoscope size={17} className="text-accent" aria-hidden="true" />
-        <h3 id="doctor-settings-heading" className="m-0 text-title font-semibold text-fg">
+        <h3 id="doctor-settings-heading" className="m-0 text-row font-semibold text-fg">
           Host checks
         </h3>
       </div>
-      <p className="mb-3 mt-1 text-ui leading-base text-muted">
+      <p className="mb-3 mt-1 text-cell leading-base text-muted">
         {report.ready
           ? 'Required dependencies are present.'
           : 'A required dependency is missing; sessions will not work yet.'}

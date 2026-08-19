@@ -1,11 +1,22 @@
 /**
- * The daemon-bound fleet cockpit: one host, one authority, one staged change.
+ * The daemon-bound fleet cockpit: one host, one staged change, and the capability layer's own answer
+ * about who may apply it.
+ *
+ * ## THE PASSWORD IS SPENT, NEVER STORED
+ *
+ * The one secret this surface touches is the operator password, and it arrives as an argument to
+ * `apply` from the field that took it. It is not in `FleetSession`, and that is a rule rather than an
+ * omission: session state is keyed by connection and survives every unrelated re-render, so a password
+ * in there would outlive the click that needed it. Where it becomes an unlock, the minted token is held
+ * for its TTL — stamped with the daemon that minted it, exactly as `src/lib/grants.ts` requires — and
+ * dies with this screen.
  *
  * IT OWNS NO MODULE CACHE AND NO CROSS-DAEMON STATE. A fleet belongs to a MACHINE and this browser can
- * be paired to several, so the whole session — client, evidence, draft, proposal, approval code and
+ * be paired to several, so the whole session — client, evidence, draft, proposal, held unlock and
  * result — is one value stamped with the connection it belongs to. Changing connection replaces that
- * value outright: a draft composed against one host must never be applied to another, and a result
- * from one host must never be read as this one's.
+ * value outright: a draft composed against one host must never be applied to another, a result from one
+ * host must never be read as this one's, and an unlock minted by one daemon must never be presented to
+ * another.
  *
  * A FAILED READ IS NOT AN EMPTY FLEET. Missing configuration, damaged configuration, a never-applied
  * host and a positively observed empty one each get their own state and their own sentence, decided by
@@ -21,6 +32,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
+import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
+import { unlockGrants } from '../settings/grants-api.ts';
 import {
   applyFleetProposal,
   createFleetProposal,
@@ -35,7 +48,6 @@ import {
   fleetRefusal,
   type HarnessDiscoveryReport,
   listFleetAssets,
-  parseApprovalCode,
   readFleetAsset,
   readFleetConfig,
   readFleetHarnesses,
@@ -48,7 +60,6 @@ import {
   accountHarnessDetection,
   accountProblems,
   applyInstructionsChoice,
-  approvalCommand,
   CHANGE_LIMITS,
   classifyInventory,
   createAccountProposal,
@@ -57,13 +68,14 @@ import {
   detectedAccountDraft,
   editAccountProposal,
   type FleetAccountDraft,
+  fleetApplyAuthority,
+  fleetApplyCopy,
+  fleetApplyNeedsPassword,
   type FleetAssetKnowledge,
-  type FleetAuthorityMode,
   type FleetInventory,
   type FleetLayerDraft,
   type FleetProbe,
   type FleetUnreadableAsset,
-  fleetAuthority,
   initializeProposal,
   instructionsAssets,
   instructionsChoices,
@@ -79,7 +91,7 @@ import {
   unseenAssets,
 } from './fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster, FleetRefusalAlert } from './fleet-change-review.tsx';
-import { EYEBROW, FleetPath } from './fleet-typography.tsx';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
 
@@ -152,7 +164,16 @@ interface FleetSession {
   readonly discovery: HarnessDiscoveryReport | null;
   readonly mode: FleetComposeMode;
   readonly proposal: FleetProposalView | null;
-  readonly code: string;
+  /**
+   * An unlock this screen minted, or `null`.
+   *
+   * The TOKEN, never the password. It is stamped with the daemon that minted it and refused for any
+   * other one by `usableUnlock`, which is the rule `src/lib/grants.ts` states: one browser can be paired
+   * to several machines, and a token is proof against exactly one of them. It dies with this screen.
+   */
+  readonly held: HeldUnlock | null;
+  /** Why the last operator password was refused, in the daemon's own words. */
+  readonly unlockFailure: OperatorUnlockFailure | null;
   readonly refusal: FleetRefusalView | null;
   readonly outcome: FleetApplyOutcome | null;
   readonly busy: boolean;
@@ -167,7 +188,8 @@ const freshSession = (generation: string): FleetSession => ({
   discovery: null,
   mode: { kind: 'idle' },
   proposal: null,
-  code: '',
+  held: null,
+  unlockFailure: null,
   refusal: null,
   outcome: null,
   busy: false,
@@ -177,7 +199,7 @@ const freshSession = (generation: string): FleetSession => ({
  * Is this refusal about a proposal the daemon no longer holds?
  *
  * Such a proposal can never be applied again, so wherever the surface learns it — an apply that was
- * refused, or a re-read while waiting for an approval — it must stop offering the change rather than
+ * refused, or a re-read that found the host had moved — it must stop offering the change rather than
  * leave an enabled button bound to a dead id.
  */
 const isDead = (refusal: FleetRefusalView): boolean =>
@@ -192,10 +214,54 @@ const probe = async <T,>(work: () => Promise<T>): Promise<FleetProbe<T>> => {
   }
 };
 
-const AUTHORITY_COPY: Readonly<Record<FleetAuthorityMode, string>> = {
-  direct: 'Host authority',
-  approval: 'Approval required',
-  'read-only': 'Read only',
+/**
+ * The three codes that mean A PASSWORD ATTEMPT WAS SPENT, as opposed to a capability being refused.
+ *
+ * They are the ones `POST /v1/grants/unlock` answers with, and they are the ones `operatorUnlockFailure`
+ * knows how to word. Every other `grant_*` code is the GUARD refusing the request — `grant_locked`,
+ * `grant_not_granted`, `grant_undetermined` — and rendering one of those as "wrong password" would tell
+ * somebody their typing was the problem when the operator's document was.
+ */
+const ATTEMPT_FAILURE_CODES: ReadonlySet<string> = new Set([
+  'grant_wrong_password',
+  'grant_rate_limited',
+  'grant_no_password',
+]);
+
+/**
+ * WHAT THIS CALLER MAY DO NOW, re-read — or nothing said, when the read itself failed.
+ *
+ * Separate from `readEvidence` because it answers a different question and fails differently: evidence is
+ * about the HOST's fleet, this is about this REQUEST's authority, and a failure here has to leave the
+ * authority unreadable rather than leave a stale `open` on screen beside a refusal.
+ */
+const reReadPermissions = async (client: FleetClient): Promise<Partial<FleetSession>> => {
+  const read = await probe(() => readFleetPermissions(client));
+  return { permissions: read.ok ? read.value : null };
+};
+
+/**
+ * A SECOND CHANCE TO RETIRE a staged change, asked after a refused apply. It can only ever retire.
+ *
+ * THE DAEMON IS ASKED RATHER THAN THE REFUSAL INTERPRETED. A refused apply says why THAT attempt was
+ * refused; it does not say whether the staged change survived, and the two come apart exactly where it
+ * matters — a wrong password on a change the host has since invalidated would otherwise keep an enabled
+ * Apply button bound to an id that can never be applied again.
+ *
+ * ## IT NEVER PUTS A PROPOSAL BACK, AND THAT IS THE CORRECTNESS RULE
+ *
+ * `GET /v1/fleet/proposals/:id` answers for a RECORD, and a record can outlive its applicability: a
+ * `fleet_proposal_stale` apply means the configuration moved underneath the change, and the daemon may
+ * still serve the proposal it can no longer honour. So this returns a retirement or nothing — the apply's
+ * own verdict is never overturned by a read that merely found the row.
+ *
+ * A read that itself refuses for a reason other than death changes nothing on screen either: the refusal
+ * already being rendered is the actionable one, and a second alert about the read would bury it.
+ */
+const stillHeld = async (client: FleetClient, id: string): Promise<Partial<FleetSession>> => {
+  const read = await probe(() => readFleetProposal(client, id));
+  if (read.ok) return read.value.state === 'consumed' ? { proposal: null } : {};
+  return isDead(read.refusal) ? { proposal: null } : {};
 };
 
 const FIRST_ACCOUNT_COMMANDS = 'fy fleet init --first-account\nfy fleet apply';
@@ -236,11 +302,20 @@ const INVENTORY_COPY: Readonly<Record<Exclude<FleetInventory['kind'], 'live'>, {
 export interface FleetConfigurationSurfaceProps {
   readonly connection: DaemonConnection;
   readonly createClient?: FleetClientFactory;
+  /**
+   * Now, supplied rather than read, so a held unlock's expiry is deterministic in a test.
+   *
+   * The same seam `GrantsSurface` takes for the same reason. Nothing here counts down on screen; the
+   * clock exists so `usableUnlock` can refuse an expired token rather than presenting one the daemon
+   * will reject.
+   */
+  readonly now?: () => number;
 }
 
 export function FleetConfigurationSurface({
   connection,
   createClient = daemonApiClient,
+  now = Date.now,
 }: FleetConfigurationSurfaceProps) {
   // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
   // four. Module-global ids there left three sections labelled by another daemon's heading and put four
@@ -385,7 +460,7 @@ export function FleetConfigurationSurface({
       if (client === null) return;
       patch(generation, { busy: true, refusal: null, outcome: null });
       try {
-        patch(generation, { proposal: await createFleetProposal(client, request), code: '' });
+        patch(generation, { proposal: await createFleetProposal(client, request) });
       } catch (cause) {
         patch(generation, { refusal: fleetRefusal(cause) });
       } finally {
@@ -470,55 +545,100 @@ export function FleetConfigurationSurface({
     [client, generation, patch, session.config],
   );
 
-  const apply = useCallback(async (): Promise<void> => {
-    const proposal = session.proposal;
-    if (client === null || proposal === null) return;
-    const authority = fleetAuthority(session.permissions);
-    let approvalCode: string | undefined;
-    if (authority === 'approval') {
-      const parsed = parseApprovalCode(session.code);
-      if (parsed === null) {
-        patch(generation, {
-          refusal: {
-            kind: 'proposal-unauthorized',
-            detail:
-              'That is not an approval code. A code is eight characters the host printed, such as 7F3K-M9QW; this one was not sent, so no attempt was spent.',
-          },
-        });
+  /**
+   * Applies the staged change, spending the typed password on EVERY step that needs it.
+   *
+   * ## THE HUMAN TYPES IT AT MOST ONCE, AND THAT IS THE WHOLE POINT OF THIS FUNCTION
+   *
+   * `locked` and `confirm` are not alternatives. A remote caller on a machine with an operator password
+   * is locked AND owes a per-change confirmation, and the panel above shows ONE field for that case —
+   * so the value arrives here once and is used twice: minted into an unlock, which is what stops the
+   * request being refused before the handler sees it, and then sent as `operatorPassword`, which is the
+   * confirmation bound to this exact diff. Prompting twice for one click is the disease this whole change
+   * is curing, and it would come back here first.
+   *
+   * A held unlock is reused rather than re-minted, so somebody who unlocked a minute ago and now applies
+   * a `confirm`-only change spends one attempt, not two.
+   *
+   * ## A WRONG PASSWORD STOPS AT THE UNLOCK
+   *
+   * The mint is the cheap half and it is the one that reports "wrong password, four tries left". If it
+   * refuses, the apply is never sent — the change stays staged, the reason is on screen in the daemon's
+   * own words, and the person retypes. Sending the apply anyway would spend the change's own attempt on
+   * a secret already known to be wrong.
+   *
+   * The typed value is a PARAMETER for the whole of its life. It is never patched into session state.
+   */
+  const apply = useCallback(
+    async (operatorPassword?: string): Promise<void> => {
+      const proposal = session.proposal;
+      if (client === null || proposal === null) return;
+      const authority = fleetApplyAuthority(session.permissions);
+      if (authority.kind === 'refused' || (fleetApplyNeedsPassword(authority) && operatorPassword === undefined))
         return;
+      patch(generation, { busy: true, refusal: null, unlockFailure: null });
+      try {
+        let unlock = usableUnlock(session.held, connection.daemonId, now());
+        if (authority.kind === 'locked' && unlock === undefined) {
+          // `operatorPassword` is defined here: `fleetApplyNeedsPassword` is true for `locked`, and the
+          // guard above returned for an absent one.
+          const minted = await unlockGrants(client, String(operatorPassword));
+          const held = {
+            daemonId: connection.daemonId,
+            token: minted.token,
+            expiresAtMs: Date.parse(minted.expiresAt),
+          };
+          patch(generation, { held });
+          unlock = minted.token;
+        }
+        const outcome = await applyFleetProposal(client, proposal.id, {
+          // The confirmation is sent only where the daemon SAID it would be asked for. A password on a
+          // request that did not want one is a secret on the wire for nothing.
+          ...(authority.kind === 'locked' && !authority.alsoConfirms ? {} : { operatorPassword }),
+          ...(unlock === undefined ? {} : { unlock }),
+        });
+        // Positive evidence, re-read. The list on screen is what the daemon holds, never what we hoped.
+        patch(generation, { outcome, proposal: null, mode: { kind: 'idle' }, ...(await readEvidence(client)) });
+      } catch (cause) {
+        const refusal = fleetRefusal(cause);
+        // A failed PASSWORD ATTEMPT is worded by the grants vocabulary rather than as a fleet refusal,
+        // because "that is not this machine's operator password, four attempts remaining" is the sentence a
+        // person can act on and a generic fleet alert would bury it. Keyed to the three codes the unlock
+        // route itself answers with — which are exactly the ones `operatorUnlockFailure` can read — so a
+        // governance refusal raised by the guard is NOT dressed up as a typo.
+        const spentAttempt = ATTEMPT_FAILURE_CODES.has(refusal.code ?? '');
+        patch(generation, {
+          ...(spentAttempt ? { unlockFailure: operatorUnlockFailure(cause) } : { refusal }),
+          // WHAT THIS CALLER MAY DO, re-read. A refusal is frequently the news that the grant state moved
+          // under this screen — `grant_locked` on a panel whose permissions said `open` is exactly that —
+          // and leaving the old answer up would leave a person with a refusal and no control to resolve
+          // it, which is the dead end this feature exists to remove. It is a probe: a permissions read
+          // that fails leaves `unreadable` rather than a claim about the operator's decisions.
+          ...(await reReadPermissions(client)),
+          // TWO INDEPENDENT WAYS TO LEARN THE CHANGE IS DEAD, and both are read. The refusal itself says so
+          // when the daemon refused BECAUSE the proposal is gone or stale; the re-read catches the other
+          // case, where the apply was refused for something else — a wrong password, a held lock — and the
+          // host moved underneath the change in the same moment. Leaving an enabled Apply bound to a
+          // proposal that can never be applied again is the one outcome worse than either answer alone.
+          ...(isDead(refusal) ? { proposal: null } : await stillHeld(client, proposal.id)),
+          ...(await readEvidence(client)),
+        });
+      } finally {
+        patch(generation, { busy: false });
       }
-      approvalCode = parsed;
-    }
-    patch(generation, { busy: true, refusal: null });
-    try {
-      const outcome = await applyFleetProposal(client, proposal.id, approvalCode);
-      // Positive evidence, re-read. The list on screen is what the daemon holds, never what we hoped.
-      patch(generation, { outcome, proposal: null, code: '', mode: { kind: 'idle' }, ...(await readEvidence(client)) });
-    } catch (cause) {
-      const refusal = fleetRefusal(cause);
-      patch(generation, { refusal, ...(isDead(refusal) ? { proposal: null } : {}), ...(await readEvidence(client)) });
-    } finally {
-      patch(generation, { busy: false });
-    }
-  }, [client, generation, patch, readEvidence, session.code, session.permissions, session.proposal]);
-
-  const recheck = useCallback(async (): Promise<void> => {
-    const proposal = session.proposal;
-    if (client === null || proposal === null) return;
-    patch(generation, { busy: true, refusal: null });
-    const read = await probe(() => readFleetProposal(client, proposal.id));
-    if (read.ok) {
-      patch(generation, { proposal: read.value, busy: false });
-      return;
-    }
-    // The same retirement an apply performs. Learning here that the proposal is gone and then leaving
-    // an enabled Apply button bound to its id would be the worst of both answers.
-    patch(generation, {
-      refusal: read.refusal,
-      busy: false,
-      ...(isDead(read.refusal) ? { proposal: null } : {}),
-    });
-  }, [client, generation, patch, session.proposal]);
+    },
+    [
+      client,
+      connection.daemonId,
+      generation,
+      now,
+      patch,
+      readEvidence,
+      session.held,
+      session.permissions,
+      session.proposal,
+    ],
+  );
 
   if (session.inventory === null) {
     return (
@@ -531,7 +651,8 @@ export function FleetConfigurationSurface({
   const inventory = session.inventory;
   // Bound to a local so the narrowing survives into the callbacks below.
   const mode = session.mode;
-  const authority = fleetAuthority(session.permissions);
+  const authority = fleetApplyAuthority(session.permissions);
+  const authorityCopy = fleetApplyCopy(authority);
   const live = inventory.kind === 'live' ? inventory.manifest.accounts : [];
   const composable = mayComposeChange(inventory) && session.permissions?.mayPropose === true;
   const variants = Object.keys(session.config?.variants ?? {});
@@ -660,7 +781,7 @@ export function FleetConfigurationSurface({
             </h2>
             {/* WHICH HOST. A browser can be paired to several, and every path, wrapper and operation
                 below belongs to exactly this one. */}
-            <FleetPath value={String(connection.daemonId)} className="text-meta text-muted" label="Daemon" />
+            <PanelPath value={String(connection.daemonId)} className="text-meta text-muted" label="Daemon" />
           </div>
           <span
             className="kt-badge"
@@ -669,17 +790,16 @@ export function FleetConfigurationSurface({
           >
             {STATE_BADGE[inventory.kind].label}
           </span>
-          <span
-            className="kt-badge ml-auto"
-            data-tone={authority === 'direct' ? 'ok' : authority === 'approval' ? 'accent' : 'warn'}
-            data-fleet-authority-mode={authority}
-          >
-            {authority === 'direct' ? (
+          {/* The SHARED grant vocabulary, in the shared badge. The fleet used to word this itself
+              ('Approval required'), which is exactly how one capability came to describe its authority in
+              terms no other capability used. */}
+          <span className="kt-badge ml-auto" data-tone={authorityCopy.tone} data-fleet-authority-mode={authority.kind}>
+            {authority.kind === 'open' ? (
               <ShieldCheck size={12} aria-hidden="true" />
             ) : (
               <Lock size={12} aria-hidden="true" />
             )}
-            {AUTHORITY_COPY[authority]}
+            {authorityCopy.badge}
           </span>
         </div>
         {composable && !composing ? (
@@ -786,18 +906,11 @@ export function FleetConfigurationSurface({
               proposal={session.proposal}
               live={live}
               authority={authority}
-              command={
-                session.permissions === null
-                  ? 'fy fleet authorize'
-                  : approvalCommand(session.permissions, session.proposal.id)
-              }
-              code={session.code}
-              onCodeChange={code => patch(generation, { code })}
-              onApply={() => void apply()}
-              onRecheck={() => void recheck()}
-              onDiscard={() => dismissed({ proposal: null, code: '', refusal: null })}
+              onApply={operatorPassword => void apply(operatorPassword)}
+              onDiscard={() => dismissed({ proposal: null, refusal: null, unlockFailure: null })}
               busy={session.busy}
               refusal={session.refusal}
+              unlockFailure={session.unlockFailure}
             />
           </div>
         ) : null}
@@ -898,18 +1011,22 @@ export function FleetConfigurationSurface({
             aria-labelledby={id('-host-guidance-heading')}
           >
             <p className={EYEBROW} id={id('-host-guidance-heading')}>
-              Host-authorised changes
+              Changes from the host
             </p>
+            {/* NOT 'only a terminal on the host may write fleet files' any more, and the correction
+                matters: this browser is refused because it may not STAGE a change on this daemon, not
+                because applying is a host-only act. Saying otherwise would send somebody to a terminal to
+                work around a permission a different browser does not have. */}
             <p className="m-0 mt-1 text-meta leading-base text-muted">
-              This paired device may inspect this daemon, but only a terminal on the host may write fleet files or
-              materialise wrappers. For a new fleet, run these commands on that host:
+              This browser may inspect this daemon and may not stage a change on it. The host itself always can. For a
+              new fleet, run these commands there:
             </p>
             <pre className="m-0 mt-2 overflow-x-auto whitespace-pre rounded-control bg-surface-2 p-3 font-mono text-meta leading-base text-fg">
               {FIRST_ACCOUNT_COMMANDS}
             </pre>
             <p className="mb-0 mt-2 text-meta leading-base text-muted">
-              Init creates only missing files. For an existing configuration, use a host-authorised Fleet session to
-              stage its change, then run the host approval command it shows.
+              Init creates only missing files. For an existing configuration, stage and apply the change from a Fleet
+              panel this daemon lets stage one, or run it from a terminal on the host.
             </p>
           </section>
         )}

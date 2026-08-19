@@ -127,6 +127,41 @@ export function isGovernedCaller(arrival: CallerArrival): boolean {
 }
 
 /**
+ * Whether a change this caller makes must be confirmed against the operator password, PER CHANGE.
+ *
+ * ## IT IS NOT A SECOND CREDENTIAL SYSTEM, AND THE FLEET'S OLD ONE WAS
+ *
+ * The fleet used to answer this question itself: an eight-character code the host minted for one
+ * proposal, living 120 seconds, with five wrong tries of its own. Two rate limiters, two lifetimes,
+ * two secret grammars, two refusal vocabularies, one question. What is here instead adds no secret,
+ * no lifetime and no budget — it is the SAME operator password, proved again, against one exact
+ * staged artifact, spending the same five tries the unlock does.
+ *
+ * ## WHAT IT BUYS, STATED NARROWLY
+ *
+ * An unlock is a bearer token with a five-minute life, and `decideCapability` accepts it for any
+ * number of `configure` demands inside that window. This says: for a change that writes executable
+ * files into somebody's home, the window is not enough — the password itself must be presented with
+ * the change. So a borrowed or replayed unlock cannot by itself provision a host.
+ *
+ * It buys nothing against a caller that holds the password, and it does not claim to. §6 of
+ * `docs/design/fleet-authority-unification.md` records what it cannot carry: the deleted code proved
+ * a HUMAN was at a terminal, and no secret can prove that, because a secret in a config file is
+ * exactly what a script has.
+ *
+ * ## AND NOTHING AT ALL WHERE THERE IS NO PASSWORD
+ *
+ * A machine with none has no secret to bind a change to, so there is deliberately no prompt. A
+ * control that cannot refuse is theatre, and this codebase requires a refusal to name a remedy a
+ * person can actually perform (see {@link describeGrantRefusal}). An UNGOVERNED caller is asked for
+ * nothing either: that is the host's own command line, and a browser on this machine that has already
+ * unlocked — the sudo shape `isGovernedCaller` establishes, one gate and then full authority.
+ */
+export function requiresChangeConfirmation(arrival: Pick<CallerArrival, 'passwordSet'>, governed: boolean): boolean {
+  return governed && arrival.passwordSet;
+}
+
+/**
  * Whether this caller may set, replace or clear the operator password.
  *
  * THE SAME QUESTION AS "is this caller ungoverned", delegated rather than restated so the two answers

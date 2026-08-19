@@ -19,7 +19,7 @@ Ferretry already carries, and the integration boundary that remains explicit.
 | Account creation, wrapper materialisation, skills, instructions and settings editing — **note there is no source counterpart.** Neither original has a create verb, a mutation API or a dry run; both flows are "edit `config.yaml` by hand, then apply". The fidelity obligation here is to the invariants, not to any original screen. | `packages/daemon/src/lib/fleet/{mutations,proposals,assets,asset-store}.ts` and the proposal routes in `packages/daemon/src/lib/runtime/mounts/fleet.ts`                                                                                           | **PORTED as a net-new capability, end to end.** A caller sends one named intent, never a document; the daemon derives the configuration, previews it, and holds the exact artifact until it is applied. Applying consumes that artifact rather than rebuilding it, and answers with one of six outcomes — committed, committed-with-history-failure, rolled-back, rollback-incomplete, initialized, initialization-partial. Per-account layering is `AccountRouteSchema.layer` (`packages/fleet/src/lib/config.ts`), applied last in `resolveAccounts`, and a layer edit merges rather than replaces so fields an editor does not display survive. The browser half is `packages/pwa/src/features/fleet/`. |
 | A single provider account offering two lanes with different instructions, skills, settings and environment.                                                                                                                                                                                                                              | `AccountRouteSchema.layer` + `resolveAccounts` (`packages/fleet/src/lib/{config,profiles}.ts`)                                                                                                                                                     | **PORTED, and beyond the original.** The source overrode instructions per _lane_, never per account. A route-level layer applies after every shared slot, so two lanes of one agent differ without either leaking onto the other.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Non-transactional delete-then-create apply (`kfleet` has no rollback and no dry run).                                                                                                                                                                                                                                                    | `packages/fleet/src/adapters/{mutation-journal,apply-lock,file-provisioner,file-scaffolder}.ts`                                                                                                                                                    | **PORTED and materially improved.** Ordinary provisioning captures undo evidence by moving entries aside, validates every input before disturbing a destination, stages replacements beside their target and publishes them with no-replace primitives (`link` for a file, non-recursive `mkdir` per directory), and unwinds in reverse on failure. Rollback never deletes what it cannot prove it wrote. Applies are serialized per fleet directory by a `link(2)` claim.                                                                                                                                                                                                                                 |
-| No wire contract at all: neither original exposes an API, so nothing described a fleet change over the network.                                                                                                                                                                                                                          | `packages/protocol/src/lib/{fleet-authorization,fleet-changes}.ts`                                                                                                                                                                                 | **Net-new, and the shared authority.** Permissions, the asset index and document, the mutation, the proposal view and preview, the approval mint and all six apply outcomes are declared once and parsed by the daemon on the way out, so a shape cannot drift between the daemon, the command line and the browser. Strict throughout: no `unknown` payloads (settings are an explicit recursive JSON value), availability is a discriminant, an unreadable asset must explain itself, and manifest identity and default-model invariants are mirrored from the configuration schema.                                                                                                                     |
+| No wire contract at all: neither original exposes an API, so nothing described a fleet change over the network.                                                                                                                                                                                                                          | `packages/protocol/src/lib/fleet-changes.ts`                                                                                                                                                                                                       | **Net-new, and the shared authority.** Permissions, the asset index and document, the mutation, the proposal view and preview, the per-change confirmation and all six apply outcomes are declared once and parsed by the daemon on the way out, so a shape cannot drift between the daemon, the command line and the browser. Strict throughout: no `unknown` payloads (settings are an explicit recursive JSON value), availability is a discriminant, an unreadable asset must explain itself, and manifest identity and default-model invariants are mirrored from the configuration schema.                                                                                                           |
 | Reading a fleet asset safely — no original had an API, so none had this problem.                                                                                                                                                                                                                                                         | `packages/daemon/src/lib/fleet/asset-store.ts` over `SessionRootPinner`                                                                                                                                                                            | **Net-new.** The **state home** is held open as an object and `fleet/assets/...` is walked component by component from that descriptor, refusing a link at any of them — so `fleet` and `assets` are themselves guarded rather than trusted. Pinning the asset tree would have made the guarded directory its own guard: swap that one directory for a link a moment before the pin and the pin follows it, after which everything below is walked faithfully inside somebody else's tree. Same primitive the session file surface uses, proven against both the procfs and POSIX implementations, and a platform that cannot pin fails closed rather than falling back to the pathname.                   |
 
 ## Mounting
@@ -44,23 +44,33 @@ harness-only.
 Reads are admin-scoped and a paired device satisfies them. Composing a change is
 also open to a device, because composing writes nothing at all.
 
-Changing the host is not. A device applying a change must carry an approval that
-the **host** minted for that one proposal: `POST
-/v1/fleet/proposals/:proposalId/authorize` is `scope: 'host'`, so only the host's
-own admin token may mint one, and `fy fleet authorize` is how a person gets it.
-There is deliberately no loopback guard on the mint — unlike pairing, the code
-confers strictly less than the admin bearer the caller already holds, so
-requiring loopback would only break a legitimate remote admin. The code is
-single-use, expires in two minutes, has a five-attempt budget bound to its own
-proposal, never travels in a URL, and no read discloses it. Offering no code at
-all costs no attempt, so a caller without one cannot burn the budget belonging to
-the person who has one. Both policy numbers are declared in
-`@ferretry/protocol`; the daemon parses its own mint through a schema that pins
-them, while clients read them as plain integers so an older install still shows a
-host the approval for a change its browser is already displaying.
+Changing the host is decided by **the capability layer and nothing else**. Every
+fleet route declares its `fleet` axis, and `decideCapability` answers it — the
+same question, the same vocabulary and the same operator password as the other
+five capabilities. See [grants](../grants.md).
 
-The body-less admin `POST /v1/fleet/apply` is unchanged, and the existing device
-refusals on it and on `PUT /v1/fleet/environment` are unchanged.
+**This replaced a second authority system, and the replacement is the point.**
+The fleet used to mint its own single-use eight-character code through `POST
+/v1/fleet/proposals/:proposalId/authorize`, with a 120-second life and a
+five-wrong-try budget of its own, transcribed off the host's terminal by a person
+running `fy fleet authorize`. Two rate limiters, two lifetimes, two secret
+grammars and two refusal vocabularies for one question. The route, the verb, the
+protocol module and the four inline `tokenClass === 'device'` refusals are all
+deleted; the decision and its cost are recorded in
+[fleet-authority-unification](../design/fleet-authority-unification.md), §6 in
+particular, which names the one property that died rather than moving.
+
+What survives is a **per-change confirmation**: a caller the operator's grants
+govern, on a machine that has an operator password, presents that password in the
+apply body, bound to that one staged change. It is the same secret the unlock is
+made of and spends the same shared five tries; it mints nothing, so it opens no
+window. An ungoverned caller — the host's command line, or a browser on this
+machine that has already unlocked — is asked for nothing at all.
+
+The body-less admin `POST /v1/fleet/apply` is unchanged. The device refusals that
+sat inline on it and on `PUT /v1/fleet/environment` are gone: their route
+declarations were already `fleet`/`configure`, and re-deciding the axis in a
+handler made the refusal invisible to both the route table and `GrantsView`.
 
 ## GAPs that remain declared
 

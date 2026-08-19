@@ -11,7 +11,7 @@
  * this is not a defence against an agent deliberately trying to leak one.
  */
 
-import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema, type SecretList } from '@ferretry/protocol';
+import { MIN_SECRET_VALUE_LENGTH, type SecretList, SecretNameSchema } from '@ferretry/protocol';
 import { AlertTriangle, KeyRound, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
@@ -78,14 +78,14 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
       data-testid="secrets-card"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="secrets-heading" className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+        <h2 id="secrets-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <KeyRound size={16} className="text-accent" aria-hidden="true" />
           Secrets
         </h2>
         <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">write-only</span>
       </div>
 
-      <p className="m-0 text-ui leading-base text-muted">{SECRET_PROMISE}</p>
+      <p className="m-0 text-cell leading-base text-muted">{SECRET_PROMISE}</p>
       <p className="m-0 text-meta leading-base text-faint">{SECRET_LIMIT}</p>
 
       {list.health === 'damaged' ? (
@@ -97,7 +97,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
           <div className="min-w-0">
             <p className="m-0 text-ui font-semibold text-fg">This daemon cannot read its secret store</p>
-            <p className="m-0 mt-1 text-ui leading-base text-muted">{list.diagnosis}</p>
+            <p className="m-0 mt-1 text-cell leading-base text-muted">{list.diagnosis}</p>
             <p className="m-0 mt-1 text-meta leading-base text-warn">
               It is not empty. Do not set these again until it is readable, or you will write over entries that are
               still there.
@@ -113,7 +113,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
           {list.secrets.map(secret => (
             <li
               key={secret.name}
-              className="flex flex-wrap items-center gap-2 rounded-control border border-border-soft bg-surface-2 px-3 py-2"
+              className="flex flex-wrap items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
               data-secret={secret.name}
             >
               <span className="mono min-w-0 truncate text-ui font-medium text-fg">{secret.name}</span>
@@ -172,7 +172,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
 
       <form className="flex min-w-0 flex-col gap-2" onSubmit={submit} aria-label="Add or replace a secret">
         <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-          <label className="flex min-w-0 flex-1 flex-col gap-1 text-ui text-muted" htmlFor={nameId}>
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-cell font-medium text-fg" htmlFor={nameId}>
             Name
             <input
               id={nameId}
@@ -183,7 +183,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
               onChange={event => setName(event.target.value.toUpperCase())}
             />
           </label>
-          <label className="flex min-w-0 flex-1 flex-col gap-1 text-ui text-muted" htmlFor={valueId}>
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-cell font-medium text-fg" htmlFor={valueId}>
             Value
             <input
               id={valueId}

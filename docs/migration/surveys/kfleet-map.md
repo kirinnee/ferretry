@@ -820,15 +820,19 @@ text composed against a file that no longer exists would overwrite whatever repl
 bounded in count and lifetime and are single-use, with tombstones so a replay is told it was consumed
 rather than that it never existed.
 
-**Approval is separate from pairing, and narrower than the credential it protects.** Reads and
-composing a proposal are open to a paired device, because composing writes nothing. Changing the host
-is not: `POST /v1/fleet/proposals/:proposalId/authorize` is `scope: 'host'`, so only the host's own
-admin token may mint an approval, and `fy fleet authorize <proposal-id>` is how a person gets one. The
-code is single-use, expires in two minutes, has a five-attempt budget bound to **its own** proposal,
-never travels in a URL, and is structurally absent from every read shape rather than filtered out of
-one. An admin bearer applies directly; a device applies only carrying that code, and the code alone
-never widens a lesser credential because the route still requires an admin-scope caller. The body-less
-admin `POST /v1/fleet/apply` is unchanged.
+**Authority is separate from pairing, and it is the capability model rather than a system of the
+fleet's own.** Reads and composing a proposal are open to a paired device, because composing writes
+nothing. Changing the host is `fleet`/`configure`, decided by `decideCapability` and enforced at the
+authorization boundary before any handler runs; where the machine has an operator password, a governed
+caller proves that same password again against one exact staged change.
+
+**This paragraph used to describe a second authorization system**, and the correction is left visible
+rather than edited away: `POST /v1/fleet/proposals/:proposalId/authorize` minted a host-only single-use
+code with a 120-second life and a five-attempt budget of its own, reached through
+`fy fleet authorize <proposal-id>`. Route and verb are both deleted, in one change, along with the four
+inline `tokenClass === 'device'` refusals that sat beside them — see
+[fleet-authority-unification](../../design/fleet-authority-unification.md). The body-less admin
+`POST /v1/fleet/apply` is unchanged.
 
 **First run works from the browser, and reuses the scaffolder rather than inventing a second policy.**
 `initialize` goes through `buildFleetScaffold` and `FileFleetScaffolder`, whose create-if-absent
@@ -1070,5 +1074,5 @@ the next reader concluding otherwise from a name search.
 | — (hand-edit `config.yaml`, then `kfleet apply`)           | `daemon/src/lib/fleet/mutations.ts`                                                              | **new**; named intents, server-minted identity — [M](#m--change-it-without-a-shell)         |
 | — (no dry run anywhere in kfleet)                          | `daemon/src/lib/fleet/proposals.ts` + `GET /v1/fleet/plan`                                       | **new**; a held, single-use, expiring proposal carrying the exact preview                   |
 | — (Home Manager owned the asset tree)                      | `daemon/src/lib/fleet/{assets,asset-store}.ts`                                                   | **new**; bounded text-asset read/edit confined to `fleet/assets`                            |
-| — (kfleet had no credentials and no remote caller)         | `POST /v1/fleet/proposals/:id/authorize` + `fy fleet authorize`                                  | **new**; host-minted, single-use, proposal-bound approval                                   |
+| — (kfleet had no credentials and no remote caller)         | the `fleet` capability (`daemon/src/lib/grants/`) + the per-change confirmation                  | **new**; one vocabulary with the other five capabilities, not a system of the fleet’s own   |
 | —                                                          | `pwa/src/features/fleet/*` mounted as the daemon `fleet` Settings sub-tab                        | **new**; no original screen, so no fidelity claim is made                                   |

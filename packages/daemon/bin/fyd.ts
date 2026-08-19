@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createHash, randomInt } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { accessSync, constants as fsConstants, existsSync, statSync, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -572,26 +572,6 @@ const CLIENT_NAME = 'fy';
  */
 function sessionRootPinner(): SessionRootPinner {
   return process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
-}
-
-/** Crockford-like symbols with the visually ambiguous 0, 1, I, L, O and U removed. */
-const APPROVAL_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-/**
- * One fleet approval code, drawn uniformly.
- *
- * `randomInt(30)` rather than a random byte folded with `%`: 256 does not divide 30, so a modulo
- * would make ten of the thirty symbols measurably likelier than the rest and quietly shrink a
- * bearer secret's search space. The platform's own rejection sampling is what the pairing code
- * already draws through, and one hand-rolled implementation of it in this daemon is enough.
- *
- * It lives in the composition root because this is the only layer allowed to reach for randomness,
- * and because how randomness maps onto an alphabet is a decision worth having somewhere visible.
- * The mount takes it as `mintApprovalCode`, so a test drives approvals through a value it chose.
- */
-function mintFleetApprovalCode(): string {
-  const symbols = Array.from({ length: 8 }, () => APPROVAL_ALPHABET.charAt(randomInt(APPROVAL_ALPHABET.length)));
-  return `${symbols.slice(0, 4).join('')}-${symbols.slice(4).join('')}`;
 }
 
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
@@ -4298,6 +4278,28 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    */
   const operatorPassword = new FileOperatorPassword(paths.operatorPassword, stateFiles);
   const stateHomeDaemonConfigStore = new FileDaemonConfig(paths, stateFiles);
+  /**
+   * What this machine has agreed a caller who is NOT on it may do.
+   *
+   * Built from the SAME configuration document `--print-config` reports, so the grants an operator
+   * reads and the grants the authorization boundary enforces are one value rather than two. The
+   * password verifier is deliberately NOT in that document — it lives in its own mode-0600 file under
+   * `state`, because the configuration document is the one that travels into backups and screen
+   * shares.
+   *
+   * HOISTED, because ONE service has to answer for two things: the boundary's per-request decision,
+   * and the fleet's per-change confirmation. A second instance would keep a second wrong-password
+   * ledger, so five wrong guesses at the fleet panel and five at the grants panel would be ten — the
+   * exact per-surface budget `UnlockAttemptState` is keyed per daemon to prevent.
+   */
+  const grants = new CapabilityGrantService({
+    document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
+    passwords: operatorPassword,
+    tokens: new RandomUnlockTokens(),
+    clock: new SystemGrantClock(),
+    audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+    clientName: CLIENT_NAME,
+  });
   // An operator's own document when they named one, and the state home's otherwise. The confined
   // filesystem port refuses every path outside the home, which is right for the daemon's own state
   // and wrong for a file a person named, so the two are different adapters.
@@ -4446,7 +4448,11 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // would be guessable by anyone who knew roughly when it was made.
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     mintUuid: () => crypto.randomUUID(),
-    mintApprovalCode: mintFleetApprovalCode,
+    // The per-change confirmation, routed to the ONE grant service this daemon has. A closure rather
+    // than the service itself, so the mount is given the ability to ask "was this password right"
+    // and nothing else — it cannot read a grant, mint an unlock, or move the password.
+    confirmChange: async password => await grants.confirmChange(password),
+    clientName: CLIENT_NAME,
     // The same pinner the session file surface uses. A platform that cannot hand an open descriptor
     // to a path-only API fails here rather than falling back to a name that can be re-pointed.
     rootPinner: sessionRootPinner(),
@@ -5908,23 +5914,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // is redeemed against a registry that never issued it. Memory-only and per-daemon by
         // construction — see the domain's own header for why it is never persisted.
         socketTickets,
-        /**
-         * What this machine has agreed a caller who is NOT on it may do.
-         *
-         * Built from the SAME configuration document `--print-config` reports, so the grants an
-         * operator reads and the grants the authorization boundary enforces are one value rather
-         * than two. The password verifier is deliberately NOT in that document — it lives in its own
-         * mode-0600 file under `state`, because the configuration document is the one that travels
-         * into backups and screen shares.
-         */
-        grants: new CapabilityGrantService({
-          document: new ConfigGrantDocument(stateHomeDaemonConfigStore, daemonConfigMutations),
-          passwords: operatorPassword,
-          tokens: new RandomUnlockTokens(),
-          clock: new SystemGrantClock(),
-          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
-          clientName: CLIENT_NAME,
-        }),
+        // Built above, and the same instance the fleet mount confirms a change through. See its
+        // definition for why one instance rather than two.
+        grants,
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
