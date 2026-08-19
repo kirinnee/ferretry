@@ -17,8 +17,8 @@
  * `null` here IS the design, not a missing loading state.
  */
 
-import { ShieldAlert, ShieldCheck } from 'lucide-react';
 import type { WardenStatusView } from '@ferretry/protocol';
+import { ShieldAlert, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/class-names.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
 import {
@@ -57,7 +57,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   const accounts = status.failover?.accounts ?? [];
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-soft bg-surface-2 px-3 py-2 text-[12px]">
+    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-[12px]">
       <span className="inline-flex items-center gap-1.5 font-medium text-fg-soft">
         {healthy ? (
           <ShieldCheck size={14} className="text-ok" aria-hidden="true" />

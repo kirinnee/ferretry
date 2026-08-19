@@ -34,12 +34,12 @@ import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
-import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
-import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
-import { type DaemonReachabilityProbe, DaemonHostChecks } from './daemon-settings.tsx';
+import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
+import { DaemonHostChecks, type DaemonReachabilityProbe } from './daemon-settings.tsx';
 import { FleetEnvironmentSettings } from './fleet-environment-settings.tsx';
+import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
@@ -122,8 +122,8 @@ function WardenStatusSurface({
   if (status !== null) return <WardenStrip status={status} />;
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Warden status unavailable">
-      <h3 className="m-0 text-title font-semibold text-fg">Warden status unavailable</h3>
-      <p className="mb-0 mt-1 text-ui leading-base text-muted">
+      <h3 className="m-0 text-row font-semibold text-fg">Warden status unavailable</h3>
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
         This daemon did not provide a Warden status. Ferretry will not treat a missing read as a clean fleet or a
         default policy.
       </p>
@@ -134,10 +134,10 @@ function WardenStatusSurface({
 function WardenVerdictsUnavailable() {
   return (
     <section className="kt-panel p-panel" aria-labelledby="warden-verdicts-unavailable-heading">
-      <h3 id="warden-verdicts-unavailable-heading" className="m-0 text-title font-semibold text-fg">
+      <h3 id="warden-verdicts-unavailable-heading" className="m-0 text-row font-semibold text-fg">
         Recent verdicts unavailable
       </h3>
-      <p className="mb-0 mt-1 text-ui leading-base text-muted">
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
         This daemon does not expose a verdict feed yet, so report provenance is unavailable too. No empty history is
         presented as evidence that the fleet is healthy.
       </p>
@@ -306,8 +306,8 @@ export function DaemonSettingsFrame({
             );
           return (
             <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
-              <h3 className="m-0 text-title font-semibold text-fg">Host checks unavailable</h3>
-              <p className="mb-0 mt-1 text-ui leading-base text-muted">
+              <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
+              <p className="mb-0 mt-1 text-cell leading-base text-muted">
                 This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
                 offer pairing changes.
               </p>
@@ -374,6 +374,8 @@ export function DaemonSettingsFrame({
           the top of a column is: the panels keep the borders, because they are the things being read. */}
       <header className="mb-3 border-b border-border pb-3">
         <p className={cn(EYEBROW, 'text-accent')}>This daemon</p>
+        {/* The machine's name stays at SECTION level. Every card below it stepped down to `text-row`,
+            and this heading is one rung above them: it names the thing all ten panels belong to. */}
         <h3 id="daemon-settings-heading" className="mt-1 text-title font-semibold text-fg">
           {name}
         </h3>

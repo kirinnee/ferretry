@@ -25,13 +25,13 @@ import { PickerTrigger } from '../../shell/picker-trigger.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
+import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { type DaemonReachabilityProbe, DaemonSettings, daemonDisplayName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
-import type { PairingClientFactory } from './add-device-settings.tsx';
-import type { GrantClientFactory } from './grants-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
+import type { GrantClientFactory } from './grants-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import {
   isSettingId,
@@ -435,7 +435,7 @@ export function SettingsPage({
       theme: <ThemeSettings theme={theme} />,
       dictation: <DictationSettings {...dictation} />,
       notifications: notifications ?? (
-        <p role="status" className="m-0 text-ui leading-base text-muted">
+        <p role="status" className="m-0 text-cell leading-base text-muted">
           Notification delivery is unavailable until this page is composed with the paired daemon’s push-subscription
           host.
         </p>

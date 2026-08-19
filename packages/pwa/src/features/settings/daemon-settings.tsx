@@ -332,7 +332,7 @@ export function DaemonSettings({
             <h2 id={titleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
               Choose a daemon
             </h2>
-            <p className="mb-3 mt-1 text-ui leading-base text-muted">
+            <p className="mb-3 mt-1 text-cell leading-base text-muted">
               Every panel below belongs to the daemon you choose here.
             </p>
             <nav aria-label="Connected daemons">

@@ -26,6 +26,7 @@ import {
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import {
   type AnalyticsPricingClient,
   applyAnalyticsPricingSync,
@@ -235,7 +236,7 @@ function Provenance({ rate }: { readonly rate: AnalyticsPricingRate }) {
   if (rate.source.kind === 'manual')
     return (
       <div>
-        <span className="inline-flex rounded-control border border-border-soft bg-surface-2 px-2 py-0.5 text-meta font-semibold text-fg">
+        <span className="inline-flex rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta font-semibold text-fg">
           Manual
         </span>
         <p className="mb-0 mt-1 text-meta leading-base text-muted">Entered or overridden by an operator.</p>
@@ -246,7 +247,11 @@ function Provenance({ rate }: { readonly rate: AnalyticsPricingRate }) {
       <span className="inline-flex rounded-control border border-ok-border bg-ok-bg px-2 py-0.5 text-meta font-semibold text-ok">
         Provider sync · {rate.source.provider}
       </span>
-      <p className="mb-0 mt-1 break-all text-meta leading-base text-muted">{rate.source.sourceUrl}</p>
+      <PanelPath
+        value={rate.source.sourceUrl}
+        className="mb-0 mt-1 block text-meta leading-base text-muted"
+        label="Source"
+      />
       <p className="mb-0 mt-1 text-meta text-faint">
         Last sync: <DateValue value={rate.lastSyncedAt} fallback="Not recorded" />
       </p>
@@ -262,7 +267,9 @@ function Identity({ rate }: { readonly rate: AnalyticsPricingRate }) {
       <p className="mb-0 mt-1 break-words text-meta leading-base text-faint">
         Aliases: {rate.aliases.length === 0 ? 'None' : rate.aliases.join(', ')}
       </p>
-      <p className="mb-0 mt-1 break-all text-meta text-faint">Key: {rate.pricingKey}</p>
+      <p className="mb-0 mt-1 flex min-w-0 gap-1 text-meta text-faint">
+        Key: <PanelPath value={rate.pricingKey} className="text-faint" />
+      </p>
     </div>
   );
 }
@@ -387,7 +394,7 @@ function CatalogLedger({
             <col className="w-[60%]" />
             <col className="w-[18%]" />
           </colgroup>
-          <thead className="bg-surface-2 text-meta uppercase tracking-label text-faint">
+          <thead className="bg-surface-2 text-meta font-semibold text-muted">
             <tr>
               <th scope="col" className="border-b border-border px-3 py-2 font-semibold">
                 Model
@@ -536,7 +543,7 @@ function PricingEditor({
       aria-labelledby={`${formId}-heading`}
       data-pricing-editor={editing === null ? 'add' : editing.pricingKey}
     >
-      <h4 id={`${formId}-heading`} className="m-0 text-title font-semibold text-fg">
+      <h4 id={`${formId}-heading`} className="m-0 text-row font-semibold text-fg">
         {editing === null ? 'Add a manual rate' : `Edit ${editing.modelId}`}
       </h4>
       <p className="mb-0 mt-1 text-meta leading-base text-muted">
@@ -674,7 +681,7 @@ function PricingEditor({
             onChange={event => onChange({ ...draft, verifiedAt: event.currentTarget.value })}
           />
         </Field>
-        <div className="rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
+        <div className="rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
           Currency is fixed to USD. Amounts use the protocol-owned unit shown beside each field.
         </div>
         <fieldset className="grid min-w-0 grid-cols-1 gap-3 rounded-panel border border-border-soft p-3 lg:col-span-2 sm:grid-cols-2">
@@ -771,7 +778,7 @@ function Sources({
   const selected = sources.find(source => source.id === selectedSourceId);
   return (
     <section className="kt-panel min-w-0 p-panel" aria-labelledby="pricing-sources-heading">
-      <h4 id="pricing-sources-heading" className="m-0 text-title font-semibold text-fg">
+      <h4 id="pricing-sources-heading" className="m-0 text-row font-semibold text-fg">
         Configured pricing feeds
       </h4>
       <p className="mb-0 mt-1 text-meta leading-base text-muted">
@@ -780,7 +787,7 @@ function Sources({
       </p>
       {sources.length === 0 ? (
         <p
-          className="mb-0 mt-3 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta text-muted"
+          className="mb-0 mt-3 rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-meta text-muted"
           data-pricing-sources-empty=""
         >
           No pricing feed is configured. Add one in the daemon configuration before checking for updates.
@@ -791,7 +798,7 @@ function Sources({
             {sources.map(source => (
               <article
                 key={source.id}
-                className="rounded-control border border-border-soft bg-surface-2 px-3 py-2"
+                className="rounded-control border border-border-strong bg-surface-2 px-3 py-2"
                 data-pricing-source={source.id}
               >
                 <div className="flex flex-wrap items-center gap-2">
@@ -806,7 +813,11 @@ function Sources({
                   </span>
                   <span className="text-meta text-muted">{source.provider}</span>
                 </div>
-                <p className="mb-0 mt-1 break-all text-meta leading-base text-muted">{source.url}</p>
+                <PanelPath
+                  value={source.url}
+                  className="mb-0 mt-1 block text-meta leading-base text-muted"
+                  label="Feed"
+                />
                 <p className="mb-0 mt-1 text-meta text-faint">
                   Last applied: <DateValue value={source.lastSyncedAt} fallback="Never" />
                 </p>
@@ -851,8 +862,8 @@ function Sources({
 
 function PreviewRate({ label, rate }: { readonly label: string; readonly rate: AnalyticsPricingRate }) {
   return (
-    <div className="min-w-0 rounded-control border border-border-soft bg-surface-2 p-3">
-      <p className="m-0 text-meta font-semibold uppercase tracking-label text-faint">{label}</p>
+    <div className="min-w-0 rounded-control border border-border-strong bg-surface-2 p-3">
+      <p className="m-0 text-meta font-semibold text-muted">{label}</p>
       <div className="mt-2">
         <Identity rate={rate} />
       </div>
@@ -893,12 +904,12 @@ function PreviewChange({
                 ? 'border-ok-border bg-ok-bg text-ok'
                 : change.kind === 'updated'
                   ? 'border-warn-border bg-warn-bg text-warn'
-                  : 'border-border-soft bg-surface-2 text-muted',
+                  : 'border-border-strong bg-surface-2 text-muted',
             )}
           >
             {change.kind === 'added' ? 'Added' : change.kind === 'updated' ? 'Changed' : 'Unchanged'}
           </span>
-          <p className="mb-0 mt-1 break-all font-mono text-ui font-semibold text-fg">{change.pricingKey}</p>
+          <PanelPath value={change.pricingKey} className="mb-0 mt-1 block text-ui font-semibold text-fg" />
         </div>
         {selectable ? (
           <label className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-control border border-border px-3 text-ui font-semibold text-fg has-[:focus-visible]:outline-focus">
@@ -961,15 +972,19 @@ function SyncPreview({
       data-pricing-preview-id={preview.previewId}
     >
       <header className="kt-panel p-panel">
-        <p className="m-0 text-meta font-semibold uppercase tracking-label text-accent">Review ledger</p>
-        <h4 id="pricing-preview-heading" className="mb-0 mt-1 text-title font-semibold text-fg">
+        <p className={cn(EYEBROW, 'text-accent')}>Review ledger</p>
+        <h4 id="pricing-preview-heading" className="mb-0 mt-1 text-row font-semibold text-fg">
           Provider changes
         </h4>
         <p className="mb-0 mt-1 text-meta leading-base text-muted">
           Fetched from configured source <span className="font-mono text-fg">{preview.sourceId}</span> at{' '}
           <DateValue value={preview.fetchedAt} />. Nothing is selected by default.
         </p>
-        <p className="mb-0 mt-1 break-all text-meta leading-base text-faint">{preview.sourceUrl}</p>
+        <PanelPath
+          value={preview.sourceUrl}
+          className="mb-0 mt-1 block text-meta leading-base text-faint"
+          label="Source"
+        />
       </header>
       {invalidMessage ? (
         <div
@@ -1250,11 +1265,11 @@ export function PricingSettings({
       <header className="kt-panel p-panel">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="m-0 text-meta font-semibold uppercase tracking-label text-accent">Analytics catalog</p>
-            <h3 id="model-pricing-heading" className="mb-0 mt-1 text-title font-semibold text-fg">
+            <p className={cn(EYEBROW, 'text-accent')}>Analytics catalog</p>
+            <h3 id="model-pricing-heading" className="mb-0 mt-1 text-row font-semibold text-fg">
               Model pricing
             </h3>
-            <p className="mb-0 mt-1 text-ui leading-base text-muted">
+            <p className="mb-0 mt-1 text-cell leading-base text-muted">
               Rates, provenance, effective windows, and configured feeds for this daemon. Ferretry never guesses a price
               for unpriced usage.
             </p>
@@ -1354,15 +1369,15 @@ export function PricingSettings({
           <section className="min-w-0" aria-labelledby="pricing-catalog-heading">
             <div className="mb-2 flex min-w-0 flex-wrap items-end justify-between gap-2 px-1">
               <div>
-                <h4 id="pricing-catalog-heading" className="m-0 text-title font-semibold text-fg">
+                <h4 id="pricing-catalog-heading" className="m-0 text-row font-semibold text-fg">
                   Current catalog
                 </h4>
                 <p className="mb-0 mt-1 text-meta text-muted">
                   {state.view.catalog.length} configured rate{state.view.catalog.length === 1 ? '' : 's'}
                 </p>
               </div>
-              <p className="m-0 break-all font-mono text-meta text-faint">
-                Fingerprint: {state.view.catalogFingerprint}
+              <p className="m-0 flex min-w-0 gap-1 text-meta text-faint">
+                Fingerprint: <PanelPath value={state.view.catalogFingerprint} className="text-faint" />
               </p>
             </div>
             <CatalogLedger

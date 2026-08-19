@@ -271,6 +271,35 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/**
+ * THE PAGE BODY MUST NEVER SCROLL SIDEWAYS, checked rather than eyeballed.
+ *
+ * This is the failure that a screenshot is worst at showing: a capture is clipped to the viewport, so a
+ * panel whose widest value pushes the document 40px past the right edge looks completely fine in the
+ * PNG. What gives it away on a real phone is that the whole app slides under your thumb.
+ *
+ * `Settings` owns its own scrollport (`data-settings-scroller`), so BOTH are asserted: the document, and
+ * that scroller. A long path or identifier is allowed to scroll inside its own box — that is exactly what
+ * `PanelPath` is for — and this is what keeps that promise honest, because a box that forgot its
+ * `max-w-full` widens its ancestors instead of scrolling.
+ *
+ * One pixel of slack: sub-pixel layout rounding at fractional device ratios can leave `scrollWidth` a
+ * hair over `clientWidth` on an element that does not actually scroll.
+ */
+const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
+  const overflow = await page.evaluate(() => {
+    const boxes: Array<{ name: string; scroll: number; client: number }> = [
+      { name: 'document', scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth },
+    ];
+    const scroller = document.querySelector('[data-settings-scroller]');
+    if (scroller !== null)
+      boxes.push({ name: 'settings scroller', scroll: scroller.scrollWidth, client: scroller.clientWidth });
+    return boxes.filter(box => box.scroll > box.client + 1);
+  });
+  for (const box of overflow)
+    fail(`${where}: the ${box.name} scrolls sideways — ${box.scroll}px of content in a ${box.client}px box`);
+};
+
 function run(command: string, args: readonly string[]): void {
   const result = spawnSync(command, [...args], { cwd: packageDir, stdio: 'inherit' });
   if (result.error) fail(`${command} could not be started: ${result.error.message}`);
@@ -1223,6 +1252,7 @@ try {
               // settled state so the row we left cannot read as selected too.
               await page.waitForTimeout(200);
             }
+            await assertNoSidewaysScroll(page, `the ${label} section at ${viewport.name}`);
           };
 
           await selectSettingsSection('behaviour');
@@ -1364,6 +1394,9 @@ try {
             await selectDaemonPanel(wardenFrame, label);
             const readySurface = wardenFrame.locator(ready).first();
             await readySurface.waitFor({ state: 'visible' });
+            // Every panel, at both widths, with its real values on it — this is the one check that
+            // catches the widest value in a panel widening the whole page instead of scrolling itself.
+            await assertNoSidewaysScroll(page, `the ${label} panel at ${viewport.name}`);
             if (slug === 'resource-limits') {
               // Keep a top frame as navigation context, then compose the acceptance frame at the
               // native viewport. The compact two-column mobile editors leave enough room between
