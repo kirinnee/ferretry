@@ -3,8 +3,8 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 import { OperatorPasswordCard } from '../../../../src/features/settings/operator-password.tsx';
 import {
   PASSWORD_ARRIVAL_VS_CREDENTIAL,
-  PASSWORD_CLEAR_WARNING,
   PASSWORD_HOST_SET_COMMAND,
+  PASSWORD_ONE_WAY_NOTE,
   PASSWORD_RECOVERY_NOTE,
   type PasswordControlState,
 } from '../../../../src/lib/grants.ts';
@@ -17,7 +17,7 @@ const marked = (renderer: ReactTestRenderer, attribute: string) =>
 
 const card = (state: PasswordControlState, overrides: Record<string, unknown> = {}) =>
   render(
-    <OperatorPasswordCard state={state} onSet={() => {}} onClear={() => {}} {...overrides} />,
+    <OperatorPasswordCard state={state} onSet={() => {}} {...overrides} />,
     // Host refs are null under react-test-renderer, so a ref effect never runs without one. Every render
     // test in this package supplies it for the same reason.
     { createNodeMock: () => ({}) },
@@ -50,10 +50,9 @@ describe('OperatorPasswordCard', () => {
     // Arrange, Act
     const renderer = card({ kind: 'remote' });
 
-    // Assert — no field, no submit, no clear: nothing that could fail on press.
+    // Assert — no field and no submit: nothing that could fail on press.
     expect(marked(renderer, 'data-password-field')).toHaveLength(0);
     expect(marked(renderer, 'data-password-submit')).toHaveLength(0);
-    expect(marked(renderer, 'data-password-clear')).toHaveLength(0);
     // And the reason, with the two places that CAN do it.
     expect(marked(renderer, 'data-password-unavailable')).toHaveLength(1);
     const rendered = text(renderer);
@@ -90,25 +89,42 @@ describe('OperatorPasswordCard', () => {
     expect(text(first)).toContain('Set an operator password');
     expect(text(replacing)).toContain('Change the operator password');
     expect(text(card({ kind: 'remote' }))).toContain('Setting the operator password');
-    // Clearing is offered only where there is something to clear.
-    expect(marked(first, 'data-password-clear')).toHaveLength(0);
-    expect(marked(replacing, 'data-password-clear')).toHaveLength(1);
   });
 
-  it('states what clearing removes in the same breath as the button', () => {
-    // The one action here that makes the machine LESS protected. The consequence belongs beside the
-    // control rather than after the press, which is the treatment a device revoke already gets.
-    // Arrange
-    const cleared: number[] = [];
-    const renderer = card({ kind: 'ready', first: false }, { onClear: () => cleared.push(1) });
-
-    // Act
-    run(() => marked(renderer, 'data-password-clear')[0]?.props.onClick());
+  it('offers NOTHING that removes the password, in any state this card can be in', () => {
+    // THE VERB IS GONE, and this is what stops it coming back as a control. Removing a password revokes
+    // no paired device, so a machine that had paired one would keep it and lose its gate — the state
+    // pairing exists to make unreachable. Asserted across every state rather than the one it used to be
+    // drawn in, because a control reappearing under a different posture is the same defect.
+    // Arrange, Act
+    const states: PasswordControlState[] = [
+      { kind: 'ready', first: true },
+      { kind: 'ready', first: false },
+      { kind: 'locked' },
+      { kind: 'remote' },
+    ];
 
     // Assert
-    expect(text(renderer)).toContain(PASSWORD_CLEAR_WARNING);
-    expect(marked(renderer, 'data-password-clear-warning')).toHaveLength(1);
-    expect(cleared).toEqual([1]);
+    for (const state of states) {
+      const rendered = card(state);
+      expect(marked(rendered, 'data-password-clear')).toHaveLength(0);
+      expect(text(rendered)).not.toContain('Remove the password');
+      expect(text(rendered)).not.toContain('password clear');
+    }
+  });
+
+  it('says setting one cannot be undone BEFORE the first press, and not again afterwards', () => {
+    // It is the decision a reader can only make once, so the consequence belongs beside the button that
+    // makes it — not in a confirmation, and not discovered later by hunting for an undo. A reader
+    // replacing a password they already have is not making this choice again, so they are not told twice.
+    // Arrange, Act
+    const first = card({ kind: 'ready', first: true });
+    const replacing = card({ kind: 'ready', first: false });
+
+    // Assert
+    expect(marked(first, 'data-password-one-way')).toHaveLength(1);
+    expect(text(first)).toContain(PASSWORD_ONE_WAY_NOTE);
+    expect(marked(replacing, 'data-password-one-way')).toHaveLength(0);
   });
 
   it('NEVER puts the password in the rendered output, before or after it is sent', () => {

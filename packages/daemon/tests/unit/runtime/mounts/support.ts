@@ -1688,9 +1688,6 @@ export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
       set: async password => {
         stored = password;
       },
-      clear: async () => {
-        stored = undefined;
-      },
       verify: async candidate => stored !== undefined && candidate === stored,
     },
     tokens: {

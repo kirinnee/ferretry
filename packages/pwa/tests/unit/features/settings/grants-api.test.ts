@@ -141,19 +141,17 @@ describe('setOperatorPassword', () => {
     expect(JSON.stringify([...new Headers(calls[0]?.init?.headers)])).not.toContain('correct-horse-battery');
   });
 
-  it('spells CLEARING as absence, so a client bug producing an empty string is refused', async () => {
-    // `''` must fail the minimum-length rule rather than silently disarming the gate, and the schema is
-    // what refuses it — here, before the call, rather than as a 400 nobody explains.
+  it('refuses an empty password before the call, and has no shape that means "remove it"', async () => {
+    // `''` must fail the minimum-length rule rather than reaching the daemon, and the schema is what
+    // refuses it — here, before the call, rather than as a 400 nobody explains. An ABSENT password used
+    // to be the removal, and there is now no argument that produces one: removing a password revokes no
+    // paired device, so it left a machine with devices paired and nothing gating them.
     // Arrange
-    const { calls, client } = recorder({ passwordSet: false });
+    const { calls, client } = recorder({ passwordSet: true });
 
-    // Act
-    const answered = await setOperatorPassword(client, undefined);
-
-    // Assert
-    expect(answered).toBe(false);
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({});
-    await expect(setOperatorPassword(recorder({ passwordSet: true }).client, '')).rejects.toThrow();
+    // Act + Assert
+    await expect(setOperatorPassword(client, '')).rejects.toThrow();
+    expect(calls).toHaveLength(0);
   });
 
   it('presents the unlock in a header when replacing a password, and omits it when there is none', async () => {

@@ -797,7 +797,6 @@ export const UNLOCK_LIMIT_NOTE = `Five wrong passwords and this daemon stops che
  * property the whole design leans on, and it is the sentence a person who has forgotten theirs needs.
  */
 export const PASSWORD_HOST_SET_COMMAND = 'fy daemon password set';
-export const PASSWORD_HOST_CLEAR_COMMAND = 'fy daemon password clear';
 
 /**
  * ARRIVAL AND CREDENTIAL ARE DIFFERENT FACTS, said before the tap rather than discovered by one.
@@ -819,22 +818,26 @@ export const PASSWORD_ARRIVAL_VS_CREDENTIAL =
 export const PASSWORD_REMOTE_UNAVAILABLE = `This browser reached the machine from somewhere else, so it cannot set the operator password — the daemon refuses that from any connection that did not arrive on the host, whatever credential it holds. Set it from a browser on the machine, or run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal there.`;
 
 /**
- * What clearing it actually removes, stated at the control rather than after the press.
+ * That setting one cannot be undone, said BEFORE the first press rather than discovered after it.
  *
- * It is the only action here that makes the machine LESS protected, and the consequence is specific:
- * every paired device stops needing anything to change what is already switched on.
+ * There is no control that removes a password, and the reason is worth the sentence: removing one
+ * revokes no paired device, so a machine that had devices paired would keep them and lose the only
+ * thing standing in front of them. The consequence a reader actually meets is narrower — they will be
+ * asked for it here from now on — and that is what this says.
  */
-export const PASSWORD_CLEAR_WARNING =
-  'Clearing it removes the gate. Every paired device can then change the settings of whatever is already switched on here without proving anything, and this browser stops being asked too. Turning a capability on stays a local act either way.';
+export const PASSWORD_ONE_WAY_NOTE =
+  'Setting a password cannot be undone. There is no way to remove one — removing it would leave every device already paired with this machine free to change its settings with nothing to prove — so from then on this browser is asked for it before it changes anything here.';
 
 /**
  * The recovery path, in the words of somebody who does not have the password.
  *
  * THIS IS THE SENTENCE THAT KEEPS THE FEATURE FROM BEING A LOCKOUT. A local browser needs the current
  * password to replace it, so the reader who has forgotten theirs is exactly the reader this control
- * strands — and the escape hatch is a terminal on this machine, which never asks for the old one.
+ * strands — and the escape hatch is a terminal on this machine, which never asks for the old one. It
+ * is the ONLY escape hatch now that nothing removes a password, which is why it is stated whole rather
+ * than as one option among several.
  */
-export const PASSWORD_RECOVERY_NOTE = `Forgotten it? Run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal on this machine — it replaces the password without asking for the old one, and \`${PASSWORD_HOST_CLEAR_COMMAND}\` removes the requirement entirely. Nothing about this password can lock you out of your own machine.`;
+export const PASSWORD_RECOVERY_NOTE = `Forgotten it? Run \`${PASSWORD_HOST_SET_COMMAND}\` in a terminal on this machine — it replaces the password without asking for the old one. That is the way back: nothing removes a password, but nothing about it can lock you out of your own machine either.`;
 
 /** What this browser may do about the password right now, and why, in one answer. */
 export type PasswordControlState =

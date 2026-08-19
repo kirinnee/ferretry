@@ -28,10 +28,15 @@ export type EnforcedGrants = CapabilityGrants | undefined;
 export interface OperatorPasswordPort {
   /** Whether a verifier exists at all. Never how long it is, never any part of it. */
   isSet(): Promise<boolean>;
-  /** Replaces the verifier. The plaintext is consumed here and never retained. */
+  /**
+   * Replaces the verifier. The plaintext is consumed here and never retained.
+   *
+   * THERE IS NO REMOVAL, and the missing method is the contract rather than an oversight. Removing a
+   * verifier revokes no paired device, so it would leave a machine with devices paired and nothing
+   * gating them — the state `PairingService.mint` exists to make unreachable. A port with no way to
+   * express it is how that stays true no matter what a caller above decides.
+   */
   set(password: string): Promise<void>;
-  /** Removes the verifier, which denies every `configure` demand thereafter. */
-  clear(): Promise<void>;
   /** Whether this candidate matches the stored verifier. `false` when none is stored. */
   verify(password: string): Promise<boolean>;
 }

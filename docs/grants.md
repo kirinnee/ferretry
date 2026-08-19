@@ -218,13 +218,28 @@ right about the artefact it was handed, and the formatter had changed the artefa
   was right while claiming to be closed.
 - Set it with `fy daemon password set`, reading the value from **stdin**. There is no flag that takes
   one: an argument is in shell history and in `/proc/<pid>/cmdline` for every account on the box.
-- **A local browser can also set, replace and clear it** — `PUT /v1/grants/password`, which is
+- **A local browser can also set and replace it** — `PUT /v1/grants/password`, which is
   `privilegedOnly`, so no caller off the host reaches it whatever credential it holds. Replacing an
   existing one needs an unlock, because a browser that could rewrite the password it cannot prove would
   make the gate one tap wide. Setting the **first** one needs nothing: there is no gate yet.
+- **Setting a password is ONE-WAY. Nothing removes one.** There is no `fy daemon password clear`, no
+  request body that means "remove it" — `GrantPasswordRequestSchema` requires the field — and no port
+  method below it that could express one. The reason is the whole point of the layer: removing a
+  password **revokes no device**. `PairingService.mint` refuses to hand out a code without a password,
+  so a device credential only ever exists on a machine that had one; a removal therefore leaves that
+  machine with **paired devices and no gate**, which is the one state the rest of this document treats
+  as unreachable. A warning beside the button was the whole mitigation, and a warning is not a rule.
+  - **The cost, accepted knowingly.** Somebody who sets a password and never pairs anything has no
+    route back to a passwordless machine: they unlock to change local settings from a browser, for a
+    hole that in their case was never open. That is the trade.
+  - **The narrower alternative, considered and not taken.** `clear` could have refused only while
+    paired devices exist — closing the hole and preserving the way back for a solo local user. The
+    owner chose outright removal instead: one rule with no state in it, rather than a verb whose
+    availability depends on a list somebody has to check.
 - **`fy daemon password set` never asks for the old password, and that door must stay open.** It is the
-  escape hatch: a local browser needs the current password to move it, so a forgotten password would
-  otherwise brick the daemon forever — no remote path, no local path, nothing. The admin token is
+  escape hatch, and with nothing able to remove a password it is the ONLY one: a local browser needs the
+  current password to move it, so a forgotten password would otherwise brick the daemon forever — no
+  remote path, no local path, nothing. The admin token is
   ungoverned for exactly this reason (`isGovernedCaller`), the UI names the command wherever somebody
   could get stuck, and `packages/daemon/tests/unit/{grants/service,runtime/mounts/grants}.test.ts`
   assert recovery from a state where the password is unknown.
@@ -350,12 +365,12 @@ usually asking which of these they chose and which something chose for them.
 Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
 meeting a denial should not have to know this file exists:
 
-| refusal        | what the sentence says to do                                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------- |
-| `not-granted`  | `fy daemon config set <capability> --use` / `--configure`, on the host                         |
-| `locked`       | enter the password — or, if you do not have it, `fy daemon password set` / `clear` at the host |
-| `rate-limited` | wait for the lockout, or `fy daemon password set` at the host                                  |
-| `undetermined` | `fy daemon config` on the host, to see and repair the document                                 |
+| refusal        | what the sentence says to do                                                         |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `not-granted`  | `fy daemon config set <capability> --use` / `--configure`, on the host               |
+| `locked`       | enter the password — or, if you do not have it, `fy daemon password set` at the host |
+| `rate-limited` | wait for the lockout, or `fy daemon password set` at the host                        |
+| `undetermined` | `fy daemon config` on the host, to see and repair the document                       |
 
 `locked` is the one worth explaining. Its reader may not be the operator: the axis is granted, nothing
 is broken, and "unlock first" is a complete instruction for whoever holds the password and **no
@@ -404,10 +419,11 @@ command says so at the moment somebody might be tempted to do that instead.
   is therefore "**no passwordless remote device can be created**", not "the browser will not create one".
   The rule is `PairingService.mint`, which answers a refusal instead of a code; the browser's panel is a
   **pre-check** that explains before somebody taps, and `fy pair` prints the daemon's sentence. One rule,
-  one sentence, and no second copy to drift. What survives as a limit, deliberately: a code minted while
-  a password existed still redeems if the password is cleared inside that code's two minutes — the check
-  is at the mint, and expiring a live code somebody is walking to their phone to scan would be a rule
-  reaching backwards.
+  one sentence, and no second copy to drift. The check is at the **mint**, which used to leave a window:
+  a code minted while a password existed still redeemed if the password was removed inside that code's
+  two minutes. Nothing removes a password any more, so nothing can open that window — and the check
+  stays where it is regardless, because expiring a live code somebody is walking to their phone to scan
+  would be a rule reaching backwards.
 - **A daemon started by a service manager can still come up passwordless, and that is not a hole.**
   `fy daemon start` offers to set the first password when a person is there to answer — and only then:
   systemd and launchd run the daemon executable with no terminal, so a prompt there would hang the unit

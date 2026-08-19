@@ -388,8 +388,8 @@ export class PairingService {
    * reading it as "password present" would mint on an assumption. Neither is an answer, so both fail
    * closed — and the refusal names the way through.
    *
-   * THE CHECK RUNS BEFORE ANY STATE MOVES. A refusal leaves a live code untouched, so an operator who
-   * clears the password while a code is in flight does not also destroy the code they are watching.
+   * THE CHECK RUNS BEFORE ANY STATE MOVES. A refusal leaves a live code untouched, so a mint that this
+   * machine cannot satisfy does not also destroy the code an operator is watching.
    */
   async mint(): Promise<PairingMint> {
     const refusal = await this.#firstPasswordRefusal();

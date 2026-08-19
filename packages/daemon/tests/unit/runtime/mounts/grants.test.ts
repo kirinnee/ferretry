@@ -203,7 +203,7 @@ describe('changing the grants over the API', () => {
 describe('the operator password route', () => {
   it('should require privileged arrival while allowing a local paired device', async () => {
     // The owner chose a local act, not an admin-token-only act. This lets the local UI explain the
-    // requirement and keeps a remote bearer from setting or clearing the password.
+    // requirement and keeps a remote bearer from rewriting the password.
     // Arrange
     const { subsystem } = await mount();
     const credentials = {
@@ -294,9 +294,11 @@ describe('the operator password route', () => {
     should(hostToken.body).not.match(/the-host-repaired-it/u);
   });
 
-  it('should clear the password when none is supplied, and refuse an empty one', async () => {
-    // Absence clears; `""` is a client bug and must fail the minimum-length rule rather than
-    // silently disarming the gate.
+  it('should refuse a body with no password at all, and an empty one, leaving the gate up', async () => {
+    // AN ABSENT PASSWORD USED TO MEAN "REMOVE IT", and that is the hole this route no longer has: a
+    // removal revokes nothing, so a machine with paired devices kept them and lost its gate. The schema
+    // now requires the field, so `{}` is a 400 like any other malformed body rather than a second verb
+    // hiding inside the first. `""` is refused by the minimum-length rule, as it always was.
     // Arrange
     const { dispatcher, subsystem } = await mount({ password: 'operator-secret' });
 
@@ -310,15 +312,16 @@ describe('the operator password route', () => {
         body: JSON.stringify({ password: '' }),
       }),
     );
-    const cleared = await dispatcher.dispatch(
+    const absent = await dispatcher.dispatch(
       request({ method: 'PUT', path: '/v1/grants/password', headers: human, loopback: true, body: '{}' }),
     );
 
     // Assert
     should(blank.status).equal(400);
-    should(cleared.status).equal(200);
-    should(jsonBody(cleared)).deepEqual({ passwordSet: false });
-    should(subsystem.hasPassword()).be.false();
+    should(absent.status).equal(400);
+    // The gate survived both, which is the property that matters rather than the status codes.
+    should(subsystem.hasPassword()).be.true();
+    should(await subsystem.unlock('operator-secret')).have.property('kind', 'unlocked');
   });
 });
 

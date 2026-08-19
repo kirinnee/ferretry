@@ -57,11 +57,11 @@ export class ProtocolGrantGateway implements IGrantGateway {
     return minted.token;
   }
 
-  async setPassword(password: string | undefined): Promise<boolean> {
+  async setPassword(password: string): Promise<boolean> {
     const outcome = await this.client.request(`${GRANTS_PATH}/password`, PasswordOutcomeSchema, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(GrantPasswordRequestSchema.parse(password === undefined ? {} : { password })),
+      body: JSON.stringify(GrantPasswordRequestSchema.parse({ password })),
     });
     return outcome.passwordSet;
   }

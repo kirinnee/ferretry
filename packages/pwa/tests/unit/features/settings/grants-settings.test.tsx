@@ -49,11 +49,9 @@ const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
  */
 function PasswordlessGrantsCard({
   onSetPassword = () => {},
-  onClearPassword = () => {},
   ...rest
-}: Omit<GrantsCardProps, 'onSetPassword' | 'onClearPassword'> &
-  Partial<Pick<GrantsCardProps, 'onSetPassword' | 'onClearPassword'>>) {
-  return <GrantsCard {...rest} onSetPassword={onSetPassword} onClearPassword={onClearPassword} />;
+}: Omit<GrantsCardProps, 'onSetPassword'> & Partial<Pick<GrantsCardProps, 'onSetPassword'>>) {
+  return <GrantsCard {...rest} onSetPassword={onSetPassword} />;
 }
 
 const text = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());
@@ -1147,9 +1145,10 @@ describe('GrantsSurface — moving the operator password', () => {
     expect(marked(surface, 'data-password-state')[0]?.props['data-password-state']).toBe('unset');
   });
 
-  it('clears the password when the reader removes it, spelling that as an absent field', async () => {
-    // Absence is the operation. `''` would fail the minimum-length rule instead of disarming the gate, which
-    // is why a client bug cannot silently do this.
+  it('offers an unlocked reader no way to remove the password, and never sends an absent one', async () => {
+    // An absent `password` used to MEAN "remove it", and this surface had a button that sent one. Both
+    // are gone: a removal revokes no paired device, so it left a machine with devices paired and no gate.
+    // Asserted from the posture that used to draw the control — local, unlocked, password already set.
     // Arrange
     const world = passwordWorld();
     let renderer: ReactTestRenderer | undefined;
@@ -1159,16 +1158,16 @@ describe('GrantsSurface — moving the operator password', () => {
     const surface = renderer as ReactTestRenderer;
     const unlockField = marked(surface, 'data-grant-unlock-field')[0];
     run(() => unlockField?.props.onChange({ target: { value: 'operator-secret' } }));
+
+    // Act
     await runAsync(async () => {
       surface.root.findAllByType('form')[0]?.props.onSubmit({ preventDefault: () => {} });
     });
 
-    // Act
-    await runAsync(async () => marked(surface, 'data-password-clear')[0]?.props.onClick());
-
-    // Assert
-    const put = world.calls.find(call => call.method === 'PUT');
-    expect(JSON.parse(String(put?.body))).toEqual({});
-    expect(marked(surface, 'data-password-state')[0]?.props['data-password-state']).toBe('unset');
+    // Assert — no control, and nothing this screen can do produces a body without a password in it.
+    expect(marked(surface, 'data-password-clear')).toHaveLength(0);
+    expect(marked(surface, 'data-password-state')[0]?.props['data-password-state']).toBe('set');
+    for (const call of world.calls.filter(entry => entry.method === 'PUT'))
+      expect(JSON.parse(String(call.body))).toHaveProperty('password');
   });
 });

@@ -51,7 +51,14 @@ interface FixtureOptions {
    * owes no per-change confirmation, which is the whole of what this change was written to restore.
    */
   readonly governed?: boolean;
-  /** The machine's password was removed between the boundary's read and the confirmation. */
+  /**
+   * The injected port answers `no-password`.
+   *
+   * NOT A STATE THE ASSEMBLED DAEMON CAN REACH any more — it modelled a password removed between the
+   * boundary's read and the confirmation, and the verb that removed one is gone. It stays because the
+   * port still DECLARES that answer, and the mount has to keep handling what its port is typed to
+   * return.
+   */
   readonly cleared?: boolean;
   /** The daemon has stopped checking operator passwords for now — the shared unlock lockout. */
   readonly rateLimited?: boolean;
@@ -503,10 +510,17 @@ describe('applying a fleet change', () => {
     should([retried.status, jsonBody(retried)]).match([200, { outcome: 'committed' }]);
   });
 
-  it('should refuse a governed caller whose machine lost its password mid-change', async () => {
-    // `fy daemon password clear` can run while a change is staged, so the boundary's `passwordSet`
-    // and this confirmation can genuinely disagree. It is reported as itself rather than as a wrong
-    // password, which would send somebody hunting for a secret the machine no longer has.
+  it('should refuse a governed caller when the port answers that there is no password', async () => {
+    // THIS TEST OUTLIVED ITS OWN SCENARIO, AND THAT IS WORTH SAYING RATHER THAN HIDING. It was
+    // written for a race: `fy daemon password clear` running while a change was staged, so the
+    // boundary's `passwordSet` and this confirmation disagreed. That verb is gone and the race cannot
+    // happen any more. What it pins now is narrower and still real — `ChangeConfirmation` declares
+    // `no-password` as an answer, so the mount must handle it and must say the true thing rather than
+    // falling through to "you mistyped", which would be wrong for this state.
+    //
+    // It reaches a branch the assembled daemon can no longer reach, by driving the injected port
+    // directly. The line ledger cannot tell the difference, and that is a property of the ledger
+    // rather than of this test: 100% means executed by SOME test, never reachable BY THE DAEMON.
     // Arrange
     const subject = await fixture({ governed: true, cleared: true });
     await writeConfig(subject);
@@ -519,7 +533,7 @@ describe('applying a fleet change', () => {
 
     // Assert
     should(jsonBody(actual)).match({ code: 'fleet_proposal_unauthorized' });
-    should(jsonBody(actual)).match({ error: /operator password was removed while/u });
+    should(jsonBody(actual)).match({ error: /machine has no operator password/u });
   });
 
   it('should refuse a governed caller the daemon has stopped checking passwords for', async () => {
@@ -1223,13 +1237,12 @@ describe('a paired browser, against the real capability guard', () => {
     let unlocks = 0;
     const grants = new CapabilityGrantService({
       document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
+      // Two methods and no remover, matching the port: `stored` only ever moves from absent to set,
+      // which is the one-way shape the real machine now has.
       passwords: {
         isSet: async () => stored !== undefined,
         set: async password => {
           stored = password;
-        },
-        clear: async () => {
-          stored = undefined;
         },
         verify: async candidate => stored !== undefined && candidate === stored,
       },
@@ -1454,9 +1467,13 @@ describe('a paired browser, against the real capability guard', () => {
       ),
     );
 
-    // Assert — and this state is not reachable by pairing: a machine with no operator password
-    // refuses to hand out a pairing code at all (`PairingService.mint`). It is reachable only by an
-    // operator who paired a device and then ran `fy daemon password clear`.
+    // Assert — and this state now has NO ROUTE INTO IT, which is a stronger claim than the one this
+    // comment used to make. A machine with no operator password refuses to hand out a pairing code
+    // (`PairingService.mint`), so it cannot acquire a paired device; and the one remaining way in —
+    // pair first, then take the password back off — closed when the verb that did that was removed.
+    // The behaviour is kept and pinned anyway: `ungated` is what `decideCapability` answers for a
+    // passwordless machine, this mount must project it truthfully, and a projection that depended on
+    // the state being unreachable would be a wrong answer waiting for somebody to make it reachable.
     should([applied.status, jsonBody(applied)]).match([200, { outcome: 'committed' }]);
     should(permissions).match({ mayApply: true, applyRefusal: 'ungated', confirmation: 'none' });
   });

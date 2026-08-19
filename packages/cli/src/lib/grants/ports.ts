@@ -33,8 +33,15 @@ export interface IGrantGateway {
   change(patch: GrantsPatch, unlock?: string): Promise<GrantsView>;
   /** Trades the operator password for a short-lived unlock. */
   unlock(password: string): Promise<string>;
-  /** Sets the operator password, or clears it when none is supplied. */
-  setPassword(password: string | undefined): Promise<boolean>;
+  /**
+   * Sets or replaces the operator password. There is no companion that removes one.
+   *
+   * SETTING IT IS ONE-WAY, and the missing verb is the point rather than an omission: removing a
+   * password revokes nothing, so a machine that had paired devices would keep them and lose the only
+   * thing standing behind them. Replacing never asks for the old one, which is what keeps a forgotten
+   * password a repair rather than a lockout.
+   */
+  setPassword(password: string): Promise<boolean>;
 }
 
 /** The only client capability the grant gateway consumes. */

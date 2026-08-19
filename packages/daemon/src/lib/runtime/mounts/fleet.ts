@@ -830,14 +830,23 @@ class MountedFleet implements FleetSubsystem {
         `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; fleet change "${id}" was not applied. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
       );
     }
-    // A password that vanished between the boundary reading `passwordSet` and this check is a real
-    // race — `fy daemon password clear` runs while a change is staged — and it is reported as
-    // itself rather than as a wrong password, because "you typed it wrong" would send somebody
-    // hunting for a secret this machine no longer has.
+    // HANDLED BECAUSE THE PORT DECLARES IT, NOT BECAUSE IT CAN STILL HAPPEN.
+    //
+    // Its original justification has expired and is recorded rather than replaced: this arm was
+    // written for a real race — `fy daemon password clear` running while a change was staged, so the
+    // boundary's `passwordSet` and this check disagreed. That verb is gone, `setPassword` can only
+    // ever SET, and a machine can no longer go from having a password to not having one while it
+    // runs. The race is impossible.
+    //
+    // The ANSWER is not. `ChangeConfirmation` still declares `no-password`, so a mount that stopped
+    // handling it would be asserting something the type does not — and the next change to that port's
+    // implementation would fall silently through to the sentence below, which would tell somebody
+    // they mistyped a password on a machine that has none. A refusal in this codebase has to be
+    // accurate about what happened, so the branch stays and says the true thing.
     if (outcome.reason === 'no-password') {
       throw new FleetRefusal(
         'fleet_proposal_unauthorized',
-        `this machine's operator password was removed while fleet change "${id}" was being applied, so the confirmation could not be checked; review the change again`,
+        `this machine has no operator password, so the confirmation for fleet change "${id}" could not be checked; review the change again`,
       );
     }
     throw new FleetRefusal(

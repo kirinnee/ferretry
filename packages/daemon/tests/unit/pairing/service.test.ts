@@ -272,11 +272,16 @@ describe('PairingService minting and status', () => {
     should(service.status(PAIRING_ID)).be.undefined();
   });
 
-  it('should leave a live code alone when the password is removed underneath it', async () => {
-    // The requirement is checked BEFORE anything moves, which is why this holds: an operator who
-    // clears the password while a code is on screen has refused the NEXT mint, not destroyed the code
+  it('should leave a live code alone when the machine stops having a password underneath it', async () => {
+    // The requirement is checked BEFORE anything moves, which is why this holds: a machine that stops
+    // answering "yes" while a code is on screen has refused the NEXT mint, not destroyed the code
     // somebody is already walking to their phone to scan. Expiring it here would be a rule that
     // reaches backwards.
+    //
+    // NO SUPPORTED VERB PRODUCES THIS ANY MORE — removing a password is gone precisely because it left
+    // paired devices on an ungated machine — so the reachable cause is now a state file edited or
+    // restored by hand. The ordering property is asserted at the port for whatever the cause is,
+    // because a rule that only holds for the causes somebody enumerated is not a rule.
     // Arrange — a machine whose verifier answers differently on the second read.
     const answers = [true, false];
     const { service } = fixture();

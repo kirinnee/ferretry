@@ -410,9 +410,8 @@ export interface GrantsCardProps {
   readonly passwordFailure?: string | null;
   readonly onChange: (capability: DaemonCapability, axis: CapabilityAxis, next: boolean) => void;
   readonly onUnlock: (password: string) => void;
-  /** `undefined` clears the password. The value is passed through and never held by this component. */
+  /** The value is passed through and never held by this component. There is no companion that removes one. */
   readonly onSetPassword: (password: string) => void;
-  readonly onClearPassword: () => void;
 }
 
 /**
@@ -433,7 +432,6 @@ export function GrantsCard({
   onChange,
   onUnlock,
   onSetPassword,
-  onClearPassword,
 }: GrantsCardProps) {
   const headingId = useId();
   /**
@@ -543,13 +541,7 @@ export function GrantsCard({
       {/* THE GATE ITSELF, beside the unlock that spends it rather than on another screen. It is rendered
           in every posture: where it cannot succeed it renders the reason and the host command, because a
           setting that silently disappears on a phone is a setting somebody goes looking for. */}
-      <OperatorPasswordCard
-        state={passwordState}
-        busy={busy}
-        failure={passwordFailure}
-        onSet={onSetPassword}
-        onClear={onClearPassword}
-      />
+      <OperatorPasswordCard state={passwordState} busy={busy} failure={passwordFailure} onSet={onSetPassword} />
 
       {entries.map(entry => (
         <CapabilityCard
@@ -667,7 +659,7 @@ export function GrantsSurface({
   );
 
   /**
-   * Sets, replaces or clears the password. `undefined` clears it.
+   * Sets or replaces the password. Nothing here removes one — that verb does not exist.
    *
    * THE VALUE IS AN ARGUMENT AND NOTHING ELSE. It is not put in state, not logged, and not echoed back;
    * the held unlock travels in a header because replacing an existing password is a privileged change,
@@ -676,7 +668,7 @@ export function GrantsSurface({
    * `held` here would claim an authority the machine has already withdrawn.
    */
   const movePassword = useCallback(
-    async (password: string | undefined) => {
+    async (password: string) => {
       if (client === null || loaded?.daemonId !== connection.daemonId) return;
       setBusy(true);
       setPasswordFailure(null);
@@ -733,7 +725,6 @@ export function GrantsSurface({
         onChange={(capability, axis, next) => void change(capability, axis, next)}
         onUnlock={password => void unlock(password)}
         onSetPassword={password => void movePassword(password)}
-        onClearPassword={() => void movePassword(undefined)}
       />
     );
   if (loadFailure?.daemonId === connection.daemonId)

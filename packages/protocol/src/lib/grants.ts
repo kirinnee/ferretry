@@ -342,13 +342,16 @@ export const GrantAuditViewSchema = z.strictObject({
 export type GrantAuditView = z.infer<typeof GrantAuditViewSchema>;
 
 /**
- * Setting or clearing the operator password from the host.
+ * Setting or replacing the operator password from the host.
  *
- * AN ABSENT `password` CLEARS IT. That is a real operation — an operator may decide their machine no
- * longer needs the layer — and it is spelled as absence rather than as an empty string so a client
- * bug producing `""` fails the minimum-length rule instead of silently disarming the gate.
+ * THE `password` IS REQUIRED, AND ITS ABSENCE IS NOT A SECOND MEANING. This route once read an absent
+ * field as "remove the password", which reopened from the wire the one state the rest of the design
+ * calls unreachable: `PairingService.mint` refuses without a password, so a paired device only ever
+ * exists on a machine that had one — and a removal that leaves those devices paired hands every one of
+ * them an ungated machine. Setting a password is therefore ONE-WAY, and there is no request body that
+ * says otherwise.
  */
-export const GrantPasswordRequestSchema = z.strictObject({ password: OperatorPasswordSchema.optional() });
+export const GrantPasswordRequestSchema = z.strictObject({ password: OperatorPasswordSchema });
 export type GrantPasswordRequest = z.infer<typeof GrantPasswordRequestSchema>;
 
 /** The unlock exchange. The password travels in a body, never in a path or a query. */

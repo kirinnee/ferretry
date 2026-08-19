@@ -551,11 +551,20 @@ at all**: `PairingService.mint` refuses without an operator password, in its own
 `packages/cli/src/lib/daemon/first-password.ts` offers to set one at the moment somebody starts the
 daemon. So the state §5.1 describes is not reachable by pairing.
 
-**It is still reachable, and the honest residue is this:** an operator can pair a device and then run
-`fy daemon password clear`, which does not revoke devices. Such a machine has paired devices, reports
-`fleet.configure` as `ungated`, and applies with no per-change step. That is a state its owner asked for
-explicitly, with `PASSWORD_CLEAR_WARNING` in front of them, rather than the default state of a fresh
-install — which is what §5.1 called it.
+**It was still reachable by one route, and that route has since been closed.** When this section was
+written an operator could pair a device and then run `fy daemon password clear`, which did not revoke
+devices: the machine kept its paired devices, reported `fleet.configure` as `ungated`, and applied with
+no per-change step. That was a state its owner had asked for explicitly, with `PASSWORD_CLEAR_WARNING`
+in front of them, rather than the default state of a fresh install — which is what §5.1 called it.
+
+**The owner then ruled that the verb should not exist, and it was removed.** Setting an operator
+password is now one-way; nothing takes one off a machine. So the state §5.1 describes has no remaining
+route into it at all: a machine without a password cannot pair, and a machine that has paired cannot
+become one without a password. The cost, accepted knowingly, is that somebody who sets a password and
+never pairs a device has no way back to a passwordless machine — recorded in `docs/grants.md` beside
+the narrower alternative that was offered and not taken (refusing removal only while paired devices
+exist). **This paragraph is left as a record of an exposure that was found, argued and closed rather
+than rewritten to look as though it never existed**, which is the same standard §3.2's correction set.
 
 **§4's first bullet reads as though loopback alone settles it.** It says the local case "is the same answer
 `isGovernedCaller` has given for every other capability since it shipped". `#358` landed after this document

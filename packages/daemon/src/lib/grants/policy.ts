@@ -162,7 +162,7 @@ export function requiresChangeConfirmation(arrival: Pick<CallerArrival, 'passwor
 }
 
 /**
- * Whether this caller may set, replace or clear the operator password.
+ * Whether this caller may set or replace the operator password.
  *
  * THE SAME QUESTION AS "is this caller ungoverned", delegated rather than restated so the two answers
  * cannot drift: the password is the thing the gate is made of, and a caller who is already past the
@@ -275,7 +275,12 @@ export function describeGrantRefusal(
   // left at a dead end: the axis is granted, nothing is broken, and no instruction applied to them.
   // So it names both remedies and says which is whose, rather than assuming the reader is the
   // operator. Every branch of this function now ends somewhere a person can actually go.
-  return `changing the settings for ${noun} needs this machine's operator password. Enter it to unlock, or — if you do not have it — somebody at the host can replace it with \`${clientName} daemon password set\`, or remove the requirement entirely with \`${clientName} daemon password clear\`.`;
+  //
+  // REPLACING IS THE WHOLE SECOND REMEDY. It once also offered removing the requirement; that verb is
+  // gone, because removal revoked no paired device and left the machine ungated. Replacing still needs
+  // nobody to know the old password, so the reader who has forgotten theirs is not stranded — which is
+  // the only property this sentence ever needed to carry.
+  return `changing the settings for ${noun} needs this machine's operator password. Enter it to unlock, or — if you do not have it — somebody at a terminal on the host can replace it with \`${clientName} daemon password set\`, which never asks for the old one.`;
 }
 
 /**

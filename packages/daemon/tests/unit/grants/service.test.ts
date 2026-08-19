@@ -48,9 +48,6 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
       set: async password => {
         stored = password;
       },
-      clear: async () => {
-        stored = undefined;
-      },
       verify: async candidate => stored !== undefined && candidate === stored,
     },
     tokens: {
@@ -369,18 +366,22 @@ describe('the operator password itself', () => {
     should(context.service.hasPassword()).be.true();
   });
 
-  it('should turn the security layer off when the password is cleared', async () => {
-    // A real operation: an operator may decide their machine no longer needs one.
+  it('should keep the security layer on across every move of the password, because nothing turns it off', async () => {
+    // SETTING ONE IS ONE-WAY, and this is the assertion that says so. Removal used to be spelled as an
+    // absent password; it revokes no paired device, so a machine that had paired one — and pairing
+    // refuses without a password — was left with paired devices and no gate. There is now no argument,
+    // no second call and no port method that reaches that state.
     // Arrange
     const context = world({ password: 'first-secret' });
     await context.service.refresh();
 
-    // Act
-    await context.service.setPassword(undefined, local);
+    // Act — every move this service offers, one after another.
+    await context.service.setPassword('second-secret', local);
+    await context.service.setPassword('third-secret', local);
 
-    // Assert
-    should(context.service.hasPassword()).be.false();
-    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('ungated');
+    // Assert — a remote caller is still gated, and the layer never went off in between.
+    should(context.service.hasPassword()).be.true();
+    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('locked');
   });
 
   it('should let the HOST replace a password nobody knows, which is the escape hatch', async () => {
@@ -830,9 +831,13 @@ describe('confirming one change against the operator password', () => {
   });
 
   it('should report a machine with no password as itself rather than as a wrong password', async () => {
-    // `fy daemon password clear` can run while a change is staged, so the boundary's `passwordSet`
-    // and this check can genuinely disagree. Reporting it as a wrong password would send somebody
-    // hunting for a secret the machine no longer has.
+    // A MACHINE WITH NO PASSWORD IS AN ORDINARY STATE, not a race any more. It is the state every
+    // fresh install is in, and this service answers for it whether or not anything upstream would
+    // ever ask — `confirmChange` is a public method on the port, and the caller that reaches it with
+    // no password stored gets the reason rather than a guess. The comment here once cited
+    // `fy daemon password clear` creating a set-then-unset window mid-change; that verb is gone and
+    // the window with it, but the answer is the same and so is the reason for its wording: reporting
+    // it as a wrong password would send somebody hunting for a secret the machine does not have.
     // Arrange
     const context = world();
     await context.service.refresh();
