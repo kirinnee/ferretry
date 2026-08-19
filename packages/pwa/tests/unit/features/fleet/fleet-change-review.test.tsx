@@ -182,7 +182,7 @@ describe('the staged change', () => {
     expect([...harness.container.querySelectorAll('[class*="break-all"]')]).toHaveLength(0);
 
     // Every path scrolls in its own box instead, which is what keeps the PAGE from scrolling sideways.
-    const paths = [...harness.container.querySelectorAll<HTMLElement>('[data-fleet-path]')];
+    const paths = [...harness.container.querySelectorAll<HTMLElement>('[data-panel-path]')];
     expect(paths.length).toBeGreaterThan(3);
     for (const path of paths) {
       expect(path.className).toContain('whitespace-nowrap');

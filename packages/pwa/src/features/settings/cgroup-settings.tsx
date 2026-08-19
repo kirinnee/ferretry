@@ -62,11 +62,15 @@ function LimitInput({
   const id = useId();
   const Icon = icon === 'cpu' ? Cpu : MemoryStick;
   return (
-    <label className="grid min-w-0 gap-1 text-ui font-medium text-fg" htmlFor={id}>
+    <label className="grid min-w-0 gap-1 text-cell font-medium text-fg" htmlFor={id}>
       <span className="flex items-center gap-1.5">
         <Icon size={14} aria-hidden="true" />
         {label}
       </span>
+      {/* A FIELD AS WIDE AS ITS VALUE. This stretched to fill its grid column, so a two-digit
+          percentage sat in a 400px box with 380px of empty space and its `%` suffix stranded at the
+          far end — the field stopped reading as a number and read as a broken text input. It is
+          capped at the width three digits need, and the `%` sits against it where a unit belongs. */}
       <span className="flex items-center gap-2">
         <input
           id={id}
@@ -77,9 +81,9 @@ function LimitInput({
           value={value}
           disabled={disabled}
           onChange={event => onChange(Number(event.target.value))}
-          className="h-control min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg disabled:cursor-not-allowed disabled:opacity-60"
+          className="h-control w-[5.5rem] min-w-0 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg disabled:cursor-not-allowed disabled:opacity-60"
         />
-        <span className="text-ui text-muted" aria-hidden="true">
+        <span className="text-cell text-muted" aria-hidden="true">
           %
         </span>
       </span>
@@ -130,7 +134,7 @@ export function CgroupConfigCard({
       aria-labelledby="cgroup-config-heading"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h3 id="cgroup-config-heading" className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+        <h3 id="cgroup-config-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <ShieldCheck size={16} className="text-accent" aria-hidden="true" /> Fleet resource limits
         </h3>
         <span
@@ -143,7 +147,7 @@ export function CgroupConfigCard({
           {editable ? (view.config.enabled ? 'enforced' : 'disabled') : 'unavailable on this platform'}
         </span>
       </div>
-      <p className="m-0 text-ui leading-base text-muted">
+      <p className="m-0 text-cell leading-base text-muted">
         Linux cgroup v2 places managed agents below <code className="font-mono text-fg">{view.fleetSlice}</code>. The
         daemon and Warden stay outside that slice, so these controls cannot starve supervision.
       </p>
@@ -228,7 +232,7 @@ export function CgroupConfigCard({
               />
             </div>
           </fieldset>
-          <p className="m-0 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
+          <p className="m-0 rounded-control border border-border-strong bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
             <strong className="text-fg">Effective limits:</strong> the fleet slice permits{' '}
             {view.effective.fleet.cpuQuota} CPU and {view.effective.fleet.memoryMax} bytes RAM in total. Each agent
             permits {view.effective.perAgent.cpuQuota} CPU and {view.effective.perAgent.memoryMax} bytes RAM. Per-agent
@@ -363,8 +367,8 @@ export function CgroupConfigSurface({
   if (failure?.daemonId === connection.daemonId)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Resource limits unavailable">
-        <h3 className="m-0 text-title font-semibold text-fg">Resource limits unavailable</h3>
-        <p className="mb-0 mt-1 text-ui leading-base text-muted">
+        <h3 className="m-0 text-row font-semibold text-fg">Resource limits unavailable</h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">
           This daemon did not provide cgroup enforcement state. Ferretry will not assume that limits are disabled or
           applied. {failure.reason}
         </p>

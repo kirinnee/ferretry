@@ -62,7 +62,7 @@ import {
 
 const POSTURE_TONE: Readonly<Record<ReturnType<typeof postureCopy>['tone'], string>> = {
   ok: 'border-ok-border bg-ok-bg text-ok',
-  disclosure: 'border-border-soft bg-surface-2 text-muted',
+  disclosure: 'border-border-strong bg-surface-2 text-muted',
   limit: 'border-warn-border bg-warn-bg text-warn',
   fault: 'border-err-border bg-err-bg text-err',
 };
@@ -137,11 +137,11 @@ function WeightLegend({ weights }: { readonly weights: readonly AccessWeight[] }
   if (weights.length === 0) return null;
   return (
     <section
-      className="rounded-control border border-border-soft bg-surface-2 px-3 py-2"
+      className="rounded-control border border-border-strong bg-surface-2 px-3 py-2"
       aria-label="What the access marks mean"
       data-capability-legend=""
     >
-      <p className="m-0 flex items-center gap-1.5 text-meta font-semibold uppercase tracking-label text-faint">
+      <p className="m-0 flex items-center gap-1.5 text-cell font-semibold text-fg">
         <Info size={13} aria-hidden="true" />
         How much each one hands over
       </p>
@@ -287,7 +287,7 @@ export function CapabilityList({ connection, capabilities, governed, hostLocal }
       data-capability-posture={posture}
     >
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+        <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
           What this browser may do here
         </h3>
@@ -327,7 +327,7 @@ export function CapabilityList({ connection, capabilities, governed, hostLocal }
       <WeightLegend weights={accessWeightsPresent(entries.map(entry => entry.capability))} />
 
       {entries.length === 0 ? (
-        <p className="m-0 text-ui leading-base text-muted" role="status">
+        <p className="m-0 text-cell leading-base text-muted" role="status">
           This daemon listed no capabilities, so there is nothing to report. That is a failed read rather than a machine
           with no limits, and Ferretry will not present it as one.
         </p>

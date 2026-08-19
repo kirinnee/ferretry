@@ -81,11 +81,11 @@ export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCard
        */
       data-carrier-kind={method?.kind ?? 'none'}
     >
-      <h3 id="settings-carrier-heading" className="m-0 text-title font-semibold text-fg">
+      <h3 id="settings-carrier-heading" className="m-0 text-row font-semibold text-fg">
         {disclosure?.label ?? 'Carrier'}
       </h3>
       {/* The measured sentence, or the honest absence of one. Never a default. */}
-      <p className="mb-0 mt-1 text-ui leading-base text-muted">
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
         {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
       </p>
       {/* A constraint the reader will otherwise discover as a screen that stops
@@ -94,12 +94,10 @@ export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCard
       {caveat === undefined ? null : <p className="mb-0 mt-2 text-meta leading-base text-warn">{caveat}</p>}
       {disclosure === undefined ? null : (
         <>
-          <p className="mb-0 mt-3 text-ui leading-base text-fg">{disclosure.summary}</p>
+          <p className="mb-0 mt-3 text-cell leading-base text-fg">{disclosure.summary}</p>
           {/* Under a "who can see this" heading an empty list reads as a redaction, so
               the list is only ever rendered with its heading and never on its own. */}
-          <h4 className="mb-0 mt-4 text-meta font-semibold uppercase tracking-label text-faint">
-            What the parties on this path can see
-          </h4>
+          <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">What the parties on this path can see</h4>
           <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {disclosure.observers.map(observer => (
               <li key={observer}>{observer}</li>
@@ -112,7 +110,7 @@ export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCard
           should be able to see, not a silent degradation. */}
       {choice === undefined || choice.passedOver.length === 0 ? null : (
         <>
-          <h4 className="mb-0 mt-4 text-meta font-semibold uppercase tracking-label text-faint">Passed over</h4>
+          <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">Passed over</h4>
           <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {choice.passedOver.map(skip => (
               <li key={`${skip.method.kind}:${skip.detail}`}>

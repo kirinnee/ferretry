@@ -182,7 +182,7 @@ export function WardenAttention({
       data-daemon={connection.daemonId}
       className="kt-panel flex flex-col gap-3 p-panel"
     >
-      <h2 id="warden-attention-heading" className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+      <h2 id="warden-attention-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
         <CircleAlert size={16} className="text-warn" aria-hidden="true" />
         Who needs you
       </h2>
@@ -388,7 +388,7 @@ function AttentionRow({
           {item.why ?? 'No reason recorded.'}
         </p>
         {item.context && (
-          <div className="rounded-control border border-border-soft bg-surface-2 px-cell-x py-1.5">
+          <div className="rounded-control border border-border-strong bg-surface-2 px-cell-x py-1.5">
             <span className="kt-label block text-faint">Context</span>
             <p className="m-0 mt-0.5 whitespace-pre-wrap break-words text-meta leading-base text-muted">
               {item.context}
@@ -456,7 +456,7 @@ function Recommendation({
 }) {
   if (recommendation.action === 'leave')
     return (
-      <div className="rounded-control border border-border-soft bg-surface-2 px-cell-x py-1.5 text-meta leading-base text-muted">
+      <div className="rounded-control border border-border-strong bg-surface-2 px-cell-x py-1.5 text-meta leading-base text-muted">
         <span className="kt-label block text-faint">Suggested next step</span>No action needed — {recommendation.reason}
       </div>
     );

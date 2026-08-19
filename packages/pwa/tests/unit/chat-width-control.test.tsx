@@ -45,9 +45,18 @@ describe('ChatWidthControl', () => {
     expect(chosen).toEqual(['balanced', 'readable']);
   });
 
+  /**
+   * The floor comes from the POINTER, not from a number written here.
+   *
+   * `min-h-control` resolves to `max(--control-h-desktop, --target-floor)`, and `themes.css` sets
+   * `--target-floor: 44px` under `(pointer: coarse)`. So a phone still gets its 44px — that part is
+   * unchanged — while a mouse gets the density its theme asked for, and a theme that runs looser can
+   * raise both without editing this file. The literal `min-h-[44px]` it replaces asserted the number
+   * instead of the rule, which is why it also pinned the desktop to a touch dimension.
+   */
   it('keeps the touch floor on every option, so a phone can hit them', () => {
     for (const card of cardsOf(render(<ChatWidthControl value="full" onChange={() => {}} />).root)) {
-      expect(card.props.className).toContain('min-h-[44px]');
+      expect(card.props.className).toContain('min-h-control');
     }
   });
 
