@@ -60,61 +60,54 @@ Running straight from an ephemeral shell is also supported:
 nix shell github:kirinnee/ferretry
 ```
 
-A `nix shell` leaves the executables in the Nix store with nothing holding them. The daemon runs from
-a copied snapshot outside the store, but that binary can still name a Nix-store ELF interpreter,
-RPATH, or script interpreter. `fy daemon install`, `start`, and `restart` therefore read the verified
-snapshot manifest and pin the Nix output containing its `sourceBinary`. The indirect root lives at
-`$XDG_STATE_HOME/ferretry/nix/fyd` (`~/.local/state/…` when that is unset), and `fy daemon uninstall`
-releases it. This is a per-user operation and needs no `sudo`. If `nix-store` is unavailable, the
-daemon still starts and `fy` warns that garbage collection may remove runtime dependencies; a
-Homebrew or release-archive source is outside the store and is left alone.
+A `nix shell` leaves the executables in the Nix store with nothing holding them, and a user service
+has to record an absolute path — so the path a unit file names is exactly the path a later
+`nix-collect-garbage` can delete, after which the service stops launching at login with nobody there
+to read the error. `fy daemon install`, `start`, and `restart` therefore resolve the installed `fyd`,
+classify what it really points at, and pin the Nix output containing it. The indirect root lives at
+`$XDG_STATE_HOME/ferretry/nix/fyd` (`~/.local/state/…` when that is unset). This is a per-user
+operation and needs no `sudo`. If `nix-store` is unavailable, the daemon still starts and `fy` warns
+that garbage collection may remove runtime dependencies; a Homebrew or release-archive install is
+outside the store, is left alone, and releases any root an earlier Nix installation left behind.
 
-Ferretry currently holds one Nix root per daemon, not one per retained snapshot. That root can
-protect at most one Nix-backed snapshot source closure. Promotion alone leaves it unchanged; a
-managed `install`, `start`, or `restart` that actually launches a Nix-backed snapshot repoints it,
-while a non-Nix launch leaves any older root in place until uninstall. An older Nix-backed snapshot
-therefore keeps its copied executable but not necessarily its interpreter and runtime closure after a
-later garbage collection. Reliable post-GC rollback of those older snapshots remains a gap until
-roots are retained per snapshot.
+`fy daemon uninstall` does NOT release the root. Removing supervision does not uninstall the daemon,
+and `fy daemon start` still runs that same executable as a direct child; the message names the root
+so you can remove it by hand if you are uninstalling Ferretry entirely.
 
-Independent lifecycle commands are not yet guarded by a daemon-keyed interprocess lock. Do not run
-`install`, `start`, or `restart` concurrently: their service-definition update and the single GC-root
-update can otherwise interleave. Serializing those commands remains part of handover item #31.
+## Which daemon runs
 
-## Daemon snapshots
-
-The daemon never launches the executable currently being edited or replaced on `PATH`. Ferretry
-copies it into a daemon-keyed, content-addressed store at
-`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` (`~/.local/state/…` by default), verifies the complete
-copy and a strict manifest, makes the artifact, manifest, and containing snapshot directory read-only,
-and atomically points `current` at the selected snapshot. A managed launch captures that verified
-snapshot and executes its exact canonical artifact path, so a later promotion cannot change the
-process being started. `fy daemon install` and any start or restart that needs an executable build and
-promote the first snapshot only when both `current` and the durable promotion marker are absent. Once
-promotion has occurred, a missing pointer is damaged state, not a fresh store; malformed, dangling,
-mutable, or digest-damaged evidence likewise fails closed. An explicit promotion of a verified
-retained ID repairs a lost pointer without live `fyd`.
-
-Build and inspect a candidate without changing the next daemon launch:
+Ferretry runs the `fyd` this host has installed. `fy daemon install`, `start` and `restart` resolve it
+— `FY_DAEMON_BIN` first, then `PATH` — and record that absolute path in the systemd unit or launchd
+agent. Upgrading is your package manager's job; `fy daemon restart` picks the new one up. Rolling back
+is the same operation in reverse: install the version you want and restart.
 
 ```bash
-fy daemon snapshot build
-fy daemon snapshot list
-fy daemon snapshot list --json
+fy daemon which           # installed and running identities, and whether they agree
+fy daemon which --json
 ```
 
-Promote a verified candidate, then restart when you are ready to roll it out:
+`fy daemon start` and `fy daemon status` say so when the daemon already serving is an older version
+than the installed one, and never act on it — a `start` that killed a working daemon to apply an
+upgrade nobody asked for is a worse surprise than the stale version.
 
-```bash
-fy daemon snapshot promote sha256-<digest>
-fy daemon restart
-```
+`FY_DAEMON_BIN` must be an absolute path. A relative one is refused when you type the command rather
+than at the next boot, because `systemd` fails such a unit with 203/EXEC and `launchd` behaves the
+same way.
 
-Promotion is atomic and does not alter the process already running. The selected artifact is used by
-the next managed launch; rollback uses the same path: promote an older ID shown by `snapshot list`,
-then restart. Listing, promotion, and launches from a retained snapshot do not require the original
-source executable. Restart verifies the promoted artifact before stopping the incumbent, so damaged
-snapshot state fails without manufacturing downtime.
+### Upgrading from a release with the daemon snapshot store
+
+Earlier releases copied `fyd` into a content-addressed store under
+`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` and launched the copy, with `fy daemon snapshot
+build|list|promote` to manage it. Every property that store added — content addressing, verification,
+immutability, an atomic pointer, rollback — is one `/nix/store` already provides for a Nix
+installation and one your package manager owns for every other, so it is gone, and so are those three
+verbs.
+
+Nothing you have to do. The first `fy daemon install`, `start`, `restart` or `uninstall` after the
+upgrade records the installed executable's absolute path, and only then removes the store and its
+per-snapshot Nix roots — roughly 100MB on a host that used it. It says what it removed. If the removal
+fails it says that too, names the directory, and carries on: nothing reads it any more, so it is safe
+to delete by hand.
 
 ## GitHub release (one-line installer)
 

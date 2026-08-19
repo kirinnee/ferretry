@@ -209,7 +209,7 @@ describe('daemon control journeys', () => {
     });
   });
 
-  it('should require a live executable only when a snapshot build actually needs one', async () => {
+  it('should require a live executable only for the verbs that launch one', async () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(false);
@@ -221,17 +221,19 @@ describe('daemon control journeys', () => {
           FY_TOKEN: 'e2e-token',
         };
         const status = await environment.runFy(['daemon', 'status'], variables);
-        const snapshots = await environment.runFy(['daemon', 'snapshot', 'list', '--json'], variables);
-        const build = await environment.runFy(['daemon', 'snapshot', 'build'], variables);
+        const which = await environment.runFy(['daemon', 'which'], variables);
+        const start = await environment.runFy(['daemon', 'start'], variables);
 
-        // Assert — read-only control and rollback paths survive removal of the live installation.
+        // Assert — reporting still works on a host with no daemon installed, and says why there is
+        // none rather than a bare absence. Only the verbs that must name a file to launch refuse.
         should(status.code).equal(1);
         should(status.out).containEql('fyd is stopped');
         should(status.err).not.containEql('cannot find fyd on PATH');
-        should(snapshots.code).equal(0);
-        should(JSON.parse(snapshots.out)).deepEqual({ daemon: 'fyd', snapshots: [] });
-        should(build.code).equal(1);
-        should(build.err).containEql('cannot find fyd on PATH');
+        should(which.code).equal(0);
+        should(which.out).containEql('installed: cannot find fyd on PATH');
+        should(which.out).containEql('running: daemon is not running');
+        should(start.code).equal(1);
+        should(start.err).containEql('cannot find fyd on PATH');
       } finally {
         await stub.stop();
       }

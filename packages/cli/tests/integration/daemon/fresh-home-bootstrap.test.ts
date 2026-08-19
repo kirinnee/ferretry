@@ -17,7 +17,6 @@ import {
 import { StateHomeLayoutError } from '../../../../daemon/src/lib/index.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
-import { FileDaemonSnapshotStore } from '../../../src/adapters/daemon/snapshot-store.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
@@ -76,23 +75,22 @@ function layoutFor(root: string): ReturnType<typeof resolveDaemonLayout> {
   });
 }
 
-/** Exactly what `fy daemon start` does to the filesystem before the daemon is running. */
+/**
+ * Exactly what `fy daemon start` does to the filesystem before the daemon is running.
+ *
+ * It launches the INSTALLED executable at its absolute path. There is no copy of it under the CLI's
+ * own state directory any more, so a fresh home is reached with nothing but the claim and the log
+ * directory — which is the whole shape this file exists to pin.
+ */
 async function startThroughTheCli(root: string): Promise<string> {
   const layout = layoutFor(root);
-  const snapshots = new FileDaemonSnapshotStore({
-    root: layout.snapshotRoot,
-    daemon: { product: layout.product, name: layout.daemonName },
-    sourceBinary: NOTHING,
-  });
-  const built = await snapshots.build();
-  await snapshots.promote(built.id);
   const supervisor = new DirectSupervisor(
     layout,
     new BunDaemonProcess(),
     new FileServiceStore(),
     new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
   );
-  const handle = await supervisor.start(built.binaryPath);
+  const handle = await supervisor.start(NOTHING);
   if (handle.pid !== undefined) {
     // Reap the child immediately: this test is about the directory it was launched into.
     try {

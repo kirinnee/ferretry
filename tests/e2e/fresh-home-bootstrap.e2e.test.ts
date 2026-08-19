@@ -28,7 +28,7 @@ const REFUSAL = 'is non-empty but has no layout-version marker';
  *
  * `fy daemon start` hands its child only `FY_HOME` and `PATH`, so both the leased port and repository
  * module root travel in files in the bin directory — the first `PATH` entry. The executable is copied
- * here and again into the snapshot store, proving neither location-relative import can sneak back in.
+ * out of the repository to get here, proving no location-relative import can sneak back in.
  */
 async function installStandInDaemon(environment: E2eEnvironment): Promise<string> {
   const source = await environment.assertSafePath(
@@ -215,10 +215,9 @@ describe('first-run daemon bootstrap', () => {
       const environmentVariables = connection(environment, daemonBinary);
       const first = await environment.runFy(['daemon', 'start'], environmentVariables);
       const stopped = await environment.runFy(['daemon', 'stop'], environmentVariables);
-      await rm(daemonBinary);
 
       try {
-        // Act — the live source is gone; the second start must use the retained promoted snapshot.
+        // Act — the same installed executable, launched into a home this CLI already claimed.
         const actual = await environment.runFy(['daemon', 'start'], environmentVariables);
 
         // Assert
@@ -230,6 +229,28 @@ describe('first-run daemon bootstrap', () => {
       } finally {
         await environment.runFy(['daemon', 'stop'], environmentVariables);
       }
+    });
+  });
+
+  it('should refuse to start once the installed daemon is gone, rather than launch something else', async () => {
+    await withE2eEnvironment(async environment => {
+      // Arrange — an earlier release kept a verified copy under its own state directory and launched
+      // that, so this journey used to succeed. There is no copy now: what runs is what is installed.
+      const daemonBinary = await installStandInDaemon(environment);
+      const environmentVariables = connection(environment, daemonBinary);
+      const first = await environment.runFy(['daemon', 'start'], environmentVariables);
+      const stopped = await environment.runFy(['daemon', 'stop'], environmentVariables);
+      await rm(daemonBinary);
+
+      // Act
+      const actual = await environment.runFy(['daemon', 'start'], environmentVariables);
+
+      // Assert — the refusal names the file and the remedy, immediately, rather than surfacing a
+      // minute later as a readiness timeout that blames the daemon for never coming up.
+      should(first.code).equal(0);
+      should(stopped.code).equal(0);
+      should(actual.code).not.equal(0);
+      should(actual.out + actual.err).containEql('which is not an executable file');
     });
   });
 });

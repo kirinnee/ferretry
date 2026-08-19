@@ -401,7 +401,7 @@ describe('daemon lifecycle claim', () => {
     // Act
     const claim = await subject.acquire({
       lockPath: join(root, 'lifecycle', 'fyd.lock'),
-      verb: 'snapshot promote',
+      verb: 'restart',
       waitMs: 0,
       waiting: neverWaits,
     });

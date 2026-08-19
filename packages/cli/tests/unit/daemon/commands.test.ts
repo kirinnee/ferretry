@@ -13,9 +13,10 @@ import {
   FakeLifecycleLock,
   FakeLogs,
   FakeNixGcRoot,
-  FakeSnapshots,
+  FakeRetiredArtifacts,
   FakeSupervisor,
   health,
+  installedDaemon,
   layout,
   RecordingFirstPassword,
   runningReport,
@@ -31,14 +32,12 @@ function run(
   service: FakeSupervisor;
   out: CapturedOutput;
   logs: FakeLogs;
-  snapshots: FakeSnapshots;
   adopted: CapturedClaimOutput;
   built: () => number;
 } {
   const service = new FakeSupervisor('systemd', stoppedReport);
   const out = new CapturedOutput();
   const logs = new FakeLogs();
-  const snapshots = new FakeSnapshots();
   let builds = 0;
   // A home already carrying our marker, so `adopt` in this suite exercises the routing rather than
   // the decision — the decision has its own suite against the real service.
@@ -66,7 +65,8 @@ function run(
         logs,
         nix: new FakeNixGcRoot(),
         lifecycle: new FakeLifecycleLock(),
-        snapshots,
+        installedDaemon: () => installedDaemon(),
+        retired: new FakeRetiredArtifacts(),
         clock: new SteppingClock(),
         out,
         firstPassword: new RecordingFirstPassword(),
@@ -81,7 +81,6 @@ function run(
     service,
     out,
     logs,
-    snapshots,
     adopted: claimOut,
     built: () => builds,
   };
@@ -203,30 +202,19 @@ describe('daemon command surface', () => {
     should(JSON.parse(adopted.text)).have.property('outcome', 'already-claimed');
   });
 
-  it('should route snapshot build, promotion and list through the mounted store', async () => {
-    // Arrange + Act
-    const build = run(['daemon', 'snapshot', 'build']);
-    await build.parsed;
-    const promote = run(['daemon', 'snapshot', 'promote', `sha256-${'b'.repeat(64)}`]);
-    await promote.parsed;
-    const list = run(['daemon', 'snapshot', 'list']);
-    await list.parsed;
+  it.each([
+    { name: 'the snapshot group itself', verb: ['snapshot'] },
+    { name: 'snapshot build', verb: ['snapshot', 'build'] },
+    { name: 'snapshot list', verb: ['snapshot', 'list'] },
+    { name: 'snapshot promote', verb: ['snapshot', 'promote', `sha256-${'b'.repeat(64)}`] },
+  ])('should no longer mount $name', async ({ verb }) => {
+    // Arrange + Act — the snapshot store is gone, and so is every verb that managed it. This is the
+    // surface an operator sees, so its absence is asserted here rather than left to a grep.
+    const { parsed, built } = run(['daemon', ...verb]);
 
-    // Assert — the two mutating verbs also reconcile garbage-collection roots against the retained
-    // set, which is the listing each of them makes; only `list` leaves the store untouched.
-    should(build.snapshots.calls).deepEqual(['build', 'retained']);
-    should(promote.snapshots.calls).deepEqual([`promote:sha256-${'b'.repeat(64)}`, 'retained']);
-    should(list.snapshots.calls).deepEqual(['list', 'current']);
-  });
-
-  it('should pass --json to the snapshot list renderer', async () => {
-    // Arrange + Act
-    const { parsed, out } = run(['daemon', 'snapshot', 'list', '--json']);
-    await parsed;
-
-    // Assert
-    const payload = JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '') as { daemon?: string };
-    should(payload.daemon).equal('fyd');
+    // Assert — commander rejects an unknown verb and the controller is never even constructed.
+    await should(parsed).be.rejected();
+    should(built()).equal(0);
   });
 
   it('should build the controller only when a verb actually runs', async () => {
