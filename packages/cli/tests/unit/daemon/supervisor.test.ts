@@ -7,12 +7,12 @@ import {
   SystemdSupervisor,
   UnsupportedServiceManagerError,
 } from '../../../src/lib/daemon/supervisor';
-import { type CommandScript, daemonSnapshot, FakeFiles, FakeProcesses, FakeStateHomeClaim, layout } from './fixtures';
+import { type CommandScript, FakeFiles, FakeProcesses, FakeStateHomeClaim, installedDaemon, layout } from './fixtures';
 
 const linux = layout();
 const mac = layout({ platform: 'darwin', userId: 501 });
-const artifact = daemonSnapshot();
-const promotedPointer = `${linux.snapshotRoot}/current`;
+const daemonBinary = installedDaemon();
+const retiredPointer = `${linux.legacySnapshotRoot}/current`;
 
 function systemd(script: CommandScript = []): {
   supervisor: SystemdSupervisor;
@@ -44,11 +44,11 @@ describe('systemd supervisor install', () => {
     const { supervisor, processes, files } = systemd();
 
     // Act
-    await supervisor.install(artifact.binaryPath);
+    await supervisor.install(daemonBinary.path);
 
     // Assert
-    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${artifact.binaryPath}"`);
-    should(files.written.get(linux.systemdUnitFile)).not.containEql(`ExecStart="${promotedPointer}"`);
+    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${daemonBinary.path}"`);
+    should(files.written.get(linux.systemdUnitFile)).not.containEql(`ExecStart="${retiredPointer}"`);
     should(processes.ran).deepEqual([
       'systemctl --user daemon-reload',
       'systemctl --user enable fyd.service',
@@ -61,7 +61,7 @@ describe('systemd supervisor install', () => {
     const { supervisor, files } = systemd();
 
     // Act
-    await supervisor.install(artifact.binaryPath);
+    await supervisor.install(daemonBinary.path);
 
     // Assert
     should(files.directories).deepEqual([`${linux.systemdUnitFile.replace('/fyd.service', '')}`, linux.logDirectory]);
@@ -74,7 +74,7 @@ describe('systemd supervisor install', () => {
     const { supervisor, files, claims } = systemd();
 
     // Act
-    await supervisor.install(artifact.binaryPath);
+    await supervisor.install(daemonBinary.path);
 
     // Assert
     should(claims.claimed).deepEqual([linux.stateHome]);
@@ -89,7 +89,7 @@ describe('systemd supervisor install', () => {
     claims.refusal = new Error('refusing to write into /tmp/fy-home/.ferretry');
 
     // Act + Assert
-    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(/refusing to write into/u);
+    await should(supervisor.install(daemonBinary.path)).be.rejectedWith(/refusing to write into/u);
     should(files.directories).not.containEql(linux.logDirectory);
   });
 
@@ -98,7 +98,7 @@ describe('systemd supervisor install', () => {
     const { supervisor } = systemd([['enable', { code: 1, stdout: '', stderr: 'Failed to enable unit\n' }]]);
 
     // Act + Assert
-    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(/Failed to enable unit/u);
+    await should(supervisor.install(daemonBinary.path)).be.rejectedWith(/Failed to enable unit/u);
   });
 
   it('should still name the command when systemctl failed silently', async () => {
@@ -108,7 +108,7 @@ describe('systemd supervisor install', () => {
     // Act
     let caught: unknown;
     try {
-      await supervisor.install(artifact.binaryPath);
+      await supervisor.install(daemonBinary.path);
     } catch (error) {
       caught = error;
     }
@@ -143,11 +143,11 @@ describe('systemd supervisor lifecycle', () => {
     const { supervisor, processes, files } = systemd();
 
     // Act
-    const actual = await supervisor.start(artifact.binaryPath);
+    const actual = await supervisor.start(daemonBinary.path);
 
     // Assert
     should(processes.ran).containEql('systemctl --user start fyd.service');
-    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${artifact.binaryPath}"`);
+    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${daemonBinary.path}"`);
     should(actual.pid).be.undefined();
   });
 
@@ -235,7 +235,7 @@ describe('launchd supervisor install', () => {
     const { supervisor, files, claims } = launchd();
 
     // Act
-    await supervisor.install(artifact.binaryPath);
+    await supervisor.install(daemonBinary.path);
 
     // Assert
     should(claims.claimed).deepEqual([mac.stateHome]);
@@ -247,11 +247,11 @@ describe('launchd supervisor install', () => {
     const { supervisor, processes, files } = launchd();
 
     // Act
-    await supervisor.install(artifact.binaryPath);
+    await supervisor.install(daemonBinary.path);
 
     // Assert
     should(files.written.get(mac.launchAgentFile)).containEql('<key>Label</key><string>com.ferretry.fyd</string>');
-    should(files.written.get(mac.launchAgentFile)).containEql(`<string>${artifact.binaryPath}</string>`);
+    should(files.written.get(mac.launchAgentFile)).containEql(`<string>${daemonBinary.path}</string>`);
     should(processes.ran).deepEqual([
       'launchctl bootout gui/501/com.ferretry.fyd',
       `launchctl bootstrap gui/501 ${mac.launchAgentFile}`,
@@ -263,7 +263,7 @@ describe('launchd supervisor install', () => {
     const { supervisor } = launchd([['bootout', { code: 3, stdout: '', stderr: 'No such process' }]]);
 
     // Act + Assert — an unloaded job cannot be booted out, so this must not abort the install.
-    await should(supervisor.install(artifact.binaryPath)).be.fulfilled();
+    await should(supervisor.install(daemonBinary.path)).be.fulfilled();
   });
 
   it('should surface a bootstrap failure', async () => {
@@ -271,7 +271,7 @@ describe('launchd supervisor install', () => {
     const { supervisor } = launchd([['bootstrap', { code: 5, stdout: '', stderr: 'Input/output error' }]]);
 
     // Act + Assert
-    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(/Input\/output error/u);
+    await should(supervisor.install(daemonBinary.path)).be.rejectedWith(/Input\/output error/u);
   });
 });
 
@@ -281,10 +281,10 @@ describe('launchd supervisor start', () => {
     const { supervisor, processes, files } = launchd();
 
     // Act
-    await supervisor.start(artifact.binaryPath);
+    await supervisor.start(daemonBinary.path);
 
     // Assert
-    should(files.written.get(mac.launchAgentFile)).containEql(`<string>${artifact.binaryPath}</string>`);
+    should(files.written.get(mac.launchAgentFile)).containEql(`<string>${daemonBinary.path}</string>`);
     should(processes.ran).deepEqual([
       'launchctl bootout gui/501/com.ferretry.fyd',
       `launchctl bootstrap gui/501 ${mac.launchAgentFile}`,
@@ -297,7 +297,7 @@ describe('launchd supervisor start', () => {
     const { supervisor, processes } = launchd([['bootout', { code: 3, stdout: '', stderr: 'No such process' }]]);
 
     // Act
-    await supervisor.start(artifact.binaryPath);
+    await supervisor.start(daemonBinary.path);
 
     // Assert
     should(processes.ran).deepEqual([
@@ -406,7 +406,7 @@ describe('direct supervisor', () => {
     const { supervisor, files, claims } = direct();
 
     // Act
-    await supervisor.start(artifact.binaryPath);
+    await supervisor.start(daemonBinary.path);
 
     // Assert
     should(claims.claimed).deepEqual([linux.stateHome]);
@@ -422,7 +422,7 @@ describe('direct supervisor', () => {
     claims.refusal = new Error('refusing to write into /tmp/fy-home/.ferretry');
 
     // Act + Assert
-    await should(supervisor.start(artifact.binaryPath)).be.rejectedWith(/refusing to write into/u);
+    await should(supervisor.start(daemonBinary.path)).be.rejectedWith(/refusing to write into/u);
     should(processes.launched).be.empty();
   });
 
@@ -431,7 +431,7 @@ describe('direct supervisor', () => {
     const { supervisor } = direct();
 
     // Act + Assert
-    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(UnsupportedServiceManagerError);
+    await should(supervisor.install(daemonBinary.path)).be.rejectedWith(UnsupportedServiceManagerError);
     await should(supervisor.uninstall()).be.rejectedWith(/systemd user services on Linux/u);
   });
 
@@ -440,13 +440,13 @@ describe('direct supervisor', () => {
     const { supervisor, processes, files } = direct();
 
     // Act
-    const actual = await supervisor.start(artifact.binaryPath);
+    const actual = await supervisor.start(daemonBinary.path);
 
     // Assert
     should(files.directories).deepEqual([linux.logDirectory]);
     should(processes.launched).have.length(1);
-    should(processes.launched[0]?.argv).deepEqual([artifact.binaryPath]);
-    should(processes.launched[0]?.argv).not.deepEqual([promotedPointer]);
+    should(processes.launched[0]?.argv).deepEqual([daemonBinary.path]);
+    should(processes.launched[0]?.argv).not.deepEqual([retiredPointer]);
     should(processes.launched[0]?.environment).deepEqual({ FY_HOME: linux.stateHome, PATH: linux.searchPath });
     should(processes.launched[0]?.logFile).equal(linux.logFile);
     should(actual.pid).equal(9001);

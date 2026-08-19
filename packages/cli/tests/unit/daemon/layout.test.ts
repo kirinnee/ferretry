@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  daemonSnapshotGcRoot,
-  InvalidDaemonEnvironmentError,
-  managerForPlatform,
-  resolveDaemonLayout,
-} from '../../../src/lib/daemon/layout';
+import { InvalidDaemonEnvironmentError, managerForPlatform, resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import { environment, HOME, layout } from './fixtures';
 
 describe('manager for platform', () => {
@@ -85,14 +80,14 @@ describe('daemon layout', () => {
     should(actual.launchAgentFile).equal(`${HOME}/Library/LaunchAgents/com.ferretry.fyd.plist`);
   });
 
-  it('should derive the daemon-keyed snapshot store without resolving a live executable', () => {
+  it('should derive the retired snapshot store root without resolving a live executable', () => {
     // Act
     const actual = layout({ searchPath: '/only/here' });
 
     // Assert
     should(actual.daemonName).equal('fyd');
     should(actual.product).equal('ferretry');
-    should(actual.snapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
+    should(actual.legacySnapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
     should(actual.searchPath).equal('/only/here');
   });
 
@@ -100,15 +95,15 @@ describe('daemon layout', () => {
     { name: 'XDG_STATE_HOME when the operator set one', input: '/tmp/xdg-state', expected: '/tmp/xdg-state' },
     { name: '~/.local/state when it is unset', input: undefined, expected: `${HOME}/.local/state` },
     { name: '~/.local/state when it is blank', input: '  ', expected: `${HOME}/.local/state` },
-  ])('should put the Nix GC roots under $name', ({ input, expected }) => {
+  ])('should put the retired per-snapshot Nix roots under $name', ({ input, expected }) => {
     // Act
     const actual = layout({ stateDirectory: input });
 
     // Assert — never under the state home. That directory is the daemon's, its layout model refuses
     // any entry it has not declared, and its filesystem port refuses symbolic links anywhere inside
     // it — and these roots are symbolic links.
-    should(actual.nixGcRootDirectory).equal(`${expected}/ferretry/nix/snapshots/fyd`);
-    should(actual.nixGcRootDirectory.startsWith(`${actual.stateHome}/`)).be.false();
+    should(actual.legacySnapshotGcRootDirectory).equal(`${expected}/ferretry/nix/snapshots/fyd`);
+    should(actual.legacySnapshotGcRootDirectory.startsWith(`${actual.stateHome}/`)).be.false();
   });
 
   describe('lifecycle claim', () => {
@@ -179,7 +174,7 @@ describe('daemon layout', () => {
         // Assert — changing the snapshot/root ownership changes only that claim. The definition,
         // logical manager target and direct daemon still serialize the transaction.
         should(exported.lifecycleLocks.filter(lock => defaulted.lifecycleLocks.includes(lock))).deepEqual(shared);
-        should(exported.nixGcRootDirectory).not.equal(defaulted.nixGcRootDirectory);
+        should(exported.legacySnapshotGcRootDirectory).not.equal(defaulted.legacySnapshotGcRootDirectory);
       },
     );
 
@@ -355,7 +350,7 @@ describe('daemon layout', () => {
       const second = layout({ platform, daemonName: 'two' });
 
       // Assert — over-serializing one daemon costs a wait; under-serializing it costs a unit file
-      // that names a snapshot nothing is holding.
+      // that names an executable nothing is holding.
       should(first.lifecycleLocks.some(lock => second.lifecycleLocks.includes(lock))).be.false();
     });
 
@@ -377,43 +372,15 @@ describe('daemon layout', () => {
     });
   });
 
-  it('should keep the superseded single root beside the per-snapshot directory, not above it', () => {
+  it('should name one live root and keep the retired per-snapshot directory out from under it', () => {
     // Act
     const actual = layout({ stateDirectory: '/tmp/xdg-state' });
 
-    // Assert — a symbolic link cannot also be the directory the new roots live in, so reusing that
-    // name would leave an upgraded installation unable to create any root at all.
-    should(actual.supersededNixGcRoot).equal('/tmp/xdg-state/ferretry/nix/fyd');
-    should(actual.nixGcRootDirectory.startsWith(`${actual.supersededNixGcRoot}/`)).be.false();
-  });
-
-  describe('snapshot garbage-collection root', () => {
-    it('should name the root after the snapshot it protects, and nothing else', () => {
-      // Act — the ONE mapping from a snapshot identity to a root path, so the writer and the reader
-      // of a root can never disagree about where it is.
-      const actual = daemonSnapshotGcRoot('/tmp/state/ferretry/nix/snapshots/fyd', `sha256-${'a'.repeat(64)}`);
-
-      // Assert
-      should(actual).equal(`/tmp/state/ferretry/nix/snapshots/fyd/sha256-${'a'.repeat(64)}`);
-    });
-
-    it.each([
-      { name: 'a path separator', id: '../../../etc/fyd' },
-      { name: 'an empty identity', id: '' },
-    ])('should refuse $name rather than let it retarget the write', ({ id }) => {
-      // Act + Assert — a root path is a filename, and a filename that can be steered is a write that
-      // can be steered.
-      should(() => daemonSnapshotGcRoot('/tmp/state/ferretry/nix/snapshots/fyd', id)).throw(
-        InvalidDaemonEnvironmentError,
-      );
-    });
-
-    it('should refuse a relative root directory rather than resolve it against the cwd', () => {
-      // Act + Assert
-      should(() => daemonSnapshotGcRoot('nix/snapshots/fyd', `sha256-${'a'.repeat(64)}`)).throw(
-        /nix root directory must be an absolute path/,
-      );
-    });
+    // Assert — the live root is a symbolic link, so it cannot also be the directory the retired
+    // per-snapshot roots sit in; an installation that spelled them the same way could create neither.
+    should(actual.nixGcRoot).equal('/tmp/xdg-state/ferretry/nix/fyd');
+    should(actual.legacySnapshotGcRootDirectory).equal('/tmp/xdg-state/ferretry/nix/snapshots/fyd');
+    should(actual.legacySnapshotGcRootDirectory.startsWith(`${actual.nixGcRoot}/`)).be.false();
   });
 
   it('should reject a relative XDG_STATE_HOME rather than resolve it against the cwd', () => {
@@ -423,15 +390,15 @@ describe('daemon layout', () => {
     );
   });
 
-  it('should key snapshots by product and daemon under XDG_STATE_HOME', () => {
+  it('should key the retired store by product and daemon under XDG_STATE_HOME', () => {
     // Act
     const first = layout({ stateDirectory: '/tmp/state', product: 'alpha', daemonName: 'one' });
     const second = layout({ stateDirectory: '/tmp/state', product: 'alpha', daemonName: 'two' });
 
     // Assert
-    should(first.snapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/one');
-    should(second.snapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/two');
-    should(first.snapshotRoot).not.equal(second.snapshotRoot);
+    should(first.legacySnapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/one');
+    should(second.legacySnapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/two');
+    should(first.legacySnapshotRoot).not.equal(second.legacySnapshotRoot);
   });
 
   it('should treat a blank XDG_STATE_HOME as unset', () => {
@@ -439,7 +406,7 @@ describe('daemon layout', () => {
     const actual = layout({ stateDirectory: '   ' });
 
     // Assert
-    should(actual.snapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
+    should(actual.legacySnapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
   });
 
   it('should normalise a path with redundant segments', () => {

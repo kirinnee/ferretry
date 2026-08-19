@@ -47,34 +47,51 @@ Keep agents alive, bounded, and recoverable without risking the daemon.
 |  31 |  ☑   | **Run the daemon from stable snapshots** | Run the daemon from a stable built snapshot instead of live source. This prevents half-written edits from taking down the daemon and fleet, and makes worktree parallelism, rollback, and controlled rollout safer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —       | #3, #4, #30, #44, #48 |
 |   7 |  ☑   | **Add task-done control**                | Expose a discoverable Mark Done action in aggregate List and Kanban views, enforce shared-board permissions, and update the UI immediately.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | —       | #35, #43              |
 
-**#31 is done.** Ferretry has a daemon-keyed, content-addressed snapshot store, strict verification,
-atomic promotion, rollback through the ordinary promotion path, explicit build/promote/list CLI
-commands, and install/start/restart capture the promoted snapshot and execute its exact canonical
-artifact path. kteam has no daemon artifact snapshot to port: `modules/kteam-ts/src/index.ts` resolves
-`kteamd` and passes that wrapper to `DaemonService`; `DaemonService.install/start` execute it, and the
-Home Manager `modules/default.nix` wrapper then runs live `daemon-entry.ts`. Its `kteam snapshot`
-command captures a session pane and is unrelated.
+**#31 is CLOSED AS WITHDRAWN, and the row's ☑ records that rather than a delivery.** The snapshot
+store was built, shipped, and then removed: it was a content-addressed, verified, immutable,
+atomically-pointed artifact store with rollback, and **every one of those is something `/nix/store`
+already provides, and provides better** — while for a Homebrew or release-archive install the package
+manager owns them. Worse, copying the executable OUT of the store yields a file whose loader and
+shared libraries still live IN it, so the copy was never self-contained; that is what forced one Nix
+root per snapshot. The last property that was genuinely ours — surviving a `nix shell` store path
+being collected out from under you — the owner explicitly waived: _"ignore the case where it comes
+from nix shell — its OK if its broken afterwards."_ What remained was a second installation model for
+one file, and an operator who had to promote something before their upgrade took effect.
 
-The two remaining GAPs are closed. **A garbage-collection root's lifetime is now its snapshot's
-lifetime**: `nixGcRootDirectory` holds one root per retained snapshot, named by
-`daemonSnapshotGcRoot()` — the single owner of that mapping — so promoting a second Nix-built snapshot
-no longer re-points the one root and leaves the rollback candidate without the loader and libraries
-its executable needs. A root is released only when its snapshot is no longer retained; neither `stop`
-nor `uninstall` withdraws protection from a snapshot still sitting in the store, and `uninstall` says
-so. The one-per-daemon root earlier releases kept is retired as `supersededNixGcRoot`, but only once
-nothing that still needs a root failed to take one. Reconciliation reads a **cheap, per-entry-tolerant
-inventory** (`IDaemonSnapshotPort.retained()`) rather than the verifying `list()`, which stays the
-operator report: an interrupted build leaves a directory no later build repairs, and a verifying
-listing on the lifecycle's critical path let one such sibling disable every mutating verb. An entry
-that cannot be read or whose manifest identity cannot be trusted is warned about and skipped; the
-managed store structure is checked without reading or hashing an executable. An inventory that is not
-the whole truth releases **no roots at all**, because a root with no matching entry is
-indistinguishable from one whose snapshot merely could not be read.
+What runs now is the `fyd` this host has installed, at the absolute path `install`, `start` and
+`restart` record in the unit or agent. `resolveDaemonBinaryPath` is the single decision — `FY_DAEMON_BIN`
+then `PATH` — and it REFUSES a relative path where the command was typed rather than at the next boot,
+because `systemd` fails such a unit with 203/EXEC and `launchd` behaves the same way. `fy daemon which`
+reports the installed and running identities and whether they agree; `start` and `status` say so when
+the daemon already serving predates the installed one, and never act on it.
 
-**Every mutating lifecycle verb is one serialized transaction**: install, uninstall, start, stop,
-restart and both snapshot mutations run inside exclusive claims, so no invocation can interleave a
-root update with another's service-definition write. Reporting verbs (`status`, `logs`,
-`snapshot list`) are deliberately unserialized. Service definitions are published with a
+**One Nix garbage-collection root survives, and deliberately.** The nix-shell waiver is about an
+interactive session a person is present for; a user service that stops launching at the next login is
+a different and worse failure the owner did not waive, and the absolute path a unit must record is
+exactly the path a collection deletes. `nixGcRoot` holds the closure of the one executable this host
+runs, is re-pinned by every mutating verb, and is RELEASED when the installed daemon is no longer a
+store path. `uninstall` does not release it, because `fy daemon start` still runs that executable as a
+direct child; the message names the root instead.
+
+**Upgrading is silent and self-cleaning.** An upgraded host still has the store — roughly 100MB — and
+one Nix root per copy, and its unit file still names an artifact inside it. The first `install`,
+`start`, `restart` or `uninstall` after the upgrade rewrites or removes the definition FIRST, and only
+then releases the per-snapshot roots and removes both directories, saying what it reclaimed. The
+removal forces write permission back on the way down, because each snapshot directory was sealed 0555
+and an ordinary recursive remove fails on it with EACCES. A failure is a warning naming the directory,
+never a failed verb.
+
+kteam had no daemon artifact snapshot to port in the first place: `modules/kteam-ts/src/index.ts`
+resolves `kteamd` and passes that wrapper to `DaemonService`; `DaemonService.install/start` execute
+it, and the Home Manager `modules/default.nix` wrapper then runs live `daemon-entry.ts` — which is
+what this now matches. Its `kteam snapshot` command captures a session pane and is unrelated.
+
+**Every mutating lifecycle verb is one serialized transaction**: install, uninstall, start, stop and
+restart run inside exclusive claims, so no invocation can interleave a root update with another's
+service-definition write. Reporting verbs (`status`, `logs`, `which`) are deliberately unserialized.
+The artifact claim keeps the path and qualifier the snapshot store gave it, because during an upgrade
+an older `fy` still takes that exact claim and is the one invocation that might be writing into the
+store this one is about to delete. Service definitions are published with a
 same-directory private write, file fsync, atomic rename and parent-directory fsync, so a crash exposes
 the old complete unit/plist or the new complete one rather than a truncated target. Claims are keyed
 on every target those verbs may own: the logical systemd unit or launchd label, its definition file,
@@ -90,12 +107,17 @@ that block every mutating verb until a person independently verifies no holder i
 each one. A refusal names one directory; a retry may expose the next. It also names the verb, owner,
 whether that owner is visible from this PID namespace, and why absence is not proof of death.
 
-Two declared residues, neither reopening the row: **retention is unbounded** (nothing prunes
-snapshots, so the reconciliation's release path exists for a prune verb that has not been written),
-and the row's headline promise — that a running daemon cannot be taken down by a half-written source
-edit — **has no automated regression guard**, because the SIT tier is CLI-only and proving it needs a
-real service manager; the evidence for it is a manual compiled-binary journey. A killed acquisition
-can also leave a hidden staging directory beside the claim, which blocks nothing.
+One declared residue: no automated regression guard runs against a REAL service manager, because the
+SIT tier is CLI-only. The absolute-path rule, the launch path, the Nix root and the retirement of an
+upgraded host's store are all proved in the unit and integration tiers against real filesystems; that
+a `systemd` unit written this way actually loads is evidence from a manual compiled-binary journey. A
+killed acquisition can also leave a hidden staging directory beside the claim, which blocks nothing.
+
+The row's original headline — that a running daemon cannot be taken down by a half-written source
+edit — is **not** what ships, and that is the withdrawal rather than a gap. A running executable is
+held open by the kernel, so editing the file on `PATH` cannot take the live daemon down; what changes
+is which one starts NEXT, and the answer to that is "whatever your package manager installed", which
+is the answer for every other program on the machine.
 
 ## 🔎 Search, navigation & surfaces
 

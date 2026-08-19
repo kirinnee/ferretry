@@ -12,15 +12,16 @@ import { UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervis
 import {
   absentReport,
   CapturedOutput,
-  daemonSnapshot,
   FakeHealth,
   FakeLifecycleLock,
   FakeLogs,
   FakeNixGcRoot,
-  FakeSnapshots,
+  FakeRetiredArtifacts,
   FakeSupervisor,
   failedReport,
+  HOME,
   health,
+  installedDaemon,
   layout,
   RecordingFirstPassword,
   runningReport,
@@ -35,9 +36,9 @@ interface Harness {
   readonly service: FakeSupervisor;
   readonly direct: FakeSupervisor;
   readonly logs: FakeLogs;
-  readonly snapshots: FakeSnapshots;
   readonly clock: SteppingClock;
   readonly nix: FakeNixGcRoot;
+  readonly retired: FakeRetiredArtifacts;
   readonly lifecycle: FakeLifecycleLock;
 }
 
@@ -50,9 +51,9 @@ function harness(options: {
   directFallback?: DaemonSupervisorReport;
   withoutService?: boolean;
   logs?: FakeLogs;
-  snapshots?: FakeSnapshots;
   step?: number;
   nix?: FakeNixGcRoot;
+  retired?: FakeRetiredArtifacts;
   lifecycle?: FakeLifecycleLock;
   overrides?: Partial<DaemonControllerDeps>;
 }): Harness {
@@ -64,9 +65,9 @@ function harness(options: {
   direct.reports = options.directReports ?? [];
   const out = new CapturedOutput();
   const logs = options.logs ?? new FakeLogs();
-  const snapshots = options.snapshots ?? new FakeSnapshots();
   const clock = new SteppingClock(options.step ?? 100);
   const nix = options.nix ?? new FakeNixGcRoot();
+  const retired = options.retired ?? new FakeRetiredArtifacts();
   const lifecycle = options.lifecycle ?? new FakeLifecycleLock();
   const firstPassword = new RecordingFirstPassword();
   const controller = new DaemonController({
@@ -77,7 +78,8 @@ function harness(options: {
     logs,
     nix,
     lifecycle,
-    snapshots,
+    installedDaemon: () => installedDaemon(),
+    retired,
     clock,
     out,
     firstPassword,
@@ -85,7 +87,14 @@ function harness(options: {
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, snapshots, clock, nix, lifecycle, firstPassword };
+  return { controller, out, service, direct, logs, clock, nix, retired, lifecycle, firstPassword };
+}
+
+/** A host with no daemon executable: the resolver refuses, as it does for a relative FY_DAEMON_BIN. */
+function noDaemonInstalled(): () => never {
+  return () => {
+    throw new Error('cannot find fyd on PATH — install it or point FY_DAEMON_BIN at the executable');
+  };
 }
 
 describe('daemon install', () => {
@@ -96,9 +105,11 @@ describe('daemon install', () => {
     // Act
     await controller.install();
 
-    // Assert
+    // Assert — the ABSOLUTE path of the installed executable, which is the only thing systemd can
+    // load: a relative `ExecStart` fails the unit with 203/EXEC at the next boot with nobody watching.
     should(service.calls).containEql('install');
-    should(service.installedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    should(service.installedExecutables).deepEqual([installedDaemon().path]);
+    should(service.installedExecutables[0]?.startsWith('/')).be.true();
     should(out.text).containEql('fyd user service installed from');
     should(out.text).containEql('and started (pid 4242)');
   });
@@ -111,8 +122,22 @@ describe('daemon install', () => {
     await should(controller.install()).be.rejectedWith(UnsupportedServiceManagerError);
   });
 
+  it('should refuse before touching the service manager when no daemon is installed', async () => {
+    // Arrange — there is no copy of the executable to fall back to any more, so an invocation that
+    // cannot name a file must say so rather than write a definition naming something it guessed.
+    const { controller, service, nix } = harness({
+      probes: [undefined, health()],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act + Assert
+    await should(controller.install()).be.rejectedWith(/cannot find fyd on PATH/u);
+    should(service.calls).be.empty();
+    should(nix.pinned).be.empty();
+  });
+
   it('should report a daemon that installed but died during startup', async () => {
-    // Arrange — the unit installs, systemd starts it, the process exits before serving.
+    // Arrange — the unit installs, systemd starts it, the daemon exits before serving.
     const { controller } = harness({
       probes: [undefined],
       serviceReports: [runningReport, failedReport],
@@ -125,16 +150,20 @@ describe('daemon install', () => {
 });
 
 describe('daemon uninstall', () => {
-  it('should remove the definition through the service manager', async () => {
+  it('should remove the definition and say the closure stays held', async () => {
     // Arrange
-    const { controller, out, service } = harness({});
+    const { controller, out, service, nix } = harness({});
 
     // Act
     await controller.uninstall();
 
-    // Assert
+    // Assert — removing supervision does not uninstall the daemon, and `fy daemon start` still runs
+    // that same executable as a direct child. Releasing the root here could leave that start with no
+    // executable at all after a garbage collection.
     should(service.calls).containEql('uninstall');
+    should(nix.released).be.empty();
     should(out.text).startWith('ok: fyd user service removed');
+    should(out.text).containEql(layout().nixGcRoot);
   });
 
   it('should refuse where there is no service manager', async () => {
@@ -147,79 +176,6 @@ describe('daemon uninstall', () => {
 });
 
 describe('daemon start', () => {
-  it('should promote and launch a changed installed daemon when stopped', async () => {
-    const snapshots = new FakeSnapshots();
-    const old = daemonSnapshot({ id: `sha256-${'a'.repeat(64)}`, sourceBinary: '/opt/fyd-0.143.0' });
-    const fresh = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: '/opt/fyd-0.175.3' });
-    snapshots.currentAnswer = old;
-    snapshots.buildAnswer = { ...fresh, created: true };
-    snapshots.listAnswer = [old, fresh];
-    const { controller, service } = harness({
-      probes: [undefined, health()],
-      serviceReports: [stoppedReport],
-      snapshots,
-      overrides: { installedDaemon: () => ({ path: fresh.sourceBinary, source: 'PATH' }) },
-    });
-
-    await controller.start();
-
-    should(snapshots.calls).containEql('build');
-    should(snapshots.calls).containEql(`promote:${fresh.id}`);
-    should(service.startedExecutables).deepEqual([fresh.binaryPath]);
-  });
-
-  it('should keep the promoted snapshot when the installed daemon is unavailable', async () => {
-    const snapshots = new FakeSnapshots();
-    const { controller, out, service } = harness({
-      probes: [undefined, health()],
-      serviceReports: [stoppedReport],
-      snapshots,
-      overrides: { installedDaemon: () => undefined },
-    });
-
-    await controller.start();
-
-    should(snapshots.calls).not.containEql('build');
-    should(service.startedExecutables).deepEqual([snapshots.currentAnswer?.binaryPath]);
-    should(out.text).not.match(/installed daemon/u);
-  });
-
-  it('should stay silent and reuse the snapshot when the installed daemon agrees', async () => {
-    const snapshots = new FakeSnapshots();
-    const { controller, out } = harness({
-      probes: [undefined, health()],
-      serviceReports: [stoppedReport],
-      snapshots,
-      overrides: {
-        installedDaemon: () =>
-          snapshots.currentAnswer === undefined
-            ? undefined
-            : { path: snapshots.currentAnswer.sourceBinary, source: 'PATH' },
-      },
-    });
-
-    await controller.start();
-
-    should(snapshots.calls).not.containEql('build');
-    should(out.text).not.match(/installed daemon|promoted .* differs/u);
-  });
-
-  it('should warn but never swap a changed installed daemon while one is running', async () => {
-    const snapshots = new FakeSnapshots();
-    const { controller, out, service } = harness({
-      probes: [health()],
-      snapshots,
-      overrides: { installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH' }) },
-    });
-
-    await controller.start();
-
-    should(snapshots.calls).not.containEql('build');
-    should(snapshots.calls).not.containEql(`promote:${snapshots.buildAnswer.id}`);
-    should(service.calls).not.containEql('start');
-    should(out.text).match(/fy daemon restart/u);
-  });
-
   it('should leave a healthy daemon alone rather than restarting it', async () => {
     // Arrange
     const { controller, out, service } = harness({ probes: [health()] });
@@ -230,6 +186,53 @@ describe('daemon start', () => {
     // Assert — kteam's macOS start used `kickstart -k`, killing a working daemon every time.
     should(out.text).equal('ok: fyd is already serving (pid 4242)');
     should(service.calls).not.containEql('start');
+  });
+
+  it('should say so when the daemon already serving is older than the installed one', async () => {
+    // Arrange — the upgrade an operator actually performs: a package manager replaced the executable
+    // and the daemon from before it is still serving.
+    const { controller, out, service } = harness({
+      probes: [health({ version: '0.143.0' })],
+      overrides: { installedDaemon: () => installedDaemon({ version: '0.175.3' }) },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert — said, never acted on: a `start` that killed a working daemon to apply an upgrade
+    // nobody asked for is the surprise this whole surface avoids.
+    should(out.text).containEql('the running fyd is version 0.143.0');
+    should(out.text).containEql('/opt/fy/bin/fyd is 0.175.3');
+    should(out.text).match(/fy daemon restart/u);
+    should(service.calls).not.containEql('start');
+  });
+
+  it('should stay silent about a running daemon whose version cannot be read', async () => {
+    // Arrange — a wrong "restart me" is worse than silence, so an unknown version says nothing.
+    const { controller, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: () => installedDaemon({ version: undefined }) },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(out.text).equal('ok: fyd is already serving (pid 4242)');
+  });
+
+  it('should stay silent about a host with no daemon installed at all', async () => {
+    // Arrange
+    const { controller, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert — the daemon is serving; there is nothing for the operator to do about the PATH now.
+    should(out.text).equal('ok: fyd is already serving (pid 4242)');
   });
 
   it('should start through the installed service manager and wait until it serves', async () => {
@@ -244,13 +247,26 @@ describe('daemon start', () => {
 
     // Assert
     should(service.calls).containEql('start');
-    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    should(service.startedExecutables).deepEqual([installedDaemon().path]);
     should(out.text).equal('ok: fyd ready (pid 4242)');
+  });
+
+  it('should refuse before touching the service manager when no daemon is installed', async () => {
+    // Arrange
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      serviceReports: [stoppedReport],
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act + Assert
+    await should(controller.start()).be.rejectedWith(/cannot find fyd on PATH/u);
+    should(service.calls).not.containEql('start');
   });
 
   it('should leave a supervised incumbent alone while its API is temporarily unavailable', async () => {
     // Arrange
-    const { controller, out, service, snapshots, nix } = harness({
+    const { controller, out, service, nix } = harness({
       probes: [undefined, health()],
       serviceFallback: runningReport,
     });
@@ -258,12 +274,27 @@ describe('daemon start', () => {
     // Act
     await controller.start();
 
-    // Assert — wait for the incumbent rather than rewriting its unit and sole GC root underneath it.
-    // Such a rewrite could leave snapshot A running while only snapshot B's closure is protected.
+    // Assert — wait for the incumbent rather than rewriting its unit and its root underneath it.
     should(out.text).equal('ok: fyd ready (pid 4242)');
     should(service.calls).not.containEql('start');
-    should(snapshots.calls).be.empty();
     should(nix.realPaths).be.empty();
+  });
+
+  it('should compare an incumbent that becomes ready against the installed daemon', async () => {
+    // Arrange — the same staleness question, asked about a daemon this verb waited for rather than
+    // one that was already answering when it arrived.
+    const { controller, out } = harness({
+      probes: [undefined, health({ version: '0.143.0' })],
+      serviceFallback: runningReport,
+      overrides: { installedDaemon: () => installedDaemon({ version: '0.175.3' }) },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(out.text).containEql('the running fyd is version 0.143.0');
+    should(out.text).endWith('ok: fyd ready (pid 4242)');
   });
 
   it('should report when a supervised incumbent exits before its API becomes ready', async () => {
@@ -291,7 +322,7 @@ describe('daemon start', () => {
 
     // Assert
     should(direct.calls).containEql('start');
-    should(direct.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    should(direct.startedExecutables).deepEqual([installedDaemon().path]);
     should(service.calls).not.containEql('start');
   });
 
@@ -464,26 +495,6 @@ describe('daemon stop', () => {
 });
 
 describe('daemon restart', () => {
-  it('should promote a changed installed daemon before restarting it', async () => {
-    const snapshots = new FakeSnapshots();
-    const old = daemonSnapshot({ id: `sha256-${'a'.repeat(64)}`, sourceBinary: '/opt/fyd-0.143.0' });
-    const fresh = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: '/opt/fyd-0.175.3' });
-    snapshots.currentAnswer = old;
-    snapshots.buildAnswer = { ...fresh, created: true };
-    snapshots.listAnswer = [old, fresh];
-    const { controller, service } = harness({
-      probes: [undefined, health()],
-      serviceReports: [stoppedReport],
-      snapshots,
-      overrides: { installedDaemon: () => ({ path: fresh.sourceBinary, source: 'PATH' }) },
-    });
-
-    await controller.restart();
-
-    should(snapshots.calls).containEql(`promote:${fresh.id}`);
-    should(service.startedExecutables).deepEqual([fresh.binaryPath]);
-  });
-
   it('should wait for the old daemon to go quiet before starting the new one', async () => {
     // Arrange — a fixed 500ms sleep is what made kteam's successor die on EADDRINUSE.
     const { controller, out, service } = harness({
@@ -497,7 +508,7 @@ describe('daemon restart', () => {
 
     // Assert
     should(service.calls.indexOf('stop')).be.below(service.calls.indexOf('start'));
-    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    should(service.startedExecutables).deepEqual([installedDaemon().path]);
     should(out.text).endWith('ok: fyd restarted (pid 4242)');
   });
 
@@ -513,31 +524,20 @@ describe('daemon restart', () => {
 
     // Assert
     should(service.stops).be.empty();
-    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    should(service.startedExecutables).deepEqual([installedDaemon().path]);
     should(out.lines[0]).equal('warn: fyd was not running; starting it');
     should(out.text).containEql('ok: fyd restarted (pid 4242)');
   });
 
-  it('should discover an incomplete sibling inventory before stopping a healthy daemon', async () => {
-    // Arrange — the warning is tolerant, but it must be discovered while the healthy incumbent is
-    // still untouched. The regression did the all-or-nothing listing only after `stop`.
+  it('should refuse a host with no daemon installed while the healthy one is still serving', async () => {
+    // Arrange — this is downtime the verb cannot undo, so the executable is located BEFORE the stop.
+    // A host that cannot name one has to learn that while its daemon is still up.
     const trail: string[] = [];
-    const snapshots = new FakeSnapshots();
-    snapshots.retainedAnswer = {
-      snapshots: [{ id: daemonSnapshot().id, sourceBinary: daemonSnapshot().sourceBinary }],
-      complete: false,
-      unreadable: [{ path: '/snapshots/interrupted', reason: 'is mutable because its build did not finish' }],
-    };
-    const retained = snapshots.retained.bind(snapshots);
-    snapshots.retained = async () => {
-      trail.push('retained');
-      return await retained();
-    };
     const subject = harness({
-      snapshots,
       probes: [health(), undefined, health()],
       serviceReports: [stoppedReport],
       serviceFallback: stoppedReport,
+      overrides: { installedDaemon: noDaemonInstalled() },
     });
     const stop = subject.service.stop.bind(subject.service);
     subject.service.stop = async request => {
@@ -545,28 +545,14 @@ describe('daemon restart', () => {
       await stop(request);
     };
 
-    // Act
-    await subject.controller.restart();
-
-    // Assert
-    should(trail).deepEqual(['retained', 'stop']);
-    should(subject.out.text).containEql('skipped snapshot inventory entry /snapshots/interrupted');
-    should(subject.service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
+    // Act + Assert
+    await should(subject.controller.restart()).be.rejectedWith(/cannot find fyd on PATH/u);
+    should(trail).be.empty();
+    should(subject.service.calls).not.containEql('start');
   });
 });
 
 describe('daemon status', () => {
-  it('should report an installed daemon that differs from the promoted snapshot', async () => {
-    const { controller, out } = harness({
-      probes: [health()],
-      overrides: { installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH' }) },
-    });
-
-    await controller.status({});
-
-    should(out.text).match(/installed daemon .* differs from promoted snapshot/u);
-  });
-
   it('should report a serving daemon as a human summary and succeed', async () => {
     // Arrange
     const { controller, out } = harness({ probes: [health()] });
@@ -577,6 +563,36 @@ describe('daemon status', () => {
     // Assert
     should(out.text).startWith('ok: fyd is serving');
     should(out.exitCode).be.undefined();
+  });
+
+  it('should say when the serving daemon is older than the installed one', async () => {
+    // Arrange
+    const { controller, out } = harness({
+      probes: [health({ version: '0.143.0' })],
+      overrides: { installedDaemon: () => installedDaemon({ version: '0.175.3' }) },
+    });
+
+    // Act
+    await controller.status({});
+
+    // Assert
+    should(out.text).containEql('the running fyd is version 0.143.0');
+    should(out.text).containEql('fy daemon restart');
+  });
+
+  it('should keep --json parseable by never mixing that notice into it', async () => {
+    // Arrange — a machine reader gets one document on stdout and nothing else.
+    const { controller, out } = harness({
+      probes: [health({ version: '0.143.0' })],
+      overrides: { installedDaemon: () => installedDaemon({ version: '0.175.3' }) },
+    });
+
+    // Act
+    await controller.status({ json: true });
+
+    // Assert
+    should(out.lines).have.length(1);
+    should(JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '')).have.property('daemon', 'fyd');
   });
 
   it('should fail when the daemon is stopped, so a script can branch on it', async () => {
@@ -591,7 +607,7 @@ describe('daemon status', () => {
     should(out.exitCode).equal(1);
   });
 
-  it('should report a process that exists but does not answer', async () => {
+  it('should report a daemon that exists but does not answer', async () => {
     // Arrange
     const { controller, out } = harness({ probes: [undefined], serviceFallback: runningReport });
 
@@ -632,57 +648,112 @@ describe('daemon status', () => {
   });
 });
 
+/**
+ * `which` reports TWO identities now, and the third one's absence is the point.
+ *
+ * It used to report installed, promoted and running, and the middle one was most of what the command
+ * was for: an operator who had upgraded the executable and was still being served by a snapshot
+ * promoted weeks earlier had no other way to see it. There is no promoted anything now, so the only
+ * question left is whether the daemon serving right now predates the one on this host's PATH.
+ */
 describe('daemon which', () => {
-  it('should clearly report unavailable installed, promoted, and running daemons', async () => {
-    const snapshots = new FakeSnapshots();
-    snapshots.currentAnswer = undefined;
+  it('should name both identities and confirm when they agree', async () => {
+    // Arrange
+    const { controller, out } = harness({ probes: [health()] });
+
+    // Act
+    await controller.which({});
+
+    // Assert
+    should(out.text).containEql('installed: /opt/fy/bin/fyd (PATH, version 1.2.3)');
+    should(out.text).containEql('running: pid 4242 version 1.2.3');
+    should(out.text).containEql('the running daemon is the installed one');
+  });
+
+  it('should name the remedy when the running daemon predates the installed one', async () => {
+    // Arrange
+    const { controller, out } = harness({
+      probes: [health({ version: '0.143.0' })],
+      overrides: { installedDaemon: () => installedDaemon({ version: '0.175.3', source: 'FY_DAEMON_BIN' }) },
+    });
+
+    // Act
+    await controller.which({});
+
+    // Assert
+    should(out.text).containEql('installed: /opt/fy/bin/fyd (FY_DAEMON_BIN, version 0.175.3)');
+    should(out.text).containEql('running and installed differ; run fy daemon restart');
+  });
+
+  it('should compare nothing when the installed version cannot be read', async () => {
+    // Arrange
+    const { controller, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: () => installedDaemon({ version: undefined }) },
+    });
+
+    // Act
+    await controller.which({});
+
+    // Assert
+    should(out.text).containEql('installed: /opt/fy/bin/fyd (PATH, version unknown)');
+    should(out.text).not.containEql('differ');
+    should(out.text).not.containEql('the running daemon is the installed one');
+  });
+
+  it('should report WHY a daemon could not be located rather than a bare absence', async () => {
+    // Arrange — "not installed" and "installed somewhere a service manager cannot launch" need
+    // different remedies, and only the resolver knows which one this is.
     const { controller, out } = harness({
       probes: [undefined],
       serviceFallback: stoppedReport,
-      snapshots,
-      overrides: { installedDaemon: () => undefined },
-    });
-
-    await controller.which({});
-
-    should(out.text).containEql('installed: not found on PATH');
-    should(out.text).containEql('promoted: no snapshot has been promoted yet');
-    should(out.text).containEql('running: daemon is not running');
-  });
-
-  it('should warn and still report the other unavailable identities when the promoted snapshot cannot be read', async () => {
-    // A damaged promoted pointer must not make `which` unusable: the operator still needs to know
-    // whether an installed or running daemon exists, as well as why promotion could not be inspected.
-    const snapshots = new FakeSnapshots();
-    snapshots.currentError = new Error('promoted manifest is unreadable');
-    const { controller, out } = harness({
-      probes: [undefined],
-      snapshots,
-      overrides: { installedDaemon: () => undefined },
-    });
-
-    await controller.which({});
-
-    should(out.text).containEql('could not inspect the promoted fyd snapshot: promoted manifest is unreadable');
-    should(out.text).containEql('installed: not found on PATH');
-    should(out.text).containEql('promoted: no snapshot has been promoted yet');
-    should(out.text).containEql('running: daemon is not running');
-  });
-
-  it('should render all identities and remedies as JSON', async () => {
-    const { controller, out } = harness({
       overrides: {
-        installedDaemon: () => ({ path: '/opt/fyd-0.175.3', source: 'PATH', version: '0.175.3' }),
-        daemonVersion: () => '0.143.0',
+        installedDaemon: () => {
+          throw new Error('fyd must be an absolute path for a user service to launch it');
+        },
       },
     });
 
+    // Act
+    await controller.which({});
+
+    // Assert
+    should(out.text).containEql('installed: fyd must be an absolute path for a user service to launch it');
+    should(out.text).containEql('running: daemon is not running');
+  });
+
+  it('should render both identities as JSON', async () => {
+    // Arrange
+    const { controller, out } = harness({
+      probes: [health()],
+      overrides: { installedDaemon: () => installedDaemon({ version: '0.175.3' }) },
+    });
+
+    // Act
     await controller.which({ json: true });
 
+    // Assert
     const payload: unknown = JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '');
     should(payload).have.property('installed').with.property('version', '0.175.3');
-    should(payload).have.property('promoted').with.property('version', '0.143.0');
     should(payload).have.property('running').with.property('version', '1.2.3');
+    should(payload).not.have.property('promoted');
+  });
+
+  it('should render a located failure as JSON too', async () => {
+    // Arrange
+    const { controller, out } = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      overrides: { installedDaemon: noDaemonInstalled() },
+    });
+
+    // Act
+    await controller.which({ json: true });
+
+    // Assert
+    const payload: unknown = JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '');
+    should(payload).have.property('installed').with.property('state', 'not-found');
+    should(payload).have.property('running').with.property('state', 'not-running');
   });
 });
 
@@ -747,43 +818,36 @@ describe('daemon logs', () => {
 /**
  * `nix shell github:…` is a supported way to run this, and it leaves the executable in the Nix store
  * with nothing rooting it — so a later `nix-collect-garbage` deletes it out from under an installed
- * service, which then breaks with no user action. The CLI holds the root itself rather than refusing
- * the install, because refusing would be pushing our convenience onto the operator.
+ * service, which then fails to launch at the next login with nobody there to read the error.
  *
- * And it holds ONE ROOT PER RETAINED SNAPSHOT. A single per-daemon root could protect only the closure
- * of whatever ran last, so promoting a newer snapshot silently disarmed every older one: the rollback
- * candidate kept its verified executable and lost the loader and libraries that executable needs.
+ * The owner has waived the case where their OWN shell goes stale afterwards. That waiver is about an
+ * interactive session they are present for; it is not about a user service that silently stops coming
+ * up at boot, and the absolute path a unit file must record is exactly the path a collection deletes.
+ *
+ * ONE ROOT, because there is one executable. The per-snapshot roots existed because a snapshot's
+ * copied executable still loaded its interpreter and libraries from the store output it was copied
+ * FROM, so every rollback candidate needed that output held. There are no copies and no rollback
+ * candidates now.
  */
 describe('nix garbage-collection root', () => {
+  const PROFILE_BINARY = `${HOME}/.nix-profile/bin/fyd`;
   const STORE_BINARY = '/nix/store/q1w2e3r4t5y6u7i8o9p0asdfghjklzxc-ferretry-0.125.0/bin/fyd';
   const STORE_PATH = '/nix/store/q1w2e3r4t5y6u7i8o9p0asdfghjklzxc-ferretry-0.125.0';
-  const OLDER_BINARY = '/nix/store/zxcvbnmasdfghjklq1w2r3y4i5p6a7s8-ferretry-0.124.0/bin/fyd';
-  const OLDER_PATH = '/nix/store/zxcvbnmasdfghjklq1w2r3y4i5p6a7s8-ferretry-0.124.0';
-  const ROOTS = layout().nixGcRootDirectory;
+  const ROOT = layout().nixGcRoot;
 
-  /**
-   * A harness whose daemon executable resolves into the Nix store, as `nix shell` leaves it.
-   *
-   * A store fixture supplied by the caller is left exactly as it was: the interesting cases here are
-   * about SEVERAL retained snapshots, and a helper that overwrote the store's contents with one would
-   * quietly turn every one of them back into the single-snapshot case it is meant to disprove.
-   */
+  /** A harness whose daemon is reached through a profile link that resolves into the Nix store. */
   function fromTheStore(options: Parameters<typeof harness>[0] = {}): ReturnType<typeof harness> {
-    let snapshots = options.snapshots;
-    if (snapshots === undefined) {
-      snapshots = new FakeSnapshots();
-      const snapshot = daemonSnapshot({ sourceBinary: STORE_BINARY });
-      snapshots.currentAnswer = snapshot;
-      snapshots.buildAnswer = { ...snapshot, created: true };
-      snapshots.listAnswer = [snapshot];
-    }
     const nix = options.nix ?? new FakeNixGcRoot();
-    nix.links.set(STORE_BINARY, STORE_BINARY);
-    return harness({ ...options, nix, snapshots });
+    nix.links.set(PROFILE_BINARY, STORE_BINARY);
+    return harness({
+      ...options,
+      nix,
+      overrides: { installedDaemon: () => installedDaemon({ path: PROFILE_BINARY }), ...options.overrides },
+    });
   }
 
   it.each([
-    { verb: 'install' as const, options: { serviceInstalled: false } },
+    { verb: 'install' as const, options: { probes: [undefined, health()] } },
     {
       verb: 'start' as const,
       options: { probes: [undefined, health()], serviceReports: [stoppedReport] as DaemonSupervisorReport[] },
@@ -796,7 +860,7 @@ describe('nix garbage-collection root', () => {
         serviceFallback: stoppedReport,
       },
     },
-  ])('should pin the store path under the launched snapshot on $verb', async ({ verb, options }) => {
+  ])('should pin the store output of the launched executable on $verb', async ({ verb, options }) => {
     // Arrange
     const subject = fromTheStore(options);
 
@@ -804,329 +868,25 @@ describe('nix garbage-collection root', () => {
     await subject.controller[verb]();
 
     // Assert — the ROOT of the store output, not the executable inside it: `nix-store --realise`
-    // takes a store path. The copied current binary is outside the store, so its verified manifest
-    // source — not the runtime symlink or today's configured build input — must drive classification.
-    // The root is named for the snapshot, which is what makes a second snapshot a second root.
-    should(subject.nix.realPaths).deepEqual([STORE_BINARY]);
-    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${daemonSnapshot().id}` }]);
+    // takes a store path. The link is resolved first, because only the real path tells a `nix profile`
+    // or `nix shell` installation apart from a Homebrew or GoReleaser one.
+    should(subject.nix.realPaths).deepEqual([PROFILE_BINARY]);
+    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: ROOT }]);
     should(subject.out.text).not.containEql('could not be pinned');
   });
 
-  it('should keep a distinct root per retained snapshot so a rollback candidate stays runnable', async () => {
-    // Arrange — the exact shape the single-root design broke: an older Nix-built snapshot retained for
-    // rollback, and a newer one being promoted over it.
-    const older = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: OLDER_BINARY });
-    const newer = daemonSnapshot({ sourceBinary: STORE_BINARY });
-    const snapshots = new FakeSnapshots();
-    snapshots.listAnswer = [newer, older];
-    snapshots.currentAnswer = newer;
-    const subject = fromTheStore({ snapshots, probes: [undefined, health()], serviceReports: [stoppedReport] });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert — two snapshots, two roots, two closures held. Nothing is released: the older snapshot is
-    // still in the store, so its closure is still a rollback that has to work.
-    should(subject.nix.pinned).deepEqual([
-      { storePath: STORE_PATH, rootPath: `${ROOTS}/${newer.id}` },
-      { storePath: OLDER_PATH, rootPath: `${ROOTS}/${older.id}` },
-    ]);
-    should(subject.nix.released).deepEqual([layout().supersededNixGcRoot]);
-  });
-
-  it('should keep the older root when a later snapshot is promoted over it', async () => {
-    // Arrange — promotion is the moment the old design re-pointed its one root and disarmed the
-    // rollback. Both snapshots already hold roots, so only the promoted one is re-registered.
-    const older = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, sourceBinary: OLDER_BINARY });
-    const newer = daemonSnapshot({ sourceBinary: STORE_BINARY });
-    const snapshots = new FakeSnapshots();
-    snapshots.listAnswer = [newer, older];
-    const nix = new FakeNixGcRoot();
-    nix.heldNames = [newer.id, older.id];
-    nix.links.set(OLDER_BINARY, OLDER_BINARY);
-    const subject = fromTheStore({ snapshots, nix });
-
-    // Act
-    await subject.controller.promoteSnapshot(newer.id);
-
-    // Assert — the older root is neither re-registered nor released; it simply stays.
-    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${newer.id}` }]);
-    should(subject.nix.released).deepEqual([layout().supersededNixGcRoot]);
-  });
-
-  it('should give a snapshot its root as soon as it is built, before anything promotes it', async () => {
-    // Arrange — a snapshot with no root is a rollback candidate a garbage collection can disarm
-    // before it has ever been selected.
-    const built = daemonSnapshot({ id: `sha256-${'e'.repeat(64)}`, sourceBinary: STORE_BINARY });
-    const snapshots = new FakeSnapshots();
-    snapshots.buildAnswer = { ...built, created: true };
-    snapshots.listAnswer = [built];
-    const subject = fromTheStore({ snapshots });
-
-    // Act
-    await subject.controller.buildSnapshot();
-
-    // Assert
-    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${built.id}` }]);
-  });
-
-  it('should pin the snapshot just built even when an incomplete inventory omits it', async () => {
-    // Arrange — the build result is verified knowledge. A sibling that makes the tolerant inventory
-    // incomplete must prevent releases, but it must not hide the snapshot this command just created
-    // from the additive side of reconciliation.
-    const built = daemonSnapshot({ id: `sha256-${'d'.repeat(64)}`, sourceBinary: STORE_BINARY });
-    const snapshots = new FakeSnapshots();
-    snapshots.buildAnswer = { ...built, created: true };
-    snapshots.retainedAnswer = {
-      snapshots: [],
-      complete: false,
-      unreadable: [{ path: '/snapshots/interrupted', reason: 'its build did not finish' }],
-    };
-    const nix = new FakeNixGcRoot();
-    nix.heldNames = [`sha256-${'9'.repeat(64)}`];
-    const subject = fromTheStore({ snapshots, nix });
-
-    // Act
-    await subject.controller.buildSnapshot();
-
-    // Assert — known protection is added, while neither the unknown root nor the superseded safety
-    // net is released from an inventory that is not the whole truth.
-    should(subject.nix.realPaths).deepEqual([STORE_BINARY]);
-    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${built.id}` }]);
-    should(subject.nix.released).be.empty();
-    should(subject.out.text).containEql('left every garbage-collection root in place');
-  });
-
-  it('should release a root whose snapshot is no longer retained, and only that one', async () => {
-    // Arrange — the one lifetime that ends a root: the snapshot it protects is gone from the store,
-    // so the closure is being held for a rollback candidate that does not exist.
-    const retained = daemonSnapshot({ sourceBinary: STORE_BINARY });
-    const departed = `sha256-${'f'.repeat(64)}`;
-    const snapshots = new FakeSnapshots();
-    snapshots.listAnswer = [retained];
-    const nix = new FakeNixGcRoot();
-    nix.heldNames = [retained.id, departed];
-    const subject = fromTheStore({ snapshots, nix, probes: [undefined, health()], serviceReports: [stoppedReport] });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(subject.nix.released).deepEqual([`${ROOTS}/${departed}`, layout().supersededNixGcRoot]);
-  });
-
-  it('should keep the superseded single root while any closure it might hold is unheld', async () => {
-    // Arrange — the upgrade path. Dropping the old one-per-daemon root while a registration is
-    // failing could withdraw the only protection a retained closure still has.
-    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
-    subject.nix.failure = 'nix-store is not on PATH';
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(subject.nix.released).be.empty();
-  });
-
-  it.each([
-    {
-      verb: 'restart',
-      options: {
-        probes: [health(), undefined, health()],
-        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
-        serviceFallback: stoppedReport,
-      },
-      run: (controller: DaemonController) => controller.restart(),
-    },
-    {
-      verb: 'start',
-      options: {
-        probes: [undefined, health()],
-        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
-      },
-      run: (controller: DaemonController) => controller.start(),
-    },
-    { verb: 'install', options: { probes: [undefined, health()] }, run: (c: DaemonController) => c.install() },
-  ])('should carry $verb through one unreadable snapshot rather than fail on it', async ({ options, run, verb }) => {
-    // Arrange — an interrupted build leaves a directory no later build repairs, by design. When the
-    // reconciliation read the VERIFYING listing, one of those disabled every mutating verb, and
-    // `restart` stopped the daemon and then refused to start it again.
-    const promoted = daemonSnapshot({ sourceBinary: STORE_BINARY });
-    const snapshots = new FakeSnapshots();
-    snapshots.currentAnswer = promoted;
-    snapshots.buildAnswer = { ...promoted, created: true };
-    const damagedId = `sha256-${'9'.repeat(64)}`;
-    snapshots.retainedAnswer = {
-      snapshots: [{ id: promoted.id, sourceBinary: STORE_BINARY }],
-      complete: false,
-      unreadable: [{ path: `/snapshots/${damagedId}`, reason: 'is mutable, so a build of it did not finish' }],
-    };
-    const nix = new FakeNixGcRoot();
-    nix.heldNames = [damagedId];
-    const subject = fromTheStore({ ...options, snapshots, nix });
-
-    // Act
-    await run(subject.controller);
-
-    // Assert — the daemon is up on the exact artifact this verb verified, the damaged entry is named,
-    // and NOTHING is released, because an entry that could not be read is a snapshot that is still
-    // there and its root is still the only thing holding its closure.
-    should(subject.service.startedExecutables.concat(subject.service.installedExecutables)).containEql(
-      promoted.binaryPath,
-    );
-    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${promoted.id}` }]);
-    should(subject.nix.released).be.empty();
-    should(subject.out.text).containEql('skipped snapshot inventory entry');
-    should(subject.out.text).containEql('did not finish');
-    should(subject.out.text).containEql('left every garbage-collection root in place');
-    should(subject.out.text).containEql(verb === 'install' ? 'user service installed' : 'fyd');
-  });
-
-  it('should complete uninstall through one unreadable snapshot without releasing any root', async () => {
-    // Arrange — uninstall removes the definition before it reconciles. A damaged sibling must not
-    // turn that completed removal into a reported failure or authorize removal of an unknown root.
-    const retained = daemonSnapshot({ sourceBinary: STORE_BINARY });
-    const damagedId = `sha256-${'8'.repeat(64)}`;
-    const snapshots = new FakeSnapshots();
-    snapshots.retainedAnswer = {
-      snapshots: [{ id: retained.id, sourceBinary: retained.sourceBinary }],
-      complete: false,
-      unreadable: [{ path: `/snapshots/${damagedId}`, reason: 'is mutable because its build did not finish' }],
-    };
-    const nix = new FakeNixGcRoot();
-    nix.heldNames = [damagedId];
-    const subject = fromTheStore({ snapshots, nix });
-
-    // Act
-    await subject.controller.uninstall();
-
-    // Assert — the definition is gone, the operator gets both the warning and truthful success, and
-    // the held root remains because its matching snapshot may be the unreadable entry.
-    should(subject.service.calls).containEql('uninstall');
-    should(subject.nix.released).be.empty();
-    should(subject.out.text).containEql(`skipped snapshot inventory entry /snapshots/${damagedId}`);
-    should(subject.out.text).containEql('left every garbage-collection root in place');
-    should(subject.out.text).containEql('user service removed');
-  });
-
-  it('should hold and launch the verified snapshot even when the whole inventory is unreadable', async () => {
-    // Arrange — the strongest form of the same rule: the store cannot be read at all. This is a
-    // safety net for a rollback that might happen later; the daemon in front of the operator is the
-    // thing that has to keep working.
-    const snapshots = new FakeSnapshots();
-    snapshots.currentAnswer = daemonSnapshot({ sourceBinary: STORE_BINARY });
-    snapshots.retainedError = new Error('/snapshots could not be read: EACCES');
-    const nix = new FakeNixGcRoot();
-    nix.heldNames = [`sha256-${'7'.repeat(64)}`];
-    const subject = fromTheStore({
-      snapshots,
-      nix,
-      probes: [undefined, health()],
-      serviceReports: [stoppedReport],
-    });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(subject.service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
-    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${daemonSnapshot().id}` }]);
-    should(subject.nix.released).be.empty();
-    should(subject.out.text).containEql('inventory read failed');
-    should(subject.out.text).containEql('fyd ready');
-  });
-
-  it('should reconcile against the cheap inventory rather than the verifying listing', async () => {
-    // Arrange — the verifying listing digests every retained executable, so putting it on the
-    // lifecycle's critical path made `start` cost more the longer a host had been building snapshots,
-    // and spent the claim's budget on hashing. Reconciliation needs a snapshot named, never proven.
-    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(subject.snapshots.calls).containEql('retained');
-    should(subject.snapshots.calls).not.containEql('list');
-  });
-
-  it('should keep the roots outside the state home, which the daemon refuses to share', async () => {
-    // Arrange — a CLI-created path inside the state home is the defect that stopped every fresh
-    // machine from starting the daemon, and these roots are symbolic links besides, which the
-    // daemon's filesystem port refuses anywhere under its home.
-    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(ROOTS).equal('/tmp/fy-home/.local/state/ferretry/nix/snapshots/fyd');
-    should(ROOTS.startsWith(`${layout().stateHome}/`)).be.false();
-    should(layout().supersededNixGcRoot).equal('/tmp/fy-home/.local/state/ferretry/nix/fyd');
-  });
-
-  it('should leave a binary that does not come from the store untouched', async () => {
-    // Arrange — the fixture's daemon is a plain /opt install, as brew or GoReleaser would leave it.
+  it('should release a stale root when the installed daemon is no longer from the store', async () => {
+    // Arrange — the fixture's daemon is a plain /opt install, as brew or GoReleaser leaves it. A root
+    // from an earlier Nix installation would otherwise hold that closure forever.
     const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport] });
 
     // Act
     await subject.controller.start();
 
     // Assert
-    should(subject.nix.pinned).deepEqual([]);
+    should(subject.nix.pinned).be.empty();
+    should(subject.nix.released).deepEqual([ROOT]);
     should(subject.out.text).containEql('fyd ready');
-  });
-
-  it('should pin the snapshot returned by first-run bootstrap', async () => {
-    // Arrange — promotion returns the just-built manifest. The live source configured in the layout
-    // is deliberately /opt, proving that the promoted manifest is the authority for what will run.
-    const snapshots = new FakeSnapshots();
-    const built = daemonSnapshot({ id: `sha256-${'c'.repeat(64)}`, sourceBinary: STORE_BINARY });
-    snapshots.currentAnswer = undefined;
-    snapshots.buildAnswer = { ...built, created: true };
-    snapshots.listAnswer = [built];
-    const nix = new FakeNixGcRoot();
-    const subject = harness({ serviceInstalled: false, probes: [undefined, health()], snapshots, nix });
-
-    // Act
-    await subject.controller.install();
-
-    // Assert
-    should(snapshots.calls).deepEqual(['current', 'build', `promote:${built.id}`, 'retained']);
-    should(nix.realPaths).deepEqual([STORE_BINARY]);
-    should(nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${built.id}` }]);
-  });
-
-  it('should launch the exact snapshot it verified and pinned even when promotion moves concurrently', async () => {
-    // Arrange
-    const snapshots = new FakeSnapshots();
-    const selected = daemonSnapshot({
-      id: `sha256-${'c'.repeat(64)}`,
-      sourceBinary: STORE_BINARY,
-      binaryPath: '/immutable/snapshots/selected/fyd',
-    });
-    const later = daemonSnapshot({
-      id: `sha256-${'d'.repeat(64)}`,
-      sourceBinary: '/opt/fy/bin/later-fyd',
-      binaryPath: '/immutable/snapshots/later/fyd',
-    });
-    snapshots.currentAnswer = selected;
-    const nix = new FakeNixGcRoot();
-    nix.links.set(STORE_BINARY, STORE_BINARY);
-    nix.afterRealPath = () => {
-      snapshots.currentAnswer = later;
-    };
-    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport], snapshots, nix });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert — promotion changed after capture, but pinning and execution stay bound to snapshot A.
-    // Every retained snapshot is classified, so the captured one appears among them rather than alone.
-    should(nix.realPaths).containEql(selected.sourceBinary);
-    should(nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: `${ROOTS}/${selected.id}` }]);
-    should(subject.service.startedExecutables).deepEqual([selected.binaryPath]);
-    should(subject.service.startedExecutables).not.containEql(later.binaryPath);
   });
 
   it('should start the daemon anyway when the pin fails, and say so', async () => {
@@ -1140,137 +900,178 @@ describe('nix garbage-collection root', () => {
     // Assert
     should(subject.out.text).containEql('could not be pinned against garbage collection');
     should(subject.out.text).containEql('nix-store is not on PATH');
+    should(subject.out.text).containEql(STORE_PATH);
     should(subject.out.text).containEql('nix profile install');
     should(subject.out.text).containEql('fyd ready');
     should(subject.out.exitCode).be.undefined();
   });
 
-  it('should keep a retained snapshot held through uninstall rather than disarming a rollback', async () => {
-    // Arrange — removing the service does not retire a snapshot. This verb used to drop the daemon's
-    // one root here, which withdrew protection from every snapshot still sitting in the store.
-    const subject = fromTheStore();
+  it('should hold the closure before the definition names the path it holds', async () => {
+    // Arrange — the two halves of a lifecycle verb. A definition that named a store path nothing was
+    // holding is a unit that can stop loading between this command and the next boot.
+    const trail: string[] = [];
+    const subject = fromTheStore({ probes: [undefined, health()] });
+    const pin = subject.nix.pin.bind(subject.nix);
+    subject.nix.pin = async (storePath, rootPath) => {
+      trail.push('pin');
+      return await pin(storePath, rootPath);
+    };
+    const install = subject.service.install.bind(subject.service);
+    subject.service.install = async executable => {
+      trail.push('install');
+      await install(executable);
+    };
 
     // Act
-    await subject.controller.uninstall();
+    await subject.controller.install();
 
-    // Assert — the retained snapshot's own root is untouched, and the operator is told the closures
-    // stay held rather than left to discover a store path nothing accounts for.
-    should(subject.nix.released).deepEqual([layout().supersededNixGcRoot]);
-    should(subject.nix.released).not.containEql(`${ROOTS}/${daemonSnapshot().id}`);
-    should(subject.out.text).containEql('user service removed; retained snapshot closures stay held in');
-    should(subject.out.text).containEql(ROOTS);
+    // Assert
+    should(trail).deepEqual(['pin', 'install']);
+  });
+
+  it('should keep the root outside the state home, which the daemon refuses to share', async () => {
+    // Arrange — a CLI-created path inside the state home is the defect that stopped every fresh
+    // machine from starting the daemon, and this root is a symbolic link besides, which the daemon's
+    // filesystem port refuses anywhere under its home.
+
+    // Act
+    const actual = layout();
+
+    // Assert
+    should(actual.nixGcRoot).equal('/tmp/fy-home/.local/state/ferretry/nix/fyd');
+    should(actual.nixGcRoot.startsWith(`${actual.stateHome}/`)).be.false();
   });
 });
 
-describe('daemon snapshots', () => {
-  it('should bootstrap only a genuinely absent promoted snapshot before install', async () => {
-    // Arrange
-    const snapshots = new FakeSnapshots();
-    snapshots.currentAnswer = undefined;
-    const { controller, out, service } = harness({ probes: [undefined, health()], snapshots });
+/**
+ * The daemon snapshot store an earlier release left behind, and why a lifecycle verb removes it.
+ *
+ * An upgraded host has roughly 100MB of copies of an executable it already has installed, plus one Nix
+ * root per copy. Leaving it there means every operator carries that forever and finds a directory
+ * nothing accounts for; telling them to remove it in release notes is an instruction almost nobody
+ * follows. The cleanup runs, it says what it did, and it never fails the verb it is attached to.
+ */
+describe('retired snapshot store', () => {
+  const ROOTS = layout().legacySnapshotGcRootDirectory;
+  const STORE = layout().legacySnapshotRoot;
+
+  /** A host that ran the release with the snapshot store: a populated store and one root per copy. */
+  function upgraded(options: Parameters<typeof harness>[0] = {}): ReturnType<typeof harness> {
+    const nix = options.nix ?? new FakeNixGcRoot();
+    nix.heldNames = [`sha256-${'a'.repeat(64)}`, `sha256-${'b'.repeat(64)}`];
+    const retired = options.retired ?? new FakeRetiredArtifacts();
+    retired.answers.set(ROOTS, { kind: 'removed', files: 2, bytes: 0 });
+    retired.answers.set(STORE, { kind: 'removed', files: 6, bytes: 104_857_600 });
+    return harness({ ...options, nix, retired });
+  }
+
+  it('should say nothing at all on a host that never had one', async () => {
+    // Arrange — the ordinary case, and the one that must not narrate. A fresh install has no store.
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport] });
 
     // Act
-    await controller.install();
+    await subject.controller.start();
 
-    // Assert
-    should(snapshots.calls).deepEqual(['current', 'build', `promote:${snapshots.buildAnswer.id}`, 'retained']);
-    should(service.calls).containEql('install');
-    should(out.text).containEql(`built and promoted ${snapshots.buildAnswer.id}`);
+    // Assert — it still LOOKS, because an upgraded host is indistinguishable until it does.
+    should(subject.retired.retired).deepEqual([ROOTS, STORE]);
+    should(subject.out.text).equal('ok: fyd ready (pid 4242)');
   });
 
-  it('should fail closed before stopping a daemon when the promoted snapshot is damaged', async () => {
+  it.each([
+    { verb: 'install' as const, options: { probes: [undefined, health()] } },
+    {
+      verb: 'start' as const,
+      options: { probes: [undefined, health()], serviceReports: [stoppedReport] as DaemonSupervisorReport[] },
+    },
+    {
+      verb: 'restart' as const,
+      options: {
+        probes: [health(), undefined, health()],
+        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
+        serviceFallback: stoppedReport,
+      },
+    },
+    { verb: 'uninstall' as const, options: {} },
+  ])('should remove the store and its roots on $verb, and say how much came back', async ({ verb, options }) => {
     // Arrange
-    const snapshots = new FakeSnapshots();
-    snapshots.currentError = new Error('current snapshot digest mismatch');
-    const { controller, service, nix } = harness({ snapshots });
+    const subject = upgraded(options);
+
+    // Act
+    await subject.controller[verb]();
+
+    // Assert — every per-snapshot root is released through the Nix port, both directories go, and the
+    // reclaimed disk is stated once rather than quietly deleted.
+    should(subject.nix.released.filter(path => path.startsWith(`${ROOTS}/`))).deepEqual([
+      `${ROOTS}/sha256-${'a'.repeat(64)}`,
+      `${ROOTS}/sha256-${'b'.repeat(64)}`,
+    ]);
+    should(subject.retired.retired).deepEqual([ROOTS, STORE]);
+    should(subject.out.text).containEql('removed the retired fyd snapshot store (8 files, 104.9MB)');
+    should(subject.out.text).containEql('runs the daemon installed on this host instead of a copy of it');
+  });
+
+  it('should remove it only after the definition no longer names anything inside it', async () => {
+    // Arrange — THE SAFETY ARGUMENT. An upgraded host's unit file still names an artifact inside the
+    // store, so a removal that ran first would leave a service that cannot launch. `start` rewrites
+    // the definition with the installed executable's absolute path, and only then is nothing pointing
+    // at the store.
+    const trail: string[] = [];
+    const retired = new FakeRetiredArtifacts();
+    const subject = upgraded({ probes: [undefined, health()], serviceReports: [stoppedReport], retired });
+    const start = subject.service.start.bind(subject.service);
+    subject.service.start = async executable => {
+      trail.push('start');
+      return await start(executable);
+    };
+    const retire = retired.retire.bind(retired);
+    retired.retire = async path => {
+      trail.push('retire');
+      return await retire(path);
+    };
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(trail).deepEqual(['start', 'retire', 'retire']);
+  });
+
+  it('should leave the store alone when the start it was attached to failed', async () => {
+    // Arrange — the definition was rewritten but the daemon never served, so the operator may still
+    // need whatever is on this host. Tidying is not worth taking that away mid-incident.
+    const subject = upgraded({ probes: [undefined], serviceFallback: stoppedReport });
 
     // Act + Assert
-    await should(controller.restart()).be.rejectedWith(/digest mismatch/u);
-    should(service.calls).be.empty();
-    should(nix.realPaths).be.empty();
+    await should(subject.controller.start()).be.rejectedWith(DaemonStartupFailedError);
+    should(subject.retired.retired).be.empty();
   });
 
-  it('should build without promotion and say whether the content was new', async () => {
-    // Arrange
-    const snapshots = new FakeSnapshots();
-    const first = harness({ snapshots });
+  it('should name what it could not remove instead of failing the verb', async () => {
+    // Arrange — reclaiming disk is tidying; the daemon in front of the operator is the work.
+    const retired = new FakeRetiredArtifacts();
+    retired.answers.set(STORE, { kind: 'failed', reason: 'EACCES' });
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport], retired });
 
     // Act
-    await first.controller.buildSnapshot();
-    snapshots.buildAnswer = { ...snapshots.buildAnswer, created: false };
-    const second = harness({ snapshots });
-    await second.controller.buildSnapshot();
+    await subject.controller.start();
 
     // Assert
-    should(first.out.text).containEql(`${snapshots.buildAnswer.id} built from /opt/fy/bin/fyd`);
-    should(second.out.text).containEql(`${snapshots.buildAnswer.id} already complete from /opt/fy/bin/fyd`);
-  });
-
-  it('should promote an exact older id through the same path used for rollout', async () => {
-    // Arrange
-    const snapshots = new FakeSnapshots();
-    const older = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}` });
-    snapshots.listAnswer = [older];
-    const { controller, out } = harness({ snapshots });
-
-    // Act
-    await controller.promoteSnapshot(older.id);
-
-    // Assert
-    should(snapshots.calls).deepEqual([`promote:${older.id}`, 'retained']);
-    should(out.text).equal(
-      `ok: fyd snapshot ${older.id} promoted; the running daemon is unchanged until the next managed launch`,
-    );
-  });
-
-  it('should render the promoted marker and a machine-readable snapshot list', async () => {
-    // Arrange
-    const snapshots = new FakeSnapshots();
-    const older = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, createdAt: '2026-08-03T12:00:00.000Z' });
-    const current = daemonSnapshot();
-    snapshots.listAnswer = [current, older];
-    snapshots.currentAnswer = current;
-    const human = harness({ snapshots });
-
-    // Act
-    await human.controller.listSnapshots({});
-    const machine = harness({ snapshots });
-    await machine.controller.listSnapshots({ json: true });
-
-    // Assert
-    should(human.out.text).containEql(`* ${current.id}`);
-    should(human.out.text).containEql(`  ${older.id}`);
-    const payload = JSON.parse(machine.out.lines[0]?.replace('ok: ', '') ?? '') as {
-      snapshots?: Array<{ id?: string; current?: boolean }>;
-    };
-    should(payload.snapshots?.[0]).containEql({ id: current.id, current: true });
-    should(payload.snapshots?.[1]).containEql({ id: older.id, current: false });
-  });
-
-  it('should report a clean empty snapshot store without pretending it is damaged', async () => {
-    // Arrange
-    const snapshots = new FakeSnapshots();
-    snapshots.listAnswer = [];
-    snapshots.currentAnswer = undefined;
-    const { controller, out } = harness({ snapshots });
-
-    // Act
-    await controller.listSnapshots({});
-
-    // Assert
-    should(out.text).equal('warn: no fyd snapshots have been built');
+    should(subject.out.text).containEql(`could not remove its retired snapshot store at ${STORE} (EACCES)`);
+    should(subject.out.text).containEql('safe to delete by hand');
+    should(subject.out.text).containEql('ok: fyd ready (pid 4242)');
+    should(subject.out.exitCode).be.undefined();
   });
 });
 
 /**
  * Two `fy daemon` invocations are unrelated, so nothing in this object can order them.
  *
- * Each mutating verb reconciles garbage-collection roots and then writes a service definition or
- * launches an executable, and those halves have to agree about which snapshot is in play. A peer that
- * interleaves them leaves a unit naming one snapshot while the roots hold another's closure, so the
- * whole verb runs inside one ordered daemon-keyed claim set — and the reporting verbs stay outside
- * it, because a `status` that waited on a slow `restart` would make the tool useless exactly when it
- * is needed.
+ * Each mutating verb holds the executable's garbage-collection root and then writes a service
+ * definition or launches that executable, and those halves have to agree about which file is in play.
+ * A peer that interleaves them leaves a unit naming one executable while the root holds another's
+ * closure, so the whole verb runs inside one ordered daemon-keyed claim set — and the reporting verbs
+ * stay outside it, because a `status` that waited on a slow `restart` would make the tool useless
+ * exactly when it is needed.
  */
 describe('daemon lifecycle serialization', () => {
   it.each([
@@ -1294,10 +1095,9 @@ describe('daemon lifecycle serialization', () => {
       options: { probes: [undefined, health()], serviceFallback: stoppedReport },
       run: (c: DaemonController) => c.restart(),
     },
-    { verb: 'snapshot build', claimed: 'snapshot build', options: {}, run: (c: DaemonController) => c.buildSnapshot() },
     { verb: 'status', claimed: undefined, options: {}, run: (c: DaemonController) => c.status({}) },
     { verb: 'logs', claimed: undefined, options: {}, run: (c: DaemonController) => c.logs({}) },
-    { verb: 'snapshot list', claimed: undefined, options: {}, run: (c: DaemonController) => c.listSnapshots({}) },
+    { verb: 'which', claimed: undefined, options: {}, run: (c: DaemonController) => c.which({}) },
   ])('should run $verb inside the daemon-keyed claims named $claimed', async ({ options, claimed, run }) => {
     // Arrange
     const subject = harness(options);
@@ -1319,26 +1119,9 @@ describe('daemon lifecycle serialization', () => {
     should(subject.lifecycle.releasedPaths).deepEqual(claimed === undefined ? [] : [...lockPaths].reverse());
   });
 
-  it('should claim every daemon-keyed path for a snapshot promotion too', async () => {
-    // Arrange — promotion moves the pointer a launch reads and registers a root, so it is a mutating
-    // lifecycle step even though it starts nothing.
-    const subject = harness({});
-    const lockPaths = layout().lifecycleLocks;
-
-    // Act
-    await subject.controller.promoteSnapshot(daemonSnapshot().id);
-
-    // Assert
-    should(subject.lifecycle.trail).deepEqual([
-      ...lockPaths.map(() => 'acquire:snapshot promote'),
-      ...lockPaths.map(() => 'release:snapshot promote'),
-    ]);
-    should(subject.lifecycle.releasedPaths).deepEqual([...lockPaths].reverse());
-  });
-
   it('should give every claim shutdown, startup, and reconciliation headroom', async () => {
-    // Arrange — a peer inside `restart` legitimately spends both waits plus promoted-snapshot and
-    // root-reconciliation work, so a shorter bound would refuse a command queued behind a healthy one.
+    // Arrange — a peer inside `restart` legitimately spends both waits plus the root-holding and
+    // retirement work, so a shorter bound would refuse a command queued behind a healthy one.
     const subject = harness({ probes: [health()] });
 
     // Act
@@ -1360,7 +1143,7 @@ describe('daemon lifecycle serialization', () => {
     // Act + Assert
     await should(subject.controller.start()).be.rejectedWith(/still holds/u);
     should(subject.service.calls).be.empty();
-    should(subject.snapshots.calls).be.empty();
+    should(subject.retired.retired).be.empty();
     should(subject.nix.pinned).be.empty();
     should(subject.lifecycle.releasedPaths).be.empty();
   });
@@ -1399,7 +1182,7 @@ describe('daemon lifecycle serialization', () => {
     should(subject.lifecycle.requests.map(request => request.lockPath)).deepEqual(lockPaths);
     should(subject.lifecycle.releasedPaths).deepEqual([...acquired].reverse());
     should(subject.service.calls).be.empty();
-    should(subject.snapshots.calls).be.empty();
+    should(subject.retired.retired).be.empty();
     should(subject.nix.pinned).be.empty();
   });
 
@@ -1444,7 +1227,8 @@ describe('daemon controller defaults', () => {
       logs: new FakeLogs(),
       nix: new FakeNixGcRoot(),
       lifecycle: new FakeLifecycleLock(),
-      snapshots: new FakeSnapshots(),
+      installedDaemon: () => installedDaemon(),
+      retired: new FakeRetiredArtifacts(),
       clock: new SteppingClock(),
       out: new CapturedOutput(),
       firstPassword: new RecordingFirstPassword(),

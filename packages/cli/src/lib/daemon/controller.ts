@@ -1,10 +1,9 @@
 import type { HealthView } from '@ferretry/protocol';
-import { planSnapshotGcRoots, type SnapshotClosure } from './gc-roots.ts';
+import type { InstalledDaemonBinary } from './binary.ts';
 import type { DaemonLayout } from './layout.ts';
 import { nixStorePathOf } from './nix-store.ts';
 import type {
   DaemonLifecycleVerb,
-  DaemonSnapshot,
   DaemonStartHandle,
   IClockPort,
   IDaemonHealthPort,
@@ -12,12 +11,11 @@ import type {
   IDaemonLifecycleLockPort,
   IDaemonLogPort,
   IDaemonOutput,
-  IDaemonSnapshotPort,
   IDaemonSupervisor,
   INixGcRootPort,
+  IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
-  RetainedSnapshot,
-  RetainedSnapshotInventory,
+  RetiredArtifactOutcome,
 } from './ports.ts';
 import { livenessOf } from './probe.ts';
 import {
@@ -46,12 +44,6 @@ export interface DaemonCommandOptions {
   readonly follow?: boolean;
 }
 
-export interface InstalledDaemonBinary {
-  readonly path: string;
-  readonly source: 'FY_DAEMON_BIN' | 'PATH';
-  readonly version?: string | undefined;
-}
-
 export class DaemonStartupFailedError extends Error {
   constructor(message: string) {
     super(message);
@@ -60,8 +52,9 @@ export class DaemonStartupFailedError extends Error {
 }
 
 /**
- * What a holder may spend outside its readiness and shutdown waits: verifying the promoted snapshot
- * and reconciling roots. A peer waits this much longer before refusing.
+ * What a holder may spend outside its readiness and shutdown waits: locating the installed daemon,
+ * holding its closure, and retiring what an earlier release left behind. A peer waits this much
+ * longer before refusing.
  */
 const LIFECYCLE_RECONCILIATION_ALLOWANCE_MS = 30_000;
 
@@ -70,6 +63,11 @@ export class DaemonShutdownFailedError extends Error {
     super(message);
     this.name = 'DaemonShutdownFailedError';
   }
+}
+
+/** Reclaimed disk, in the unit a person recognises. One decimal is as much precision as this means. */
+function megabytes(bytes: number): string {
+  return `${(bytes / 1_000_000).toFixed(1)}MB`;
 }
 
 /** What the controller needs; a struct so the composition root reads as a wiring list. */
@@ -85,11 +83,17 @@ export interface DaemonControllerDeps {
   readonly nix: INixGcRootPort;
   /** Serializes every mutating verb below against the same verbs in other invocations. */
   readonly lifecycle: IDaemonLifecycleLockPort;
-  readonly snapshots: IDaemonSnapshotPort;
-  /** The installed daemon binary, when this invocation has one on its PATH. */
-  readonly installedDaemon?: () => InstalledDaemonBinary | undefined;
-  /** Reads a daemon artifact's version without making it part of the snapshot format. */
-  readonly daemonVersion?: (path: string) => string | undefined;
+  /**
+   * The daemon executable this host runs, or a THROW naming the remedy when there is none.
+   *
+   * Required, and required to be total in the sense that it either answers or explains. There is no
+   * second candidate to fall back to now that no copy of the executable is kept: an invocation that
+   * cannot say which file to launch cannot launch anything, and saying so is strictly better than a
+   * unit file naming a path chosen by default.
+   */
+  readonly installedDaemon: () => InstalledDaemonBinary;
+  /** Removes CLI-owned artifact trees an earlier release wrote and this one no longer keeps. */
+  readonly retired: IRetiredArtifactPort;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
   /**
@@ -118,12 +122,19 @@ interface IFirstPasswordOffer {
  * authority on whether it is supervised. Neither answer comes from a file under the state home — the
  * CLI does not read the daemon's state, which is the seam the whole package split exists to enforce.
  *
+ * THE DAEMON THAT RUNS IS THE DAEMON THIS HOST HAS INSTALLED. There is no copy, no promotion and no
+ * pointer of our own: `install`, `start` and `restart` resolve the installed executable and record or
+ * launch that absolute path. An upgrade is therefore whatever the package manager already did plus a
+ * `restart`, and a rollback is the same — this CLI never became a second, worse package manager for
+ * one file.
+ *
  * EVERY MUTATING VERB IS ONE SERIALIZED TRANSACTION, and the ones that only report are not. Each
- * mutating verb reconciles garbage-collection roots and then writes a service definition or launches
- * an executable, and those two halves have to agree about which snapshot is in play: two invocations
- * that interleave them leave a unit file naming one snapshot while the roots hold another's closure.
- * Claims keyed on every ownership target are what make the pair atomic against a peer invocation, and
- * they are taken in the public verb rather than deeper down so no verb can ever nest inside another.
+ * mutating verb holds the executable's garbage-collection root and then writes a service definition
+ * or launches that executable, and those two halves have to agree about which file is in play: two
+ * invocations that interleave them leave a unit file naming one executable while the root holds
+ * another's closure. Claims keyed on every ownership target are what make the pair atomic against a
+ * peer invocation, and they are taken in the public verb rather than deeper down so no verb can ever
+ * nest inside another.
  */
 export class DaemonController {
   private readonly readiness: ReadinessPolicy;
@@ -166,63 +177,57 @@ export class DaemonController {
     await this.#serialized('restart', () => this.#restart());
   }
 
-  async buildSnapshot(): Promise<void> {
-    await this.#serialized('snapshot build', () => this.#buildSnapshot());
-  }
-
-  async promoteSnapshot(id: string): Promise<void> {
-    await this.#serialized('snapshot promote', () => this.#promoteSnapshot(id));
-  }
-
   async #install(): Promise<void> {
-    const snapshot = await this.#ensurePromotedSnapshot();
+    const daemon = this.deps.installedDaemon();
     const service = this.#service();
     // Before the definition is written, so a unit file never names a store path nothing is holding.
-    await this.#holdRetainedClosures(snapshot);
-    await service.install(snapshot.binaryPath);
+    await this.#holdDaemonClosure(daemon.path);
+    await service.install(daemon.path);
     const health = await this.#awaitReady(service, {});
+    await this.#retireLegacyArtifacts();
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
   }
 
   async #uninstall(): Promise<void> {
     const service = this.#service();
     await service.uninstall();
-    // REMOVING THE SERVICE DOES NOT RETIRE A SNAPSHOT, so it does not retire a snapshot's root.
+    // REMOVING SUPERVISION DOES NOT UNINSTALL THE DAEMON, so it does not release the daemon's root.
     //
-    // This verb used to drop the daemon's one root here, and the asymmetry with `stop` was the point:
-    // in a `nix shell`, releasing on stop meant a garbage collection could leave the next `start` with
-    // no executable at all. Per-snapshot roots retire the argument rather than settle it — every root
-    // now belongs to a snapshot that is still sitting in the store, waiting to be promoted, and an
-    // uninstalled service does not make any of them less runnable. Reconciling still runs, so a root
-    // whose snapshot is genuinely gone is released; the ones that remain are named, because a held
-    // store path an operator cannot account for is its own kind of surprise.
-    await this.#holdRetainedClosures(undefined);
+    // The asymmetry with `stop` was always the point: in a `nix shell`, releasing the root when the
+    // daemon goes down means a garbage collection can leave the next `start` with no executable at
+    // all — and `fy daemon start` still runs the daemon as a direct child on a host with no service
+    // definition. The root belongs to the executable on this host's PATH, and that executable is
+    // exactly as installed after this verb as it was before it. It is released when the installed
+    // daemon stops being a store path, and named here because a held store path an operator cannot
+    // account for is its own kind of surprise.
+    await this.#retireLegacyArtifacts();
     this.deps.out.success(
-      `${this.#name} user service removed; retained snapshot closures stay held in ${this.deps.layout.nixGcRootDirectory} so a rollback remains runnable`,
+      `${this.#name} user service removed; the installed daemon's Nix closure stays held by ${this.deps.layout.nixGcRoot} so a later fy daemon start still works`,
     );
   }
 
   async #start(): Promise<void> {
     const serving = await this.deps.health.probe();
     if (serving !== undefined) {
-      await this.#warnIfInstalledDaemonDiffers();
+      this.#warnIfRunningIsStale(serving);
       this.deps.out.success(`${this.#name} is already serving (pid ${String(serving.pid)})`);
       return;
     }
     const owner = await this.#owner();
     const incumbent = await owner.inspect();
     if (incumbent.state === 'running') {
-      // A service manager reports `activating` as running. Leave that incumbent's executable and
-      // sole GC root untouched, but still honor `start`'s contract to wait until its API serves.
-      await this.#warnIfInstalledDaemonDiffers();
+      // A service manager reports `activating` as running. Leave that incumbent's executable and its
+      // root untouched, but still honor `start`'s contract to wait until its API serves.
       const ready = await this.#awaitReady(owner, {}, true);
+      this.#warnIfRunningIsStale(ready);
       this.deps.out.success(`${this.#name} ready (pid ${String(ready.pid)})`);
       return;
     }
-    const snapshot = await this.#ensurePromotedSnapshot(true);
-    await this.#holdRetainedClosures(snapshot);
-    const handle = await owner.start(snapshot.binaryPath);
+    const daemon = this.deps.installedDaemon();
+    await this.#holdDaemonClosure(daemon.path);
+    const handle = await owner.start(daemon.path);
     const health = await this.#awaitReady(owner, handle);
+    await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
   }
 
@@ -238,20 +243,19 @@ export class DaemonController {
   }
 
   async #restart(): Promise<void> {
-    // Verify the complete promoted artifact AND discover every inventory problem before stopping the
-    // incumbent. Reconciliation is tolerant, so a damaged sibling is a warning rather than a refusal,
-    // but an operator must hear that warning while the healthy daemon is still untouched — never only
-    // after restart has already created downtime.
-    const snapshot = await this.#ensurePromotedSnapshot(true);
-    const inventory = await this.#inventory();
+    // Locate the executable BEFORE stopping the incumbent. A host with no daemon on its PATH cannot
+    // start one, and an operator must learn that while the healthy daemon is still serving — never
+    // only after restart has already created downtime it cannot undo.
+    const daemon = this.deps.installedDaemon();
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
-    // Restart is when an upgraded executable is picked up, so the roots are reconciled here too.
-    await this.#holdRetainedClosures(snapshot, inventory);
-    const handle = await owner.start(snapshot.binaryPath);
+    // Restart is when an upgraded executable is picked up, so the root is reconciled here too.
+    await this.#holdDaemonClosure(daemon.path);
+    const handle = await owner.start(daemon.path);
     const ready = await this.#awaitReady(owner, handle);
+    await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
   }
 
@@ -264,40 +268,32 @@ export class DaemonController {
     if (options.json === true) this.deps.out.success(renderDaemonStatusJson(view));
     else if (code === 0) this.deps.out.success(renderDaemonStatus(view));
     else this.deps.out.warn(renderDaemonStatus(view));
-    if (options.json !== true) await this.#warnIfInstalledDaemonDiffers();
+    if (options.json !== true && health !== undefined) this.#warnIfRunningIsStale(health);
     if (code !== 0) this.deps.out.setExitCode(code);
   }
 
+  /**
+   * The two daemon identities that still exist, and whether they agree.
+   *
+   * It used to report three — installed, promoted, running — and the middle one is what this command
+   * was mostly for: an operator who had upgraded the executable and was still being served by a
+   * snapshot promoted weeks earlier had no other way to see it. There is no third identity now.
+   * `install`, `start` and `restart` record and launch the installed executable, so the only question
+   * left is whether the daemon serving right now predates the executable on this host's PATH, which is
+   * answered by comparing the two versions and naming the one command that closes the gap.
+   *
+   * A daemon that cannot be located is REPORTED WITH ITS REASON rather than as a bare absence, because
+   * the two causes need different remedies: not installed at all, and installed at a path a service
+   * manager could never launch.
+   */
   async which(options: DaemonCommandOptions): Promise<void> {
-    const installed = this.#installedDaemon();
-    const promoted = await this.deps.snapshots.current().catch((error: unknown) => {
-      this.deps.out.warn(
-        `could not inspect the promoted ${this.#name} snapshot: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return undefined;
-    });
+    const located = this.#locateDaemon();
     const running = await this.deps.health.probe();
-    const promotedVersion = promoted === undefined ? undefined : this.#daemonVersion(promoted.binaryPath);
     const payload = {
       installed:
-        installed === undefined
-          ? { state: 'not-found' as const }
-          : {
-              state: 'found' as const,
-              path: installed.path,
-              source: installed.source,
-              version: installed.version ?? null,
-            },
-      promoted:
-        promoted === undefined
-          ? { state: 'not-found' as const }
-          : {
-              state: 'found' as const,
-              id: promoted.id,
-              path: promoted.binaryPath,
-              sourcePath: promoted.sourceBinary,
-              version: promotedVersion ?? null,
-            },
+        'reason' in located
+          ? { state: 'not-found' as const, reason: located.reason }
+          : { state: 'found' as const, path: located.path, source: located.source, version: located.version ?? null },
       running:
         running === undefined
           ? { state: 'not-running' as const }
@@ -310,25 +306,18 @@ export class DaemonController {
     const lines = [
       payload.installed.state === 'found'
         ? `installed: ${payload.installed.path} (${payload.installed.source}, version ${payload.installed.version ?? 'unknown'})`
-        : `installed: not found on PATH`,
-      payload.promoted.state === 'found'
-        ? `promoted: ${payload.promoted.id} version ${payload.promoted.version ?? 'unknown'} artifact ${payload.promoted.path} source ${payload.promoted.sourcePath}`
-        : 'promoted: no snapshot has been promoted yet',
+        : `installed: ${payload.installed.reason}`,
       payload.running.state === 'running'
         ? `running: pid ${String(payload.running.pid)} version ${payload.running.version}`
         : 'running: daemon is not running',
     ];
-    if (installed !== undefined && promoted !== undefined && installed.path !== promoted.sourceBinary)
-      lines.push('installed and promoted differ; run fy daemon restart to use the installed daemon');
-    if (
-      running !== undefined &&
-      promoted !== undefined &&
-      promotedVersion !== undefined &&
-      running.version !== promotedVersion
-    )
-      lines.push('running and promoted differ; run fy daemon restart to apply the promoted snapshot');
-    if (running !== undefined && installed?.version !== undefined && running.version !== installed.version)
-      lines.push('running and installed differ; run fy daemon restart to use the installed daemon');
+    if (running !== undefined && !('reason' in located) && located.version !== undefined) {
+      lines.push(
+        running.version === located.version
+          ? 'the running daemon is the installed one'
+          : 'running and installed differ; run fy daemon restart to use the installed daemon',
+      );
+    }
     this.deps.out.success(lines.join('\n'));
   }
 
@@ -345,42 +334,6 @@ export class DaemonController {
     if (code !== 0) this.deps.out.setExitCode(code);
   }
 
-  async #buildSnapshot(): Promise<void> {
-    const snapshot = await this.deps.snapshots.build();
-    // A snapshot with no root is a rollback candidate a garbage collection can quietly disarm before
-    // anybody ever promotes it, so the root exists from the moment the snapshot does. Pass the exact
-    // verified build result as explicitly known protection: a tolerant but incomplete inventory may
-    // omit this entry, and that uncertainty must not disarm the snapshot the command just created.
-    await this.#holdRetainedClosures(snapshot);
-    this.deps.out.success(
-      `${this.#name} snapshot ${snapshot.id} ${snapshot.created ? 'built' : 'already complete'} from ${snapshot.sourceBinary}`,
-    );
-  }
-
-  async #promoteSnapshot(id: string): Promise<void> {
-    const snapshot = await this.deps.snapshots.promote(id);
-    await this.#holdRetainedClosures(snapshot);
-    this.deps.out.success(
-      `${this.#name} snapshot ${snapshot.id} promoted; the running daemon is unchanged until the next managed launch`,
-    );
-  }
-
-  async listSnapshots(options: DaemonCommandOptions): Promise<void> {
-    const [snapshots, current] = await Promise.all([this.deps.snapshots.list(), this.deps.snapshots.current()]);
-    const views = snapshots.map(snapshot => ({ ...snapshot, current: snapshot.id === current?.id }));
-    if (options.json === true) {
-      this.deps.out.success(JSON.stringify({ daemon: this.#name, snapshots: views }));
-      return;
-    }
-    if (views.length === 0) {
-      this.deps.out.warn(`no ${this.#name} snapshots have been built`);
-      return;
-    }
-    this.deps.out.success(
-      views.map(snapshot => `${snapshot.current ? '*' : ' '} ${snapshot.id}  ${snapshot.createdAt}`).join('\n'),
-    );
-  }
-
   get #name(): string {
     return this.deps.layout.daemonName;
   }
@@ -391,9 +344,9 @@ export class DaemonController {
    * The wait bound is this controller's own policy rather than the adapter's guess: a peer inside a
    * `restart` may legitimately hold the claim for a whole shutdown followed by a whole startup, and a
    * bound shorter than that would refuse commands that were only ever queued behind a healthy one.
-   * The allowance on top is the work those two policies do not describe — verifying the promoted
-   * artifact and reconciling roots — because a bound equal to the holder's best case refuses a peer
-   * for no reason but the holder having been thorough.
+   * The allowance on top is the work those two policies do not describe — holding the root and
+   * retiring what an earlier release left behind — because a bound equal to the holder's best case
+   * refuses a peer for no reason but the holder having been thorough.
    */
   async #serialized<T>(verb: DaemonLifecycleVerb, work: () => Promise<T>): Promise<T> {
     const waitMs = this.shutdown.deadlineMs + this.readiness.deadlineMs + LIFECYCLE_RECONCILIATION_ALLOWANCE_MS;
@@ -431,110 +384,82 @@ export class DaemonController {
   }
 
   /**
-   * Make the garbage-collection roots match the snapshots the store still retains.
+   * Hold the Nix closure of the executable this verb is about to record or launch.
    *
-   * `nix shell github:…` is a supported way to run this. A snapshot's executable is an ordinary copy,
-   * but its ELF interpreter, RPATH or script interpreter can still name the Nix output recorded as
-   * `sourceBinary` in its manifest, and that output is what a root has to hold. Any other source
-   * resolves outside the store and is left alone.
+   * `nix shell github:…` is a supported way to run this, and a store path is a root only while that
+   * shell is open. The absolute path a unit file has to name is therefore a path a later
+   * `nix-collect-garbage` can delete, and an installed user service that names a collected path does
+   * not start at the next login. THAT is the failure this holds against — not a person's own shell
+   * going stale afterwards, which is an accepted cost.
    *
-   * Every retained snapshot is considered, not just the one being launched, because the ROLLBACK
-   * candidates are the snapshots this exists to keep runnable. A failure is reported and the verb
-   * continues: an unheld daemon that runs beats a working install refused over a root that did not
-   * take. The superseded single root is dropped only once nothing needed a root that failed to take,
-   * since while a pin is failing that old root may be the only thing holding one of these closures.
+   * One root, because there is one executable. An installation outside the store cannot be collected
+   * and asks for nothing, and any root left over from an earlier Nix installation is RELEASED there:
+   * it would otherwise hold a closure of something this host no longer runs, forever.
    *
-   * NOTHING HERE MAY FAIL A VERB. This reconciliation is a safety net for a rollback that might happen
-   * later; the daemon in front of the operator is the thing that has to keep working. Reading the
-   * inventory is tolerant per entry, an inventory that is not the whole truth releases nothing at all,
-   * and a store that cannot be read at all still lets the captured snapshot be held and launched.
+   * NOTHING HERE MAY FAIL A VERB. A pin is protection against a collection that may never happen; the
+   * daemon in front of the operator is the thing that has to keep working, so a refusal is a warning
+   * naming the sturdier installation method and the verb carries on.
    */
-  async #holdRetainedClosures(
-    launching: DaemonSnapshot | undefined,
-    capturedInventory?: RetainedSnapshotInventory,
-  ): Promise<void> {
-    const rootDirectory = this.deps.layout.nixGcRootDirectory;
-    const inventory = capturedInventory ?? (await this.#inventory());
-    const closures: SnapshotClosure[] = [];
-    for (const snapshot of this.#withLaunching(inventory.snapshots, launching)) {
-      const resolved = await this.deps.nix.realPath(snapshot.sourceBinary);
-      closures.push({ snapshotId: snapshot.id, storePath: nixStorePathOf(resolved) });
+  async #holdDaemonClosure(binaryPath: string): Promise<void> {
+    const root = this.deps.layout.nixGcRoot;
+    const storePath = nixStorePathOf(await this.deps.nix.realPath(binaryPath));
+    if (storePath === undefined) {
+      await this.deps.nix.release(root);
+      return;
     }
-    const plan = planSnapshotGcRoots({
-      rootDirectory,
-      closures,
-      held: await this.deps.nix.held(rootDirectory),
-      launching: launching?.id,
-      complete: inventory.complete,
-    });
-    let unheld = false;
-    for (const pin of plan.pin) {
-      const failure = await this.deps.nix.pin(pin.storePath, pin.rootPath);
-      if (failure === undefined) continue;
-      unheld = true;
-      this.deps.out.warn(
-        `${this.#name} snapshot ${pin.snapshotId} was built from the Nix store but its runtime closure ` +
-          `could not be pinned against garbage collection (${failure}); a later nix-collect-garbage may ` +
-          `remove dependencies that snapshot needs — install with \`nix profile install\` to have Nix ` +
-          `hold them instead`,
-      );
-    }
-    for (const rootPath of plan.release) await this.deps.nix.release(rootPath);
-    // The superseded root goes only from a run that knows the whole retained set and held all of it.
-    // It is one link with no snapshot name on it, so while anything is unread or unheld it may be the
-    // only thing holding a closure something still needs.
-    if (!unheld && inventory.complete) await this.deps.nix.release(this.deps.layout.supersededNixGcRoot);
+    const failure = await this.deps.nix.pin(storePath, root);
+    if (failure === undefined) return;
+    this.deps.out.warn(
+      `${this.#name} runs from the Nix store but its runtime closure could not be pinned against ` +
+        `garbage collection (${failure}); a later nix-collect-garbage may remove ${storePath} and the ` +
+        `service will not start — install with \`nix profile install\` to have Nix hold it instead`,
+    );
   }
 
   /**
-   * The cheap retained inventory, and what to say when it is not the whole truth.
+   * Remove the daemon snapshot store, and its roots, that an earlier release left on this host.
    *
-   * A store that cannot be read at all is reported as an empty INCOMPLETE inventory rather than as a
-   * failure, so the verb continues holding and launching what it already verified. That is the
-   * difference between a damaged sibling snapshot being a warning and it being an outage: the
-   * verifying listing this used to call is all-or-nothing, so one interrupted build — which no later
-   * build repairs, by design — disabled every mutating verb, and `restart` stopped the daemon before
-   * discovering it.
-   */
-  async #inventory(): Promise<RetainedSnapshotInventory> {
-    const inventory = await this.deps.snapshots.retained().catch((error: unknown) => {
-      return {
-        snapshots: [],
-        complete: false as const,
-        unreadable: [
-          {
-            path: this.deps.layout.snapshotRoot,
-            reason: `inventory read failed: ${error instanceof Error ? error.message : String(error)}`,
-          },
-        ] as const,
-      };
-    });
-    for (const issue of inventory.unreadable) {
-      this.deps.out.warn(`${this.#name} skipped snapshot inventory entry ${issue.path}: ${issue.reason}`);
-    }
-    if (!inventory.complete) {
-      this.deps.out.warn(
-        `${this.#name} left every garbage-collection root in place because that inventory is incomplete; ` +
-          `a root is released only when its snapshot is known to be gone, and an entry that cannot be read ` +
-          `is a snapshot that is still there`,
-      );
-    }
-    return inventory;
-  }
-
-  /**
-   * The snapshots a root is owed: the inventory plus the exact snapshot being launched.
+   * **Only ever called after a verb has actually recorded or removed a service definition**, and that
+   * ordering is the whole safety argument. An upgraded host's unit file still names an artifact inside
+   * the store, so deleting the store first would leave a service that cannot launch. `install`,
+   * `start` and `restart` rewrite the definition with the installed executable's absolute path before
+   * they reach this, and `uninstall` has removed it; only then is nothing pointing at the store.
    *
-   * The launching snapshot is added rather than assumed present. This verb captured and verified it
-   * before the inventory was read, and a snapshot that is about to be executed must be held whether
-   * or not the inventory agrees about the store's contents.
+   * It runs rather than telling somebody to run it because the store is roughly 100MB of copies of an
+   * executable that is already installed, it is ours, and an instruction in release notes is an
+   * instruction almost nobody follows. What it removed is said OUT LOUD, once, on the one invocation
+   * that does it — a machine quietly deleting 100MB and mentioning nothing is worse than the disk.
+   *
+   * NOTHING HERE MAY FAIL A VERB either. Reclaiming disk is tidying; the daemon is the work.
    */
-  #withLaunching(
-    inventory: readonly RetainedSnapshot[],
-    launching: DaemonSnapshot | undefined,
-  ): readonly RetainedSnapshot[] {
-    if (launching === undefined || inventory.some(snapshot => snapshot.id === launching.id)) return inventory;
-    return [...inventory, { id: launching.id, sourceBinary: launching.sourceBinary }];
+  async #retireLegacyArtifacts(): Promise<void> {
+    const layout = this.deps.layout;
+    for (const root of await this.deps.nix.held(layout.legacySnapshotGcRootDirectory)) {
+      await this.deps.nix.release(root.path);
+    }
+    const attempts: ReadonlyArray<readonly [string, RetiredArtifactOutcome]> = [
+      [layout.legacySnapshotGcRootDirectory, await this.deps.retired.retire(layout.legacySnapshotGcRootDirectory)],
+      [layout.legacySnapshotRoot, await this.deps.retired.retire(layout.legacySnapshotRoot)],
+    ];
+    let files = 0;
+    let bytes = 0;
+    for (const [path, outcome] of attempts) {
+      if (outcome.kind === 'removed') {
+        files += outcome.files;
+        bytes += outcome.bytes;
+      }
+      if (outcome.kind === 'failed') {
+        this.deps.out.warn(
+          `${this.#name} could not remove its retired snapshot store at ${path} (${outcome.reason}); ` +
+            `nothing reads it any more, so it is safe to delete by hand`,
+        );
+      }
+    }
+    if (files === 0) return;
+    this.deps.out.warn(
+      `removed the retired ${this.#name} snapshot store (${String(files)} files, ${megabytes(bytes)}); ` +
+        `${this.#name} now runs the daemon installed on this host instead of a copy of it`,
+    );
   }
 
   /** The supervisor that currently owns the daemon: the service manager when one is installed. */
@@ -550,68 +475,30 @@ export class DaemonController {
     return service;
   }
 
+  /** The installed daemon, or why this host has none — for the verbs that only REPORT. */
+  #locateDaemon(): InstalledDaemonBinary | { readonly reason: string } {
+    try {
+      return this.deps.installedDaemon();
+    } catch (error: unknown) {
+      return { reason: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   /**
-   * Bootstrap exactly once. Only a store with no durable promotion evidence takes this path;
-   * `current()` throws for a lost, malformed, dangling or unverifiable pointer, so damaged evidence
-   * can never be overwritten as if this were a fresh installation.
+   * Say so when the daemon already serving is older than the one installed here.
+   *
+   * The version is the only honest comparison left. Comparing PATHS would report a difference every
+   * time a package manager moved its own files around, and it cannot see the case that matters — an
+   * upgrade in place, where the path is identical and the code is not. A daemon whose version cannot
+   * be read says nothing rather than guessing, because a wrong "restart me" is worse than silence.
    */
-  async #ensurePromotedSnapshot(refreshInstalled = false): Promise<DaemonSnapshot> {
-    const current = await this.deps.snapshots.current();
-    if (current !== undefined) {
-      if (!refreshInstalled) return current;
-      const installed = this.#installedDaemon();
-      if (installed === undefined || installed.path === current.sourceBinary) return current;
-      const built = await this.deps.snapshots.build();
-      const promoted = await this.deps.snapshots.promote(built.id);
-      this.deps.out.warn(
-        `installed ${this.#name} daemon ${current.sourceBinary} differs from promoted snapshot; promoted ${promoted.sourceBinary}`,
-      );
-      return promoted;
-    }
-    const built = await this.deps.snapshots.build();
-    const promoted = await this.deps.snapshots.promote(built.id);
-    this.deps.out.warn(`no promoted ${this.#name} snapshot existed; built and promoted ${promoted.id}`);
-    return promoted;
-  }
-
-  #installedDaemon(): InstalledDaemonBinary | undefined {
-    try {
-      return this.deps.installedDaemon?.();
-    } catch (error: unknown) {
-      this.deps.out.warn(
-        `could not compare the installed ${this.#name} daemon; using the promoted snapshot: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return undefined;
-    }
-  }
-
-  async #warnIfInstalledDaemonDiffers(): Promise<void> {
-    const installed = this.#installedDaemon();
-    if (installed === undefined) return;
-    try {
-      const current = await this.deps.snapshots.current();
-      if (current !== undefined && current.sourceBinary !== installed.path) {
-        this.deps.out.warn(
-          `installed daemon ${installed.path} differs from promoted snapshot ${current.sourceBinary}; run fy daemon restart to apply it`,
-        );
-      }
-    } catch (error: unknown) {
-      this.deps.out.warn(
-        `could not compare the installed ${this.#name} daemon; leaving the running daemon untouched: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  #daemonVersion(path: string): string | undefined {
-    try {
-      return this.deps.daemonVersion?.(path);
-    } catch {
-      return undefined;
-    }
+  #warnIfRunningIsStale(running: HealthView): void {
+    const located = this.#locateDaemon();
+    if ('reason' in located || located.version === undefined || located.version === running.version) return;
+    this.deps.out.warn(
+      `the running ${this.#name} is version ${running.version} but ${located.path} is ${located.version}; ` +
+        `run fy daemon restart to use the installed daemon`,
+    );
   }
 
   /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */

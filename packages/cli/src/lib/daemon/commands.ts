@@ -8,6 +8,14 @@ import type { DaemonCommandOptions, DaemonController } from './controller.ts';
  * Every verb is idempotent and says what it found: `start` on a serving daemon reports that rather
  * than disturbing it, `stop` on a stopped one says so instead of failing.
  *
+ * THERE IS NO `snapshot` GROUP, and its absence is the design rather than an omission. `build`,
+ * `promote` and `list` managed a content-addressed store of copies of the daemon executable, which
+ * asked an operator to learn a second installation model for one file and to promote something before
+ * their upgrade took effect. What runs is the daemon this host has installed; upgrading is the package
+ * manager's job and `restart` picks it up. Nothing rewrote those verbs into a deprecation stub because
+ * a stub is still the concept, still in `--help`, and still a thing to keep working — the one
+ * invocation an upgraded host makes says what happened to the store instead.
+ *
  * `adopt` belongs to this group rather than a group of its own because the state home is the
  * daemon's: it is the directory `fyd` serves from, and adopting one is something a person does in
  * order to get the daemon running. Its controller is separate because it shares no collaborator with
@@ -76,7 +84,7 @@ login is untouched: a unit runs the daemon executable, never this command.`,
 
   daemon
     .command('which')
-    .description('show the installed, promoted, and currently running daemon identities')
+    .description('show the installed and currently running daemon identities')
     .option('--json', 'print the machine-readable daemon identities')
     .action(async (flags: DaemonCommandOptions) => {
       await controller().which(flags);
@@ -96,32 +104,5 @@ login is untouched: a unit runs the daemon executable, never this command.`,
     .option('--json', 'print the machine-readable outcome instead of the human summary')
     .action(async (flags: StateHomeAdoptOptions) => {
       await stateHome().adopt(flags);
-    });
-
-  const snapshots = daemon
-    .command('snapshot')
-    .description('build, inspect and atomically promote immutable daemon snapshots');
-
-  snapshots
-    .command('build')
-    .description('copy and verify the installed daemon without changing what will run')
-    .action(async () => {
-      await controller().buildSnapshot();
-    });
-
-  snapshots
-    .command('promote')
-    .description('atomically select a verified snapshot for the next daemon start')
-    .argument('<id>', 'content-addressed snapshot id')
-    .action(async (id: string) => {
-      await controller().promoteSnapshot(id);
-    });
-
-  snapshots
-    .command('list')
-    .description('list every verified snapshot and mark the promoted one')
-    .option('--json', 'print the machine-readable list instead of the human summary')
-    .action(async (flags: DaemonCommandOptions) => {
-      await controller().listSnapshots(flags);
     });
 }
