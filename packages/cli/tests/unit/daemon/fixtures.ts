@@ -16,11 +16,15 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonProcessPort,
+  IDaemonPrompt,
   INixGcRootPort,
+  IResetInventoryPort,
+  IResetTreePort,
   IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
   IStateHomeClaimPort,
+  ResetTreeMeasure,
   RetiredArtifactOutcome,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
@@ -325,6 +329,64 @@ export class FakeRetiredArtifacts implements IRetiredArtifactPort {
   retire(path: string): Promise<RetiredArtifactOutcome> {
     this.retired.push(path);
     return Promise.resolve(this.answers.get(path) ?? { kind: 'absent' });
+  }
+}
+
+/**
+ * The trees a reset would measure and remove, answering for each and recording the ORDER.
+ *
+ * One trail across both methods, because the defect a reset can have is an ordering one: measuring
+ * after the removal, or removing before the daemon stopped, are both invisible to a per-method call log
+ * and are the two ways this verb can destroy something nobody authorized.
+ */
+export class FakeResetTrees implements IResetTreePort {
+  readonly trail: string[] = [];
+  readonly measured: string[] = [];
+  readonly removed: string[] = [];
+  /** What each path holds; anything absent from this map is an absent tree, the ordinary answer. */
+  readonly answers = new Map<string, ResetTreeMeasure>();
+  /** Set to fail a removal the way an unwritable tree does; a reset must surface that, never swallow it. */
+  removalFailure: Error | undefined;
+
+  constructor(trail: string[] = []) {
+    this.trail = trail;
+  }
+
+  measure(root: string): Promise<ResetTreeMeasure> {
+    this.measured.push(root);
+    this.trail.push(`measure:${root}`);
+    return Promise.resolve(this.answers.get(root) ?? { kind: 'absent' });
+  }
+
+  remove(root: string): Promise<ResetTreeMeasure> {
+    this.removed.push(root);
+    this.trail.push(`remove:${root}`);
+    if (this.removalFailure !== undefined) return Promise.reject(this.removalFailure);
+    return Promise.resolve(this.answers.get(root) ?? { kind: 'absent' });
+  }
+}
+
+/** The unrecoverable counts, or the `undefined` a daemon that will not answer produces. */
+export class FakeResetInventory implements IResetInventoryPort {
+  calls = 0;
+
+  constructor(private readonly answer: { readonly secrets: number; readonly devices: number } | undefined) {}
+
+  count(): Promise<{ readonly secrets: number; readonly devices: number } | undefined> {
+    this.calls += 1;
+    return Promise.resolve(this.answer);
+  }
+}
+
+/** A terminal somebody types one scripted answer at. */
+export class FakePrompt implements IDaemonPrompt {
+  readonly asked: string[] = [];
+
+  constructor(private readonly answer = 'reset') {}
+
+  ask(message: string): Promise<string> {
+    this.asked.push(message);
+    return Promise.resolve(this.answer);
   }
 }
 

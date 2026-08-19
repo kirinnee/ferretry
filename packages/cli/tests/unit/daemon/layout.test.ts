@@ -95,6 +95,33 @@ describe('daemon layout', () => {
     { name: 'XDG_STATE_HOME when the operator set one', input: '/tmp/xdg-state', expected: '/tmp/xdg-state' },
     { name: '~/.local/state when it is unset', input: undefined, expected: `${HOME}/.local/state` },
     { name: '~/.local/state when it is blank', input: '  ', expected: `${HOME}/.local/state` },
+  ])('should key the one client-owned artifact tree on $name', ({ input, expected }) => {
+    // Act
+    const actual = layout({ stateDirectory: input });
+
+    // Assert — one derivation, and every state-directory path is inside it. Three of them used to be
+    // spelled independently, so a fourth reader — the verb that REMOVES them — would have been a
+    // fourth spelling with nothing making the four agree, and one of them would be left behind.
+    should(actual.stateArtifactRoot).equal(`${expected}/ferretry`);
+    for (const derived of [actual.legacySnapshotRoot, actual.nixGcRoot, actual.legacySnapshotGcRootDirectory]) {
+      should(derived.startsWith(`${actual.stateArtifactRoot}/`)).be.true();
+    }
+  });
+
+  it.each([
+    { name: 'the invoking home directory', input: undefined, expected: HOME },
+    { name: 'a pinned FY_HOME leaves it alone', input: '/srv/fy', expected: HOME },
+  ])('should carry $name so a reset can refuse against it', ({ input, expected }) => {
+    // Assert — a guard cannot compare against a value it was never handed, and the value it must
+    // refuse on is the home directory: `FY_HOME=$HOME` would otherwise make a reset remove every file
+    // the user owns.
+    should(layout({ stateHome: input }).homeDirectory).equal(expected);
+  });
+
+  it.each([
+    { name: 'XDG_STATE_HOME when the operator set one', input: '/tmp/xdg-state', expected: '/tmp/xdg-state' },
+    { name: '~/.local/state when it is unset', input: undefined, expected: `${HOME}/.local/state` },
+    { name: '~/.local/state when it is blank', input: '  ', expected: `${HOME}/.local/state` },
   ])('should put the retired per-snapshot Nix roots under $name', ({ input, expected }) => {
     // Act
     const actual = layout({ stateDirectory: input });

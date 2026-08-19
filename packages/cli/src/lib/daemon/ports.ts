@@ -122,7 +122,7 @@ export interface INixGcRootPort {
 }
 
 /** The mutating daemon-lifecycle commands, named in a claim so a refusal can say what is running. */
-export type DaemonLifecycleVerb = 'install' | 'uninstall' | 'start' | 'stop' | 'restart';
+export type DaemonLifecycleVerb = 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'reset';
 
 /** What a lifecycle claim is asked for, so the wait bound stays the caller's policy rather than the adapter's. */
 export interface DaemonLifecycleClaimRequest {
@@ -184,6 +184,73 @@ export type RetiredArtifactOutcome =
 export interface IRetiredArtifactPort {
   /** Remove `path` and everything under it; an absent path is `absent`, never a failure. */
   retire(path: string): Promise<RetiredArtifactOutcome>;
+}
+
+/**
+ * What one tree holds, measured without removing anything.
+ *
+ * `escapingLinks` is the evidence for a promise this port makes and a person has no other way to
+ * check: a symbolic link inside the tree that points OUT of it is unlinked and never followed, so a
+ * link into somebody's real data costs them the link and nothing else. Naming them in the preflight is
+ * how that stops being a claim.
+ */
+export type ResetTreeMeasure =
+  | { readonly kind: 'absent' }
+  | {
+      readonly kind: 'measured';
+      readonly files: number;
+      readonly bytes: number;
+      /** Rendered `<path inside the tree> -> <where it points>`, relative to the tree it was found in. */
+      readonly escapingLinks: readonly string[];
+    };
+
+/**
+ * Measuring and removing the trees a reset destroys.
+ *
+ * SEPARATE FROM `IRetiredArtifactPort`, and the difference is the failure contract rather than the
+ * mechanics. Retiring an artifact an earlier release left behind is tidying, so it may never fail a
+ * lifecycle verb and reports its problems as values. A reset that cannot remove what it just told
+ * somebody it would remove has LIED to them, and half a reset is the state the whole verb exists to
+ * stop people reaching by hand — so both methods here throw, and the verb fails with them.
+ *
+ * `measure` is a separate call rather than a return value of `remove` because the order is the point:
+ * a person is shown the sizes and the counts, and only then asked. A measurement that arrived with the
+ * removal would arrive too late to abort on.
+ */
+export interface IResetTreePort {
+  measure(root: string): Promise<ResetTreeMeasure>;
+  /**
+   * Remove the tree and report what actually went; an absent tree is `absent`, not a failure. Never
+   * follows a symbolic link out of the tree.
+   *
+   * It answers with its OWN measurement rather than nothing, because the preflight's numbers were
+   * taken while the daemon was still running and writing. Reporting those as what was removed would be
+   * a number nobody measured. The removal has to walk the tree anyway to unseal it, so counting on the
+   * way down costs nothing and is the only count that is true.
+   */
+  remove(root: string): Promise<ResetTreeMeasure>;
+}
+
+/**
+ * Counting what a reset destroys that nothing brings back, asked of the daemon that still owns it.
+ *
+ * The daemon is the authority on its own state and the CLI does not read it. `undefined` therefore
+ * means "did not answer", which is information rather than a failure: a daemon that is already down
+ * cannot be asked, and the preflight says so instead of guessing or counting files behind its back.
+ */
+export interface IResetInventoryPort {
+  count(): Promise<{ readonly secrets: number; readonly devices: number } | undefined>;
+}
+
+/**
+ * The typed confirmation a reset asks for, injected so no test blocks on a terminal.
+ *
+ * The same one-method shape `fy worktree rm` uses, for the same reason: this is the repository's
+ * existing pattern for authorizing something irreversible, and a second pattern for one verb would
+ * mean two rituals to learn for the same class of act.
+ */
+export interface IDaemonPrompt {
+  ask(message: string): Promise<string>;
 }
 
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */

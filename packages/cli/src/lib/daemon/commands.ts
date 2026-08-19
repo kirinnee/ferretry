@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import type { StateHomeAdoptOptions, StateHomeController } from '../state-home/controller.ts';
-import type { DaemonCommandOptions, DaemonController } from './controller.ts';
+import type { DaemonCommandOptions, DaemonController, DaemonResetOptions } from './controller.ts';
 
 /**
  * Mounts `fy daemon …` onto the program.
@@ -20,6 +20,21 @@ import type { DaemonCommandOptions, DaemonController } from './controller.ts';
  * daemon's: it is the directory `fyd` serves from, and adopting one is something a person does in
  * order to get the daemon running. Its controller is separate because it shares no collaborator with
  * the process-control verbs — it touches one file and never asks whether anything is running.
+ *
+ * `reset` IS A VERB HERE RATHER THAN A TOP-LEVEL `reset` OR `wipe`, and the choice is the same one
+ * `config` and `password` already made when they mounted onto this noun. What it resets is the
+ * daemon — its state home, its logs, its configuration, the artifacts this client keeps for it — and
+ * it stops the daemon to do it, so it is serialized by the same lifecycle claims as `stop` and
+ * `restart` and shares their collaborators. A top-level `reset` would read as though it reset the
+ * client, would sit beside nouns rather than beneath the one it belongs to, and would be a second
+ * grammar for one verb. There is no `wipe` alias either: two spellings for an irreversible act is two
+ * things to search for when somebody is trying to work out what a colleague ran.
+ *
+ * IT TAKES NO `--json`, and that is the one place it departs from its siblings. `status`, `which` and
+ * `adopt` report, so a machine consumes their answer. `reset` destroys, and its output exists to be
+ * read by the person deciding — a second rendering of it would mean the one that mattered was the one
+ * nobody read. A script passes `--yes` and reads the exit code, which is the whole contract it can act
+ * on.
  */
 export function registerDaemonCommands(
   program: Command,
@@ -72,6 +87,36 @@ login is untouched: a unit runs the daemon executable, never this command.`,
     .description('stop the daemon, wait for it to go quiet, then start it again')
     .action(async () => {
       await controller().restart();
+    });
+
+  daemon
+    .command('reset')
+    .description('stop the daemon and remove ALL of its persistent data on this host')
+    .option('-y, --yes', 'skip the typed confirmation; required when not on a terminal')
+    .addHelpText(
+      'after',
+      `
+This is the whole installation, not a cache. It removes both trees a Ferretry
+installation occupies — the state home, and the client-owned artifacts under
+XDG_STATE_HOME — so the configuration, the fleet, every session and transcript,
+every stored secret, every paired device and the operator password all go.
+Doing it by hand misses the second tree, which is where an obsolete pinned
+daemon executable hides, and leaves the machine running that instead.
+
+What survives: the installed executables, any user service definition, and
+everything outside those two paths. Nothing else is touched, and no backup is
+taken — restoring is not something this can offer.
+
+It prints every path, its size, and how many secrets, devices and sessions are
+about to go BEFORE it asks. Read that; those counts are not available anywhere
+else. It never asks for the operator password: forgetting the password is one of
+the reasons to run this, so requiring it would close the door it exists to open.
+
+Afterwards, \`daemon start\` comes up on a clean slate and offers to set a new
+operator password, exactly as a fresh install does.`,
+    )
+    .action(async (flags: DaemonResetOptions) => {
+      await controller().reset(flags);
     });
 
   daemon

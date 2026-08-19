@@ -13,6 +13,9 @@ import {
   FakeLifecycleLock,
   FakeLogs,
   FakeNixGcRoot,
+  FakePrompt,
+  FakeResetInventory,
+  FakeResetTrees,
   FakeRetiredArtifacts,
   FakeSupervisor,
   health,
@@ -34,10 +37,14 @@ function run(
   logs: FakeLogs;
   adopted: CapturedClaimOutput;
   built: () => number;
+  resetTrees: FakeResetTrees;
+  prompt: FakePrompt;
 } {
   const service = new FakeSupervisor('systemd', stoppedReport);
   const out = new CapturedOutput();
   const logs = new FakeLogs();
+  const resetTrees = new FakeResetTrees();
+  const prompt = new FakePrompt();
   let builds = 0;
   // A home already carrying our marker, so `adopt` in this suite exercises the routing rather than
   // the decision — the decision has its own suite against the real service.
@@ -67,6 +74,13 @@ function run(
         lifecycle: new FakeLifecycleLock(),
         installedDaemon: () => installedDaemon(),
         retired: new FakeRetiredArtifacts(),
+        resetTrees,
+        resetInventory: new FakeResetInventory({ secrets: 1, devices: 1 }),
+        prompt,
+        // No terminal, so `reset` routes here and then refuses unless `--yes` was passed. That is what
+        // this suite is for: the flag reaching the controller, not the decision it drives.
+        interactive: () => false,
+        clientName: 'fy',
         clock: new SteppingClock(),
         out,
         firstPassword: new RecordingFirstPassword(),
@@ -83,6 +97,8 @@ function run(
     logs,
     adopted: claimOut,
     built: () => builds,
+    resetTrees,
+    prompt,
   };
 }
 
@@ -131,6 +147,34 @@ describe('daemon command surface', () => {
     // Assert
     should(service.calls).containEql('stop');
     should(service.calls).containEql('start');
+  });
+
+  it('should route reset to the controller once --yes authorizes it', async () => {
+    // Arrange + Act — no terminal in this suite, so `--yes` is what makes the verb reachable at all.
+    const { parsed, resetTrees, out } = run(['daemon', 'reset', '--yes'], [undefined]);
+    await parsed;
+
+    // Assert — both roots, from the layout rather than from anything this command line spelled.
+    should(resetTrees.removed).deepEqual(['/tmp/fy-home/.ferretry', '/tmp/fy-home/.local/state/ferretry']);
+    should(out.text).containEql('nothing was removed');
+  });
+
+  it('should accept -y as the short form, the same as every other destructive verb', async () => {
+    // Arrange + Act
+    const { parsed, resetTrees } = run(['daemon', 'reset', '-y'], [undefined]);
+    await parsed;
+
+    // Assert
+    should(resetTrees.removed).have.length(2);
+  });
+
+  it('should refuse reset with no flag and no terminal, rather than silently skipping the guard', async () => {
+    // Arrange + Act
+    const { parsed, resetTrees } = run(['daemon', 'reset'], [undefined]);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/pass --yes to authorize it/u);
+    should(resetTrees.removed).be.empty();
   });
 
   it('should print a human status by default', async () => {

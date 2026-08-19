@@ -11,8 +11,11 @@ import type {
   IDaemonLifecycleLockPort,
   IDaemonLogPort,
   IDaemonOutput,
+  IDaemonPrompt,
   IDaemonSupervisor,
   INixGcRootPort,
+  IResetInventoryPort,
+  IResetTreePort,
   IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
   RetiredArtifactOutcome,
@@ -29,11 +32,21 @@ import {
 } from './readiness.ts';
 import {
   decideDaemonStatus,
+  megabytes,
   renderDaemonStatus,
   renderDaemonStatusJson,
   renderInstalled,
   statusExitCode,
 } from './render.ts';
+import {
+  assertResettableRoots,
+  type ResetPlan,
+  type ResetSurvey,
+  renderResetOutcome,
+  renderResetPlan,
+  resetRoots,
+  resetSurvivors,
+} from './reset.ts';
 import { UnsupportedServiceManagerError } from './supervisor.ts';
 
 /** Options the daemon commands accept. */
@@ -42,6 +55,29 @@ export interface DaemonCommandOptions {
   readonly json?: boolean;
   /** Keep streaming the log as it grows. */
   readonly follow?: boolean;
+}
+
+/**
+ * What the caller must type, in full, to authorize a reset by hand.
+ *
+ * The same shape `fy worktree rm` asks for — a word, not a `y/N` — because this repository already has
+ * one ritual for authorizing something irreversible, and a stronger ritual invented for this verb alone
+ * would be a second thing to learn for the same class of act.
+ */
+const RESET_CONFIRMATION_WORD = 'reset';
+
+/** Flags `reset` accepts. */
+export interface DaemonResetOptions {
+  /** Skip the typed confirmation; required when there is no terminal to type it at. */
+  readonly yes?: boolean;
+}
+
+/** Raised when a reset will not proceed, so the caller sees a refusal rather than a half-reset. */
+export class DaemonResetRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DaemonResetRefusedError';
+  }
 }
 
 export class DaemonStartupFailedError extends Error {
@@ -63,11 +99,6 @@ export class DaemonShutdownFailedError extends Error {
     super(message);
     this.name = 'DaemonShutdownFailedError';
   }
-}
-
-/** Reclaimed disk, in the unit a person recognises. One decimal is as much precision as this means. */
-function megabytes(bytes: number): string {
-  return `${(bytes / 1_000_000).toFixed(1)}MB`;
 }
 
 /** What the controller needs; a struct so the composition root reads as a wiring list. */
@@ -94,6 +125,21 @@ export interface DaemonControllerDeps {
   readonly installedDaemon: () => InstalledDaemonBinary;
   /** Removes CLI-owned artifact trees an earlier release wrote and this one no longer keeps. */
   readonly retired: IRetiredArtifactPort;
+  /** Measures and removes the two trees `reset` destroys. */
+  readonly resetTrees: IResetTreePort;
+  /** Counts what a reset destroys unrecoverably, from the daemon that still holds it. */
+  readonly resetInventory: IResetInventoryPort;
+  /** Where the typed reset confirmation is read from; never used off a terminal. */
+  readonly prompt: IDaemonPrompt;
+  /**
+   * Whether anybody is at a terminal, asked when the question is asked rather than captured here.
+   *
+   * A function for the same reason the first-password offer takes one: the answer belongs to the
+   * terminal at the moment somebody would have to type, not to the moment this controller was built.
+   */
+  readonly interactive: () => boolean;
+  /** The binary somebody types, so a reset can name the command that brings the machine back. */
+  readonly clientName: string;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
   /**
@@ -177,6 +223,24 @@ export class DaemonController {
     await this.#serialized('restart', () => this.#restart());
   }
 
+  /**
+   * Removes every trace of this daemon's persistent data, after showing what that costs.
+   *
+   * INSIDE THE LIFECYCLE CLAIM, unlike the first-password offer, and the prompt is inside it too. That
+   * placement is the opposite of `start`'s and both are right: `start` must not hold every other
+   * invocation on this host while somebody reads an optional question, whereas a reset that released
+   * the claim to ask its question would let a peer `start` bring the daemon back up between the answer
+   * and the deletion — recreating a state home underneath a removal that had already been authorized.
+   * The claim is what makes measure-show-ask-stop-remove one transaction rather than five moments.
+   *
+   * A person waiting at the prompt therefore does block other `fy daemon …` invocations, and a peer
+   * says so out loud through the same wait notice every other verb uses. That is the correct trade for
+   * the one verb that is destroying the thing they contend for.
+   */
+  async reset(options: DaemonResetOptions): Promise<void> {
+    await this.#serialized('reset', () => this.#reset(options));
+  }
+
   async #install(): Promise<void> {
     const daemon = this.deps.installedDaemon();
     const service = this.#service();
@@ -257,6 +321,66 @@ export class DaemonController {
     const ready = await this.#awaitReady(owner, handle);
     await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
+  }
+
+  /**
+   * Measure, show, ask, stop, remove — in that order, and the order is the whole design.
+   *
+   * MEASURED AND COUNTED WHILE THE DAEMON IS STILL UP, because the counts only exist there: the daemon
+   * owns the secrets, the paired devices and the sessions, and it is the thing that can say how many.
+   * Stopping first would leave "3 paired devices" unavailable at the exact moment somebody needs it to
+   * decide, which is the difference between a confirmation and a formality.
+   *
+   * STOPPED BEFORE ANYTHING IS REMOVED, and a stop that will not take REFUSES the whole verb. Moving
+   * state out from under a running daemon is how a half-reset happens — an owner hit exactly that, with
+   * a log written into a state directory that had already been cleared — and `#pressStop` throwing is
+   * the refusal, before a single entry has been unlinked.
+   */
+  async #reset(options: DaemonResetOptions): Promise<void> {
+    const layout = this.deps.layout;
+    const roots = resetRoots(layout);
+    // Before any measurement, let alone any removal: an operator-supplied FY_HOME that resolves
+    // somewhere unresettable must fail while nothing has been touched.
+    assertResettableRoots(roots, layout.homeDirectory);
+
+    const owner = await this.#owner();
+    const health = await this.deps.health.probe();
+    const counted = health === undefined ? undefined : await this.deps.resetInventory.count();
+    const surveys: ResetSurvey[] = [];
+    for (const root of roots) surveys.push({ root, measure: await this.deps.resetTrees.measure(root.path) });
+    const plan: ResetPlan = {
+      daemon: this.#name,
+      surveys,
+      inventory: health === undefined || counted === undefined ? undefined : { ...counted, sessions: health.sessions },
+      survivors: resetSurvivors(layout),
+    };
+    this.deps.out.warn(renderResetPlan(plan));
+    await this.#confirmReset(options);
+
+    if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
+    const removals: ResetSurvey[] = [];
+    for (const root of roots) removals.push({ root, measure: await this.deps.resetTrees.remove(root.path) });
+    this.deps.out.success(renderResetOutcome(this.#name, removals, this.deps.clientName));
+  }
+
+  /**
+   * The typed confirmation, unless `--yes` waived it.
+   *
+   * Off a terminal there is nobody to type it, so an unattended run has to pass `--yes` explicitly
+   * rather than have the guard silently skipped — the failure mode that makes a safety prompt
+   * decorative. The word is `reset` and the flag is `--yes` because `fy worktree rm` already asks for a
+   * typed word and takes `--yes`, and one ritual for irreversible acts is worth more than a stronger
+   * ritual invented for this verb alone.
+   */
+  async #confirmReset(options: DaemonResetOptions): Promise<void> {
+    if (options.yes === true) return;
+    if (!this.deps.interactive()) {
+      throw new DaemonResetRefusedError(
+        `refusing to reset ${this.#name} without a confirmation — pass --yes to authorize it`,
+      );
+    }
+    const answer = await this.deps.prompt.ask(`Type ${JSON.stringify(RESET_CONFIRMATION_WORD)} to confirm:`);
+    if (answer.trim() !== RESET_CONFIRMATION_WORD) throw new DaemonResetRefusedError('reset cancelled');
   }
 
   async status(options: DaemonCommandOptions): Promise<void> {
