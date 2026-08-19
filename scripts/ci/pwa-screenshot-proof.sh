@@ -75,7 +75,13 @@ for scheme in dark light; do
   echo "🧪 Capturing the Settings surfaces in ${scheme}..."
   # `pipefail` is what makes `tee` safe here: without it the harness's exit status is discarded and
   # every red run would report the exit status of `tee`, which is always zero.
-  (cd packages/pwa && bun harness/screenshot.ts "${flags[@]}") | tee "${log}"
+  #
+  # `2>&1` IS LOAD-BEARING, and its absence was measured rather than imagined. The harness reports
+  # failures on stderr, so a stdout-only pipe uploaded an evidence artifact whose log stopped dead
+  # after the last frame it managed and never said why — on the first CI run of this gate, which found
+  # a real 12px overflow. An artifact that carries every passing line and omits the failing one is
+  # worse than no artifact, because it reads like a truncated success.
+  (cd packages/pwa && bun harness/screenshot.ts "${flags[@]}") 2>&1 | tee "${log}"
 
   # THE CLOSING LINE, REQUIRED. The harness asserts its own tally and prints this only after both
   # viewports have completed, so demanding it here is what separates "every check passed" from "the

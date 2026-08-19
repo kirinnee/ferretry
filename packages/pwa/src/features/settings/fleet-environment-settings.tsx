@@ -16,6 +16,7 @@
 import { RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { PanelPath } from '../../shell/panel-typography.tsx';
 
 interface EnvironmentView {
   readonly profiles: Readonly<Record<string, Readonly<Record<string, string>>>>;
@@ -172,10 +173,23 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
               {targetEntries.length === 0 ? (
                 <p className="mb-0 mt-1 text-cell text-muted">This profile publishes no environment entries.</p>
               ) : (
+                /* AN ENVIRONMENT VALUE IS A PATH, so it gets the treatment every other panel's paths
+                   already get. This list rendered them as bare text in a `mono` `<li>`, and a `PATH`
+                   entry is one unbreakable 40-plus-character token: at 390px it pushed the Settings
+                   scrollport to 402px, so the whole app slid sideways under a thumb. The overflow was
+                   font-dependent — absent on a developer's font set, real on CI's — which is exactly
+                   why it survived being looked at.
+
+                   `PanelPath` is the shell component promoted for this, and it is used in ORDINARY
+                   INLINE FLOW rather than as a flex row on purpose. It is `inline-block max-w-full`, so
+                   it can never be wider than this `<li>` — a long value takes the next line and scrolls
+                   inside its own box, a short one stays beside its key. A flex row would fix the
+                   geometry just as well and would delete the space between key and value from the text
+                   stream, which is what a screen reader reads. */
                 <ul className="mb-0 mt-2 list-none space-y-1 p-0 mono text-meta text-muted">
                   {targetEntries.map(([key, value]) => (
                     <li key={key}>
-                      <span className="text-accent">{key}</span> {value}
+                      <span className="text-accent">{key}</span> <PanelPath value={value} />
                     </li>
                   ))}
                 </ul>
@@ -203,9 +217,14 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
                     : difference.kind === 'target-only'
                       ? `${difference.target ?? '—'}`
                       : `${difference.source ?? '—'}`;
+                // The same repair as the list above, and it needs it MORE: `detail` can carry two
+                // paths and an arrow. The harness compares this daemon against itself, so this branch
+                // renders empty there and the gate cannot see it — a real reader comparing two hosts
+                // is the first person who would have met it.
                 return (
                   <li key={difference.key}>
-                    <span className="text-accent">{DIFFERENCE_LABEL[difference.kind]}</span> {difference.key}: {detail}
+                    <span className="text-accent">{DIFFERENCE_LABEL[difference.kind]}</span> {difference.key}:{' '}
+                    <PanelPath value={detail} />
                   </li>
                 );
               })}

@@ -344,16 +344,79 @@ let sidewaysChecks = 0;
 
 const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
   const overflow = await page.evaluate(() => {
-    const boxes: Array<{ name: string; scroll: number; client: number }> = [
-      { name: 'document', scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth },
+    /**
+     * The elements actually sticking out, named — because a width alone is not a repair.
+     *
+     * "402px of content in a 390px box" says a regression exists and leaves finding it to whoever
+     * reads the log, and the reader of a CI log is usually not at a machine that reproduces it. Text
+     * metrics differ between a developer's font set and a runner's, so a 12px overflow can be real on
+     * CI and absent locally — which makes "which element" the only part of the message that travels.
+     *
+     * Only LEAF offenders are reported. Every ancestor of a too-wide element is also too wide, so
+     * sorting by width would name the page, the section and the card before the one node to fix;
+     * dropping any offender that contains another leaves the culprits.
+     */
+    const describe = (element: Element): string => {
+      const classes =
+        typeof element.className === 'string' && element.className.trim() !== ''
+          ? `.${element.className.trim().split(/\s+/).slice(0, 5).join('.')}`
+          : '';
+      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 50);
+      return (
+        `${element.tagName.toLowerCase()}${element.id === '' ? '' : `#${element.id}`}${classes}` +
+        `${text === '' ? '' : ` "${text}"`}`
+      );
+    };
+    const culprits = (box: Element): readonly string[] => {
+      const limit = box.getBoundingClientRect().left + box.clientWidth + 1;
+      /**
+       * TWO WAYS TO STICK OUT, and only checking the obvious one reports nothing on the common case.
+       *
+       * A too-wide ELEMENT has a rect past the limit — a fixed width, a min-width, an unshrinkable flex
+       * child. But unbreakable TEXT does not move its own block's box: a `<li>` stays exactly as wide as
+       * its container while a 44-character `PATH` paints straight past it, so a rect comparison finds
+       * nothing and the honest-looking conclusion is "the box is sized wrong". It is not — it is holding
+       * content it never agreed to clip. That case is a box whose own `scrollWidth` exceeds its
+       * `clientWidth` while its `overflow-x` is `visible`, which is precisely "leaking into my
+       * ancestors" as opposed to "scrolling in my own box", the latter being what `PanelPath` does on
+       * purpose and must not be reported.
+       */
+      const offenders = [...box.querySelectorAll('*')].filter(element => {
+        if (element.getBoundingClientRect().right > limit) return true;
+        return element.scrollWidth > element.clientWidth + 1 && getComputedStyle(element).overflowX === 'visible';
+      });
+      return offenders
+        .filter(element => !offenders.some(other => other !== element && element.contains(other)))
+        .slice(0, 4)
+        .map(
+          element =>
+            `${describe(element)} — ${element.scrollWidth}px of content in a ${element.clientWidth}px box, ` +
+            `right edge ${element.getBoundingClientRect().right.toFixed(1)}px`,
+        );
+    };
+    const boxes = [
+      { name: 'document', element: document.documentElement as Element },
+      ...[...document.querySelectorAll('[data-settings-scroller]')].map(element => ({
+        name: 'settings scroller',
+        element,
+      })),
     ];
-    const scroller = document.querySelector('[data-settings-scroller]');
-    if (scroller !== null)
-      boxes.push({ name: 'settings scroller', scroll: scroller.scrollWidth, client: scroller.clientWidth });
-    return boxes.filter(box => box.scroll > box.client + 1);
+    return boxes
+      .filter(box => box.element.scrollWidth > box.element.clientWidth + 1)
+      .map(box => ({
+        name: box.name,
+        scroll: box.element.scrollWidth,
+        client: box.element.clientWidth,
+        culprits: culprits(box.element),
+      }));
   });
   for (const box of overflow)
-    fail(`${where}: the ${box.name} scrolls sideways — ${box.scroll}px of content in a ${box.client}px box`);
+    fail(
+      `${where}: the ${box.name} scrolls sideways — ${box.scroll}px of content in a ${box.client}px box\n` +
+        (box.culprits.length === 0
+          ? '   no descendant sticks out, so the box itself is sized wrong rather than holding something too wide'
+          : box.culprits.map(culprit => `   sticking out: ${culprit}`).join('\n')),
+    );
   sidewaysChecks += 1;
   process.stdout.write(`🧭 no sideways scroll: ${where}\n`);
 };
