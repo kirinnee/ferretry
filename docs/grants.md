@@ -232,6 +232,44 @@ right about the artefact it was handed, and the formatter had changed the artefa
   if what the old one bought survives it, so the browser drops its own held token too rather than
   presenting an authority the machine has already withdrawn.
 
+## The per-change confirmation: `fleet.configure` asks once more
+
+**One route asks a governed caller to prove the operator password again, against one exact staged change:
+`POST /v1/fleet/proposals/:proposalId/apply`.** It is worth its own section because it looks like a second
+gate and is not one.
+
+- **It is the SAME secret, and the SAME budget.** The password travels in the apply body, is checked by
+  `CapabilityGrantService.confirmChange`, and spends one of the same five tries an unlock spends, with the
+  same fifteen-minute lockout. There is no second credential, no second lifetime, and no second refusal
+  vocabulary — which is precisely what the mechanism it replaced had, and why it was deleted
+  ([fleet-authority-unification](design/fleet-authority-unification.md)).
+- **It mints nothing.** An unlock is a bearer value good for five minutes and any number of `configure`
+  demands. This is spent inside the one request that carries it and leaves nothing behind, which is the
+  whole of what "bound to one diff" means. **What it buys is narrow and worth stating narrowly:** a
+  borrowed or replayed unlock is not by itself enough to write executable wrappers into somebody's home.
+  It buys nothing at all against a caller that has the password.
+- **An UNGOVERNED caller is asked for nothing.** The host's own command line, and a browser on this machine
+  that has already unlocked, apply a fleet change with no prompt of any kind. `#358` established that
+  shape — one gate at the door, then full authority, the way `sudo` behaves — and adding a per-action
+  prompt behind it would be the patchwork this document exists to refuse.
+- **A machine with no operator password is asked for nothing either.** There is no secret to bind a change
+  to, and a control that cannot refuse is theatre. The capability layer reports that state as `ungated`
+  rather than `granted` for exactly this reason: so a surface can say once, beside the control, that
+  nothing is standing behind it.
+- **The confirmation happens BEFORE the change is spent.** A mistyped password must not burn a staged
+  change the caller was entitled to apply, which would make the mechanism a denial of service against the
+  person it exists to ask.
+- `GET /v1/fleet/permissions` carries `confirmation: 'none' | 'operator-password'` so a panel says this
+  before somebody clicks, and `applyRefusal` is the shared `GrantRefusal`, so the fleet panel words a
+  refusal exactly as the grants panel does.
+
+**Why only the fleet.** Every capability can do damage, and this is not a claim that the fleet's is worse
+in kind. It is that a fleet apply is a discrete, reviewable artifact — a numbered manifest of writes a
+person reads before agreeing — so there is something for a confirmation to be _bound to_. `terminal.use` is
+a stream of arbitrary code with no such boundary; a per-change prompt there would be a per-keystroke prompt,
+which is the control that trains people to click through. If a second capability ever grows a reviewable
+artifact, the machinery is `CallerGovernance.confirmChange` and it is not fleet-specific.
+
 ## Widening is a local act. There is no remote path to it.
 
 "Local" below means **on the host and past the gate** — `fy`, or a browser that has unlocked (or a

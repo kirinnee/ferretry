@@ -124,10 +124,10 @@ how somebody installs Claude Code, is told no harness is ready, and is right to 
   others is typing — less typing than before, and still typing.
 - **Nothing checks that a detected model is a model the provider will serve.** The report says what the
   settings file says. A wrong model in a settings file becomes a wrong model on the account.
-- **The authorize step is untouched.** Everything here happens before submit; the change is still
-  derived, previewed and authorized by whatever authority the fleet panel has at the time. The form
-  hands off at one call and knows nothing about proposals, approval codes or expiry, so replacing that
-  flow does not reach any of this.
+- **The authority step is untouched.** Everything here happens before submit; the change is still
+  derived, previewed and applied under whatever authority the fleet panel has at the time. The form
+  hands off at one call and knows nothing about proposals, confirmations or expiry — which is why the
+  deletion of the fleet approval flow reached none of this.
 - **A per-profile Codex model is not read** (above).
 - **`fy` has no command that prints this report.** It is a route and a browser surface; a terminal
   reader gets the harness paths from `fy doctor` and the models from the harness's own config file.

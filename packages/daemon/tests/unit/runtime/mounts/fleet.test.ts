@@ -15,13 +15,14 @@ import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
 import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
+import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, harnessDiscoveryReader, human } from './support.ts';
+import { CREDENTIALS, GRANTED, harnessDiscoveryReader, human, NARROWED } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
@@ -38,7 +39,9 @@ interface FleetFixture {
 /** Shared counter behind the deterministic identity a fixture mints. */
 let minted = 1;
 
-async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}): Promise<FleetFixture> {
+async function fixture(
+  options: { readonly healthProbe?: FleetHealthProbe; readonly guard?: CapabilityGuard } = {},
+): Promise<FleetFixture> {
   const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-route-'));
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
@@ -55,8 +58,9 @@ async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}
     // Counted rather than random, so a proposal handle and an account id are both assertable.
     mintId: () => `proposal${String(minted++).padStart(14, '0')}`,
     mintUuid: () => `00000000-0000-4000-8000-${String(minted++).padStart(12, '0')}`,
-    mintApprovalCode: () => 'AAAA-BBBB',
+    confirmChange: async () => ({ kind: 'confirmed' }),
     rootPinner: new ProcfsSessionRootPinner(),
+    clientName: 'fy',
     healthProbe: options.healthProbe,
     harnesses: harnessDiscoveryReader(),
   });
@@ -68,7 +72,7 @@ async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}
     root,
     userHome,
     paths,
-    dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, GRANTED),
+    dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, options.guard ?? GRANTED),
   };
 }
 
@@ -122,8 +126,9 @@ describe('the daemon fleet mount', () => {
       platform: 'linux',
       mintId: () => 'proposal00000000000000',
       mintUuid: () => '00000000-0000-4000-8000-000000000001',
-      mintApprovalCode: () => 'AAAA-BBBB',
+      confirmChange: async () => ({ kind: 'confirmed' }),
       rootPinner: new ProcfsSessionRootPinner(),
+      clientName: 'fy',
       harnesses: harnessDiscoveryReader(),
     }) as unknown as { healthProbe(): { probe: unknown } };
     should(subsystem.healthProbe().probe).be.a.Function();
@@ -199,26 +204,38 @@ describe('the daemon fleet mount', () => {
     should(JSON.parse(path.body)).have.property('code', 'fleet_environment_refused');
   });
 
-  it('should require a host-admin credential before changing profile environment', async () => {
+  it('should refuse a configure-axis change through the grant rather than through the token class', async () => {
+    // THE SAME REQUEST, TWO GUARDS. It used to be refused by an inline `tokenClass === 'device'` in
+    // the handler, which meant the refusal was invisible to the route table and to `GrantsView` and
+    // no surface could explain it before somebody clicked. Now the operator's answer decides, and
+    // the refusal arrives in the shared `grant_*` vocabulary with a sentence naming the next step.
     // Arrange
-    const subject = await fixture();
-    await writeConfig(subject);
-
-    // Act
-    const response = await subject.dispatcher.dispatch(
+    const permitted = await fixture();
+    const refused = await fixture({ guard: NARROWED });
+    await Promise.all([writeConfig(permitted), writeConfig(refused)]);
+    const write = (headers: Readonly<Record<string, string>>) =>
       request({
         method: 'PUT',
         path: '/v1/fleet/environment',
-        headers: { authorization: 'Bearer paired-device', 'x-ferretry-client': 'ui' },
+        headers,
         body: JSON.stringify({ profile: 'portable', mode: 'replace', environment: {} }),
-      }),
-    );
+      });
+    const device = { authorization: 'Bearer paired-device', 'x-ferretry-client': 'ui' } as const;
+
+    // Act
+    const served = await permitted.dispatcher.dispatch(write(device));
+    const denied = await refused.dispatcher.dispatch(write(device));
 
     // Assert
-    should(response.status).equal(403);
+    should(served.status).equal(200);
+    should(denied.status).equal(403);
+    should(jsonBody(denied)).match({ code: 'grant_not_granted', error: /daemon config set fleet --configure/u });
   });
 
-  it('should require operator authority and never let a paired device provision', async () => {
+  it('should require an authenticated operator credential before anything at all', async () => {
+    // The route's own contract, which the grant layer is stacked on top of rather than merged into:
+    // a grant is consulted only once the credential minimum has already passed, so it can only ever
+    // take authority away.
     // Arrange
     const subject = await fixture();
     await writeConfig(subject);
@@ -229,15 +246,11 @@ describe('the daemon fleet mount', () => {
     const anonymous = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/plan' }));
     const scoped = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: warden }));
     const deviceRead = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: device }));
-    const deviceApply = await subject.dispatcher.dispatch(
-      request({ method: 'POST', path: '/v1/fleet/apply', headers: device }),
-    );
 
     // Assert
     should(anonymous.status).equal(401);
     should(scoped.status).equal(403);
     should(deviceRead.status).equal(200);
-    should(deviceApply.status).equal(403);
     should(await fileExists(subject.paths.fleetManifest)).be.false();
   });
 

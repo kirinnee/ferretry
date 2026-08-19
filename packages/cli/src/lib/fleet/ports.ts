@@ -13,7 +13,7 @@ import type {
   FleetUsageSnapshot,
   HarnessKind,
 } from '@ferretry/fleet';
-import type { FleetApprovalMint, FleetSharing, IFyApiClient } from '@ferretry/protocol';
+import type { FleetSharing, IFyApiClient } from '@ferretry/protocol';
 import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
 
 /**
@@ -117,18 +117,6 @@ export interface IFleetClock {
 /** Asking the daemon which agents should do a piece of work. */
 export interface IRecommendationGateway {
   recommend(request: RecommendationRequest): Promise<TeamRecommendation>;
-}
-
-/**
- * Approving one change a paired browser has proposed.
- *
- * Separate from the recommender because the two have nothing in common but a client: one asks the
- * daemon a question, the other exercises this host's authority over a pending write. The port takes
- * only the proposal id — a non-secret handle — and answers with the mint, because the code must be
- * something this process prints and then forgets, never something it is handed to pass on.
- */
-export interface IFleetAuthorizationGateway {
-  authorize(proposalId: string): Promise<FleetApprovalMint>;
 }
 
 /**

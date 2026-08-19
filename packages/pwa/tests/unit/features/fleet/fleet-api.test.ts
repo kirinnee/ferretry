@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FLEET_REFUSAL_CODES } from '@ferretry/protocol';
+import { FLEET_REFUSAL_CODES, OPERATOR_UNLOCK_HEADER } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 // A value import, not a type-only one: these tests build the client's real parse failures with it.
 import { z } from 'zod';
@@ -12,7 +12,6 @@ import {
   type FleetRefusalKind,
   fleetRefusal,
   listFleetAssets,
-  parseApprovalCode,
   readFleetAsset,
   readFleetConfig,
   readFleetHarnesses,
@@ -26,6 +25,9 @@ interface Call {
   readonly path: string;
   readonly init: RequestInit | undefined;
 }
+
+/** An unlock token that satisfies the shared grammar, so a fixture cannot be laxer than the daemon. */
+const TOKEN = `fy_unlock_${'A'.repeat(22)}`;
 
 const clientFor = (answer: unknown): { client: FleetClient; calls: Call[] } => {
   const calls: Call[] = [];
@@ -95,25 +97,61 @@ describe('the fleet wire client', () => {
       assetEdits: [],
     });
 
-    const read = clientFor(proposal({ approval: { outstanding: true, expiresAt: '2026-08-05T06:02:00.000Z' } }));
-    expect((await readFleetProposal(read.client, 'fy_fprop_A')).approval?.outstanding).toBe(true);
+    const read = clientFor(proposal({ state: 'consumed' }));
+    expect((await readFleetProposal(read.client, 'fy_fprop_A')).state).toBe('consumed');
     expect(read.calls[0]?.path).toBe(`${FLEET_PATH}/proposals/fy_fprop_A`);
   });
 
-  it('applies exactly one proposal, with the approval code only when there is one', async () => {
-    const answer = {
-      outcome: 'committed',
-      result: { accountCount: 1, operationCount: 3, manifestPath: '/m', prunedWrappers: [], sharedHistory: [] },
-    };
-    const direct = clientFor(answer);
+  const APPLIED = {
+    outcome: 'committed',
+    result: { accountCount: 1, operationCount: 3, manifestPath: '/m', prunedWrappers: [], sharedHistory: [] },
+  };
+
+  it('applies exactly one proposal, and sends an empty body when nothing was asked for', async () => {
+    // Arrange — the ungoverned caller: the host's own token, or a local browser that has unlocked.
+    const direct = clientFor(APPLIED);
+
+    // Act
     const outcome = await applyFleetProposal(direct.client, 'fy_fprop_A');
+
+    // Assert — one route, no secret, and no header.
     expect(outcome.outcome).toBe('committed');
     expect(direct.calls[0]?.path).toBe(`${FLEET_PATH}/proposals/fy_fprop_A/apply`);
     expect(JSON.parse(String(direct.calls[0]?.init?.body))).toEqual({});
+    expect(direct.calls[0]?.init?.headers).toEqual({ 'content-type': 'application/json' });
+  });
 
-    const approved = clientFor(answer);
-    await applyFleetProposal(approved.client, 'fy_fprop_A', '7F3K-M9QW');
-    expect(JSON.parse(String(approved.calls[0]?.init?.body))).toEqual({ approvalCode: '7F3K-M9QW' });
+  it('carries the per-change confirmation in the BODY, because a query reaches every proxy log', async () => {
+    const confirmed = clientFor(APPLIED);
+    await applyFleetProposal(confirmed.client, 'fy_fprop_A', { operatorPassword: 'correct horse battery' });
+    expect(JSON.parse(String(confirmed.calls[0]?.init?.body))).toEqual({ operatorPassword: 'correct horse battery' });
+    // Not in the path, ever: the id is the only thing that identifies this call.
+    expect(confirmed.calls[0]?.path).not.toContain('correct');
+  });
+
+  it('carries an unlock in the SHARED header, so a governed route stops refusing before the handler', async () => {
+    // Arrange — the case that produced two prompts before this change: locked AND owing a confirmation.
+    const both = clientFor(APPLIED);
+
+    // Act — ONE value, two uses, one call.
+    await applyFleetProposal(both.client, 'fy_fprop_A', { operatorPassword: 'correct horse battery', unlock: TOKEN });
+
+    // Assert — the header is the same one `changeGrants` sends; the body still carries the confirmation.
+    expect(both.calls[0]?.init?.headers).toEqual({
+      'content-type': 'application/json',
+      [OPERATOR_UNLOCK_HEADER]: TOKEN,
+    });
+    expect(JSON.parse(String(both.calls[0]?.init?.body))).toEqual({ operatorPassword: 'correct horse battery' });
+  });
+
+  it('refuses to send a password the daemon would reject, at the call rather than as a 400', async () => {
+    // Arrange — the shared schema owns the minimum length, and this parses through it on the way out, so
+    // a browser bug cannot spend one of a small attempt budget on a value that could never be right.
+    const short = clientFor(APPLIED);
+
+    // Act / Assert
+    expect(applyFleetProposal(short.client, 'fy_fprop_A', { operatorPassword: 'no' })).rejects.toThrow();
+    expect(short.calls).toHaveLength(0);
   });
 
   it('parses every apply outcome the daemon can report, including the failures', async () => {
@@ -144,14 +182,6 @@ describe('the fleet wire client', () => {
       const parsed: string = (await applyFleetProposal(client, 'fy_fprop_A')).outcome;
       expect(parsed).toBe((answer as { outcome: string }).outcome);
     }
-  });
-
-  it('normalises an approval code the way a person types it, and refuses one that is not a code', () => {
-    expect(parseApprovalCode('7f3k m9qw')).toBe('7F3K-M9QW');
-    expect(parseApprovalCode('  7F3KM9QW ')).toBe('7F3K-M9QW');
-    expect(parseApprovalCode('7F3K-M9Q')).toBeNull();
-    // 0, 1, I, L, O and U are not in the alphabet, so a transcription of them is not a code.
-    expect(parseApprovalCode('01IL-OUOU')).toBeNull();
   });
 });
 
