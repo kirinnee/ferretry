@@ -11,6 +11,7 @@ import {
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
+  FleetTokenRefreshService,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
 import {
@@ -23,10 +24,12 @@ import {
   PlatformFleetCredentialStore,
   ProcessFleetHealthProbe,
   ProcessFleetLoginPort,
+  ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
   runFleetHealthProcess,
   SpawnCredentialCommand,
   spawnFleetLoginProcess,
+  spawnFleetTokenRefreshProcess,
   whichHarnessBinary,
 } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
@@ -800,6 +803,18 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
         environment: world.environment,
         readWrapper: readFleetWrapperScript,
         which: whichHarnessBinary,
+      }),
+      // Wired here and not inside the login service, because this is the surface where starting a
+      // harness is unremarkable: a human typed a fleet command in a terminal. The renewal reads
+      // through the same credential store as the login, so the reading that authorises a rotation is
+      // the reading a copy would have decided on.
+      renewal: new FleetTokenRefreshService({
+        store: credentialStore,
+        port: new ProcessFleetTokenRefreshPort({
+          spawn: spawnFleetTokenRefreshProcess,
+          environment: world.environment,
+          which: whichHarnessBinary,
+        }),
       }),
     }),
     clock: new SystemFleetClock(),

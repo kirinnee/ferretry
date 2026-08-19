@@ -11,6 +11,7 @@ import { FleetIdentityService, UnknownIdentityAccountError } from '../../src/lib
 import type { FleetLoginOutcome, FleetLoginResult, FleetLoginTarget } from '../../src/lib/login.ts';
 import { FleetLoginService } from '../../src/lib/login.ts';
 import type { HarnessKind } from '../../src/lib/manifest.ts';
+import type { FleetTokenRefreshResult, FleetTokenRenewal } from '../../src/lib/token-refresh.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
 const ID_TWO = '00000000-0000-4000-8000-000000000002';
@@ -465,5 +466,130 @@ describe('FleetLoginService', () => {
       wrapper: '/fleet/bin/codex-kirin',
       home: '/fleet/homes/codex-kirin',
     });
+  });
+});
+
+/**
+ * The renewal pass.
+ *
+ * Nothing here decides eligibility — that is the renewal's own gate, proved in `token-refresh.test.ts`
+ * — so these fakes report what a renewal did and the tests are about what the login pass does with it.
+ */
+describe('FleetLoginService with a renewal', () => {
+  /** A renewal that reports a scripted result and rewrites the store the way a real one would. */
+  class RecordingRenewal implements FleetTokenRenewal {
+    readonly asked: string[] = [];
+
+    constructor(
+      private readonly result: FleetTokenRefreshResult,
+      private readonly store?: ScriptedCredentialStore,
+    ) {}
+
+    renew(identityToRenew: FleetIdentity): Promise<FleetTokenRefreshResult> {
+      this.asked.push(identityToRenew.key);
+      if (this.result.ran) this.store?.nextPass();
+      return Promise.resolve(this.result);
+    }
+  }
+
+  const withRenewal = (
+    store: ScriptedCredentialStore,
+    port: RecordingLoginPort,
+    renewal: FleetTokenRenewal,
+  ): FleetLoginService =>
+    new FleetLoginService({ identities: new FleetIdentityService(store), loginPort: port, renewal });
+
+  const expired: CredentialReading = { state: 'refreshable', expiresAt: NOW - HOUR };
+
+  it('should renew an expired credential so the sibling receives a live one instead of a spent copy', async () => {
+    // Arrange — both lanes expired. Without the renewal this copies an expired credential around and
+    // every lane then races to spend the one refresh token it holds a copy of.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: expired, [ID_TWO]: expired },
+      { [ID_ONE]: VALID, [ID_TWO]: expired },
+    ]);
+    const port = new RecordingLoginPort();
+    const renewal = new RecordingRenewal(
+      { identity: 'claude:kirin', accountId: ID_ONE, status: 'renewed', ran: true },
+      store,
+    );
+
+    // Act
+    const actual = await withRenewal(store, port, renewal).login({
+      identities: [identity({ members: [member({ accountId: ID_ONE }), member({ accountId: ID_TWO, mode: 'auto' })] })],
+      mode: 'full',
+    });
+
+    // Assert — nobody was asked for anything, and the credential that was copied is the renewed one.
+    should(renewal.asked).deepEqual(['claude:kirin']);
+    should(port.launched).deepEqual([]);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'renewed', [ID_TWO]: 'synced' });
+  });
+
+  it('should start nothing at all when the pass was asked not to renew', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: expired }]);
+    const renewal = new RecordingRenewal({ identity: 'claude:kirin', status: 'renewed', ran: true });
+
+    // Act
+    const actual = await withRenewal(store, new RecordingLoginPort(), renewal).login({
+      identities: [identity()],
+      mode: 'full',
+      refresh: false,
+    });
+
+    // Assert
+    should(renewal.asked).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable' });
+  });
+
+  it('should lend a failed renewal its own sentence to a row that has nothing else to say', async () => {
+    // Arrange — the renewal ran and achieved nothing, so the credential is still expired.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: expired }]);
+    const renewal = new RecordingRenewal({
+      identity: 'claude:kirin',
+      accountId: ID_ONE,
+      status: 'failed',
+      reason: 'the renewal ran and this access token is still expired',
+      ran: true,
+    });
+
+    // Act
+    const actual = await withRenewal(store, new RecordingLoginPort(), renewal).login({
+      identities: [identity()],
+      mode: 'full',
+    });
+
+    // Assert
+    should(actual).match([
+      { accountId: ID_ONE, status: 'usable', message: 'the renewal ran and this access token is still expired' },
+    ]);
+  });
+
+  it('should leave a row that already explains itself alone', async () => {
+    // Arrange — a spent refresh token leaves the home with nothing, so this identity now needs a human
+    // and the pass was told not to ask for one. That row's own message is the one that matters.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: expired }, { [ID_ONE]: { state: 'missing' } }]);
+    const renewal = new RecordingRenewal(
+      {
+        identity: 'claude:kirin',
+        accountId: ID_ONE,
+        status: 'failed',
+        reason: 'the refresh token is gone',
+        ran: true,
+      },
+      store,
+    );
+
+    // Act
+    const actual = await withRenewal(store, new RecordingLoginPort(), renewal).login({
+      identities: [identity()],
+      mode: 'sync-only',
+    });
+
+    // Assert
+    should(actual).match([{ accountId: ID_ONE, status: 'login-needed' }]);
+    should(actual[0]?.message).not.equal('the refresh token is gone');
   });
 });

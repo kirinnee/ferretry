@@ -471,12 +471,17 @@ export function renderScaffoldResult(
  * nothing happened, and the last one is not a milder version of the other two: it means this home was
  * never read successfully, so nothing can be concluded about it. Collapsing them is how a report ends
  * up implying a fleet is signed in when part of it was never checked.
+ *
+ * `renewed` is likewise not a quieter `usable`: this account's token had expired, and the run got it
+ * back without anybody being asked for anything. That is the line worth reading in the report.
  */
 export function renderLoginRow(result: FleetLoginResult): string {
   const detail = result.message === undefined ? '' : ` — ${result.message}`;
   switch (result.status) {
     case 'logged-in':
       return `  ${result.accountId}  logged in`;
+    case 'renewed':
+      return `  ${result.accountId}  expired token renewed itself, nobody was asked`;
     case 'synced':
       return `  ${result.accountId}  credential copied from this identity`;
     case 'usable':

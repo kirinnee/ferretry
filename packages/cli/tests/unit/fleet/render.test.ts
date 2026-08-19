@@ -793,11 +793,14 @@ describe('renderLoginResults', () => {
       { accountId: 'f', identity: KEY, status: 'usable' },
       { accountId: 'g', identity: KEY, status: 'login-needed', message: 'rerun without --sync-only' },
       { accountId: 'h', identity: KEY, status: 'indeterminate', message: 'the keychain is locked' },
+      { accountId: 'i', identity: KEY, status: 'renewed' },
     ]);
 
     // Assert — a failure and an unknown are counted apart, because they need different next steps.
-    should(actual).containEql('8 accounts, 1 failed, 1 could not be read');
+    should(actual).containEql('9 accounts, 1 failed, 1 could not be read');
     should(actual).containEql('a  logged in');
+    // A renewal is not "already had a usable credential": it is an approval this run did not cost.
+    should(actual).containEql('i  expired token renewed itself, nobody was asked');
     should(actual).containEql('b  no login needed');
     should(actual).containEql('c  skipped, the manifest declares it unavailable — pool down');
     should(actual).containEql('d  FAILED — login process exited with code 7');
