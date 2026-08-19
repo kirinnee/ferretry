@@ -106,7 +106,11 @@ The contract is [docs/fleet-sharing.md](docs/fleet-sharing.md). Sharing was alwa
 accounts referencing one path in the asset tree each get a copy of it — so what this adds is a
 **declaration and a report**, not a second mechanism: `config.shared` names documents, the sharing
 report says per account and per field whether the effective value is a declared shared one or its own
-and which slot supplied it, and `link` / `unlink` are reviewed mutations like any other. **Unlink
+and which slot supplied it, and `link` / `unlink` are reviewed mutations like any other. **`skills` is
+per ITEM, not one directory**: the store registers one entry per skill, an account's `skills` is the
+LIST it selected, a later slot replaces that whole list, and each item lands under its own name at
+`<home>/skills/<item>` — so two accounts can overlap on some items and not others, and an item dropped
+from a selection is removed from the home rather than left behind. **Unlink
 materialises a private copy** rather than leaving an account with nothing, and never touches the shared
 document. **Identity and auth are never shared**, enforced by the schema rather than by convention:
 everything shareable is a `Profile` field, and an account's identity and provider login are

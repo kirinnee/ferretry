@@ -10,6 +10,7 @@
  * ({@link unsupportedAssetFields}) rather than an absent file nobody notices.
  */
 import type { HarnessKind } from './manifest.ts';
+import { canonicalAssetReference } from './paths.ts';
 import type { SettingsFormat } from './settings.ts';
 
 /** The profile fields that name an asset on disk. `settings` is layered; the rest are paths. */
@@ -20,10 +21,34 @@ export type AssetField = (typeof ASSET_FIELDS)[number];
 export type AssetShape = 'file' | 'directory';
 
 /**
+ * The name one selected skill item takes inside the harness's skills destination.
+ *
+ * The reference's last segment, canonicalized first, so `./skills/review` and `skills/review` claim
+ * one destination rather than two. Derived here, once, because the plan builder *writes* that
+ * destination and the sharing report *names* it: two derivations would eventually disagree about which
+ * item an account is holding, and the disagreement would be invisible until an apply put the wrong
+ * tree in a home.
+ *
+ * Returns the canonical reference itself when nothing segment-shaped remains — a reference like `.`
+ * names no item, and the plan builder refuses it rather than composing `<home>/skills/.` and
+ * replacing the whole directory.
+ */
+export function skillItemName(reference: string): string {
+  const canonical = canonicalAssetReference(reference);
+  const segments = canonical.split('/').filter(segment => segment !== '' && segment !== '.');
+  return segments.at(-1) ?? canonical;
+}
+
+/** Whether a derived item name is a single path component that can safely be a destination. */
+export function isUsableSkillItemName(name: string): boolean {
+  return name !== '' && name !== '.' && name !== '..' && !name.includes('/');
+}
+
+/**
  * Whether each field names one file or a whole directory, independent of harness.
  *
- * The shape is a property of the field rather than of the harness that receives it: `skills` is a
- * directory wherever it lands. It is declared here, beside the destinations, because the two facts
+ * The shape is a property of the field rather than of the harness that receives it: a `skills` item is
+ * a directory wherever it lands. It is declared here, beside the destinations, because the two facts
  * are read together — and it is the fact that decides whether a shared asset can be privately
  * materialized through the reviewed text-document path, which writes files and only files.
  *
@@ -48,7 +73,11 @@ export const ASSET_FIELD_SHAPES: Readonly<Record<AssetField, AssetShape>> = {
  */
 export interface HarnessAsset {
   readonly field: AssetField;
-  /** Destination name inside the account's home. */
+  /**
+   * Destination name inside the account's home. For `skills` this names the *container*: a selection
+   * materializes one entry per selected item beneath it, at `<dest>/<item>`, rather than replacing it
+   * with one source tree.
+   */
   readonly dest: string;
   readonly mode: 'link' | 'copy';
   /** Set only for the layered settings field; names the format its layers merge into. */

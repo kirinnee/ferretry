@@ -62,6 +62,9 @@ export function operationSummary(operation: FleetWriteOperation): FleetWireOpera
   if (operation.kind === 'prune') {
     return { kind: 'prune', path: operation.path, marker: operation.marker, keep: [...operation.keep] };
   }
+  if (operation.kind === 'prune-directory') {
+    return { kind: 'prune-directory', path: operation.path, keep: [...operation.keep] };
+  }
   return {
     kind: 'codex-sqlite-ownership',
     path: operation.path,

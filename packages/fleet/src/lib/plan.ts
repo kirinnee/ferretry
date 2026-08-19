@@ -16,16 +16,19 @@
  *   before a single byte is written, rather than being dropped silently.
  */
 import {
+  ASSET_FIELDS,
   type AssetField,
   HARNESS_ASSETS,
   type HarnessAssetTable,
   harnessAsset,
+  isUsableSkillItemName,
+  skillItemName,
   unsupportedAssetFields,
 } from './assets.ts';
 import { UnimplementedFleetCapabilityError } from './capabilities.ts';
 import { type FleetConfig, FleetConfigCapabilities } from './config.ts';
 import { buildFleetManifest, type FleetManifest, type HarnessKind } from './manifest.ts';
-import { expandAssetPath, expandHomePath, joinPath } from './paths.ts';
+import { canonicalAssetReference, expandAssetPath, expandHomePath, joinPath } from './paths.ts';
 import { type ResolvedAccount, resolveAccounts, resolveCommands, toManifestAccounts } from './profiles.ts';
 import type {
   FleetApplyPlan,
@@ -73,20 +76,93 @@ export class UnknownDefaultHomeError extends Error {
   }
 }
 
-/** The path-valued asset fields, in the order they are materialized. */
-const PATH_ASSET_FIELDS = ['memory', 'skills', 'hooks', 'hooksDir', 'mcp'] as const satisfies readonly AssetField[];
+/** Raised when two selected skill items would claim one destination inside the skills directory. */
+export class SkillItemCollisionError extends Error {
+  constructor(
+    readonly accountId: string,
+    readonly item: string,
+    readonly sources: readonly string[],
+  ) {
+    // Both source paths are named rather than only the colliding item name. From a store browser two
+    // items that differ solely in their parent directory look identical, so a refusal saying only
+    // "review collides" would send somebody to correct the wrong one.
+    super(
+      `account "${accountId}" selects ${sources.length} skill items that would all be materialized as "${item}": ${sources.join(', ')}; select one of them, or give each item its own name`,
+    );
+    this.name = 'SkillItemCollisionError';
+  }
+}
+
+/** Raised when a selected skills reference names no item that could become a destination. */
+export class UnnamedSkillItemError extends Error {
+  constructor(
+    readonly accountId: string,
+    readonly reference: string,
+  ) {
+    super(
+      `account "${accountId}" selects the skills reference "${reference}", which names no item to materialize; name the item inside the store rather than the store itself`,
+    );
+    this.name = 'UnnamedSkillItemError';
+  }
+}
+
+/** The asset fields that name exactly one path each, in the order they are materialized. */
+const PATH_ASSET_FIELDS = ['memory', 'hooks', 'hooksDir', 'mcp'] as const satisfies readonly AssetField[];
 
 /**
- * Asset fields this account actually asks for. `settings` is a layer stack rather than a path, so
- * "declared" means a non-empty stack; every other field is declared when it names something.
+ * Asset fields this account actually asks for, in the fields' own declaration order.
+ *
+ * Three shapes, so three questions. `settings` is a layer stack, so "declared" means a non-empty
+ * stack. `skills` is a per-item selection, and an EMPTY selection still counts as declared: an account
+ * that selected nothing has said something about its skills, and a harness with no destination for
+ * them must be refused for saying it rather than quietly accepted because the list was short. Every
+ * other field is declared when it names a path.
  */
 export function declaredAssetFields(account: ResolvedAccount): readonly AssetField[] {
-  const declared: AssetField[] = [];
-  if (account.settings.length > 0) declared.push('settings');
+  const declared = new Set<AssetField>();
+  if (account.settings.length > 0) declared.add('settings');
+  if (account.skills !== undefined) declared.add('skills');
   for (const field of PATH_ASSET_FIELDS) {
-    if (account[field] !== undefined) declared.push(field);
+    if (account[field] !== undefined) declared.add(field);
   }
-  return declared;
+  return ASSET_FIELDS.filter(field => declared.has(field));
+}
+
+/** One selected skill item: the document it comes from, and the name it takes inside the home. */
+interface PlannedSkillItem {
+  readonly name: string;
+  readonly reference: string;
+}
+
+/**
+ * One account's selection as distinct items, refusing rather than dropping.
+ *
+ * Two entries naming ONE document are one item, not a collision: a selection assembled by adding to a
+ * list can legitimately repeat a reference, and materializing it twice would be the same tree written
+ * over itself. Two entries naming DIFFERENT documents that want one destination is the collision, and
+ * it throws while planning like every other thing this plan cannot honour.
+ */
+function plannedSkillItems(account: ResolvedAccount): readonly PlannedSkillItem[] {
+  const byName = new Map<string, PlannedSkillItem[]>();
+  for (const reference of account.skills ?? []) {
+    const name = skillItemName(reference);
+    if (!isUsableSkillItemName(name)) throw new UnnamedSkillItemError(account.id, reference);
+    const claimed = byName.get(name) ?? [];
+    const already = claimed.some(
+      item => canonicalAssetReference(item.reference) === canonicalAssetReference(reference),
+    );
+    if (!already) byName.set(name, [...claimed, { name, reference }]);
+  }
+  for (const [name, items] of byName) {
+    if (items.length > 1) {
+      throw new SkillItemCollisionError(
+        account.id,
+        name,
+        items.map(item => item.reference),
+      );
+    }
+  }
+  return [...byName.values()].flatMap(items => items.slice(0, 1));
 }
 
 export class FleetPlan implements FleetPlanBuilder {
@@ -269,6 +345,43 @@ export class FleetPlan implements FleetPlanBuilder {
       operations.push(asset.mode === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path });
     }
 
+    operations.push(...this.skillOperations(account, directory, layout));
+    return operations;
+  }
+
+  /**
+   * Materialize one account's skills selection: the container, one entry per selected item, and a
+   * sweep of everything else.
+   *
+   * One operation per item rather than one per field, which is the whole of per-item selection at the
+   * write layer: two accounts selecting the same item read the same document, so an edit to it reaches
+   * both on the next apply, and neither can see what the other also selected. The sweep comes last so
+   * its keep list is exactly what the operations above materialized — an item dropped from the
+   * selection is removed rather than left behind for the harness to keep running.
+   */
+  private skillOperations(
+    account: ResolvedAccount,
+    directory: string,
+    layout: FleetLayout,
+  ): readonly FleetWriteOperation[] {
+    const asset = harnessAsset(this.assets, account.kind, 'skills');
+    // A selection this harness has no destination for was already refused by assetOperations.
+    if (account.skills === undefined || asset === undefined) return [];
+
+    const container = joinPath(directory, asset.dest);
+    const items = plannedSkillItems(account);
+    const operations: FleetWriteOperation[] = [
+      // Created explicitly rather than left to each item's own write, so the container keeps the
+      // account-private mode every other fleet-owned directory has instead of whatever the umask gives
+      // it — and so an empty selection still has a directory for the sweep to empty.
+      { kind: 'directory', path: container, mode: DIRECTORY_MODE },
+    ];
+    for (const item of items) {
+      const source = expandAssetPath(item.reference, layout.userHome, layout.assetsDirectory);
+      const path = joinPath(container, item.name);
+      operations.push(asset.mode === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path });
+    }
+    operations.push({ kind: 'prune-directory', path: container, keep: items.map(item => item.name) });
     return operations;
   }
 }

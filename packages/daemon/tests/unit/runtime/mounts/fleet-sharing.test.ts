@@ -359,16 +359,37 @@ describe('giving an account its own copy', () => {
   });
 
   it('should refuse a directory asset with the manual remedy', async () => {
+    // Arrange — hooksDir is the directory-shaped field, declared through a `codex:` overlay so it
+    // reaches only the harness that has a destination for it.
+    const subject = await fixture();
+    await prepare(
+      subject,
+      CONFIG.replace(
+        '  base:\n    memory: ./CLAUDE.md',
+        '  base:\n    memory: ./CLAUDE.md\n    codex:\n      hooksDir: ./hooks',
+      ).replace('  skills:\n    default: ./skills', '  hooksDir:\n    default: ./hooks'),
+    );
+
+    // Act / Assert
+    should(await refusal(subject, { kind: 'unlink-shared-asset', accountId: CODEX_ID, field: 'hooksDir' })).match(
+      /names a directory, and a private copy of a directory is not something the reviewed asset editor can write/u,
+    );
+  });
+
+  it('should refuse unlinking a per-item selection, because no single document is being left', async () => {
     // Arrange
     const subject = await fixture();
     await prepare(
       subject,
-      CONFIG.replace('  base:\n    memory: ./CLAUDE.md', '  base:\n    memory: ./CLAUDE.md\n    skills: ./skills'),
+      CONFIG.replace(
+        '  base:\n    memory: ./CLAUDE.md',
+        '  base:\n    memory: ./CLAUDE.md\n    skills: [./skills/review]',
+      ).replace('    default: ./skills', '    review: ./skills/review'),
     );
 
-    // Act / Assert
+    // Act / Assert — the refusal a person actually meets, said in terms of the list they can edit.
     should(await refusal(subject, { kind: 'unlink-shared-asset', accountId: CLAUDE_ID, field: 'skills' })).match(
-      /names a directory, and a private copy of a directory is not something the reviewed asset editor can write/u,
+      /"skills" holds a per-item selection rather than one document/u,
     );
   });
 

@@ -14,6 +14,7 @@ import {
   accountSharing,
   DEFAULT_SHARED_NAME,
   LINKABLE_FIELDS,
+  orphanedSharedDocuments,
   PER_ACCOUNT_FIELDS,
   resolveFleetSharing,
   SHAREABLE_FIELDS,
@@ -470,5 +471,260 @@ describe('materializing a private copy', () => {
     should(unreadableSourceReason('/etc/instructions.md')).match(/outside this fleet's asset tree/u);
     should(unreadableSourceReason('~/notes.md')).match(/outside this fleet's asset tree/u);
     should(unreadableSourceReason('$HOME/notes.md')).match(/outside this fleet's asset tree/u);
+  });
+});
+
+describe('reporting a per-item skills selection', () => {
+  /** A store of three skill items, with each account free to take its own subset. */
+  const storeFleet = (first: readonly string[], second: readonly string[]): FleetConfig =>
+    parse({
+      shared: {
+        skills: { review: 'skills/review', deploy: 'skills/deploy', research: 'skills/research' },
+      },
+      variants: { default: {} },
+      agents: [
+        { name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one', { layer: { skills: first } }) } },
+        {
+          name: 'two',
+          kind: 'claude',
+          routes: { default: route(ID_TWO, 'claude-two', { layer: { skills: second } }) },
+        },
+      ],
+    });
+
+  it('should report each selected item separately, saying which are the stores', () => {
+    // Arrange — one store item and one path the store never declared.
+    const config = storeFleet(['skills/review', 'skills/mine'], []);
+
+    // Act
+    const sharing = resolveFleetSharing(config);
+
+    // Assert
+    should(accountSharing(sharing, ID_ONE)?.fields.skills).deepEqual({
+      state: 'selection',
+      origin: { kind: 'account' },
+      items: [
+        { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 1 },
+        { name: 'mine', path: 'skills/mine', sharedName: undefined, referrers: 1 },
+      ],
+    });
+  });
+
+  it('should name every account that selected one item, per item', () => {
+    // Arrange — both take `review`; only the first takes `deploy`; nobody takes `research`.
+    const config = storeFleet(['skills/review', 'skills/deploy'], ['skills/review']);
+
+    // Act
+    const sharing = resolveFleetSharing(config);
+    const byName = new Map(sharing.documents.map(document => [document.name, document.accounts]));
+
+    // Assert — membership rather than value equality, which is what makes deleting one item a question
+    // with a per-item answer instead of one about whoever shares the same directory.
+    should(byName.get('review')).deepEqual([ID_ONE, ID_TWO]);
+    should(byName.get('deploy')).deepEqual([ID_ONE]);
+    should(byName.get('research')).deepEqual([]);
+  });
+
+  it('should count referrers per item rather than per account', () => {
+    // Act
+    const sharing = resolveFleetSharing(storeFleet(['skills/review', 'skills/deploy'], ['skills/review']));
+    const items = accountSharing(sharing, ID_ONE)?.fields.skills;
+
+    // Assert
+    should(items).match({ state: 'selection' });
+    should(items?.state === 'selection' && items.items).deepEqual([
+      { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2 },
+      { name: 'deploy', path: 'skills/deploy', sharedName: 'deploy', referrers: 1 },
+    ]);
+  });
+
+  it('should report an account that selected nothing as an empty selection, not as absent', () => {
+    // Act
+    const sharing = resolveFleetSharing(storeFleet([], []));
+
+    // Assert
+    should(accountSharing(sharing, ID_ONE)?.fields.skills).deepEqual({
+      state: 'selection',
+      origin: { kind: 'account' },
+      items: [],
+    });
+  });
+
+  it('should report absent when no slot declared a selection at all', () => {
+    // Arrange
+    const config = parse({
+      variants: { default: {} },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one') } }],
+    });
+
+    // Act / Assert
+    should(accountSharing(resolveFleetSharing(config), ID_ONE)?.fields.skills).deepEqual({ state: 'absent' });
+  });
+
+  it('should count one item named twice as one item and report it once', () => {
+    // Act — the same document, spelled two ways the canonical form collapses.
+    const sharing = resolveFleetSharing(storeFleet(['skills/review', './skills/review'], []));
+    const skills = accountSharing(sharing, ID_ONE)?.fields.skills;
+
+    // Assert
+    should(skills?.state === 'selection' && skills.items).deepEqual([
+      { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 1 },
+    ]);
+  });
+
+  it('should name the slot that supplied the selection when it is not the account own layer', () => {
+    // Arrange
+    const config = parse({
+      shared: { skills: { review: 'skills/review' } },
+      profiles: { base: { skills: ['skills/review'] } },
+      variants: { default: {} },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one') } }],
+    });
+
+    // Act / Assert
+    should(accountSharing(resolveFleetSharing(config), ID_ONE)?.fields.skills).match({
+      state: 'selection',
+      origin: { kind: 'base-profile', name: 'base' },
+    });
+  });
+});
+
+describe('orphanedSharedDocuments', () => {
+  /** A store of two skill items, both selected by the one account. */
+  const before = (): FleetConfig =>
+    parse({
+      shared: { skills: { review: 'skills/review', deploy: 'skills/deploy' } },
+      variants: { default: {} },
+      agents: [
+        {
+          name: 'one',
+          kind: 'claude',
+          routes: { default: route(ID_ONE, 'claude-one', { layer: { skills: ['skills/review', 'skills/deploy'] } }) },
+        },
+        {
+          name: 'two',
+          kind: 'claude',
+          routes: { default: route(ID_TWO, 'claude-two', { layer: { skills: ['skills/review'] } }) },
+        },
+      ],
+    });
+
+  /** The same fleet with the named store items removed from the registry. */
+  const withStore = (store: Record<string, string>): FleetConfig => {
+    const base = before();
+    return parse({
+      shared: { skills: store },
+      variants: { default: {} },
+      agents: base.agents as unknown as Record<string, unknown>[],
+    });
+  };
+
+  it('should find nothing when the store still offers everything', () => {
+    // Act / Assert
+    should(orphanedSharedDocuments(before(), before())).deepEqual([]);
+  });
+
+  it('should name every account still selecting a deleted item', () => {
+    // Act — `review` is dropped from the store while two accounts still select it.
+    const actual = orphanedSharedDocuments(before(), withStore({ deploy: 'skills/deploy' }));
+
+    // Assert — the ids, not a count: the remedy is to move each of them off it.
+    should(actual).deepEqual([{ field: 'skills', name: 'review', path: 'skills/review', accounts: [ID_ONE, ID_TWO] }]);
+  });
+
+  it('should report per item rather than per field', () => {
+    // Act — the whole store is emptied; each item names its own users.
+    const actual = orphanedSharedDocuments(before(), withStore({}));
+
+    // Assert
+    should(actual).deepEqual([
+      { field: 'skills', name: 'review', path: 'skills/review', accounts: [ID_ONE, ID_TWO] },
+      { field: 'skills', name: 'deploy', path: 'skills/deploy', accounts: [ID_ONE] },
+    ]);
+  });
+
+  it('should accept a rename, because the item is still there and every account still reaches it', () => {
+    // Act
+    const actual = orphanedSharedDocuments(before(), withStore({ audit: 'skills/review', deploy: 'skills/deploy' }));
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  it('should accept a deletion that also moves its last user off the item', () => {
+    // Arrange — deleting `deploy` and dropping it from the only account that selected it, in one change.
+    const after = parse({
+      shared: { skills: { review: 'skills/review' } },
+      variants: { default: {} },
+      agents: [
+        {
+          name: 'one',
+          kind: 'claude',
+          routes: { default: route(ID_ONE, 'claude-one', { layer: { skills: ['skills/review'] } }) },
+        },
+        {
+          name: 'two',
+          kind: 'claude',
+          routes: { default: route(ID_TWO, 'claude-two', { layer: { skills: ['skills/review'] } }) },
+        },
+      ],
+    });
+
+    // Act / Assert — refusing this would make the two-step remedy impossible to perform in one step.
+    should(orphanedSharedDocuments(before(), after)).deepEqual([]);
+  });
+
+  it('should ignore a deleted document nobody was using', () => {
+    // Arrange
+    const unused = parse({
+      shared: { memory: { spare: './spare.md' } },
+      variants: { default: {} },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one') } }],
+    });
+    const after = parse({
+      variants: { default: {} },
+      agents: [{ name: 'one', kind: 'claude', routes: { default: route(ID_ONE, 'claude-one') } }],
+    });
+
+    // Act / Assert
+    should(orphanedSharedDocuments(unused, after)).deepEqual([]);
+  });
+
+  it('should name a scalar field document and a settings layer too, not only a selection', () => {
+    // Arrange — one account on a shared memory document and a shared settings layer.
+    const withDocuments = parse({
+      shared: { memory: { default: './CLAUDE.md' }, settings: { claude: './settings.json' } },
+      variants: { default: {} },
+      agents: [
+        {
+          name: 'one',
+          kind: 'claude',
+          routes: {
+            default: route(ID_ONE, 'claude-one', { layer: { memory: './CLAUDE.md', settings: './settings.json' } }),
+          },
+        },
+      ],
+    });
+    const emptied = parse({
+      variants: { default: {} },
+      agents: [
+        {
+          name: 'one',
+          kind: 'claude',
+          routes: {
+            default: route(ID_ONE, 'claude-one', { layer: { memory: './CLAUDE.md', settings: './settings.json' } }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = orphanedSharedDocuments(withDocuments, emptied);
+
+    // Assert — the check is generic over fields, so a future store surface inherits it for all of them.
+    should(actual).deepEqual([
+      { field: 'settings', name: 'claude', path: './settings.json', accounts: [ID_ONE] },
+      { field: 'memory', name: 'default', path: './CLAUDE.md', accounts: [ID_ONE] },
+    ]);
   });
 });

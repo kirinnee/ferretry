@@ -80,6 +80,10 @@ describe('operationSummary', () => {
       { kind: 'prune', path: '/bin', marker: '# managed', keep: ['claude-kirin'] },
     ],
     [
+      { kind: 'prune-directory', path: '/homes/one/skills', keep: ['review', 'deploy'] },
+      { kind: 'prune-directory', path: '/homes/one/skills', keep: ['review', 'deploy'] },
+    ],
+    [
       {
         kind: 'codex-sqlite-ownership',
         path: '/homes/one/config.toml',

@@ -175,6 +175,30 @@ const FleetAssetRefSchema = z.string().check(context => {
   context.issues.push({ code: 'custom', message: refusal, input: context.value });
 });
 
+/**
+ * A per-item skills selection: one reference, or the list of them.
+ *
+ * Written as one schema rather than a union of the two shapes because a failed `z.union` reports
+ * "Invalid input" and drops the branch's own issue — so a caller who sent a path outside the asset tree
+ * would be told the shape was wrong instead of being told which path was refused and why. The shape
+ * check is structural and the grammar is applied to every entry afterwards, which keeps each refusal
+ * naming the reference that earned it, and gives a list entry the index in its path.
+ */
+const FleetSkillsSelectionSchema = z.union([z.string(), z.array(z.string()).readonly()]).check(context => {
+  const value = context.value;
+  const references = typeof value === 'string' ? [value] : value;
+  references.forEach((reference, index) => {
+    const refusal = assetRefRefusal(reference);
+    if (refusal === undefined) return;
+    context.issues.push({
+      code: 'custom',
+      message: refusal,
+      input: reference,
+      path: typeof value === 'string' ? [] : [index],
+    });
+  });
+});
+
 /** A text file a change will write into the asset tree, relative to it and always `/`-separated. */
 export const FleetAssetEditSchema = z.strictObject({ path: FleetAssetRefSchema, content: z.string() });
 export type FleetAssetEdit = z.infer<typeof FleetAssetEditSchema>;
@@ -237,7 +261,14 @@ const layerFields = {
   flags: z.array(NonEmpty).readonly(),
   settings: SettingsFieldSchema,
   memory: FleetAssetRefSchema,
-  skills: FleetAssetRefSchema,
+  /**
+   * A per-item selection: the store items this layer takes, each one materialized under its own name.
+   *
+   * A list rather than one directory, because the shared pool is a store of individually-addressable
+   * items and an account takes the subset it needs. A bare reference is accepted as the selection of
+   * one, so a caller that only ever picks a single item does not have to know the field is a list.
+   */
+  skills: FleetSkillsSelectionSchema,
   hooks: FleetAssetRefSchema,
   hooksDir: FleetAssetRefSchema,
   mcp: FleetAssetRefSchema,
@@ -279,12 +310,34 @@ export const FleetCompositionOriginSchema = z.discriminatedUnion('kind', [
 export type FleetCompositionOrigin = z.infer<typeof FleetCompositionOriginSchema>;
 
 /**
- * What one account's asset field is: nothing, a declared shared document, or its own path.
+ * One item of a per-item selection. `sharedName` is absent when the item is not a declared one.
  *
- * `referrers` is positive by construction in both non-absent arms — an account resolving a path is
- * itself a referrer, so a zero would mean the count and the value disagree. `local` with more than one
- * referrer is a path a fleet already shares without having declared it, which is a state a surface
+ * Not exported: a client reads an item through the `selection` arm of {@link FleetAssetSharingSchema},
+ * which is where the shape is meaningful, and a second exported name for it would be a second place to
+ * keep in step.
+ */
+const FleetSelectedItemSchema = z.strictObject({
+  /** The name this item takes inside the account's destination directory. */
+  name: z.string().min(1),
+  path: z.string().min(1),
+  sharedName: z.string().min(1).optional(),
+  referrers: z.number().int().positive(),
+});
+
+/**
+ * What one account's asset field is: nothing, a declared shared document, its own path, or — for a
+ * field that holds ITEMS rather than one document — the selection it made.
+ *
+ * `referrers` is positive by construction in every arm that carries one — an account resolving a path
+ * is itself a referrer, so a zero would mean the count and the value disagree. `local` with more than
+ * one referrer is a path a fleet already shares without having declared it, which is a state a surface
  * should offer to fix rather than one it should hide.
+ *
+ * `skills` is the only field that reports `selection`, and it reports nothing else: asking "shared or
+ * its own copy" about a selection has no answer, because each item answers it separately and the whole
+ * point of per-item selection is that two accounts can overlap on some items and not others. A client
+ * that renders `selection` for one field and the other three states for the rest is reading this
+ * correctly.
  */
 export const FleetAssetSharingSchema = z.discriminatedUnion('state', [
   z.strictObject({ state: z.literal('absent') }),
@@ -300,6 +353,13 @@ export const FleetAssetSharingSchema = z.discriminatedUnion('state', [
     path: z.string().min(1),
     origin: FleetCompositionOriginSchema,
     referrers: z.number().int().positive(),
+  }),
+  z.strictObject({
+    state: z.literal('selection'),
+    /** The one slot that supplied the whole list; a later slot replaces it rather than adding to it. */
+    origin: FleetCompositionOriginSchema,
+    /** In declaration order. Empty is a declared selection of nothing, which is not the same as absent. */
+    items: z.array(FleetSelectedItemSchema).readonly(),
   }),
 ]);
 export type FleetAssetSharing = z.infer<typeof FleetAssetSharingSchema>;
@@ -534,6 +594,19 @@ export const FleetWriteOperationSchema = z.discriminatedUnion('kind', [
     kind: z.literal('prune'),
     path: z.string().min(1),
     marker: z.string().min(1),
+    keep: z.array(z.string().min(1)).readonly(),
+  }),
+  /**
+   * Empty a directory the plan materialized entry by entry of everything else it holds.
+   *
+   * It carries no marker, and a reader should see that as the wider bound it is: `prune` sweeps a
+   * directory Ferretry shares with the user's own files and may only remove ones it marked, while this
+   * sweeps a destination the fleet replaced wholesale on every apply before it became per-item. `keep`
+   * is what bounds it, and it is exactly what this plan just put there.
+   */
+  z.strictObject({
+    kind: z.literal('prune-directory'),
+    path: z.string().min(1),
     keep: z.array(z.string().min(1)).readonly(),
   }),
 ]);

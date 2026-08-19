@@ -87,6 +87,17 @@ interface PublishedName {
 const MAX_PUBLISH_DIGEST_BYTES = 4 * 1024 * 1024;
 
 /**
+ * Whether this operation enters its destination as a directory rather than replacing it.
+ *
+ * One predicate for the two places that ask, because they must agree: the preflight decides which
+ * paths are inside the allowed roots and the mutation boundary rechecks the same question. A kind one
+ * of them counted as a directory and the other did not would be approved and then refused. Every other
+ * operation replaces or lstat-checks its final entry, so only its ancestors may be followed.
+ */
+const traversesDestination = (operation: FleetWriteOperation): boolean =>
+  operation.kind === 'directory' || operation.kind === 'prune' || operation.kind === 'prune-directory';
+
+/**
  * What proves an entry is the one this publish created.
  *
  * A directory is identified by inode alone. Its size and timestamps move every time a child is
@@ -496,9 +507,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   private async assertOperationWritable(operation: FleetWriteOperation): Promise<void> {
-    // These two operations traverse the final destination as a directory. Every other operation
-    // replaces or lstat-checks its final entry, so only its ancestors may be followed.
-    await this.assertWritablePath(operation.path, operation.kind === 'directory' || operation.kind === 'prune');
+    await this.assertWritablePath(operation.path, traversesDestination(operation));
     if (operation.kind === 'codex-sqlite-ownership') await this.assertWritablePath(operation.markerPath);
   }
 
@@ -515,7 +524,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const refusedHomes = sharedHistory.flatMap(preview => (preview.refusals ?? []).map(refusal => refusal.home));
     const previewed: FleetWriteOperation[] = [];
     for (const operation of operations) {
-      const followsFinalComponent = operation.kind === 'directory' || operation.kind === 'prune';
+      const followsFinalComponent = traversesDestination(operation);
       const pathWritable = await this.isWritablePath(operation.path, followsFinalComponent);
       if (!pathWritable && !this.isRepresentedByRefusedHome(operation.path, refusedHomes)) {
         throw new Error(`refusing to write outside configured fleet roots: ${operation.path}`);
@@ -615,6 +624,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     if (operation.kind === 'prune') {
       return await this.prune(operation.path, operation.marker, new Set(operation.keep), journal);
+    }
+
+    if (operation.kind === 'prune-directory') {
+      await this.pruneDirectory(operation.path, new Set(operation.keep), journal);
+      // Deliberately no names: the caller collects what it reports as pruned WRAPPERS, and a removed
+      // skill item is not one. What was removed is visible where a person decides — the dry run states
+      // the directory and the keep set it is bounded to.
+      return [];
     }
 
     if (operation.kind === 'codex-sqlite-ownership') {
@@ -818,6 +835,42 @@ export class FileFleetProvisioner implements FleetProvisioner {
       pruned.push(entry);
     }
     return pruned;
+  }
+
+  /**
+   * Empty a directory the fleet materialized entry by entry of everything this plan did not put there.
+   *
+   * Bounded to direct children and to the keep list, and — unlike {@link prune} — it removes
+   * directories as well as files, because the entries here ARE directories: one skill item is a tree.
+   * There is no marker to check for the same reason, and the bound that replaces it is ownership: this
+   * destination was replaced wholesale by every apply before the field became per-item, so nothing a
+   * user placed here has ever survived one.
+   *
+   * Removal goes through the journal like every other destructive step, so a later failure in the same
+   * batch puts each swept entry back exactly where it was.
+   */
+  private async pruneDirectory(
+    directory: string,
+    keep: ReadonlySet<string>,
+    journal: FileMutationJournal,
+  ): Promise<void> {
+    let entries: readonly string[];
+    try {
+      entries = await readdir(directory);
+    } catch {
+      return;
+    }
+
+    for (const entry of entries.toSorted()) {
+      if (keep.has(entry)) continue;
+      // A backup or staging name belongs to this very batch; sweeping one away would destroy the only
+      // copy of what a rollback needs to put back.
+      if (isMutationReservedName(entry)) continue;
+      // capture() renames the entry aside and records the restore. It reports false only when this
+      // batch already captured the path, which cannot happen here: every path this plan writes under
+      // the container is in the keep set.
+      await journal.capture(path.join(directory, entry));
+    }
   }
 
   private async stillCarries(backup: string | undefined, marker: string): Promise<boolean> {
