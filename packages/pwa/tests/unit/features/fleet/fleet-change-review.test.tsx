@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'bun:test';
-import { FLEET_APPROVAL_MAX_ATTEMPTS, FLEET_APPROVAL_TTL_SECONDS } from '@ferretry/protocol';
 import type {
   FleetApplyOutcome,
   FleetManifestAccountView,
@@ -11,20 +10,28 @@ import {
   FleetLiveRoster,
   FleetRefusalAlert,
 } from '../../../../src/features/fleet/fleet-change-review.tsx';
-import { type GrantRefusalNotice, grantRefusalNotice } from '../../../../src/lib/grants.ts';
+import { type FleetApplyAuthority, fleetApplyCopy } from '../../../../src/features/fleet/fleet-change-model.ts';
+import {
+  type GrantRefusalNotice,
+  grantGuidance,
+  grantRefusalNotice,
+  type OperatorUnlockFailure,
+  UNLOCK_LIMIT_NOTE,
+} from '../../../../src/lib/grants.ts';
 import { absoluteTime } from '../../../../src/lib/session-screens.ts';
-import { mount } from '../../../support/dom.ts';
+import { mount, must } from '../../../support/dom.ts';
 import {
   account,
   accountId,
   button,
   click,
-  field,
+  form,
   manifest,
   pick,
   plan,
   proposal,
   scaffoldProposal,
+  submit,
   type,
 } from './fleet-support.ts';
 
@@ -139,38 +146,36 @@ describe('the staged change', () => {
   const reviewHarness = async (
     overrides: {
       readonly proposal?: FleetProposalView;
-      readonly authority?: 'direct' | 'approval' | 'read-only';
-      readonly code?: string;
+      readonly authority?: FleetApplyAuthority;
       readonly busy?: boolean;
+      readonly unlockFailure?: OperatorUnlockFailure | null;
     } = {},
   ) => {
-    const calls = { applied: 0, rechecked: 0, discarded: 0, code: '' };
+    /** Every password this panel handed back, so a suite can count how many times one was asked for. */
+    const calls = { applied: [] as (string | undefined)[], discarded: 0 };
     const view = overrides.proposal ?? proposal();
     const mounted = await mount(
       <FleetChangeReview
         proposal={view}
         live={accounts([account()])}
-        authority={overrides.authority ?? 'approval'}
-        command="fy fleet authorize fy_fprop_AAAAAAAAAAAAAAAAAAAAAA"
-        code={overrides.code ?? ''}
-        onCodeChange={next => {
-          calls.code = next;
-        }}
-        onApply={() => {
-          calls.applied += 1;
-        }}
-        onRecheck={() => {
-          calls.rechecked += 1;
+        authority={overrides.authority ?? { kind: 'open' }}
+        onApply={operatorPassword => {
+          calls.applied.push(operatorPassword);
         }}
         onDiscard={() => {
           calls.discarded += 1;
         }}
         busy={overrides.busy ?? false}
         refusal={null}
+        unlockFailure={overrides.unlockFailure ?? null}
       />,
     );
     return { ...mounted, calls };
   };
+
+  /** The one password field, or a failure naming what a test was actually looking at. */
+  const passwordField = (container: HTMLElement): HTMLInputElement =>
+    must(container.querySelector<HTMLInputElement>('[data-fleet-operator-password]'), 'the operator password field');
 
   it('never tears a path apart mid-token, and keeps the whole value reachable', async () => {
     // Arrange — the ugliest thing on this screen was a wrapper path rendered as
@@ -193,23 +198,21 @@ describe('the staged change', () => {
       expect(path.getAttribute('title')).toBe(path.textContent);
     }
 
-    // The proposal id is one of them: it is what the host mints an approval AGAINST, so a reader has to
-    // be able to compare it character for character.
-    expect(paths.some(path => path.textContent === 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA')).toBe(true);
+    // And the proposal id is NOT one of them any more. It used to be, because a person read it off this
+    // panel to compare against `fy fleet authorize <id>`; nothing mints anything against it now.
+    expect(paths.some(path => path.textContent === 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA')).toBe(false);
     await harness.unmount();
   });
 
   it('keeps uppercase for the eyebrow and the state chip, and nothing else', async () => {
     // Arrange — uppercase on every label removes the hierarchy it exists to create. The eyebrow role
     // (`kt-label`) and the shared state chip (`kt-badge`) keep it; no third thing shouts.
-    const harness = await reviewHarness();
+    const harness = await reviewHarness({ authority: { kind: 'confirm' } });
 
-    // Assert
-    const shouting = [...harness.container.querySelectorAll<HTMLElement>('[class*="uppercase"]')];
-    for (const node of shouting) {
-      // The approval-code INPUT is a value transform, not a label: a code is typed and shown in caps.
-      expect(node.className).toContain('kt-input');
-    }
+    // Assert — nothing shouts at all now. The one uppercase input was the approval-code field, which
+    // displayed a code in caps; a password is never transformed, because a person cannot see what they
+    // typed and a case change would make a correct one look wrong.
+    expect([...harness.container.querySelectorAll('[class*="uppercase"]')]).toHaveLength(0);
     // The verdict chip is the shared badge rather than a fifth hand-rolled chip design.
     const verdict = pick(harness.container, '[data-fleet-roster-change="unchanged"] .kt-badge');
     expect(verdict.getAttribute('data-tone')).toBe('muted');
@@ -229,11 +232,14 @@ describe('the staged change', () => {
     await harness.unmount();
   });
 
-  it('binds the review to one proposal id, its expiry and the revision it was derived from', async () => {
+  it('stays bound to one proposal id in the DOM, and shows the reader the expiry and revision instead', async () => {
     const harness = await reviewHarness();
+    // The BINDING survives — the panel still applies exactly one staged change, and the attribute is how
+    // the surface's own suite proves which. What went is the id as READABLE TEXT.
     expect(pick(harness.container, '[data-fleet-proposal-id]').getAttribute('data-fleet-proposal-id')).toBe(
       'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA',
     );
+    expect(harness.container.textContent).not.toContain('fy_fprop_');
     // Formatted, not raw: the repo owns instants and the rest of the PWA formats them.
     expect(harness.container.textContent).toContain(absoluteTime('2026-08-05T06:15:00.000Z'));
     expect(harness.container.textContent).not.toContain('2026-08-05T06:15:00.000Z');
@@ -277,52 +283,187 @@ describe('the staged change', () => {
     await harness.unmount();
   });
 
-  it('under approval authority shows the exact host command and will not apply without a code', async () => {
-    const harness = await reviewHarness({ authority: 'approval' });
-    expect(pick(harness.container, '[data-fleet-authority="approval"]')).toBeDefined();
-    expect(pick(harness.container, 'pre').textContent).toBe('fy fleet authorize fy_fprop_AAAAAAAAAAAAAAAAAAAAAA');
-    expect(pick(harness.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
-    // L8: the actual budget, from the shared constants, not 'a small number of tries'.
-    expect(harness.container.textContent).toContain(`A code lasts ${FLEET_APPROVAL_TTL_SECONDS} seconds`);
-    expect(harness.container.textContent).toContain(`${FLEET_APPROVAL_MAX_ATTEMPTS} wrong ones`);
+  /**
+   * PROOF 1 — the owner's complaint, as one assertion.
+   *
+   * Everything the two stacked gates put on this screen is named individually rather than checked as one
+   * absence, because each was a separate thing a person had to read and act on, and a single "no code
+   * field" assertion would go green the day one of the others came back in a new spelling.
+   */
+  it('asks an ungoverned caller for NOTHING: no id, no command, no code field, no timer', async () => {
+    // Arrange — `confirmation: 'none'` with `mayApply: true`. A loopback caller, or a local browser that
+    // has already unlocked, which is the owner's own case.
+    const harness = await reviewHarness({ authority: { kind: 'open' } });
+    const text = harness.container.textContent ?? '';
 
-    await type(field(harness.container, '-approval-code'), '7f3k m9qw');
-    expect(harness.calls.code).toBe('7f3k m9qw');
-    await click(button(harness.container, 'Check for approval'));
-    expect(harness.calls.rechecked).toBe(1);
+    // Assert — one live Apply, and nothing standing in front of it.
+    const apply = pick(harness.container, '[data-fleet-apply]');
+    expect(apply.hasAttribute('disabled')).toBe(false);
+    expect(apply.textContent).toContain('Apply this change');
+
+    // No proposal id anywhere a person reads.
+    expect(text).not.toContain('fy_fprop_');
+    // No command to copy into a terminal, and no `<pre>` block that would carry one. (The scaffold and
+    // refusal blocks are the only other `<pre>`s and neither is rendered here.)
+    expect(text).not.toContain('fy fleet authorize');
+    expect(harness.container.querySelector('pre')).toBeNull();
+    // No code field and no password field: this caller proves nothing.
+    expect(harness.container.querySelector('[data-fleet-operator-password]')).toBeNull();
+    expect(harness.container.querySelector('input')).toBeNull();
+    // No TTL, no attempt budget, no hourglass sentence, and no heading claiming the fleet has an
+    // authority of its own.
+    expect(text).not.toContain('seconds');
+    expect(text).not.toContain('attempts');
+    expect(text).not.toContain('Host authority');
+    expect(text).not.toContain('Approval');
+    // And nothing is explained, because there is nothing to explain.
+    expect(harness.container.querySelector('[data-fleet-apply-explanation]')).toBeNull();
     await harness.unmount();
   });
 
-  it('applies once a code is typed, and reports an outstanding approval', async () => {
-    const outstanding = proposal({
-      approval: { outstanding: true, expiresAt: '2026-08-05T06:02:00.000Z' },
-    });
-    const harness = await reviewHarness({ proposal: outstanding, code: '7F3K-M9QW' });
-    expect(harness.container.textContent).toContain(
-      `An approval is outstanding until ${absoluteTime('2026-08-05T06:02:00.000Z')}.`,
+  /** PROOF 3 — the per-change confirmation: ONE field, and the value reaches `onApply` once. */
+  it('asks a confirming caller for the password once, and hands exactly that value to the apply', async () => {
+    // Arrange
+    const harness = await reviewHarness({ authority: { kind: 'confirm' } });
+
+    // Assert — the standard sentence, the shared limit note, and one field.
+    expect(pick(harness.container, '[data-fleet-apply-authority]').getAttribute('data-fleet-apply-authority')).toBe(
+      'confirm',
     );
+    expect(pick(harness.container, '[data-fleet-apply-explanation]').textContent).toBe(
+      fleetApplyCopy({ kind: 'confirm' }).explanation,
+    );
+    expect(harness.container.textContent).toContain(UNLOCK_LIMIT_NOTE);
+    expect(harness.container.querySelectorAll('input')).toHaveLength(1);
+    // A password, so the browser does not paint it on screen.
+    expect(passwordField(harness.container).type).toBe('password');
+    // Apply is refused until something is typed, and refused HERE rather than by a round trip.
+    expect(pick(harness.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
+
+    // Act
+    await type(passwordField(harness.container), 'correct horse battery');
     await click(pick(harness.container, '[data-fleet-apply]'));
-    expect(harness.calls.applied).toBe(1);
+
+    // Assert — asked once, delivered once, and the field is cleared rather than left holding a secret.
+    expect(harness.calls.applied).toEqual(['correct horse battery']);
+    expect(passwordField(harness.container).value).toBe('');
+    await harness.unmount();
+  });
+
+  /** PROOF 2 (browser half) — a `locked` caller gets the unlock, and is asked ONCE for both steps. */
+  it('offers a locked caller the operator-password unlock, with the SHARED sentence', async () => {
+    // Arrange — locked AND owing a confirmation, which is the case that produced two prompts.
+    const harness = await reviewHarness({ authority: { kind: 'locked', alsoConfirms: true } });
+
+    // Assert — the grants surface's own sentence, verbatim, and one field for both steps.
+    expect(pick(harness.container, '[data-fleet-apply-explanation]').textContent).toBe(
+      grantGuidance('locked', 'fleet').explanation,
+    );
+    expect(harness.container.querySelectorAll('input')).toHaveLength(1);
+
+    // Act — typed once.
+    await type(passwordField(harness.container), 'correct horse battery');
+    await click(pick(harness.container, '[data-fleet-apply]'));
+
+    // Assert — ONE handback. The surface spends it on the mint and the apply; the panel never asks twice.
+    expect(harness.calls.applied).toEqual(['correct horse battery']);
+    await harness.unmount();
+  });
+
+  it('applies on Enter in the password field, because that is what a person types after one', async () => {
+    // Arrange — the field is inside a form whose submit is the Apply button, so this is the behaviour a
+    // click handler on a bare button would silently not have.
+    const harness = await reviewHarness({ authority: { kind: 'confirm' } });
+    await type(passwordField(harness.container), 'correct horse battery');
+
+    // Act
+    await submit(form(harness.container, '[data-fleet-apply-authority]'));
+
+    // Assert
+    expect(harness.calls.applied).toEqual(['correct horse battery']);
+    await harness.unmount();
+  });
+
+  it('keeps a wrong password retryable, and says when the daemon has stopped checking', async () => {
+    // Arrange — the daemon's own sentence, with the one number a person needs. Not counted here: the
+    // limiter is per-machine state and a browser keeping its own would disagree with the host.
+    const retryable = await reviewHarness({
+      authority: { kind: 'locked', alsoConfirms: true },
+      unlockFailure: { message: 'that is not this machine’s operator password; 4 attempts remaining', retryable: true },
+    });
+
+    // Assert — the failure REPLACES the limit note rather than stacking under it, and the field is still
+    // there to retype into.
+    expect(pick(retryable.container, '[data-fleet-operator-password-failure]').textContent).toContain(
+      '4 attempts remaining',
+    );
+    expect(retryable.container.textContent).not.toContain(UNLOCK_LIMIT_NOTE);
+    expect(pick(retryable.container, '[data-fleet-operator-password-failure]').getAttribute('role')).toBe('alert');
+    expect(retryable.container.querySelectorAll('input')).toHaveLength(1);
+    await retryable.unmount();
+
+    const final = await reviewHarness({
+      authority: { kind: 'locked', alsoConfirms: true },
+      unlockFailure: { message: 'this daemon has stopped checking passwords', retryable: false, attemptsRemaining: 0 },
+    });
+    expect(
+      pick(final.container, '[data-fleet-operator-password-failure]').getAttribute(
+        'data-fleet-operator-password-failure',
+      ),
+    ).toBe('final');
+    await final.unmount();
+  });
+
+  /** PROOF 4 — a refusal an unlock would not fix gets the sentence and NO field. */
+  it('explains a refusal an unlock cannot fix, and offers no field for it', async () => {
+    // Arrange — the operator switched `fleet.configure` off for governed callers. A password buys nothing
+    // here, and offering one would be the theatre this codebase refuses.
+    const off = await reviewHarness({ authority: { kind: 'refused', refusal: 'not-granted' } });
+
+    // Assert — the shared sentence, no field, and an Apply that is not offered as live.
+    expect(pick(off.container, '[data-fleet-apply-explanation]').textContent).toBe(
+      grantGuidance('not-granted', 'fleet').explanation,
+    );
+    expect(off.container.querySelector('input')).toBeNull();
+    expect(pick(off.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
+    // And still no terminal command: the remedy is on the host, and the shared sentence says so in its
+    // own words rather than this panel printing a command line.
+    expect(off.container.textContent).not.toContain('fy fleet authorize');
+    await off.unmount();
+
+    // The other two refusals a password cannot resolve. `rate-limited` especially: a field here would
+    // invite five more wrong guesses at a daemon that has already stopped listening.
+    for (const refusal of ['rate-limited', 'undetermined'] as const) {
+      const other = await reviewHarness({ authority: { kind: 'refused', refusal } });
+      expect(other.container.querySelector('input')).toBeNull();
+      expect(pick(other.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
+      await other.unmount();
+    }
+  });
+
+  it('says it cannot tell when the daemon never answered what this browser may do', async () => {
+    // Arrange — the permissions read failed. Rendering that as the operator refusing would be a claim
+    // about somebody's decisions on the strength of no answer at all.
+    const harness = await reviewHarness({ authority: { kind: 'unreadable' } });
+
+    // Assert — it says so, and it still offers Apply: the daemon is the one that decides, and a refusal
+    // will name its own reason.
+    expect(pick(harness.container, '[data-fleet-apply-explanation]').textContent).toContain('did not say');
+    expect(pick(harness.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(false);
+    expect(harness.container.querySelector('input')).toBeNull();
+    await harness.unmount();
+  });
+
+  it('discards a staged change without applying it', async () => {
+    const harness = await reviewHarness();
     await click(button(harness.container, 'Discard'));
     expect(harness.calls.discarded).toBe(1);
+    expect(harness.calls.applied).toEqual([]);
     await harness.unmount();
-  });
-
-  it('lets a host credential apply directly, and lets a read-only one apply nothing', async () => {
-    const direct = await reviewHarness({ authority: 'direct' });
-    expect(pick(direct.container, '[data-fleet-authority="direct"]')).toBeDefined();
-    expect(pick(direct.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(false);
-    expect(direct.container.querySelector('[id$="-approval-code"]')).toBeNull();
-    await direct.unmount();
-
-    const readOnly = await reviewHarness({ authority: 'read-only' });
-    expect(pick(readOnly.container, '[data-fleet-authority="read-only"]').textContent).toContain('Run the change');
-    expect(pick(readOnly.container, '[data-fleet-apply]').hasAttribute('disabled')).toBe(true);
-    await readOnly.unmount();
   });
 
   it('says it is applying while it applies, and shows a consumed proposal as consumed', async () => {
-    const harness = await reviewHarness({ authority: 'direct', busy: true });
+    const harness = await reviewHarness({ busy: true });
     expect(pick(harness.container, '[data-fleet-apply]').textContent).toContain('Applying');
     expect(pick(harness.container, '[data-fleet-side="proposed"]').getAttribute('aria-busy')).toBe('true');
     await harness.unmount();
@@ -337,12 +478,8 @@ describe('the staged change', () => {
       <FleetChangeReview
         proposal={proposal()}
         live={[]}
-        authority="direct"
-        command="fy fleet authorize x"
-        code=""
-        onCodeChange={noop}
+        authority={{ kind: 'open' }}
         onApply={noop}
-        onRecheck={noop}
         onDiscard={noop}
         busy={false}
         refusal={{ kind: 'proposal-stale', detail: 'the fleet configuration changed on this host' }}

@@ -4,8 +4,9 @@
  * NOTHING HERE WRITES ON THE STRENGTH OF A CLICK. The daemon holds a proposal — a derived, previewed,
  * expiring change — and this module can create one, read one, and ask for exactly that one to be
  * applied. It cannot send a configuration document, cannot name a path outside the daemon's asset
- * tree, and cannot mint its own authority: the approval a paired device needs is minted on the host
- * and typed back in by the person sitting at it.
+ * tree, and cannot mint its own authority: whether a governed caller may apply at all is
+ * `fleet.configure` as the operator's grants decided it, and the per-change confirmation is the SAME
+ * operator password the grants surface asks for, spent on this one staged change.
  *
  * EVERY WIRE SHAPE IS THE SHARED ONE. The schemas come from `@ferretry/protocol`, which the daemon
  * also parses its own responses through, so this browser and that daemon cannot hold two different
@@ -20,16 +21,17 @@
 import {
   type FleetApplyOutcome,
   FleetApplyOutcomeSchema,
-  FleetApprovalCodeSchema,
   type FleetAssetDocument,
   FleetAssetDocumentSchema,
   type FleetAssetIndex,
   FleetAssetIndexSchema,
   type FleetAssetListing,
+  type FleetChangeConfirmation,
   type FleetManifestSummary,
   FleetManifestSummarySchema,
   type FleetPermissions,
   FleetPermissionsSchema,
+  FleetProposalApplyRequestSchema,
   type FleetProposalPreview,
   type FleetProposalRequest,
   type FleetProposalView,
@@ -41,6 +43,7 @@ import {
   type HarnessDiscoveryReport,
   HarnessDiscoveryReportSchema,
   type IFyApiClient,
+  OPERATOR_UNLOCK_HEADER,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { z } from 'zod';
@@ -57,6 +60,7 @@ export type {
   FleetAssetDocument,
   FleetAssetIndex,
   FleetAssetListing,
+  FleetChangeConfirmation,
   FleetManifestSummary,
   FleetPermissions,
   FleetProposalPreview,
@@ -131,40 +135,48 @@ export const createFleetProposal = async (
 ): Promise<FleetProposalView> =>
   await client.request(`${FLEET_PATH}/proposals`, FleetProposalViewSchema, json(request));
 
-/** Re-reads a held proposal, which is how the surface learns an approval is now outstanding. */
+/**
+ * Re-reads a held proposal, which is how the surface learns the host moved under a staged change.
+ *
+ * It carries no authority state any more, and there is nothing to poll FOR: a proposal is applied by
+ * the caller that staged it, in one call, so the only reason to look again is to find out whether the
+ * daemon still holds this one.
+ */
 export const readFleetProposal = async (client: FleetClient, id: string): Promise<FleetProposalView> =>
   await client.request(`${FLEET_PATH}/proposals/${encodeURIComponent(id)}`, FleetProposalViewSchema);
 
 /**
- * The typed approval code, normalised the way a person actually types it, or `null` when it is not
- * one at all.
- *
- * Checked here rather than only on the daemon because the attempt budget is small and shared: a
- * transposed character that never leaves the browser costs nothing, while the same character sent
- * spends one of the tries the host allows for that proposal. The grammar is the SHARED one, so the
- * browser and the daemon cannot disagree about what a code is.
- */
-export const parseApprovalCode = (candidate: string): string | null => {
-  const parsed = FleetApprovalCodeSchema.safeParse(candidate);
-  return parsed.success ? parsed.data : null;
-};
-
-/**
  * Applies exactly the held proposal.
  *
- * The approval code is sent to THIS proposal's apply route and nowhere else, and it is never
- * persisted: it is a short-lived, single-use, proposal-bound value a person read off their own host.
+ * TWO DIFFERENT USES OF ONE SECRET, and they are not interchangeable. `unlock` is the five-minute
+ * token a mint produced, and it travels in the header the dispatcher reads for every governed route —
+ * so a locked caller stops being locked. `operatorPassword` is the per-change confirmation and is the
+ * PASSWORD ITSELF, proved again against this one staged change, which is why a borrowed unlock is not
+ * by itself enough to provision a host. Neither is persisted or echoed anywhere, and the password
+ * travels in a body because a query parameter reaches every proxy's access log.
+ *
+ * The body is parsed through the SHARED request schema on the way out, so a value this browser would
+ * send that the daemon would refuse fails here — at the call — rather than as a 400 a person reads as
+ * a broken panel.
  */
 export const applyFleetProposal = async (
   client: FleetClient,
   id: string,
-  approvalCode?: string,
-): Promise<FleetApplyOutcome> =>
-  await client.request(
-    `${FLEET_PATH}/proposals/${encodeURIComponent(id)}/apply`,
-    FleetApplyOutcomeSchema,
-    json(approvalCode === undefined ? {} : { approvalCode }),
-  );
+  confirmation?: { readonly operatorPassword?: string; readonly unlock?: string },
+): Promise<FleetApplyOutcome> => {
+  const password = confirmation?.operatorPassword;
+  const unlock = confirmation?.unlock;
+  return await client.request(`${FLEET_PATH}/proposals/${encodeURIComponent(id)}/apply`, FleetApplyOutcomeSchema, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(unlock === undefined ? {} : { [OPERATOR_UNLOCK_HEADER]: unlock }),
+    },
+    body: JSON.stringify(
+      FleetProposalApplyRequestSchema.parse(password === undefined ? {} : { operatorPassword: password }),
+    ),
+  });
+};
 
 /** Every fleet refusal the daemon spells out with a code, plus the two states a browser must infer. */
 export type FleetRefusalKind =

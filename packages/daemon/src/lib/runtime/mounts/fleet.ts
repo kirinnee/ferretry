@@ -46,12 +46,8 @@ import {
  * takes it from the protocol package, as this mount does, rather than from the mount itself.
  */
 import {
-  FLEET_APPROVAL_MAX_ATTEMPTS,
-  FLEET_APPROVAL_TTL_SECONDS,
   type FleetApplyOutcome,
   FleetApplyOutcomeSchema,
-  type FleetApprovalMint,
-  FleetApprovalMintPolicySchema,
   FleetAssetDocumentSchema,
   FleetAssetIndexSchema,
   FleetManifestSummarySchema,
@@ -70,6 +66,7 @@ import {
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { MAX_TEXT_BODY_BYTES, parseBody, parseOptionalBody } from '../../api/body.ts';
+import type { CallerGovernance, ChangeConfirmation } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -121,11 +118,19 @@ import type { SessionRootPinner } from '../../session/filesystem/ports.ts';
  * - **Nothing a caller sends is a configuration.** It sends one named intent — prepare this host,
  *   add an account, change that account — and the daemon derives the next configuration itself. An
  *   arbitrary document could differ from what was reviewed in ways nobody reads.
- * - **Nothing is written until a change has been reviewed and separately authorized.** Composing a
- *   change writes nothing at all; applying consumes the exact artifact that produced the preview,
- *   never a rebuilt one.
- * - **Pairing is still not provisioning.** A paired device may look and may compose. To change the
- *   host it must carry an approval the host itself minted for that one change.
+ * - **Nothing is written until a change has been reviewed.** Composing a change writes nothing at
+ *   all; applying consumes the exact artifact that produced the preview, never a rebuilt one.
+ * - **Pairing is still not provisioning**, and WHO decides that is no longer this file's business.
+ *   Every route below declares its `fleet` axis and the authorization boundary enforces it, exactly
+ *   as it does for the other five capabilities. This mount used to re-decide the same question in
+ *   four inline `tokenClass === 'device'` refusals and a private approval system — codes the host
+ *   minted, a 120-second life, a wrong-try budget — which was a second authority model wearing the
+ *   fleet's name, invisible to the route table and to `GrantsView`, so no surface could explain a
+ *   refusal before somebody clicked. It is gone; see `docs/design/fleet-authority-unification.md`.
+ * - **A governed caller confirms each change**, where this machine has an operator password. That is
+ *   the one thing added rather than removed, and it is not a credential of its own: it is the same
+ *   password the unlock is made of, proved against one exact staged artifact so that a borrowed
+ *   five-minute unlock cannot by itself write executables into somebody's home.
  *
  * The declared YAML remains an operator-owned local document: it is round-tripped through the
  * shared schema, so comments and anchors in a hand-written file do not survive the first edit made
@@ -152,8 +157,8 @@ export interface FleetSubsystem {
   /** Explicit liveness evidence, keyed to this daemon's FY_HOME. */
   health(): Promise<FleetHealthSnapshot>;
   apply(): Promise<FleetApplyResult>;
-  /** What this caller's credential may do here, so the surface can say so before a click. */
-  permissions(tokenClass: string | undefined): FleetPermissions;
+  /** What this caller may do here, so the surface can say so before a click. */
+  permissions(governance: CallerGovernance | undefined): FleetPermissions;
   /** Text assets the fleet copies into account homes, bounded to this daemon's asset tree. */
   assets(): Promise<FleetAssetTree>;
   asset(path: string): Promise<FleetAssetDocument>;
@@ -162,13 +167,11 @@ export interface FleetSubsystem {
   /** Derive, preview and hold a change. Writes nothing. */
   propose(request: FleetProposalRequest): Promise<FleetProposalView>;
   readProposal(id: string): Promise<FleetProposalView>;
-  /** Mint a single-use approval bound to one proposal. Host credential only. */
-  authorizeProposal(id: string): Promise<FleetApprovalMint>;
   /** Apply exactly the held proposal, never a rebuilt one. */
   applyProposal(
     id: string,
     request: FleetProposalApplyRequest,
-    tokenClass: string | undefined,
+    governance: CallerGovernance | undefined,
   ): Promise<FleetApplyOutcome>;
 }
 
@@ -224,11 +227,24 @@ export interface DaemonFleetOptions {
   /** A fresh account identifier. Minted by the daemon so no caller can choose or collide with one. */
   readonly mintUuid: () => string;
   /**
-   * One approval code in the shared grammar. Supplied rather than generated here: this layer may
-   * not reach for randomness, and how randomness maps onto the code alphabet is a decision that
-   * belongs somewhere it is reviewed rather than buried in a store.
+   * Proves the operator password for ONE change, for the caller the boundary said owes a
+   * confirmation.
+   *
+   * INJECTED, and deliberately not the grant subsystem itself. This mount must be able to ask
+   * "was this password right" without being able to read one, hold one, or reach anything else the
+   * grant service can do — the same use-never-read shape the secret store is built on. The
+   * composition root satisfies it with `CapabilityGrantService.confirmChange`, so the attempt this
+   * spends is one of the same five an unlock spends and no second budget exists.
    */
-  readonly mintApprovalCode: () => string;
+  readonly confirmChange: (password: string) => Promise<ChangeConfirmation>;
+  /**
+   * What a person types to run this binary, so a refusal names a command they actually have.
+   *
+   * Injected for the same reason the grant subsystem takes one: the binary name is single-sourced
+   * from `packages/cli/package.json`'s `bin` key, and a mount that spelled it itself would be a
+   * second owner of a fact a rename script is supposed to move in one place.
+   */
+  readonly clientName: string;
   /**
    * Holds a directory open so nothing can be substituted underneath it. Supplied rather than
    * chosen here because the implementation is platform-specific, and one that cannot pin must fail
@@ -326,7 +342,6 @@ const PROPOSAL_CODES: Record<FleetProposalProblem, FleetRefusalCode> = {
   unknown: 'fleet_proposal_unknown',
   expired: 'fleet_proposal_expired',
   consumed: 'fleet_proposal_consumed',
-  unauthorized: 'fleet_proposal_unauthorized',
   exhausted: 'fleet_proposal_refused',
 };
 
@@ -457,30 +472,51 @@ class MountedFleet implements FleetSubsystem {
     this.proposals = new FleetProposalStore<FleetProposalPayload>({
       now: () => this.options.clock.now(),
       mintId: () => this.options.mintId(),
-      mintCode: () => this.options.mintApprovalCode(),
     });
   }
 
   /**
-   * What this credential may do, so the surface can render a truthful state before a click.
+   * What this caller may do, so the surface can render a truthful state before a click.
    *
-   * A paired device may look and may propose, because neither touches the host. It may not apply on
-   * the strength of having paired once; that needs an approval the host mints for one exact change.
-   * A 403 is still handled where it happens — this read is a courtesy, never the enforcement.
+   * ## IT PROJECTS THE CAPABILITY LAYER'S ANSWER; IT DOES NOT PRODUCE A SECOND ONE
+   *
+   * `mayApply` and `applyRefusal` are literally `decideCapability({ fleet, configure })` for this
+   * request, asked through the governance the authorization boundary already built. They used to be
+   * derived from `tokenClass` here, which meant the panel and the boundary held two independent
+   * opinions about one question: a paired device was told `mayApplyDirectly: false` while the route
+   * table declared `capability: fleet.configure` and the operator's grants said a third thing. The
+   * refusal travels with the answer because `false` has four different remedies and a panel showing
+   * one sentence for all four is the dead end this surface exists to remove.
+   *
+   * `mayInspect` and `mayPropose` are the `use` axis, ASKED rather than hardcoded to the `true` a
+   * caller who reached this route has already proved. They will not differ in practice — the route
+   * itself demands `fleet.use` — and asking anyway is what keeps this function a projection of one
+   * decision rather than a mixture of a decision and an assumption about the route table.
+   *
+   * AN ABSENT GOVERNANCE IS THE STRICTER READING. It cannot arise through the served route, which
+   * declares a capability and therefore always has one built — but "nobody could tell me where this
+   * caller stands" must never render as an open Apply button, or as a panel that promises a read.
    */
-  permissions(tokenClass: string | undefined): FleetPermissions {
-    // Every answer is derived from a credential class positively recognised here. `!device` would
-    // have granted direct apply to an absent or unfamiliar one — manufacturing authority out of
-    // missing evidence, which is exactly backwards for a read whose whole purpose is to tell
-    // somebody what they may do. The dispatcher still enforces; this must not mislead.
-    const admin = tokenClass === 'admin';
-    const device = tokenClass === 'device';
+  permissions(governance: CallerGovernance | undefined): FleetPermissions {
+    if (governance === undefined)
+      return {
+        mayInspect: false,
+        mayPropose: false,
+        mayApply: false,
+        applyRefusal: 'undetermined',
+        confirmation: 'none',
+      };
+    const use = governance.decide({ capability: 'fleet', axis: 'use' });
+    const configure = governance.decide({ capability: 'fleet', axis: 'configure' });
     return {
-      mayInspect: admin || device,
-      mayPropose: admin || device,
-      mayApplyDirectly: admin,
-      mayApplyWithApproval: device,
-      approvalCommand: 'fy fleet authorize',
+      mayInspect: use.allowed,
+      mayPropose: use.allowed,
+      mayApply: configure.allowed,
+      applyRefusal: configure.refusal,
+      // Reported even when `mayApply` is false, because it is a fact about the machine rather than
+      // about this attempt: a caller that unlocks and comes back still owes the confirmation, and a
+      // panel that learned that only after the unlock would have to re-word itself mid-flow.
+      confirmation: governance.confirmChange ? 'operator-password' : 'none',
     };
   }
 
@@ -715,45 +751,46 @@ class MountedFleet implements FleetSubsystem {
     }
   }
 
-  async authorizeProposal(id: string): Promise<FleetApprovalMint> {
-    const minted = this.withProposalRefusals(() => this.proposals.authorize(id));
-    // Parsed on the way out through the STRICTER of the two shapes: this side must advertise the
-    // exact declared policy, while a client reads the permissive one so a daemon whose policy has
-    // moved is still usable from an older install.
-    return FleetApprovalMintPolicySchema.parse({
-      proposalId: minted.record.id,
-      code: minted.code,
-      ttlSeconds: FLEET_APPROVAL_TTL_SECONDS,
-      expiresAt: new Date(minted.expiresAt).toISOString(),
-      maxAttempts: FLEET_APPROVAL_MAX_ATTEMPTS,
-      mutation: minted.record.mutation.kind,
-      summary: minted.record.summary,
-    });
-  }
-
   /**
    * Apply exactly the proposal that was reviewed.
    *
-   * The proposal is consumed in the same synchronous step as the authority check, before anything
-   * is awaited: two applies arriving together would otherwise both pass and both run. If the apply
-   * never reaches the host — a stale revision, a refused plan — the proposal is put back, because
-   * consuming it was bookkeeping and nothing about the host changed.
+   * ## THE ORDER OF THE TWO STEPS IS THE SUBSTANCE
+   *
+   * The per-change confirmation is proved BEFORE the proposal is consumed, and the consume is then
+   * synchronous. Reversed, a wrong password would burn a staged change the caller was entitled to
+   * apply; interleaved with an await, two applies arriving together would both find it pending and
+   * both run. So: confirm, then spend, then await.
+   *
+   * ## WHO MAY APPLY IS NOT DECIDED HERE
+   *
+   * The route declares `fleet`/`configure` and the authorization boundary has already enforced it —
+   * including the operator's grant, the unlock, and the lockout. This adds ONE step for the caller
+   * the boundary said owes it, and can never remove one. It used to decide the whole question itself
+   * from `tokenClass`, which is the duplication `docs/design/fleet-authority-unification.md` was
+   * written about.
+   *
+   * If the apply never reaches the host — a stale revision, a refused plan — the proposal is put
+   * back, because consuming it was bookkeeping and nothing about the host changed.
    */
   async applyProposal(
     id: string,
     request: FleetProposalApplyRequest,
-    tokenClass: string | undefined,
+    governance: CallerGovernance | undefined,
   ): Promise<FleetApplyOutcome> {
-    // Branch on a class positively recognised here. `not a device` would have handed the host's own
-    // path to anything unfamiliar — the dispatcher is the enforcement boundary, but this decides
-    // *which* authority a caller is exercising, and it must not infer one from absent evidence.
-    if (tokenClass !== 'admin' && tokenClass !== 'device') {
-      throw new ApiError(403, 'this credential may not apply a fleet change', 'forbidden');
+    // Absent governance is refused rather than waved through. It cannot arise through the served
+    // route — that route declares a capability, so the boundary always builds one — and the safe
+    // reading of "nobody can tell me where this caller stands" is not "apply the change".
+    if (governance === undefined) {
+      throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
-    const device = tokenClass === 'device';
-    const record = this.withProposalRefusals(() =>
-      device ? this.proposals.consume(id, request.approvalCode) : this.proposals.consumeAsHost(id),
-    );
+    // Read first, and NON-DESTRUCTIVELY. A change that timed out or was already applied is refused
+    // as ITSELF rather than as a wrong password — and a wrong password against a dead change does
+    // not spend one of the five tries the whole machine shares. It is a courtesy, not the check:
+    // `consume` re-asks the same question, synchronously, which is what keeps single-use true when
+    // two applies arrive together.
+    this.withProposalRefusals(() => this.proposals.require(id));
+    if (governance.confirmChange) await this.confirm(id, request.operatorPassword);
+    const record = this.withProposalRefusals(() => this.proposals.consume(id));
 
     // Reopening the change is only safe while it is certain nothing was attempted. That certainty
     // ends the instant materialization begins: from there a failure may have left the host part-way
@@ -768,6 +805,54 @@ class MountedFleet implements FleetSubsystem {
     }
 
     return await this.materialize(record);
+  }
+
+  /**
+   * Prove the operator password against THIS change, or refuse in words naming the next step.
+   *
+   * The proposal id is in every sentence on purpose: this is a confirmation of one exact staged
+   * artifact, and a refusal that did not name which one would read as a login failure. Nothing here
+   * receives, returns or logs the password — it goes to the injected port and what comes back is a
+   * reason, which is the same use-never-read shape the secret store is built on.
+   */
+  private async confirm(id: string, password: string | undefined): Promise<void> {
+    if (password === undefined) {
+      throw new FleetRefusal(
+        'fleet_proposal_unauthorized',
+        `applying fleet change "${id}" from off this host needs this machine's operator password, entered against this exact change`,
+      );
+    }
+    const outcome = await this.options.confirmChange(password);
+    if (outcome.kind === 'confirmed') return;
+    if (outcome.reason === 'rate-limited') {
+      throw new FleetRefusal(
+        'fleet_proposal_unauthorized',
+        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; fleet change "${id}" was not applied. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
+      );
+    }
+    // HANDLED BECAUSE THE PORT DECLARES IT, NOT BECAUSE IT CAN STILL HAPPEN.
+    //
+    // Its original justification has expired and is recorded rather than replaced: this arm was
+    // written for a real race — `fy daemon password clear` running while a change was staged, so the
+    // boundary's `passwordSet` and this check disagreed. That verb is gone, `setPassword` can only
+    // ever SET, and a machine can no longer go from having a password to not having one while it
+    // runs. The race is impossible.
+    //
+    // The ANSWER is not. `ChangeConfirmation` still declares `no-password`, so a mount that stopped
+    // handling it would be asserting something the type does not — and the next change to that port's
+    // implementation would fall silently through to the sentence below, which would tell somebody
+    // they mistyped a password on a machine that has none. A refusal in this codebase has to be
+    // accurate about what happened, so the branch stays and says the true thing.
+    if (outcome.reason === 'no-password') {
+      throw new FleetRefusal(
+        'fleet_proposal_unauthorized',
+        `this machine has no operator password, so the confirmation for fleet change "${id}" could not be checked; review the change again`,
+      );
+    }
+    throw new FleetRefusal(
+      'fleet_proposal_unauthorized',
+      `that is not this machine's operator password, so fleet change "${id}" was not applied and is still open`,
+    );
   }
 
   /**
@@ -1186,13 +1271,14 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
-      handle: async context => {
-        if (context.credential?.tokenClass === 'device')
-          throw new ApiError(403, 'a paired device may inspect fleet environment but may not change it', 'forbidden');
-        return await respond(
+      // The `configure` declaration IS the refusal now. This handler used to re-decide it with an
+      // inline `tokenClass === 'device'` 403 — invisible to the route table and to `GrantsView`, so
+      // no surface could explain it before somebody clicked, which `docs/design/one-fact-one-owner.md`
+      // names as the smell in its purest form.
+      handle: async context =>
+        await respond(
           async () => await subsystem.updateEnvironment(await parseBody(context.request, FleetEnvironmentUpdateSchema)),
-        );
-      },
+        ),
     },
     {
       method: 'GET',
@@ -1224,12 +1310,11 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       minimum: 'operator',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
-      handle: async context => {
-        if (context.credential?.tokenClass === 'device') {
-          throw new ApiError(403, 'a paired device may inspect the fleet but may not apply it', 'forbidden');
-        }
-        return await respond(() => subsystem.apply());
-      },
+      // No inline class check, for the same reason as `PUT /v1/fleet/environment` above. This route
+      // stays unreached from the browser (`route-agreement-allowlist.txt`) — the panel always goes
+      // through a staged proposal so a person reviews every write first — and that is a property of
+      // the surface, not an authority this handler enforces.
+      handle: async () => await respond(() => subsystem.apply()),
     },
     {
       method: 'GET',
@@ -1238,7 +1323,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async context =>
-        await respondWith(FleetPermissionsSchema, async () => subsystem.permissions(context.credential?.tokenClass)),
+        await respondWith(FleetPermissionsSchema, async () => subsystem.permissions(context.governance)),
     },
     {
       /**
@@ -1310,31 +1395,18 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
     },
     {
       /**
-       * Mint the approval a paired device needs for one exact change.
+       * Apply one held proposal.
        *
-       * `host` scope, so only the host's own admin token may mint — a device cannot authorise
-       * itself, and a warden cannot authorise at all. There is deliberately **no loopback guard**,
-       * unlike the pairing mint: a pairing code hands a new long-lived credential to a party that
-       * has none, while this code confers strictly less than the caller already holds, since an
-       * admin bearer can apply directly. Requiring loopback would only break a legitimate remote
-       * admin using FY_URL and FY_TOKEN, and would buy nothing.
-       */
-      method: 'POST',
-      path: '/v1/fleet/proposals/:proposalId/authorize',
-      minimum: 'admin-token',
-      capability: { capability: 'fleet', axis: 'configure' },
-      noStore: true,
-      handle: async context =>
-        await respondWith(FleetApprovalMintPolicySchema, () =>
-          subsystem.authorizeProposal(decodeParameter(context.params.get('proposalId') ?? '') ?? ''),
-        ),
-    },
-    {
-      /**
-       * Apply one held proposal. A device may reach this, but only carrying an approval the host
-       * minted for this exact proposal — the credential alone is never enough, and the code alone
-       * never widens a lesser credential, because the route still requires an authenticated
-       * admin-scope caller.
+       * `fleet`/`configure`, and that declaration is the whole of who may reach it. A route
+       * `POST /v1/fleet/proposals/:proposalId/authorize` used to sit above this one, minting a
+       * single-use code a person transcribed off the host's own terminal; it was a second authority
+       * system with its own lifetime, its own attempt budget and its own refusal vocabulary, and it
+       * is deleted along with the `fy fleet authorize` verb that dialled it — in this same change,
+       * because `route-agreement-allowlist.txt` may only shrink and a half-deletion has no line it
+       * is permitted to record.
+       *
+       * What replaced it is not a credential: a governed caller confirms the change with the
+       * operator password, in this request, against this one proposal.
        */
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/apply',
@@ -1347,7 +1419,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
           subsystem.applyProposal(
             decodeParameter(context.params.get('proposalId') ?? '') ?? '',
             body,
-            context.credential?.tokenClass,
+            context.governance,
           ),
         );
       },

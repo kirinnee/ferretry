@@ -6,9 +6,7 @@ import { FleetController } from '../../../src/lib/fleet/controller';
 import {
   CapturingOutput,
   FrozenClock,
-  PROPOSAL_ID,
   RecordingApplier,
-  RecordingAuthorizationGateway,
   RecordingHealthCollector,
   RecordingIdentitySource,
   RecordingLoginService,
@@ -24,7 +22,6 @@ import {
 function run(argv: string[]) {
   const applier = new RecordingApplier();
   const recommendations = new RecordingRecommendationGateway();
-  const authorizations = new RecordingAuthorizationGateway();
   const usage = new RecordingUsageCollector();
   const health = new RecordingHealthCollector();
   const logins = new RecordingLoginService();
@@ -49,7 +46,6 @@ function run(argv: string[]) {
       logins,
       clock: new FrozenClock(),
       recommendations,
-      authorizations,
       out,
     }),
   );
@@ -57,7 +53,6 @@ function run(argv: string[]) {
     parsed: program.parseAsync(['node', 'fy', ...argv]),
     applier,
     recommendations,
-    authorizations,
     usage,
     health,
     logins,
@@ -262,55 +257,6 @@ describe('fleet init', () => {
 
     // Assert
     should(scaffolder.calls).equal(0);
-  });
-});
-
-describe('fleet authorize', () => {
-  it('should carry the proposal id through to the controller', async () => {
-    // Arrange + Act
-    const { parsed, authorizations } = run(['fleet', 'authorize', PROPOSAL_ID]);
-    await parsed;
-
-    // Assert
-    should(authorizations.proposalIds).eql([PROPOSAL_ID]);
-  });
-
-  it('should print the code the browser is waiting for', async () => {
-    // Arrange + Act
-    const { parsed, out } = run(['fleet', 'authorize', PROPOSAL_ID]);
-    await parsed;
-
-    // Assert
-    should(out.text).containEql('7F3K-M9QW');
-    should(out.text).containEql('approves this one change and nothing else');
-  });
-
-  it('should refuse to run without naming a proposal', async () => {
-    // Arrange + Act — approving "whatever is pending" is not a thing this may guess at
-    const { parsed, authorizations } = run(['fleet', 'authorize']);
-
-    // Assert
-    await should(parsed).be.rejected();
-    should(authorizations.proposalIds).be.empty();
-  });
-
-  it('should not offer --json on the verb itself', async () => {
-    // Arrange + Act
-    const { parsed, authorizations } = run(['fleet', 'authorize', '--json', PROPOSAL_ID]);
-
-    // Assert — an unknown option, not a silently honoured one
-    await should(parsed).be.rejected();
-    should(authorizations.proposalIds).be.empty();
-  });
-
-  it('should refuse the group-level --json rather than inherit it', async () => {
-    // Arrange + Act — `scoped()` puts --json on the group, and `merged()` spreads the group first,
-    // so this reaches the verb whether or not the verb declared it.
-    const { parsed, authorizations } = run(['fleet', '--json', 'authorize', PROPOSAL_ID]);
-
-    // Assert
-    await should(parsed).be.rejectedWith(/has no --json/u);
-    should(authorizations.proposalIds).be.empty();
   });
 });
 

@@ -8,7 +8,14 @@ import {
   type GrantsPatch,
   type GrantsView,
 } from '@ferretry/protocol';
-import type { CapabilityDemand, CapabilityGuard, CapabilityPresentation, GrantDecision } from '../api/capability.ts';
+import type {
+  CallerGovernance,
+  CapabilityDemand,
+  CapabilityGuard,
+  CapabilityPresentation,
+  ChangeConfirmation,
+  GrantDecision,
+} from '../api/capability.ts';
 import {
   applyGrantPatch,
   type CallerArrival,
@@ -23,6 +30,7 @@ import {
   patchedCapabilities,
   recordUnlockFailure,
   recordUnlockSuccess,
+  requiresChangeConfirmation,
   type UnlockAttemptState,
   unlockAttemptsRemaining,
   widenedBy,
@@ -137,6 +145,58 @@ export class CapabilityGrantService implements CapabilityGuard {
   /** The synchronous answer the authorization boundary asks for. */
   decide(demand: CapabilityDemand, presentation: CapabilityPresentation): GrantDecision {
     return decideCapability(demand, this.evaluate(presentation));
+  }
+
+  /**
+   * Where this caller stands relative to the gate, for a handler that must honour or render it.
+   *
+   * Built from the SAME `evaluate` every decision above uses, so a route that asks for one more step
+   * can never be reasoning about a different caller than the one the boundary just allowed.
+   */
+  governance(presentation: CapabilityPresentation): CallerGovernance {
+    const evaluation = this.evaluate(presentation);
+    return {
+      governed: evaluation.governed,
+      passwordSet: evaluation.passwordSet,
+      confirmChange: requiresChangeConfirmation(evaluation, evaluation.governed),
+      // The SAME evaluation, captured once, rather than a fresh one per question: two reads of the
+      // clock inside one request could straddle an unlock's expiry and answer one axis as unlocked
+      // and the next as locked, which is a request describing two different callers.
+      decide: demand => decideCapability(demand, evaluation),
+    };
+  }
+
+  /**
+   * Proves the operator password for ONE change, spending one attempt and minting NOTHING.
+   *
+   * ## IT SHARES THE UNLOCK'S LEDGER, DELIBERATELY
+   *
+   * A separate budget here would hand an attacker a fresh five tries for every surface that asked,
+   * which is the exact reasoning `UnlockAttemptState` already records for keying the ledger per
+   * daemon rather than per caller. So a wrong confirmation costs one of the same five, and the same
+   * fifteen-minute lockout follows. The rate limit is checked FIRST and applies to a caller that
+   * would have got it right, for the same reason it does in {@link unlock}: a limiter that let
+   * correct guesses through early would leak whether a guess was correct while claiming to be closed.
+   *
+   * ## IT MINTS NO TOKEN, AND THAT IS THE DIFFERENCE FROM `unlock`
+   *
+   * An unlock is a bearer value good for five minutes and any number of `configure` demands. This is
+   * spent inside the one request that carries it and leaves nothing behind, which is what makes it
+   * bind to a single change rather than open a window.
+   */
+  async confirmChange(password: string): Promise<ChangeConfirmation> {
+    const now = this.deps.clock.nowMs();
+    if (isUnlockLocked(this.attempts, now)) return { kind: 'refused', reason: 'rate-limited' };
+    // A machine with no password has nothing to confirm against. Reporting this rather than passing
+    // is what stops a caller believing it cleared a check that never ran — the same reason `unlock`
+    // refuses to mint on such a machine instead of handing out a token that proves nothing.
+    if (!this.passwordSet) return { kind: 'refused', reason: 'no-password' };
+    if (!(await this.deps.passwords.verify(password))) {
+      this.attempts = recordUnlockFailure(this.attempts, now);
+      return { kind: 'refused', reason: isUnlockLocked(this.attempts, now) ? 'rate-limited' : 'wrong-password' };
+    }
+    this.attempts = recordUnlockSuccess();
+    return { kind: 'confirmed' };
   }
 
   /** The sentence that goes with a refusal, composed here because only this layer knows the client

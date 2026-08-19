@@ -94,6 +94,57 @@ export interface GrantDecision {
 }
 
 /**
+ * WHERE THIS CALLER STANDS RELATIVE TO THE OPERATOR'S GATE, derived once by the boundary and handed
+ * to a handler that has to honour or render it.
+ *
+ * IT EXISTS SO NO HANDLER RE-DERIVES ONE OF THESE. `governed` is `isGovernedCaller`'s answer for this
+ * exact request, made from the four facts the guard already gathered — and a handler that recomputed
+ * it from `request.loopback` would be reading the ONE value that must never be inferred anywhere but
+ * the transport, in the ONE place a mistake hands a remote phone the machine. The fleet mount used to
+ * decide its own version of this from `tokenClass`, four separate times; that is the duplication this
+ * type replaces.
+ *
+ * IT NEVER GRANTS ANYTHING. It arrives only on a request the capability demand already allowed, so a
+ * handler reading it can add a step, never remove one.
+ */
+export interface CallerGovernance {
+  /** Whether the operator's grants govern this caller at all. */
+  readonly governed: boolean;
+  /** Whether this machine has an operator password. Never the password, never any part of it. */
+  readonly passwordSet: boolean;
+  /**
+   * Whether a change this caller makes must be confirmed against that password, PER CHANGE.
+   *
+   * Derived by the grant layer rather than composed from the two fields above, so the policy has one
+   * owner. A route that consumes this must bind the confirmation to the exact artifact it is about to
+   * spend — an unconfirmed one, or one confirmed against something else, is not a confirmation.
+   */
+  readonly confirmChange: boolean;
+  /**
+   * The operator's answer for ANY axis, for THIS caller — so a surface can report an axis its own
+   * route did not demand.
+   *
+   * IT REPORTS AND NEVER ENFORCES. A read route asking "and would `configure` be allowed?" is exactly
+   * how a panel explains a limit BEFORE somebody clicks into it, which is the whole requirement
+   * `docs/grants.md` states for this layer. It is the same `decide` the boundary just used, bound to
+   * the same presentation, so an answer here can never disagree with the enforcement beside it — and
+   * it cannot widen anything, because reading a decision performs no act.
+   */
+  decide(demand: CapabilityDemand): GrantDecision;
+}
+
+/**
+ * What a per-change confirmation was worth.
+ *
+ * The refusals are the grant layer's own, not a second vocabulary: a wrong password spends one of the
+ * SAME five tries an unlock does, and the same fifteen-minute lockout follows. A second budget would
+ * hand an attacker a fresh one for every surface that asked.
+ */
+export type ChangeConfirmation =
+  | { readonly kind: 'confirmed' }
+  | { readonly kind: 'refused'; readonly reason: 'wrong-password' | 'rate-limited' | 'no-password' };
+
+/**
  * The grant layer as the authorization boundary sees it.
  *
  * SYNCHRONOUS, deliberately. This runs in front of every request and every socket upgrade, and a
@@ -102,6 +153,13 @@ export interface GrantDecision {
  */
 export interface CapabilityGuard {
   decide(demand: CapabilityDemand, presentation: CapabilityPresentation): GrantDecision;
+  /**
+   * Where this caller stands relative to the gate, for a handler that must honour or render it.
+   *
+   * SYNCHRONOUS and derived from the same evaluation `decide` uses, so a view can never disagree with
+   * the enforcement it describes.
+   */
+  governance(presentation: CapabilityPresentation): CallerGovernance;
   /**
    * The sentence a refused caller is shown, or nothing when there is nothing to explain.
    *
@@ -121,6 +179,14 @@ export interface CapabilityGuard {
  */
 export const NO_GOVERNED_ROUTES_GUARD: CapabilityGuard = {
   decide: () => ({ allowed: false, refusal: 'undetermined' }),
+  // Every field the STRICTER reading: a table with no governed routes has no caller standing at this
+  // gate, and a wiring mistake that grew one must not be told the caller is past it.
+  governance: () => ({
+    governed: true,
+    passwordSet: false,
+    confirmChange: true,
+    decide: () => ({ allowed: false, refusal: 'undetermined' }),
+  }),
   explain: () => undefined,
 };
 

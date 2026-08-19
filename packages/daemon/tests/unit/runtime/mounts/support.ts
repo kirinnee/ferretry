@@ -34,7 +34,8 @@ import {
   rebuildAnalyticsSessionIndex,
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
-import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
+import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
+import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
   type AttentionLedger,
@@ -1723,5 +1724,53 @@ export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
  */
 export const GRANTED: CapabilityGuard = {
   decide: () => ({ allowed: true, refusal: 'granted' }),
+  // UNGOVERNED, matching the decision above: this stub speaks for a caller the operator's grants do
+  // not govern, so a route that asks where the caller stands is told the same thing `decide` just
+  // said. A stub whose two answers disagreed would let a mount test pass while describing a caller
+  // that cannot exist.
+  governance: () => ({
+    governed: false,
+    passwordSet: false,
+    confirmChange: false,
+    decide: () => ({ allowed: true, refusal: 'granted' }),
+  }),
+  explain: () => undefined,
+};
+
+/**
+ * A guard for a caller the operator has NARROWED — `fleet.configure` turned off on this machine.
+ *
+ * The refusal sentence is the real one from `describeGrantRefusal`, so a test asserting it is
+ * asserting the words a person actually meets rather than a phrase invented beside the assertion.
+ */
+export const NARROWED: CapabilityGuard = {
+  decide: (demand: CapabilityDemand) =>
+    demand.axis === 'configure' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
+  governance: () => ({
+    governed: true,
+    passwordSet: true,
+    confirmChange: true,
+    decide: (demand: CapabilityDemand) =>
+      demand.axis === 'configure' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
+  }),
+  explain: (demand, refusal) => describeGrantRefusal(demand, refusal, 'fy'),
+};
+
+/**
+ * A guard for a caller the operator's grants DO govern, on a machine with an operator password.
+ *
+ * The remote paired browser, in other words — and, since a machine cannot pair a device until a
+ * password exists (`PairingService.mint`), the only shape a remote caller comes in. It permits every
+ * capability, exactly as {@link GRANTED} does, so a test using it is about the per-change
+ * confirmation rather than about the grant document.
+ */
+export const GOVERNED: CapabilityGuard = {
+  decide: () => ({ allowed: true, refusal: 'granted' }),
+  governance: () => ({
+    governed: true,
+    passwordSet: true,
+    confirmChange: true,
+    decide: () => ({ allowed: true, refusal: 'granted' }),
+  }),
   explain: () => undefined,
 };

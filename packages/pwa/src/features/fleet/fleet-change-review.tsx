@@ -12,27 +12,27 @@
  * in a candidate configuration, every path a rollback could not verify — and the reader needs all of it.
  */
 
-import { FLEET_APPROVAL_MAX_ATTEMPTS, FLEET_APPROVAL_TTL_SECONDS } from '@ferretry/protocol';
 import {
   ArrowRight,
   CircleAlert,
   CircleCheck,
   ClipboardList,
   FileCog,
-  Hourglass,
   ListOrdered,
   Lock,
   ServerCog,
-  ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
-import { useId } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { EYEBROW, FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
+import { type OperatorUnlockFailure, UNLOCK_LIMIT_NOTE } from '../../lib/grants.ts';
 import { absoluteTime } from '../../lib/session-screens.ts';
 import type { FleetApplyOutcome, FleetManifestAccountView, FleetProposalView, FleetRefusalView } from './fleet-api.ts';
 import {
-  type FleetAuthorityMode,
+  type FleetApplyAuthority,
+  fleetApplyCopy,
+  fleetApplyNeedsPassword,
   type FleetRosterChange,
   type FleetRosterRow,
   operationLedger,
@@ -205,46 +205,70 @@ export interface FleetChangeReviewProps {
   readonly proposal: FleetProposalView;
   /** The live accounts the ledger is compared against. */
   readonly live: readonly FleetManifestAccountView[];
-  readonly authority: FleetAuthorityMode;
-  /** The exact command a person runs on the host. Server-derived; never a guess. */
-  readonly command: string;
-  readonly code: string;
-  readonly onCodeChange: (code: string) => void;
-  readonly onApply: () => void;
-  readonly onRecheck: () => void;
+  readonly authority: FleetApplyAuthority;
+  /**
+   * Applies the change, with the operator password when one was asked for.
+   *
+   * ONE ARGUMENT, because there is one secret. The panel does not decide whether it becomes an unlock,
+   * a confirmation or both — the surface does, from the same authority this component renders — and a
+   * component that split it into two callbacks would be the second place that decision could be made
+   * differently.
+   */
+  readonly onApply: (operatorPassword?: string) => void;
   readonly onDiscard: () => void;
   readonly busy: boolean;
   readonly refusal: FleetRefusalView | null;
+  /** Why the last operator password was refused, so a wrong one is retyped rather than re-guessed at. */
+  readonly unlockFailure?: OperatorUnlockFailure | null;
 }
 
 /**
- * The change manifest: numbered, exact, and bound to one proposal id.
+ * The change manifest: numbered, exact, and one Apply.
  *
- * The id is on screen because it is what the approval is minted against. A person authorizing a
- * change on their host is authorizing THAT id, and being able to compare the two is the whole point of
- * showing it.
+ * ## THE PROPOSAL ID IS NOT ON SCREEN
+ *
+ * It was, and the reason it was is gone with the authorization half: a person used to read it off this
+ * panel to compare against the id in `fy fleet authorize <id>`. Nothing mints anything against it now —
+ * it is a transaction handle the browser sends back in a path — so showing it would be a 30-character
+ * opaque string a reader has no use for, in the place the change itself should be.
  */
 export function FleetChangeReview({
   proposal,
   live,
   authority,
-  command,
-  code,
-  onCodeChange,
   onApply,
-  onRecheck,
   onDiscard,
   busy,
   refusal,
+  unlockFailure = null,
 }: FleetChangeReviewProps) {
   // Instance-local for the same reason as the roster above.
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
+  /**
+   * The typed password, held HERE and nowhere above.
+   *
+   * It is the one value on this screen that must not reach the session state the surface keys by
+   * connection: a secret in there outlives the click that needed it, survives every unrelated re-render,
+   * and shows up in anything that inspects the state. It lives for one submit and is cleared by it.
+   */
+  const [password, setPassword] = useState('');
   const preview = proposal.preview;
   const ledger = preview.kind === 'apply' ? operationLedger(preview.plan.operations) : [];
   const rows = preview.kind === 'apply' ? rosterDiff(live, preview.plan.manifest.accounts) : [];
-  const approvalOutstanding = proposal.approval !== undefined;
-  const applyBlocked = busy || (authority === 'approval' && code.trim() === '') || authority === 'read-only';
+  const copy = fleetApplyCopy(authority);
+  const needsPassword = fleetApplyNeedsPassword(authority);
+  const applyBlocked = busy || authority.kind === 'refused' || (needsPassword && password === '');
+
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (applyBlocked) return;
+    onApply(needsPassword ? password : undefined);
+    // Cleared on submit rather than on success, exactly as the grants surface clears its own: a wrong
+    // password is retyped, and holding the last attempt in a field is one more place the value sits
+    // while somebody walks away from the screen.
+    setPassword('');
+  };
 
   return (
     <section
@@ -266,12 +290,11 @@ export function FleetChangeReview({
         </div>
         <p className="m-0 mt-1 text-ui font-semibold text-fg">{proposal.summary}</p>
         <dl className="m-0 mt-2 grid gap-x-4 gap-y-1 text-meta sm:grid-cols-[auto_minmax(0,1fr)]">
-          <dt className={EYEBROW}>Proposal</dt>
-          {/* Wrapped, never truncated: this id is what the host mints the approval AGAINST, so it is
-              the one fact a reader came for. */}
-          <dd className="m-0 min-w-0">
-            <PanelPath value={proposal.id} className="text-meta text-fg" />
-          </dd>
+          {/* NO PROPOSAL ID ROW. Nothing is minted against it any more, so it is an opaque handle a
+              reader cannot act on — and the expiry and revision are the two facts that decide whether
+              this review is still worth applying. It used to be here, wrapped rather than truncated,
+              because it was "the one fact a reader came for": they read it off this panel to match the
+              id in `fy fleet authorize <id>`. That is the sentence this change makes false. */}
           <dt className={EYEBROW}>Expires</dt>
           <dd className="m-0 font-mono text-meta text-muted">{absoluteTime(proposal.expiresAt)}</dd>
           <dt className={EYEBROW}>Config revision</dt>
@@ -428,82 +451,72 @@ export function FleetChangeReview({
 
       {refusal === null ? null : <FleetRefusalAlert refusal={refusal} />}
 
-      <section
+      {/*
+        ONE FORM, ONE FIELD, ONE BUTTON. There is no heading over it and deliberately so: a "Host
+        authority" section was the fleet advertising an authority system of its own, and what is left is
+        the ordinary thing every other governed control does — say what is true when it is not a plain
+        yes, and offer the one step that resolves it.
+      */}
+      <form
         className="border-t border-border-soft bg-surface-2 px-panel py-3"
-        aria-labelledby={id('-authority-heading')}
+        data-fleet-apply-authority={authority.kind}
+        onSubmit={submit}
       >
-        <div className="flex min-w-0 items-center gap-2">
-          {authority === 'direct' ? (
-            <ShieldCheck size={16} className="shrink-0 text-ok" aria-hidden="true" />
-          ) : (
-            <Lock size={16} className="shrink-0 text-accent" aria-hidden="true" />
-          )}
-          <h3 id={id('-authority-heading')} className="m-0 text-ui font-semibold text-fg">
-            Host authority
-          </h3>
-        </div>
-
-        {authority === 'direct' ? (
-          <p className="m-0 mt-1 text-meta leading-base text-muted" data-fleet-authority="direct">
-            This credential is the host's own, so it may apply this proposal directly.
+        {copy.explanation === '' ? null : (
+          <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base text-muted">
+            <Lock size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+            <span data-fleet-apply-explanation="">{copy.explanation}</span>
           </p>
-        ) : null}
+        )}
 
-        {authority === 'read-only' ? (
-          <p className="m-0 mt-1 text-meta leading-base text-warn" data-fleet-authority="read-only">
-            This credential may inspect the fleet and stage a change, but nothing here may apply one. Run the change
-            from the host.
-          </p>
-        ) : null}
-
-        {authority === 'approval' ? (
-          <div data-fleet-authority="approval">
-            <p className="m-0 mt-1 text-meta leading-base text-muted">
-              A paired browser cannot provision a host on the strength of having paired. Run this on the host to mint a
-              single-use approval for <span className="font-semibold text-fg">this exact proposal</span>:
-            </p>
-            <pre className="kt-code-block m-0 mt-2 overflow-x-auto whitespace-pre font-mono text-code">{command}</pre>
-            <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-approval-code')}>
-              Approval code
+        {needsPassword ? (
+          <>
+            <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-operator-password')}>
+              Operator password for this machine
             </label>
             <input
-              id={id('-approval-code')}
-              className="kt-input font-mono uppercase"
-              value={code}
+              id={id('-operator-password')}
+              type="password"
+              className="kt-input"
+              value={password}
               disabled={busy}
               autoComplete="off"
               spellCheck={false}
-              placeholder="XXXX-XXXX"
-              onChange={event => onCodeChange(event.target.value)}
+              data-fleet-operator-password=""
+              onChange={event => setPassword(event.target.value)}
             />
-            <p className="m-0 mt-1 flex flex-wrap items-center gap-1 text-meta text-muted">
-              <Hourglass size={14} className="shrink-0" aria-hidden="true" />
-              {approvalOutstanding
-                ? `An approval is outstanding until ${absoluteTime(proposal.approval?.expiresAt)}.`
-                : `No approval is outstanding yet. A code lasts ${FLEET_APPROVAL_TTL_SECONDS} seconds, is single-use, and this proposal accepts ${FLEET_APPROVAL_MAX_ATTEMPTS} wrong ones before it stops taking any.`}
-            </p>
-            <button type="button" className="kt-btn kt-btn--sm mt-2" disabled={busy} onClick={onRecheck}>
-              Check for approval
-            </button>
-          </div>
+            {unlockFailure === null ? (
+              <p className="m-0 mt-1 text-meta leading-base text-faint">{UNLOCK_LIMIT_NOTE}</p>
+            ) : (
+              <p
+                role="alert"
+                className={cn(
+                  'm-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base',
+                  unlockFailure.retryable
+                    ? 'border-warn-border bg-warn-bg text-warn'
+                    : 'border-err-border bg-err-bg text-err',
+                )}
+                data-fleet-operator-password-failure={unlockFailure.retryable ? 'retryable' : 'final'}
+              >
+                {unlockFailure.message}
+              </p>
+            )}
+          </>
         ) : null}
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="kt-btn"
-            data-variant="primary"
-            data-fleet-apply=""
-            disabled={applyBlocked}
-            onClick={onApply}
-          >
-            {busy ? 'Applying…' : 'Apply this change'}
+          {/*
+            A SUBMIT, not a click handler, so Enter in the password field applies the change rather than
+            doing nothing — which is what a person types after a password every time.
+          */}
+          <button type="submit" className="kt-btn" data-variant="primary" data-fleet-apply="" disabled={applyBlocked}>
+            {busy ? 'Applying…' : needsPassword ? 'Confirm and apply' : 'Apply this change'}
           </button>
           <button type="button" className="kt-btn" data-variant="ghost" disabled={busy} onClick={onDiscard}>
             Discard
           </button>
         </div>
-      </section>
+      </form>
     </section>
   );
 }

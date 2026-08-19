@@ -5,9 +5,11 @@ title: Should the fleet's proposal flow become the capability system?
 
 # Should the fleet's proposal flow become the capability system?
 
-**Status: DECIDED by the owner. Nothing here is built yet, and this document changes no production code.**
-**Verified against `origin/main` at `27509573` (`Brew cask update for ferretry version v0.176.0`).** Every
-claim about current behaviour below cites a file and line at that commit.
+**Status: DECIDED by the owner, and now BUILT. §9 is what shipped and where this document was wrong.**
+**§0–§8 were verified against `origin/main` at `27509573` (`Brew cask update for ferretry version v0.176.0`)
+and are left as they were written**, because a decision record that quietly rewrites itself to match the
+code teaches the next reader that nothing was ever in doubt. Every line number below is that commit's;
+several have moved, and two of its factual claims are corrected in §9.4.
 
 It answers the owner's question:
 
@@ -392,7 +394,9 @@ it takes is a secret, and a secret in a config file is exactly what a script has
 "prove you are a person" available to this layer, and inventing one would be the second authority system all
 over again.
 
-**Status: accepted loss.** The owner decided (§0) that one vocabulary is worth more than this property. That
+**Status: accepted loss, and now REALISED — the verb is deleted (§9.1).** The property below is no longer
+available in this product, and this section is the only remaining record that it ever existed. The owner
+decided (§0) that one vocabulary is worth more than this property. That
 is a legitimate trade — the property costs the friction the owner complained about in the first place, and it
 protects against a threat model (a script with the device credential and no human nearby) that the same
 decision has already accepted in a larger form via §5.1. It is recorded because a design that quietly drops
@@ -476,7 +480,105 @@ than absorbed. That last one is why this section ends where it does — the deci
 written down beside it, and the next reader can disagree with the trade without having to rediscover it.
 
 **Next: implementation is NOT authorised by this document.** §7 is the work; whether and when it happens is a
-separate call.
+separate call. **It was authorised separately and is now built — see §9.**
+
+---
+
+## 9. As built
+
+**Everything §0 decided shipped, and one thing §7 did not anticipate had to be built rather than deleted.**
+This section is written against the change that implemented it, not against `27509573`.
+
+### 9.1 What went
+
+- `POST /v1/fleet/proposals/:proposalId/authorize`, `authorizeProposal`, and the `FleetProposalStore`'s
+  entire approval half — `authorize`, the code-checking `consume`, the per-proposal attempt ledger and
+  `normalizeApprovalCode`. `consumeAsHost` is now simply `consume`, takes only an id, and decides nothing
+  about a caller.
+- `packages/protocol/src/lib/fleet-authorization.ts`, deleted outright. `FleetProposalIdSchema` survived it
+  and moved into `fleet-changes.ts`, because a staged change still has a handle; a handle was never a
+  credential, and having it live in a file named for authorization is what made it read like one.
+- `fy fleet authorize` — **removed outright, not deprecated.** The verb's whole purpose was to mint a
+  credential that no longer exists, and a stub would have been a second place describing the capability
+  model. The route and the verb went in ONE change, as §7 requires: the route-agreement allowlist may only
+  shrink, so neither half has a line it is permitted to record on its own.
+- The four inline `tokenClass === 'device'` refusals in `runtime/mounts/fleet.ts`. Each route's declared
+  `fleet` axis is now the whole answer, which is what makes the refusal visible to the route table and to
+  `GrantsView` — §2.2's point, and the last handler in the daemon that re-decided its own route's axis.
+- The Fleet panel's "Host authority" block: the `fy fleet authorize fy_fprop_…` command to copy, the
+  approval-code field, the 120-second sentence, the "Check for approval" button and the **Approval
+  required** badge.
+- `minimum: 'admin-token'` is now declared by **no route at all**. The authorize route was the only one.
+  The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than a census
+  of today's table, but the count is pinned in `surface.test.ts` so its return would be deliberate.
+
+### 9.2 What was built
+
+The per-change confirmation §0 kept, and §3.2 sketched, did not exist and had to be written:
+
+- `CallerGovernance` on the route context, minted by the authorization boundary for every route that
+  declares a capability, carrying `governed`, `passwordSet`, `confirmChange`, and a `decide` that reports
+  the operator's answer for **any** axis — so `GET /v1/fleet/permissions` can say whether `configure` would
+  be allowed without demanding it. It is the `wardenRemedy` shape: a handler cannot mint one, and it only
+  ever adds a step.
+- `requiresChangeConfirmation` in `grants/policy.ts` — governed **and** a password exists — and
+  `CapabilityGrantService.confirmChange`, which spends one of the SAME five tries an unlock spends and
+  **mints nothing**. That last part is the whole difference from an unlock: an unlock is a bearer value
+  good for five minutes and any number of `configure` demands, while this is spent inside the one request
+  that carries it, which is what binds it to a single diff.
+- `FleetProposalApplyRequestSchema.operatorPassword`, held to `OperatorPasswordSchema` — the same schema
+  the unlock is held to, because it is the same secret rather than a new one.
+- `FleetPermissions` reshaped from `{ mayApplyDirectly, mayApplyWithApproval, approvalCommand }` to
+  `{ mayApply, applyRefusal, confirmation }`. `applyRefusal` is the shared `GrantRefusal`, so the fleet
+  panel words a refusal exactly as the grants panel beside it does.
+
+### 9.3 What §7's removal list missed
+
+Found by grep rather than by the survey, and each would have failed a gate:
+
+- `packages/cli/bin/fy.ts` — the composition root that constructed the authorization gateway.
+- `packages/cli/tests/integration/fleet/shared-history.test.ts`, which builds a real `FleetController`.
+- Three prose sites a symbol grep does not reach: the `fy fleet --help` overview, which advertised
+  `authorize` as one of two daemon-crossing verbs; the `FleetController` class comment, which said "two of
+  them cross to it" and named it; and `FLEET_PROPOSALS_PATH`, left with no consumer.
+
+### 9.4 Where this document was wrong
+
+**§5.1's exposure is narrower than stated, and the reason post-dates the document.** It says that on a
+passwordless machine "any paired device can apply any number of fleet changes, with no per-change step".
+That is still exactly what `decideCapability` answers — but a passwordless machine **cannot pair a device
+at all**: `PairingService.mint` refuses without an operator password, in its own sentence, and
+`packages/cli/src/lib/daemon/first-password.ts` offers to set one at the moment somebody starts the
+daemon. So the state §5.1 describes is not reachable by pairing.
+
+**It was still reachable by one route, and that route has since been closed.** When this section was
+written an operator could pair a device and then run `fy daemon password clear`, which did not revoke
+devices: the machine kept its paired devices, reported `fleet.configure` as `ungated`, and applied with
+no per-change step. That was a state its owner had asked for explicitly, with `PASSWORD_CLEAR_WARNING`
+in front of them, rather than the default state of a fresh install — which is what §5.1 called it.
+
+**The owner then ruled that the verb should not exist, and it was removed.** Setting an operator
+password is now one-way; nothing takes one off a machine. So the state §5.1 describes has no remaining
+route into it at all: a machine without a password cannot pair, and a machine that has paired cannot
+become one without a password. The cost, accepted knowingly, is that somebody who sets a password and
+never pairs a device has no way back to a passwordless machine — recorded in `docs/grants.md` beside
+the narrower alternative that was offered and not taken (refusing removal only while paired devices
+exist). **This paragraph is left as a record of an exposure that was found, argued and closed rather
+than rewritten to look as though it never existed**, which is the same standard §3.2's correction set.
+
+**§4's first bullet reads as though loopback alone settles it.** It says the local case "is the same answer
+`isGovernedCaller` has given for every other capability since it shipped". `#358` landed after this document
+and changed that: a browser on the machine is a paired device and is governed **until it unlocks**. The
+target state §4 describes is therefore what a local browser meets _after_ one unlock, not on arrival — and
+that unlock is now offered by the Fleet panel itself, which is the half of the shipped bug §4 could not
+have predicted. The panel had no unlock prompt at all, so a local browser met `grant_locked` **and** the
+approval block, and had no way through either.
+
+**§3.2 is right that the per-change confirmation "is one more branch in `decideCapability`'s shape, not a
+second credential system", but it is not a branch in `decideCapability`.** `decideCapability` answers a
+demand; whether a confirmation is owed is a fact about the caller, so it is a sibling function over the
+same evaluation. The distinction matters only to somebody reading for the code, which is why it is recorded
+here rather than edited into §3.2.
 
 ---
 

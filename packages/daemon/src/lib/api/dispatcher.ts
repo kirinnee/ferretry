@@ -1,6 +1,6 @@
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
-import { type CapabilityGuard, grantRefusalCode } from './capability.ts';
+import { type CallerGovernance, type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
 import { type ApiRequest, type ApiResponse, headerValue, queryValue, type RouteParameters } from './http.ts';
 import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
@@ -171,8 +171,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
    * defect this product has already been bitten by three times.
    */
   const demand = lookup.route.capability;
+  let governance: CallerGovernance | undefined;
   if (demand !== undefined) {
-    const decision = guard.decide(demand, {
+    const presentation = {
       // The TRANSPORT's answer, never a header's. A relayed hop terminates on this very host, so
       // anything derived from an address would read as local and hand a remote caller the machine.
       loopback: request.loopback,
@@ -182,7 +183,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       adminToken: authentication.tokenClass === 'admin',
       actor,
       unlock: headerValue(request, OPERATOR_UNLOCK_HEADER),
-    }) ?? { allowed: false, refusal: 'undetermined' as const };
+    };
+    const decision = guard.decide(demand, presentation) ?? { allowed: false, refusal: 'undetermined' as const };
     if (!decision.allowed)
       return {
         kind: 'refused',
@@ -193,6 +195,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           grantRefusalCode(decision.refusal),
         ),
       };
+    // Derived AFTER the refusal, so it can only ever describe a request this daemon is about to
+    // serve. A handler is given where the caller stands so it can ask for one more thing; it is
+    // never given a way to conclude that a refused caller was allowed.
+    governance = guard.governance(presentation);
   }
   const remedy = wardenRemedyOutcome(lookup.route, authentication.tokenClass, request, lookup.params, actor, remedies);
   if (remedy.kind === 'refused') return { kind: 'refused', response: remedy.response };
@@ -207,6 +213,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // Present only when a warden was allowed one, so its ABSENCE means "not acting as a warden"
       // rather than "acting as one, unrecorded".
       ...(remedy.kind === 'granted' ? { wardenRemedy: remedy.grant } : {}),
+      // Present only where the route named a capability, so its ABSENCE means "the operator was never
+      // asked about this route" rather than "asked, and the answer was mislaid".
+      ...(governance === undefined ? {} : { governance }),
     },
   };
 }

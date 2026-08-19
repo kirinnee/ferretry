@@ -6,6 +6,7 @@ import {
   type ApiRoute,
   ApiRouter,
   authorizeRequest,
+  type CallerGovernance,
   type CapabilityGuard,
   CLIENT_HEADER,
   type CredentialMinimum,
@@ -24,6 +25,20 @@ import {
   type WardenRemedyPresentation,
 } from '../../../src/lib/api/index.ts';
 import { jsonBody, request } from './support.ts';
+
+/**
+ * Where the caller stands, for a stub whose subject is the DECISION rather than the gate.
+ *
+ * The boundary asks for this only on a route that names a capability, and only once the decision
+ * above has already allowed the request — so every stub below answers with the caller this daemon
+ * serves most, and a test that wanted a governed one would say so.
+ */
+const UNGOVERNED: CallerGovernance = {
+  governed: false,
+  passwordSet: false,
+  confirmChange: false,
+  decide: () => ({ allowed: true, refusal: 'granted' }),
+};
 
 const credentials = {
   admin: 'admin-secret',
@@ -444,6 +459,7 @@ describe('the operator grant layer', () => {
 
   const guard = (allowed: boolean): CapabilityGuard => ({
     decide: () => ({ allowed, refusal: allowed ? 'granted' : 'not-granted' }),
+    governance: () => UNGOVERNED,
     explain: () => 'the operator of this machine has not granted the UI the use of the agent fleet',
   });
 
@@ -458,6 +474,7 @@ describe('the operator grant layer', () => {
         asked.push(demand.capability);
         return { allowed: true, refusal: 'granted' };
       },
+      governance: () => UNGOVERNED,
       explain: () => undefined,
     };
     const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
@@ -520,6 +537,7 @@ describe('the operator grant layer', () => {
         seen.push({ loopback: presentation.loopback, unlock: presentation.unlock });
         return { allowed: true, refusal: 'granted' };
       },
+      governance: () => UNGOVERNED,
       explain: () => undefined,
     };
     const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
@@ -906,6 +924,7 @@ describe('the warden remedy axis', () => {
       credentials,
       {
         decide: () => ({ allowed: false, refusal: 'not-granted' }),
+        governance: () => UNGOVERNED,
         explain: () => 'the operator of this machine has not granted the UI the use of the warden',
       },
       allowing(seen),
@@ -1110,5 +1129,30 @@ describe('the warden remedy axis', () => {
     should(accepted.outcome).equal('accepted');
     should(refused.outcome).equal('refused');
     should(refused.outcome === 'refused' && jsonBody(refused.response).code).equal('warden_remedy_unwired');
+  });
+});
+
+describe('the explicit guard for a table that names no capability', () => {
+  it('should fail closed on every question, so a table that grows one cannot acquire a bypass', () => {
+    // A route table with no capability declaration never asks this guard anything. The value of the
+    // constant is entirely in what it answers if one is ADDED and the wiring is not: refused, and a
+    // caller reported as governed, owing a confirmation, with no axis allowed. It is asserted
+    // directly because the dispatcher can never reach `governance` through it — `decide` refuses
+    // first — and an unreachable fail-closed answer is exactly the kind that rots unnoticed.
+    // Act
+    const decision = NO_GOVERNED_ROUTES_GUARD.decide(
+      { capability: 'fleet', axis: 'use' },
+      { loopback: true, adminToken: true, actor: 'admin-cli' },
+    );
+    const governance = NO_GOVERNED_ROUTES_GUARD.governance({ loopback: true, adminToken: true, actor: 'admin-cli' });
+
+    // Assert — the STRICTER reading of every field, for the most privileged caller there is.
+    should(decision).deepEqual({ allowed: false, refusal: 'undetermined' });
+    should(governance).match({ governed: true, passwordSet: false, confirmChange: true });
+    should(governance.decide({ capability: 'fleet', axis: 'configure' })).deepEqual({
+      allowed: false,
+      refusal: 'undetermined',
+    });
+    should(NO_GOVERNED_ROUTES_GUARD.explain({ capability: 'fleet', axis: 'use' }, 'undetermined')).be.undefined();
   });
 });

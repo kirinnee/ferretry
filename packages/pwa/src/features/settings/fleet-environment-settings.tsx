@@ -1,11 +1,17 @@
 /**
  * Read-only fleet profile environment inspection.
  *
- * A paired-device token may inspect a daemon's fleet profile environment and
- * compare it with another daemon's, but device authority is intentionally not
- * enough to mutate Fleet configuration. This panel never writes: it shows what
- * each daemon publishes and how two daemons differ, and points the operator at
- * the Fleet tab's proposal review + host-approval flow to make any change.
+ * This panel never writes: it shows what each daemon publishes and how two
+ * daemons differ, and points the operator at the Fleet tab — where a change is
+ * reviewed before it is applied — to make one.
+ *
+ * IT CLAIMS NOTHING ABOUT WHO MAY WRITE. It used to say device authority was
+ * "intentionally not enough to mutate Fleet configuration", which was a
+ * description of the fleet's own private approval flow and is now false: writing
+ * is `fleet.configure` as the operator's grants decided it, and on a machine with
+ * no operator password a paired device may apply a change. `docs/grants.md` owns
+ * that answer and the Fleet panel renders it; a second statement of it here could
+ * only ever drift.
  */
 import { RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';

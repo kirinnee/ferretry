@@ -689,3 +689,163 @@ describe('widening is a local act and there is no remote path to it', () => {
     should(fromHere.capabilities.every(entry => entry.mayGrant)).be.true();
   });
 });
+
+describe('where a caller stands, for a route that must add one step', () => {
+  it('should tell an ungoverned caller it owes nothing, whatever the machine has set', async () => {
+    // THE OWNER'S CASE. The host's command line, and a browser on this machine that has unlocked,
+    // are past the gate — `isGovernedCaller` says so — and the fleet's per-change confirmation must
+    // not reintroduce a second one behind it. `#358` established that shape: unlock once, then full
+    // authority, exactly as `sudo` behaves.
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+
+    // Act
+    const commandLine = context.service.governance(local);
+    const unlocked = await context.service.unlock('the operator knows this');
+    const browser = context.service.governance({
+      ...localBrowser,
+      unlock: unlocked.kind === 'unlocked' ? unlocked.token : '',
+    });
+
+    // Assert
+    should(commandLine).match({ governed: false, passwordSet: true, confirmChange: false });
+    should(browser).match({ governed: false, passwordSet: true, confirmChange: false });
+  });
+
+  it('should ask a governed caller on a machine with a password to confirm each change', async () => {
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+
+    // Act
+    const actual = context.service.governance(remote);
+
+    // Assert
+    should(actual).match({ governed: true, passwordSet: true, confirmChange: true });
+  });
+
+  it('should ask a governed caller on a machine with NO password for nothing at all', async () => {
+    // A control that cannot refuse is theatre. There is no secret to bind a change to here, so
+    // there is deliberately no prompt — and the capability layer already reports the state as
+    // `ungated` rather than `granted` so a surface can say once, beside the control, that nothing
+    // is standing behind it.
+    // Arrange
+    const context = world();
+    await context.service.refresh();
+
+    // Act
+    const actual = context.service.governance(remote);
+
+    // Assert
+    should(actual).match({ governed: true, passwordSet: false, confirmChange: false });
+  });
+
+  it('should answer for an axis its own route never demanded, and never disagree with the boundary', async () => {
+    // A read route asking "and would `configure` be allowed?" is how a panel explains a limit BEFORE
+    // somebody clicks into it. It is the same `decide` the boundary just used, over the same
+    // evaluation, so the two can never come to different answers about one request.
+    // Arrange
+    const context = world({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: true, configure: false } },
+    });
+    await context.service.refresh();
+
+    // Act
+    const governance = context.service.governance(remote);
+    const reported = governance.decide({ capability: 'fleet', axis: 'configure' });
+    const enforced = context.service.decide({ capability: 'fleet', axis: 'configure' }, remote);
+
+    // Assert
+    should(reported).deepEqual({ allowed: false, refusal: 'not-granted' });
+    should(reported).deepEqual(enforced);
+    should(governance.decide({ capability: 'fleet', axis: 'use' })).deepEqual({ allowed: true, refusal: 'granted' });
+  });
+});
+
+describe('confirming one change against the operator password', () => {
+  it('should accept the password and mint nothing, so the proof cannot outlive the request', async () => {
+    // THE DIFFERENCE FROM `unlock`. An unlock is a bearer value good for five minutes and any number
+    // of `configure` demands; this is spent inside the one request that carries it and leaves
+    // nothing behind, which is what binds it to a single change rather than opening a window.
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+
+    // Act
+    const actual = await context.service.confirmChange('the operator knows this');
+
+    // Assert — no unlock was minted, so a later request presenting nothing is still governed.
+    should(actual).deepEqual({ kind: 'confirmed' });
+    should(context.service.view(remote).unlocked).be.false();
+    should(context.service.governance(remote).governed).be.true();
+  });
+
+  it('should refuse a wrong password and spend one of the SAME five tries an unlock spends', async () => {
+    // A separate budget here would hand an attacker a fresh five for every surface that asked, which
+    // is the exact reasoning the unlock ledger is already keyed per daemon for.
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+
+    // Act
+    const wrong = await context.service.confirmChange('not it');
+
+    // Assert
+    should(wrong).deepEqual({ kind: 'refused', reason: 'wrong-password' });
+    should(context.service.view(remote).attemptsRemaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS - 1);
+  });
+
+  it('should lock out after the shared budget and refuse even a correct password', async () => {
+    // THE RATE LIMIT IS CHECKED FIRST and applies to a caller that would have got it right: a
+    // limiter that let correct guesses through early would leak whether a guess was correct while
+    // claiming to be closed.
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+    for (let attempt = 0; attempt < GRANT_UNLOCK_MAX_ATTEMPTS - 1; attempt += 1) {
+      await context.service.confirmChange('not it');
+    }
+
+    // Act
+    const last = await context.service.confirmChange('not it');
+    const correct = await context.service.confirmChange('the operator knows this');
+
+    // Assert
+    should(last).deepEqual({ kind: 'refused', reason: 'rate-limited' });
+    should(correct).deepEqual({ kind: 'refused', reason: 'rate-limited' });
+  });
+
+  it('should clear the ledger when the password is right, exactly as an unlock does', async () => {
+    // Arrange
+    const context = world({ password: 'the operator knows this' });
+    await context.service.refresh();
+    await context.service.confirmChange('not it');
+
+    // Act
+    const confirmed = await context.service.confirmChange('the operator knows this');
+
+    // Assert — the holder proved who they are, so a mistyped attempt does not follow them around.
+    should(confirmed).deepEqual({ kind: 'confirmed' });
+    should(context.service.view(remote).attemptsRemaining).equal(GRANT_UNLOCK_MAX_ATTEMPTS);
+  });
+
+  it('should report a machine with no password as itself rather than as a wrong password', async () => {
+    // A MACHINE WITH NO PASSWORD IS AN ORDINARY STATE, not a race any more. It is the state every
+    // fresh install is in, and this service answers for it whether or not anything upstream would
+    // ever ask — `confirmChange` is a public method on the port, and the caller that reaches it with
+    // no password stored gets the reason rather than a guess. The comment here once cited
+    // `fy daemon password clear` creating a set-then-unset window mid-change; that verb is gone and
+    // the window with it, but the answer is the same and so is the reason for its wording: reporting
+    // it as a wrong password would send somebody hunting for a secret the machine does not have.
+    // Arrange
+    const context = world();
+    await context.service.refresh();
+
+    // Act
+    const actual = await context.service.confirmChange('anything at all');
+
+    // Assert
+    should(actual).deepEqual({ kind: 'refused', reason: 'no-password' });
+  });
+});
