@@ -29,13 +29,14 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 
 ## CI jobs
 
-| Job         | Runs                                                    | Notes                                         |
-| ----------- | ------------------------------------------------------- | --------------------------------------------- |
-| `precommit` | `nix develop .#ci -c ./scripts/ci/pre-commit.sh`        | every gate, with `--show-diff-on-failure`     |
-| `test`      | `nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"` | matrix `[unit, int]`, `fail-fast: false`      |
-| `compile`   | `nix develop .#ci -c ./scripts/release/compile.sh`      | uploads `cli-binaries` from `dist/bin/`       |
-| `sit`       | `nix develop .#ci -c ./scripts/ci/test.sh sit`          | `needs: compile`, downloads the binaries      |
-| `smoke`     | `./scripts/release/smoke.sh dist/bin/<binary>-<target>` | `needs: compile`, one runner per build target |
+| Job              | Runs                                                       | Notes                                         |
+| ---------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh`           | every gate, with `--show-diff-on-failure`     |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"`    | matrix `[unit, int]`, `fail-fast: false`      |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh` | Settings geometry in a real Chromium          |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`         | uploads `cli-binaries` from `dist/bin/`       |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`             | `needs: compile`, downloads the binaries      |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`    | `needs: compile`, one runner per build target |
 
 Notable details:
 
@@ -47,6 +48,14 @@ Notable details:
 - **SIT runs against the artifact, not a rebuild.** `compile` uploads the binaries and `sit`
   downloads them, which is what makes it a black-box test of the shipped thing.
   `download-artifact` drops the executable bit; the scripts restore it.
+- **A browser gate asserts geometry, and never stores pixels.** `pwa-screenshot` runs the PWA's
+  screenshot harness in `--settings-only` mode in both colour schemes and fails on
+  `assertNoSidewaysScroll` — the one layout defect a capture cannot show, because the capture is
+  clipped to the viewport it overflows. The PNGs upload with `if: always()` as evidence; nothing
+  compares them, and `.gitignore` keeps them out of the tree. The harness asserts its own tally of
+  checks and the script requires that closing line, so a refactor that stops the checks running is
+  red rather than green. Adding or removing a Settings surface means editing one integer, which is
+  the churn this shape chose over re-baselining a directory of images.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
@@ -117,6 +126,7 @@ Use the same entry points CI uses:
 nix develop .#ci -c ./scripts/ci/pre-commit.sh    # the precommit job
 nix develop .#ci -c ./scripts/ci/test.sh unit     # the unit matrix leg
 nix develop .#ci -c ./scripts/ci/test.sh sit      # SIT (compile first)
+nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh   # the Settings geometry gate
 ./scripts/release/publish.sh --snapshot           # the whole CD lane, offline
 ```
 
