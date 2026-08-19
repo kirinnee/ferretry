@@ -10,6 +10,7 @@ import {
 } from '../../../../src/features/fleet/fleet-configuration-surface.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { grantGuidance, UNLOCK_LIMIT_NOTE } from '../../../../src/lib/grants.ts';
+import type { LocalNetworkAccess } from '../../../../src/lib/local-network-access.ts';
 import { interact, mount } from '../../../support/dom.ts';
 import {
   absent,
@@ -127,10 +128,15 @@ afterEach(async () => {
   for (const mounted of live.splice(0)) await mounted.unmount().catch(() => undefined);
 });
 
-const open = async (script: Script, connection = laptop) => {
+const open = async (script: Script, connection = laptop, readLocalNetwork?: () => Promise<LocalNetworkAccess>) => {
   const daemon = fakeDaemon(script);
   const mounted = await mount(
-    <FleetConfigurationSurface connection={connection} createClient={async () => daemon.client} now={() => NOW} />,
+    <FleetConfigurationSurface
+      connection={connection}
+      createClient={async () => daemon.client}
+      now={() => NOW}
+      {...(readLocalNetwork === undefined ? {} : { readLocalNetwork })}
+    />,
   );
   live.push(mounted);
   // The first read is several awaited round trips deep; one more flush settles them all.
@@ -372,14 +378,18 @@ describe('a host that has never been configured', () => {
  * `Failed to fetch` arrives as, and it is why the panel must not word it as a refusal.
  */
 describe('a daemon this browser could not reach', () => {
-  const dead = 'fyd is unavailable at http://127.0.0.1:9999 (Failed to fetch)';
+  const dead = 'could not reach fyd at http://127.0.0.1:9999 (Failed to fetch)';
   const loopback = daemonConnection({
     daemonId: 'daemon/home',
     baseUrl: 'http://127.0.0.1:9999',
     deviceToken: 'token-home',
   });
 
-  const openUnreachable = async (connection = laptop, pageScheme = 'http:') => {
+  const openUnreachable = async (
+    connection = laptop,
+    pageScheme = 'http:',
+    readLocalNetwork?: () => Promise<LocalNetworkAccess>,
+  ) => {
     const mounted = await mount(
       <FleetConfigurationSurface
         connection={connection}
@@ -388,9 +398,12 @@ describe('a daemon this browser could not reach', () => {
         }}
         now={() => NOW}
         pageScheme={pageScheme}
+        {...(readLocalNetwork === undefined ? {} : { readLocalNetwork })}
       />,
     );
     live.push(mounted);
+    await interact(() => undefined);
+    // The permission is asked AFTER the failure, so its answer lands a flush later than the state does.
     await interact(() => undefined);
     return mounted;
   };
@@ -419,6 +432,69 @@ describe('a daemon this browser could not reach', () => {
     const plain = await openUnreachable(loopback, 'http:');
     expect(pick(plain.container, '[data-fleet-unreachable]').textContent).not.toContain('Safari');
     await plain.unmount();
+  });
+
+  /**
+   * THE ONE QUESTION THAT TELLS THE TWO CAUSES APART, asked of the browser on the failure path.
+   *
+   * `'prompt'` is the blocked state as Chrome 150 actually reports it — measured while the fetch was
+   * refused and zero requests reached the server — so the panel says the browser is blocking and gives
+   * the remedy in the wording Chrome itself uses, instead of listing two possibilities.
+   */
+  it('says the browser is blocking, with the remedy, when this site is not allowed the local network', async () => {
+    const asked: number[] = [];
+    const blocked = await openUnreachable(loopback, 'https:', () => {
+      asked.push(1);
+      return Promise.resolve('prompt');
+    });
+    const notice = pick(blocked.container, '[data-fleet-unreachable]');
+    expect(asked).toHaveLength(1);
+    expect(notice.textContent).toContain('blocking this page from your local network');
+    expect(notice.textContent).toContain('access other devices on your local network');
+    // The claim that cost an afternoon — nowhere on this screen, including the transport's own line,
+    // which no longer says it either.
+    expect(blocked.container.textContent).not.toContain('unavailable');
+    expect(blocked.container.textContent?.toLowerCase()).not.toContain('start the daemon');
+    // No verified navigation exists, so none is written down.
+    expect(blocked.container.textContent).not.toContain('chrome://');
+    // The transport's own line is still there, whole: it is what names the exact address tried.
+    expect(pick(blocked.container, '[data-fleet-state]').textContent).toContain(dead);
+    await blocked.unmount();
+  });
+
+  it('keeps the honest wording when the browser says this site IS allowed', async () => {
+    const granted = await openUnreachable(loopback, 'https:', () => Promise.resolve('granted'));
+    const notice = pick(granted.container, '[data-fleet-unreachable]');
+    expect(notice.textContent).toContain('could not reach this daemon');
+    expect(notice.textContent).toContain('IS allowed to access other devices on your local network');
+    expect(notice.textContent).toContain('NOT evidence that the daemon is stopped');
+    await granted.unmount();
+  });
+
+  /**
+   * A DIAGNOSTIC MAY NOT BECOME A FAILURE MODE. A browser with no such permission rejects the query, and
+   * the panel must fall back to naming both possibilities rather than lose the notice altogether.
+   */
+  it('falls back to both possibilities when the permission query throws', async () => {
+    const unknown = await openUnreachable(loopback, 'https:', () =>
+      Promise.reject(new TypeError('local-network-access is not a valid permission name')),
+    );
+    const notice = pick(unknown.container, '[data-fleet-unreachable]');
+    expect(notice.textContent).toContain('could not reach this daemon');
+    expect(notice.textContent).toContain('Has this site been allowed');
+    expect(notice.textContent).toContain('Safari');
+    await unknown.unmount();
+  });
+
+  it('never asks the browser anything while the daemon is answering', async () => {
+    const asked: number[] = [];
+    const working = await open({}, laptop, () => {
+      asked.push(1);
+      return Promise.resolve('prompt');
+    });
+    expect(working.container.textContent).toContain('claude-studio');
+    expect(asked).toHaveLength(0);
+    await working.unmount();
   });
 
   /**

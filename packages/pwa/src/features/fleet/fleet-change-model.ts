@@ -24,6 +24,7 @@ import {
   type GrantRefusal,
   type HarnessDiscovery,
   type HarnessDiscoveryReport,
+  isLoopbackHost,
 } from '@ferretry/protocol';
 import type {
   FleetApplyOutcome,
@@ -37,6 +38,7 @@ import type {
   FleetWriteOperation,
 } from './fleet-api.ts';
 import { type GrantRefusalNotice, grantGuidance } from '../../lib/grants.ts';
+import { type LocalNetworkAccess, localNetworkBlocked } from '../../lib/local-network-access.ts';
 import { defaultFleetHarness, type FleetHarnessKind, type FleetHarnessView } from './fleet-model.ts';
 
 /** A read that either produced evidence or produced a stated refusal. There is no third answer. */
@@ -129,6 +131,18 @@ export const daemonOutOfReach = (inventory: FleetInventory | null, refusal: Flee
  * is sent — the server sees no preflight and no connection — because local network access is denied by
  * default. So an earlier draft of this sentence, which said Chrome and Firefox allow such a request for a
  * loopback address, was false reassurance pointing away from the likeliest cause.
+ *
+ * ## AND ONE IT CAN ESTABLISH OUTRIGHT, WHEN THE BROWSER ANSWERS
+ *
+ * Naming two possibilities is honest; knowing which one it is, is useful. `localNetwork` is the
+ * browser's own answer about this site's local-network permission, and when it says "not granted" the
+ * refusal is no longer a candidate — it is a fact, with a remedy. The default is `'unknown'`, which is
+ * every browser that has no such permission and every query that failed, and it words the two
+ * possibilities exactly as it did before this was asked at all.
+ *
+ * `'prompt'` COUNTS AS BLOCKED, which is the counter-intuitive half: it was measured WHILE the fetch
+ * was refused and zero requests reached the server, because Chrome does not raise a prompt first. A
+ * check that treated anything but `'denied'` as fine would report the blocked case as healthy.
  */
 export interface FleetUnreachableDiagnosis {
   readonly headline: string;
@@ -139,26 +153,64 @@ export interface FleetUnreachableDiagnosis {
   readonly checks: readonly string[];
 }
 
+/**
+ * The permission's own wording, as Chrome writes it — read out of `locales/en-US.pak` rather than
+ * paraphrased, because it is what a person types into a settings search box. The navigation to it is
+ * deliberately NOT written down: nobody here has verified a menu path, and an invented one sends a
+ * reader somewhere that may not exist. Searchable wording is a fact; a path would be a guess.
+ */
+const LOCAL_NETWORK_WORDING = 'access other devices on your local network';
+
+/**
+ * Is the address this pairing carries one the local-network restriction could apply to?
+ *
+ * COPY ONLY, like the scheme pair above. Nothing about authority, locality or governance is derived
+ * here — `src/lib/grants.ts` states why deciding that from an address would be the worst bug in this
+ * feature — and the predicate itself is the protocol's, because a second spelling of "loopback" is
+ * how two files end up disagreeing about which machine an address names.
+ */
+const localTarget = (target: string): boolean => URL.canParse(target) && isLoopbackHost(new URL(target).hostname);
+
 export const unreachableDiagnosis = (
   /** The direct address this pairing carries. Named because the reader has to type it somewhere. */
   target: string,
   /** The scheme this page is served over, exactly as `location.protocol` spells it. */
   pageScheme: string,
+  /** What the browser said about reaching the local network, or `'unknown'` when it said nothing. */
+  localNetwork: LocalNetworkAccess = 'unknown',
   clientName = 'fy',
-): FleetUnreachableDiagnosis => ({
-  headline: 'This browser could not reach this daemon',
-  target,
-  body: `Nothing came back, so nothing about this host is known from here. That is NOT evidence that the daemon is stopped — a daemon that is serving and a request this browser never sent fail in exactly the same way, and this panel will not guess which one happened. This pairing's direct address is ${target}; the line below is what the attempt itself said.`,
-  checks: [
-    `Is the daemon serving? Run \`${clientName} daemon status\` on that machine. If it prints a pid, the daemon is not what is wrong.`,
-    `Can this browser reach that address at all? Open ${target}/healthz in a tab on this device. A request the browser itself refuses never reaches this page as an error, so it looks identical to silence.`,
-    ...(pageScheme === 'https:' && target.startsWith('http://')
-      ? [
-          `This page is served over https and that address is plain http, and browsers restrict that in two ways: Safari has historically refused the mixed request outright, and Chrome refuses a page on a public origin to reach a loopback or private address at all until local network access is allowed for this site. In both cases nothing is sent, so this page sees exactly what it would see from a stopped daemon — look for a blocked permission in the address bar.`,
-        ]
-      : []),
-  ],
-});
+): FleetUnreachableDiagnosis => {
+  const mixedRequest = pageScheme === 'https:' && target.startsWith('http://');
+  /** A permission can only be what happened if it covers the address that was tried. */
+  const restrictable = mixedRequest || localTarget(target);
+  const blocked = restrictable && localNetworkBlocked(localNetwork);
+  const refused = localNetwork === 'denied';
+  return {
+    headline: blocked
+      ? 'This browser is blocking this page from your local network'
+      : 'This browser could not reach this daemon',
+    target,
+    body: blocked
+      ? `This site is not allowed to ${LOCAL_NETWORK_WORDING}, which is what the browser answered when this page asked it — measured, not guessed.${refused ? ' It was refused rather than never asked for, so the answer already stored for this site is the one to change.' : ''} A browser that has not allowed it refuses the request before anything is sent, which is why nothing came back and why the daemon has no record of it: no request to ${target} left this page. Allow this site to ${LOCAL_NETWORK_WORDING} and reload. That is a per-site permission worded exactly that way, so searching your browser's settings for that wording finds it. None of this is evidence about the daemon itself, so if allowing it does not fix this, the checks below still apply.`
+      : `Nothing came back, so nothing about this host is known from here. That is NOT evidence that the daemon is stopped — a daemon that is serving and a request this browser never sent fail in exactly the same way, and this panel will not guess which one happened. This pairing's direct address is ${target}; the line below is what the attempt itself said.${restrictable && localNetwork === 'granted' ? ` This site IS allowed to ${LOCAL_NETWORK_WORDING}, so that restriction is one thing this failure is not.` : ''}`,
+    checks: [
+      `Is the daemon serving? Run \`${clientName} daemon status\` on that machine. If it prints a pid, the daemon is not what is wrong.`,
+      `Can this browser reach that address at all? Open ${target}/healthz in a tab on this device. A request the browser itself refuses never reaches this page as an error, so it looks identical to silence.`,
+      // Only while the state is unknown. Once the browser has answered, the body says which it was, and
+      // a check whose answer is already on screen is noise beside a failure.
+      ...(restrictable && localNetwork === 'unknown'
+        ? [
+            `Has this site been allowed to ${LOCAL_NETWORK_WORDING}? Chrome refuses a page's request to a loopback or private address until it has been, and refuses it before anything is sent, so it looks exactly like a stopped daemon. This browser gave no answer when this page asked, so it is worth checking by hand: it is a per-site permission worded exactly that way.`,
+          ]
+        : []),
+      ...(mixedRequest
+        ? [
+            `This page is served over https and that address is plain http, so every request to it is a mixed one, and Safari has historically refused those outright. Nothing is sent when it does, so this page sees exactly what it would see from a stopped daemon. That is a browser rule rather than a fault on the host.`,
+          ]
+        : []),
+    ],
+  };
+};
 
 /**
  * How this caller may turn a reviewed change into host state, before it tries.

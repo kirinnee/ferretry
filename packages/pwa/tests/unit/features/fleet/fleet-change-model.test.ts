@@ -111,7 +111,8 @@ describe('what a daemon fleet read means', () => {
 
 /**
  * The owner's own failure: `fyd is unavailable at …(Failed to fetch)` while `fy daemon status` printed a
- * pid. Every assertion here is about what the panel MAY NOT claim.
+ * pid. Every assertion here is about what the panel MAY NOT claim. The transport's own sentence has since
+ * been repaired to "could not reach fyd at <url>" for the same reason the panel's was.
  */
 describe('a daemon this browser could not reach', () => {
   it('is out of reach whether the read said so or the last attempt did', () => {
@@ -137,24 +138,109 @@ describe('a daemon this browser could not reach', () => {
 
   it('names the mixed request only when the page really is https and the address really is http', () => {
     const mixed = unreachableDiagnosis('http://127.0.0.1:1', 'https:').checks;
-    expect(mixed).toHaveLength(3);
+    expect(mixed).toHaveLength(4);
     // BOTH restrictions, because either one sends nothing and looks identical to a stopped daemon — and
     // #369 measured Chrome refusing a public page's loopback fetch outright, so naming only Safari would
-    // reassure somebody away from the likelier cause.
-    expect(mixed[2]).toContain('Safari');
-    expect(mixed[2]).toContain('local network access');
-    // A page on http, or a daemon reached over https, is not a mixed request and gets no such sentence.
-    for (const same of [
-      unreachableDiagnosis('http://127.0.0.1:1', 'http:'),
-      unreachableDiagnosis('https://host.invalid', 'https:'),
-    ]) {
-      expect(same.checks).toHaveLength(2);
-      expect(same.checks.join(' ')).not.toContain('Safari');
+    // reassure somebody away from the likelier cause. They are two checks rather than one sentence
+    // because they are true under DIFFERENT conditions, which is what #370 could not express.
+    expect(mixed[2]).toContain('access other devices on your local network');
+    expect(mixed[3]).toContain('Safari');
+    // Only the mixed-request half is about the scheme pair. A daemon reached over https from an https
+    // page is neither a mixed request nor a local address, so it gets neither sentence.
+    const neither = unreachableDiagnosis('https://host.invalid', 'https:');
+    expect(neither.checks).toHaveLength(2);
+    expect(neither.checks.join(' ')).not.toContain('Safari');
+    expect(neither.checks.join(' ')).not.toContain('local network');
+  });
+
+  /**
+   * THE SCHEME GATE WAS A SECOND WRONG CAUSE, in the same shape as the first: #370 put the
+   * local-network sentence behind `https:` page + `http:` address, which reads the ONE setting it was
+   * measured in as the condition for the restriction existing. An http page — the screenshot harness, a
+   * PWA served over the LAN — reaching a loopback daemon is refused for exactly the same reason and was
+   * told nothing at all.
+   */
+  it('names local network access for a loopback address whatever scheme the page is served over', () => {
+    const plain = unreachableDiagnosis('http://127.0.0.1:1', 'http:');
+    expect(plain.checks).toHaveLength(3);
+    expect(plain.checks[2]).toContain('access other devices on your local network');
+    // Still not a mixed request, so the sentence about one stays absent.
+    expect(plain.checks.join(' ')).not.toContain('Safari');
+  });
+
+  /**
+   * WHICH cause, rather than a list of two, when the browser will say. `'prompt'` was measured on real
+   * Chrome 150 WHILE the fetch was refused and zero requests reached the server — Chrome does not raise
+   * a prompt first — so it is treated exactly as `'denied'` is. A check that read anything but
+   * `'denied'` as healthy would report the blocked case as fine.
+   */
+  it('says the browser is blocking, and never that the daemon is unavailable, when access is not granted', () => {
+    for (const state of ['prompt', 'denied'] as const) {
+      const blocked = unreachableDiagnosis('http://127.0.0.1:1', 'https:', state);
+      expect(blocked.headline).toContain('blocking this page from your local network');
+      expect(blocked.headline).not.toContain('could not reach');
+      // The remedy, in the wording Chrome itself uses, which is what a person can search for.
+      expect(blocked.body).toContain('access other devices on your local network');
+      expect(blocked.body).toContain('reload');
+      // NO menu path: nobody here has verified one, and an invented path is another wrong answer.
+      expect(`${blocked.body} ${blocked.checks.join(' ')}`).not.toContain('chrome://');
+      // It still refuses to claim anything about the daemon, in either direction.
+      expect(blocked.body.toLowerCase()).not.toContain('unavailable');
+      expect(blocked.body).toContain('None of this is evidence about the daemon itself');
+      // The question is answered, so it is no longer asked; the second possibility remains on screen.
+      expect(blocked.checks).toHaveLength(3);
+      expect(blocked.checks[2]).toContain('Safari');
     }
+    // Which of the two, because the remedy differs: a stored Block is changed, an unasked one is given.
+    expect(unreachableDiagnosis('http://127.0.0.1:1', 'https:', 'denied').body).toContain(
+      'refused rather than never asked for',
+    );
+    expect(unreachableDiagnosis('http://127.0.0.1:1', 'https:', 'prompt').body).not.toContain(
+      'refused rather than never asked for',
+    );
+  });
+
+  it('rules the restriction out rather than the daemon in, when access is granted', () => {
+    const granted = unreachableDiagnosis('http://127.0.0.1:1', 'https:', 'granted');
+    // The honest headline: what was attempted, not what it concluded.
+    expect(granted.headline).toContain('could not reach');
+    expect(granted.body).toContain('NOT evidence that the daemon is stopped');
+    expect(granted.body).toContain('IS allowed to access other devices on your local network');
+    // Answered, so the check is gone — and the mixed request, which this does NOT rule out, stays.
+    expect(granted.checks).toHaveLength(3);
+    expect(granted.checks[2]).toContain('Safari');
+  });
+
+  /**
+   * The fallback, and the one a browser with no such permission gets: Firefox, Safari, an older Chrome,
+   * or any query that failed. It is #370's wording, unchanged, because two possibilities beat one wrong
+   * assertion — and it is the DEFAULT, so a caller that never asks cannot be made worse by this.
+   */
+  it('falls back to both possibilities when the browser gives no answer', () => {
+    const unknown = unreachableDiagnosis('http://127.0.0.1:1', 'https:', 'unknown');
+    expect(unknown).toEqual(unreachableDiagnosis('http://127.0.0.1:1', 'https:'));
+    expect(unknown.headline).toContain('could not reach');
+    expect(unknown.checks[2]).toContain('Has this site been allowed');
+    expect(unknown.checks[3]).toContain('Safari');
+  });
+
+  /**
+   * An answer about a permission that cannot apply to the address that was tried would be the same
+   * class of error again. A relayed or hosted daemon is not on the local network, so the state is read
+   * and deliberately ignored.
+   */
+  it('ignores the permission for an address the restriction cannot cover', () => {
+    for (const state of ['prompt', 'denied', 'granted'] as const) {
+      const remote = unreachableDiagnosis('https://host.invalid', 'https:', state);
+      expect(remote).toEqual(unreachableDiagnosis('https://host.invalid', 'https:'));
+      expect(remote.checks).toHaveLength(2);
+    }
+    // And an address that does not parse at all is not asserted to be anything.
+    expect(unreachableDiagnosis('not a url', 'http:', 'prompt').checks).toHaveLength(2);
   });
 
   it('spells the binary the way the caller does, so a check names a command they have', () => {
-    expect(unreachableDiagnosis('http://host.invalid:9', 'http:', 'ferretry').checks[0]).toContain(
+    expect(unreachableDiagnosis('http://host.invalid:9', 'http:', 'unknown', 'ferretry').checks[0]).toContain(
       'ferretry daemon status',
     );
   });
