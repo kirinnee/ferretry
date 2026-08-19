@@ -5218,12 +5218,8 @@ function Shell() {
             <FleetChangeReview
               proposal={HARNESS_FLEET_PROPOSAL}
               live={HARNESS_FLEET_ACCOUNTS}
-              authority="approval"
-              command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb"
-              code=""
-              onCodeChange={() => {}}
+              authority={{ kind: 'open' }}
               onApply={() => {}}
-              onRecheck={() => {}}
               onDiscard={() => {}}
               busy={false}
               refusal={null}
@@ -6780,6 +6776,7 @@ function BrowserFullViewportHarness() {
 type HarnessFleetFrame =
   | 'accounts'
   | 'preview'
+  | 'preview-confirm'
   | 'failed-apply'
   | 'create'
   | 'layer'
@@ -6808,12 +6805,19 @@ function fleetCockpitClient(answers: Readonly<Record<string, unknown>>) {
 }
 
 const HARNESS_FLEET_COCKPIT_ANSWERS: Readonly<Record<string, unknown>> = {
+  /**
+   * The OWNER'S OWN CASE: a browser this daemon does not govern, which is every loopback caller and
+   * every local one that has unlocked. One Apply, nothing else in the way.
+   *
+   * It used to be `mayApplyWithApproval` with a command for minting codes, so every fleet capture in
+   * this gallery showed the two stacked gates this frame now exists to prove are gone.
+   */
   '/permissions': {
     mayInspect: true,
     mayPropose: true,
-    mayApplyDirectly: false,
-    mayApplyWithApproval: true,
-    approvalCommand: 'fy fleet authorize',
+    mayApply: true,
+    applyRefusal: 'ungated',
+    confirmation: 'none',
   },
   '/accounts': { version: 1, generatedAt: '2026-08-05T08:26:00.000Z', accounts: HARNESS_FLEET_ACCOUNTS },
   '/config': { variants: { default: {}, auto: {} }, agents: [] },
@@ -6888,6 +6892,28 @@ const HARNESS_FLEET_STATE_ANSWERS: readonly {
       '/config': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
     },
   },
+  /**
+   * THE OWNER'S COMPLAINT, as the panel answers it now: a published fleet whose apply is `locked`.
+   *
+   * The old panel showed a red refusal with no way out of it AND a terminal command underneath. This
+   * frame is here so that the absence of both is a thing somebody can look at, and so the state is
+   * captured beside the four read failures rather than only described in a report.
+   */
+  {
+    label: 'locked',
+    answers: {
+      '/permissions': {
+        mayInspect: true,
+        mayPropose: true,
+        mayApply: false,
+        applyRefusal: 'locked',
+        confirmation: 'operator-password',
+      },
+      '/accounts': HARNESS_FLEET_COCKPIT_ANSWERS['/accounts'],
+      '/config': HARNESS_FLEET_COCKPIT_ANSWERS['/config'],
+      '/assets': HARNESS_FLEET_COCKPIT_ANSWERS['/assets'],
+    },
+  },
 ];
 
 function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
@@ -6907,15 +6933,30 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
       )}
       {frame !== 'preview' ? null : (
         <section aria-label="Fleet plan preview" id="harness-fleet-preview-page">
+          {/* `open` — the change manifest and ONE Apply, which is what the panel is for. The
+              per-change confirmation has its own frame below, because the two look different and both
+              are worth capturing. */}
           <FleetChangeReview
             proposal={HARNESS_FLEET_PROPOSAL}
             live={HARNESS_FLEET_ACCOUNTS}
-            authority="approval"
-            command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb"
-            code=""
-            onCodeChange={() => {}}
+            authority={{ kind: 'open' }}
             onApply={() => {}}
-            onRecheck={() => {}}
+            onDiscard={() => {}}
+            busy={false}
+            refusal={null}
+          />
+        </section>
+      )}
+      {frame !== 'preview-confirm' ? null : (
+        <section aria-label="Fleet plan preview, confirmation required" id="harness-fleet-preview-confirm-page">
+          {/* `confirm` — a governed caller on a machine with an operator password, which is the one
+              state where applying still asks for something. ONE field, the shared unlock limit note, and
+              no second gate: the field is what proves the password AND what confirms this exact diff. */}
+          <FleetChangeReview
+            proposal={HARNESS_FLEET_PROPOSAL}
+            live={HARNESS_FLEET_ACCOUNTS}
+            authority={{ kind: 'confirm' }}
+            onApply={() => {}}
             onDiscard={() => {}}
             busy={false}
             refusal={null}
@@ -7004,6 +7045,7 @@ const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = 
 const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-accounts': 'accounts',
   '#fleet-preview': 'preview',
+  '#fleet-preview-confirm': 'preview-confirm',
   '#fleet-failed-apply': 'failed-apply',
   '#fleet-create': 'create',
   '#fleet-layer': 'layer',

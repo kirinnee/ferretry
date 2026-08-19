@@ -152,21 +152,26 @@ describe('FleetManifestSummarySchema', () => {
 });
 
 describe('FleetProposalApplyRequestSchema', () => {
-  it('should read an approval code the way a person types it', () => {
+  it('should carry the per-change confirmation as the operator password itself', () => {
     // Act
-    const actual = FleetProposalApplyRequestSchema.safeParse({ approvalCode: ' 7f3k m9qw ' });
+    const actual = FleetProposalApplyRequestSchema.safeParse({ operatorPassword: 'correct horse battery' });
 
-    // Assert — one grammar everywhere, rather than a laxer length rule on this field.
-    should(actual.success && actual.data.approvalCode).equal('7F3K-M9QW');
+    // Assert — one secret, one grammar, rather than a second credential with a laxer rule of its own.
+    should(actual.success && actual.data.operatorPassword).equal('correct horse battery');
   });
 
-  it('should refuse a code that is not in the grammar at all', () => {
-    // Act + Assert
-    should(FleetProposalApplyRequestSchema.safeParse({ approvalCode: 'not-a-code' }).success).be.false();
+  it('should refuse a confirmation that could not be an operator password', () => {
+    // Act + Assert — the same minimum the unlock is held to, because it is the same value.
+    should(FleetProposalApplyRequestSchema.safeParse({ operatorPassword: 'short' }).success).be.false();
   });
 
-  it('should accept an apply that carries no code', () => {
-    // Act + Assert — the host's own credential needs none.
+  it('should refuse an approval code, because that vocabulary no longer exists', () => {
+    // Act + Assert — a strict object, so a client still sending one is told rather than ignored.
+    should(FleetProposalApplyRequestSchema.safeParse({ approvalCode: '7F3K-M9QW' }).success).be.false();
+  });
+
+  it('should accept an apply that carries no confirmation', () => {
+    // Act + Assert — the ungoverned caller, and every caller on a machine with no password.
     should(FleetProposalApplyRequestSchema.safeParse({}).success).be.true();
   });
 });

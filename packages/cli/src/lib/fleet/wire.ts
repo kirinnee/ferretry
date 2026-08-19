@@ -5,9 +5,9 @@
  * owns that package. They are parsed rather than cast, so a daemon that changes the contract fails
  * here with a stated reason.
  *
- * The fleet APPROVAL shapes already made that move and are NOT duplicated here: they are
- * `FleetApprovalMintSchema` and friends in `@ferretry/protocol`, because three consumers — the
- * daemon that mints, this CLI that prints, and the browser that submits — have to agree on them.
+ * The fleet CHANGE shapes already made that move and are NOT duplicated here: they are
+ * `FleetProposalViewSchema` and friends in `@ferretry/protocol`, because three consumers — the
+ * daemon that applies, this CLI that prints, and the browser that proposes — have to agree on them.
  */
 import { z } from 'zod';
 

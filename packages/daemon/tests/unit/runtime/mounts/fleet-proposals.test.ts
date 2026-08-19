@@ -13,7 +13,8 @@ import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, harnessDiscoveryReader } from './support.ts';
+import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import { CREDENTIALS, GOVERNED, GRANTED, harnessDiscoveryReader } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
@@ -23,22 +24,52 @@ const admin = { authorization: `Bearer ${CREDENTIALS.admin}` } as const;
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}` } as const;
 const device = { authorization: 'Bearer paired-device' } as const;
 
+/**
+ * The operator password this fixture's machine has, for the per-change confirmation.
+ *
+ * A literal in a test rather than a mint, because the confirmation is not a value this daemon
+ * produces: it is one the operator already chose, and the whole point of the mechanism is that it is
+ * the SAME secret the unlock is made of rather than a fresh one the host hands out.
+ */
+const OPERATOR_PASSWORD = 'the operator knows this';
+
 interface Fixture {
   readonly paths: ReturnType<typeof createFoundationPaths>;
   readonly dispatcher: ApiDispatcher;
   readonly clock: { value: number };
+  /** Every password this fixture was asked to confirm, so a test can assert what was spent. */
+  readonly confirmed: string[];
+}
+
+interface FixtureOptions {
+  readonly scaffolder?: FleetScaffolder;
+  /**
+   * Whether the caller is one the operator's grants govern — a paired browser off this host.
+   *
+   * Defaults to `false`, the owner's own case: the host's command line, or a browser on this machine
+   * that has already unlocked. That caller is ungoverned by {@link isGovernedCaller} and therefore
+   * owes no per-change confirmation, which is the whole of what this change was written to restore.
+   */
+  readonly governed?: boolean;
+  /** The machine's password was removed between the boundary's read and the confirmation. */
+  readonly cleared?: boolean;
+  /** The daemon has stopped checking operator passwords for now — the shared unlock lockout. */
+  readonly rateLimited?: boolean;
 }
 
 let minted = 1;
 
-async function fixture(scaffolder?: FleetScaffolder): Promise<Fixture> {
+async function fixture(options: FixtureOptions | FleetScaffolder = {}): Promise<Fixture> {
+  // The scaffolder used to be the only option, and several tests still pass one positionally.
+  const settings: FixtureOptions = 'scaffold' in options ? { scaffolder: options } : options;
   const root = await mkdtemp(join(tmpdir(), 'fy-fleet-proposal-'));
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
   const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
   const clock = { value: GENERATED_AT_MS };
+  const confirmed: string[] = [];
   const subsystem = createDaemonFleetSubsystem({
-    ...(scaffolder === undefined ? {} : { scaffolder }),
+    ...(settings.scaffolder === undefined ? {} : { scaffolder: settings.scaffolder }),
     paths,
     userHome,
     clock: { now: () => clock.value },
@@ -48,15 +79,32 @@ async function fixture(scaffolder?: FleetScaffolder): Promise<Fixture> {
     // Deliberately in a range the fixture configuration never uses, so a minted account can never
     // collide with a declared one and make a create look like a duplicate.
     mintUuid: () => `00000000-0000-4000-8000-9${String(minted++).padStart(11, '0')}`,
-    mintApprovalCode: () => 'AAAA-BBBB',
+    // Stands in for `CapabilityGrantService.confirmChange`. It records what it was asked, so a test
+    // can prove the password reached the ONE place allowed to see it and nowhere else.
+    confirmChange: async password => {
+      confirmed.push(password);
+      if (settings.rateLimited === true) return { kind: 'refused', reason: 'rate-limited' };
+      if (settings.cleared === true) return { kind: 'refused', reason: 'no-password' };
+      return password === OPERATOR_PASSWORD ? { kind: 'confirmed' } : { kind: 'refused', reason: 'wrong-password' };
+    },
     rootPinner: new ProcfsSessionRootPinner(),
+    clientName: 'fy',
     harnesses: harnessDiscoveryReader(),
   });
   const credentials = {
     ...CREDENTIALS,
     devices: { identify: (token: string) => (token === 'paired-device' ? 'device-1' : undefined) },
   };
-  return { paths, clock, dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, GRANTED) };
+  return {
+    paths,
+    clock,
+    confirmed,
+    dispatcher: new ApiDispatcher(
+      new ApiRouter(fleetRoutes(subsystem)),
+      credentials,
+      settings.governed === true ? GOVERNED : GRANTED,
+    ),
+  };
 }
 
 afterEach(async () => {
@@ -123,7 +171,6 @@ async function propose(subject: Fixture, body: unknown = CREATE, headers: Readon
       documents: { path: string; bytes: number }[];
       plan?: { manifest: { generatedAt: string } };
     };
-    approval: { outstanding: boolean } | undefined;
   };
 }
 
@@ -300,54 +347,56 @@ describe('composing a fleet change', () => {
   });
 });
 
-describe('authorizing a fleet change', () => {
-  it('should mint a code for the host and never disclose it in a read', async () => {
+describe('the authorization half, after it was deleted', () => {
+  it('should serve no route that mints an approval for a change', async () => {
+    // The whole `fy_fprop_` vocabulary lived behind this one route — a single-use eight-character
+    // code, a 120-second life, five wrong tries — and it was a second authority system beside the
+    // capability model, in a refusal vocabulary no other capability shared. It is gone, along with
+    // the `fy fleet authorize` verb that dialled it, in one change: the route-agreement allowlist may
+    // only shrink, so a half-deletion has no line it is permitted to record.
     // Arrange
     const subject = await fixture();
     await writeConfig(subject);
     const proposal = await propose(subject);
 
     // Act
-    const minted = await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin);
-    const read = await get(subject, `/v1/fleet/proposals/${proposal.id}`, admin);
+    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin);
 
-    // Assert
-    const mint = jsonBody(minted) as { code: string; summary: string; mutation: string };
-    should(minted.status).equal(200);
-    should(mint.code).match(/^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}$/u);
-    should(mint.mutation).equal('create-account');
-    should(mint.summary).equal('add claude-atomi');
-    should(JSON.stringify(jsonBody(read))).not.match(new RegExp(mint.code, 'u'));
-    should(jsonBody(read)).match({ approval: { outstanding: true } });
-  });
-
-  it('should refuse a paired device, because a device cannot authorise itself', async () => {
-    // Arrange
-    const subject = await fixture();
-    await writeConfig(subject);
-    const proposal = await propose(subject);
-
-    // Act
-    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, device);
-
-    // Assert
-    should(actual.status).equal(403);
+    // Assert — 404 rather than 403: the route does not exist, which is a stronger statement than a
+    // route that exists and refuses.
+    should(actual.status).equal(404);
   });
 
   it('should report an unknown change as unknown and an expired one as expired', async () => {
+    // The transaction's own refusals survive the authorization half's deletion untouched. A
+    // timed-out change must still not send a person hunting for a typo in a correct id.
     // Arrange
     const subject = await fixture();
     await writeConfig(subject);
     const proposal = await propose(subject);
 
     // Act
-    const unknown = await post(subject, '/v1/fleet/proposals/fy_fprop_never0000000000/authorize', admin);
+    const unknown = await get(subject, '/v1/fleet/proposals/fy_fprop_never0000000000', admin);
     subject.clock.value += 16 * 60 * 1000;
-    const expired = await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin);
+    const expired = await get(subject, `/v1/fleet/proposals/${proposal.id}`, admin);
 
-    // Assert — a timed-out change must not send a person hunting for a typo in a correct id.
+    // Assert
     should(jsonBody(unknown)).match({ code: 'fleet_proposal_unknown' });
     should(jsonBody(expired)).match({ code: 'fleet_proposal_expired' });
+  });
+
+  it('should never put an approval on a staged change, because the shape has no field for one', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const proposal = await propose(subject);
+    const read = jsonBody(await get(subject, `/v1/fleet/proposals/${proposal.id}`, admin));
+
+    // Assert — structurally absent rather than filtered, which is what stops it coming back.
+    should(read).not.have.property('approval');
+    should(JSON.stringify(read)).not.match(/approval/iu);
   });
 });
 
@@ -386,45 +435,140 @@ describe('applying a fleet change', () => {
     should(manifest.generatedAt).equal(reviewed);
   });
 
-  it('should refuse a device with no approval, and accept it with the minted one', async () => {
-    // Arrange
+  it('should let a browser on this machine apply with no code, no proposal id and no timer', async () => {
+    // THE OWNER'S OWN CASE, and the one the deleted mechanism made unbearable: a browser on this
+    // host that has already unlocked is ungoverned by `isGovernedCaller`, so it applies exactly as
+    // the host's command line does. Nothing is transcribed, nothing expires in 120 seconds, and the
+    // request body is empty.
+    // Arrange — `GRANTED` is the ungoverned caller; the default fixture.
     const subject = await fixture();
     await writeConfig(subject);
-    const proposal = await propose(subject);
+    const proposal = await propose(subject, CREATE, device);
+
+    // Act — a paired-device credential, which is what a browser always holds, and NO body at all.
+    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device);
+
+    // Assert
+    should([actual.status, jsonBody(actual)]).match([200, { outcome: 'committed' }]);
+    // And the password was never asked for, because there was nothing standing behind one.
+    should(subject.confirmed).deepEqual([]);
+  });
+
+  it('should refuse a governed caller that confirmed nothing, and accept the one that did', async () => {
+    // A PAIRED REMOTE BROWSER, which since `PairingService.mint` began refusing without an operator
+    // password is the only shape a remote caller comes in. Pairing is still not provisioning: the
+    // credential alone applies nothing, and what closes the gap is the operator password proved
+    // against this one staged change.
+    // Arrange
+    const subject = await fixture({ governed: true });
+    await writeConfig(subject);
+    const proposal = await propose(subject, CREATE, device);
 
     // Act
     const bare = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device);
-    const mint = jsonBody(await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin)) as {
-      code: string;
-    };
-    const approved = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
-      approvalCode: mint.code.toLowerCase(),
+    const confirmed = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
+      operatorPassword: OPERATOR_PASSWORD,
     });
 
-    // Assert — pairing is not provisioning; an approval the host minted for this one change is.
+    // Assert
     should(jsonBody(bare)).match({ code: 'fleet_proposal_unauthorized' });
-    should(approved.status).equal(200);
-    should(jsonBody(approved)).match({ outcome: 'committed' });
+    should(jsonBody(bare)).match({ error: /operator password, entered against this exact change/u });
+    should([confirmed.status, jsonBody(confirmed)]).match([200, { outcome: 'committed' }]);
+    // Only the presented password reached the one port allowed to see one, and only once.
+    should(subject.confirmed).deepEqual([OPERATOR_PASSWORD]);
   });
 
-  it('should refuse a wrong code and stop accepting any once the budget is spent', async () => {
+  it('should keep the change open when a governed caller confirms it wrongly', async () => {
+    // A WRONG PASSWORD MUST NOT BURN THE CHANGE. Confirming happens BEFORE the consume for exactly
+    // this reason: a mistyped password that spent somebody's staged change would make the mechanism
+    // a denial of service against the person who is entitled to apply it.
+    // Arrange
+    const subject = await fixture({ governed: true });
+    await writeConfig(subject);
+    const proposal = await propose(subject, CREATE, device);
+
+    // Act
+    const wrong = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
+      operatorPassword: 'not the operator password',
+    });
+
+    // Assert — nothing landed, and the change is still there to be applied by whoever has the
+    // password. Asserted BEFORE the retry, because after it the manifest exists on purpose.
+    should(jsonBody(wrong)).match({ code: 'fleet_proposal_unauthorized' });
+    should(jsonBody(wrong)).match({ error: /not this machine's operator password/u });
+    should(await Bun.file(subject.paths.fleetManifest).exists()).be.false();
+    const retried = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
+      operatorPassword: OPERATOR_PASSWORD,
+    });
+    should([retried.status, jsonBody(retried)]).match([200, { outcome: 'committed' }]);
+  });
+
+  it('should refuse a governed caller whose machine lost its password mid-change', async () => {
+    // `fy daemon password clear` can run while a change is staged, so the boundary's `passwordSet`
+    // and this confirmation can genuinely disagree. It is reported as itself rather than as a wrong
+    // password, which would send somebody hunting for a secret the machine no longer has.
+    // Arrange
+    const subject = await fixture({ governed: true, cleared: true });
+    await writeConfig(subject);
+    const proposal = await propose(subject, CREATE, device);
+
+    // Act
+    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
+      operatorPassword: OPERATOR_PASSWORD,
+    });
+
+    // Assert
+    should(jsonBody(actual)).match({ code: 'fleet_proposal_unauthorized' });
+    should(jsonBody(actual)).match({ error: /operator password was removed while/u });
+  });
+
+  it('should refuse a governed caller the daemon has stopped checking passwords for', async () => {
+    // The lockout is the GRANT layer's, shared with the unlock rather than counted again here — so
+    // five wrong guesses at this panel and five at the grants panel are five, not ten.
+    // Arrange
+    const subject = await fixture({ governed: true, rateLimited: true });
+    await writeConfig(subject);
+    const proposal = await propose(subject, CREATE, device);
+
+    // Act
+    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
+      operatorPassword: OPERATOR_PASSWORD,
+    });
+
+    // Assert — and the change is still open, so the lockout costs a wait rather than the work.
+    should(jsonBody(actual)).match({ code: 'fleet_proposal_unauthorized' });
+    should(jsonBody(actual)).match({ error: /too many wrong operator passwords/u });
+    should(
+      (jsonBody(await get(subject, `/v1/fleet/proposals/${proposal.id}`, admin)) as { state: string }).state,
+    ).equal('pending');
+  });
+
+  it('should refuse to apply for a caller it was told nothing about', async () => {
+    // The served route always carries a governance, because it declares a capability and the
+    // boundary builds one for every such route. This is the wiring failure: the safe reading of
+    // "nobody can tell me where this caller stands" is not "write executables into their home".
     // Arrange
     const subject = await fixture();
     await writeConfig(subject);
-    const proposal = await propose(subject);
-    const mint = jsonBody(await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin)) as {
-      code: string;
-    };
+    const mounted = createDaemonFleetSubsystem({
+      paths: subject.paths,
+      userHome: join(subject.paths.home, 'user'),
+      clock: { now: () => GENERATED_AT_MS },
+      files: new StateFileSystem(subject.paths),
+      platform: 'linux',
+      mintId: () => 'proposal00000000000001',
+      mintUuid: () => '00000000-0000-4000-8000-000000000002',
+      confirmChange: async () => ({ kind: 'confirmed' }),
+      rootPinner: new ProcfsSessionRootPinner(),
+      clientName: 'fy',
+      harnesses: harnessDiscoveryReader(),
+    });
 
     // Act
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, { approvalCode: 'ZZZZ-ZZZZ' });
-    }
-    const spent = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, { approvalCode: mint.code });
+    const act = async (): Promise<unknown> => await mounted.applyProposal('fy_fprop_never0000000000', {}, undefined);
 
     // Assert
-    should(jsonBody(spent)).match({ code: 'fleet_proposal_refused' });
-    should(await Bun.file(subject.paths.fleetManifest).exists()).be.false();
+    await should(act()).be.rejectedWith(/cannot say whether this caller may change the fleet/u);
   });
 
   it('should let exactly one of two applies arriving together consume the change', async () => {
@@ -446,28 +590,27 @@ describe('applying a fleet change', () => {
     should(outcomes.filter(body => body.code === 'fleet_proposal_consumed')).have.length(1);
   });
 
-  it('should not let repeated empty codes spend the approval budget', async () => {
-    // Arrange — offering nothing is not a guess. If it cost a try, a client with no code at all
-    // could burn the budget belonging to the person who has one.
-    const subject = await fixture();
+  it('should not let an empty confirmation spend the machine-wide password budget', async () => {
+    // Offering nothing is not a guess. If it cost a try, a client with no password at all could burn
+    // the five the operator gets — and that budget is per-DAEMON, so it would deny the grants panel
+    // and every other surface at the same time.
+    // Arrange
+    const subject = await fixture({ governed: true });
     await writeConfig(subject);
-    const proposal = await propose(subject);
-    const mint = jsonBody(await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin)) as {
-      code: string;
-      maxAttempts: number;
-    };
+    const proposal = await propose(subject, CREATE, device);
 
-    // Act — more empty attempts than the budget would ever allow, then the real code.
-    for (let attempt = 0; attempt < mint.maxAttempts + 3; attempt += 1) {
+    // Act — far more empty attempts than any budget would allow, then the real password.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const bare = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device);
       should(jsonBody(bare)).match({ code: 'fleet_proposal_unauthorized' });
     }
-    const approved = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
-      approvalCode: mint.code,
+    const confirmed = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
+      operatorPassword: OPERATOR_PASSWORD,
     });
 
-    // Assert — the budget was never touched, so the person's code still works.
-    should(jsonBody(approved)).match({ outcome: 'committed' });
+    // Assert — the verifier was never consulted for an absent value, so nothing was spent.
+    should(subject.confirmed).deepEqual([OPERATOR_PASSWORD]);
+    should(jsonBody(confirmed)).match({ outcome: 'committed' });
   });
 
   it('should refuse to apply the same change twice', async () => {
@@ -587,43 +730,44 @@ describe('applying a fleet change that fails', () => {
   });
 });
 
-describe('replaying an approval', () => {
-  it('should refuse a code that has expired', async () => {
+describe('replaying a confirmed change', () => {
+  it('should refuse a change that timed out before it was confirmed', async () => {
+    // The staged change's own fifteen minutes, which is a RESOURCE BOUND rather than an authority:
+    // it exists so a client cannot make this daemon hold memory forever, and it survived the
+    // authorization half's deletion untouched.
     // Arrange
-    const subject = await fixture();
+    const subject = await fixture({ governed: true });
     await writeConfig(subject);
-    const proposal = await propose(subject);
-    const mint = jsonBody(await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin)) as {
-      code: string;
-      ttlSeconds: number;
-    };
+    const proposal = await propose(subject, CREATE, device);
 
-    // Act — at the instant it expires, not a millisecond past it.
-    subject.clock.value += mint.ttlSeconds * 1000;
+    // Act
+    subject.clock.value += 16 * 60 * 1000;
     const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
-      approvalCode: mint.code,
+      operatorPassword: 'not the operator password',
     });
 
-    // Assert
+    // Assert — refused as EXPIRED rather than as a wrong password, and the password was never even
+    // presented to the verifier, so a change that timed out while somebody typed does not spend one
+    // of the five tries the whole machine shares.
     should(jsonBody(actual)).match({ code: 'fleet_proposal_expired' });
+    should(subject.confirmed).deepEqual([]);
   });
 
-  it('should refuse a code replayed after the change it approved was applied', async () => {
+  it('should refuse a correct password replayed against a change already applied', async () => {
+    // The confirmation is not a bearer value, so replaying it buys nothing: what is single-use is
+    // the CHANGE, and it was spent by the apply that succeeded.
     // Arrange
-    const subject = await fixture();
+    const subject = await fixture({ governed: true });
     await writeConfig(subject);
-    const proposal = await propose(subject);
-    const mint = jsonBody(await post(subject, `/v1/fleet/proposals/${proposal.id}/authorize`, admin)) as {
-      code: string;
-    };
-    await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, { approvalCode: mint.code });
+    const proposal = await propose(subject, CREATE, device);
+    await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, { operatorPassword: OPERATOR_PASSWORD });
 
     // Act
     const replayed = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, device, {
-      approvalCode: mint.code,
+      operatorPassword: OPERATOR_PASSWORD,
     });
 
-    // Assert — single use means the second attempt is told the change already happened.
+    // Assert
     should(jsonBody(replayed)).match({ code: 'fleet_proposal_consumed' });
   });
 });
@@ -778,7 +922,6 @@ describe('who may reach each new fleet route', () => {
     ['GET', '/v1/fleet/assets/CLAUDE.md'],
     ['POST', '/v1/fleet/proposals'],
     ['GET', '/v1/fleet/proposals/fy_fprop_never0000000000'],
-    ['POST', '/v1/fleet/proposals/fy_fprop_never0000000000/authorize'],
     ['POST', '/v1/fleet/proposals/fy_fprop_never0000000000/apply'],
   ] as const;
 
@@ -804,7 +947,11 @@ describe('who may reach each new fleet route', () => {
     should(actual.status).equal(403);
   });
 
-  it('should refuse a paired device only where the host itself must decide', async () => {
+  it('should decide a paired device by the route declaration alone, never by an inline check', async () => {
+    // FOUR INLINE `tokenClass === 'device'` REFUSALS USED TO LIVE IN THIS MOUNT, and they were the
+    // last place in the daemon where a handler re-decided the axis its own route already declares.
+    // What answers now is the capability guard: `GRANTED` speaks for an ungoverned caller, so every
+    // one of these is served, and the SAME code refuses under a guard that says otherwise.
     // Arrange
     const subject = await fixture();
     await writeConfig(subject);
@@ -813,16 +960,27 @@ describe('who may reach each new fleet route', () => {
     const reads = await Promise.all([
       get(subject, '/v1/fleet/permissions', device),
       get(subject, '/v1/fleet/assets', device),
+      get(subject, '/v1/fleet/environment', device),
     ]);
-    const mint = await post(subject, '/v1/fleet/proposals/fy_fprop_never0000000000/authorize', device);
+    const environment = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: { ...device, 'content-type': 'application/json' },
+        body: JSON.stringify({ profile: 'default', environment: { EDITOR: 'vi' }, mode: 'merge' }),
+      }),
+    );
 
-    // Assert — a device may look and may compose; only minting an approval is the host's alone.
-    should(reads.map(response => response.status)).deepEqual([200, 200]);
-    should(mint.status).equal(403);
+    // Assert — a device is no longer singled out anywhere in this file; the grant decides. The
+    // environment write is asserted as NOT-403 rather than as 200: whether this particular payload
+    // is portable is the environment editor's own question, and answering it here would make this
+    // test pass or fail for a reason that has nothing to do with who the caller is.
+    should(reads.map(response => response.status)).deepEqual([200, 200, 200]);
+    should(environment.status).not.equal(403);
   });
 
   it.each(endpoints)('should answer %s %s with no-store', async (method, path) => {
-    // Arrange — every one of these discloses host paths, a proposal, or an approval's existence.
+    // Arrange — every one of these discloses host paths or a staged change.
     const subject = await fixture();
 
     // Act
@@ -833,47 +991,42 @@ describe('who may reach each new fleet route', () => {
   });
 });
 
-describe('reading what a credential may do', () => {
-  it('should tell an admin it may apply directly and a device that it needs an approval', async () => {
+describe('reading what a caller may do', () => {
+  it('should say the same thing the boundary would, in the shared grant vocabulary', async () => {
+    // Said BEFORE a click, so the panel never offers a control that ends in a refusal — and said in
+    // the vocabulary every other capability-governed surface uses, rather than the fleet's own.
     // Arrange
-    const subject = await fixture();
+    const ungoverned = await fixture();
+    const governed = await fixture({ governed: true });
 
     // Act
-    const asAdmin = jsonBody(await get(subject, '/v1/fleet/permissions', admin));
-    const asDevice = jsonBody(await get(subject, '/v1/fleet/permissions', device));
+    const local = jsonBody(await get(ungoverned, '/v1/fleet/permissions', device));
+    const remote = jsonBody(await get(governed, '/v1/fleet/permissions', device));
 
-    // Assert — said before a click, so the surface never offers a control that ends in a refusal.
-    should(asAdmin).match({ mayInspect: true, mayPropose: true, mayApplyDirectly: true, mayApplyWithApproval: false });
-    should(asDevice).match({ mayInspect: true, mayPropose: true, mayApplyDirectly: false, mayApplyWithApproval: true });
-  });
-
-  it('should refuse to apply for a credential class it does not recognise', async () => {
-    // Arrange — the same rule as the permissions read, on the path that actually changes the host:
-    // an unfamiliar class must not fall through to the host's own no-approval-needed branch.
-    const subject = await fixture();
-    const mounted = createDaemonFleetSubsystem({
-      paths: subject.paths,
-      userHome: join(subject.paths.home, 'user'),
-      clock: { now: () => GENERATED_AT_MS },
-      files: new StateFileSystem(subject.paths),
-      platform: 'linux',
-      mintId: () => 'proposal00000000000001',
-      mintUuid: () => '00000000-0000-4000-8000-000000000002',
-      mintApprovalCode: () => 'AAAA-BBBB',
-      rootPinner: new ProcfsSessionRootPinner(),
-      harnesses: harnessDiscoveryReader(),
+    // Assert — the local browser is asked for nothing more; the remote one confirms each change.
+    should(local).deepEqual({
+      mayInspect: true,
+      mayPropose: true,
+      mayApply: true,
+      applyRefusal: 'granted',
+      confirmation: 'none',
     });
-
-    // Act
-    const act = async (): Promise<unknown> => await mounted.applyProposal('fy_fprop_never0000000000', {}, undefined);
-
-    // Assert
-    await should(act()).be.rejectedWith(/may not apply a fleet change/u);
+    should(remote).deepEqual({
+      mayInspect: true,
+      mayPropose: true,
+      mayApply: true,
+      applyRefusal: 'granted',
+      confirmation: 'operator-password',
+    });
+    // And there is nothing left in the shape that names a code or a command to run on the host.
+    should(JSON.stringify(local)).not.match(/approval|authorize/iu);
   });
 
-  it('should grant nothing to a credential class it does not recognise', async () => {
-    // Arrange — the permissions read is a courtesy, and a courtesy must not invent authority out of
-    // missing evidence. Deriving from `not a device` would have handed direct apply to an unknown.
+  it('should offer nothing to a caller it was told nothing about', async () => {
+    // The permissions read is a courtesy, and a courtesy must not invent authority out of missing
+    // evidence. It cannot happen through the served route, which declares a capability — but an
+    // absent answer must render as a closed panel, never as an open Apply button.
+    // Arrange
     const subject = await fixture();
     const mounted = createDaemonFleetSubsystem({
       paths: subject.paths,
@@ -883,8 +1036,9 @@ describe('reading what a credential may do', () => {
       platform: 'linux',
       mintId: () => 'proposal00000000000000',
       mintUuid: () => '00000000-0000-4000-8000-000000000001',
-      mintApprovalCode: () => 'AAAA-BBBB',
+      confirmChange: async () => ({ kind: 'confirmed' }),
       rootPinner: new ProcfsSessionRootPinner(),
+      clientName: 'fy',
       harnesses: harnessDiscoveryReader(),
     });
 
@@ -892,11 +1046,12 @@ describe('reading what a credential may do', () => {
     const actual = mounted.permissions(undefined);
 
     // Assert
-    should(actual).match({
+    should(actual).deepEqual({
       mayInspect: false,
       mayPropose: false,
-      mayApplyDirectly: false,
-      mayApplyWithApproval: false,
+      mayApply: false,
+      applyRefusal: 'undetermined',
+      confirmation: 'none',
     });
   });
 });
@@ -1047,5 +1202,262 @@ describe('reading fleet assets', () => {
     should(jsonBody(found)).match({ path: 'CLAUDE.md', content: 'be brief\n' });
     should(absent.status).equal(409);
     should(jsonBody(absent)).match({ code: 'fleet_asset_refused' });
+  });
+});
+
+describe('a paired browser, against the real capability guard', () => {
+  /**
+   * The fleet route table in front of the REAL `CapabilityGrantService`, not a stub.
+   *
+   * Every other test in this file drives a hand-written guard, which proves the mount honours what it
+   * is told. This proves what it is actually told — that `isGovernedCaller`, `decideCapability` and
+   * the unlock ledger, wired exactly as the composition root wires them, refuse a paired browser that
+   * is not on this host. A stub can be made to say anything; this cannot.
+   */
+  async function governedWorld(options: { readonly password?: string } = {}) {
+    const root = await mkdtemp(join(tmpdir(), 'fy-fleet-governed-'));
+    temporaryDirectories.push(root);
+    const userHome = join(root, 'user');
+    const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
+    let stored = options.password;
+    let unlocks = 0;
+    const grants = new CapabilityGrantService({
+      document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
+      passwords: {
+        isSet: async () => stored !== undefined,
+        set: async password => {
+          stored = password;
+        },
+        clear: async () => {
+          stored = undefined;
+        },
+        verify: async candidate => stored !== undefined && candidate === stored,
+      },
+      tokens: {
+        mint: () => {
+          unlocks += 1;
+          return `fy_unlock_${String(unlocks).padStart(22, 'u')}`;
+        },
+      },
+      clock: { nowMs: () => GENERATED_AT_MS },
+      audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+      clientName: 'fy',
+    });
+    await grants.refresh();
+    const subsystem = createDaemonFleetSubsystem({
+      paths,
+      userHome,
+      clock: { now: () => GENERATED_AT_MS },
+      files: new StateFileSystem(paths),
+      platform: 'linux',
+      mintId: () => `proposal${String(minted++).padStart(14, '0')}`,
+      mintUuid: () => `00000000-0000-4000-8000-8${String(minted++).padStart(11, '0')}`,
+      confirmChange: async password => await grants.confirmChange(password),
+      rootPinner: new ProcfsSessionRootPinner(),
+      clientName: 'fy',
+      harnesses: harnessDiscoveryReader(),
+    });
+    const credentials = {
+      ...CREDENTIALS,
+      devices: { identify: (token: string) => (token === 'paired-device' ? 'device-1' : undefined) },
+    };
+    const subject: Fixture = {
+      paths,
+      clock: { value: GENERATED_AT_MS },
+      confirmed: [],
+      dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, grants),
+    };
+    await writeConfig(subject);
+    return { subject, grants };
+  }
+
+  /** A relayed request. `loopback: false` is the carrier's own answer and no header can move it. */
+  const remotely = (path: string, body?: unknown, unlock?: string) =>
+    request({
+      method: 'POST',
+      path,
+      loopback: false,
+      headers: {
+        authorization: 'Bearer paired-device',
+        // Every header a caller could hope re-derives locality. None of them can: `loopback` comes
+        // from the socket, and the relay tunnel sets it `false` unconditionally.
+        host: '127.0.0.1:7777',
+        'x-forwarded-for': '127.0.0.1',
+        ...(unlock === undefined ? {} : { 'x-ferretry-operator-unlock': unlock }),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  it('should refuse a remote paired browser that has not proved the operator password', async () => {
+    // THE PROPERTY THAT MUST NOT REGRESS. A fleet apply writes executable wrappers into the user's
+    // home and prunes files carrying Ferretry's marker, so a device must not provision a host on the
+    // strength of having paired. What refuses it is `decideCapability`'s `locked` branch, reached
+    // because `isGovernedCaller` reads `loopback: false` from the carrier.
+    // Arrange
+    const { subject } = await governedWorld({ password: 'the operator knows this' });
+    const staged = await subject.dispatcher.dispatch(
+      remotely('/v1/fleet/proposals', CREATE) as ReturnType<typeof request>,
+    );
+    const proposal = jsonBody(staged) as { id: string };
+
+    // Act
+    const applied = await subject.dispatcher.dispatch(remotely(`/v1/fleet/proposals/${proposal.id}/apply`));
+
+    // Assert — composing is `fleet.use` and touches nothing, so it is served; applying is not.
+    should(staged.status).equal(200);
+    should(applied.status).equal(403);
+    should(jsonBody(applied)).match({ code: 'grant_locked' });
+    should(await Bun.file(subject.paths.fleetManifest).exists()).be.false();
+  });
+
+  it('should still refuse a remote browser holding a valid unlock but confirming nothing', async () => {
+    // THE PER-CHANGE CONFIRMATION, PROVED. An unlock is a five-minute bearer value; on its own it is
+    // not enough to write executables into somebody's home. This is the step that makes a borrowed
+    // unlock insufficient.
+    // Arrange
+    const { subject, grants } = await governedWorld({ password: 'the operator knows this' });
+    const unlocked = await grants.unlock('the operator knows this');
+    should(unlocked.kind).equal('unlocked');
+    const token = unlocked.kind === 'unlocked' ? unlocked.token : '';
+    const proposal = jsonBody(await subject.dispatcher.dispatch(remotely('/v1/fleet/proposals', CREATE, token))) as {
+      id: string;
+    };
+
+    // Act
+    const bare = await subject.dispatcher.dispatch(
+      remotely(`/v1/fleet/proposals/${proposal.id}/apply`, undefined, token),
+    );
+    const confirmed = await subject.dispatcher.dispatch(
+      remotely(`/v1/fleet/proposals/${proposal.id}/apply`, { operatorPassword: 'the operator knows this' }, token),
+    );
+
+    // Assert
+    should(jsonBody(bare)).match({ code: 'fleet_proposal_unauthorized' });
+    should([confirmed.status, jsonBody(confirmed)]).match([200, { outcome: 'committed' }]);
+  });
+
+  it('should refuse a remote browser that never unlocked, however local its headers claim to be', async () => {
+    // A `Host` header, an `x-forwarded-for` and a `127.0.0.1` in the URL are all present on every
+    // request this describe block sends. None of them moves `loopback`, which is the worst bug this
+    // design could produce and the reason the value is carrier-derived.
+    // Arrange
+    const { subject } = await governedWorld({ password: 'the operator knows this' });
+
+    // Act
+    const view = await subject.dispatcher.dispatch(
+      request({ path: '/v1/fleet/permissions', loopback: false, headers: { authorization: 'Bearer paired-device' } }),
+    );
+
+    // Assert — and the panel is TOLD, before a click, that it is locked and why.
+    should(jsonBody(view)).deepEqual({
+      mayInspect: true,
+      mayPropose: true,
+      mayApply: false,
+      applyRefusal: 'locked',
+      confirmation: 'operator-password',
+    });
+  });
+
+  it('should tell a local browser that has NOT unlocked that the password is the whole remedy', async () => {
+    // THE OWNER'S SCREENSHOT, at the daemon. `#358` made a local browser a governed caller until it
+    // unlocks, so this is the state the panel was in when it showed `grant_locked` — and the only
+    // thing the daemon says about it is `locked`, whose remedy is a password the reader may already
+    // have. It never was, and is not now, a reason to print a command to run in a terminal.
+    // Arrange
+    const { subject } = await governedWorld({ password: 'the operator knows this' });
+    const locally = { authorization: 'Bearer paired-device' } as const;
+
+    // Act
+    const permissions = jsonBody(
+      await subject.dispatcher.dispatch(request({ path: '/v1/fleet/permissions', loopback: true, headers: locally })),
+    );
+    const proposal = jsonBody(
+      await subject.dispatcher.dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/proposals',
+          loopback: true,
+          headers: { ...locally, 'content-type': 'application/json' },
+          body: JSON.stringify(CREATE),
+        }),
+      ),
+    ) as { id: string };
+    const applied = await subject.dispatcher.dispatch(
+      request({ method: 'POST', path: `/v1/fleet/proposals/${proposal.id}/apply`, loopback: true, headers: locally }),
+    );
+
+    // Assert — staging is `fleet.use` and is served; applying is `locked`, in the shared vocabulary.
+    should(permissions).match({ mayApply: false, applyRefusal: 'locked' });
+    should(applied.status).equal(403);
+    should(jsonBody(applied)).match({ code: 'grant_locked' });
+    should(await Bun.file(subject.paths.fleetManifest).exists()).be.false();
+  });
+
+  it('should let a browser on this machine apply once it has unlocked, and ask for nothing more', async () => {
+    // `#358`'s shape, end to end through the real guard: a local browser is a paired device and is
+    // governed until it presents an unlock — then ungoverned COMPLETELY, with no second gate and no
+    // per-action prompt. That is what the owner asked for and what the deleted approval flow broke.
+    // Arrange
+    const { subject, grants } = await governedWorld({ password: 'the operator knows this' });
+    const unlocked = await grants.unlock('the operator knows this');
+    const token = unlocked.kind === 'unlocked' ? unlocked.token : '';
+    const locally = (path: string, body?: unknown) =>
+      request({
+        method: 'POST',
+        path,
+        loopback: true,
+        headers: {
+          authorization: 'Bearer paired-device',
+          'x-ferretry-operator-unlock': token,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    const proposal = jsonBody(await subject.dispatcher.dispatch(locally('/v1/fleet/proposals', CREATE))) as {
+      id: string;
+    };
+
+    // Act — no password in the body, and no code anywhere.
+    const applied = await subject.dispatcher.dispatch(locally(`/v1/fleet/proposals/${proposal.id}/apply`));
+    const permissions = jsonBody(
+      await subject.dispatcher.dispatch(
+        request({
+          path: '/v1/fleet/permissions',
+          loopback: true,
+          headers: { authorization: 'Bearer paired-device', 'x-ferretry-operator-unlock': token },
+        }),
+      ),
+    );
+
+    // Assert
+    should([applied.status, jsonBody(applied)]).match([200, { outcome: 'committed' }]);
+    should(permissions).match({ mayApply: true, applyRefusal: 'granted', confirmation: 'none' });
+    should(JSON.stringify(permissions)).not.match(/approval|authorize/iu);
+  });
+
+  it('should ask a caller on a machine with no operator password for nothing at all', async () => {
+    // No secret exists to bind a change to, so there is deliberately no prompt: a control that
+    // cannot refuse is theatre. The capability layer reports `ungated` rather than `granted` so the
+    // panel can say once, beside the control, that nothing is standing behind it.
+    // Arrange
+    const { subject } = await governedWorld();
+
+    // Act
+    const proposal = jsonBody(await subject.dispatcher.dispatch(remotely('/v1/fleet/proposals', CREATE))) as {
+      id: string;
+    };
+    const applied = await subject.dispatcher.dispatch(remotely(`/v1/fleet/proposals/${proposal.id}/apply`));
+    const permissions = jsonBody(
+      await subject.dispatcher.dispatch(
+        request({ path: '/v1/fleet/permissions', loopback: false, headers: { authorization: 'Bearer paired-device' } }),
+      ),
+    );
+
+    // Assert — and this state is not reachable by pairing: a machine with no operator password
+    // refuses to hand out a pairing code at all (`PairingService.mint`). It is reachable only by an
+    // operator who paired a device and then ran `fy daemon password clear`.
+    should([applied.status, jsonBody(applied)]).match([200, { outcome: 'committed' }]);
+    should(permissions).match({ mayApply: true, applyRefusal: 'ungated', confirmation: 'none' });
   });
 });

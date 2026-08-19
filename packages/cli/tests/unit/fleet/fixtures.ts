@@ -18,11 +18,10 @@ import type {
   FleetUsageSnapshot,
 } from '@ferretry/fleet';
 import { FleetApplyFailureError } from '@ferretry/fleet';
-import type { FleetAccountSharing, FleetApprovalMint, FleetSharing } from '@ferretry/protocol';
+import type { FleetAccountSharing, FleetSharing } from '@ferretry/protocol';
 import type {
   FleetScaffoldOptions,
   IFleetApplier,
-  IFleetAuthorizationGateway,
   IFleetClock,
   IFleetConfigSource,
   IFleetHealthCollectorFactory,
@@ -367,34 +366,6 @@ export class RecordingRecommendationGateway implements IRecommendationGateway {
   recommend(request: RecommendationRequest): Promise<TeamRecommendation> {
     this.requests.push(request);
     return Promise.resolve(this.value);
-  }
-}
-
-/** Shaped to `FleetProposalIdSchema`, because a mint echoes an id the protocol parses strictly. */
-export const PROPOSAL_ID = 'fy_fprop_7Zq3Kd91Lm4Rt8Vx2Ns6Bc';
-
-export function approvalMint(overrides: Partial<FleetApprovalMint> = {}): FleetApprovalMint {
-  return {
-    proposalId: PROPOSAL_ID,
-    code: '7F3K-M9QW',
-    ttlSeconds: 120,
-    expiresAt: '2026-08-05T12:34:56.000Z',
-    maxAttempts: 5,
-    mutation: 'create-account',
-    summary: 'add claude-auto-loge',
-    ...overrides,
-  };
-}
-
-/** An approval gateway recording which proposal it was asked to approve. */
-export class RecordingAuthorizationGateway implements IFleetAuthorizationGateway {
-  readonly proposalIds: string[] = [];
-
-  constructor(private readonly value: FleetApprovalMint | Error = approvalMint()) {}
-
-  authorize(proposalId: string): Promise<FleetApprovalMint> {
-    this.proposalIds.push(proposalId);
-    return this.value instanceof Error ? Promise.reject(this.value) : Promise.resolve(this.value);
   }
 }
 

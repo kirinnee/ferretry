@@ -6,6 +6,7 @@
  * with could never fail that way.
  */
 
+import type { GrantUnlockView } from '@ferretry/protocol';
 import type {
   FleetAssetIndex,
   FleetConfigView,
@@ -109,12 +110,47 @@ export function absentCodex(overrides: Partial<HarnessDiscovery> = {}): HarnessD
   };
 }
 
+/**
+ * What this caller may do, defaulting to the UNGOVERNED answer.
+ *
+ * The default is the owner's own case and the common one: a loopback caller, or a local browser that has
+ * already unlocked. It used to default to `mayApplyWithApproval`, so every suite that did not say
+ * otherwise was asserting against the two-gate panel — which is how a screen nobody wanted stayed
+ * pinned by its own tests.
+ */
 export const permissions = (overrides: Partial<FleetPermissions> = {}): FleetPermissions => ({
   mayInspect: true,
   mayPropose: true,
-  mayApplyDirectly: false,
-  mayApplyWithApproval: true,
-  approvalCommand: 'fy fleet authorize',
+  mayApply: true,
+  applyRefusal: 'ungated',
+  confirmation: 'none',
+  ...overrides,
+});
+
+/** A caller the operator's grants still govern on a machine with a password: apply asks for it once. */
+export const confirmingPermissions = (overrides: Partial<FleetPermissions> = {}): FleetPermissions =>
+  permissions({ applyRefusal: 'granted', confirmation: 'operator-password', ...overrides });
+
+/**
+ * A caller refused until it unlocks, which is the owner's complaint.
+ *
+ * `confirmation: 'operator-password'` alongside `locked` is the case the one-password rule exists for: a
+ * remote caller on a machine with a password is BOTH, and one typed value has to serve both steps.
+ */
+export const lockedPermissions = (overrides: Partial<FleetPermissions> = {}): FleetPermissions =>
+  permissions({ mayApply: false, applyRefusal: 'locked', confirmation: 'operator-password', ...overrides });
+
+/**
+ * A minted unlock, as `POST /v1/grants/unlock` answers.
+ *
+ * The SHARED shape, because the fleet panel now mints through the same route the grants surface does —
+ * a fixture of its own here would be a second idea of what an unlock is.
+ */
+export const unlockView = (overrides: Partial<GrantUnlockView> = {}): GrantUnlockView => ({
+  // The shared grammar requires the prefix and 22 characters after it, so a placeholder must satisfy it.
+  token: `fy_unlock_${'A'.repeat(22)}`,
+  expiresAt: '2026-08-05T06:05:00.000Z',
+  ttlSeconds: 300,
   ...overrides,
 });
 

@@ -51,8 +51,9 @@ async function fixture(): Promise<Fixture> {
     platform: 'linux',
     mintId: () => `sharing${String(minted++).padStart(15, '0')}`,
     mintUuid: () => `00000000-0000-4000-8000-8${String(minted++).padStart(11, '0')}`,
-    mintApprovalCode: () => 'AAAA-BBBB',
+    confirmChange: async () => ({ kind: 'confirmed' }),
     rootPinner: new ProcfsSessionRootPinner(),
+    clientName: 'fy',
     harnesses: harnessDiscoveryReader(),
   });
   const credentials = {

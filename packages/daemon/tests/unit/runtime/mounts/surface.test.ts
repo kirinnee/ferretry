@@ -138,9 +138,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     readProposal: async () => {
       throw new Error('not exercised by the surface inventory');
     },
-    authorizeProposal: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
     applyProposal: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -415,7 +412,12 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129, 'admin-token': 1 });
+    // NOTE WHAT IS ABSENT: `admin-token`, which no route declares any more. The one that did was
+    // `POST /v1/fleet/proposals/:proposalId/authorize`, and it minted the fleet's own approval code.
+    // The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than
+    // a census of today's table — but a table that used it exactly once, for a mechanism the
+    // capability model already answered, is worth reading as evidence rather than as trivia.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -474,10 +476,11 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/assets/:assetPath',
       'POST /v1/fleet/proposals',
       'GET /v1/fleet/proposals/:proposalId',
-      // Host-scoped: only the host's own admin token may mint an approval, and NOTE WHAT IS ABSENT —
-      // no route returns a minted code to anyone who did not just ask for it, and no read discloses
-      // one at all.
-      'POST /v1/fleet/proposals/:proposalId/authorize',
+      // NOTE WHAT IS ABSENT: `POST /v1/fleet/proposals/:proposalId/authorize`. It minted a single-use
+      // code the host printed and a person transcribed — a second authority system beside the
+      // capability model, with its own lifetime, its own attempt budget and its own refusal
+      // vocabulary. It went in the same change as the `fy fleet authorize` verb that dialled it,
+      // because the route-agreement allowlist may only shrink.
       'POST /v1/fleet/proposals/:proposalId/apply',
       // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or

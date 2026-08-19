@@ -6,7 +6,6 @@ import {
   accountHarnessDetection,
   accountProblems,
   applyInstructionsChoice,
-  approvalCommand,
   assetPathProblem,
   CHANGE_LIMITS,
   classifyInventory,
@@ -20,8 +19,10 @@ import {
   emptyAccountDraft,
   emptyLayerDraft,
   type FleetAccountDraft,
+  fleetApplyAuthority,
+  fleetApplyCopy,
+  fleetApplyNeedsPassword,
   type FleetLayerDraft,
-  fleetAuthority,
   harnessEvidence,
   initializeProposal,
   instructionsAssets,
@@ -40,15 +41,18 @@ import {
   unseenAssets,
 } from '../../../../src/features/fleet/fleet-change-model.ts';
 import { defaultFleetHarness } from '../../../../src/features/fleet/fleet-model.ts';
+import { grantGuidance } from '../../../../src/lib/grants.ts';
 import {
   absentCodex,
   account,
   accountId,
   assetIndex,
   config,
+  confirmingPermissions,
   discovery,
   type FleetAccountFixture,
   harness,
+  lockedPermissions,
   manifest,
   permissions,
 } from './fleet-support.ts';
@@ -103,16 +107,101 @@ describe('what a daemon fleet read means', () => {
   });
 });
 
-describe('authority', () => {
-  it('reads direct, approval and read-only from the daemon rather than assuming one', () => {
-    expect(fleetAuthority(null)).toBe('read-only');
-    expect(fleetAuthority({ ...permissions({ mayApplyDirectly: true }) })).toBe('direct');
-    expect(fleetAuthority(permissions())).toBe('approval');
-    expect(fleetAuthority(permissions({ mayApplyWithApproval: false }))).toBe('read-only');
+describe('who may apply a staged change', () => {
+  it('reads the capability layer’s answer rather than a fleet-private one', () => {
+    // Arrange / Act / Assert — the ungoverned caller applies with nothing asked for. This is the owner's
+    // own case, and the default fixture, so a regression to a second gate fails everywhere at once.
+    expect(fleetApplyAuthority(permissions())).toEqual({ kind: 'open' });
+    // A caller the grants govern on a machine WITHOUT a password is still `open`: there is no secret to
+    // bind a change to, and a prompt that cannot refuse is theatre (§0 of the design).
+    expect(fleetApplyAuthority(permissions({ applyRefusal: 'granted' }))).toEqual({ kind: 'open' });
+    // With one set, the per-change confirmation is real.
+    expect(fleetApplyAuthority(confirmingPermissions())).toEqual({ kind: 'confirm' });
   });
 
-  it('binds the approval command to one exact proposal id', () => {
-    expect(approvalCommand(permissions(), 'fy_fprop_ABC')).toBe('fy fleet authorize fy_fprop_ABC');
+  it('offers the unlock for `locked` and NOTHING for a refusal an unlock would not fix', () => {
+    // Arrange / Act / Assert — `locked` is the one refusal a password resolves from this panel, and
+    // `alsoConfirms` is what lets one typed value serve both the unlock and the confirmation.
+    expect(fleetApplyAuthority(lockedPermissions())).toEqual({ kind: 'locked', alsoConfirms: true });
+    expect(fleetApplyAuthority(lockedPermissions({ confirmation: 'none' }))).toEqual({
+      kind: 'locked',
+      alsoConfirms: false,
+    });
+
+    // The other three refusals: a decision somebody made, a wait, and a broken document. An unlock helps
+    // with none of them, so the panel must not offer one — that is the theatre this codebase refuses.
+    for (const refusal of ['not-granted', 'rate-limited', 'undetermined'] as const) {
+      const authority = fleetApplyAuthority(permissions({ mayApply: false, applyRefusal: refusal }));
+      expect(authority).toEqual({ kind: 'refused', refusal });
+      expect(fleetApplyNeedsPassword(authority)).toBe(false);
+    }
+    expect(fleetApplyNeedsPassword(fleetApplyAuthority(lockedPermissions()))).toBe(true);
+    expect(fleetApplyNeedsPassword(fleetApplyAuthority(confirmingPermissions()))).toBe(true);
+    expect(fleetApplyNeedsPassword(fleetApplyAuthority(permissions()))).toBe(false);
+  });
+
+  it('says it cannot tell when the permissions read itself failed, rather than blaming the operator', () => {
+    // Arrange / Act
+    const authority = fleetApplyAuthority(null);
+
+    // Assert — NOT `refused`. Rendering no answer as a refusal would put a sentence about somebody's
+    // decisions on screen on the strength of nothing, and `undetermined` would blame the daemon's own
+    // grant document — a claim about the host this browser has no evidence for.
+    expect(authority).toEqual({ kind: 'unreadable' });
+    expect(fleetApplyNeedsPassword(authority)).toBe(false);
+    expect(fleetApplyCopy(authority).explanation).toContain('did not say');
+    expect(fleetApplyCopy(authority).tone).toBe('err');
+  });
+
+  it('words every state in the SHARED grant vocabulary, never a fleet dialect of its own', () => {
+    // Arrange / Act / Assert — the whole point of the unification: a fleet refusal reads exactly as the
+    // same refusal reads on the grants surface beside it, because both call `grantGuidance`.
+    expect(fleetApplyCopy(fleetApplyAuthority(lockedPermissions())).explanation).toBe(
+      grantGuidance('locked', 'fleet').explanation,
+    );
+    expect(fleetApplyCopy(fleetApplyAuthority(permissions({ mayApply: false, applyRefusal: 'not-granted' })))).toEqual({
+      badge: grantGuidance('not-granted').badge,
+      tone: 'warn',
+      explanation: grantGuidance('not-granted', 'fleet').explanation,
+    });
+    // A daemon that cannot read its own grant document is a fault, not a limit somebody chose.
+    expect(
+      fleetApplyCopy(fleetApplyAuthority(permissions({ mayApply: false, applyRefusal: 'undetermined' }))).tone,
+    ).toBe('err');
+
+    // `open` says NOTHING. There is no refusal, no secret and no next step, so a sentence here would be
+    // the fleet narrating its own authority again — which is the thing being deleted.
+    expect(fleetApplyCopy({ kind: 'open' })).toEqual({
+      badge: grantGuidance('granted').badge,
+      tone: 'ok',
+      explanation: '',
+    });
+
+    // The confirmation is the ONE state with words of its own, because no other capability asks for this.
+    const confirm = fleetApplyCopy({ kind: 'confirm' });
+    expect(confirm.explanation).toContain('this exact change');
+    expect(confirm.tone).toBe('accent');
+    // And it must not promise the password buys anything beyond this change.
+    expect(confirm.explanation).toContain('does not carry over');
+  });
+
+  it('names no command to run in a terminal, in any state', () => {
+    // Arrange — the owner's complaint was a panel telling somebody to run `fy fleet authorize <id>` and
+    // transcribe a code. Nothing here may name a command again: the remedy is a field on this screen.
+    const every = [
+      fleetApplyAuthority(permissions()),
+      fleetApplyAuthority(confirmingPermissions()),
+      fleetApplyAuthority(lockedPermissions()),
+      fleetApplyAuthority(permissions({ mayApply: false, applyRefusal: 'rate-limited' })),
+      fleetApplyAuthority(null),
+    ];
+
+    // Assert
+    for (const authority of every) {
+      const { explanation } = fleetApplyCopy(authority);
+      expect(explanation).not.toContain('fy fleet authorize');
+      expect(explanation).not.toContain('fy_fprop_');
+    }
   });
 });
 

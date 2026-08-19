@@ -17,18 +17,60 @@
  */
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
-import { FleetApprovalCodeSchema, FleetProposalIdSchema } from './fleet-authorization.ts';
+import { GrantRefusalSchema, OperatorPasswordSchema } from './grants.ts';
 
-/** What this caller's credential permits, read before a surface offers a control it cannot use. */
+/**
+ * A non-secret handle for one staged change. Safe in a path and in a log.
+ *
+ * IT IS A TRANSACTION HANDLE, NOT A CREDENTIAL, and it lives beside the change it names for exactly
+ * that reason. It used to sit in a `fleet-authorization` module beside a single-use approval code,
+ * which read as though holding one conferred something; it never did. Naming the staged artifact is
+ * all it has ever done, and it is the one part of that module that survived the authorization half
+ * being deleted.
+ */
+export const FleetProposalIdSchema = z.string().regex(/^fy_fprop_[A-Za-z0-9_-]{22}$/u, 'invalid fleet proposal id');
+export type FleetProposalId = z.infer<typeof FleetProposalIdSchema>;
+
+/**
+ * What a governed caller must produce before one staged change is applied.
+ *
+ * TWO VALUES, AND THE SECOND IS NOT A SECOND CREDENTIAL SYSTEM. `none` is the answer for a caller the
+ * operator's grants do not govern at all — the host's own command line, and a browser on this machine
+ * that has already unlocked — and for a machine with no operator password, where there is no secret to
+ * bind a change to and a prompt would be a control that cannot refuse. `operator-password` is the
+ * per-change confirmation: the SAME password the unlock is made of, proved again against this exact
+ * staged change, so a borrowed five-minute unlock is not by itself enough to provision a host.
+ */
+export const FleetChangeConfirmationSchema = z.enum(['none', 'operator-password']);
+export type FleetChangeConfirmation = z.infer<typeof FleetChangeConfirmationSchema>;
+
+/**
+ * What this caller may do here, read before a surface offers a control it cannot use.
+ *
+ * IT IS THE CAPABILITY LAYER'S ANSWER, not a second one. `mayApply` is `fleet.configure` as
+ * `decideCapability` decided it for this request, and `confirmation` says whether applying will ask
+ * for the operator password once more. The shape used to carry `mayApplyDirectly`,
+ * `mayApplyWithApproval` and the command that minted an approval code — three fields describing an
+ * authority the fleet ran privately, in a vocabulary no other capability shared.
+ */
 export const FleetPermissionsSchema = z.strictObject({
   mayInspect: z.boolean(),
   mayPropose: z.boolean(),
-  /** True when the credential is already the host's, so no separate approval is needed. */
-  mayApplyDirectly: z.boolean(),
-  /** True when applying is possible, but only with an approval the host minted for one change. */
-  mayApplyWithApproval: z.boolean(),
-  /** The command a person runs on the host to mint that approval. */
-  approvalCommand: z.string().min(1),
+  /** `fleet.configure` for this caller, as the operator's grants decided it. */
+  mayApply: z.boolean(),
+  /**
+   * WHY `mayApply` reads the way it does, in the SHARED grant vocabulary.
+   *
+   * Carried rather than left to be inferred, because `false` has four different remedies —
+   * `not-granted` is a decision somebody made, `locked` is a password the reader may already have,
+   * `rate-limited` is a wait, and `undetermined` is a broken document — and a panel that showed one
+   * sentence for all four is the dead end this whole surface exists to remove. It is the same enum
+   * `GrantsView` reports and the same one a 403's `grant_*` code spells, so the fleet panel cannot word
+   * a refusal differently from the grants panel beside it.
+   */
+  applyRefusal: GrantRefusalSchema,
+  /** What applying will additionally ask for, so a panel can say so before somebody clicks. */
+  confirmation: FleetChangeConfirmationSchema,
 });
 export type FleetPermissions = z.infer<typeof FleetPermissionsSchema>;
 
@@ -432,11 +474,15 @@ export type FleetProposalRequest = z.infer<typeof FleetProposalRequestSchema>;
 
 export const FleetProposalApplyRequestSchema = z.strictObject({
   /**
-   * Present only for a caller whose credential does not already authorise the change, and held to
-   * the same grammar the mint produces. A separate length rule here would be a second, laxer
-   * description of the one thing this field can be.
+   * The per-change confirmation, present only when {@link FleetPermissionsSchema}'s `confirmation`
+   * said it would be asked for.
+   *
+   * IT IS THE OPERATOR PASSWORD AND NOTHING ELSE — the same value the unlock is made of, held to the
+   * same rule by the same schema, so this cannot become a second, laxer description of one secret. It
+   * travels in a BODY: a query parameter reaches every proxy's access log, and this one is worth more
+   * than the five minutes an unlock is.
    */
-  approvalCode: FleetApprovalCodeSchema.optional(),
+  operatorPassword: OperatorPasswordSchema.optional(),
 });
 export type FleetProposalApplyRequest = z.infer<typeof FleetProposalApplyRequestSchema>;
 
@@ -644,11 +690,6 @@ export const FleetProposalViewSchema = z.strictObject({
   /** Edited assets by size. The text is what the reviewer just composed; its length is the fact. */
   assetEdits: z.array(FleetDocumentSummarySchema).readonly(),
   preview: FleetProposalPreviewSchema,
-  /**
-   * Whether an approval is outstanding, and until when — never the code itself. The value is
-   * structurally absent from this shape rather than filtered out of it.
-   */
-  approval: z.strictObject({ outstanding: z.literal(true), expiresAt: InstantSchema }).optional(),
 });
 export type FleetProposalView = z.infer<typeof FleetProposalViewSchema>;
 
