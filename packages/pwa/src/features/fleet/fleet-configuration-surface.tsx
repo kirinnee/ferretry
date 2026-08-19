@@ -33,6 +33,7 @@ import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
+import { type LocalNetworkAccess, readLocalNetworkAccess } from '../../lib/local-network-access.ts';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import { unlockGrants } from '../settings/grants-api.ts';
 import { FleetAccountStepper } from './fleet-account-stepper.tsx';
@@ -209,6 +210,14 @@ interface FleetSession {
   readonly refusal: FleetRefusalView | null;
   readonly outcome: FleetApplyOutcome | null;
   readonly busy: boolean;
+  /**
+   * What the BROWSER said about this site reaching the local network, asked only after a failure.
+   *
+   * `'unknown'` until something could not be reached, and `'unknown'` for every browser that has no
+   * such permission — which is the state that words the two possibilities rather than a diagnosis. It
+   * decides copy and nothing else: no request anywhere is gated on it.
+   */
+  readonly localNetwork: LocalNetworkAccess;
 }
 
 const freshSession = (generation: string): FleetSession => ({
@@ -225,6 +234,7 @@ const freshSession = (generation: string): FleetSession => ({
   refusal: null,
   outcome: null,
   busy: false,
+  localNetwork: 'unknown',
 });
 
 /**
@@ -358,6 +368,16 @@ export interface FleetConfigurationSurfaceProps {
    * `src/lib/grants.ts` states why that would be the worst bug in this feature.
    */
   readonly pageScheme?: string;
+  /**
+   * ASKS THE BROWSER whether this site may reach the local network. Supplied so a test can drive all
+   * three answers, and read from the browser by default.
+   *
+   * Same rule as `pageScheme`, and it matters more here: IT DECIDES COPY AND NOTHING ELSE. A browser
+   * that refuses a loopback request before sending it produces exactly what a stopped daemon produces,
+   * and this is the one question that tells them apart — but a diagnostic that could stop a request
+   * from being made would be a worse defect than the wrong sentence it exists to replace.
+   */
+  readonly readLocalNetwork?: () => Promise<LocalNetworkAccess>;
 }
 
 export function FleetConfigurationSurface({
@@ -365,6 +385,7 @@ export function FleetConfigurationSurface({
   createClient = daemonApiClient,
   now = Date.now,
   pageScheme = window.location.protocol,
+  readLocalNetwork = readLocalNetworkAccess,
 }: FleetConfigurationSurfaceProps) {
   // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
   // four. Module-global ids there left three sections labelled by another daemon's heading and put four
@@ -445,6 +466,39 @@ export function FleetConfigurationSurface({
       live = false;
     };
   }, [generation, createClient, patch, readEvidence]);
+
+  /**
+   * ONE ANSWER TO "can this browser reach the daemon", read by every control that needs one.
+   *
+   * Computed here rather than asked per control, because the shape of the defect this repairs is a
+   * panel where one place knew and the others did not: the read said `unreachable` and the staged
+   * change went on offering a password field to a limiter nothing could ask.
+   */
+  const outOfReach = daemonOutOfReach(session.inventory, session.refusal);
+
+  /**
+   * ONE QUERY, ON THE FAILURE PATH, AND NEVER A POLL.
+   *
+   * It runs when this panel ENTERS the out-of-reach state, which is the only moment its answer changes
+   * what is on screen. A `TypeError` with no status is all a refused request leaves behind — the daemon
+   * logs nothing at all, because nothing arrived — so the browser's own answer about the permission is
+   * the only evidence that distinguishes it from a daemon that is stopped.
+   *
+   * A THROWING READER CHANGES NOTHING. The state stays `'unknown'`, which is the wording that names
+   * both possibilities: a diagnostic feature that could break the panel it explains would be a worse
+   * failure than the message it replaces.
+   */
+  useEffect(() => {
+    if (!outOfReach) return;
+    let live = true;
+    void (async () => {
+      const access = await readLocalNetwork().catch((): LocalNetworkAccess => 'unknown');
+      if (live) patch(generation, { localNetwork: access });
+    })();
+    return () => {
+      live = false;
+    };
+  }, [outOfReach, generation, patch, readLocalNetwork]);
 
   const client = session.client;
   /**
@@ -720,16 +774,8 @@ export function FleetConfigurationSurface({
   const variants = Object.keys(session.config?.variants ?? {});
   const detection = accountHarnessDetection(session.discovery, live);
   const composing = mode.kind !== 'idle' || session.proposal !== null;
-  /**
-   * ONE ANSWER TO "can this browser reach the daemon", read by every control that needs one.
-   *
-   * Computed here rather than asked per control, because the shape of the defect this repairs is a
-   * panel where one place knew and the others did not: the read said `unreachable` and the staged
-   * change went on offering a password field to a limiter nothing could ask.
-   */
-  const unreachable = daemonOutOfReach(inventory, session.refusal)
-    ? unreachableDiagnosis(connection.baseUrl, pageScheme)
-    : null;
+  /** The verdict above, worded — with the browser's own answer folded in when it gave one. */
+  const unreachable = outOfReach ? unreachableDiagnosis(connection.baseUrl, pageScheme, session.localNetwork) : null;
   /** Bound to a local so the preview's discriminant narrows into the two panels below. */
   const staged = session.proposal;
   /**
@@ -952,7 +998,7 @@ export function FleetConfigurationSurface({
               // The one state whose remedy is never on this screen, so it gets the checks and no
               // control at all — not even a re-read, which is what reopening the tab already does.
               <FleetUnreachableNotice
-                diagnosis={unreachableDiagnosis(connection.baseUrl, pageScheme)}
+                diagnosis={unreachableDiagnosis(connection.baseUrl, pageScheme, session.localNetwork)}
                 detail={inventory.detail}
                 headingId={id('-state-heading')}
               />

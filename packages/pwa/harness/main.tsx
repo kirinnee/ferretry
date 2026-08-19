@@ -7221,7 +7221,7 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
             createClient={async () => {
               // The SAME address the fixture pairs on, because the real client names the address it dialled:
               // two different ones on one screen is the confusion this panel exists to remove.
-              throw new Error(`fyd is unavailable at ${daemon.baseUrl} (Failed to fetch)`);
+              throw new Error(`could not reach fyd at ${daemon.baseUrl} (Failed to fetch)`);
             }}
           />
         </section>
