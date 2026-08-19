@@ -875,13 +875,15 @@ function SkillsStep({
         empty="This fleet’s store has no skills yet. Add one from the asset tree first, or leave this account without skills."
         onToggle={path => onChange(withSkillsSelection(layer, selection.selected.includes(path) ? [] : [path]))}
       />
-      {/* A DECLARED LIMIT, stated where it bites rather than in a release note. The configuration's
-          `skills` field names ONE directory, so "these three skills and not those two" is not
-          something this fleet can express yet — and a control that offered it would be describing a
-          change the daemon would refuse. */}
+      {/* A DECLARED LIMIT OF THIS SCREEN, and it is careful about whose limit it is.
+          `layer.skills` became a LIST in #373, so the fleet CAN now select items one at a time — what
+          has not caught up is this browser's draft, which still models the selection as one reference.
+          Saying "this fleet cannot express it" would be false the moment that landed, and a sentence
+          that goes stale into a lie is worse than no sentence. The selection is already a list here,
+          so closing it is widening the draft rather than redesigning this step. */}
       <p className="m-0 text-meta leading-base text-muted" data-fleet-skills-limit="">
-        One store directory at a time. Picking skills individually out of a directory is not something this fleet can
-        express yet.
+        One store item at a time, on this screen. The fleet itself can give an account several — picking more than one
+        here is the next change, not a limit of the fleet.
       </p>
     </div>
   );

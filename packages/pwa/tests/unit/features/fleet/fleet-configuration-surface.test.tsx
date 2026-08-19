@@ -989,10 +989,11 @@ describe('creating an account', () => {
     expect(
       pick(surface.container, '[data-fleet-check-group="skills"] [data-fleet-check="skills/research"]').textContent,
     ).toContain('linked by nothing yet');
-    // The gap is stated where it bites, rather than discovered by somebody looking for a control.
-    expect(pick(surface.container, '[data-fleet-skills-limit]').textContent).toContain(
-      'Picking skills individually out of a directory is not something this fleet can express yet',
-    );
+    // The gap is stated where it bites, and it is careful about WHOSE gap it is: #373 made the fleet
+    // able to give an account several items, so a sentence blaming the fleet would now be false.
+    const limit = pick(surface.container, '[data-fleet-skills-limit]').textContent ?? '';
+    expect(limit).toContain('One store item at a time, on this screen');
+    expect(limit).toContain('not a limit of the fleet');
 
     // Act
     await click(card(surface.container, 'skills', 'skills/research'));
