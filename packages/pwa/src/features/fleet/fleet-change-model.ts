@@ -25,6 +25,7 @@ import {
   type HarnessDiscovery,
   type HarnessDiscoveryReport,
 } from '@ferretry/protocol';
+import { type GrantRefusalNotice, grantGuidance } from '../../lib/grants.ts';
 import type {
   FleetApplyOutcome,
   FleetAssetIndex,
@@ -36,7 +37,6 @@ import type {
   FleetRefusalView,
   FleetWriteOperation,
 } from './fleet-api.ts';
-import { type GrantRefusalNotice, grantGuidance } from '../../lib/grants.ts';
 import { defaultFleetHarness, type FleetHarnessKind, type FleetHarnessView } from './fleet-model.ts';
 
 /** A read that either produced evidence or produced a stated refusal. There is no third answer. */
@@ -830,15 +830,53 @@ export const derivedWrapper = (draft: FleetAccountDraft): string =>
 const INSTRUCTIONS_DIRECTORY = 'instructions';
 
 /**
+ * The fixed part of an instructions document's name, per harness.
+ *
+ * The PREFIX is not a choice and the middle is. A person browsing the store should be able to see at
+ * a glance which harness a document is for, and `CLAUDE-` / `AGENTS-` is what each harness already
+ * calls its own file — so the prefix follows from the harness the account runs and is never offered.
+ * What they name is the part after it: `CLAUDE-auto.md`, `AGENTS-review.md`.
+ */
+export const INSTRUCTIONS_PREFIX: Readonly<Record<FleetHarnessKind, string>> = {
+  claude: 'CLAUDE-',
+  codex: 'AGENTS-',
+};
+
+/** A store document's path from the part a person named. Empty middle names nothing, never a bare prefix. */
+export const instructionsPathFor = (harness: FleetHarnessKind, middle: string): string =>
+  middle.trim() === '' ? '' : `${INSTRUCTIONS_DIRECTORY}/${INSTRUCTIONS_PREFIX[harness]}${middle.trim()}.md`;
+
+/**
+ * The part a person named, recovered from a path this scheme produced, or `undefined` for anything
+ * else.
+ *
+ * `undefined` rather than a best guess: a path that does not follow the scheme — one typed before
+ * this scheme existed, or one pointing at a document somebody else named — is not a middle with a
+ * prefix missing, and offering to edit "the name" of it would silently rewrite where it points.
+ */
+export const instructionsMiddleOf = (harness: FleetHarnessKind, path: string): string | undefined => {
+  const head = `${INSTRUCTIONS_DIRECTORY}/${INSTRUCTIONS_PREFIX[harness]}`;
+  if (!path.startsWith(head) || !path.endsWith('.md')) return undefined;
+  const middle = path.slice(head.length, -'.md'.length);
+  return middle === '' ? undefined : middle;
+};
+
+/**
  * The document a NEW account's instructions are written to, derived from the account being created.
  *
- * Empty while the account has no name. Deriving `instructions/claude-.md` from a half-typed form would
- * be a fabricated path — and worse, a path that stops matching the account the moment the name lands.
+ * The middle is the WRAPPER minus its harness prefix, which is what makes it unique per lane:
+ * `claude-auto-atelier` gives `CLAUDE-auto-atelier.md`, so two lanes of one provider account cannot
+ * derive one path and silently write over each other. The person renames it to anything they like.
+ *
+ * Empty while the account has no name. Deriving `instructions/CLAUDE-.md` from a half-typed form
+ * would be a fabricated path — and worse, one that stops matching the account the moment a name lands.
  */
-export const derivedInstructionsPath = (draft: FleetAccountDraft): string =>
-  draft.name.trim() === ''
-    ? ''
-    : `${INSTRUCTIONS_DIRECTORY}/${derivedWrapper({ ...draft, name: draft.name.trim() })}.md`;
+export const derivedInstructionsPath = (draft: FleetAccountDraft): string => {
+  const name = draft.name.trim();
+  if (name === '') return '';
+  const wrapper = derivedWrapper({ ...draft, name });
+  return instructionsPathFor(draft.harness, wrapper.slice(`${draft.harness}-`.length));
+};
 
 /** One harness's discovery, or `undefined` when this report says nothing about that kind. */
 export const discoveredHarness = (
@@ -918,7 +956,8 @@ const modelNote = (models: HarnessDiscovery['models']): string =>
 const instructionsTextNote = (source: string, bytes: number): string =>
   `Imported — ${source} (${String(bytes)} bytes). Edit it here; nothing is written until you review and authorize the change.`;
 
-const DERIVED_PATH_NOTE = 'Derived — from the wrapper name above. Choose another document, or edit the path.';
+const DERIVED_PATH_NOTE =
+  'Derived — from the account and lane above. Rename it, or point at a document already in the store.';
 
 /**
  * Does the person own this field now?

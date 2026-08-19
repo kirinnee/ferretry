@@ -19,6 +19,7 @@ import type {
   DoctorReport,
   GrantRefusal,
   GrantsView,
+  HarnessDiscoveryReport,
   LearningStatus,
   PairedDevicesView,
   PairingCodeMintResponse,
@@ -115,16 +116,14 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import { FleetAccountStepper } from '../src/features/fleet/fleet-account-stepper.tsx';
 import type {
   FleetApplyOutcome,
+  FleetConfigView,
   FleetManifestAccountView,
   FleetProposalView,
 } from '../src/features/fleet/fleet-api.ts';
-import {
-  FleetAccountForm,
-  type FleetInstructionsControl,
-  FleetLayerForm,
-} from '../src/features/fleet/fleet-change-forms.tsx';
+import { FleetLayerForm } from '../src/features/fleet/fleet-change-forms.tsx';
 import {
   emptyAccountDraft,
   type FleetAccountDraft,
@@ -139,6 +138,11 @@ import {
 } from '../src/features/fleet/fleet-change-review.tsx';
 import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
+import {
+  FLEET_STEP_IDS,
+  type FleetInstructionsControl,
+  type FleetSkillsStoreItem,
+} from '../src/features/fleet/fleet-stepper-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
 import { type RemoteLoginStep, RemoteLoginSurface } from '../src/features/fleet/remote-login-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
@@ -457,6 +461,88 @@ const HARNESS_FLEET_INSTRUCTIONS: FleetInstructionsControl = {
   onChoose: () => {},
   loading: false,
 };
+
+/**
+ * A fleet whose store already holds two skills directories and whose operator declared a lane of
+ * their own, so the stepper renders both the store picker with real linkers on it and the lane
+ * escape hatch that only appears when a fleet has lanes no mode would derive.
+ */
+const HARNESS_FLEET_CONFIG: FleetConfigView = {
+  variants: { default: {}, auto: {}, review: {} },
+  agents: [
+    {
+      name: 'studio',
+      kind: 'claude',
+      routes: {
+        default: {
+          id: 'b2f0f0c8-7d3e-4a7d-9a1f-2b4a6d9e1c33',
+          wrapper: 'claude-studio',
+          layer: { skills: 'skills/studio' },
+        },
+        auto: {
+          id: 'c3a1e1d9-8e4f-4b8e-8b20-3c5b7eaf2d44',
+          wrapper: 'claude-auto-studio',
+          layer: { skills: 'skills/studio' },
+        },
+      },
+    },
+  ],
+};
+
+const HARNESS_FLEET_DISCOVERY: HarnessDiscoveryReport = {
+  harnesses: [
+    {
+      kind: 'claude',
+      command: '/usr/local/bin/claude',
+      absenceImpact:
+        'A wrapper this fleet publishes for a Claude account runs `claude`. Without it on this host, the wrapper exists and no Claude session can start.',
+      models: {
+        origin: 'detected',
+        ids: ['claude-opus-5'],
+        defaultModel: 'claude-opus-5',
+        source: '/home/pilot/.claude/settings.json',
+      },
+      instructions: {
+        found: true,
+        source: '/home/pilot/.claude/CLAUDE.md',
+        text: '# Atelier\n\nBe exact.\n',
+        bytes: 86,
+      },
+    },
+    {
+      kind: 'codex',
+      absenceImpact:
+        'A wrapper this fleet publishes for a Codex account runs `codex`. Without it on this host, the wrapper exists and no Codex session can start.',
+      models: {
+        origin: 'fallback',
+        ids: ['gpt-5.6'],
+        defaultModel: 'gpt-5.6',
+        source:
+          'Ferretry\u2019s starter model for codex, because there is no /home/pilot/.codex/config.toml on this host',
+      },
+      instructions: {
+        found: false,
+        source: '/home/pilot/.codex/AGENTS.md',
+        reason: 'this host has no AGENTS.md there',
+      },
+    },
+  ],
+  noneInstalled: false,
+  limitation:
+    'Every answer here is a PATH lookup and a file read. It does not prove a harness is signed in, has credit, or can reach its provider.',
+};
+
+/** Instructions documents already in the store, so the "use an existing one" branch has options. */
+const HARNESS_FLEET_STORE_DOCUMENTS: readonly string[] = [
+  'instructions/CLAUDE-house-rules.md',
+  'instructions/CLAUDE-studio.md',
+];
+
+/** Two store directories, one of them linked by two accounts and one linked by nothing yet. */
+const HARNESS_FLEET_SKILLS_STORE: readonly FleetSkillsStoreItem[] = [
+  { path: 'skills/studio', accounts: ['claude-studio', 'claude-auto-studio'] },
+  { path: 'skills/research', accounts: [] },
+];
 
 const HARNESS_FLEET_LAYER: FleetLayerDraft = {
   instructions: {
@@ -5190,23 +5276,44 @@ function Shell() {
       ),
     },
     {
-      label: 'Fleet create account',
+      /**
+       * EVERY STEP OF THE NEW-ACCOUNT SEQUENCE, one card each.
+       *
+       * A single card would prove that step one fits a phone and say nothing about the other six —
+       * and the model step, with a card per model and a custom-value row, is the widest of them. The
+       * step is a PROP rather than component state precisely so this gallery can render each one
+       * directly instead of driving six clicks per viewport per theme.
+       */
+      label: 'Fleet new account stepper',
       render: () => (
-        <Card id="harness-fleet-create" aria-label="Fleet create account" className="min-w-0 overflow-hidden">
+        <Card id="harness-fleet-stepper" aria-label="Fleet new account stepper" className="min-w-0 overflow-hidden">
           <PanelBody>
-            <div className="kt-panel overflow-hidden">
-              <FleetAccountForm
-                draft={HARNESS_FLEET_DRAFT}
-                onChange={() => {}}
-                onSubmit={() => {}}
-                onCancel={() => {}}
-                problems={[]}
-                disabled={false}
-                loading={false}
-                detection={HARNESS_FLEET_DETECTION}
-                instructions={HARNESS_FLEET_INSTRUCTIONS}
-                variants={['default', 'auto']}
-              />
+            <div className="grid gap-4">
+              {FLEET_STEP_IDS.map(step => (
+                <div key={step} className="kt-panel overflow-hidden" data-harness={`fleet-stepper-${step}`}>
+                  <FleetAccountStepper
+                    draft={HARNESS_FLEET_DRAFT}
+                    step={step}
+                    onStep={() => {}}
+                    onChange={() => {}}
+                    onSubmit={() => {}}
+                    onCancel={() => {}}
+                    disabled={false}
+                    loading={false}
+                    detection={HARNESS_FLEET_DETECTION}
+                    instructions={HARNESS_FLEET_INSTRUCTIONS}
+                    instructionsSource="import"
+                    onInstructionsSource={() => {}}
+                    variants={['default', 'auto', 'review']}
+                    config={HARNESS_FLEET_CONFIG}
+                    discovery={HARNESS_FLEET_DISCOVERY}
+                    published={HARNESS_FLEET_ACCOUNTS}
+                    skillsStore={HARNESS_FLEET_SKILLS_STORE}
+                    storeDocuments={HARNESS_FLEET_STORE_DOCUMENTS}
+                    assetBlockers={[]}
+                  />
+                </div>
+              ))}
             </div>
           </PanelBody>
         </Card>
@@ -6844,6 +6951,9 @@ const HARNESS_FLEET_COCKPIT_ANSWERS: Readonly<Record<string, unknown>> = {
   },
   '/accounts': { version: 1, generatedAt: '2026-08-05T08:26:00.000Z', accounts: HARNESS_FLEET_ACCOUNTS },
   '/config': { variants: { default: {}, auto: {} }, agents: [] },
+  // WHAT THIS HOST HAS. Without it the new-account sequence opens unprefilled, which is the OLD screen:
+  // every capture would show empty boxes and prove nothing about the one property the panel gained.
+  '/harnesses': HARNESS_FLEET_DISCOVERY,
   // Every compose flow lists the asset tree, because a path the person types has to be judged against
   // what is already there. A daemon that cannot answer this is a daemon whose tree is unknown, and the
   // surface then refuses to stage anything — so a harness without this route would capture a blocked
@@ -6992,19 +7102,34 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
         </section>
       )}
       {frame !== 'create' ? null : (
-        <section aria-label="Fleet create account" className="kt-panel overflow-hidden" id="harness-fleet-create-page">
-          <FleetAccountForm
-            draft={HARNESS_FLEET_DRAFT}
-            onChange={() => {}}
-            onSubmit={() => {}}
-            onCancel={() => {}}
-            problems={[]}
-            disabled={false}
-            loading={false}
-            detection={HARNESS_FLEET_DETECTION}
-            instructions={HARNESS_FLEET_INSTRUCTIONS}
-            variants={['default', 'auto']}
-          />
+        <section aria-label="Fleet create account" id="harness-fleet-create-page" className="grid gap-4">
+          {/* Every step, each in its own panel with its own hook, so the geometry gate can take one
+              at a time rather than one image of a stack it cannot attribute a failure to. */}
+          {FLEET_STEP_IDS.map(step => (
+            <div key={step} className="kt-panel overflow-hidden" data-harness={`fleet-stepper-${step}`}>
+              <FleetAccountStepper
+                draft={HARNESS_FLEET_DRAFT}
+                step={step}
+                onStep={() => {}}
+                onChange={() => {}}
+                onSubmit={() => {}}
+                onCancel={() => {}}
+                disabled={false}
+                loading={false}
+                detection={HARNESS_FLEET_DETECTION}
+                instructions={HARNESS_FLEET_INSTRUCTIONS}
+                instructionsSource="import"
+                onInstructionsSource={() => {}}
+                variants={['default', 'auto', 'review']}
+                config={HARNESS_FLEET_CONFIG}
+                discovery={HARNESS_FLEET_DISCOVERY}
+                published={HARNESS_FLEET_ACCOUNTS}
+                skillsStore={HARNESS_FLEET_SKILLS_STORE}
+                storeDocuments={HARNESS_FLEET_STORE_DOCUMENTS}
+                assetBlockers={[]}
+              />
+            </div>
+          ))}
         </section>
       )}
       {frame !== 'layer' ? null : (

@@ -20,10 +20,10 @@ import {
   emptyAccountDraft,
   emptyLayerDraft,
   type FleetAccountDraft,
+  type FleetLayerDraft,
   fleetApplyAuthority,
   fleetApplyCopy,
   fleetApplyNeedsPassword,
-  type FleetLayerDraft,
   harnessEvidence,
   initializeProposal,
   instructionsAssets,
@@ -1185,10 +1185,10 @@ describe('the account form fills itself in from what the host has', () => {
   });
 
   it('derives the instructions document name from the account, and only once it has one', () => {
-    // Arrange — the screenshot had a person typing `instructions/claude-studio.md` from nothing.
+    // Arrange — the screenshot had a person typing `instructions/CLAUDE-studio.md` from nothing.
     const draft = opened();
 
-    // Assert — nothing derived yet, because there is nothing to derive FROM. `instructions/claude-.md`
+    // Assert — nothing derived yet, because there is nothing to derive FROM. `instructions/CLAUDE-.md`
     // would be a fabricated path that stops matching the account the moment a name lands.
     expect(draft.layer.instructions.path).toBe('');
     expect(draft.prefilled.instructionsPath).toBeUndefined();
@@ -1197,11 +1197,11 @@ describe('the account form fills itself in from what the host has', () => {
     const named = reconcileAccountDraft(draft, { ...draft, name: 'studio' }, discovery());
 
     // Assert
-    expect(named.layer.instructions.path).toBe('instructions/claude-studio.md');
+    expect(named.layer.instructions.path).toBe('instructions/CLAUDE-studio.md');
     expect(named.prefilled.instructionsPath).toContain('Derived');
     // It keeps up with the account: a lane and a harness are part of the wrapper name.
     const relaned = reconcileAccountDraft(named, { ...named, variant: 'auto' }, discovery());
-    expect(relaned.layer.instructions.path).toBe('instructions/claude-auto-studio.md');
+    expect(relaned.layer.instructions.path).toBe('instructions/CLAUDE-auto-studio.md');
   });
 
   it('stops deriving the path the moment a person names their own, and starts again if they clear it', () => {
@@ -1228,7 +1228,7 @@ describe('the account form fills itself in from what the host has', () => {
     );
 
     // Assert
-    expect(cleared.layer.instructions.path).toBe('instructions/claude-atelier.md');
+    expect(cleared.layer.instructions.path).toBe('instructions/CLAUDE-atelier.md');
   });
 
   it('drops the provenance note for every field the person edits, and keeps the others', () => {
@@ -1265,7 +1265,7 @@ describe('the account form fills itself in from what the host has', () => {
     expect(switched.prefilled.instructionsText).toBeUndefined();
     // The derived name follows the harness too, because the wrapper name does.
     const named = reconcileAccountDraft(switched, { ...switched, name: 'studio' }, report);
-    expect(named.layer.instructions.path).toBe('instructions/codex-studio.md');
+    expect(named.layer.instructions.path).toBe('instructions/AGENTS-studio.md');
   });
 
   it('never overwrites a model list the person typed, even when the harness changes', () => {
@@ -1314,13 +1314,13 @@ describe('the account form fills itself in from what the host has', () => {
     expect(draft.prefilled).toEqual({});
     // And an edit against a null discovery still reconciles rather than throwing.
     expect(reconcileAccountDraft(draft, { ...draft, name: 'studio' }, null).layer.instructions.path).toBe(
-      'instructions/claude-studio.md',
+      'instructions/CLAUDE-studio.md',
     );
   });
 });
 
 describe('a fleet with more than one instructions document', () => {
-  const listed = ['instructions/house-rules.md', 'instructions/claude-atelier.md', 'skills/studio/review.md'];
+  const listed = ['instructions/house-rules.md', 'instructions/CLAUDE-atelier.md', 'skills/studio/review.md'];
 
   it('offers every asset that is not part of a declared skills directory', () => {
     // Arrange — which directories hold skills is something the CONFIGURATION states, so it is asked
@@ -1333,7 +1333,7 @@ describe('a fleet with more than one instructions document', () => {
     const offered = instructionsAssets(listed, declaredWithSkills);
 
     // Assert — sorted, deduplicated, and with the skill document excluded.
-    expect(offered).toEqual(['instructions/claude-atelier.md', 'instructions/house-rules.md']);
+    expect(offered).toEqual(['instructions/CLAUDE-atelier.md', 'instructions/house-rules.md']);
     // With no skills directory declared, nothing is excluded: the browser does not invent a convention.
     expect(instructionsAssets(listed, config())).toHaveLength(3);
     expect(instructionsAssets(['a.md', 'a.md'], null)).toEqual(['a.md']);
@@ -1352,7 +1352,7 @@ describe('a fleet with more than one instructions document', () => {
       'new-blank',
       'asset:instructions/house-rules.md',
     ]);
-    expect(choices[0]?.label).toContain('instructions/claude-atelier.md');
+    expect(choices[0]?.label).toContain('instructions/CLAUDE-atelier.md');
     expect(choices[0]?.detail).toContain('/home/pilot/.claude/CLAUDE.md');
     expect(choices[2]?.detail).toContain('rewrites the one document every account using it reads');
   });
@@ -1423,11 +1423,11 @@ describe('a fleet with more than one instructions document', () => {
     // Assert — the path moves BACK to the derived one in both cases, which is what "new document" means.
     expect(imported.load).toBeUndefined();
     expect(imported.draft.layer.instructions).toEqual({
-      path: 'instructions/claude-atelier.md',
+      path: 'instructions/CLAUDE-atelier.md',
       text: '# House rules\n',
     });
     expect(imported.draft.prefilled.instructionsText).toContain('Imported');
-    expect(blank.draft.layer.instructions).toEqual({ path: 'instructions/claude-atelier.md', text: '' });
+    expect(blank.draft.layer.instructions).toEqual({ path: 'instructions/CLAUDE-atelier.md', text: '' });
     // And the empty option makes NO claim about contents it did not fill in.
     expect(blank.draft.prefilled.instructionsText).toBeUndefined();
     expect(blank.draft.prefilled.instructionsPath).toContain('Derived');
