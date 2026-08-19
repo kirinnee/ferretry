@@ -553,6 +553,9 @@ import {
 import { MAX_ASSET_FILE_BYTES } from '../src/lib/fleet/assets.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
+import { PlatformFleetCredentialStore, readFleetWrapperScript, SpawnCredentialCommand } from '@ferretry/fleet/adapters';
+import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
+import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import { daemonVersion } from '../src/lib/version.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -4476,6 +4479,42 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         }),
     },
   });
+  /**
+   * Driving a harness's own sign-in from a browser, holding no token.
+   *
+   * IT READS THE FLEET THROUGH THE FLEET SUBSYSTEM, two methods wide. `config` and `accounts` are
+   * already its public surface, so nothing here re-implements configuration or manifest loading, and
+   * this service cannot propose a change, apply one, or write an asset.
+   *
+   * IT GETS ITS OWN CREDENTIAL STORE, and that is deliberate rather than a missed reuse: the usage
+   * probe's store exists to hand a bearer token to a provider call, and this one exists to CLASSIFY and
+   * to CLONE. The store is stateless and constructed from injected facts, so two instances cannot
+   * disagree; sharing one would only couple two unrelated reasons for holding it.
+   *
+   * IT IS GIVEN THIS PROCESS'S ENVIRONMENT, which the service sanitizes before any child sees it. A
+   * login started from inside an agent session must not inherit that session's provider credentials, or
+   * the sign-in for account B authenticates against account A's key.
+   *
+   * THE CONFIRMATION IS THE SAME CLOSURE THE FLEET TAKES, routed to the one grant service this daemon
+   * has, so the attempt a wrong password spends is one of the same five an unlock spends.
+   */
+  const harnessLogin = new HarnessLoginService({
+    fleet,
+    credentials: new PlatformFleetCredentialStore({
+      platform: process.platform,
+      command: new SpawnCredentialCommand(),
+      now: () => millisecondClock.now(),
+      keychainAccount: process.env.USER ?? '',
+    }),
+    clock: millisecondClock,
+    mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
+    spawn: spawnHarnessLoginChild,
+    environment: process.env,
+    readWrapper: readFleetWrapperScript,
+    timer: harnessLoginTimer,
+    confirmChange: async password => await grants.confirmChange(password),
+    clientName: CLIENT_NAME,
+  });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */
   const advisorOver = (usage: UsageFeedPort): TeamAdvisor => new TeamAdvisor(accounts, routing, usage);
@@ -5596,6 +5635,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
         fleet,
+        harnessLogin,
         /**
          * How much of this machine the managed fleet may take.
          *

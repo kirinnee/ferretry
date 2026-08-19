@@ -18,6 +18,7 @@ export * from './foreign-history.ts';
 export * from './grants.ts';
 export * from './handover.ts';
 export * from './harness-discovery.ts';
+export * from './harness-login.ts';
 export * from './learning.ts';
 export * from './pairing.ts';
 export * from './pins.ts';

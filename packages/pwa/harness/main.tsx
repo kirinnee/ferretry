@@ -144,7 +144,8 @@ import {
   type FleetSkillsStoreItem,
 } from '../src/features/fleet/fleet-stepper-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
-import { type RemoteLoginStep, RemoteLoginSurface } from '../src/features/fleet/remote-login-surface.tsx';
+import { ClaudeLoginPanel } from '../src/features/fleet/claude-login-panel.tsx';
+import { CodexLoginPanel } from '../src/features/fleet/codex-login-panel.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
@@ -694,42 +695,69 @@ const HARNESS_FLEET_FAILURE = {
   lockResidue: '/home/pilot/.ferretry/fleet/apply.lock',
 } satisfies FleetApplyOutcome;
 
-const HARNESS_REMOTE_LOGIN_URL = 'https://accounts.example.test/authorize?state=harness-state';
-
 /**
- * A safe, local-only journey for visual review. The callbacks are obvious
- * fixtures, never provider credentials, and the component still clears them
- * before either terminal state is painted.
+ * The two sign-in fixtures, one per harness, at the states worth looking at.
+ *
+ * BOTH URLS AND THE CODE ARE OBVIOUS FIXTURES. The Claude one carries a `code_challenge_method=S256`
+ * query exactly as the real one does, because that is the part a narrow renderer breaks on. Nothing
+ * here is a credential, and the panels' own clearing behaviour is unchanged by rendering them.
+ *
+ * TWO HARNESSES, TWO FIXTURES, DELIBERATELY. A shared one would have had to invent a shape neither
+ * panel has.
  */
-function RemoteLoginHarness() {
-  const start = async (): Promise<RemoteLoginStep> => ({
-    kind: 'awaiting-callback',
-    authorizationUrl: HARNESS_REMOTE_LOGIN_URL,
-  });
-  const submit = async (redirectUrl: string): Promise<RemoteLoginStep> =>
-    redirectUrl.includes('rejected')
-      ? { kind: 'rejected', reason: 'This callback does not match the sign-in started on Studio workstation.' }
-      : { kind: 'complete', copiedToSiblings: 2 };
+const HARNESS_CLAUDE_LOGIN_URL =
+  'https://claude.com/cai/oauth/authorize?code=true&code_challenge_method=S256&state=harness';
+const HARNESS_CODEX_LOGIN_URL = 'https://auth.openai.com/codex/device';
 
+const HARNESS_LOGIN_FLOW_BASE = {
+  flowId: 'harness-flow',
+  accountId: '00000000-0000-4000-8000-0000000000aa',
+  startedAt: '2026-08-19T10:00:00.000Z',
+  expiresAt: '2026-08-19T10:10:00.000Z',
+} as const;
+
+function RemoteLoginHarness() {
   return (
-    <div data-harness="remote-login">
-      <RemoteLoginSurface
-        daemonId={daemon.daemonId}
-        identity={{
+    <div data-harness="remote-login" className="space-y-3">
+      <ClaudeLoginPanel
+        accountLabel="Studio Claude"
+        identity="claude:studio"
+        memberCount={3}
+        flow={{
+          harness: 'claude',
+          ...HARNESS_LOGIN_FLOW_BASE,
           identity: 'claude:studio',
-          provider: 'claude',
-          accountLabel: 'Studio Claude',
-          memberCount: 3,
+          state: 'awaiting-code',
+          verificationUrl: HARNESS_CLAUDE_LOGIN_URL,
         }}
-        initialStep={{ kind: 'ready' }}
-        onStart={start}
-        onSubmitRedirect={submit}
+        busy={false}
+        refusal={null}
+        onStart={() => undefined}
+        onSubmitCode={() => undefined}
+        onCancel={() => undefined}
+        copy={async () => {}}
+      />
+      <CodexLoginPanel
+        accountLabel="Studio Codex"
+        identity="codex:studio"
+        memberCount={2}
+        flow={{
+          harness: 'codex',
+          ...HARNESS_LOGIN_FLOW_BASE,
+          identity: 'codex:studio',
+          state: 'awaiting-approval',
+          verificationUrl: HARNESS_CODEX_LOGIN_URL,
+          userCode: '0IER-FFQW6',
+        }}
+        busy={false}
+        refusal={null}
+        onStart={() => undefined}
+        onCancel={() => undefined}
         copy={async () => {}}
       />
     </div>
   );
 }
-
 /**
  * A skills catalog covering both scopes and every origin chip, so the row
  * chrome, the group headings and the badge column can all be compared against

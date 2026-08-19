@@ -21,6 +21,7 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
+import { fleetSignInTab } from './features/fleet/fleet-sign-in-section.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
@@ -856,6 +857,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       },
       pricingSettingsTab(createDaemonClient),
       fleetSettingsTab(async daemon => await store.clients.client(daemon)),
+      // Directly after Fleet: the accounts, then who is signed in to them.
+      fleetSignInTab(async daemon => await store.clients.client(daemon)),
     ],
     [createDaemonClient, store.clients],
   );

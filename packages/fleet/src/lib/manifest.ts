@@ -216,7 +216,18 @@ export function buildFleetManifest(input: FleetManifestInput): FleetManifest {
  * lane or model from this string — {@link FleetManifestAccount.kind} and its siblings declare those.
  */
 export function wrapperName(account: FleetManifestAccount): string {
-  return basename(account.wrapper);
+  return wrapperNameOf(account.wrapper);
+}
+
+/**
+ * The same derivation, for a caller that holds the published PATH rather than the whole account.
+ *
+ * One owner for one rule. An identity member and a usage row both carry a wrapper and neither is a
+ * {@link FleetManifestAccount}, and a second `basename` call elsewhere is how two consumers come to
+ * disagree about what an account is called on a host whose separator is not the one they assumed.
+ */
+export function wrapperNameOf(publishedPath: string): string {
+  return basename(publishedPath);
 }
 
 /** Model ids this account may actually be asked to serve. Never includes an unavailable model. */

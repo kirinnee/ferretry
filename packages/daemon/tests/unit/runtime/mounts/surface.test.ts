@@ -142,6 +142,23 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  harnessLogin: {
+    readiness: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    start: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    status: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    submit: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    cancel: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   cgroups: {
     config: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -417,7 +434,9 @@ describe('the mounted daemon surface', () => {
     // The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than
     // a census of today's table — but a table that used it exactly once, for a mechanism the
     // capability model already answered, is worth reading as evidence rather than as trivia.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 });
+    // 129 fleet-and-session routes, plus the five that drive a harness sign-in. Written as a sum so
+    // that two changes landing together cannot silently agree on one total.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 + 5 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -482,6 +501,16 @@ describe('the mounted daemon surface', () => {
       // vocabulary. It went in the same change as the `fy fleet authorize` verb that dialled it,
       // because the route-agreement allowlist may only shrink.
       'POST /v1/fleet/proposals/:proposalId/apply',
+      // Driving a harness’s own sign-in. NOTE WHAT IS ABSENT: no route here accepts or returns a
+      // provider token. Two values go out — a verification URL, and for Codex a device code — and one
+      // short-lived authorization code comes in, straight to the harness child’s stdin. The readiness
+      // read is `fleet.use` like the other reads; every other route here is `fleet.configure`, because
+      // the risk is account substitution rather than disclosure.
+      'GET /v1/fleet/login',
+      'POST /v1/fleet/login',
+      'GET /v1/fleet/login/:flowId',
+      'POST /v1/fleet/login/:flowId',
+      'DELETE /v1/fleet/login/:flowId',
       // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or
       // destroys a slice, because the units are transient and belong to the launches that made them.

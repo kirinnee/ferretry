@@ -5,9 +5,13 @@ title: Can a harness login be driven from the UI?
 
 # Can a harness login be driven from the UI?
 
-**Status: PROPOSED. Nothing here is built, and this document changes no production code.**
-**Verified against `origin/main` at `81158ca3` (`release: 3.1.2`).**
-Every claim about current behaviour below cites a file and line at that commit.
+**Status: BUILT.** The decision in §7 was taken and answered **yes**, and §3 is implemented — the
+credential-state read, both harness flows, the five routes and the surface that drives them. Section 6
+records which GAPs survived and what closed.
+**The design was verified against `origin/main` at `81158ca3` (`release: 3.1.2`)**, and every claim
+about behaviour BEFORE the build cites a file and line at that commit. Where the build learned something
+the design could only assume, the assumption is replaced in place and the observation is dated — §4.2 is
+the one that mattered.
 
 It answers the owner's request:
 
@@ -43,15 +47,24 @@ reconcilable with `use, never read`, and §3 is the shape.
 
 **Two things make it easy to get wrong, and both are already in the tree.**
 
-1. **A UI for this is already on `main`, and it is one sentence away from the wrong design.**
-   `packages/pwa/src/features/fleet/remote-login-surface.tsx` is a complete URL-out / URL-back login
-   panel — rendered only in the dev harness (`packages/pwa/harness/main.tsx:630`), dialling nothing,
-   because no daemon route exists. Its header says "The daemon owns callback-origin and OAuth-state
-   validation" (`:1-8`) and its form says "The daemon checks the callback origin and one-time state"
-   (`:281`). Read as _the daemon is the OAuth client_, that is the design this section refuses. Read
-   as _the daemon checks the pasted URL belongs to the flow it started_, it is right and it is what
-   §3 builds. The component needs no change; the reading has to be written down before somebody
-   implements the other one.
+1. **A UI for this was already on `main`, and it was one sentence away from the wrong design.**
+   `packages/pwa/src/features/fleet/remote-login-surface.tsx` was a complete URL-out / URL-back login
+   panel — rendered only in the dev harness, dialling nothing, because no daemon route existed. Its header
+   said "The daemon owns callback-origin and OAuth-state validation" and its form said "The daemon checks
+   the callback origin and one-time state". Read as _the daemon is the OAuth client_, that is the design
+   this section refuses.
+
+   > **RETRACTED BY THE BUILD.** This section concluded "the component needs no change; the reading has to
+   > be written down". That was wrong, and the reason is a fact neither reading had: running
+   > `claude auth login --claudeai` shows `redirect_uri=https://platform.claude.com/oauth/code/callback`
+   > — a HOSTED page that shows the reader a code. **There is no localhost callback in this flow at all**,
+   > so the panel's "after the provider redirects to the daemon's localhost callback, copy the complete
+   > address-bar URL" asked for something a person never sees, and its "the daemon checks the callback
+   > origin and one-time state" described a check the daemon cannot perform — it holds no verifier and no
+   > state. Neither sentence was salvageable by choosing a reading. The panel is **deleted**, and
+   > `claude-login-panel.tsx` and `codex-login-panel.tsx` replace it, one per harness. What it got right
+   > is kept: it cleared the field before the request settled, and it said so to the reader.
+
 2. **The already-surveyed plan contains one recommendation that must be dropped for this flow.**
    `docs/migration/surveys/harness-login-flows.md:100-101` advises preferring
    `codex login --with-access-token` (stdin) over flags that take a secret as an argument. That is
@@ -136,7 +149,7 @@ purpose, because it renews itself the first time each sibling runs (`identity.ts
 So thirty wrappers on six provider accounts are **six** interactions, not thirty — and the UI flow
 inherits that arithmetic for free. It also inherits the check the panel on `main` already promises
 ("The daemon verifies the new credential before copying it",
-`remote-login-surface.tsx:150-154`): `clone` re-reads and re-classifies the donor at copy time
+the deleted panel, whose promise both replacements keep): `clone` re-reads and re-classifies the donor at copy time
 (`credential-store.ts:166-192`), and a login that exits zero but leaves the identity with no usable
 credential is reported as a failure, not a success (`login.ts:157-184`, `96`).
 
@@ -224,7 +237,7 @@ answer must be a citation rather than a reassurance.
 3. **The submitted value is write-only.** Never echoed into a status, an error message, a log line,
    the grant audit journal or a transcript. The panel on `main` already holds up its half — it clears
    the field before the request settles and says so to the reader
-   (`remote-login-surface.tsx:96-100`, `235-240`).
+   (it did, and both replacement panels keep that behaviour and keep saying so to the reader).
 4. **No `PATH` fallback in the daemon.** `process-login.ts:66-72` falls back to the bare `claude` /
    `codex` binary when a wrapper is missing. A daemon started by a service manager inherits no shell
    profile — `packages/daemon/src/lib/core/harness-readiness.ts:15-24` exists because of exactly that
@@ -268,11 +281,13 @@ harness.
 Two costs come with it, and neither is hypothetical:
 
 - **The daemon reads harness stdout** (rule 2 above). Piping is what makes the flow remotable at all.
-- **The Claude leg depends on the code being PKCE-bound.** That is a property of somebody else's OAuth
-  client, not of this repository, and it cannot be cited from here. If it is ever false, the pasted
-  code becomes independently redeemable while the daemon holds it for milliseconds — still not a
-  stored credential, but a different claim from the one above. It is written down so a future reader
-  checks it rather than inherits it.
+- **The Claude leg depends on the code being PKCE-bound, and this is now OBSERVED rather than assumed.**
+  It was written here as an assumption that "cannot be cited from here". It can: running
+  `claude auth login --claudeai` with piped stdio at **claude-code 2.1.220** (2026-08-19) prints an
+  authorization URL carrying `code_challenge=…&code_challenge_method=S256`. The challenge is in the URL
+  the child publishes, so the verifier is inside that child and the daemon could not redeem the code it
+  forwards even if it kept one. The check a future reader owes is now narrower: not "is it PKCE-bound"
+  but "is it STILL", on the version this host has — and the observation is repeatable in one command.
 
 **The alternative considered and not taken:** instead of writing the code to stdin, the daemon could
 replay the whole pasted callback URL at the child's own loopback listener — the harness has a
@@ -280,6 +295,29 @@ replay the whole pasted callback URL at the child's own loopback listener — th
 of the URL at all. That is marginally purer and needs a port the daemon must discover, on a path
 nothing in this repository has read. Recommendation: **stdin**, because the paste prompt was actually
 verified in the binary (`harness-login-flows.md:42-61`) and the port dance was not.
+
+### 4.2a Two traps a second implementation had already hit
+
+`kfleet`, the fleet manager this migration replaces, measures usage for providers this build does not,
+and two of its findings are invisible to anybody who reads only the endpoint. They are recorded here
+because both would be inherited by a future probe written from the obvious reading.
+
+**A provider's usage endpoint may serve data on a STALE token, so `authOk` must not be judged from the
+probe succeeding.** `kfleet` reads Codex usage from `GET https://chatgpt.com/backend-api/codex/usage`
+and deliberately decides `authOk` from the access token's own JWT expiry instead, because that endpoint
+answers for an expired one. Ferretry's `usageEndpointHttpVerdict` decides `authOk` from the HTTP status
+(`packages/fleet/src/lib/quota.ts`), which is right for the endpoint it was written for and would report
+a signed-out account as healthy if reused here. **Reporting an account healthy is worse than reporting
+nothing**, because the failover has nothing to route around.
+
+**An auth-failure code a provider returns transiently must be corroborated before a credential is
+condemned.** MiniMax answers `1004` / `2049` for a bad key AND, under load, for a working one;
+`kfleet` re-probes up to three times, spaced, before declaring one dead, and its comment records that a
+single blip once condemned an account that sixty later probes found fine. A port written from the status
+code alone would kill working accounts.
+
+Neither probe is built here — see §6 — and both are written down so that whoever builds one starts from
+the trap rather than from the endpoint.
 
 ### 4.3 Does a re-login flow need to reach the operator when a token expires?
 
@@ -289,6 +327,16 @@ verified in the binary (`harness-login-flows.md:42-61`) and the port dance was n
   a legitimate donor precisely because it renews itself on first use (`identity.ts:336-354`). What
   actually strands an account is a dead refresh token — `missing` across a whole identity — which is
   rarer than the fear suggests.
+
+  > **The mechanism is no longer only "it renews itself on first use".** `fy fleet login` now RENEWS an
+  > expired-but-refreshable credential deliberately, with no browser and no human, gated on a
+  > zero-network local expiry check (#375). So the re-login gap this section argues about has a mechanism
+  > with a commit behind it, and the fleet reports `renewed` as its own outcome. **One consequence lands
+  > on the sign-in surface:** a rotation the provider REJECTS makes Claude Code zero its own credential,
+  > so an account can move from `refreshable` to `missing` with nobody having touched it. That is
+  > correct — a refresh token the provider refuses was worth nothing — and it is why the surface says a
+  > refreshable credential renews itself _if the provider still accepts it_ rather than promising it will.
+
 - **Something already notices.** The fleet feed carries `authOk`, the daemon composes the remedy
   string "run `fy fleet login` for this account"
   (`packages/daemon/src/lib/usage/quota.ts:12-17`), and the recommender excludes the account with that
@@ -407,20 +455,55 @@ UI in front of a phone.
 
 ---
 
-## 6. Declared GAPs
+## 6. Declared GAPs, restated against the shipped state
 
-- **No notification when an account goes dead.** §4.3 argues the control matters more, and the
-  notification needs a daemon-level subject that neither attention nor push has. Named so its absence
-  is a decision.
-- **No cross-process lock over credential writes.** Pre-existing (§3.3 rule 5); this flow makes it
-  reachable from two places instead of one.
-- **`RemoteLoginSurface` is Claude-only** (`remote-login-surface.tsx:20`, `55-56`) and its step union
-  has no state for "a device code you type at the provider", which is Codex's whole flow. It is a
-  state to add, not a rewrite.
-- **Nothing here helps an API-key account** (§1.2). Rotating a key is `docs/secrets.md`.
-- **`unreadable` still needs a human.** A locked keychain or a credential a newer harness wrote is
-  refused, not overwritten (`identity.ts:19-34`), and no UI flow changes that: the correct answer to
-  "I could not tell" is still a person looking.
+### Closed by the build
+
+- **The dead end itself.** `quota auth!` had nothing to press. There is now a **Sign-in** settings tab
+  beside Fleet that says which accounts need one and offers it, and both quota readouts name where to go.
+  The control is there rather than inside the readout for the reason §7 gives: that component is rendered
+  by the chat header, the fleet table, the session card and the folder sidebar.
+- **`RemoteLoginSurface` was Claude-only, and it is gone rather than extended.** Its header claimed the
+  daemon owns "callback-origin and OAuth-state validation" and its copy asked for a URL redirected to "the
+  daemon's localhost callback". Neither is this design: the daemon holds no verifier and no state, and
+  `redirect_uri` is `https://platform.claude.com/oauth/code/callback` — a hosted page that shows the
+  reader a CODE, with no localhost callback anywhere in the path. A panel that told a person otherwise
+  would have described the daemon as the OAuth client, which is what §0 refuses. It is replaced by
+  `claude-login-panel.tsx` and `codex-login-panel.tsx` — one per harness, because a paste field and a
+  device code are two shapes, not one with two options.
+- **No route returned a credential classification.** `GET /v1/fleet/login` does, per identity and per
+  lane, and it says where a credential comes from when a sign-in does not apply.
+
+### Still open, and now with an owner where there is one
+
+- **No notification when an account goes dead.** Unchanged, and still a decision rather than an omission:
+  §4.3's argument holds, and a daemon-level attention subject still does not exist. The **control** shipped;
+  the **push** did not.
+- **No cross-process lock over credential writes.** Pre-existing (§3.3 rule 5) and now genuinely reachable
+  from two places: `fy fleet login` on the host, and a flow here. The daemon-side service is single-flight
+  **within itself** and its refusal says which flow holds an identity; it makes no claim about the host.
+- **Nothing here helps an API-key account** (§1.2). Unchanged — and the build makes the ABSENCE legible
+  rather than silent: such an account gets no control and a sentence naming the file or the variable its
+  credential comes from. Rotating a key is still `docs/secrets.md`.
+- **`unreadable` still needs a human.** Unchanged. The surface reports it as `Could not be read` with the
+  daemon's own reason, and offers no sign-in for it, because the fleet's verdict for that identity is
+  `indeterminate` rather than "needs a login".
+- **No usage probe for Codex, z.ai/GLM, MiniMax, or a CLIProxy pool.** The sign-in surface SHOWS what this
+  host measures and says **unknown** where nothing measured — never `0%`, and never "token-based", because
+  a ChatGPT subscription does have windows and nobody read them. Each probe is a known technique with a
+  recorded trap (§4.2a); `usage.cliProxy` is already a declared unimplemented capability that a
+  configuration asking for it is REFUSED on, and building any of them is separate work.
+
+### Named because it has an owner now
+
+- **Silent token renewal**, the mechanism that shrinks the notification gap by reducing how often anybody
+  is asked at all: renew an expired-but-refreshable credential with no browser and no human, gated on a
+  zero-network local expiry check. It is being built as its own unit (`feat/silent-token-refresh`) behind
+  `FleetTokenRefreshService`, deliberately outside this change: it is a third spawn path with two more
+  undocumented third-party dependencies. **One consequence lands on this surface and is worth knowing:** a
+  rotation the provider REJECTS makes Claude Code zero its own credential, so an account can move from
+  `refreshable` to `missing` with nobody having touched it — which is why this surface says a refreshable
+  credential renews itself "if the provider still accepts it" rather than promising that it will.
 
 ---
 
@@ -436,12 +519,13 @@ The engineering is tractable and mostly already written. The trade is one questi
 > two routes sit on `fleet.configure` with the existing per-change operator-password confirmation on
 > the start?**
 
-**Yes** → the order is: the credential-state read (§4.1) so the fleet table can finally say who needs
-a login; then Codex, because `--device-auth` needs no return trip; then Claude's paste leg; then wire
-`RemoteLoginSurface` to it and put a control where the dead end is. **That last step is wider than it
-looks:** the `quota auth!` readout is one component deliberately shared by the chat header, the fleet
-table, the session card and the folder sidebar (`packages/pwa/src/shell/quota-readout.tsx:1-19`), so
-the control belongs beside it in the fleet surface rather than inside a readout four screens render.
+**Yes** → the order was: the credential-state read (§4.1) so a surface can finally say who needs a
+sign-in; then both harness legs; then the surface that drives them and the control where the dead end was.
+**That last step was wider than it looks:** the `quota auth!` readout is one component deliberately shared
+by the chat header, the fleet table, the session card and the folder sidebar
+(`packages/pwa/src/shell/quota-readout.tsx:1-19`), so the control went **beside** it — a Sign-in tab
+immediately after Fleet — rather than inside a readout four screens render. Both readouts gained one
+sentence naming where to go, which is the only change either of them needed.
 
 **No** → the honest alternatives, both coherent:
 
@@ -452,7 +536,25 @@ the control belongs beside it in the fleet surface rather than inside a readout 
   login and prints the exact command, and `fy fleet login` stays the only way to run one. That is a
   half-day of work and it does not answer the owner's actual complaint.
 
-**Implementation is not authorised by this document.**
+**The decision was taken and the answer was YES.** What shipped differs from the sketch above in three
+places, each stated so a reader is not left comparing prose to code:
+
+1. **One flow per harness, not one parameterised flow.** `claude-flow.ts` and `codex-flow.ts` are two sets
+   of pure functions over two different stage unions, dispatched by a `switch`, with no base class and no
+   shared driver. Codex needs a partial stage (two values arrive on two lines) and has no submission at
+   all; Claude has a submission and no device code. A single flow would have needed both as options, which
+   is a shape that can express a Codex sign-in waiting for a paste.
+2. **A login is DECLARED per harness** — `packages/fleet/src/lib/harness-login.ts`. Both shipped harnesses
+   declare one, and the `false` arm exists so that the day a harness that does not is added, the assumption
+   is a compile error rather than an invisible one.
+3. **The credential SOURCE decides whether a sign-in applies at all** —
+   `packages/fleet/src/lib/credential-source.ts`, derived from the declared configuration and nothing read
+   from the host. A credential that arrives from a token file, the environment or the configuration gets no
+   control and a sentence naming where it does come from. This is not in §3 because §3 asked whether the
+   flow was possible; this is what stops it being offered where it cannot succeed.
+
+Five routes, not four: the §5 seam plus the credential-state read §4.1 asks for, which is the one that was
+blocking everything else. The seam is otherwise unchanged and the stepper was not touched.
 
 ---
 
@@ -473,25 +575,30 @@ the control belongs beside it in the fleet surface rather than inside a readout 
 
 ## Appendix B: the claims a reader is most likely to want to re-check
 
-| claim                                                     | how to re-check it                                                                          |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| no daemon route logs the fleet in                         | `rg -n --fixed-strings "path: '/v1/fleet" packages/daemon/src/lib/runtime/mounts/fleet.ts`  |
-| `fy fleet login` inherits a terminal                      | `packages/fleet/src/adapters/process-login.ts:89-97`                                        |
-| the login command is two literals                         | `rg -n --fixed-strings "HARNESS_LOGIN" packages/fleet/src/adapters/process-login.ts`        |
-| credential material never leaves the adapter              | `packages/fleet/src/adapters/credential-store.ts:16-18`, `194-206`                          |
-| the wire carries no credential classification             | `rg -n --fixed-strings "refreshable" packages/protocol/src packages/pwa/src` (no hits)      |
-| the roster already puts `home` and `wrapper` on the wire  | `packages/protocol/src/lib/fleet-changes.ts:564-577`                                        |
-| a login UI already exists and dials nothing               | `rg -n --fixed-strings "RemoteLoginSurface" packages/pwa` (harness and tests only)          |
-| both fleet axes default to enabled                        | `packages/daemon/src/lib/grants/policy.ts:42-49`                                            |
-| `use` is never password-gated; `configure` is             | `packages/daemon/src/lib/grants/policy.ts:211-229`                                          |
-| every attention board is session-scoped                   | `rg -n --fixed-strings "path: '/v1/sessions/:sessionId/attention'" packages/daemon/src`     |
-| nothing raises a daemon-caused attention item             | `rg -n --fixed-strings "kind: 'daemon'" packages/daemon/src` (state-machine read-back only) |
-| the browser meets a dead end today                        | `packages/pwa/src/shell/quota-readout.tsx:78-86`                                            |
-| a relay cannot read a data frame                          | `docs/relay-protocol.md:123-124`, `138`                                                     |
-| the remedy the daemon composes is a host command          | `packages/daemon/src/lib/usage/quota.ts:12-17`                                              |
-| a terminal cannot be pointed at a command                 | `packages/protocol/src/lib/terminal.ts:96-109`                                              |
-| readiness never runs a harness to answer a question       | `packages/daemon/src/lib/core/harness-readiness.ts:22-24`                                   |
-| the harness flows were read out of the installed binaries | `docs/migration/surveys/harness-login-flows.md:10-16`                                       |
+**Four rows below were TRUE BEFORE THE BUILD AND ARE FALSE NOW**, and they are marked rather than
+deleted: a reader comparing this document to `main` needs to see which claims moved. A grep whose answer
+has inverted is the dangerous kind — "no hits" reads as confirmation either way — so each says what the
+answer is now.
+
+| claim                                                                                                           | how to re-check it                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~no daemon route logs the fleet in~~ **NOW FALSE**: five do                                                    | `rg -n --fixed-strings "path: '/v1/fleet/login" packages/daemon/src/lib/runtime/mounts/fleet-login.ts`                                                                 |
+| `fy fleet login` inherits a terminal                                                                            | `packages/fleet/src/adapters/process-login.ts:89-97`                                                                                                                   |
+| the login command is two literals                                                                               | `rg -n --fixed-strings "HARNESS_LOGIN" packages/fleet/src/adapters/process-login.ts`                                                                                   |
+| credential material never leaves the adapter                                                                    | `packages/fleet/src/adapters/credential-store.ts:16-18`, `194-206`                                                                                                     |
+| ~~the wire carries no credential classification~~ **NOW FALSE**                                                 | `rg -n --fixed-strings "refreshable" packages/protocol/src packages/pwa/src` — `FleetCredentialReadingSchema` carries it                                               |
+| the roster already puts `home` and `wrapper` on the wire                                                        | `packages/protocol/src/lib/fleet-changes.ts:564-577`                                                                                                                   |
+| ~~a login UI already exists and dials nothing~~ **NOW FALSE**: it is deleted, and the two that replace it dial  | `rg -n --fixed-strings "startHarnessLogin" packages/pwa/src` — a grep for `RemoteLoginSurface` now finds NOTHING, which is the answer inverting rather than confirming |
+| both fleet axes default to enabled                                                                              | `packages/daemon/src/lib/grants/policy.ts:42-49`                                                                                                                       |
+| `use` is never password-gated; `configure` is                                                                   | `packages/daemon/src/lib/grants/policy.ts:211-229`                                                                                                                     |
+| every attention board is session-scoped                                                                         | `rg -n --fixed-strings "path: '/v1/sessions/:sessionId/attention'" packages/daemon/src`                                                                                |
+| nothing raises a daemon-caused attention item                                                                   | `rg -n --fixed-strings "kind: 'daemon'" packages/daemon/src` (state-machine read-back only)                                                                            |
+| ~~the browser meets a dead end today~~ **NOW FALSE**: the readout names where to go, and a Sign-in tab is there | `rg -n --fixed-strings "Settings ▸ Fleet" packages/pwa/src`                                                                                                            |
+| a relay cannot read a data frame                                                                                | `docs/relay-protocol.md:123-124`, `138`                                                                                                                                |
+| the remedy the daemon composes is a host command                                                                | `packages/daemon/src/lib/usage/quota.ts:12-17`                                                                                                                         |
+| a terminal cannot be pointed at a command                                                                       | `packages/protocol/src/lib/terminal.ts:96-109`                                                                                                                         |
+| readiness never runs a harness to answer a question                                                             | `packages/daemon/src/lib/core/harness-readiness.ts:22-24`                                                                                                              |
+| the harness flows were read out of the installed binaries                                                       | `docs/migration/surveys/harness-login-flows.md:10-16`                                                                                                                  |
 
 Use `--fixed-strings` on every one of those greps. `rg -r` is `--replace`, so `rg -rn "pattern" path`
 prints each hit with the pattern rewritten to `n` and reads as "it is not there" — the mistake
