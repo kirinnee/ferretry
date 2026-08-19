@@ -100,8 +100,62 @@ Two constraints that fall out of the reading above and should not be rediscovere
 - Prefer `codex login --with-access-token` (stdin) over any flag that would take a secret as an
   argument, for the same reason the credential store notes about `security add-generic-password`.
 
+  > **RETIRED FOR THE UI-DRIVEN FLOW, and kept for a person at the host.** This is correct advice for
+  > somebody at a terminal and wrong for a browser: a route that accepted an access token would make the
+  > daemon a credential conduit and the browser a credential form, which is exactly what
+  > `docs/design/harness-login.md` §0 refuses. `--with-access-token` and `--with-api-key` appear nowhere
+  > in the daemon flow, its wire contract, or either panel — and `codex-flow.test.ts` asserts the argv
+  > carries neither, so the exclusion is checkable rather than remembered.
+
+## What the CLIs actually printed, observed 2026-08-19 with PIPED stdio
+
+Both were run against throwaway harness homes and both were killed by a timeout while still waiting. No
+login was completed. This section exists because the design was built against these bytes rather than
+against the help text, and three of them are not guessable.
+
+### `codex login --device-auth`, codex-cli 0.145.0
+
+    Follow these steps to sign in with ChatGPT using device code authorization:
+
+    1. Open this link in your browser and sign in to your account
+       <ESC>[94mhttps://auth.openai.com/codex/device<ESC>[0m
+
+    2. Enter this one-time code <ESC>[90m(expires in 15 minutes)<ESC>[0m
+       <ESC>[94m0IER-FFQW6<ESC>[0m
+
+- **`--device-auth` is UNDOCUMENTED at this version.** `codex login --help` lists it with an EMPTY
+  description, so a reader scanning the help text concludes it is not there. An undocumented flag can
+  vanish without a deprecation, which is why the daemon flow fails as itself and names `fy fleet login`
+  when it recognises nothing.
+- **Colour is emitted even when stdout is a pipe**, so an unstripped line never equals the code it shows.
+- The user code is two uppercase alphanumeric groups joined by one hyphen, alone on its own indented line.
+- There is no return trip: the child polls and exits on its own.
+
+### `claude auth login --claudeai`, claude-code 2.1.220
+
+    Opening browser to sign in…
+    If the browser didn't open, visit: <OSC8>https://claude.com/cai/oauth/authorize?…<BEL>https://…<OSC8-end>
+    Paste code here if prompted >
+
+- **The paste prompt IS reached with piped stdio.** That is the whole remote leg.
+- **The URL is wrapped in an OSC 8 hyperlink**, so the address appears TWICE — once as the link target
+  inside the escape and once as visible text. Stripping OSC sequences whole is what leaves exactly one.
+- **The prompt carries no trailing newline**, so a line splitter that only emits complete lines never
+  delivers it.
+- **`code_challenge_method=S256` is in the printed URL**, so the code is PKCE-bound and the verifier is
+  inside the child. `docs/design/harness-login.md` §4.2 recorded this as an assumption it could not cite;
+  this is the citation.
+- **`redirect_uri` is `https://platform.claude.com/oauth/code/callback`** — a hosted page that SHOWS the
+  reader a code. There is no localhost callback in this path, so what comes back is a CODE off a web page
+  and not a redirected address. A UI asking for "the complete redirected URL" asks for something a person
+  never sees.
+- **The subcommand is `auth login`, not `/login`.** `process-login.ts` launches `<wrapper> /login`,
+  which hands a slash command to the interactive TUI; `auth login` is what was observed to work with a
+  pipe. The daemon flow uses `auth login` and the CLI path is unchanged.
+
 ## State
 
 The identity model, donor policy, credential store and per-identity login are implemented — see
-section E of [kfleet-map.md](kfleet-map.md). The daemon-side login session and the PWA surface that
-drives it are **not** implemented; this document is the contract for building them.
+section E of [kfleet-map.md](kfleet-map.md). **The daemon-side login session and the PWA surface that
+drives it are implemented too**, against the observations above: see
+[harness-login.md](../../design/harness-login.md), whose §6 records what is still open.

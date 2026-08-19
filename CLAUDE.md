@@ -173,6 +173,20 @@ Defaults are permissive and the **operator password** is the opt-in layer; a gra
 narrow what a credential could already do, and an undetermined document fails closed. The contract,
 the widen/narrow asymmetry and the declared GAPs are [docs/grants.md](docs/grants.md).
 
+A browser can also drive **the harness's own sign-in**, and the daemon holds no token while it does: it
+launches the account's own wrapper with piped stdio and a sanitized environment, publishes a verification
+URL — and for Codex a device code — accepts one short-lived authorization code straight into that child's
+stdin, and lets the harness write its own credential into its own store. The contract is
+[docs/design/harness-login.md](docs/design/harness-login.md). **There is one flow PER HARNESS and no shared
+abstraction over them**: Claude prints a URL and reads a pasted code, Codex completes a device grant and has
+no return trip, and a single parameterised flow would have needed both as options — a shape that can express
+a Codex sign-in waiting for a paste. A login is a **declared** per-harness property, and whether one applies
+to an ACCOUNT is decided by where its credential comes from: a token file or an environment variable means
+there is nothing to sign in to, so no control is offered and the surface says where the credential DOES come
+from instead. Every route that acts sits on `fleet.configure` with the existing per-change
+operator-password confirmation and **no second gate** — the remote risk is account substitution, not token
+theft. `--with-access-token` and `--with-api-key` stay host-and-CLI-only at every layer.
+
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code,
 a device token the daemon keeps only a hash of, and revocation of either. **No route returns a device
 token or a digest** — the wire projection has no field for one — and a **pairing code is a live

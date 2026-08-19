@@ -288,9 +288,21 @@ mechanism told truthfully.
 
 ## The per-change confirmation: `fleet.configure` asks once more
 
-**One route asks a governed caller to prove the operator password again, against one exact staged change:
-`POST /v1/fleet/proposals/:proposalId/apply`.** It is worth its own section because it looks like a second
-gate and is not one.
+**Two routes ask a governed caller to prove the operator password again, each against one exact act:
+`POST /v1/fleet/proposals/:proposalId/apply` and `POST /v1/fleet/login`.** It is worth its own section
+because it looks like a second gate and is not one.
+
+The second one arrived with the UI-driven harness sign-in and it changed nothing about the mechanism — it is
+the same flag, the same check, the same five attempts and the same vocabulary. What it added is one more
+artifact worth binding to, and the reason is not that a sign-in is dangerous in the way a write is:
+
+> The remote risk in a sign-in is **account substitution**, not disclosure. A caller who can start one and
+> forward its code can bind this fleet to a provider account THEY control, and every agent run afterwards
+> authenticates as that account. Nothing leaks; the fleet was quietly re-pointed.
+
+That is a change to how the host behaves, so it sits on `fleet.configure` and the START proves the password.
+Nothing else in that flow does: reading it, forwarding the one code and cancelling are `configure` and no
+more, because a second prompt inside one ceremony is the patchwork this document refuses.
 
 - **It is the SAME secret, and the SAME budget.** The password travels in the apply body, is checked by
   `CapabilityGrantService.confirmChange`, and spends one of the same five tries an unlock spends, with the
@@ -318,8 +330,9 @@ gate and is not one.
   refusal exactly as the grants panel does.
 
 **Why only the fleet.** Every capability can do damage, and this is not a claim that the fleet's is worse
-in kind. It is that a fleet apply is a discrete, reviewable artifact — a numbered manifest of writes a
-person reads before agreeing — so there is something for a confirmation to be _bound to_. `terminal.use` is
+in kind. It is that both fleet acts that ask are discrete, NAMED artifacts a person reads before agreeing —
+a numbered manifest of writes, or one identity to sign in — so there is something for a confirmation to be
+_bound to_. `terminal.use` is
 a stream of arbitrary code with no such boundary; a per-change prompt there would be a per-keystroke prompt,
 which is the control that trains people to click through. If a second capability ever grows a reviewable
 artifact, the machinery is `CallerGovernance.confirmChange` and it is not fleet-specific.
