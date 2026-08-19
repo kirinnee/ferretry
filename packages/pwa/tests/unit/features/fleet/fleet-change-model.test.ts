@@ -138,7 +138,11 @@ describe('a daemon this browser could not reach', () => {
   it('names the mixed request only when the page really is https and the address really is http', () => {
     const mixed = unreachableDiagnosis('http://127.0.0.1:1', 'https:').checks;
     expect(mixed).toHaveLength(3);
+    // BOTH restrictions, because either one sends nothing and looks identical to a stopped daemon — and
+    // #369 measured Chrome refusing a public page's loopback fetch outright, so naming only Safari would
+    // reassure somebody away from the likelier cause.
     expect(mixed[2]).toContain('Safari');
+    expect(mixed[2]).toContain('local network access');
     // A page on http, or a daemon reached over https, is not a mixed request and gets no such sentence.
     for (const same of [
       unreachableDiagnosis('http://127.0.0.1:1', 'http:'),

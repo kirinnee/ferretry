@@ -123,6 +123,12 @@ export const daemonOutOfReach = (inventory: FleetInventory | null, refusal: Flee
  * NAMED when it is true and absent when it is not — which is different from claiming it is the cause.
  * Nothing here reads a peer address to decide anything about authority; the schemes decide only which
  * sentence is honest.
+ *
+ * It names TWO restrictions rather than one, and the second was measured in this repository: #369 found
+ * that Chrome 150 refuses a page on a public origin reaching `http://127.0.0.1:<port>` before any request
+ * is sent — the server sees no preflight and no connection — because local network access is denied by
+ * default. So an earlier draft of this sentence, which said Chrome and Firefox allow such a request for a
+ * loopback address, was false reassurance pointing away from the likeliest cause.
  */
 export interface FleetUnreachableDiagnosis {
   readonly headline: string;
@@ -148,7 +154,7 @@ export const unreachableDiagnosis = (
     `Can this browser reach that address at all? Open ${target}/healthz in a tab on this device. A request the browser itself refuses never reaches this page as an error, so it looks identical to silence.`,
     ...(pageScheme === 'https:' && target.startsWith('http://')
       ? [
-          `This page is served over https and that address is http, so every request to it is a mixed one. Safari has historically refused those outright; Chrome and Firefox allow them for a loopback address. That is a browser rule rather than a fault on the host.`,
+          `This page is served over https and that address is plain http, and browsers restrict that in two ways: Safari has historically refused the mixed request outright, and Chrome refuses a page on a public origin to reach a loopback or private address at all until local network access is allowed for this site. In both cases nothing is sent, so this page sees exactly what it would see from a stopped daemon — look for a blocked permission in the address bar.`,
         ]
       : []),
   ],
