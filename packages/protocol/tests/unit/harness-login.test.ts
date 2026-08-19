@@ -298,6 +298,8 @@ describe('harness-login schemas', () => {
   it('should keep every fleet outcome distinguishable rather than collapsing them to success', () => {
     const statuses = [
       'logged-in',
+      // A silent renewal: refreshed with no browser and nobody asked. A SUCCESS, and not a sign-in.
+      'renewed',
       'synced',
       'usable',
       'not-required',

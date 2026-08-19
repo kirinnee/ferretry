@@ -327,6 +327,16 @@ the trap rather than from the endpoint.
   a legitimate donor precisely because it renews itself on first use (`identity.ts:336-354`). What
   actually strands an account is a dead refresh token — `missing` across a whole identity — which is
   rarer than the fear suggests.
+
+  > **The mechanism is no longer only "it renews itself on first use".** `fy fleet login` now RENEWS an
+  > expired-but-refreshable credential deliberately, with no browser and no human, gated on a
+  > zero-network local expiry check (#375). So the re-login gap this section argues about has a mechanism
+  > with a commit behind it, and the fleet reports `renewed` as its own outcome. **One consequence lands
+  > on the sign-in surface:** a rotation the provider REJECTS makes Claude Code zero its own credential,
+  > so an account can move from `refreshable` to `missing` with nobody having touched it. That is
+  > correct — a refresh token the provider refuses was worth nothing — and it is why the surface says a
+  > refreshable credential renews itself _if the provider still accepts it_ rather than promising it will.
+
 - **Something already notices.** The fleet feed carries `authOk`, the daemon composes the remedy
   string "run `fy fleet login` for this account"
   (`packages/daemon/src/lib/usage/quota.ts:12-17`), and the recommender excludes the account with that

@@ -194,14 +194,20 @@ export type FleetLoginReadiness = z.infer<typeof FleetLoginReadinessSchema>;
 /**
  * What happened to one account when a flow finished.
  *
- * The fleet's own eight outcomes, carried rather than collapsed: `usable`, `login-needed` and
+ * The fleet's own outcomes, carried rather than collapsed: `usable`, `login-needed` and
  * `indeterminate` are three different reasons nothing was done, and merging them is how a report ends
  * up implying a fleet is signed in when two of its identities were never checked.
+ *
+ * `renewed` is a SUCCESS and not a sign-in: the credential was refreshed with no browser and nobody was
+ * asked. This flow cannot produce one today — it passes no renewal dependency — and the member is here
+ * anyway, because this schema projects the domain's whole union rather than the subset one caller happens
+ * to reach. A projection narrower than its source turns a later wiring decision into a 500.
  */
 export const FleetLoginAccountOutcomeSchema = z.strictObject({
   accountId: AccountIdSchema,
   status: z.enum([
     'logged-in',
+    'renewed',
     'synced',
     'usable',
     'not-required',
