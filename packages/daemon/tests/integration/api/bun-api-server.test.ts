@@ -13,6 +13,7 @@ import {
   jsonResponse,
   MAX_REQUEST_BODY_BYTES,
   NO_GOVERNED_ROUTES_GUARD,
+  OPERATOR_UNLOCK_HEADER,
   parseBody,
   SOCKET_MAX_PENDING_FRAMES,
   type SocketDownstream,
@@ -268,6 +269,62 @@ describe('BunApiServer', () => {
     should(response.headers.get('access-control-allow-credentials')).equal('true');
     should(response.headers.get('access-control-expose-headers')).containEql('x-ferretry-version');
     should(response.headers.get('vary')).equal('Origin');
+  });
+
+  it('should admit the operator unlock header on a preflight and still refuse a lookalike', async () => {
+    // Arrange
+    // The shipped defect this pins: the browser sends `x-ferretry-operator-unlock` on every governed
+    // mutation the operator password unlocks, the preflight refused it, and the POST never left
+    // Chrome. Held against the real header constant so a rename cannot pass this while breaking it.
+    let unlockSeen: string | null = null;
+    const handle = await serve({
+      method: 'POST',
+      path: '/v1/fleet/proposals/:id/apply',
+      minimum: 'operator',
+      handle: async context => {
+        unlockSeen = context.request.headers.get(OPERATOR_UNLOCK_HEADER) ?? null;
+        return jsonResponse({ ok: true });
+      },
+    });
+    const origin = 'https://ferretry.pages.dev';
+    const path = `${handle.url}/v1/fleet/proposals/fy_fprop_1/apply`;
+
+    // Act
+    const preflight = await fetch(path, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': `Content-Type, ${OPERATOR_UNLOCK_HEADER}`,
+      },
+    });
+    const applied = await fetch(path, {
+      method: 'POST',
+      headers: {
+        origin,
+        authorization: 'Bearer admin-secret',
+        'content-type': 'application/json',
+        [OPERATOR_UNLOCK_HEADER]: 'operator-password',
+      },
+      body: '{}',
+    });
+    // A prefix of the admitted name, which a loosened check would wave through.
+    const lookalike = await fetch(path, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': `${OPERATOR_UNLOCK_HEADER}-secret`,
+      },
+    });
+
+    // Assert
+    should(preflight.status).equal(204);
+    should(preflight.headers.get('access-control-allow-headers')).equal(`content-type, ${OPERATOR_UNLOCK_HEADER}`);
+    should(applied.status).equal(200);
+    should(unlockSeen).equal('operator-password');
+    should(lookalike.status).equal(403);
+    should(await lookalike.json()).match({ code: 'cors_preflight_refused' });
   });
 
   it('should refuse unlisted origins and unsupported preflight capabilities before dispatch', async () => {
