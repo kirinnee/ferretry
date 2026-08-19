@@ -306,6 +306,103 @@ describe('reading one daemon fleet', () => {
   });
 });
 
+/**
+ * THE OWNER'S SCREENSHOT, as a test. The daemon could not be reached and the panel offered a password
+ * field, an attempt-limit warning and Confirm-and-Apply — three controls that could not possibly work,
+ * in front of a limiter nothing could ask a question of.
+ *
+ * The failure is spelled the way a browser spells it: a plain `Error`, no status, no code. That is what
+ * `Failed to fetch` arrives as, and it is why the panel must not word it as a refusal.
+ */
+describe('a daemon this browser could not reach', () => {
+  const dead = 'fyd is unavailable at http://127.0.0.1:9999 (Failed to fetch)';
+  const loopback = daemonConnection({
+    daemonId: 'daemon/home',
+    baseUrl: 'http://127.0.0.1:9999',
+    deviceToken: 'token-home',
+  });
+
+  const openUnreachable = async (connection = laptop, pageScheme = 'http:') => {
+    const mounted = await mount(
+      <FleetConfigurationSurface
+        connection={connection}
+        createClient={async () => {
+          throw new Error(dead);
+        }}
+        now={() => NOW}
+        pageScheme={pageScheme}
+      />,
+    );
+    live.push(mounted);
+    await interact(() => undefined);
+    return mounted;
+  };
+
+  it('says what it knows, names the address, and offers no control at all', async () => {
+    const surface = await openUnreachable();
+    const state = pick(surface.container, '[data-fleet-state]');
+    expect(state.getAttribute('data-fleet-state')).toBe('unreachable');
+    expect(pick(surface.container, '[data-fleet-unreachable]').textContent).toContain('could not reach this daemon');
+    // The transport's own sentence, whole: it is the only thing here that names the exact URL tried.
+    expect(state.textContent).toContain(dead);
+    // NOT "start the daemon". The owner's daemon was serving when they read this.
+    expect(surface.container.textContent?.toLowerCase()).not.toContain('start the daemon');
+    expect(state.textContent).toContain('fy daemon status');
+    expect(state.textContent).toContain('/healthz');
+    // Nothing on this screen is a control, because nothing a click could do would help.
+    expect(surface.container.querySelectorAll('button')).toHaveLength(0);
+    await surface.unmount();
+  });
+
+  it('names the mixed request for an https page reaching an http daemon, and not otherwise', async () => {
+    const mixed = await openUnreachable(loopback, 'https:');
+    expect(pick(mixed.container, '[data-fleet-unreachable]').textContent).toContain('Safari');
+    await mixed.unmount();
+
+    const plain = await openUnreachable(loopback, 'http:');
+    expect(pick(plain.container, '[data-fleet-unreachable]').textContent).not.toContain('Safari');
+    await plain.unmount();
+  });
+
+  /**
+   * The exact shape in the screenshot: a change staged while the host answered, then an apply whose
+   * request never arrives. The proposal survives, so the review is still on screen — and everything on
+   * it that needs a reachable daemon must be gone rather than merely disabled.
+   */
+  it('takes the password field and the apply off a staged change it can no longer send', async () => {
+    const surface = await open({
+      permissions: () => lockedPermissions(),
+      propose: () => proposal(),
+      apply: () => {
+        throw new Error(dead);
+      },
+      unlock: () => {
+        throw new Error(dead);
+      },
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+    await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
+    await click(button(surface.container, 'Preview this change'));
+    // While the daemon answered, the panel asked for the password. That part is #362 and stays.
+    expect(absent(surface.container, '[data-fleet-operator-password]')).toBe(false);
+
+    await type(pick(surface.container, '[data-fleet-operator-password]') as HTMLInputElement, 'hunter2');
+    await click(pick(surface.container, '[data-fleet-apply]'));
+    await interact(() => undefined);
+
+    expect(absent(surface.container, '[data-fleet-operator-password]')).toBe(true);
+    expect(absent(surface.container, '[data-fleet-apply]')).toBe(true);
+    expect(surface.container.textContent).not.toContain(UNLOCK_LIMIT_NOTE);
+    expect(pick(surface.container, '[data-fleet-apply-unreachable]').textContent).toContain('cannot be applied');
+    // The change is still held and this browser's own act still works.
+    expect(absent(surface.container, '[data-fleet-side="proposed"]')).toBe(false);
+    await click(button(surface.container, 'Discard'));
+    expect(absent(surface.container, '[data-fleet-side="proposed"]')).toBe(true);
+    await surface.unmount();
+  });
+});
+
 describe('creating an account', () => {
   /** Fills a draft that resolves every problem, so the preview control is actually reachable. */
   const draftIn = async (surface: Awaited<ReturnType<typeof open>>): Promise<void> => {

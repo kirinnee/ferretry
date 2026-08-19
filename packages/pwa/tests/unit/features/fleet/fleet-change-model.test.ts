@@ -11,6 +11,7 @@ import {
   classifyInventory,
   createAccountProposal,
   currentUnreadable,
+  daemonOutOfReach,
   declaredLayer,
   derivedWrapper,
   detectedAccountDraft,
@@ -37,6 +38,7 @@ import {
   reconcileAccountDraft,
   rosterDiff,
   selectLayerAssets,
+  unreachableDiagnosis,
   unreadableAssetProblems,
   unseenAssets,
 } from '../../../../src/features/fleet/fleet-change-model.ts';
@@ -104,6 +106,53 @@ describe('what a daemon fleet read means', () => {
     expect(mayComposeChange({ kind: 'uninitialized', detail: '' })).toBe(false);
     expect(mayInitialize({ kind: 'uninitialized', detail: '' })).toBe(true);
     expect(mayInitialize({ kind: 'damaged', detail: '' })).toBe(false);
+  });
+});
+
+/**
+ * The owner's own failure: `fyd is unavailable at …(Failed to fetch)` while `fy daemon status` printed a
+ * pid. Every assertion here is about what the panel MAY NOT claim.
+ */
+describe('a daemon this browser could not reach', () => {
+  it('is out of reach whether the read said so or the last attempt did', () => {
+    expect(daemonOutOfReach({ kind: 'unreachable', detail: 'nothing' }, null)).toBe(true);
+    // The apply's own fetch failing is the FIRST news, before any re-read has landed.
+    expect(daemonOutOfReach({ kind: 'live', manifest: liveManifest }, { kind: 'unreachable', detail: 'x' })).toBe(true);
+    expect(daemonOutOfReach({ kind: 'live', manifest: liveManifest }, null)).toBe(false);
+    expect(daemonOutOfReach(null, null)).toBe(false);
+    // A refusal the daemon WORDED is not silence, and must not be read as one.
+    expect(daemonOutOfReach({ kind: 'forbidden', detail: 'no' }, { kind: 'forbidden', detail: 'no' })).toBe(false);
+  });
+
+  it('never asserts the daemon is stopped, and gives the checks that tell the causes apart', () => {
+    const diagnosis = unreachableDiagnosis('http://host.invalid:9', 'http:');
+    expect(diagnosis.target).toBe('http://host.invalid:9');
+    expect(diagnosis.headline).toContain('could not reach');
+    // The sentence a person acted on for an afternoon must not be here in any form.
+    expect(`${diagnosis.body} ${diagnosis.checks.join(' ')}`.toLowerCase()).not.toContain('start the daemon');
+    expect(diagnosis.body).toContain('NOT evidence that the daemon is stopped');
+    expect(diagnosis.checks[0]).toContain('fy daemon status');
+    expect(diagnosis.checks[1]).toContain('http://host.invalid:9/healthz');
+  });
+
+  it('names the mixed request only when the page really is https and the address really is http', () => {
+    const mixed = unreachableDiagnosis('http://127.0.0.1:1', 'https:').checks;
+    expect(mixed).toHaveLength(3);
+    expect(mixed[2]).toContain('Safari');
+    // A page on http, or a daemon reached over https, is not a mixed request and gets no such sentence.
+    for (const same of [
+      unreachableDiagnosis('http://127.0.0.1:1', 'http:'),
+      unreachableDiagnosis('https://host.invalid', 'https:'),
+    ]) {
+      expect(same.checks).toHaveLength(2);
+      expect(same.checks.join(' ')).not.toContain('Safari');
+    }
+  });
+
+  it('spells the binary the way the caller does, so a check names a command they have', () => {
+    expect(unreachableDiagnosis('http://host.invalid:9', 'http:', 'ferretry').checks[0]).toContain(
+      'ferretry daemon status',
+    );
   });
 });
 

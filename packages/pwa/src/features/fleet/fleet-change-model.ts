@@ -90,6 +90,71 @@ export const mayComposeChange = (inventory: FleetInventory): boolean =>
 export const mayInitialize = (inventory: FleetInventory): boolean => inventory.kind === 'uninitialized';
 
 /**
+ * IS THIS DAEMON OUT OF REACH RIGHT NOW — from the evidence, or from the last thing that was tried.
+ *
+ * Read by every control whose precondition is a daemon that answers. A staged change outlives the
+ * reachability of the host it was staged against: somebody stages, the address stops answering, and the
+ * review is still on screen with an enabled Apply and a password field in front of a limiter that
+ * cannot be asked anything. An enabled control that cannot possibly work is the same dead end a greyed
+ * control with no explanation is, arrived at from the other side.
+ *
+ * TWO SOURCES, because they fail at different moments. `inventory` is the last READ of the host, and
+ * `refusal` is the last thing this panel ATTEMPTED — an apply whose fetch never completed is the first
+ * news the panel gets, and it arrives before any re-read has landed.
+ */
+export const daemonOutOfReach = (inventory: FleetInventory | null, refusal: FleetRefusalView | null): boolean =>
+  inventory?.kind === 'unreachable' || refusal?.kind === 'unreachable';
+
+/**
+ * What a browser that could not reach a daemon KNOWS, and deliberately not one sentence more.
+ *
+ * ## IT MUST NOT NAME A CAUSE IT HAS NOT ESTABLISHED
+ *
+ * "Start the daemon" was the obvious remedy and it is wrong, in the way that costs somebody an
+ * afternoon: a daemon that is serving and a request this browser never sent produce the SAME failure
+ * here — no status, no body, nothing but the fetch not completing. The owner who met this had `fyd`
+ * serving with a pid at the time. So the copy names the two possibilities and gives the check that
+ * tells them apart, rather than asserting the one that is easier to word.
+ *
+ * ## ONE CAUSE IT CAN ESTABLISH, PARTLY
+ *
+ * A page served over `https` fetching an `http` address is a mixed request, and a browser may refuse it
+ * before anything leaves the tab. The scheme pair is a fact the page holds, so that possibility is
+ * NAMED when it is true and absent when it is not — which is different from claiming it is the cause.
+ * Nothing here reads a peer address to decide anything about authority; the schemes decide only which
+ * sentence is honest.
+ */
+export interface FleetUnreachableDiagnosis {
+  readonly headline: string;
+  readonly body: string;
+  /** The address, carried so a control that has to say ONE short sentence can name it too. */
+  readonly target: string;
+  /** Ordered, and each one DISCRIMINATES: a check whose answer changes nothing is noise beside a failure. */
+  readonly checks: readonly string[];
+}
+
+export const unreachableDiagnosis = (
+  /** The direct address this pairing carries. Named because the reader has to type it somewhere. */
+  target: string,
+  /** The scheme this page is served over, exactly as `location.protocol` spells it. */
+  pageScheme: string,
+  clientName = 'fy',
+): FleetUnreachableDiagnosis => ({
+  headline: 'This browser could not reach this daemon',
+  target,
+  body: `Nothing came back, so nothing about this host is known from here. That is NOT evidence that the daemon is stopped — a daemon that is serving and a request this browser never sent fail in exactly the same way, and this panel will not guess which one happened. This pairing's direct address is ${target}; the line below is what the attempt itself said.`,
+  checks: [
+    `Is the daemon serving? Run \`${clientName} daemon status\` on that machine. If it prints a pid, the daemon is not what is wrong.`,
+    `Can this browser reach that address at all? Open ${target}/healthz in a tab on this device. A request the browser itself refuses never reaches this page as an error, so it looks identical to silence.`,
+    ...(pageScheme === 'https:' && target.startsWith('http://')
+      ? [
+          `This page is served over https and that address is http, so every request to it is a mixed one. Safari has historically refused those outright; Chrome and Firefox allow them for a loopback address. That is a browser rule rather than a fault on the host.`,
+        ]
+      : []),
+  ],
+});
+
+/**
  * How this caller may turn a reviewed change into host state, before it tries.
  *
  * ## THE FLEET HAS NO AUTHORITY OF ITS OWN ANY MORE

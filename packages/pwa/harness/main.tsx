@@ -6776,7 +6776,8 @@ type HarnessFleetFrame =
   | 'layer'
   | 'cockpit'
   | 'cockpit-staged'
-  | 'states';
+  | 'states'
+  | 'unreachable';
 
 /**
  * The COCKPIT itself, driven by a stub daemon rather than by fixtures handed to a leaf.
@@ -7010,6 +7011,25 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
           />
         </section>
       )}
+      {frame !== 'unreachable' ? null : (
+        /**
+         * THE OWNER'S SCREENSHOT. A daemon this browser could not reach — which is NOT a daemon that is
+         * stopped, and the whole point of the frame is that the panel no longer says or implies it is.
+         *
+         * The failure is a plain `Error`, because that is what a fetch that never completed throws:
+         * no status, no code, nothing the daemon worded. The page is served over http here, so the
+         * mixed-request sentence is deliberately absent — `pageScheme` decides that, and the state with
+         * it present has its own unit coverage rather than a second near-identical capture.
+         */
+        <section aria-label="Fleet daemon unreachable" id="harness-fleet-unreachable-page">
+          <FleetConfigurationSurface
+            connection={daemon}
+            createClient={async () => {
+              throw new Error('fyd is unavailable at http://127.0.0.1:9999 (Failed to fetch)');
+            }}
+          />
+        </section>
+      )}
       {frame !== 'states' ? null : (
         <section aria-label="Fleet host states" className="space-y-panel" id="harness-fleet-states-page">
           {HARNESS_FLEET_STATE_ANSWERS.map(state => (
@@ -7046,6 +7066,7 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-cockpit': 'cockpit',
   '#fleet-cockpit-staged': 'cockpit-staged',
   '#fleet-states': 'states',
+  '#fleet-unreachable': 'unreachable',
 };
 
 /**

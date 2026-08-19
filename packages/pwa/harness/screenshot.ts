@@ -277,6 +277,10 @@ const FLEET_FRAMES = [
   'failed-apply',
   'create',
   'layer',
+  // The daemon this browser could not reach, which used to render an operator-password field and a
+  // Confirm-and-Apply in front of a limiter nothing could ask a question of. A screen whose every
+  // control is gone is exactly the kind of change a capture is the only honest review of.
+  'unreachable',
 ] as const;
 
 /**

@@ -27,7 +27,7 @@
  * happened would be the most convincing possible lie about a host it cannot see.
  */
 
-import { Layers3, Lock, Plus, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CloudOff, Layers3, Lock, Plus, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -64,6 +64,7 @@ import {
   classifyInventory,
   createAccountProposal,
   currentUnreadable,
+  daemonOutOfReach,
   declaredLayer,
   detectedAccountDraft,
   editAccountProposal,
@@ -87,10 +88,17 @@ import {
   outcomeSummary,
   reconcileAccountDraft,
   selectLayerAssets,
+  unreachableDiagnosis,
   unreadableAssetProblems,
   unseenAssets,
 } from './fleet-change-model.ts';
-import { FleetApplyReport, FleetChangeReview, FleetLiveRoster, FleetRefusalAlert } from './fleet-change-review.tsx';
+import {
+  FleetApplyReport,
+  FleetChangeReview,
+  FleetLiveRoster,
+  FleetRefusalAlert,
+  FleetUnreachableNotice,
+} from './fleet-change-review.tsx';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
@@ -276,7 +284,17 @@ const STATE_BADGE: Readonly<Record<FleetInventory['kind'], { label: string; tone
   unreachable: { label: 'no answer', tone: 'err' },
 };
 
-const INVENTORY_COPY: Readonly<Record<Exclude<FleetInventory['kind'], 'live'>, { title: string; body: string }>> = {
+/**
+ * The sentence each non-live state gets, EXCEPT the one that is not a state of the host at all.
+ *
+ * `unreachable` is deliberately not here. It is the only entry in this table that would be a claim
+ * about a machine this browser got no answer from, and the flat sentence it used to carry ("This daemon
+ * did not answer") reads as a verdict on the daemon when the daemon may be serving perfectly. It is
+ * worded by `unreachableDiagnosis`, which names the possibilities and the check that separates them.
+ */
+const INVENTORY_COPY: Readonly<
+  Record<Exclude<FleetInventory['kind'], 'live' | 'unreachable'>, { title: string; body: string }>
+> = {
   uninitialized: {
     title: 'This host has no fleet yet',
     body: 'There is no fleet configuration on this daemon. That is a first run, not a damaged one: preparing the host creates what is missing and never replaces a file that already exists.',
@@ -293,10 +311,6 @@ const INVENTORY_COPY: Readonly<Record<Exclude<FleetInventory['kind'], 'live'>, {
     title: 'This credential may not read the fleet',
     body: 'The daemon refused this browser the fleet read. Nothing about the host is known from here.',
   },
-  unreachable: {
-    title: 'This daemon did not answer',
-    body: 'The fleet read did not complete, so nothing about this host is known from here. It is not an empty fleet.',
-  },
 };
 
 export interface FleetConfigurationSurfaceProps {
@@ -310,12 +324,23 @@ export interface FleetConfigurationSurfaceProps {
    * will reject.
    */
   readonly now?: () => number;
+  /**
+   * The scheme this page is served over, exactly as `location.protocol` spells it.
+   *
+   * Supplied so both halves of the unreachable diagnosis can be driven in a test, and read from the
+   * page by default. IT DECIDES COPY AND NOTHING ELSE: an `https` page fetching an `http` address is a
+   * mixed request some browsers refuse, which is worth saying to somebody staring at a failure that
+   * looks like a stopped daemon. Nothing about authority, locality or governance is derived from it —
+   * `src/lib/grants.ts` states why that would be the worst bug in this feature.
+   */
+  readonly pageScheme?: string;
 }
 
 export function FleetConfigurationSurface({
   connection,
   createClient = daemonApiClient,
   now = Date.now,
+  pageScheme = window.location.protocol,
 }: FleetConfigurationSurfaceProps) {
   // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
   // four. Module-global ids there left three sections labelled by another daemon's heading and put four
@@ -658,6 +683,16 @@ export function FleetConfigurationSurface({
   const variants = Object.keys(session.config?.variants ?? {});
   const detection = accountHarnessDetection(session.discovery, live);
   const composing = mode.kind !== 'idle' || session.proposal !== null;
+  /**
+   * ONE ANSWER TO "can this browser reach the daemon", read by every control that needs one.
+   *
+   * Computed here rather than asked per control, because the shape of the defect this repairs is a
+   * panel where one place knew and the others did not: the read said `unreachable` and the staged
+   * change went on offering a password field to a limiter nothing could ask.
+   */
+  const unreachable = daemonOutOfReach(inventory, session.refusal)
+    ? unreachableDiagnosis(connection.baseUrl, pageScheme)
+    : null;
 
   /**
    * Open the create form, with the daemon's answer to what is already in the asset tree.
@@ -832,42 +867,54 @@ export function FleetConfigurationSurface({
             <span className="mt-0.5 shrink-0 text-warn">
               {inventory.kind === 'uninitialized' ? (
                 <ServerCog size={16} aria-hidden="true" />
+              ) : inventory.kind === 'unreachable' ? (
+                <CloudOff size={16} aria-hidden="true" />
               ) : (
                 <TriangleAlert size={16} aria-hidden="true" />
               )}
             </span>
-            <div className="min-w-0">
-              <h3 id={id('-state-heading')} className="m-0 text-title font-semibold text-fg">
-                {INVENTORY_COPY[inventory.kind].title}
-              </h3>
-              <p className="mb-0 mt-1 text-ui leading-base text-muted">{INVENTORY_COPY[inventory.kind].body}</p>
-              {/* WHICH refusal this is, when the operator is the one refusing. "This credential may
+            {inventory.kind === 'unreachable' ? (
+              // The one state whose remedy is never on this screen, so it gets the checks and no
+              // control at all — not even a re-read, which is what reopening the tab already does.
+              <FleetUnreachableNotice
+                diagnosis={unreachableDiagnosis(connection.baseUrl, pageScheme)}
+                detail={inventory.detail}
+                headingId={id('-state-heading')}
+              />
+            ) : (
+              <div className="min-w-0">
+                <h3 id={id('-state-heading')} className="m-0 text-title font-semibold text-fg">
+                  {INVENTORY_COPY[inventory.kind].title}
+                </h3>
+                <p className="mb-0 mt-1 text-ui leading-base text-muted">{INVENTORY_COPY[inventory.kind].body}</p>
+                {/* WHICH refusal this is, when the operator is the one refusing. "This credential may
                   not read the fleet" is true of all three and actionable for none of them: switched
                   off on the host, needs the operator password, and a daemon that has lost its own
                   decision send a person three different places. */}
-              {inventory.kind === 'forbidden' && inventory.grant !== undefined ? (
-                <p
-                  className="mb-0 mt-2 text-ui font-semibold leading-base text-fg"
-                  data-fleet-state-grant={inventory.grant.refusal}
-                >
-                  {inventory.grant.guidance.explanation}
-                </p>
-              ) : null}
-              <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
-                {inventory.detail}
-              </pre>
-              {mayInitialize(inventory) && session.permissions?.mayPropose === true && session.proposal === null ? (
-                <button
-                  type="button"
-                  className="kt-btn mt-3"
-                  data-variant="primary"
-                  data-fleet-start-initialize=""
-                  onClick={() => void stage(initializeProposal())}
-                >
-                  Prepare this host
-                </button>
-              ) : null}
-            </div>
+                {inventory.kind === 'forbidden' && inventory.grant !== undefined ? (
+                  <p
+                    className="mb-0 mt-2 text-ui font-semibold leading-base text-fg"
+                    data-fleet-state-grant={inventory.grant.refusal}
+                  >
+                    {inventory.grant.guidance.explanation}
+                  </p>
+                ) : null}
+                <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
+                  {inventory.detail}
+                </pre>
+                {mayInitialize(inventory) && session.permissions?.mayPropose === true && session.proposal === null ? (
+                  <button
+                    type="button"
+                    className="kt-btn mt-3"
+                    data-variant="primary"
+                    data-fleet-start-initialize=""
+                    onClick={() => void stage(initializeProposal())}
+                  >
+                    Prepare this host
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -911,6 +958,7 @@ export function FleetConfigurationSurface({
               busy={session.busy}
               refusal={session.refusal}
               unlockFailure={session.unlockFailure}
+              unreachable={unreachable}
             />
           </div>
         ) : null}

@@ -17,6 +17,7 @@ import {
   CircleAlert,
   CircleCheck,
   ClipboardList,
+  CloudOff,
   FileCog,
   ListOrdered,
   Lock,
@@ -35,6 +36,7 @@ import {
   fleetApplyNeedsPassword,
   type FleetRosterChange,
   type FleetRosterRow,
+  type FleetUnreachableDiagnosis,
   operationLedger,
   outcomeSummary,
   rosterDiff,
@@ -166,6 +168,10 @@ const REFUSAL_HEADLINE: Readonly<Partial<Record<FleetRefusalView['kind'], string
   // The daemon answered; the answer did not match the contract. Calling that "the daemon refused" would
   // send a person looking for a permission or a policy that does not exist.
   malformed: 'This daemon answered something this browser cannot read',
+  // NOTHING ANSWERED AT ALL, so nobody refused anything. This one was reading "The daemon refused" over
+  // a fetch that never completed — a sentence that sends a person to look for a permission on a host
+  // this browser could not even reach, which is what happened to the owner who reported it.
+  unreachable: 'This browser could not reach this daemon',
 };
 
 /** The daemon's refusal, whole. Multiline by design: the second line is usually the actionable one. */
@@ -201,6 +207,52 @@ export function FleetRefusalAlert({ refusal }: { readonly refusal: FleetRefusalV
   );
 }
 
+/**
+ * WHAT THIS BROWSER KNOWS WHEN NOTHING ANSWERED, and the checks that tell the possibilities apart.
+ *
+ * No control, because there is nothing here a click could achieve: every remedy is somewhere else — a
+ * terminal on that machine, or the same address opened in a tab. Rendering a button that re-tried the
+ * read would be the third version of the same mistake this panel is being repaired for, since a retry
+ * is the one thing a reader will do anyway by reopening the tab, and a failing one teaches them the
+ * panel is broken rather than that the request is not arriving.
+ *
+ * `detail` is the transport's own sentence, kept whole. It names the exact URL the attempt used, which
+ * is the one fact the diagnosis below cannot derive — a connection may carry more than one carrier.
+ */
+export function FleetUnreachableNotice({
+  diagnosis,
+  detail,
+  headingId,
+}: {
+  readonly diagnosis: FleetUnreachableDiagnosis;
+  readonly detail?: string;
+  /** The id the owning section names itself by, so this heading IS that name rather than a second one. */
+  readonly headingId?: string;
+}) {
+  return (
+    <div className="min-w-0" data-fleet-unreachable="">
+      <h3 id={headingId} className="m-0 text-title font-semibold text-fg">
+        {diagnosis.headline}
+      </h3>
+      <p className="mb-0 mt-1 text-ui leading-base text-muted">{diagnosis.body}</p>
+      {detail === undefined ? null : (
+        <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
+          {detail}
+        </pre>
+      )}
+      {/* AN ORDERED LIST, because the order is the discrimination: the first check rules out the cause
+          a person is most likely to be told about, and only then is the second one informative. */}
+      <ol className="m-0 mt-3 list-decimal space-y-1 pl-5" aria-label="Checks that tell these causes apart">
+        {diagnosis.checks.map(check => (
+          <li key={check} className="text-ui leading-base text-fg-soft">
+            {check}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export interface FleetChangeReviewProps {
   readonly proposal: FleetProposalView;
   /** The live accounts the ledger is compared against. */
@@ -220,6 +272,15 @@ export interface FleetChangeReviewProps {
   readonly refusal: FleetRefusalView | null;
   /** Why the last operator password was refused, so a wrong one is retyped rather than re-guessed at. */
   readonly unlockFailure?: OperatorUnlockFailure | null;
+  /**
+   * Set while this browser cannot reach the daemon this change was staged against.
+   *
+   * IT REMOVES THE PASSWORD FIELD AND THE APPLY, rather than disabling them. Neither can do anything:
+   * the password would be checked by a limiter on the far side of a request that is not arriving, and
+   * the apply would spend one of that limiter's five attempts on a round trip nobody receives. What is
+   * left is Discard, which is this browser's own act and works either way.
+   */
+  readonly unreachable?: FleetUnreachableDiagnosis | null;
 }
 
 /**
@@ -241,6 +302,7 @@ export function FleetChangeReview({
   busy,
   refusal,
   unlockFailure = null,
+  unreachable = null,
 }: FleetChangeReviewProps) {
   // Instance-local for the same reason as the roster above.
   const uid = useId();
@@ -257,7 +319,9 @@ export function FleetChangeReview({
   const ledger = preview.kind === 'apply' ? operationLedger(preview.plan.operations) : [];
   const rows = preview.kind === 'apply' ? rosterDiff(live, preview.plan.manifest.accounts) : [];
   const copy = fleetApplyCopy(authority);
-  const needsPassword = fleetApplyNeedsPassword(authority);
+  // A daemon that is not answering makes the authority question moot: there is nothing to prove a
+  // password to. So the field is not merely blocked here, it is not rendered at all.
+  const needsPassword = fleetApplyNeedsPassword(authority) && unreachable === null;
   const applyBlocked = busy || authority.kind === 'refused' || (needsPassword && password === '');
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
@@ -462,7 +526,18 @@ export function FleetChangeReview({
         data-fleet-apply-authority={authority.kind}
         onSubmit={submit}
       >
-        {copy.explanation === '' ? null : (
+        {unreachable !== null ? (
+          <p
+            className="m-0 flex min-w-0 items-start gap-2 text-ui leading-base text-warn"
+            data-fleet-apply-unreachable=""
+          >
+            <CloudOff size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              This change cannot be applied while this browser cannot reach {unreachable.target}. Nothing has been sent
+              and no password would be checked, so the change simply stays here until that address answers.
+            </span>
+          </p>
+        ) : copy.explanation === '' ? null : (
           <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base text-muted">
             <Lock size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
             <span data-fleet-apply-explanation="">{copy.explanation}</span>
@@ -508,10 +583,16 @@ export function FleetChangeReview({
           {/*
             A SUBMIT, not a click handler, so Enter in the password field applies the change rather than
             doing nothing — which is what a person types after a password every time.
+
+            ABSENT ENTIRELY while the daemon is out of reach. A disabled Apply is still an Apply on
+            screen: it says "this is the control, come back to it", when what is true is that this
+            screen has nothing left to offer until the address answers.
           */}
-          <button type="submit" className="kt-btn" data-variant="primary" data-fleet-apply="" disabled={applyBlocked}>
-            {busy ? 'Applying…' : needsPassword ? 'Confirm and apply' : 'Apply this change'}
-          </button>
+          {unreachable !== null ? null : (
+            <button type="submit" className="kt-btn" data-variant="primary" data-fleet-apply="" disabled={applyBlocked}>
+              {busy ? 'Applying…' : needsPassword ? 'Confirm and apply' : 'Apply this change'}
+            </button>
+          )}
           <button type="button" className="kt-btn" data-variant="ghost" disabled={busy} onClick={onDiscard}>
             Discard
           </button>
