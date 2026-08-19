@@ -43,7 +43,7 @@ import {
   type GrantsView,
 } from '@ferretry/protocol';
 import { CircleAlert, KeyRound, Lock, LockOpen, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -72,13 +72,13 @@ import {
   PASSWORD_SET_DISCLOSURE,
   passwordControlState,
   remoteRevokeWarning,
-  UNLOCK_LIMIT_NOTE,
   unlockSecondsRemaining,
   usableUnlock,
 } from '../../lib/grants.ts';
 import { CapabilityList } from './capability-list.tsx';
 import { changeGrants, type GrantClient, readGrants, setOperatorPassword, unlockGrants } from './grants-api.ts';
 import { OperatorPasswordCard } from './operator-password.tsx';
+import { OperatorUnlockDialog } from './operator-unlock-dialog.tsx';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
 const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
@@ -311,19 +311,19 @@ export function GrantUnlockPrompt({
   readonly hostLocal?: boolean;
   readonly onUnlock: (password: string) => void;
 }) {
-  const fieldId = useId();
-  const [password, setPassword] = useState('');
+  const [asking, setAsking] = useState(false);
   const secondsLeft = unlockSecondsRemaining(held, daemonId, nowMs);
   const unlocked = usableUnlock(held, daemonId, nowMs) !== undefined;
-
-  const submit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    if (password === '' || busy) return;
-    onUnlock(password);
-    // Cleared on submit rather than on success: a wrong password is retyped, and holding the last
-    // attempt in a field is one more place the value sits while somebody walks away from the screen.
-    setPassword('');
-  };
+  /**
+   * What the password buys HERE, branched on where this browser is.
+   *
+   * "Turning a capability on from off this host needs it" was the whole story while a local browser was
+   * ungoverned, and it is false for the reader most likely to meet this prompt. The sentence travels into
+   * the dialog rather than being written there, because this is the grants panel's own vocabulary.
+   */
+  const purpose = hostLocal
+    ? 'A browser is a paired device even on the machine, so changing these settings needs the password once. Turning something off never does.'
+    : 'Turning a capability on from off this host needs it. Turning one off never does.';
 
   if (unlocked)
     return (
@@ -343,6 +343,14 @@ export function GrantUnlockPrompt({
       </section>
     );
 
+  /**
+   * THE PROMPT IS A MODAL, AND IT IS THE FLEET PANEL'S MODAL.
+   *
+   * Two inline password fields in one product, worded differently, is how the fleet came to describe its
+   * own authority in terms no other capability used — so the presentation is shared and this panel keeps
+   * only the trigger and its own sentence. What stays inline is the SENTENCE, because somebody arriving
+   * at a refused switch has to know a password is what stands there before they open anything.
+   */
   return (
     <section
       className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
@@ -354,33 +362,23 @@ export function GrantUnlockPrompt({
         Operator password
       </p>
       <p className="m-0 text-meta leading-base text-muted" data-grant-unlock-purpose={hostLocal ? 'local' : 'remote'}>
-        {hostLocal
-          ? 'Enter it once and this browser is ungoverned for five minutes — a browser is a paired device even on the machine. Turning something off never needs it.'
-          : 'Turning a capability on from off this host needs it. Turning one off never does.'}
+        {purpose}
       </p>
-      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
-        <label className="sr-only" htmlFor={fieldId}>
-          Operator password for this machine
-        </label>
-        <input
-          id={fieldId}
-          type="password"
-          value={password}
+      <div>
+        <button
+          type="button"
+          className="kt-btn min-h-[44px]"
+          data-grant-unlock-open=""
           disabled={busy}
-          autoComplete="off"
-          spellCheck={false}
-          data-grant-unlock-field=""
-          onChange={event => setPassword(event.target.value)}
-          className="h-control min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <button type="submit" className="kt-btn min-h-[44px] shrink-0" disabled={busy || password === ''}>
+          onClick={() => setAsking(true)}
+        >
           <KeyRound size={15} aria-hidden="true" />
-          Unlock
+          Unlock…
         </button>
-      </form>
-      {failure === null ? (
-        <p className="m-0 text-meta leading-base text-faint">{UNLOCK_LIMIT_NOTE}</p>
-      ) : (
+      </div>
+      {/* The failure stays reachable after the dialog closes, because a lockout is a state of the MACHINE
+          rather than of one prompt: somebody who dismissed the modal still needs to know why nothing works. */}
+      {failure === null ? null : (
         <p
           role="alert"
           className={cn(
@@ -392,6 +390,16 @@ export function GrantUnlockPrompt({
           {failure.message}
         </p>
       )}
+      <OperatorUnlockDialog
+        open={asking}
+        purpose={purpose}
+        holding={true}
+        busy={busy}
+        failure={failure}
+        submitLabel="Unlock"
+        onSubmit={onUnlock}
+        onClose={() => setAsking(false)}
+      />
     </section>
   );
 }

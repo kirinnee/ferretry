@@ -284,6 +284,9 @@ const FLEET_FRAMES = [
   // Preparing a host, which is one action and the list it will write. Captured beside `preview` on
   // purpose: the difference between the two frames IS the ceremony this change removes.
   'first-run',
+  // The operator-password prompt, open, driven by clicking the real control. It is the one modal both this
+  // panel and the grants surface raise, and a phone is where it has to work.
+  'unlock',
 ] as const;
 
 /**
@@ -2202,6 +2205,11 @@ try {
                 process.stdout.write(`   staging did not land: ${refused.join(' | ') || 'no refusal shown'}\n`);
               }
               await staged.waitFor({ state: 'visible' });
+            }
+            // The prompt only exists while it is raised, and raising it is a click on the action itself.
+            if (frame === 'unlock') {
+              await page.getByRole('button', { name: 'Apply this change' }).click();
+              await page.locator('[role="dialog"]').waitFor({ state: 'visible' });
             }
             const fleetTarget = join(outDir, `${viewport.name}-fleet-${frame}.png`);
             // A full-page capture of a page carrying ONE frame: Chrome captures beyond the viewport

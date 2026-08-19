@@ -103,8 +103,24 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-export const readFleetPermissions = async (client: FleetClient): Promise<FleetPermissions> =>
-  await client.request(`${FLEET_PATH}/permissions`, FleetPermissionsSchema);
+/**
+ * WHAT THIS CALLER MAY DO, asked AS the caller it currently is.
+ *
+ * The unlock is optional and it changes the answer, which is the whole reason it is here: a held unlock
+ * makes a loopback caller ungoverned, so the daemon stops asking for a per-change confirmation — and a
+ * panel that read this route without the token it holds would go on claiming a password was owed and
+ * prompting for one, while the apply beside it needed nothing. That is precisely the "one gate at the
+ * door, then full authority" shape `docs/grants.md` describes, reported wrongly by the surface.
+ *
+ * The DAEMON is asked rather than the answer inferred. This browser cannot decide what an unlock buys —
+ * a remote caller still owes the confirmation with one held, and only the host knows which caller this is.
+ */
+export const readFleetPermissions = async (client: FleetClient, unlock?: string): Promise<FleetPermissions> =>
+  await client.request(
+    `${FLEET_PATH}/permissions`,
+    FleetPermissionsSchema,
+    unlock === undefined ? undefined : { headers: { [OPERATOR_UNLOCK_HEADER]: unlock } },
+  );
 
 export const readFleetManifest = async (client: FleetClient): Promise<FleetManifestSummary> =>
   await client.request(`${FLEET_PATH}/accounts`, FleetManifestSummarySchema);
@@ -228,6 +244,21 @@ const REFUSAL_KINDS = {
  *
  * A code this contract does not declare — a future fleet code, or an ordinary HTTP code from anywhere
  * else in the daemon — is an honest generic refusal rather than a crash or a silent blank.
+ *
+ * ## THE CODE, NEVER THE STATUS, AND THAT IS DELIBERATE
+ *
+ * Every `FleetRefusal` leaves the daemon as HTTP 409 — `respond()` in `runtime/mounts/fleet.ts` maps all
+ * of them — so "you conflict with existing state" and "there is nothing here yet" arrive with the same
+ * status. A never-configured host answers 409 `fleet_config_missing` on `/config` and 409
+ * `fleet_not_applied` on `/accounts`, which is the ORDINARY STARTING STATE of every new install, and a
+ * browser that branched on the status would render the first thing a person ever sees as a failure.
+ *
+ * The status is not being changed to fix that, and the reason is not inertia: the code is the contract's
+ * declared discriminator, it is exhaustive here (`satisfies Record<FleetRefusalCode, …>` stops this
+ * object compiling the day a new one is declared), and a status is a coarse channel every refusal shares.
+ * Moving these two to 404 would be a breaking change to a shipped wire contract that other clients may
+ * branch on, in exchange for nothing this browser needs. `classifyInventory` turns the pair into
+ * `uninitialized`, which is a first run rather than an error.
  */
 const refusalKindFor = (code: string | undefined): FleetRefusalKind => {
   const parsed = FleetRefusalCodeSchema.safeParse(code);

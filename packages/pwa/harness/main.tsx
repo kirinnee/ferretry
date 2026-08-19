@@ -6804,6 +6804,7 @@ type HarnessFleetFrame =
   | 'cockpit-staged'
   | 'states'
   | 'first-run'
+  | 'unlock'
   | 'unreachable';
 
 /**
@@ -7038,6 +7039,27 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
           />
         </section>
       )}
+      {frame !== 'unlock' ? null : (
+        /**
+         * THE PASSWORD PROMPT AS A PERSON MEETS IT: a modal, raised by the action, saying that it unlocks
+         * changing settings on this machine.
+         *
+         * The capture is taken with the dialog OPEN, driven by clicking the real control — a posed overlay
+         * would prove nothing about the component that has to produce one. It is the same dialog the grants
+         * panel raises; there is only one.
+         */
+        <section aria-label="Fleet operator unlock" id="harness-fleet-unlock-page">
+          <FleetChangeReview
+            proposal={HARNESS_FLEET_PROPOSAL}
+            live={HARNESS_FLEET_ACCOUNTS}
+            authority={{ kind: 'locked', alsoConfirms: true }}
+            onApply={() => {}}
+            onDiscard={() => {}}
+            busy={false}
+            refusal={null}
+          />
+        </section>
+      )}
       {frame !== 'first-run' ? null : (
         /**
          * PREPARING A HOST: one action and the list it will write.
@@ -7114,6 +7136,7 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-cockpit-staged': 'cockpit-staged',
   '#fleet-states': 'states',
   '#fleet-first-run': 'first-run',
+  '#fleet-unlock': 'unlock',
   '#fleet-unreachable': 'unreachable',
 };
 

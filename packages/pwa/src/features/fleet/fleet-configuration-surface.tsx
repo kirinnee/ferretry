@@ -244,8 +244,8 @@ const ATTEMPT_FAILURE_CODES: ReadonlySet<string> = new Set([
  * about the HOST's fleet, this is about this REQUEST's authority, and a failure here has to leave the
  * authority unreadable rather than leave a stale `open` on screen beside a refusal.
  */
-const reReadPermissions = async (client: FleetClient): Promise<Partial<FleetSession>> => {
-  const read = await probe(() => readFleetPermissions(client));
+const reReadPermissions = async (client: FleetClient, unlock?: string): Promise<Partial<FleetSession>> => {
+  const read = await probe(() => readFleetPermissions(client, unlock));
   return { permissions: read.ok ? read.value : null };
 };
 
@@ -603,8 +603,10 @@ export function FleetConfigurationSurface({
       if (authority.kind === 'refused' || (fleetApplyNeedsPassword(authority) && operatorPassword === undefined))
         return;
       patch(generation, { busy: true, refusal: null, unlockFailure: null });
+      // Hoisted out of the `try` so the failure path can re-read authority AS the caller this browser now
+      // is: a mint that succeeded before an apply that did not still moved this caller past the gate.
+      let unlock = usableUnlock(session.held, connection.daemonId, now());
       try {
-        let unlock = usableUnlock(session.held, connection.daemonId, now());
         if (authority.kind === 'locked' && unlock === undefined) {
           // `operatorPassword` is defined here: `fleetApplyNeedsPassword` is true for `locked`, and the
           // guard above returned for an absent one.
@@ -624,7 +626,18 @@ export function FleetConfigurationSurface({
           ...(unlock === undefined ? {} : { unlock }),
         });
         // Positive evidence, re-read. The list on screen is what the daemon holds, never what we hoped.
-        patch(generation, { outcome, proposal: null, mode: { kind: 'idle' }, ...(await readEvidence(client)) });
+        patch(generation, {
+          outcome,
+          proposal: null,
+          mode: { kind: 'idle' },
+          ...(await readEvidence(client)),
+          // AND WHAT THIS CALLER MAY DO NOW, asked WITH the unlock this screen holds. This is the second
+          // half of the sudo shape: past the gate, the panel must stop advertising a gate. Without this
+          // read the permissions on screen are the ones from before the unlock existed, so the next change
+          // would prompt for a password the daemon would no longer ask for — the mechanism getting out of
+          // the way while the presentation did not, which is the whole defect being repaired here.
+          ...(await reReadPermissions(client, unlock)),
+        });
       } catch (cause) {
         const refusal = fleetRefusal(cause);
         // A failed PASSWORD ATTEMPT is worded by the grants vocabulary rather than as a fleet refusal,
@@ -640,7 +653,7 @@ export function FleetConfigurationSurface({
           // and leaving the old answer up would leave a person with a refusal and no control to resolve
           // it, which is the dead end this feature exists to remove. It is a probe: a permissions read
           // that fails leaves `unreadable` rather than a claim about the operator's decisions.
-          ...(await reReadPermissions(client)),
+          ...(await reReadPermissions(client, unlock)),
           // TWO INDEPENDENT WAYS TO LEARN THE CHANGE IS DEAD, and both are read. The refusal itself says so
           // when the daemon refused BECAUSE the proposal is gone or stale; the re-read catches the other
           // case, where the apply was refused for something else — a wrong password, a held lock — and the

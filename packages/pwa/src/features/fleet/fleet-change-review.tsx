@@ -24,10 +24,11 @@ import {
   ServerCog,
   TriangleAlert,
 } from 'lucide-react';
-import { type FormEvent, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
-import { EYEBROW, FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
-import { type OperatorUnlockFailure, UNLOCK_LIMIT_NOTE } from '../../lib/grants.ts';
+import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
+import type { OperatorUnlockFailure } from '../../lib/grants.ts';
+import { OperatorUnlockDialog } from '../settings/operator-unlock-dialog.tsx';
 import { absoluteTime } from '../../lib/session-screens.ts';
 import type {
   FleetApplyOutcome,
@@ -317,38 +318,39 @@ function FleetApplyForm({
   unreachable = null,
   labels,
 }: FleetApplyControls & { readonly labels: FleetApplyLabels }) {
-  const uid = useId();
-  const id = (name: string): string => `${uid}${name}`;
   /**
-   * The typed password, held HERE and nowhere above.
+   * Whether the prompt is up. NOT the password, which this component never holds at all.
    *
-   * It is the one value on this screen that must not reach the session state the surface keys by
-   * connection: a secret in there outlives the click that needed it, survives every unrelated re-render,
-   * and shows up in anything that inspects the state. It lives for one submit and is cleared by it.
+   * The typed value lives inside the dialog for the one submit that spends it and passes through here
+   * only as an argument on its way to `onApply`. A secret in a panel's state outlives the click that
+   * needed it and shows up in anything that inspects that state.
    */
-  const [password, setPassword] = useState('');
+  const [asking, setAsking] = useState(false);
   const copy = fleetApplyCopy(authority);
   // A daemon that is not answering makes the authority question moot: there is nothing to prove a
-  // password to. So the field is not merely blocked here, it is not rendered at all.
+  // password to. So the prompt is not merely blocked here, it can never be raised.
   const needsPassword = fleetApplyNeedsPassword(authority) && unreachable === null;
-  const blocked = busy || authority.kind === 'refused' || (needsPassword && password === '');
+  const blocked = busy || authority.kind === 'refused';
 
-  const submit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
+  /**
+   * ONE CLICK, and the prompt comes to the person rather than the person coming to the prompt.
+   *
+   * A caller that owes nothing acts immediately; a caller that owes the password meets the modal AT THIS
+   * MOMENT. That is the difference between "this machine needs unlocking before its settings change" and
+   * "authorise this one change" — and the second is what the owner was reading off a password field
+   * sitting inside a staged-change card, under an expiry, beside Confirm-and-Apply.
+   */
+  const act = (): void => {
     if (blocked) return;
-    onApply(needsPassword ? password : undefined);
-    // Cleared on submit rather than on success, exactly as the grants surface clears its own: a wrong
-    // password is retyped, and holding the last attempt in a field is one more place the value sits
-    // while somebody walks away from the screen.
-    setPassword('');
+    if (needsPassword) {
+      setAsking(true);
+      return;
+    }
+    onApply(undefined);
   };
 
   return (
-    <form
-      className="border-t border-border-soft bg-surface-2 px-panel py-3"
-      data-fleet-apply-authority={authority.kind}
-      onSubmit={submit}
-    >
+    <div className="border-t border-border-soft bg-surface-2 px-panel py-3" data-fleet-apply-authority={authority.kind}>
       {unreachable !== null ? (
         <p
           className="m-0 flex min-w-0 items-start gap-2 text-ui leading-base text-warn"
@@ -361,66 +363,53 @@ function FleetApplyForm({
           </span>
         </p>
       ) : copy.explanation === '' ? null : (
+        // ONE SENTENCE, and no field under it. Saying what applying will ask for BEFORE the click is
+        // what `confirmation` on the permissions read exists for; the prompt itself arrives on the click.
         <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base text-muted">
           <Lock size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
           <span data-fleet-apply-explanation="">{copy.explanation}</span>
         </p>
       )}
 
-      {needsPassword ? (
-        <>
-          <label className={cn(FIELD_LABEL, 'mt-3')} htmlFor={id('-operator-password')}>
-            Operator password for this machine
-          </label>
-          <input
-            id={id('-operator-password')}
-            type="password"
-            className="kt-input"
-            value={password}
-            disabled={busy}
-            autoComplete="off"
-            spellCheck={false}
-            data-fleet-operator-password=""
-            onChange={event => setPassword(event.target.value)}
-          />
-          {unlockFailure === null ? (
-            <p className="m-0 mt-1 text-meta leading-base text-faint">{UNLOCK_LIMIT_NOTE}</p>
-          ) : (
-            <p
-              role="alert"
-              className={cn(
-                'm-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base',
-                unlockFailure.retryable
-                  ? 'border-warn-border bg-warn-bg text-warn'
-                  : 'border-err-border bg-err-bg text-err',
-              )}
-              data-fleet-operator-password-failure={unlockFailure.retryable ? 'retryable' : 'final'}
-            >
-              {unlockFailure.message}
-            </p>
-          )}
-        </>
-      ) : null}
-
       <div className="mt-3 flex flex-wrap gap-2">
         {/*
-          A SUBMIT, not a click handler, so Enter in the password field applies the change rather than
-          doing nothing — which is what a person types after a password every time.
-
           ABSENT ENTIRELY while the daemon is out of reach. A disabled action is still an action on
           screen: it says "this is the control, come back to it", when what is true is that this screen
           has nothing left to offer until the address answers.
         */}
         {unreachable !== null ? null : (
-          <button type="submit" className="kt-btn" data-variant="primary" data-fleet-apply="" disabled={blocked}>
-            {busy ? labels.working : needsPassword ? labels.confirming : labels.action}
+          <button
+            type="button"
+            className="kt-btn"
+            data-variant="primary"
+            data-fleet-apply=""
+            disabled={blocked}
+            onClick={act}
+          >
+            {busy ? labels.working : labels.action}
           </button>
         )}
         <button type="button" className="kt-btn" data-variant="ghost" disabled={busy} onClick={onDiscard}>
           {labels.discard}
         </button>
       </div>
-    </form>
+
+      {/* THE SHARED PROMPT, not a fleet-specific one: the grants panel raises the same component, so an
+          unlock reads the same wherever somebody meets it. It stays open while `busy`, so a refused
+          password reports itself where the password was typed rather than behind the panel. */}
+      <OperatorUnlockDialog
+        open={asking && needsPassword}
+        purpose={copy.explanation}
+        // `locked` is the only case that MINTS an unlock. A per-change confirmation is spent inside the
+        // one request that carries it, so promising a five-minute window there would be false.
+        holding={authority.kind === 'locked'}
+        busy={busy}
+        failure={unlockFailure}
+        submitLabel={labels.confirming}
+        onSubmit={password => onApply(password)}
+        onClose={() => setAsking(false)}
+      />
+    </div>
   );
 }
 

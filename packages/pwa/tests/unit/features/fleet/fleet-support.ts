@@ -301,3 +301,18 @@ export const pick = (container: HTMLElement, selector: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(selector), `an element matching ${selector}`);
 
 export const absent = (container: HTMLElement, selector: string): boolean => container.querySelector(selector) === null;
+
+/**
+ * The operator password field, wherever the SHARED prompt puts it.
+ *
+ * `[data-grant-unlock-field]` rather than a fleet-specific hook, because there is one prompt now and the
+ * grants panel raises the same one. A fleet-private selector here would be the first step back to two.
+ */
+export const unlockField = (container: HTMLElement): HTMLInputElement =>
+  must(container.querySelector<HTMLInputElement>('[data-grant-unlock-field]'), 'the operator password field');
+
+/** Types the password into the raised prompt and submits it, which is what a person does. */
+export const unlockWith = async (container: HTMLElement, password: string): Promise<void> => {
+  await type(unlockField(container), password);
+  await click(must(container.querySelector<HTMLElement>('[data-operator-unlock-submit]'), 'the unlock button'));
+};
