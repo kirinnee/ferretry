@@ -75,6 +75,39 @@ jobs:
       - name: Build static PWA bundle
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
 
+  pwa-screenshot:
+    name: PWA Settings Geometry
+    permissions:
+      contents: read
+    # `ubuntu-latest`, and deliberately NOT a macOS runner: the runner image already ships the same
+    # Google Chrome the Integration Tests job's shared Chromium launches, so this needs no new tool and
+    # no third `macos-14` job. Measured at roughly 2 minutes against a ~4.6min Integration Tests
+    # critical path, which is why it is a sibling job rather than another step on an existing one — it
+    # adds runner time and no wall clock.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # `packages/pwa/harness/screenshot.ts` could always prove the Settings surfaces do not scroll
+      # sideways at 390px, and until now nothing ran it — so a change could reintroduce the exact
+      # clipping that shipped once already and every gate here would stay green. The script's header
+      # says which frames this covers, which it does not, and why the assertion is the gate while the
+      # images are only evidence.
+      - name: Prove the Settings surfaces fit both viewports
+        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh
+      # `always()` because a red run is the run whose frames matter most: the artifact carries both
+      # colour schemes at both viewports plus each run's full log, so a reviewer can see the panel that
+      # broke instead of reading a geometry number and guessing.
+      - name: Upload the captured Settings frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pwa-settings-frames
+          path: packages/pwa/.artifacts/pwa-screenshot/
+          if-no-files-found: warn
+
   test:
     name: ${{ matrix.mode == 'int' && 'Integration Tests' || 'Unit Tests' }}
     permissions:

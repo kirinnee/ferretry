@@ -2,9 +2,16 @@
  * Build the shell harness, serve it on an ephemeral loopback port, and
  * screenshot it at both viewports.
  *
- * Dev-only. It never runs in CI and is not part of the shipped bundle: its whole
- * job is to make "does the port still look like the original?" a thing a human
- * can answer by opening two PNGs.
+ * Not part of the shipped bundle, and MOSTLY dev-only: the gallery's job is to make "does the port
+ * still look like the original?" a thing a human can answer by opening two PNGs.
+ *
+ * `--settings-only` IS DIFFERENT — it is a CI gate, and this file therefore has a caller that never
+ * looks at a PNG. `scripts/ci/pwa-screenshot-proof.sh` runs that mode in both colour schemes on
+ * every push, because the layout failure this harness is best at catching is the one a PNG is worst
+ * at showing: `assertNoSidewaysScroll` reads geometry the capture has already clipped away. Before
+ * that job existed the whole harness ran only when somebody remembered, which is how an auto margin
+ * cancelling flex stretch clipped a surface at 390px with every gate green. Anything that changes
+ * what `--settings-only` reaches changes a gate; the counter below is what keeps that honest.
  *
  * It drives the browser through playwright-core with the system Chrome, exactly
  * as the visual integration tests already do, and aborts every request that
@@ -15,6 +22,7 @@
  *   bun harness/screenshot.ts --serve    # leave it running to look at by hand
  *   bun harness/screenshot.ts --files-only   # just the Files/reload/preview frames
  *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
+ *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
 
 import { spawnSync } from 'node:child_process';
@@ -72,6 +80,46 @@ const PROJECTS_ONLY = process.argv.includes('--projects-only');
 const PROJECTS_FRAMES = ['hub', 'empty', 'loading', 'error', 'refused', 'registered', 'already-registered'] as const;
 
 const FILES_ONLY = process.argv.includes('--files-only');
+
+/**
+ * Whether this invocation walks the Settings block at all, which decides which tally it owes.
+ *
+ * The five narrow modes above `continue` past Settings to reach their own surface, so they legitimately
+ * make ZERO sideways-scroll checks — asserting the full tally for them would break every one of these
+ * developer entry points the moment the gate was added. `--landing-only` never enters the viewport loop
+ * and so is not listed.
+ *
+ * A mode that skips Settings is held to `=== 0` rather than left unchecked, because the number that
+ * must never appear is a PARTIAL one: it would mean the Settings block was entered and then abandoned
+ * part-way, which is the failure both tallies exist to catch and the only one an "it's a narrow mode"
+ * exemption would hide.
+ */
+const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOARD_ONLY || PROJECTS_ONLY);
+
+/**
+ * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
+ *
+ * Thirty-five: nineteen at `mobile` and sixteen at `desktop`. Sixteen at both viewports — three
+ * Settings sections (Appearance, Behaviour, Daemons), the healthy daemon's ten panels, the unreachable
+ * daemon's Warden and Carrier, and the one-daemon route — plus THREE MOBILE-ONLY open bottom sheets,
+ * which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry is
+ * the product's, not an omission.
+ *
+ * Every call site lives in the Settings block, so a `--settings-only` run and a full gallery run owe
+ * the same tally — there is no mode reaching Settings in which this number quietly drops.
+ *
+ * IT IS ASSERTED RATHER THAN REPORTED. A count that is merely printed is a count nobody reads, and
+ * the failure being defended against is not a check that goes red — it is a check that stops
+ * happening. Deleting a call site, returning early from a panel loop, or moving a frame out of the
+ * mode CI runs would each leave every remaining assertion passing, so the only thing that can tell
+ * "nothing is wrong" from "nothing was measured" is this number disagreeing.
+ *
+ * So when a Settings surface is legitimately added or removed, EDIT THIS, and treat the edit as the
+ * moment to say in the pull request which frames the gate covers now. That is the churn this design
+ * chose over committed golden images: one integer per intentional change, versus a re-baselined
+ * directory of PNGs whose diff nobody can review.
+ */
+const SETTINGS_SIDEWAYS_CHECKS = 35;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -285,7 +333,15 @@ function fail(message: string): never {
  *
  * One pixel of slack: sub-pixel layout rounding at fractional device ratios can leave `scrollWidth` a
  * hair over `clientWidth` on an element that does not actually scroll.
+ *
+ * EVERY CHECK ANNOUNCES ITSELF, PASS INCLUDED, and they are counted. This is a CI gate now, and the
+ * way a gate like this dies is not a false red — it is a refactor that stops the checks running while
+ * the job stays green, which reads exactly like "nothing was wrong". A silent pass is
+ * indistinguishable from a check that was never reached, so the run ends by asserting the tally
+ * against `SETTINGS_SIDEWAYS_CHECKS` and the CI script requires that closing line to be present.
  */
+let sidewaysChecks = 0;
+
 const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
   const overflow = await page.evaluate(() => {
     const boxes: Array<{ name: string; scroll: number; client: number }> = [
@@ -298,6 +354,8 @@ const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> 
   });
   for (const box of overflow)
     fail(`${where}: the ${box.name} scrolls sideways — ${box.scroll}px of content in a ${box.client}px box`);
+  sidewaysChecks += 1;
+  process.stdout.write(`🧭 no sideways scroll: ${where}\n`);
 };
 
 function run(command: string, args: readonly string[]): void {
@@ -1206,6 +1264,12 @@ try {
           let settingsPage = page.getByLabel('Settings page preview', { exact: true });
           await settingsPage.locator('[data-settings-section="appearance"]').waitFor({ state: 'visible' });
 
+          // Appearance is the section Settings OPENS ON, which is the one reason it went unchecked:
+          // `selectSettingsSection` asserts the sections a reader navigates to, and nobody navigates
+          // to the one that is already there. It is also the section carrying six theme-family cards,
+          // so it has more ways to widen a phone than any section that was being checked.
+          await assertNoSidewaysScroll(page, `the Appearance section at ${viewport.name}`);
+
           const appearanceTarget = join(outDir, `settings-appearance-${viewport.name}.png`);
           await page.screenshot({ path: appearanceTarget });
           process.stdout.write(`📸 Settings Appearance ${viewport.name} -> ${appearanceTarget}\n`);
@@ -1228,6 +1292,12 @@ try {
             await settingsPage.locator('[data-settings-section-trigger]').click();
             const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
             await picker.waitFor({ state: 'visible' });
+            // AN OPEN SHEET IS CHECKED TOO, and a viewport capture is not evidence that it is safe.
+            // `BottomSheet` is fixed to the viewport, so a row too wide for a phone does not visibly
+            // spill — it widens the DOCUMENT behind it, and the shot of the sheet still looks correct
+            // while the whole app has become draggable sideways. This repository has already had a
+            // hidden control inside a scrollport scroll the app away, which is the same shape.
+            await assertNoSidewaysScroll(page, `the open settings-section sheet at ${viewport.name}`);
             const pickerOpenTarget = join(outDir, 'settings-picker-open-mobile.png');
             await page.screenshot({ path: pickerOpenTarget });
             process.stdout.write(`📸 Settings picker open -> ${pickerOpenTarget}\n`);
@@ -1324,6 +1394,7 @@ try {
             await settingsPage.locator('[data-daemon-subtab-trigger]').click();
             const daemonPicker = page.getByRole('dialog', { name: 'Choose a daemon' });
             await daemonPicker.waitFor({ state: 'visible' });
+            await assertNoSidewaysScroll(page, `the open daemon sheet at ${viewport.name}`);
             const daemonPickerTarget = join(outDir, 'settings-daemon-picker-open-mobile.png');
             await page.screenshot({ path: daemonPickerTarget });
             process.stdout.write(`📸 Settings daemon picker open -> ${daemonPickerTarget}\n`);
@@ -1359,12 +1430,22 @@ try {
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
             if (openPanelChoices !== 10)
               fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 10`);
+            // Ten rows, each naming a panel, is the longest list any sheet in Settings presents — so if
+            // one of these sheets is going to be the one that widens a phone, it is this one.
+            await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
             await page.screenshot({ path: panelPickerOpenTarget });
             process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
             await page.keyboard.press('Escape');
             await panelPicker.waitFor({ state: 'hidden' });
           }
+
+          // Warden has the same blind spot Appearance had, one level deeper: the loop below asserts
+          // every panel a reader OPENS, and Warden is the panel the frame is already showing, so the
+          // one panel nobody navigates to was the one panel nothing measured. It is also the widest
+          // content in the frame — supervision status, account failover and policy — which makes it a
+          // poor thing to have been the exception.
+          await assertNoSidewaysScroll(page, `the Warden panel at ${viewport.name}`);
 
           const wardenFrameTarget = join(outDir, `settings-daemon-warden-${viewport.name}.png`);
           await page.screenshot({ path: wardenFrameTarget });
@@ -1434,6 +1515,12 @@ try {
           const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
           await unavailableWardenFrame.scrollIntoViewIfNeeded();
           await unavailableWardenFrame.getByLabel('Warden status unavailable').waitFor({ state: 'visible' });
+          // A FAILURE STATE IS A LAYOUT, not an absence of one. These two frames explain why a panel
+          // could not be read, and the sentences that do the explaining are the longest unbroken text
+          // in Settings — an unwrapped URL or daemon id in one of them widens the page exactly as a
+          // healthy panel's widest value would, and it does it on the screen a reader is already
+          // having a bad time on.
+          await assertNoSidewaysScroll(page, `the unavailable daemon's Warden panel at ${viewport.name}`);
           const unavailableWardenTarget = join(outDir, `settings-daemon-warden-unavailable-${viewport.name}.png`);
           await page.screenshot({ path: unavailableWardenTarget });
           process.stdout.write(
@@ -1445,6 +1532,7 @@ try {
           // that daemon scoping is reviewable in pixels, not only in fixture code.
           await selectDaemonPanel(unavailableWardenFrame, 'Carrier');
           await unavailableWardenFrame.locator('[data-active-carrier]').waitFor({ state: 'visible' });
+          await assertNoSidewaysScroll(page, `the unavailable daemon's Carrier panel at ${viewport.name}`);
           const unavailableCarrierTarget = join(outDir, `settings-daemon-carrier-unavailable-${viewport.name}.png`);
           await page.screenshot({ path: unavailableCarrierTarget });
           process.stdout.write(
@@ -1486,6 +1574,11 @@ try {
           const oneDaemonTabs = await settingsPage.locator('[data-daemon-subtab]').count();
           if (oneDaemonTabs !== 1)
             fail(`settings one-daemon fixture rendered ${oneDaemonTabs} daemon sub-tab instead of 1`);
+          // The one-daemon route is a DIFFERENT MOUNT, not the many-daemon page with rows hidden: it
+          // remounts the frame with no daemon switcher above it, so the panel gets width the checked
+          // page never gave it. A layout that only breaks when it is given more room is not a strange
+          // failure — it is what an element sized from a container rather than the viewport does.
+          await assertNoSidewaysScroll(page, `the one-daemon Settings route at ${viewport.name}`);
           const oneDaemonTarget = join(outDir, `settings-daemons-one-${viewport.name}.png`);
           await page.screenshot({ path: oneDaemonTarget });
           process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
@@ -2376,6 +2469,27 @@ try {
         await context.close();
       }
     }
+
+    // THE CLOSING LINE, and the only one the CI script insists on. It is reached after both viewports
+    // have completed, so a run that died halfway prints nothing here and the job goes red on a
+    // missing sentinel rather than on a green summary nobody re-reads. A tally that is short is the
+    // same failure as an assertion that broke: in both cases a surface this gate is supposed to be
+    // measuring was not measured.
+    const owed = WALKS_SETTINGS ? SETTINGS_SIDEWAYS_CHECKS : 0;
+    if (sidewaysChecks !== owed)
+      fail(
+        `the run made ${sidewaysChecks} sideways-scroll checks instead of the ${owed} this mode owes — ` +
+          (WALKS_SETTINGS
+            ? `a Settings surface was added, removed or skipped, so either restore the call site or ` +
+              `update SETTINGS_SIDEWAYS_CHECKS and say in the pull request which frames the gate ` +
+              `covers now`
+            : `a narrow mode reached the Settings block and left it part-way, which means it no longer ` +
+              `skips Settings cleanly`),
+      );
+    if (WALKS_SETTINGS)
+      process.stdout.write(
+        `✅ settings sideways-scroll checks: ${sidewaysChecks}/${SETTINGS_SIDEWAYS_CHECKS} in ${SCHEME}\n`,
+      );
   } finally {
     await browser.close();
   }
