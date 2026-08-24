@@ -3,6 +3,8 @@
  * host. This is intentionally a read model: provisioning and account editing
  * need their own authenticated mutation boundary.
  */
+import type { PickerAccountHealth } from '../../lib/account-picker-catalog.ts';
+
 export type FleetHarnessKind = 'claude' | 'codex';
 
 export interface FleetHarnessView {
@@ -20,6 +22,20 @@ export interface FleetAccountView {
   readonly label: string;
   readonly available: boolean;
   readonly unavailableReason?: string;
+  /**
+   * The host's stored health verdict, or absent when it published none for this
+   * account.
+   *
+   * ABSENT IS NOT UNHEALTHY and it is not "unknown" either — it renders through
+   * `UNREAD_ACCOUNT_HEALTH`, whose sentence is "nothing has checked this account
+   * yet". An account whose ROW says `unknown` has its own reason, which might be
+   * a timeout or Codex having no free proof, and those are different facts.
+   *
+   * Optional rather than required because this surface must keep rendering a
+   * roster whose health read failed: a daemon that can list accounts and cannot
+   * serve verdicts still has accounts.
+   */
+  readonly health?: PickerAccountHealth;
 }
 
 /** A positive snapshot is required before this surface can say a fleet is empty. */

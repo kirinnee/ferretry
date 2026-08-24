@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { buildFleetManifest, FleetHealthSnapshotSchema, FleetManifestSchema } from '@ferretry/fleet';
-import { FLEET_HEALTH_SENTINEL } from '@ferretry/fleet/adapters';
 import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
@@ -162,6 +161,21 @@ function buildIntegrationWorld(): DaemonWorld {
     harnesses: { ...world.harnesses, executables: hostWithoutHarnesses(world.harnesses.executables) },
     relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
   };
+}
+
+/**
+ * The same wait, for a condition that has to be READ rather than counted.
+ *
+ * A separate helper rather than widening {@link waitUntil}'s predicate to `boolean | Promise<boolean>`:
+ * a synchronous predicate returning a promise is always truthy, so one signature accepting both would
+ * make an async caller's wait return on the first attempt and its assertion race.
+ */
+async function waitUntilAsync(predicate: () => Promise<boolean>, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await predicate()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(`timed out waiting for ${what}`);
 }
 
 async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
@@ -5213,13 +5227,7 @@ describe('daemon boot lifecycle', () => {
       await mkdir(binary, { recursive: true });
       const wrapperLog = join(home, 'wrapper-launches.log');
       const spendWrapper = join(binary, SPEND_WRAPPER);
-      // It answers with the exact sentinel, so the positive control below is a genuine `healthy`
-      // verdict rather than a launch that happened to fail.
-      await writeFile(
-        spendWrapper,
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> ${wrapperLog}\nprintf '%s' '${FLEET_HEALTH_SENTINEL}'\n`,
-        { mode: 0o755 },
-      );
+      await writeFile(spendWrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${wrapperLog}\n`, { mode: 0o755 });
       await publishManifest(home, [
         {
           id: SPEND_ACCOUNT,
@@ -5249,6 +5257,10 @@ describe('daemon boot lifecycle', () => {
       const collectorUrl = `http://127.0.0.1:${String(boundPort(collector))}/usage`;
 
       await mkdir(join(home, 'fleet'), { recursive: true });
+      // `health.enabled: true` IS DELIBERATE AND MUST NOT BE TIDIED OUT FOR BEING UNUSED. It is the
+      // switch that used to authorise the spend: a flag that was supposed to prevent the sentinel
+      // probe and did not. It is explicitly ON here and nothing spends anyway, because the launching
+      // path is DELETED rather than gated. A test with the flag off would prove far less.
       await writeFile(
         join(home, 'fleet', 'config.yaml'),
         Bun.YAML.stringify({
@@ -5278,14 +5290,30 @@ describe('daemon boot lifecycle', () => {
       const unattendedReads = usageReads;
       const wrapperAfterUnattended = await Bun.file(wrapperLog).exists();
 
-      // The positive control: a caller who ASKS for account health still gets a real probe. This is
-      // also what proves the wrapper recorder works, so the absence above means something.
+      // EVERY EXPLICIT PATH IS NOW ALSO FREE, and both of them are exercised. The read and the
+      // collecting check are different routes on different verbs, and neither may launch anything.
       const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
-      const explicit = await fetch(`${base}/v1/fleet/health`, {
-        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
-      });
+      const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+      const explicit = await fetch(`${base}/v1/fleet/health`, { headers });
       const snapshot = FleetHealthSnapshotSchema.parse(await explicit.json());
-      const wrapperAfterExplicit = await readFile(wrapperLog, 'utf8');
+      const checked = await fetch(`${base}/v1/fleet/health/check`, { method: 'POST', headers });
+      const checkedSnapshot = FleetHealthSnapshotSchema.parse(await checked.json());
+      const wrapperAfterExplicit = await Bun.file(wrapperLog).exists();
+
+      /**
+       * THE RECORDER'S OWN CREDIBILITY, proved by the FIXTURE rather than by the product.
+       *
+       * The control this replaces asked `GET /v1/fleet/health` to launch the wrapper, and that was
+       * load-bearing: it is what made the absence above mean something rather than meaning "the log
+       * was never going to appear anyway". But it tied the recorder's credibility to a PRODUCT
+       * FEATURE, so deleting the feature silently deleted the proof.
+       *
+       * Spawning the wrapper directly severs that. A control must depend on the fixture, never on the
+       * behaviour under test — and there is no longer any path in the product that launches a wrapper
+       * for health, so an assertion that one does would pin the billing bug as required behaviour.
+       */
+      await Bun.spawn({ cmd: [spendWrapper, 'recorder-proof'], stdout: 'ignore', stderr: 'ignore' }).exited;
+      const recorderProof = await readFile(wrapperLog, 'utf8');
       release();
       const code = await exit;
       await runCleanups(cleanups);
@@ -5309,15 +5337,143 @@ describe('daemon boot lifecycle', () => {
       // sent and no model call was billed.
       should(wrapperAfterUnattended).be.false();
 
-      // The explicit diagnostic is unchanged: it launched the wrapper, with the real sentinel prompt,
-      // and reported the account healthy.
+      // AND NEITHER EXPLICIT PATH LAUNCHED ONE EITHER. This is the half that inverted: it used to
+      // assert the wrapper WAS launched with the sentinel prompt, which is the billing bug written
+      // down as required behaviour. Both routes answer with a real verdict and spend nothing.
       should(explicit.status).equal(200);
       should(snapshot.accounts).have.length(1);
       should(snapshot.accounts[0]?.accountId).equal(SPEND_ACCOUNT);
-      should(snapshot.accounts[0]?.state).equal('healthy');
-      should(wrapperAfterExplicit).containEql('--print');
-      should(wrapperAfterExplicit).containEql(FLEET_HEALTH_SENTINEL);
-      should(wrapperAfterExplicit.trim().split('\n')).have.length(1);
+      should(checked.status).equal(200);
+      should(checkedSnapshot.accounts).have.length(1);
+      // This home holds no credential at all, so the honest verdict is that a login is needed — an
+      // answer reached from a local read and one free provider classification, never from a launch.
+      should(checkedSnapshot.accounts[0]?.verdict).equal('needs_relogin');
+      should(wrapperAfterExplicit).be.false();
+
+      // The recorder works, so every `false` above is evidence rather than an artefact.
+      should(recorderProof).containEql('recorder-proof');
+    });
+
+    /**
+     * HEALTH RIDES THE FREE PASS, AUTOMATICALLY, AND STILL LAUNCHES NOTHING.
+     *
+     * The journey above proves the tick spends nothing. This proves the tick now PRODUCES SOMETHING:
+     * a real per-account verdict with a real last-checked instant, on a booted `fyd`, with nobody
+     * asking. That is the requirement in the human's own words — "is there no auto metring?" — and a
+     * button-only design would have been a failed design.
+     *
+     * THE TIMESTAMP IS PROVED TO PREDATE THE READ. `boundary` is captured before the `GET` is issued
+     * and `lastCheckedAt` must be EARLIER than it. Without that this test cannot tell "the tick
+     * checked automatically" from "reading it checked it", and the automatic claim would be unproven —
+     * which is the one way this could pass for the wrong reason.
+     *
+     * ## What this fixture CANNOT prove — a declared GAP, read it before quoting this test
+     *
+     * This home holds no credential, so `AnthropicUsageProbe` returns `absent` and issues NO HTTP
+     * request at all. That is what keeps the test hermetic, and it means this journey does not
+     * exercise the CREDENTIALED provider path — which is the case a real operator runs. So it cannot
+     * prove that an account with a working credential also costs nothing on a tick.
+     *
+     * That gap is not closable here and closing it would be worse than naming it. The endpoint is
+     * `ANTHROPIC_USAGE_URL`, a module constant the probe uses directly; the composition root builds
+     * the probe inside `createDaemonFleetSubsystem`, which no `DaemonWorld` hook reaches. Making the
+     * base URL injectable would mean a configuration surface that redirects where a BEARER TOKEN is
+     * sent, which is a credential-exfiltration seam added to make a test easier. Writing a real
+     * credential into this fixture instead would point the probe at `api.anthropic.com` from CI.
+     * Neither is acceptable.
+     *
+     * WHAT COVERS IT INSTEAD, and why the pair is not the same as one test:
+     * `packages/fleet/tests/integration/anthropic-usage-probe.test.ts` drives the credentialed path
+     * against a scripted transport and asserts the whole request list — exactly one `GET`, never a
+     * `POST`, on every status including `403`. So "a credentialed account costs one free GET" is
+     * proved there, and "the tick reaches the collector and launches nothing" is proved here. Neither
+     * test alone proves the conjunction on a booted daemon, and that residual is the gap.
+     */
+    it('should record a real per-account verdict from the scheduled tick alone, launching no wrapper', async () => {
+      // Arrange
+      const home = await tempDirectory('fyd-automatic-health');
+      const port = await freeLoopbackPort();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      let release = (): void => {};
+      const world = await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      });
+
+      const binary = join(home, 'bin');
+      await mkdir(binary, { recursive: true });
+      const wrapperLog = join(home, 'wrapper-launches.log');
+      const spendWrapper = join(binary, SPEND_WRAPPER);
+      await writeFile(spendWrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> ${wrapperLog}\n`, { mode: 0o755 });
+      await publishManifest(home, [
+        {
+          id: SPEND_ACCOUNT,
+          kind: 'claude',
+          mode: 'auto',
+          wrapper: spendWrapper,
+          home: join(home, 'harness'),
+          displayName: 'Spend',
+          defaultModel: 'claude-opus-5',
+          models: [{ id: 'claude-opus-5', available: true }],
+          available: true,
+          unavailableReason: null,
+        },
+      ]);
+
+      await mkdir(join(home, 'fleet'), { recursive: true });
+      // `usage.enabled: true` — unlike the journey above, the fleet's OWN collector runs on the timer
+      // here, which is the path health rides. `health.enabled` is left ON for the same reason as
+      // above: the switch that used to authorise a spend is enabled and nothing spends.
+      await writeFile(
+        join(home, 'fleet', 'config.yaml'),
+        Bun.YAML.stringify({ health: { enabled: true }, usage: { enabled: true, interval: TICK_SECONDS } }),
+        { mode: 0o600 },
+      );
+      await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), {
+        mode: 0o600,
+      });
+
+      // Act
+      const exit = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      // The health document only exists once an unattended pass has written one. Waiting on the FILE
+      // rather than on a clock is what makes this a claim about the tick.
+      const document = join(home, 'fleet', 'account-health.json');
+      await waitUntilAsync(
+        async () => await Bun.file(document).exists(),
+        'the unattended pass to record account health',
+      );
+      // Captured BEFORE the read, so the assertion below can prove the instant predates it.
+      const boundary = Date.now();
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const read = await fetch(`${base}/v1/fleet/health`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const snapshot = FleetHealthSnapshotSchema.parse(await read.json());
+      const launched = await Bun.file(wrapperLog).exists();
+      release();
+      const code = await exit;
+      await runCleanups(cleanups);
+
+      // Assert
+      should(code).equal(0);
+      should(read.status).equal(200);
+      should(snapshot.accounts).have.length(1);
+      // A REAL verdict, not `never_checked`: the tick established it.
+      should(snapshot.accounts[0]?.verdict).equal('needs_relogin');
+      should(snapshot.accounts[0]?.reason).equal('oauth_credential_missing');
+      const lastCheckedAt = snapshot.accounts[0]?.lastCheckedAt;
+      should(lastCheckedAt).be.a.Number();
+      // THE LOAD-BEARING LINE. The check happened before this test asked anything, so it was the
+      // timer's and not the read's. Without it, "automatic" would be unproven.
+      should(lastCheckedAt as number).be.below(boundary);
+      // And the pass that produced it launched nothing.
+      should(launched).be.false();
     });
   });
 });

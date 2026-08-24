@@ -122,6 +122,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     health: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    checkHealth: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     apply: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -439,9 +442,11 @@ describe('the mounted daemon surface', () => {
     // The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than
     // a census of today's table — but a table that used it exactly once, for a mechanism the
     // capability model already answered, is worth reading as evidence rather than as trivia.
-    // 129 fleet-and-session routes, plus the five that drive a harness sign-in. Written as a sum so
-    // that two changes landing together cannot silently agree on one total.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 + 5 });
+    // 129 fleet-and-session routes, plus the five that drive a harness sign-in, plus the one free
+    // account-health re-check. Written as a sum so that two changes landing together cannot silently
+    // agree on one total — two independent `+ 1` edits produce the same number and git merges them
+    // without a conflict, which is exactly how a route can go missing with this test green.
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 + 5 + 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -493,6 +498,11 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/plan',
       'GET /v1/fleet/usage',
       'GET /v1/fleet/health',
+      // The stored verdicts, and the explicit free re-check. Both are `fleet.use`: the POST records a
+      // READING, not a change — it launches nothing and writes no account — so putting it behind
+      // `fleet.configure` would gate somebody's own health check on the operator password that guards
+      // writing executables into their home.
+      'POST /v1/fleet/health/check',
       'POST /v1/fleet/apply',
       'GET /v1/fleet/permissions',
       'GET /v1/fleet/sharing',

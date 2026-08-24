@@ -218,6 +218,7 @@ export * from '../shell/stop-actions.ts';
 export * from '../shell/task-name.ts';
 export * from '../shell/theme-toggle.tsx';
 export * from '../shell/view-tabs.tsx';
+export * from './account-health-view.ts';
 export * from './account-picker-catalog.ts';
 export * from './account-picker-store.ts';
 export * from './agent-references.ts';

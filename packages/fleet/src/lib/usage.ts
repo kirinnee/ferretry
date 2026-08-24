@@ -7,6 +7,42 @@ const finiteNumber = z.number().refine(Number.isFinite, 'expected a finite numbe
 const percentage = finiteNumber.min(0).max(100);
 const epochMilliseconds = finiteNumber.int().nonnegative();
 
+/**
+ * WHAT THE FREE PROVIDER READ SAID ABOUT THE CREDENTIAL, as a closed classification.
+ *
+ * This exists because `authOk` cannot carry it. `authOk` answers one question — is this credential
+ * repudiated — and it collapses three answers that mean different things into `true`: a `200` that
+ * accepted the token, a `403` that accepted it and refused to show usage, and a `503` that said
+ * nothing at all. Quota does not care which of those happened; a health verdict is nothing but that
+ * distinction, and a build that turned the third into `healthy` would report a working account for
+ * every provider outage.
+ *
+ * IT IS A CLASSIFICATION, NEVER MATERIAL. Every member is a fixed word chosen from an HTTP status,
+ * so a row carrying one cannot carry a token, a header or a provider body. The reason the status is
+ * mapped at the adapter rather than travelling as a number is that a consumer holding a number
+ * writes its own table, and two tables are how `403` becomes a re-login for somebody.
+ */
+export const FleetCredentialSignalSchema = z.enum([
+  /** The provider answered for this token: it is currently accepted. */
+  'accepted',
+  /**
+   * `403` from the read-only usage endpoint. The token is ACCEPTED and merely lacks `user:profile`,
+   * which is permanent for an inference-scoped token. Reading this as a rejection is the single
+   * worst mistake available here: it sends somebody to re-login, forever, on a working account.
+   */
+  'scope_unavailable',
+  /** `401`. This exact token was repudiated by the provider. */
+  'rejected',
+  /** The request did not finish inside its deadline. Inconclusive, never a rejection. */
+  'timeout',
+  /** Reached, and said nothing usable: a 5xx, a 429, another 4xx, a transport failure. */
+  'inconclusive',
+  /** There was no readable token to ask with, so no request was made. */
+  'absent',
+]);
+
+export type FleetCredentialSignal = z.infer<typeof FleetCredentialSignalSchema>;
+
 /** A normalized quota window. Percentages always mean consumed capacity. */
 export const FleetUsageWindowSchema = z.strictObject({
   usedPercent: percentage.optional(),
@@ -23,6 +59,13 @@ export const FleetUsageProbeResultSchema = z.strictObject({
   unavailable: z.boolean().optional(),
   unavailableReason: z.string().min(1).optional(),
   authOk: z.boolean().optional(),
+  /**
+   * What the free provider read established about the credential, when a probe was in a position to
+   * establish anything. Absent means this probe does not speak for this account at all — which is
+   * how a Codex account reaches a health verdict of "unproven" rather than one invented from a
+   * probe that declined to run.
+   */
+  credentialSignal: FleetCredentialSignalSchema.optional(),
   error: z.string().min(1).optional(),
   shortWindow: FleetUsageWindowSchema.optional(),
   longWindow: FleetUsageWindowSchema.optional(),
@@ -49,6 +92,13 @@ export const FleetUsageSchema = z.strictObject({
   unavailable: z.boolean(),
   unavailableReason: z.string().min(1).optional(),
   authOk: z.boolean().optional(),
+  /**
+   * Carried through per credential GROUP, exactly like the quota reading beside it, because it was
+   * measured against the group's shared login. A sibling's own LOCAL credential copy is read
+   * separately by the health collector, and a positively dead local copy outranks this — see
+   * `./health.ts`, which is where the two are joined.
+   */
+  credentialSignal: FleetCredentialSignalSchema.optional(),
   error: z.string().min(1).optional(),
   shortWindow: FleetUsageWindowSchema.optional(),
   longWindow: FleetUsageWindowSchema.optional(),
@@ -278,6 +328,7 @@ export class FleetUsageCollector {
       unavailable,
       ...(reading.unavailableReason === undefined ? {} : { unavailableReason: reading.unavailableReason }),
       ...(reading.authOk === undefined ? {} : { authOk: reading.authOk }),
+      ...(reading.credentialSignal === undefined ? {} : { credentialSignal: reading.credentialSignal }),
       ...(reading.error === undefined ? {} : { error: reading.error }),
       ...(shortWindow === undefined ? {} : { shortWindow }),
       ...(longWindow === undefined ? {} : { longWindow }),

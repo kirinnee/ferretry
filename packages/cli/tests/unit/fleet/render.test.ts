@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { FleetHealth, FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
+import type { FleetAccountHealth, FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
 import should from 'should';
 import {
   renderAccount,
@@ -13,6 +13,7 @@ import {
   renderLoginRow,
   renderManifest,
   renderRecommendation,
+  renderRelativeInstant,
   renderScaffoldResult,
   renderUsage,
   renderUsageRow,
@@ -700,23 +701,138 @@ describe('usage rendering', () => {
   });
 });
 
+/**
+ * Account health in a terminal.
+ *
+ * ONE FACT, ONE OWNER, TWO SURFACES. The daemon publishes a verdict and a reason CODE; this file owns
+ * the terminal's words for it and `packages/pwa/src/lib/account-health-view.ts` owns the browser's.
+ * Both read the same codes, so the two surfaces cannot describe the same account differently — and
+ * neither is a degraded version of the other: the terminal shows the same four verdicts and the same
+ * last-checked instant the browser does.
+ */
+const NOW = 1_786_000_000_000;
+const healthRow = (overrides: Partial<FleetAccountHealth> = {}): FleetAccountHealth =>
+  ({
+    accountId: 'a',
+    kind: 'claude',
+    verdict: 'healthy',
+    reason: 'provider_accepted',
+    evidence: 'anthropic_usage',
+    lastCheckedAt: NOW - 240_000,
+    verdictAt: NOW - 240_000,
+    lastCheckInconclusive: false,
+    ...overrides,
+  }) as FleetAccountHealth;
+
+describe('relative instant rendering', () => {
+  it('should use whole units, coarsest that fits', () => {
+    // A terminal reader wants "4m ago", never a millisecond count.
+    should(renderRelativeInstant(NOW - 5_000, NOW)).equal('just now');
+    should(renderRelativeInstant(NOW - 240_000, NOW)).equal('4m ago');
+    should(renderRelativeInstant(NOW - 7_200_000, NOW)).equal('2h ago');
+    should(renderRelativeInstant(NOW - 172_800_000, NOW)).equal('2d ago');
+  });
+
+  it('should never render a future instant as negative', () => {
+    // A daemon clock a little ahead of this process is ordinary, and "-3m ago" is not a time.
+    should(renderRelativeInstant(NOW + 60_000, NOW)).equal('just now');
+  });
+});
+
 describe('health rendering', () => {
-  it('should distinguish down and unknown accounts while preserving cached evidence', () => {
+  it('should name the verdict, when it was checked, and why', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] });
+
+    // Assert — the time is part of the verdict, not decoration: "HEALTHY" with no instant is a claim
+    // with no expiry, and the evidence behind it has a fifteen-minute horizon.
+    should(rendered).containEql('a  HEALTHY  checked 4m ago — the provider accepted this credential');
+  });
+
+  it('should count the two verdicts somebody must ACT on, and not count unknown among them', () => {
     // Arrange
-    const rows: FleetHealth[] = [
-      { accountId: 'a', kind: 'claude', state: 'down', cached: false, checkedAt: 1, ms: 2, error: 'no sentinel' },
-      { accountId: 'b', kind: 'codex', state: 'unknown', cached: true, checkedAt: 1, ms: 0 },
+    const rows = [
+      healthRow({ accountId: 'a', verdict: 'needs_relogin', reason: 'oauth_token_rejected' }),
+      healthRow({ accountId: 'b', verdict: 'needs_credentials', reason: 'static_credential_missing' }),
+      healthRow({ accountId: 'c', verdict: 'unknown', reason: 'codex_liveness_unproven', kind: 'codex' }),
     ];
 
     // Act
-    const rendered = renderHealth({ at: 1, accounts: rows });
+    const rendered = renderHealth({ at: NOW, accounts: rows });
 
-    // Assert
-    should(rendered).equal('2 accounts, 1 down, 1 unknown\n  a  DOWN — no sentinel\n  b  UNKNOWN (cached)');
+    // Assert — unknown is not a fault. On Codex it is the CORRECT published answer, and counting it
+    // beside real rejections would send a person hunting a problem that is not there.
+    should(rendered.split('\n')[0]).equal('3 accounts, 1 need sign-in, 1 need a credential');
   });
 
-  it('should explain an empty health snapshot without pretending a probe ran', () => {
-    should(renderHealth({ at: 1, accounts: [] })).equal('No accounts to probe for health.');
+  it('should offer a CREDENTIAL, not a login, for an account no login can fix', () => {
+    // Arrange / Act — the harness reads an environment variable and never consults its own credential
+    // store, so telling somebody to sign in sends them to do something that cannot work.
+    const rendered = renderHealth({
+      at: NOW,
+      accounts: [healthRow({ verdict: 'needs_credentials', reason: 'static_credential_rejected' })],
+    });
+
+    // Assert
+    should(rendered).containEql('NEEDS CREDENTIAL');
+    should(rendered).not.containEql('NEEDS LOGIN');
+  });
+
+  it('should call a 403 healthy and say the quota is what is unknown', () => {
+    // Arrange / Act — the rule the whole feature turns on.
+    const rendered = renderHealth({
+      at: NOW,
+      accounts: [healthRow({ reason: 'usage_scope_unavailable' })],
+    });
+
+    // Assert
+    should(rendered).containEql('HEALTHY');
+    should(rendered).containEql('quota is unknown');
+    should(rendered).not.containEql('NEEDS LOGIN');
+  });
+
+  it('should say NEVER CHECKED rather than inventing an instant', () => {
+    // Arrange / Act
+    const rendered = renderHealth({
+      at: NOW,
+      accounts: [healthRow({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null })],
+    });
+
+    // Assert — a fabricated "now" here would be indistinguishable from a check that just succeeded.
+    should(rendered).containEql('checked never checked — never checked');
+  });
+
+  it('should report what a stale verdict WAS, and that the last check was inconclusive', () => {
+    // Arrange
+    const rows = [
+      healthRow({
+        accountId: 'a',
+        verdict: 'unknown',
+        reason: 'stale',
+        staleVerdict: 'healthy',
+        lastCheckedAt: NOW - 60_000,
+      }),
+      healthRow({ accountId: 'b', lastCheckInconclusive: true, lastCheckedAt: NOW - 60_000 }),
+    ];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: rows });
+
+    // Assert — a bare UNKNOWN reads exactly like an account nobody ever checked, and hiding a failed
+    // attempt is how a fleet reads healthy while every provider call is failing.
+    should(rendered).containEql('a  UNKNOWN (was HEALTHY)');
+    should(rendered).containEql('b  HEALTHY');
+    should(rendered).containEql('last check was inconclusive');
+  });
+
+  it('should state that it spends nothing, every time', () => {
+    // The command this replaced launched every account's wrapper and asked a model for a sentinel.
+    // Somebody who used it before has every reason to assume this one still bills them.
+    should(renderHealth({ at: NOW, accounts: [healthRow()] })).containEql('uses no inference quota');
+  });
+
+  it('should explain an empty health snapshot without pretending a check ran', () => {
+    should(renderHealth({ at: NOW, accounts: [] })).equal('No accounts to report health for.');
   });
 });
 

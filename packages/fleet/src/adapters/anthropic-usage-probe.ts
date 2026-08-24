@@ -28,11 +28,26 @@
  * **A failed probe reports a failure, never a number.** `ok: false` with a reason is always preferable
  * to a fabricated zero, and the collector already refuses to let a failed probe mark an account at its
  * limit.
+ *
+ * **It also reports what the answer said about the CREDENTIAL, and that is a second field on purpose.**
+ * `credentialSignal` is set on every return path here, and it is the only place in the repository that
+ * turns an Anthropic HTTP status into a health classification. Health is not derivable from `ok` or
+ * from `authOk`: a `200` with an unreadable body is a failed quota reading and an accepted credential,
+ * and a `503` leaves `authOk: true` for quota purposes while proving nothing whatever about a login.
+ * The account-health verdict is nothing but those distinctions, so they are made once, here, where the
+ * status actually is — see `lib/quota.ts`'s `usageEndpointCredentialSignal` for the table and
+ * `lib/health.ts` for what each member becomes. **No additional request is made for health**: this is
+ * the same single read-only GET, reported more completely.
  */
 
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
-import { parseStoredUsageBody, type QuotaReading, usageEndpointHttpVerdict } from '../lib/quota.ts';
+import {
+  parseStoredUsageBody,
+  type QuotaReading,
+  usageEndpointCredentialSignal,
+  usageEndpointHttpVerdict,
+} from '../lib/quota.ts';
 import type { FleetUsageProbe, FleetUsageProbeResult } from '../lib/usage.ts';
 
 export const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -103,16 +118,27 @@ function bearerToken(material: CredentialMaterial): string | undefined {
   }
 }
 
-/** Turn a successful reading into a row, or a signal-less one into an honest failure. */
+/**
+ * Turn a successful reading into a row, or a signal-less one into an honest failure.
+ *
+ * Both carry `credentialSignal: 'accepted'`, and the failure branch is the reason that field exists
+ * separately from `ok`. A `200` whose body held no percentage is a FAILED QUOTA READING and a
+ * SUCCESSFUL credential check: the provider answered for this token. Deriving health from `ok` would
+ * report an account as unproven purely because its usage JSON changed shape.
+ */
 function fromReading(reading: QuotaReading, source: string): FleetUsageProbeResult {
   if (!reading.hasQuotaSignal) {
-    return failure(`${source} carried no readable quota measurement`, { authOk: true });
+    return failure(`${source} carried no readable quota measurement`, {
+      authOk: true,
+      credentialSignal: 'accepted',
+    });
   }
   return {
     provider: ANTHROPIC_PROVIDER,
     usageBased: true,
     ok: true,
     authOk: true,
+    credentialSignal: 'accepted',
     ...(reading.shortWindow === undefined ? {} : { shortWindow: reading.shortWindow }),
     ...(reading.longWindow === undefined ? {} : { longWindow: reading.longWindow }),
     atLimit: reading.providerAtLimit,
@@ -124,14 +150,18 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
 
   async probe(account: FleetManifestAccount): Promise<FleetUsageProbeResult> {
     if (account.kind !== 'claude') {
+      // NO `credentialSignal`, deliberately. This probe has not looked at a Codex account and is not
+      // entitled to classify one — an absent signal is how the health verdict reaches "liveness
+      // unproven" instead of inventing a conclusion from a probe that declined to run.
       return failure(`no Anthropic quota probe applies to a ${account.kind} account`, { usageBased: false });
     }
 
     const token = bearerToken(await this.deps.credentials.material('claude', account.home));
     if (token === undefined) {
       // Not logged in, or a credential this build could not read. Either way there is nothing to ask
-      // with, and saying so beats reporting 0% spent.
-      return failure('no readable access token for this account', { authOk: false });
+      // with, and saying so beats reporting 0% spent. `absent` rather than `rejected`: nothing was
+      // asked, so nothing was refused, and the local classification is the better evidence about why.
+      return failure('no readable access token for this account', { authOk: false, credentialSignal: 'absent' });
     }
 
     const stored = await this.#stored(token);
@@ -145,6 +175,11 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       stored ??
       failure('this token cannot read usage; it lacks the user:profile scope', {
         authOk: true,
+        // ACCEPTED, and merely unmeasurable. This is the single most consequential line in the file
+        // for the health verdict: a `403` here becomes `healthy/usage_scope_unavailable`, never a
+        // re-login. Reading it as a rejection would send somebody to sign in again, forever, on an
+        // account that is working perfectly.
+        credentialSignal: 'scope_unavailable',
       })
     );
   }
@@ -160,7 +195,10 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
         timeoutMs: this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       });
     } catch (error) {
-      return failure(requestFailure(error));
+      // A request that never completed proves nothing about the credential, and the two ways it can
+      // fail are two different sentences a reader acts on differently: "it timed out" versus "the
+      // provider could not be reached". Neither is ever a rejection.
+      return failure(requestFailure(error), { credentialSignal: abortedRequest(error) ? 'timeout' : 'inconclusive' });
     }
 
     if (response.status === FORBIDDEN_STATUS) return undefined;
@@ -169,6 +207,7 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       const verdict = usageEndpointHttpVerdict(response.status);
       return failure(`the usage endpoint answered HTTP ${response.status}`, {
         ...(verdict.authOk === undefined ? {} : { authOk: verdict.authOk }),
+        credentialSignal: usageEndpointCredentialSignal(response.status),
         ...(verdict.unavailable ? { unavailable: true, unavailableReason: 'this credential was rejected' } : {}),
       });
     }
@@ -177,15 +216,26 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
     try {
       body = await response.json();
     } catch (error) {
-      return failure(`the usage endpoint answered unreadable JSON: ${requestFailure(error)}`, { authOk: true });
+      // The provider answered FOR THIS TOKEN and then handed back bytes this build cannot read. That
+      // is a lost quota number and an accepted credential, so health stays positive while usage does
+      // not — the whole reason the two facts travel in separate fields.
+      return failure(`the usage endpoint answered unreadable JSON: ${requestFailure(error)}`, {
+        authOk: true,
+        credentialSignal: 'accepted',
+      });
     }
     return fromReading(parseStoredUsageBody(body), 'the usage endpoint');
   }
 }
 
+/** Whether this failure is the deadline firing rather than the network refusing. */
+function abortedRequest(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 /** A request failure's own message, never anything derived from the credential. */
 function requestFailure(error: unknown): string {
-  if (error instanceof Error && error.name === 'AbortError') return 'the request timed out';
+  if (abortedRequest(error)) return 'the request timed out';
   return error instanceof Error && error.message.length > 0 ? error.message : 'the request failed';
 }
 

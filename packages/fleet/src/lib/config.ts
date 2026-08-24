@@ -584,7 +584,14 @@ export const FleetConfigCapabilities = {
     {
       key: 'health.enabled',
       capability: 'probing each account with a real model call to prove it can complete a turn',
-      consequence: 'nothing verifies an account beyond that its wrapper exists, so a broken account reads as fine',
+      // PERMANENTLY unimplemented, by decision rather than by backlog. That probe billed a model turn
+      // per account on a timer for nobody, and it is deleted rather than gated — see
+      // `docs/fleet-health.md`. What replaced it needs no flag because it costs nothing: account
+      // health rides the free read-only usage GET the quota pass already makes, so it is on whenever
+      // that pass is. This entry stays because the SETTING is still accepted, and accepting a setting
+      // is not the same as implementing it.
+      consequence:
+        'nothing proves an account can complete a turn; account health reports whether its credential was accepted, which is a narrower and free claim',
       requested: (config: FleetConfig) => config.health.enabled,
     },
     {

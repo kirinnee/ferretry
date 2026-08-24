@@ -15,7 +15,11 @@ import {
   projectFieldSource,
 } from '../../src/components/daemon-pickers.tsx';
 import { accountPickerOptions, projectPickerOptions } from '../../src/components/daemon-picker-model.ts';
-import type { AccountPickerHealthCatalog, PickerAccount } from '../../src/lib/account-picker-catalog.ts';
+import type {
+  AccountPickerHealthCatalog,
+  PickerAccount,
+  PickerAccountHealth,
+} from '../../src/lib/account-picker-catalog.ts';
 import {
   type DaemonAccountPickerPort,
   type DaemonAccountPickerSlice,
@@ -198,12 +202,12 @@ const pressRow = async (index: number): Promise<void> => {
 
 describe('accountFieldOptions', () => {
   it('keeps an unread roster unread rather than turning it into no accounts', () => {
-    expect(accountFieldOptions(null)).toBeNull();
-    expect(accountFieldOptions(accountPickerOptions(null, usage, null))).toBeNull();
+    expect(accountFieldOptions(null, NOW)).toBeNull();
+    expect(accountFieldOptions(accountPickerOptions(null, usage, null), NOW)).toBeNull();
   });
 
   it('offers each account under its wrapper, searchable by everything the projection matched on', () => {
-    const options = must(accountFieldOptions(accountPickerOptions([account(), codex], usage, null)), 'options');
+    const options = must(accountFieldOptions(accountPickerOptions([account(), codex], usage, null), NOW), 'options');
 
     expect(options.map(option => option.value)).toEqual(['claude-auto-studio', 'codex-auto-atelier']);
     expect(options.map(option => option.label)).toEqual(['Studio Claude', 'Atelier Codex']);
@@ -213,7 +217,7 @@ describe('accountFieldOptions', () => {
   });
 
   it('disables an unavailable account with the manifest’s own reason, and hides nothing', () => {
-    const options = must(accountFieldOptions(accountPickerOptions([archived], usage, null)), 'options');
+    const options = must(accountFieldOptions(accountPickerOptions([archived], usage, null), NOW), 'options');
 
     expect(options).toHaveLength(1);
     expect(options[0]?.disabled).toBeTrue();
@@ -249,7 +253,7 @@ describe('accountFieldSource', () => {
   });
 
   it('keeps last-good rows AND the failure when a refresh fails over them', () => {
-    const options = must(accountFieldOptions(accountPickerOptions([account()], usage, null)), 'options');
+    const options = must(accountFieldOptions(accountPickerOptions([account()], usage, null), NOW), 'options');
     const source = accountFieldSource(slice({ status: 'error', error: 'the daemon stopped answering' }), options);
 
     expect(source).toMatchObject({ kind: 'ready', staleReason: 'the daemon stopped answering' });
@@ -469,17 +473,31 @@ describe('accountEmptyCopy', () => {
   });
 });
 
+/**
+ * The instant every relative health label in this file is measured against.
+ *
+ * Fixed, and carried ON the projection rather than read from a clock inside a row — so "checked 4m
+ * ago" is an assertion about a fixture instead of about whenever the suite happened to run.
+ */
+const NOW = Date.parse('2026-08-24T12:00:00.000Z');
+
+const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
+  accountId: account().id,
+  kind: 'claude',
+  verdict: 'healthy',
+  reason: 'provider_accepted',
+  evidence: 'anthropic_usage',
+  lastCheckedAt: NOW - 240_000,
+  verdictAt: NOW - 240_000,
+  lastCheckInconclusive: false,
+  ...overrides,
+});
+
 describe('checkedAmongOffered', () => {
-  const options = must(accountFieldOptions(accountPickerOptions([account(), codex], usage, null)), 'options').map(
+  const options = must(accountFieldOptions(accountPickerOptions([account(), codex], usage, null), NOW), 'options').map(
     option => option.account,
   );
-  const health = (...ids: readonly string[]) =>
-    new Map(
-      ids.map(id => [
-        id,
-        { accountId: id, kind: 'claude' as const, state: 'healthy' as const, cached: false, checkedAt: 1, ms: 2 },
-      ]),
-    );
+  const health = (...ids: readonly string[]) => new Map(ids.map(id => [id, healthRow({ accountId: id })]));
 
   it('counts only the rows this field offers', () => {
     const codexOnly = [must(options[1], 'the codex option')];
@@ -502,7 +520,7 @@ const accountField = async (
   accounts: readonly PickerAccount[],
   health: AccountPickerHealthCatalog['health'] | null = null,
 ): Promise<void> => {
-  const options = accountFieldOptions(accountPickerOptions(accounts, usage, health));
+  const options = accountFieldOptions(accountPickerOptions(accounts, usage, health), NOW);
   await show(
     <AccountPickerField
       id="fy-test-agent"
@@ -533,60 +551,93 @@ describe('the account row', () => {
     expect(rowText(1)).not.toContain('0%');
   });
 
-  it('says an unchecked account is unchecked rather than healthy', async () => {
+  it('says an account with no published row has never been checked, not that it is healthy', async () => {
     await accountField([account()]);
 
-    expect(rowText(0)).toContain('unchecked');
+    // Two absences that must not merge: NO ROW means nobody has looked, while a row that SAYS unknown
+    // has its own reason. This is the first.
+    expect(rowText(0)).toContain('never checked');
     expect(rowText(0)).not.toContain('healthy');
   });
 
-  it('tells the three health verdicts apart once a reader has checked', async () => {
+  it('prints the verdict AND when it was established, because the time is part of the claim', async () => {
+    // Arrange
+    const health = new Map([[account().id, healthRow()]]);
+
+    // Act
+    await accountField([account()], health);
+
+    // Assert — "healthy" with no instant is a claim with no expiry, and the host's evidence has a
+    // fifteen-minute horizon. The exact UTC instant reaches the machine-readable attribute so the
+    // relative label can tick without anything claiming a fresh check happened.
+    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).toContain('checked 4m ago');
+    expect(must(rows()[0], 'row 0').querySelector('time')?.getAttribute('datetime')).toBe(
+      new Date(NOW - 240_000).toISOString(),
+    );
+  });
+
+  it('tells the four health verdicts apart, and never sends a static credential to a login', async () => {
+    // Arrange
     const health = new Map([
-      [
-        account().id,
-        {
-          accountId: account().id,
-          kind: 'claude' as const,
-          state: 'healthy' as const,
-          cached: true,
-          checkedAt: 1,
-          ms: 2,
-        },
-      ],
+      [account().id, healthRow()],
       [
         codex.id,
-        {
+        healthRow({
           accountId: codex.id,
-          kind: 'codex' as const,
-          state: 'down' as const,
-          cached: false,
-          checkedAt: 1,
-          ms: 30_000,
-          failureKind: 'timeout' as const,
-          error: 'timed out after 30s',
-        },
+          kind: 'codex',
+          verdict: 'needs_relogin',
+          reason: 'oauth_token_rejected',
+        }),
       ],
       [
         archived.id,
-        {
+        healthRow({
           accountId: archived.id,
-          kind: 'claude' as const,
-          state: 'unknown' as const,
-          cached: false,
-          checkedAt: 1,
-          ms: 0,
-        },
+          verdict: 'needs_credentials',
+          reason: 'static_credential_rejected',
+        }),
       ],
     ]);
+
+    // Act
     await accountField([account(), codex, archived], health);
 
+    // Assert — `needs credential` is not a politer `needs re-login`. The third account authenticates
+    // from an environment variable, so a sign-in cannot fix it and must not be implied.
     expect(rowText(0)).toContain('healthy');
-    expect(rowText(1)).toContain('down');
-    expect(rowText(2)).toContain('unknown');
-    expect(must(rows()[0], 'row 0').querySelector('[title*="cached health: healthy"]')).not.toBeNull();
-    expect(must(rows()[1], 'row 1').querySelector('[title*="(timeout)"]')?.getAttribute('title')).toContain(
-      'timed out after 30s',
-    );
+    expect(rowText(1)).toContain('needs re-login');
+    expect(rowText(2)).toContain('needs credential');
+    expect(rowText(2)).not.toContain('re-login');
+    expect(must(rows()[1], 'row 1').querySelector('[title*="rejected this token"]')).not.toBeNull();
+  });
+
+  it('calls a 403 healthy and says the QUOTA is the unknown thing', async () => {
+    // Arrange — the rule the whole feature turns on.
+    const health = new Map([[account().id, healthRow({ reason: 'usage_scope_unavailable' })]]);
+
+    // Act
+    await accountField([account()], health);
+
+    // Assert
+    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).not.toContain('re-login');
+    expect(must(rows()[0], 'row 0').querySelector('[title*="quota is not measurable"]')).not.toBeNull();
+  });
+
+  it('reports a live conclusion as CONFIRMED when the newest check failed', async () => {
+    // Arrange
+    const health = new Map([
+      [account().id, healthRow({ lastCheckedAt: NOW - 60_000, verdictAt: NOW - 480_000, lastCheckInconclusive: true })],
+    ]);
+
+    // Act
+    await accountField([account()], health);
+
+    // Assert — dated from the evidence, because that is when the claim was last true. Hiding the
+    // failed attempt is how a fleet reads healthy while every provider call is failing.
+    expect(rowText(0)).toContain('confirmed 8m ago');
+    expect(must(rows()[0], 'row 0').querySelector('[title*="inconclusive"]')).not.toBeNull();
   });
 
   /**
@@ -709,7 +760,7 @@ describe('the project row', () => {
 describe('AccountPickerField', () => {
   it('filters as you type and keeps a value the roster has never heard of', async () => {
     const values: string[] = [];
-    const options = accountFieldOptions(accountPickerOptions([account(), codex], usage, null));
+    const options = accountFieldOptions(accountPickerOptions([account(), codex], usage, null), NOW);
 
     function Host() {
       const [value, setValue] = useState('');
@@ -744,7 +795,7 @@ describe('AccountPickerField', () => {
 
   it('hands the whole chosen account to its surface without touching a model', async () => {
     const chosen: string[] = [];
-    const options = accountFieldOptions(accountPickerOptions([account()], usage, null));
+    const options = accountFieldOptions(accountPickerOptions([account()], usage, null), NOW);
 
     function Host() {
       const [value, setValue] = useState('');
@@ -788,6 +839,7 @@ describe('AccountPickerField', () => {
         accounts: [account(), account({ id: 'other', wrapper: 'claude-auto-two', home: '/h2' })],
       }),
       health: async () => ({ health: new Map(), error: null }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
     });
     await show(
       <DaemonAccountPicker
@@ -862,6 +914,7 @@ describe('AccountPickerField', () => {
     const store = new DaemonAccountPickerStore({
       catalog: async () => ({ accounts: [] }),
       health: async () => ({ health: new Map(), error: null }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
     });
     await show(
       <DaemonAccountPicker
@@ -919,7 +972,7 @@ describe('AccountPickerField', () => {
   });
 
   it('shows rows and a staleness warning together', async () => {
-    const options = accountFieldOptions(accountPickerOptions([account()], usage, null));
+    const options = accountFieldOptions(accountPickerOptions([account()], usage, null), NOW);
     await show(
       <AccountPickerField
         id="fy-test-agent"
@@ -1012,25 +1065,39 @@ describe('ProjectPickerField', () => {
 // ─── the health check ────────────────────────────────────────────────────────
 
 describe('AccountHealthCheck', () => {
-  it('says what pressing it costs before it is pressed', async () => {
+  /**
+   * THE COPY IS THE ASSERTION HERE, and it changed because the cost did.
+   *
+   * The old label was "Check accounts" over "Runs a live check on the host: it starts each published
+   * account once and waits for a reply" — an accurate description of a real inference call per
+   * account, disclosed rather than removed. That was a live spend path in the UI.
+   *
+   * It is now "Check now" over copy that says what it does NOT do, because a reader who used the old
+   * button has every reason to assume this one still bills them. "no inference quota" is the sentence
+   * that answers that, and it is asserted rather than merely written.
+   */
+  it('says out loud that pressing it spends nothing', async () => {
     const presses: number[] = [];
     await show(<AccountHealthCheck checked={0} error={null} onCheck={() => presses.push(1)} status="idle" />);
 
     const button = checkButton();
-    expect(button.textContent).toContain('Check accounts');
-    expect(root().textContent).toContain('starts each published account once');
+    expect(button.textContent).toContain('Check now');
+    expect(root().textContent).toContain('uses no inference quota');
+    expect(root().textContent).toContain('read-only provider status');
+    // The old disclosure named the spend. It must not survive anywhere in this control.
+    expect(root().textContent).not.toContain('starts each published account');
     expect(button.hasAttribute('disabled')).toBeFalse();
 
     await press(button);
     expect(presses).toEqual([1]);
   });
 
-  it('refuses a second press while the host is still being probed', async () => {
+  it('refuses a second press while the host is still collecting', async () => {
     const presses: number[] = [];
     await show(<AccountHealthCheck checked={0} error={null} onCheck={() => presses.push(1)} status="loading" />);
 
     const button = checkButton();
-    expect(button.textContent).toContain('Checking accounts…');
+    expect(button.textContent).toContain('Checking…');
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(button.hasAttribute('disabled')).toBeTrue();
     await press(button);
@@ -1066,32 +1133,65 @@ describe('AccountHealthCheck', () => {
 
 // ─── connected ───────────────────────────────────────────────────────────────
 
+/**
+ * `health` answers with an empty snapshot by default and `checkHealth` REFUSES.
+ *
+ * The refusal used to be on `health`, because reading it launched every account's agent — so a mount
+ * reaching it was a real spend and a test had to opt in. The stored snapshot is free and the store now
+ * hydrates it on mount, so the default has to answer or every mount fails on unrelated grounds.
+ *
+ * The refusal moves to the COLLECTING call, which is where the property now lives: nothing may reach
+ * `checkHealth` without a deliberate press.
+ */
 const catalogPort = (health?: () => Promise<AccountPickerHealthCatalog>): DaemonAccountPickerPort => ({
   catalog: async daemon => ({
     accounts: daemon.daemonId === laptop.daemonId ? [account(), codex] : [archived],
   }),
-  health:
+  health: health ?? (async () => ({ health: new Map(), error: null })),
+  checkHealth:
     health ??
     (async () => {
-      throw new Error('the harness never probes unless a test says so');
+      throw new Error('nothing collects unless a test presses the control');
     }),
 });
 
 describe('DaemonAccountPicker', () => {
-  it('hydrates the cheap roster from its own subscription and never probes the host', async () => {
-    let probes = 0;
+  /**
+   * MOUNTING READS BOTH SNAPSHOTS AND COLLECTS NEITHER.
+   *
+   * This block used to assert the mount made NO health call at all, and that was right: health meant
+   * starting each account's agent and asking a model for a sentinel, so a bottom sheet opening would
+   * have spent money on a host the reader is not sitting at. The probe is deleted, so the property is
+   * now about the COLLECTING call rather than about the read.
+   *
+   * WHAT THIS CANNOT PROVE: it observes port calls. It cannot see a process spawn, so it is not the
+   * guard against a spend regression — `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`
+   * ("what an unattended fleet pass may spend") is, because it boots a real `fyd` and watches for a
+   * wrapper launch.
+   */
+  it('hydrates the roster AND the stored verdicts on mount, and collects nothing', async () => {
+    // Arrange
+    let snapshotReads = 0;
+    let collections = 0;
     const store = new DaemonAccountPickerStore({
       catalog: async () => ({ accounts: [account()] }),
       health: async () => {
-        probes += 1;
+        snapshotReads += 1;
+        return { health: new Map([[account().id, healthRow()]]), error: null };
+      },
+      checkHealth: async () => {
+        collections += 1;
         return { health: new Map(), error: null };
       },
     });
+
+    // Act
     await show(
       <DaemonAccountPicker
         connection={laptop}
         id="fy-test-agent"
         label="Account"
+        now={NOW}
         onValueChange={() => undefined}
         store={store}
         usage={usage}
@@ -1100,11 +1200,17 @@ describe('DaemonAccountPicker', () => {
     );
     await openList();
 
+    // Assert
     expect(rows()).toHaveLength(1);
     // Projected internally: the caller supplied a roster of nothing at all.
     expect(rowText(0)).toContain('Studio Claude');
     expect(rowText(0)).toContain('5h 37%');
-    expect(probes).toBe(0);
+    // The verdict is on the row WITHOUT anybody pressing anything, which is the human's whole ask.
+    expect(rowText(0)).toContain('healthy');
+    expect(rowText(0)).toContain('checked 4m ago');
+    expect(snapshotReads).toBe(1);
+    expect(collections).toBe(0);
+    // And no control is drawn, because this surface did not ask for one.
     expect(find('button')).toBeNull();
   });
 
@@ -1119,6 +1225,7 @@ describe('DaemonAccountPicker', () => {
         return { accounts: [account()] };
       },
       health: async () => ({ health: new Map(), error: null }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
     });
     await show(
       <DaemonAccountPicker
@@ -1202,29 +1309,18 @@ describe('DaemonAccountPicker', () => {
     expect(rowText(0)).toContain('Atelier Codex');
   });
 
-  it('probes only from a press, then shows what came back', async () => {
-    let probes = 0;
-    const store = new DaemonAccountPickerStore(
-      catalogPort(async () => {
-        probes += 1;
-        return {
-          health: new Map([
-            [
-              account().id,
-              {
-                accountId: account().id,
-                kind: 'claude' as const,
-                state: 'healthy' as const,
-                cached: false,
-                checkedAt: 5,
-                ms: 900,
-              },
-            ],
-          ]),
-          error: null,
-        };
-      }),
-    );
+  it('collects only from a press, then shows what came back', async () => {
+    // Arrange — the SNAPSHOT read answers empty, so the rows start with no verdicts and the press is
+    // the only thing that can put one there. `checkHealth` is the collecting call and is counted.
+    let collections = 0;
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => ({ accounts: [account(), codex] }),
+      health: async () => ({ health: new Map(), error: null }),
+      checkHealth: async () => {
+        collections += 1;
+        return { health: new Map([[account().id, healthRow()]]), error: null };
+      },
+    });
 
     function Host() {
       const [value, setValue] = useState('');
@@ -1233,6 +1329,7 @@ describe('DaemonAccountPicker', () => {
           connection={laptop}
           id="fy-test-agent"
           label="Account"
+          now={NOW}
           offerHealthCheck={true}
           onAccountChosen={() => undefined}
           onValueChange={setValue}
@@ -1242,18 +1339,22 @@ describe('DaemonAccountPicker', () => {
         />
       );
     }
-    await show(<Host />);
-    expect(probes).toBe(0);
 
+    // Act
+    await show(<Host />);
+    expect(collections).toBe(0);
     await press(checkButton());
-    expect(probes).toBe(1);
+
+    // Assert
+    expect(collections).toBe(1);
     expect(healthStatusText()).toContain('1 account checked.');
 
     // The verdict reaches the ROWS through the same subscription, with no second
     // one anywhere: this is what the connected shape buys.
     await openList();
     expect(rowText(0)).toContain('healthy');
-    expect(rowText(1)).toContain('unchecked');
+    // And the account the collection did not cover stays uncovered rather than inheriting a verdict.
+    expect(rowText(1)).toContain('never checked');
   });
 
   /**
@@ -1262,21 +1363,18 @@ describe('DaemonAccountPicker', () => {
    * reader, so a one-row Codex migration must never report the two Claude rows
    * that were also probed.
    */
-  it('counts only the harness rows on screen, while still disclosing the whole-fleet cost', async () => {
+  it('counts only the harness rows on screen, while still disclosing the whole-fleet scope', async () => {
+    const wholeFleet = {
+      health: new Map([account().id, codex.id, 'third'].map(id => [id, healthRow({ accountId: id })])),
+      error: null,
+    };
     const store = new DaemonAccountPickerStore({
       catalog: async () => ({
         accounts: [account(), codex, account({ id: 'third', wrapper: 'claude-auto-three', home: '/h3' })],
       }),
-      health: async () => ({
-        // Every published account came back — three of them.
-        health: new Map(
-          [account().id, codex.id, 'third'].map(id => [
-            id,
-            { accountId: id, kind: 'claude' as const, state: 'healthy' as const, cached: false, checkedAt: 9, ms: 12 },
-          ]),
-        ),
-        error: null,
-      }),
+      // Every published account came back — three of them.
+      health: async () => wholeFleet,
+      checkHealth: async () => wholeFleet,
     });
     await show(
       <DaemonAccountPicker
@@ -1284,6 +1382,7 @@ describe('DaemonAccountPicker', () => {
         harness="codex"
         id="fy-test-agent"
         label="Account"
+        now={NOW}
         offerHealthCheck={true}
         onValueChange={() => undefined}
         store={store}
@@ -1292,8 +1391,9 @@ describe('DaemonAccountPicker', () => {
       />,
     );
 
-    // The cost disclosure stays whole-fleet, because that is what will happen.
-    expect(root().textContent).toContain('starts each published account once');
+    // The disclosure stays whole-fleet, because that is still what the check covers — but it now
+    // discloses the SCOPE rather than a cost, because there is no longer a cost to disclose.
+    expect(root().textContent).toContain('uses no inference quota');
 
     await press(checkButton());
 
@@ -1329,7 +1429,9 @@ describe('DaemonAccountPicker', () => {
 
     expect(alertText()).toContain('the host refused the health check');
     await openList();
-    expect(rowText(0)).toContain('unchecked');
+    // A refused collection leaves the row where it was — never checked — rather than inventing a
+    // verdict for it, and never disables the field: the daemon is the thing that refuses a launch.
+    expect(rowText(0)).toContain('never checked');
     expect(input().hasAttribute('disabled')).toBeFalse();
   });
 

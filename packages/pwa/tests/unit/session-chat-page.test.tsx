@@ -173,6 +173,7 @@ describe('SessionChatPage', () => {
     const accountPicker = new DaemonAccountPickerStore({
       catalog: async () => ({ accounts: [] }),
       health: async () => ({ health: new Map(), error: null }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
     });
     const usage = new DaemonUsageStore({ usage: async () => ({ stale: false, accounts: [] }) });
     const page = renderSessionChatPage(

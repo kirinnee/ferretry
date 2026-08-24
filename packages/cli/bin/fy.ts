@@ -23,14 +23,13 @@ import {
   FileSharedHistoryFileSystem,
   fetchQuota,
   PlatformFleetCredentialStore,
-  ProcessFleetHealthProbe,
   ProcessFleetLoginPort,
   ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
-  runFleetHealthProcess,
   SpawnCredentialCommand,
   spawnFleetLoginProcess,
   spawnFleetTokenRefreshProcess,
+  StoreCredentialClassifier,
   whichHarnessBinary,
 } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
@@ -783,14 +782,30 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
           new SystemUsageClock(),
         ),
     },
+    // ACCOUNT HEALTH, AND IT SPENDS NOTHING. This used to launch every account's wrapper and ask a
+    // model to answer a sentinel — a real billable turn per account, every time somebody ran the
+    // command. It is now the free evidence: one read-only `GET /api/oauth/usage` per credential,
+    // through the SAME collector and the SAME probe the line above builds, plus a local credential
+    // classification. Reusing the usage collector is what makes "one free GET" true rather than
+    // aspirational — a second collector here would be a second round of provider calls.
+    //
+    // No persistence, deliberately. This process answers the question it was asked and exits; a head
+    // store here would be a second owner of a fact the daemon already keeps, and the two would
+    // disagree about when an account was last checked.
     health: {
       forConfig: config =>
         buildFleetHealthCollector(
           config,
-          new ProcessFleetHealthProbe({
-            process: runFleetHealthProcess,
-            cachePath: `${layout.fleetDirectory}/health-successes.json`,
-          }),
+          buildFleetUsageCollector(
+            config,
+            new AnthropicUsageProbe({
+              fetch: fetchQuota,
+              timeoutMs: config.usage.timeout * 1_000,
+              credentials: credentialStore,
+            }),
+            new SystemUsageClock(),
+          ),
+          new StoreCredentialClassifier({ credentials: credentialStore, now: () => Date.now() }),
           new SystemUsageClock(),
         ),
     },

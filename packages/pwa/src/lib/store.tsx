@@ -18,7 +18,11 @@ import {
   type HostedRelayFallback,
   readHostedRelayFallback,
 } from '../features/onboarding/hosted-relay.ts';
-import { readAccountPickerCatalog, readAccountPickerHealth } from './account-picker-catalog.ts';
+import {
+  checkAccountPickerHealth,
+  readAccountPickerCatalog,
+  readAccountPickerHealth,
+} from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
@@ -573,6 +577,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const accountPicker = new DaemonAccountPickerStore({
     catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
     health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
+    checkHealth: async daemon => await checkAccountPickerHealth(await clients.client(daemon)),
   });
   // Attention is not part of the generated FyApiClient yet, but it still takes
   // the SAME carrier as every generated call. A direct-only second client would

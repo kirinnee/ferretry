@@ -164,6 +164,28 @@ operator believing they configured something they did not. Boot, `fyd --check` a
 each name the resolved path AND the rule that produced it, and **nothing is ever launched to find
 out**. It is discovery only: a start still launches the absolute wrapper the manifest publishes.
 
+Every fleet account also publishes **whether it is signed in and when that was last established**,
+and the contract is [docs/fleet-health.md](docs/fleet-health.md). It replaces a question that could
+only be answered by spending: health used to mean "can this wrapper answer a sentinel prompt", which
+LAUNCHED the account's agent and asked a model to reply — a billable turn per account, on a timer,
+for nobody. `healthy` now means the current credential was recently accepted, which says nothing
+about quota, entitlement or provider uptime. **Zero spend is structural**: the verdict is a pure
+function of a usage snapshot somebody already collected and a LOCAL credential read, so there is no
+seam to hang a spend on, and `GET /v1/fleet/health` is a store read a browser may hydrate on page
+load. **There is no health timer** — health rides the free read-only `GET /api/oauth/usage` the quota
+pass already makes, so a verdict refreshes as a side effect of a read the daemon was making anyway.
+The single most consequential rule is that a **`403` from that endpoint is HEALTHY**: the token
+merely lacks `user:profile`, permanently, for an inference-scoped token, and reading it as a
+rejection sends somebody to re-login forever on a working account. `needs_credentials` is a separate
+verdict from `needs_relogin` because an account authenticated by an environment variable **cannot** be
+fixed by signing in. **Codex is honestly `unknown`** and that is the finished answer, not a gap: its
+usage endpoint answers `200` for stale tokens, and the refresh that would prove liveness rotates a
+single-use token. A stale `401` cannot condemn a fresh login — an opaque credential digest is compared
+before a remote negative commits — and a fifteen-minute horizon expires NEGATIVE verdicts too, so an
+external re-login is never condemned forever. Read the GAPs before describing what this protects
+against; the credentialed provider path is deliberately not proved on a booted daemon, because the
+only way to close that is a setting redirecting where a bearer token is sent.
+
 `packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
 (`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **A
 loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"

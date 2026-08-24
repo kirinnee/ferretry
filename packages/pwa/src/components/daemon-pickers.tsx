@@ -13,24 +13,31 @@
  *      no accounts because a request timed out.
  *   2. RENDER THE ROWS. Quota, health and provenance are the words the control
  *      refuses to know, so they are drawn here through `renderOption`.
- *   3. OFFER THE HEALTH CHECK, AND ONLY ON PURPOSE.
+ *   3. OFFER THE RE-CHECK, AND ONLY ON PURPOSE.
  *
- * WHY HEALTH IS A BUTTON AND QUOTA IS NOT. They look like the same kind of fact
- * and they cost wildly different things. Quota is the daemon's own cached feed,
- * already polled for the badges elsewhere in this app, so joining it onto a row
- * costs one map lookup. Health is a live probe: the host starts each account's
- * agent and asks it to answer a sentinel, which is a real inference call per
- * account, and failures are not cached. Reading that automatically would mean
- * opening a bottom sheet quietly spending money on a machine the reader is not
- * sitting at. So automatic hydration reads the published manifest and nothing
- * else, and `store.checkHealth` runs only from the control below, whose label
- * says out loud what it is about to do.
+ * WHY HEALTH USED TO BE A BUTTON, AND WHY IT IS NOW A ROW. They looked like the
+ * same kind of fact and they cost wildly different things. Quota is the daemon's
+ * own cached feed, already polled for the badges elsewhere in this app, so joining
+ * it onto a row costs one map lookup. Health was a live probe: the host started
+ * each account's agent and asked it to answer a sentinel — a real inference call
+ * per account — so reading it automatically would have meant opening a bottom
+ * sheet and quietly spending money on a machine the reader is not sitting at.
+ *
+ * That probe is gone. Health is now a verdict the host derived from the free
+ * read-only usage GET its quota pass already makes, so it is a stored snapshot and
+ * costs the same map lookup quota does. Every row therefore carries its verdict
+ * and the time it was established, without anybody pressing anything.
+ *
+ * The control below survives as "prove it again, now". It still cannot spend:
+ * `store.checkHealth` asks the host to collect that same free evidence, and its
+ * copy says so — because a reader who used the old button has every reason to
+ * assume this one still bills them.
  *
  * EVERY MISSING FACT STAYS MISSING. An unread roster is not an empty fleet, an
  * account with no quota row is not an account at 0 %, an account nobody has
- * checked is not a healthy one, and a folder a session merely used is not a
- * folder anybody registered. Each of those pairs is one `null` away from being
- * conflated, and each is asserted separately in the tests.
+ * checked is not a healthy one — and an account whose token cannot READ quota is
+ * healthy with unknown quota rather than an account at zero. Each of those pairs
+ * is one `null` away from being conflated, and each is asserted separately.
  */
 
 import { Activity, Check, FolderClock, FolderGit2, ShieldQuestion } from 'lucide-react';
@@ -38,12 +45,17 @@ import type { ReactNode } from 'react';
 import {
   type AccountPickerOption,
   type AccountUsageRow,
-  accountHealthLabel,
   accountPickerOptions,
   type ProjectPickerCatalog,
   type ProjectPickerOption,
   sameHarnessAccountOptions,
 } from './daemon-picker-model.ts';
+import {
+  absoluteInstantLabel,
+  type AccountHealthTone,
+  accountHealthView,
+  UNREAD_ACCOUNT_HEALTH,
+} from '../lib/account-health-view.ts';
 import type { PickerAccount, PickerAccountHealth } from '../lib/account-picker-catalog.ts';
 import type { DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { cn } from '../lib/class-names.ts';
@@ -60,6 +72,16 @@ import { QuotaReadout } from '../shell/quota-readout.tsx';
 /** The projection, wearing the control's option contract. */
 export interface AccountFieldOption extends PickerOption {
   readonly account: AccountPickerOption;
+  /**
+   * The instant the row's relative times are measured against, carried ON the
+   * option rather than read from a clock inside the row.
+   *
+   * The row is a render callback the combobox invokes; reaching for `Date.now()`
+   * inside it would make every rendered health label untestable and would let two
+   * rows in one list disagree about what "4m ago" means. It travels with the
+   * projection, so one render is one instant.
+   */
+  readonly now: number;
 }
 
 export interface ProjectFieldOption extends PickerOption {
@@ -81,9 +103,11 @@ export interface ProjectFieldOption extends PickerOption {
  */
 export const accountFieldOptions = (
   options: readonly AccountPickerOption[] | null,
+  now: number,
 ): readonly AccountFieldOption[] | null =>
   options?.map(account => ({
     account,
+    now,
     value: account.wrapper,
     label: account.displayName,
     search: account.searchText,
@@ -237,38 +261,48 @@ export const projectFieldSource = (
 // ---------------------------------------------------------------------------
 
 /**
- * Health, in four visibly different readings.
+ * Health, and the time it was established, in one right-rail line.
  *
- * `unknown` is not a softer `down` — the fleet schema says so in its own words —
- * and "nobody has checked" is not `unknown` either. Collapsing the last two is
- * the exact "absence of evidence read as evidence" bug the whole health feature
- * exists to avoid, so the never-checked case renders as its own quiet sentence
- * with no verdict in it.
+ * THE TIME IS PART OF THE VERDICT, not decoration. "Healthy" with no instant is a
+ * claim with no expiry, and the host's evidence has a fifteen-minute horizon. So
+ * the mark prints both, and the words come from `account-health-view.ts` — the
+ * one place in this app that owns them, so this row and the Fleet surface cannot
+ * describe the same account differently.
+ *
+ * `unknown` is not a softer `needs re-login`, and "nobody has checked" is not
+ * `unknown` either: an account with no published row renders through
+ * `UNREAD_ACCOUNT_HEALTH`, whose sentence is its own. Collapsing those is the
+ * exact "absence of evidence read as evidence" bug this feature exists to avoid.
+ *
+ * A `<time>` element carries the machine-readable instant and the exact UTC
+ * timestamp reaches the title, so the relative label can tick in the client
+ * without anything claiming a fresh check happened.
  */
-const HEALTH_MARK = {
-  healthy: { label: 'healthy', className: 'text-ok' },
-  down: { label: 'down', className: 'text-err' },
-  unknown: { label: 'unknown', className: 'text-warn' },
-} as const;
-
-const healthTitle = (health: PickerAccountHealth): string => {
-  const detail = health.error === undefined ? '' : ` — ${health.error}`;
-  const kind = health.failureKind === undefined ? '' : ` (${health.failureKind})`;
-  return `${health.cached ? 'cached ' : ''}health: ${health.state}${kind}${detail}`;
+const HEALTH_TONE: Readonly<Record<AccountHealthTone, string>> = {
+  ok: 'text-ok',
+  bad: 'text-err',
+  warn: 'text-warn',
+  muted: 'text-faint',
 };
 
-function AccountHealthMark({ health }: { readonly health: PickerAccountHealth | null }) {
-  if (health === null) {
-    return (
-      <span className="mono shrink-0 text-2xs text-faint" title="this account has not been checked on the host">
-        unchecked
-      </span>
-    );
-  }
-  const mark = HEALTH_MARK[accountHealthLabel(health)];
+function AccountHealthMark({ health, now }: { readonly health: PickerAccountHealth | null; readonly now: number }) {
+  const view = health === null ? UNREAD_ACCOUNT_HEALTH : accountHealthView(health, now);
+  const instant = health?.lastCheckedAt ?? null;
+  const title = [view.label, view.checked, view.detail, view.secondary]
+    .filter((part): part is string => part !== undefined)
+    .join(' · ');
   return (
-    <span className={cn('mono shrink-0 text-2xs', mark.className)} title={healthTitle(health)}>
-      {mark.label}
+    <span className={cn('mono flex shrink-0 flex-wrap items-center gap-x-1 text-2xs', HEALTH_TONE[view.tone])}>
+      <span title={title}>{view.label.toLowerCase()}</span>
+      {instant === null ? (
+        <span className="text-faint" title={title}>
+          · never checked
+        </span>
+      ) : (
+        <time className="text-faint" dateTime={absoluteInstantLabel(instant)} title={title}>
+          · {view.checked.toLowerCase()}
+        </time>
+      )}
     </span>
   );
 }
@@ -350,8 +384,12 @@ export function AccountPickerRow(option: AccountFieldOption, state: { readonly s
         )}
       </span>
       <span className={EVIDENCE_CLASS}>
+        {/* `showUnknown` is what keeps an unmeasurable account off a 0 % bar. An
+            account whose token cannot read usage is HEALTHY with unknown quota,
+            and drawing it at zero would read as "nothing spent" — the opposite
+            of "not measurable". */}
         <QuotaReadout className="text-2xs" quota={account.quota} showUnknown={true} />
-        <AccountHealthMark health={account.health} />
+        <AccountHealthMark health={account.health} now={option.now} />
       </span>
     </span>
   );
@@ -568,13 +606,22 @@ export interface AccountHealthCheckProps {
 }
 
 /**
- * The one control in this file that spends something, and it says so.
+ * The control that used to spend money, and no longer can.
  *
- * The sentence beside it is not a nicety: this button asks the host to start
- * every published account's agent and wait for it to answer, which is a real
- * inference call each and takes as long as the slowest one. A reader pressing it
- * on a machine they are not sitting at should know that before they press it,
- * not after — so the cost is in the copy rather than in a tooltip.
+ * ITS OLD COPY WAS ACCURATE AND THAT WAS THE PROBLEM. "Runs a live check on the
+ * host: it starts each published account once and waits for a reply" described a
+ * real inference call per account, on a machine the reader is very likely not
+ * sitting at — a live spend path in the UI, disclosed rather than removed. The
+ * check underneath it is now the host's free evidence: one read-only provider
+ * status GET per credential, which is the same request that host's quota pass
+ * already makes every minute.
+ *
+ * So the copy changes with the cost. It now says what it does NOT do, because a
+ * reader who used the old button has every reason to assume this one still bills
+ * them — and "no inference quota" is the sentence that answers that.
+ *
+ * It is also no longer the only way to see health: the rows hydrate their stored
+ * verdicts on mount. This is the "prove it again, now" control.
  */
 export function AccountHealthCheck({ status, error, checked, onCheck }: AccountHealthCheckProps): ReactNode {
   const running = status === 'loading';
@@ -593,10 +640,10 @@ export function AccountHealthCheck({ status, error, checked, onCheck }: AccountH
           type="button"
         >
           <Activity aria-hidden="true" className="shrink-0" size={14} />
-          {running ? 'Checking accounts…' : 'Check accounts'}
+          {running ? 'Checking…' : 'Check now'}
         </Button>
         <span className="min-w-0 text-meta leading-base text-muted">
-          Runs a live check on the host: it starts each published account once and waits for a reply.
+          Checks credentials and read-only provider status. It does not ask a model and uses no inference quota.
         </span>
       </div>
       {status === 'ready' ? (
@@ -643,12 +690,24 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
   readonly harness?: PickerAccount['kind'];
   readonly onAccountChosen?: (account: AccountPickerOption) => void;
   /**
-   * Whether this surface offers the live host probe. Off by default so a screen
+   * Whether this surface offers the re-check control. Off by default so a screen
    * has to ask for it deliberately, and available to every surface that does —
    * the new-session form and the migrate sheet both choose an account, and both
-   * have the same reason to want evidence before they commit to one.
+   * have the same reason to want fresher evidence before they commit to one.
+   *
+   * IT NO LONGER GATES SEEING HEALTH. Every row carries its stored verdict
+   * whatever this says; the flag only decides whether a "prove it again" button is
+   * drawn. It gated visibility when the only way to see health was to spend money
+   * for it.
    */
   readonly offerHealthCheck?: boolean;
+  /**
+   * The instant relative labels are measured against. Defaults to the wall clock.
+   *
+   * Injected so a test can assert "checked 4m ago" against a fixture instead of
+   * against whenever the suite happened to run.
+   */
+  readonly now?: number;
 }
 
 /**
@@ -674,8 +733,12 @@ export const checkedAmongOffered = (
  *
  * It subscribes to the roster ONCE and projects everything from that one
  * subscription: the manifest it hydrated, the cached quota rows handed in, and
- * whatever health the reader has asked for. `store.checkHealth` is called from
- * exactly one place — the button below — and from nowhere on mount.
+ * the health the store hydrated beside the roster.
+ *
+ * `store.checkHealth` is STILL called from exactly one place — the button below —
+ * and from nowhere on mount. What the store hydrates automatically is the stored
+ * SNAPSHOT, which is a different call on a different verb: this component cannot
+ * reach the collecting one except through the control.
  */
 export function DaemonAccountPicker({
   store,
@@ -685,6 +748,7 @@ export function DaemonAccountPicker({
   harness,
   onAccountChosen,
   offerHealthCheck = false,
+  now = Date.now(),
   ...field
 }: DaemonAccountPickerProps): ReactNode {
   const slice = useAccountPickerSlice(store, connection);
@@ -715,7 +779,7 @@ export function DaemonAccountPicker({
             },
           }
         : {})}
-      source={accountFieldSource(slice, accountFieldOptions(scoped))}
+      source={accountFieldSource(slice, accountFieldOptions(scoped, now))}
     />
   );
 }

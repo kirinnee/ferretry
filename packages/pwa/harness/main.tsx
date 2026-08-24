@@ -3542,17 +3542,19 @@ const HARNESS_PICKER_USAGE: readonly AccountUsageRow[] = [
   { agent: 'claude-auto-loge', authOk: false },
 ];
 
-/** What one press of “Check accounts” came back with. Two accounts are absent from it. */
+/** The stored verdicts the daemon published. Two accounts are deliberately absent from it. */
 const HARNESS_PICKER_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
   [
     PICKER_ID.studio,
     {
       accountId: PICKER_ID.studio,
       kind: 'claude' as const,
-      state: 'healthy' as const,
-      cached: true,
-      checkedAt: HARNESS_NOW - 120_000,
-      ms: 1_840,
+      verdict: 'healthy' as const,
+      reason: 'provider_accepted' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: HARNESS_NOW - 120_000,
+      verdictAt: HARNESS_NOW - 120_000,
+      lastCheckInconclusive: false,
     },
   ],
   [
@@ -3560,25 +3562,27 @@ const HARNESS_PICKER_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map(
     {
       accountId: PICKER_ID.atelier,
       kind: 'claude' as const,
-      state: 'down' as const,
-      cached: false,
-      checkedAt: HARNESS_NOW - 4_000,
-      ms: 30_000,
-      failureKind: 'timeout' as const,
-      error: 'timed out after 30s waiting for the sentinel reply',
+      verdict: 'needs_relogin' as const,
+      reason: 'oauth_token_rejected' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: HARNESS_NOW - 4_000,
+      verdictAt: HARNESS_NOW - 4_000,
+      lastCheckInconclusive: false,
     },
   ],
   [
+    // A 403: HEALTHY, with the quota unmeasurable. Under review here precisely because it is the
+    // reading a reviewer is most likely to expect to look like a failure and must not.
     PICKER_ID.loge,
     {
       accountId: PICKER_ID.loge,
       kind: 'claude' as const,
-      state: 'unknown' as const,
-      cached: false,
-      checkedAt: HARNESS_NOW - 3_000,
-      ms: 210,
-      failureKind: 'authentication' as const,
-      error: 'this wrapper is not signed in, so liveness could not be established',
+      verdict: 'healthy' as const,
+      reason: 'usage_scope_unavailable' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: HARNESS_NOW - 3_000,
+      verdictAt: HARNESS_NOW - 3_000,
+      lastCheckInconclusive: false,
     },
   ],
 ]);
@@ -3598,7 +3602,10 @@ const pickerSlice = (overrides: Partial<DaemonAccountPickerSlice> = {}): DaemonA
 const pickerAccountSource = (slice: DaemonAccountPickerSlice) =>
   accountFieldSource(
     slice,
-    accountFieldOptions(accountPickerOptions(slice.catalog?.accounts ?? null, HARNESS_PICKER_USAGE, slice.health)),
+    accountFieldOptions(
+      accountPickerOptions(slice.catalog?.accounts ?? null, HARNESS_PICKER_USAGE, slice.health),
+      HARNESS_NOW,
+    ),
   );
 
 /** Two registered folders, and folders a session has used that no registry names. */

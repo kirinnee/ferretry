@@ -466,3 +466,100 @@ describe('fetchQuota', () => {
     await fetchQuota({ url, method: 'GET', headers: {}, timeoutMs: 60 }).should.be.rejected();
   });
 });
+
+/**
+ * `credentialSignal`, which is what a HEALTH verdict is built from.
+ *
+ * It is a SECOND field beside `authOk` because `authOk` cannot carry this: it answers "is the
+ * credential repudiated" and collapses three different answers into `true` — a `200` that accepted the
+ * token, a `403` that accepted it and refused to show usage, and a `503` that said nothing at all.
+ * Quota does not care which happened; a health verdict is nothing but that distinction.
+ *
+ * Every case here asserts the signal AND the request list, so the free-GET claim and the
+ * classification are checked by different means in the same test.
+ */
+describe('AnthropicUsageProbe reporting what the answer said about the credential', () => {
+  const signalFor = async (reply: Reply) => {
+    const { fetch, requests } = transport({ [ANTHROPIC_USAGE_URL]: reply });
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+    return { signal: actual.credentialSignal, requests };
+  };
+
+  it('should classify a 403 as ACCEPTED-but-unmeasurable, which is a healthy verdict', async () => {
+    // Arrange / Act
+    const actual = await signalFor({ status: 403 });
+
+    // Assert — the single most consequential line in the whole feature. `rejected` here would send
+    // somebody to sign in again, forever, on an account that works perfectly. Still ONE free GET.
+    should(actual.signal).equal('scope_unavailable');
+    should(actual.requests.map(request => request.method)).deepEqual(['GET']);
+  });
+
+  it('should classify a 401 as rejected', async () => {
+    should((await signalFor({ status: 401 })).signal).equal('rejected');
+  });
+
+  it('should classify a successful read as accepted', async () => {
+    should((await signalFor({ body: { five_hour: { utilization: 5 } } })).signal).equal('accepted');
+  });
+
+  it('should still call the credential accepted when the body was unreadable', async () => {
+    // The provider answered FOR THIS TOKEN and then handed back bytes this build cannot read. That is
+    // a lost quota number and a working credential, and reading it as unproven would report an
+    // account as broken because its usage JSON changed shape.
+    should((await signalFor({ unreadableJson: true })).signal).equal('accepted');
+  });
+
+  it('should still call the credential accepted when a 200 carried no measurement', async () => {
+    should((await signalFor({ body: { five_hour: {}, seven_day: {} } })).signal).equal('accepted');
+  });
+
+  it('should refuse to conclude anything from a 500 or a rate limit', async () => {
+    // Note `authOk` is `true` for both of these — correctly, for quota. Health may not read that as
+    // acceptance, which is precisely why this is a separate field.
+    should((await signalFor({ status: 500 })).signal).equal('inconclusive');
+    should((await signalFor({ status: 429, ok: false })).signal).equal('inconclusive');
+  });
+
+  it('should distinguish a timeout from an unreachable provider', async () => {
+    // Arrange
+    const aborted = new Error('aborted');
+    aborted.name = 'AbortError';
+
+    // Act / Assert — two sentences a reader acts on differently: "the check timed out" versus "the
+    // provider could not be reached". Neither is ever a rejection.
+    should((await signalFor({ throws: aborted })).signal).equal('timeout');
+    should((await signalFor({ throws: new Error('getaddrinfo ENOTFOUND') })).signal).equal('inconclusive');
+  });
+
+  it('should say a credential was ABSENT rather than rejected when nothing was asked', async () => {
+    // Arrange
+    const { fetch, requests } = transport({});
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: credentials({ outcome: 'absent' }) }).probe(
+      account(),
+    );
+
+    // Assert — nothing was asked, so nothing was refused. The LOCAL classification is the better
+    // evidence about why, and the health verdict prefers it.
+    should(actual.credentialSignal).equal('absent');
+    should(requests).be.empty();
+  });
+
+  it('should classify NOTHING for a Codex account, because it has not looked at one', async () => {
+    // Arrange
+    const { fetch, requests } = transport({});
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(
+      account({ kind: 'codex' }),
+    );
+
+    // Assert — an ABSENT signal is how the verdict reaches `codex_liveness_unproven` instead of
+    // inventing a conclusion from a probe that declined to run. A signal here would be this probe
+    // speaking for a provider it never contacted.
+    should(actual).not.have.property('credentialSignal');
+    should(requests).be.empty();
+  });
+});
