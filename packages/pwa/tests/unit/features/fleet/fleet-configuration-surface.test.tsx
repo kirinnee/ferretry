@@ -63,6 +63,15 @@ interface Script {
   config?: () => unknown;
   /** What this HOST has. Scripted by default, because every account form now opens from it. */
   harnesses?: () => unknown;
+  /**
+   * The stored health verdicts.
+   *
+   * DELIBERATELY UNSCRIPTED BY DEFAULT, unlike `harnesses`. Every other test in this file therefore
+   * runs with the health read FAILING, which is the property worth having as the default rather than
+   * as one case: health is decoration on a configuration screen, so a panel that needed it to load
+   * would fail almost every test here rather than one.
+   */
+  health?: () => unknown;
   assets?: () => unknown;
   asset?: (path: string) => unknown;
   propose?: (body: unknown) => unknown;
@@ -92,6 +101,10 @@ const fakeDaemon = (script: Script) => {
     if (tail === '/accounts') return (script.accounts ?? (() => manifest()))();
     if (tail === '/config') return (script.config ?? (() => config()))();
     if (tail === '/harnesses') return (script.harnesses ?? (() => discovery()))();
+    if (tail === '/health') {
+      if (script.health === undefined) throw new Error('no health scripted');
+      return script.health();
+    }
     if (tail === '/assets') return (script.assets ?? (() => ({ files: [], complete: true })))();
     if (tail.startsWith('/assets/')) {
       if (script.asset === undefined) throw new Error(`no asset scripted for ${tail}`);
@@ -165,6 +178,85 @@ describe('reading one daemon fleet', () => {
     // L10: the live region is permanent, so its text can change where a screen reader is listening.
     expect(pick(surface.container, '[data-fleet-announcement]').getAttribute('role')).toBe('status');
     await surface.unmount();
+  });
+
+  /**
+   * WHETHER EACH ACCOUNT IS SIGNED IN, on the screen an operator actually opens.
+   *
+   * The verdict comes from `GET /v1/fleet/health`, which is a SNAPSHOT read: the daemon answers from
+   * its own file and checks nothing, so opening this panel cannot cost a provider call. The route that
+   * COLLECTS is a different verb on a different path, and the assertion on the call list below is what
+   * stops this screen ever reaching it.
+   */
+  it('shows each published account’s verdict, and never asks the host to collect one', async () => {
+    // Arrange / Act
+    const surface = await open({
+      health: () => ({
+        at: NOW,
+        accounts: [
+          {
+            accountId: account().id,
+            kind: 'claude',
+            verdict: 'healthy',
+            reason: 'provider_accepted',
+            evidence: 'anthropic_usage',
+            lastCheckedAt: NOW - 240_000,
+            verdictAt: NOW - 240_000,
+            lastCheckInconclusive: false,
+          },
+        ],
+      }),
+    });
+
+    // Assert
+    expect(surface.container.textContent).toContain('Healthy');
+    expect(surface.container.textContent).toContain('The provider accepted');
+    // A GET on the snapshot, and NOTHING on the collecting route. A configuration screen has no
+    // business collecting evidence, and this is the line that proves it does not.
+    expect(surface.daemon.paths()).toContain('/v1/fleet/health');
+    expect(surface.daemon.paths()).not.toContain('/v1/fleet/health/check');
+    await surface.unmount();
+  });
+
+  /**
+   * HEALTH MUST NEVER BE ABLE TO FAIL THIS SCREEN'S INVENTORY LOAD.
+   *
+   * Health is decoration on a panel whose job is configuration. A daemon too old to serve the route, a
+   * credential that refused it, a transport that timed out, or a document this build cannot parse must
+   * all leave a WORKING panel: the accounts render, the layer edit works, and the rows say "Never
+   * checked". They must not blank the screen, and they must not read as an unreachable daemon.
+   *
+   * Three failure shapes, because they fail in three different places: a rejection inside the request,
+   * a response that parses to the wrong thing, and a response that does not parse at all.
+   */
+  it('keeps the whole inventory when the health read fails, in each of the ways it can', async () => {
+    const failures: readonly { readonly what: string; readonly health: () => unknown }[] = [
+      {
+        what: 'the request rejects',
+        health: () => {
+          throw new Error('the daemon refused the health read');
+        },
+      },
+      { what: 'the document is malformed', health: () => ({ at: 'not-an-instant', accounts: 'nope' }) },
+      {
+        what: 'a row carries a verdict this build has no words for',
+        health: () => ({ at: NOW, accounts: [{ accountId: 'x', kind: 'claude', verdict: 'probably_fine' }] }),
+      },
+    ];
+
+    for (const failure of failures) {
+      // Act
+      const surface = await open({ health: failure.health });
+
+      // Assert — the inventory is intact and the rows are honest about knowing nothing.
+      expect(surface.container.textContent, failure.what).toContain('claude-studio');
+      expect(surface.container.textContent, failure.what).toContain('Last published manifest');
+      expect(surface.container.textContent, failure.what).toContain('Never checked');
+      // Not an unreachable daemon, and not a refusal: the panel is fine, one read was not.
+      expect(absent(surface.container, '[data-fleet-state]'), failure.what).toBe(true);
+      expect(button(surface.container, 'Edit layer').hasAttribute('disabled'), failure.what).toBe(false);
+      await surface.unmount();
+    }
   });
 
   it('shows a published manifest with no accounts as an observed empty fleet', async () => {

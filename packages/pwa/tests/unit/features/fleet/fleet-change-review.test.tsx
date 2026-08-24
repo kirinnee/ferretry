@@ -22,6 +22,7 @@ import {
   UNLOCK_HOLDING_NOTE,
   UNLOCK_LIMIT_NOTE,
 } from '../../../../src/lib/grants.ts';
+import type { PickerAccountHealth } from '../../../../src/lib/account-picker-catalog.ts';
 import { absoluteTime } from '../../../../src/lib/session-screens.ts';
 import { mount } from '../../../support/dom.ts';
 import {
@@ -40,6 +41,22 @@ import {
   unlockField,
   unlockWith,
 } from './fleet-support.ts';
+
+/**
+ * One stored verdict. Defaults to healthy-and-recent, so each case overrides only the field it is
+ * about rather than restating a shape.
+ */
+const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
+  accountId: account().id,
+  kind: 'claude',
+  verdict: 'healthy',
+  reason: 'provider_accepted',
+  evidence: 'anthropic_usage',
+  lastCheckedAt: Date.parse('2026-08-24T11:56:00.000Z'),
+  verdictAt: Date.parse('2026-08-24T11:56:00.000Z'),
+  lastCheckInconclusive: false,
+  ...overrides,
+});
 
 const noop = (): void => undefined;
 /** `account()` already returns the shared shape, so this is a name rather than a conversion. */
@@ -89,6 +106,157 @@ describe('the live roster', () => {
       <FleetLiveRoster accounts={accounts([account()])} generatedAt="now" onEdit={noop} editable={false} />,
     );
     expect(button(mounted.container, 'Edit layer').hasAttribute('disabled')).toBe(true);
+    await mounted.unmount();
+  });
+
+  /**
+   * PER-ACCOUNT HEALTH ON THE SCREEN AN OPERATOR ACTUALLY OPENS.
+   *
+   * `N published` is what the MANIFEST declares; this is what the PROVIDER last said. An account can
+   * be published and signed out, so neither line stands in for the other — and the words come from
+   * `account-health-view.ts`, the same module the account picker reads, so the two screens cannot
+   * describe one account differently.
+   */
+  it('shows each account’s verdict and when it was established', async () => {
+    // Arrange
+    const now = Date.parse('2026-08-24T12:00:00.000Z');
+    const health = new Map([
+      [account().id, healthRow({ lastCheckedAt: now - 240_000, verdictAt: now - 240_000 })],
+      [
+        accountId(2),
+        healthRow({
+          accountId: accountId(2),
+          verdict: 'needs_relogin',
+          reason: 'oauth_token_rejected',
+          lastCheckedAt: now - 120_000,
+          verdictAt: now - 120_000,
+        }),
+      ],
+    ]);
+
+    // Act — a third account has NO row: absent is not unhealthy, and it is not the same as a row
+    // that says unknown.
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([
+          account(),
+          account({ id: accountId(2), wrapper: 'claude-atelier' }),
+          account({ id: accountId(3), wrapper: 'claude-archive' }),
+        ])}
+        generatedAt="2026-08-05T06:00:00.000Z"
+        health={health}
+        now={now}
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    // Assert
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('Healthy');
+    expect(text).toContain('Checked 4m ago');
+    expect(text).toContain('Needs re-login');
+    expect(text).toContain('Checked 2m ago');
+    expect(text).toContain('Never checked');
+    // The exact UTC instant is machine-readable, so the visible label can be relative.
+    expect(pick(mounted.container, 'time').getAttribute('datetime')).toBe(new Date(now - 240_000).toISOString());
+    expect(
+      [...mounted.container.querySelectorAll('[data-fleet-live-health]')].map(node =>
+        node.getAttribute('data-fleet-live-health'),
+      ),
+    ).toEqual(['ok', 'bad', 'muted']);
+    await mounted.unmount();
+  });
+
+  it('calls a 403 healthy, and never offers a login to a static credential', async () => {
+    // Arrange — the rule the whole feature turns on, and the verdict that must not become a login.
+    const now = Date.parse('2026-08-24T12:00:00.000Z');
+    const health = new Map([
+      [account().id, healthRow({ reason: 'usage_scope_unavailable' })],
+      [
+        accountId(2),
+        healthRow({
+          accountId: accountId(2),
+          verdict: 'needs_credentials',
+          reason: 'static_credential_rejected',
+        }),
+      ],
+    ]);
+
+    // Act
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([account(), account({ id: accountId(2), wrapper: 'claude-atelier' })])}
+        generatedAt="now"
+        health={health}
+        now={now}
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    // Assert
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('Healthy');
+    expect(text).toContain('quota is not measurable');
+    expect(text).toContain('Needs credential');
+    expect(text).not.toContain('Needs re-login');
+    await mounted.unmount();
+  });
+
+  /**
+   * HEALTH IS DECORATION ON A CONFIGURATION SCREEN, and this is the assertion that says so.
+   *
+   * A daemon that publishes a manifest and cannot serve verdicts still has accounts to configure. So
+   * an absent health map must cost the roster nothing: every row reads "Never checked", the wrapper
+   * names are still there, and the edit control still works.
+   */
+  it('renders the whole roster with no health at all', async () => {
+    // Act
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([account(), account({ id: accountId(2), wrapper: 'claude-atelier' })])}
+        generatedAt="now"
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    // Assert
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('claude-studio');
+    expect(text).toContain('claude-atelier');
+    expect(text).toContain('2 published');
+    expect(button(mounted.container, 'Edit layer').hasAttribute('disabled')).toBe(false);
+    expect(
+      [...mounted.container.querySelectorAll('[data-fleet-live-health]')].map(node =>
+        node.getAttribute('data-fleet-live-health'),
+      ),
+    ).toEqual(['muted', 'muted']);
+    await mounted.unmount();
+  });
+
+  it('leaves a row alone when the snapshot covered only its sibling', async () => {
+    // Arrange — a partial snapshot is ordinary: the daemon publishes one row per manifest account,
+    // but a manifest can move underneath a read.
+    const now = Date.parse('2026-08-24T12:00:00.000Z');
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([account(), account({ id: accountId(2), wrapper: 'claude-atelier' })])}
+        generatedAt="now"
+        health={new Map([[account().id, healthRow()]])}
+        now={now}
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    // Assert — the uncovered account does not inherit its sibling's verdict.
+    expect(
+      [...mounted.container.querySelectorAll('[data-fleet-live-health]')].map(node =>
+        node.getAttribute('data-fleet-live-health'),
+      ),
+    ).toEqual(['ok', 'muted']);
     await mounted.unmount();
   });
 });
