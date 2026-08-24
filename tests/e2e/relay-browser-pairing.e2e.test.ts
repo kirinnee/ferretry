@@ -61,6 +61,7 @@ import { type E2eEnvironment, withE2eEnvironment } from './fixture.ts';
 import { seedRunningSession } from './support/seeded-session.ts';
 import {
   attributeNow,
+  type BrowserPage,
   buildPwaBundle,
   chromeExecutable,
   clickFirstPresent,
@@ -261,12 +262,90 @@ async function sessionEvents(
   return (await response.json()) as readonly DurableSessionEvent[];
 }
 
-/** CSS has no numeric attribute comparison; excluding every lower cursor value is an exact ≥ wait. */
+/**
+ * CSS has no numeric attribute comparison; excluding every lower cursor value is an exact ≥ wait.
+ *
+ * IT IS A WAIT AND NOT A CHECK. `data-live-events="NaN"` matches none of the excluded literals, so
+ * this selector would happily settle on garbage — and `NaN < expected` is false, so a later `<`
+ * comparison would not catch it either. Every value this returns is therefore re-read through
+ * {@link liveCursor}, which parses rather than compares.
+ */
 function liveCursorAtLeast(sequence: number): string {
   return (
     '[data-live-events]' +
     Array.from({ length: sequence }, (_, lower) => `:not([data-live-events="${String(lower)}"])`).join('')
   );
+}
+
+/** The rendered cursor, PARSED. A missing, malformed or non-integral value is a failure, not a `NaN`. */
+async function liveCursor(page: BrowserPage, ledger: StepLedger, step: string, where: string): Promise<number> {
+  const raw = await attributeNow(page, '[data-live-events]', 'data-live-events');
+  const value = Number(raw);
+  if (raw === null || raw.trim() === '' || !Number.isSafeInteger(value) || value < 0) {
+    ledger.fail(step, `the rendered cursor was not a safe non-negative integer ${where}: ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+/** What the page must still be when the journey ends, if it is to be called the same page view. */
+interface DocumentLifetime {
+  readonly present: boolean;
+  readonly sentinel: string | null;
+  readonly timeOrigin: number | null;
+  /** The lowest cursor this document ever rendered after the sentinel was installed. */
+  readonly minCursor: number | null;
+  /** How many times the watcher actually looked. Zero means it proved nothing. */
+  readonly samples: number;
+}
+
+/**
+ * Pin this document's identity, and watch its cursor from inside the page.
+ *
+ * WITHOUT THIS THE RECOVERY CLAIM IS UNFALSIFIABLE. A document that reloads on the same Playwright
+ * `Page` keeps its pairing in local storage, remounts the route at cursor `0`, reaches
+ * `reconnecting`, and then replays forward to the marked event once the daemon returns — passing
+ * every assertion while the ledger claims a never-reloaded page that held its cursor. Both halves of
+ * that claim are about things nothing was measuring.
+ *
+ * A GLOBAL AND `performance.timeOrigin` ARE TWO INDEPENDENT WITNESSES: a reload clears the global,
+ * and it also restarts the clock. The interval is the third — a remount to zero inside the SAME
+ * document leaves both witnesses intact, so the only thing that can catch it is watching the value
+ * itself, continuously, from the page. `samples` is reported so a watcher that never ran cannot be
+ * mistaken for a cursor that never dropped.
+ */
+async function watchDocumentLifetime(page: BrowserPage, token: string, baseline: number): Promise<number> {
+  const timeOrigin = await page.evaluate<number>(`(() => {
+    const state = {
+      sentinel: ${JSON.stringify(token)},
+      timeOrigin: performance.timeOrigin,
+      minCursor: ${String(baseline)},
+      samples: 0,
+    };
+    globalThis.__fyJourney = state;
+    globalThis.__fyJourneyTimer = setInterval(() => {
+      state.samples += 1;
+      const raw = document.querySelector('[data-live-events]')?.getAttribute('data-live-events') ?? null;
+      const value = Number(raw);
+      if (raw !== null && Number.isSafeInteger(value) && value < state.minCursor) state.minCursor = value;
+    }, 20);
+    return state.timeOrigin;
+  })()`);
+  return timeOrigin;
+}
+
+async function readDocumentLifetime(page: BrowserPage): Promise<DocumentLifetime> {
+  const encoded = await page.evaluate<string>(`(() => {
+    const state = globalThis.__fyJourney;
+    if (state === undefined) return JSON.stringify({ present: false, sentinel: null, timeOrigin: null, minCursor: null, samples: 0 });
+    return JSON.stringify({
+      present: true,
+      sentinel: state.sentinel,
+      timeOrigin: performance.timeOrigin,
+      minCursor: state.minCursor,
+      samples: state.samples,
+    });
+  })()`);
+  return JSON.parse(encoded) as DocumentLifetime;
 }
 
 /** Everything the journey claims, in the order it can be claimed. */
@@ -317,9 +396,11 @@ const STEPS: readonly LedgerStep[] = [
   {
     id: 'live-stream-recovers',
     // NOT "resumed at the cursor rather than from zero" — the relay's records are sealed, so no
-    // observer here can read the `after` this subscription sent. What a browser can show is that the
-    // page picked the daemon back up unaided and moved on from the cursor it was holding.
-    claim: 'the returning daemon is picked back up unaided, and the never-reloaded page advances from its held cursor',
+    // observer here can read the `after` this subscription sent. What a browser CAN show, and what
+    // this now measures rather than assumes, is that the document never reloaded, its cursor never
+    // dropped below where the outage found it, and it advanced again unaided.
+    claim:
+      'the returning daemon is picked back up unaided, in the same never-reloaded document, whose cursor never rewound',
   },
 ];
 
@@ -1032,7 +1113,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
               `The page renders: ${await renderedDataAttributes(browser.page)}`,
           );
         }
-        const cursorWhileLive = Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events'));
+        const cursorWhileLive = await liveCursor(browser.page, ledger, 'lost-stream-is-visible', 'before the outage');
+        // From here to the end of the journey, this document must remain THE SAME DOCUMENT and its
+        // cursor must never go backwards. Installed before the daemon is touched, so the whole
+        // outage and recovery happen inside the watched window.
+        const lifetimeToken = `${eventMarker}-lifetime`;
+        const documentTimeOrigin = await watchDocumentLifetime(browser.page, lifetimeToken, cursorWhileLive);
 
         await environment.stopDaemon();
         /**
@@ -1062,10 +1148,21 @@ describe('a real browser, a compiled daemon and a real relay', () => {
               `Console: ${browser.console.slice(-6).join(' | ') || 'silent'}`,
           );
         }
+        // THE CURSOR AT THE LOSS POINT, read rather than assumed. A route that remounted while the
+        // daemon was away would be sitting at zero here and still reach `reconnecting`.
+        const cursorWhileLost = await liveCursor(browser.page, ledger, 'lost-stream-is-visible', 'at the loss state');
+        if (cursorWhileLost !== cursorWhileLive) {
+          ledger.fail(
+            'lost-stream-is-visible',
+            `the cursor moved from ${String(cursorWhileLive)} to ${String(cursorWhileLost)} while the daemon was ` +
+              `stopped. Losing the feed must not lose the reader's place, and a drop means the route remounted.`,
+          );
+        }
         ledger.prove(
           'lost-stream-is-visible',
           `with the compiled daemon stopped, Chrome left "live" for data-live-stream=${lostState} on screen, ` +
-            `holding the cursor it had already reached (${String(cursorWhileLive)}) rather than rewinding it`,
+            `and its rendered cursor was still exactly ${String(cursorWhileLost)} — read at the loss point, not ` +
+            `assumed from before it`,
         );
 
         /**
@@ -1139,11 +1236,15 @@ describe('a real browser, a compiled daemon and a real relay', () => {
               `${JSON.stringify(recoveredAppends.map(entry => ({ sequence: entry.sequence, sessionId: entry.sessionId, type: entry.type })))}`,
           );
         }
-        const recoveredCursor = await browser.page
+        await browser.page
           .waitForSelector(liveCursorAtLeast(recoveredEvent.sequence), { timeout: 120_000 })
-          .then(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')))
-          .catch(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')));
+          .then(() => true)
+          .catch(() => false);
+        // PARSED, not compared. The selector above cannot reject `NaN`, so the value it settled on is
+        // re-read through a predicate that can.
+        const recoveredCursor = await liveCursor(browser.page, ledger, 'live-stream-recovers', 'after the recovery');
         const recoveredState = await liveStreamNow();
+        const lifetime = await readDocumentLifetime(browser.page);
         if (recoveredCursor < recoveredEvent.sequence) {
           ledger.fail(
             'live-stream-recovers',
@@ -1160,14 +1261,56 @@ describe('a real browser, a compiled daemon and a real relay', () => {
               `data-live-stream=${recoveredState}, so the visible state and the feed disagree`,
           );
         }
+        /**
+         * THE CLAIM "THE SAME PAGE VIEW, NEVER REWOUND" IS ONLY NOW WORTH MAKING.
+         *
+         * A reload on this same Playwright `Page` would have satisfied every assertion above: the
+         * pairing survives in local storage, the route remounts at cursor `0`, it reaches
+         * `reconnecting` on its own, and replay carries it forward to the marked event once the
+         * daemon is back. Three independent witnesses are required instead — the in-document global,
+         * the clock, and a continuous reading of the cursor — because a remount inside one document
+         * defeats the first two, and a reload defeats the third.
+         */
+        if (!lifetime.present || lifetime.sentinel !== lifetimeToken) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the document did not survive the outage: sentinel ${JSON.stringify(lifetime.sentinel)} against ` +
+              `${JSON.stringify(lifetimeToken)}. The page reloaded, so this is a fresh mount replaying history and ` +
+              `NOT the recovery of a live subscription.`,
+          );
+        }
+        if (lifetime.timeOrigin !== documentTimeOrigin) {
+          ledger.fail(
+            'live-stream-recovers',
+            `performance.timeOrigin moved from ${String(documentTimeOrigin)} to ${String(lifetime.timeOrigin)}, ` +
+              `which only a navigation does`,
+          );
+        }
+        if (lifetime.samples <= 0) {
+          ledger.fail(
+            'live-stream-recovers',
+            'the in-document cursor watcher never sampled, so "never rewound" would be an untested claim',
+          );
+        }
+        if (lifetime.minCursor !== cursorWhileLive) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the rendered cursor dropped to ${String(lifetime.minCursor)} at some point after the outage began, ` +
+              `below the pre-outage ${String(cursorWhileLive)} — the route remounted rather than resuming ` +
+              `(${String(lifetime.samples)} samples taken)`,
+          );
+        }
         ledger.prove(
           'live-stream-recovers',
-          `with nothing clicked, the never-reloaded page reconnected to the restarted daemon by itself and returned to ` +
+          `with nothing clicked, the page reconnected to the restarted daemon by itself and returned to ` +
             `data-live-stream=live. The marked second waiting signal appended exactly session.waiting at sequence ` +
-            `${String(recoveredEvent.sequence)}, and Chrome reached ${String(recoveredCursor)} — forward from the ` +
-            `pre-outage cursor ${String(cursorWhileLive)} on the same page view. The sealed relay hides the wire ` +
-            `\`after\` value from every observer including this one, so the exact resumption cursor is proved in the ` +
-            `unit suite rather than claimed here`,
+            `${String(recoveredEvent.sequence)}, and Chrome reached ${String(recoveredCursor)}. It is the SAME ` +
+            `document throughout: the in-page sentinel survived and performance.timeOrigin is unchanged at ` +
+            `${String(documentTimeOrigin)}, so no reload occurred. It never rewound: an in-document watcher sampled ` +
+            `the rendered cursor ${String(lifetime.samples)} time(s) across the outage and recovery and its lowest ` +
+            `reading was ${String(lifetime.minCursor)}, equal to the pre-outage cursor. What this CANNOT see is the ` +
+            `\`after\` value the resumed subscription put on the wire — the relay's records are sealed to every ` +
+            `observer including this journey — so the exact resumption cursor is proved in the unit suite instead`,
         );
 
         // A noted step does not abort, so the journey can reach here with one still unproven. It is

@@ -48,11 +48,21 @@ export const SESSION_EVENT_STREAM_BACKOFF = {
  *
  * `random` is clamped rather than trusted. It is injected so a test can prove the two ends of the
  * range exactly, and an injected value is the one input here that no type can bound.
+ *
+ * A CLAMP IS NOT A CLAMP UNTIL IT CONTAINS `NaN`. `Math.min`/`Math.max` PROPAGATE it rather than
+ * bounding it, so a `NaN` draw came out of a "clamped" expression as `NaN`, and a browser timer
+ * coerces that to zero — a retry storm at the exact input this function's own doc calls untrusted,
+ * and below the lower bound its own test claims cannot be escaped. So non-finite inputs are
+ * normalised BEFORE the clamp rather than being assumed away: an unusable draw becomes the bottom of
+ * the range, which is the same answer a caller gets from `random() === 0` and never a shorter wait
+ * than the schedule allows. `attempt` gets the same treatment for the same reason — this helper is
+ * exported, so its totality is part of its contract and not an internal detail.
  */
 export const sessionEventStreamDelayMs = (attempt: number, random: number): number => {
   const { baseMs, factor, ceilingMs } = SESSION_EVENT_STREAM_BACKOFF;
-  const windowMs = Math.min(ceilingMs, baseMs * factor ** Math.max(0, attempt));
-  const jitter = Math.min(1, Math.max(0, random));
+  const step = Number.isFinite(attempt) ? Math.max(0, attempt) : 0;
+  const windowMs = Math.min(ceilingMs, baseMs * factor ** step);
+  const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0;
   return Math.round(windowMs / 2 + (windowMs / 2) * jitter);
 };
 

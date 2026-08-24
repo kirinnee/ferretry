@@ -195,6 +195,36 @@ describe('the live feed retry schedule', () => {
     expect(negativeAttempt).toBe(sessionEventStreamDelayMs(0, 0));
   });
 
+  test('contains a non-finite draw instead of propagating it', () => {
+    // Arrange — the case an ordinary clamp does NOT cover. `Math.min`/`Math.max` propagate `NaN`
+    // rather than bounding it, so the "clamped" expression returned `NaN` for a `NaN` draw, and a
+    // browser timer coerces `NaN` to zero: a retry storm, from the one input this helper's own
+    // contract calls untrusted, below the lower bound the test above claims cannot be escaped.
+    const floor = sessionEventStreamDelayMs(0, 0);
+
+    // Act
+    const draws = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY].map(draw =>
+      sessionEventStreamDelayMs(0, draw),
+    );
+    const attempts = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY].map(attempt =>
+      sessionEventStreamDelayMs(attempt, 0),
+    );
+
+    // Assert — every one is a real number inside the proved range, and none is shorter than the
+    // schedule's own floor. `+Infinity` is deliberately NOT treated as "the top of the range": an
+    // unusable draw is not a draw, and reading it as `1` would let a broken generator lengthen the
+    // wait as easily as shorten it.
+    for (const delay of [...draws, ...attempts]) {
+      expect(Number.isSafeInteger(delay)).toBe(true);
+      expect(delay).toBeGreaterThanOrEqual(floor);
+      expect(delay).toBeLessThanOrEqual(SESSION_EVENT_STREAM_BACKOFF.ceilingMs);
+    }
+    expect(draws).toEqual([floor, floor, floor]);
+    // A non-finite attempt falls back to the FIRST window rather than the ceiling, so a broken
+    // counter cannot silently park the schedule at half a minute per try.
+    expect(attempts).toEqual([floor, floor, floor]);
+  });
+
   test('derives the silence budget from the cadence the daemon declared', () => {
     // Assert — three of the daemon's OWN windows, once it has said what its window is.
     expect(sessionEventStreamDeadlineMs(undefined)).toBe(90_000);

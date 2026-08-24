@@ -28,6 +28,7 @@ import {
   type AttentionSnapshot,
   DoctorReportSchema,
   type FyEvent,
+  type FyEventStreamIdle,
   HealthViewSchema,
   type ProjectInfo,
   type SessionStatus,
@@ -369,6 +370,8 @@ interface LiveFeed {
   readonly sessionId: string | undefined;
   readonly after: number;
   readonly emit: (event: FyEvent) => void;
+  /** The daemon's quiet-but-alive proof, so a late one can be delivered to an abandoned feed. */
+  readonly idle: (frame: FyEventStreamIdle) => void;
   /**
    * Ends this subscription the way a daemon going away does.
    *
@@ -377,6 +380,17 @@ interface LiveFeed {
    * stopped. This is the daemon's half of that, held by the test rather than by a timer.
    */
   readonly end: () => void;
+  /**
+   * TEARDOWN, OBSERVED RATHER THAN INFERRED.
+   *
+   * `liveFeeds.length` only ever counts OPENS, so "no replacement appeared" was being read as "the
+   * old subscription is gone" — and those are different claims. Delete the route's `stream.stop()`
+   * and the length assertion still passes while a live socket keeps running behind a page that has
+   * moved on. The signal is the only thing that can tell them apart, so the fake surfaces it.
+   */
+  readonly aborted: () => boolean;
+  /** Whether this subscription's promise has actually settled, which is what a real teardown does. */
+  readonly settled: () => boolean;
 }
 
 const appStore = async (
@@ -425,15 +439,33 @@ const appStore = async (
           after: number,
           onEvent: (event: FyEvent) => void,
           signal?: AbortSignal,
-        ) =>
-          await new Promise<void>(resolve => {
+          onIdle?: (frame: FyEventStreamIdle) => void,
+        ) => {
+          let settled = false;
+          const finish = (resolve: () => void) => () => {
+            settled = true;
+            resolve();
+          };
+          return await new Promise<void>(resolve => {
+            // RECORDED BEFORE THE ABORT CHECK, so a subscription opened against an already-cancelled
+            // signal is still visible to the test. It is one of the shapes a replacement race takes,
+            // and a fake that dropped it on the floor would report the race as "nothing happened".
+            liveFeeds.push({
+              sessionId,
+              after,
+              emit: onEvent,
+              idle: frame => onIdle?.(frame),
+              end: finish(resolve),
+              aborted: () => signal?.aborted === true,
+              settled: () => settled,
+            });
             if (signal?.aborted === true) {
-              resolve();
+              finish(resolve)();
               return;
             }
-            liveFeeds.push({ sessionId, after, emit: onEvent, end: resolve });
-            signal?.addEventListener('abort', () => resolve(), { once: true });
-          }),
+            signal?.addEventListener('abort', finish(resolve), { once: true });
+          });
+        },
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
         wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
         wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,
@@ -1146,8 +1178,98 @@ describe('AppShell', () => {
     // AND NO CONTROL THAT WOULD DO NOTHING. The route tore its model down, so a Reconnect button here
     // would be wired to a null control — an affordance that looks like a remedy and is a no-op.
     expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
-    // The subscription really is gone rather than merely unreported: nothing reopened one.
+    // The subscription is gone because the ROUTE CANCELLED IT, not because nothing reopened one.
+    // `liveFeeds.length` counts opens and would read exactly the same with the cleanup deleted.
+    expect(must(liveFeeds[0], 'the original subscription').aborted()).toBe(true);
+    expect(must(liveFeeds[0], 'the original subscription').settled()).toBe(true);
     expect(liveFeeds).toHaveLength(1);
+
+    await view.unmount();
+  });
+
+  /**
+   * THE REPLACEMENT RACE, WATCHED AT EVERY COMMIT RATHER THAN AFTER THE DUST SETTLES.
+   *
+   * Reading the DOM once React has finished cannot see this defect at all. Both the broken and the
+   * fixed route settle on the same final attribute; what differed was a frame in between. On the
+   * render where a carrier walk SUCCEEDS after a failure, the host facts already permit a
+   * subscription while the replacement model does not exist yet — it is built by a passive effect
+   * after the commit — so React painted the previous owner's `live` over a session with nothing
+   * behind it, and a previous `disconnected` painted a Reconnect button whose callback had a null
+   * control. A MutationObserver records every committed value, which is the only way to assert about
+   * a frame that is immediately overwritten.
+   *
+   * The teardown assertions are here for the same reason as above: `liveFeeds.length` counts opens,
+   * so only the signal can say whether the old stream is actually gone.
+   */
+  it('never commits the previous owner‘s state when a carrier becomes reachable again', async () => {
+    let reachable = true;
+    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      carrierDown: () => !reachable,
+    });
+    await settle();
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+    const walk = async (): Promise<void> => {
+      await interact(async () => {
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`).catch(() => undefined);
+      });
+      await settle();
+    };
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(4)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+
+    // The daemon goes away and a walk reaches the `ok: false` verdict.
+    reachable = false;
+    await walk();
+    await walk();
+    expect(region().getAttribute('data-live-stream')).toBe('unavailable');
+    const original = must(liveFeeds[0], 'the original subscription');
+    expect(original.aborted()).toBe(true);
+
+    // A LATE DAEMON CANNOT REACH THE PAGE THROUGH A CANCELLED SOCKET. Delivered after the route let
+    // go of it, these must move nothing: not the cursor, not the state, not the budget.
+    await interact(() => {
+      original.emit(liveEvent(99));
+      original.idle({ kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 'shared', after: 99 } });
+    });
+    await settle();
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+    expect(session.getAttribute('data-live-events')).toBe('4');
+    expect(region().getAttribute('data-live-stream')).toBe('unavailable');
+
+    // Act — every committed value from here on, not just the last one.
+    const committed: Array<string | null> = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records) committed.push((record.target as HTMLElement).getAttribute('data-live-stream'));
+    });
+    observer.observe(view.container, { attributes: true, attributeFilter: ['data-live-stream'], subtree: true });
+    reachable = true;
+    await walk();
+    observer.disconnect();
+
+    // Assert — the page recovers, and NOT ONE committed frame in between claimed the old owner's
+    // state. `live` is the unacceptable one; `disconnected` would have carried a dead button.
+    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(true);
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed).not.toContain('live');
+    expect(committed).not.toContain('disconnected');
+    expect(committed.at(-1)).toBe('connecting');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+
+    // Exactly ONE replacement, and it resumes at the cursor the page is still showing rather than
+    // replaying the tail — the late `99` above must not have moved it.
+    expect(liveFeeds).toHaveLength(2);
+    expect(must(liveFeeds[1], 'the replacement subscription').after).toBe(4);
+    expect(must(liveFeeds[1], 'the replacement subscription').aborted()).toBe(false);
+
+    // And the recovered feed is a working one.
+    await interact(() => must(liveFeeds[1], 'the replacement subscription').emit(liveEvent(7)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(session.getAttribute('data-live-events')).toBe('7');
 
     await view.unmount();
   });

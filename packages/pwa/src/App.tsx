@@ -641,7 +641,27 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    * daemon-session seam: moving to another session mounts another route with a cursor of its own.
    */
   const liveCursorRef = useRef(0);
-  const [streamStatus, setStreamStatus] = useState<SessionEventStreamStatus>('connecting');
+  /**
+   * The reported status AND THE OWNER THAT REPORTED IT, stored as one value because they are one
+   * fact and storing them apart is what made them disagree.
+   *
+   * A BARE `streamStatus` WAS COMMITTED FOR THE WRONG OWNER, one render early. Deriving the chip from
+   * "may a subscription exist right now" fixed the direction where the answer becomes NO, but not the
+   * direction where it becomes YES again: on the render where a carrier walk succeeds after a
+   * failure, the host facts already say `subscribed`, while the replacement model does not exist yet
+   * — a passive effect creates it AFTER the commit. So React painted the PREVIOUS owner's `live` over
+   * a session with no subscription behind it, and a stale `disconnected` painted a Reconnect button
+   * whose callback had a null control. Measured, not theorised: the commit ledger was
+   * `{subscribed: true, state: 'live', hasControl: false}` and only then `{'connecting', true}`.
+   *
+   * Pairing the status with its owner makes the stale read unrepresentable rather than unlikely: a
+   * status is only ever shown to the owner that produced it, and any other owner — new, replaced, or
+   * restored — reads `connecting` until its own model says otherwise.
+   */
+  const [reportedStream, setReportedStream] = useState<{
+    readonly owner: object | null;
+    readonly status: SessionEventStreamStatus;
+  }>({ owner: null, status: 'connecting' });
   const streamControl = useRef<SessionEventStreamControl | null>(null);
   /**
    * The carrier this daemon's traffic is MEASURED on, subscribed rather than read once.
@@ -655,6 +675,31 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const measuredCarrier = useActiveCarrier(store.carrier, daemonId);
   const carrierKind = measuredCarrier?.ok === true ? measuredCarrier.method.kind : 'none';
   const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
+  /**
+   * WHO a live subscription would belong to, as one identity — `null` when none may exist.
+   *
+   * NOT UNTIL A CARRIER HAS BEEN MEASURED, and that is a fix rather than a guard. A carrier is
+   * decided by the first request that walks, so this route can render before any walk has finished —
+   * and a subscription opened then takes the direct branch and opens a socket at an address a
+   * relayed browser cannot reach. The model would retry that address until its budget ran out and
+   * then tell the reader the daemon is offline, which makes waiting for the measurement MORE
+   * necessary rather than less.
+   *
+   * THE IDENTITY IS THE CHOICE OBJECT, NOT ITS KIND. Keying on the kind alone would leave a stream
+   * subscribed to a carrier the router has replaced whenever the replacement happens to be the same
+   * kind — relay A for relay B. That is not reachable through today's router, which only ever
+   * replaces a winner by way of `undefined`, but "not reachable today" is a fact about one call site
+   * rather than about this route, and the object costs nothing to depend on.
+   *
+   * IT IS AN OBJECT SO THAT IDENTITY IS COMPARABLE. Memoised on exactly the three values a model is
+   * built from, it is stable while they are and a NEW object the moment any of them changes — which
+   * is what lets a render ask "is the status I am holding this owner's, or the previous one's?"
+   * A boolean could not answer that, and answering it wrong is what committed a stale `Live`.
+   */
+  const streamOwner = useMemo(
+    () => (client === null || measuredCarrier?.ok !== true ? null : { client, carrier: measuredCarrier, sessionId }),
+    [client, measuredCarrier, sessionId],
+  );
 
   useEffect(() => {
     let current = true;
@@ -725,22 +770,13 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    * something has arrived — so "an event reached this browser" is readable without matching copy.
    */
   useEffect(() => {
-    // NOT UNTIL A CARRIER HAS BEEN MEASURED, and that is the whole fix rather than a guard. A
-    // carrier is decided by the first request that walks, so this effect can run before any walk has
-    // finished — and a subscription opened then takes the direct branch and opens a socket at an
-    // address a relayed browser cannot reach. The model would now retry that address until its
-    // budget ran out and then tell the reader the daemon is offline, which makes waiting for the
-    // measurement MORE necessary rather than less.
-    //
-    // THE DEPENDENCY IS THE CHOICE OBJECT, NOT ITS KIND. Depending on the kind alone would leave a
-    // stream subscribed to a carrier the router has replaced whenever the replacement happens to be
-    // the same kind — relay A for relay B. That is not reachable through today's router, which only
-    // ever replaces a winner by way of `undefined`, but "not reachable today" is a fact about one
-    // call site rather than about this effect, and the object costs nothing to depend on.
-    if (client === null || measuredCarrier?.ok !== true) return;
+    if (streamOwner === null) return;
+    // The gating rules live on `streamOwner` above, because they decide an IDENTITY and not just a
+    // permission — see its comment for why a carrier must be measured first and why the dependency
+    // is the choice object rather than its kind.
     const stream = startSessionEventStream({
-      api: client,
-      sessionId,
+      api: streamOwner.client,
+      sessionId: streamOwner.sessionId,
       after: liveCursorRef.current,
       environment: browserEventStreamEnvironment,
       onEvent: event => {
@@ -748,15 +784,18 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         setLiveCursor(current => Math.max(current, event.sequence));
         void refreshControl.current?.refresh(true);
       },
-      onStatus: setStreamStatus,
+      // Stamped with the owner, so a report can never be read by a later one. The model publishes
+      // nothing after `stop()`, and even if it did, a report from a replaced owner is discarded at
+      // render rather than believed.
+      onStatus: status => setReportedStream({ owner: streamOwner, status }),
     });
     streamControl.current = stream;
-    setStreamStatus(stream.status());
+    setReportedStream({ owner: streamOwner, status: stream.status() });
     return () => {
       stream.stop();
       if (streamControl.current === stream) streamControl.current = null;
     };
-  }, [client, measuredCarrier, sessionId]);
+  }, [streamOwner]);
 
   /**
    * The reader's way back, and it is a REF rather than the control itself on purpose: a callback
@@ -767,26 +806,30 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     streamControl.current?.reconnect();
   }, []);
   /**
-   * WHAT THE CHIP READS, DERIVED FROM THE SAME TWO VALUES THE EFFECT ABOVE GATES ON.
+   * WHAT THE CHIP READS — a status only its own owner may supply.
    *
-   * `streamStatus` alone was not enough and the gap was silent. When the effect's guard stops being
-   * satisfied — the client is replaced with `null`, or a later carrier walk answers `ok: false` for a
-   * daemon that was reachable a minute ago — React runs the cleanup and then the effect RETURNS
-   * EARLY. The subscription is gone and `setStreamStatus` is never reached, so the state kept saying
-   * whatever it last said. A page that had been `live` went on saying `live` with nothing behind it,
-   * which is precisely the defect this whole route was changed to end.
+   * TWO SEPARATE WAYS THIS ROUTE COULD LIE, and both are closed here. Deriving from the host facts
+   * closes the direction where a subscription becomes IMPOSSIBLE: the client goes `null`, or a walk
+   * finds the daemon unreachable, React runs the cleanup and the effect returns early without ever
+   * publishing, and a remembered status went on saying `live` with nothing behind it.
    *
-   * Deriving it instead of remembering it makes that disagreement unrepresentable: the status is only
-   * consulted while a subscription may exist, and the two host facts are the same expression the
-   * effect uses rather than a second copy that could drift from it.
+   * Comparing the OWNER closes the direction where it becomes possible again — the one a plain
+   * derivation still got wrong. On the render where a carrier walk succeeds after a failure, the
+   * host facts already say `subscribed`, but the replacement model does not exist yet; it is built by
+   * a passive effect AFTER the commit. React therefore painted the previous owner's `live`, and a
+   * previous `disconnected` painted a Reconnect button whose callback had a null control. Neither
+   * survives an identity check: an owner that has not reported yet reads `connecting`, which is the
+   * honest answer and also the one state that offers no control.
    */
-  const subscribed = client !== null && measuredCarrier?.ok === true;
+  const subscribed = streamOwner !== null;
+  const ownedStatus: SessionEventStreamStatus =
+    streamOwner !== null && reportedStream.owner === streamOwner ? reportedStream.status : 'connecting';
   const liveStream = useMemo(
     () => ({
-      status: liveStreamState(subscribed, measuredCarrier?.ok === false, streamStatus),
+      status: liveStreamState(subscribed, measuredCarrier?.ok === false, ownedStatus),
       onReconnect: reconnectStream,
     }),
-    [measuredCarrier, reconnectStream, streamStatus, subscribed],
+    [measuredCarrier, ownedStatus, reconnectStream, subscribed],
   );
 
   useEffect(() => {
