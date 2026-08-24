@@ -28,6 +28,7 @@ import {
   type AttentionSnapshot,
   DoctorReportSchema,
   type FyEvent,
+  type FyEventStreamIdle,
   HealthViewSchema,
   type ProjectInfo,
   type SessionStatus,
@@ -322,6 +323,14 @@ interface ShellOptions {
   /** Makes creating the daemon-bound client reject before any read starts. */
   readonly clientFailure?: string;
   /**
+   * When this answers true, every carrier probe fails, so the next walk reaches `ok: false`.
+   *
+   * A PREDICATE RATHER THAN A FLAG, because the interesting case is a daemon that WAS reachable and
+   * then stopped being: the router's `ok: false` branch is only entered by a later walk, and a fixed
+   * option could only ever make a session unreachable from the start.
+   */
+  readonly carrierDown?: () => boolean;
+  /**
    * Holds `get` open. Without it the read resolves inside the mount's own act
    * flush and the loading state never exists to be observed — which is exactly
    * the state the live-region tests are about.
@@ -361,6 +370,27 @@ interface LiveFeed {
   readonly sessionId: string | undefined;
   readonly after: number;
   readonly emit: (event: FyEvent) => void;
+  /** The daemon's quiet-but-alive proof, so a late one can be delivered to an abandoned feed. */
+  readonly idle: (frame: FyEventStreamIdle) => void;
+  /**
+   * Ends this subscription the way a daemon going away does.
+   *
+   * The fake cannot resolve on its own — see below — but a test that never CAN resolve it could not
+   * reach the half of the route that matters most: what the reader is shown once the feed has
+   * stopped. This is the daemon's half of that, held by the test rather than by a timer.
+   */
+  readonly end: () => void;
+  /**
+   * TEARDOWN, OBSERVED RATHER THAN INFERRED.
+   *
+   * `liveFeeds.length` only ever counts OPENS, so "no replacement appeared" was being read as "the
+   * old subscription is gone" — and those are different claims. Delete the route's `stream.stop()`
+   * and the length assertion still passes while a live socket keeps running behind a page that has
+   * moved on. The signal is the only thing that can tell them apart, so the fake surfaces it.
+   */
+  readonly aborted: () => boolean;
+  /** Whether this subscription's promise has actually settled, which is what a real teardown does. */
+  readonly settled: () => boolean;
 }
 
 const appStore = async (
@@ -409,15 +439,33 @@ const appStore = async (
           after: number,
           onEvent: (event: FyEvent) => void,
           signal?: AbortSignal,
-        ) =>
-          await new Promise<void>(resolve => {
+          onIdle?: (frame: FyEventStreamIdle) => void,
+        ) => {
+          let settled = false;
+          const finish = (resolve: () => void) => () => {
+            settled = true;
+            resolve();
+          };
+          return await new Promise<void>(resolve => {
+            // RECORDED BEFORE THE ABORT CHECK, so a subscription opened against an already-cancelled
+            // signal is still visible to the test. It is one of the shapes a replacement race takes,
+            // and a fake that dropped it on the floor would report the race as "nothing happened".
+            liveFeeds.push({
+              sessionId,
+              after,
+              emit: onEvent,
+              idle: frame => onIdle?.(frame),
+              end: finish(resolve),
+              aborted: () => signal?.aborted === true,
+              settled: () => settled,
+            });
             if (signal?.aborted === true) {
-              resolve();
+              finish(resolve)();
               return;
             }
-            liveFeeds.push({ sessionId, after, emit: onEvent });
-            signal?.addEventListener('abort', () => resolve(), { once: true });
-          }),
+            signal?.addEventListener('abort', finish(resolve), { once: true });
+          });
+        },
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
         wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
         wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,
@@ -443,6 +491,9 @@ const appStore = async (
     fetcher: async input => {
       const url = String(input);
       carrierRequests.push(url);
+      // Every carrier this daemon publishes fails at transport, which is what a walk needs to see
+      // before it can answer `ok: false` rather than picking a winner.
+      if (options.carrierDown?.() === true) throw new Error('the daemon is unreachable');
       // The board a live session reads. A test that wants to watch a refresh
       // land supplies its own answer per read; every other test gets the same
       // empty deck the shell has always been given here.
@@ -1061,6 +1112,231 @@ describe('AppShell', () => {
     await settle();
 
     expect(session.getAttribute('data-live-events')).toBe('9');
+    await view.unmount();
+  });
+
+  /**
+   * THE OTHER WAY A PAGE CAN GO ON CLAIMING TO BE LIVE, which is not a stream failure at all.
+   *
+   * The effect below only subscribes while there is a client AND a measured, reachable carrier. When
+   * that stops being true — the client is replaced with `null`, or a later carrier walk answers
+   * `ok: false` for a daemon that was reachable a minute ago — React runs the cleanup and the effect
+   * RETURNS EARLY. The subscription is gone and no status is ever published, so a `useState` holding
+   * the last reported value simply kept saying `live`: the same "a dead stream looks alive" defect
+   * this route was changed to end, arrived at from the opposite direction and invisible to every
+   * assertion about the stream itself, because the stream is not the thing that broke.
+   *
+   * IT HAPPENS IN TWO STEPS AND BOTH ARE ASSERTED, because the router does not go straight to a
+   * verdict. A remembered winner that stops carrying is FORGOTTEN — `choice` becomes `undefined` and
+   * the next request walks again — and only that later walk, having failed every carrier the daemon
+   * publishes, publishes `ok: false`. So the page passes through "nothing is measured" on its way to
+   * "this daemon cannot be reached", and it must not claim to be live in either.
+   */
+  it('stops claiming a live feed the moment its carrier stops carrying', async () => {
+    let reachable = true;
+    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      carrierDown: () => !reachable,
+    });
+    await settle();
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+    const walk = async (): Promise<void> => {
+      await interact(async () => {
+        // The request itself rejects — every carrier failed, which is the point. What matters is the
+        // choice the router publishes on its way out.
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`).catch(() => undefined);
+      });
+      await settle();
+    };
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(4)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+
+    // Act I — the daemon stops answering, so the remembered carrier is forgotten.
+    reachable = false;
+    await walk();
+
+    // Assert I — this is the transition that used to leave `Live` on screen with nothing behind it:
+    // the effect's guard stopped holding, React ran the cleanup, and the effect returned early
+    // without ever publishing a status. Nothing is measured now, and the app walks again on its next
+    // request, so `connecting` is the honest reading — but `live` is the one it must never be.
+    expect(store.carrier.choice(alpha.daemonId)).toBeUndefined();
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    expect(liveFeeds).toHaveLength(1);
+
+    // Act II — that next walk tries every carrier the daemon publishes and reaches a verdict.
+    await walk();
+
+    // Assert II
+    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(false);
+    expect(region().getAttribute('data-live-stream')).toBe('unavailable');
+    const sentence = must(region().querySelector('.sr-only'), 'the announced sentence').textContent ?? '';
+    expect(sentence).toContain('cannot be reached');
+    // NOT a promise of a timer refresh, and that is not pedantry: the poll underneath takes the same
+    // carrier that just failed, so it is not refreshing anything either.
+    expect(sentence).not.toContain('timer');
+    // AND NO CONTROL THAT WOULD DO NOTHING. The route tore its model down, so a Reconnect button here
+    // would be wired to a null control — an affordance that looks like a remedy and is a no-op.
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+    // The subscription is gone because the ROUTE CANCELLED IT, not because nothing reopened one.
+    // `liveFeeds.length` counts opens and would read exactly the same with the cleanup deleted.
+    expect(must(liveFeeds[0], 'the original subscription').aborted()).toBe(true);
+    expect(must(liveFeeds[0], 'the original subscription').settled()).toBe(true);
+    expect(liveFeeds).toHaveLength(1);
+
+    await view.unmount();
+  });
+
+  /**
+   * THE REPLACEMENT RACE, WATCHED AT EVERY COMMIT RATHER THAN AFTER THE DUST SETTLES.
+   *
+   * Reading the DOM once React has finished cannot see this defect at all. Both the broken and the
+   * fixed route settle on the same final attribute; what differed was a frame in between. On the
+   * render where a carrier walk SUCCEEDS after a failure, the host facts already permit a
+   * subscription while the replacement model does not exist yet — it is built by a passive effect
+   * after the commit — so React painted the previous owner's `live` over a session with nothing
+   * behind it, and a previous `disconnected` painted a Reconnect button whose callback had a null
+   * control. A MutationObserver records every committed value, which is the only way to assert about
+   * a frame that is immediately overwritten.
+   *
+   * The teardown assertions are here for the same reason as above: `liveFeeds.length` counts opens,
+   * so only the signal can say whether the old stream is actually gone.
+   */
+  it('never commits the previous owner‘s state when a carrier becomes reachable again', async () => {
+    let reachable = true;
+    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      carrierDown: () => !reachable,
+    });
+    await settle();
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+    const walk = async (): Promise<void> => {
+      await interact(async () => {
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`).catch(() => undefined);
+      });
+      await settle();
+    };
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(4)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+
+    // The daemon goes away and a walk reaches the `ok: false` verdict.
+    reachable = false;
+    await walk();
+    await walk();
+    expect(region().getAttribute('data-live-stream')).toBe('unavailable');
+    const original = must(liveFeeds[0], 'the original subscription');
+    expect(original.aborted()).toBe(true);
+
+    // A LATE DAEMON CANNOT REACH THE PAGE THROUGH A CANCELLED SOCKET. Delivered after the route let
+    // go of it, these must move nothing: not the cursor, not the state, not the budget.
+    await interact(() => {
+      original.emit(liveEvent(99));
+      original.idle({ kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 'shared', after: 99 } });
+    });
+    await settle();
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+    expect(session.getAttribute('data-live-events')).toBe('4');
+    expect(region().getAttribute('data-live-stream')).toBe('unavailable');
+
+    // Act — every committed value from here on, not just the last one.
+    const committed: Array<string | null> = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records) committed.push((record.target as HTMLElement).getAttribute('data-live-stream'));
+    });
+    observer.observe(view.container, { attributes: true, attributeFilter: ['data-live-stream'], subtree: true });
+    reachable = true;
+    await walk();
+    observer.disconnect();
+
+    // Assert — the page recovers, and NOT ONE committed frame in between claimed the old owner's
+    // state. `live` is the unacceptable one; `disconnected` would have carried a dead button.
+    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(true);
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed).not.toContain('live');
+    expect(committed).not.toContain('disconnected');
+    expect(committed.at(-1)).toBe('connecting');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+
+    // Exactly ONE replacement, and it resumes at the cursor the page is still showing rather than
+    // replaying the tail — the late `99` above must not have moved it.
+    expect(liveFeeds).toHaveLength(2);
+    expect(must(liveFeeds[1], 'the replacement subscription').after).toBe(4);
+    expect(must(liveFeeds[1], 'the replacement subscription').aborted()).toBe(false);
+
+    // And the recovered feed is a working one.
+    await interact(() => must(liveFeeds[1], 'the replacement subscription').emit(liveEvent(7)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(session.getAttribute('data-live-events')).toBe('7');
+
+    await view.unmount();
+  });
+
+  /**
+   * WHAT THE READER IS SHOWN WHEN THE FEED STOPS, driven through the real route.
+   *
+   * This is the defect the whole PR exists for, and it was invisible precisely BECAUSE every other
+   * assertion in this file still passed after it happened: the transcript kept refreshing on its
+   * three-second poll, the session stayed `connected`, the carrier stayed `direct`, and the page
+   * went on looking live forever. Nothing rendered by this route distinguished "the daemon has said
+   * nothing because nothing has happened" from "the socket died and nobody noticed".
+   *
+   * So the assertions here are the ones that could not have been made before: a stopped feed is a
+   * VISIBLE state, and the reader's way out of it is a real control wired to a real resubscription.
+   * The route's own state — the model's schedule, its jitter and its budget — belongs to
+   * `session-event-stream-model.test.ts`; what this proves is that the composition root actually
+   * connected the three of them.
+   */
+  it('shows the reader a stopped live feed and reconnects it on demand', async () => {
+    const { liveFeeds, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+
+    // A subscription exists but nothing has proved it: constructing a socket is not evidence a daemon
+    // is on the other end, and the route says the honest one of the two.
+    expect(liveFeeds).toHaveLength(1);
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(3)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+
+    // The daemon goes away. Before this PR the route swallowed exactly this and changed nothing.
+    await interact(() => must(liveFeeds[0], 'the live event subscription').end());
+    await settle();
+
+    expect(region().getAttribute('data-live-stream')).toBe('reconnecting');
+    expect(must(region().querySelector('.sr-only'), 'the announced sentence').textContent).toContain(
+      'still refreshes on a timer',
+    );
+    // NO SECOND SUBSCRIPTION YET. The reconnection is waiting out a backoff window on the real
+    // browser clock, which is what makes the manual control below a distinct fact and not a race.
+    expect(liveFeeds).toHaveLength(1);
+
+    const reconnect = must(
+      region().querySelector<HTMLButtonElement>('button[data-live-stream-reconnect]'),
+      'the reconnect button',
+    );
+    await interact(() => reconnect.click());
+    await settle();
+
+    // ONE new subscription, resuming at the cursor the old one reached rather than replaying the
+    // tail — and the route is back to an honest unproved state rather than claiming to be live.
+    expect(liveFeeds).toHaveLength(2);
+    expect(must(liveFeeds[1], 'the resumed subscription').after).toBe(3);
+    expect(session.getAttribute('data-live-events')).toBe('3');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+
+    await interact(() => must(liveFeeds[1], 'the resumed subscription').emit(liveEvent(11)));
+    await settle();
+
+    // RECOVERED: the resubscription is a working feed, not just a reopened socket.
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(session.getAttribute('data-live-events')).toBe('11');
     await view.unmount();
   });
 

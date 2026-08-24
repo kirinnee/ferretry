@@ -400,26 +400,64 @@ describe('the per-session event stream', () => {
     should(harness.source.unsubscribed).equal(1);
   });
 
-  it('should prove it is quiet rather than broken, once per silent stretch', async () => {
+  it('should keep proving it is quiet rather than broken, every silent window', async () => {
     // Arrange
     const harness = subject(SESSION, { pages: [[stored('s1', 9)]] });
 
-    // Act
+    // Act — two consecutive silent windows with nothing at all between them, then a real event, then
+    // a third window. One frame per quiet STRETCH would have produced only the first and the last.
     await harness.handler.open();
     harness.scheduler.fire();
     const afterFirstProof = harness.scheduler.pending;
+    harness.scheduler.fire();
     harness.source.emit(stored('s1', 10));
     harness.scheduler.fire();
 
     // Assert — the proof names this session's OWN last delivered sequence, so a reader can tell a
     // stream that is caught up from one that silently stalled at an older cursor.
-    should(harness.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS, EVENT_STREAM_IDLE_MS]);
     should(harness.downstream.frames().filter(frame => frame.kind === 'idle')).deepEqual([
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 9 } },
       { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 9 } },
       { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 10 } },
     ]);
-    // Once per quiet stretch: nothing re-arms until an event does.
-    should(afterFirstProof).be.false();
+    // A SECOND SILENT WINDOW IS STILL ARMED. One proof per quiet stretch told a reader what it wanted
+    // to know and then let the connection itself fall completely silent, which is how a path dies
+    // with no close frame at either end — and a close is the only thing the browser can react to.
+    should(afterFirstProof).be.true();
+    // Five arms on one socket: the open, one after each of the three proofs, and the one the real
+    // event replaced the pending window with — the window is measured from the last thing actually
+    // sent, of either kind, so an active stream never carries an idle frame.
+    should(harness.scheduler.armed).deepEqual(Array.from({ length: 5 }, () => EVENT_STREAM_IDLE_MS));
+  });
+
+  it('should stop the idle schedule the moment the stream closes', async () => {
+    // Arrange
+    const harness = subject(SESSION, { pages: [[stored('s1', 1)]] });
+
+    // Act
+    await harness.handler.open();
+    harness.scheduler.fire();
+    harness.handler.close();
+    harness.scheduler.fire();
+
+    // Assert — a recurring proof must not outlive the socket it is proving.
+    should(harness.scheduler.pending).be.false();
+    should(harness.downstream.frames().filter(frame => frame.kind === 'idle')).have.length(1);
+  });
+
+  it('should stop re-arming once the transport refuses the proof', async () => {
+    // Arrange — the peer went away between windows, which the transport reports as a failed write.
+    const harness = subject(SESSION, { pages: [[stored('s1', 1)]] });
+
+    // Act
+    await harness.handler.open();
+    harness.downstream.result = -1;
+    harness.scheduler.fire();
+
+    // Assert — a refused write closes the handler, and scheduling another window after that would be
+    // a timer on a socket nobody holds. This is the loop's only exit that is not a close.
+    should(harness.scheduler.pending).be.false();
+    should(harness.source.listening).be.false();
   });
 
   it('should report the caller cursor in an idle proof before anything has been delivered', async () => {
