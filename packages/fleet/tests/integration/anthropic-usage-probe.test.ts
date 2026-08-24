@@ -425,27 +425,34 @@ describe('fetchQuota', () => {
     should(actual.ok).be.false();
   });
 
-  it('should send the method, headers and body it was given', async () => {
-    // Arrange
-    let seen: { method: string; auth: string | null; body: string } | undefined;
+  it('should send the headers it was given and no body at all', async () => {
+    // Arrange — what a REAL server saw, which is the only witness that matters here. Narrowing
+    // `QuotaRequest` makes a payload unrepresentable in the type; this proves the transport under
+    // that type sends none, so the two halves of the claim are checked by different means.
+    let seen: { method: string; auth: string | null; body: string; contentType: string | null } | undefined;
     const url = serve(async request => {
-      seen = { method: request.method, auth: request.headers.get('authorization'), body: await request.text() };
+      seen = {
+        method: request.method,
+        auth: request.headers.get('authorization'),
+        body: await request.text(),
+        contentType: request.headers.get('content-type'),
+      };
       return new Response('{}', { status: 200 });
     });
 
     // Act
     await fetchQuota({
       url,
-      method: 'POST',
-      headers: { Authorization: 'Bearer placeholder', 'content-type': 'application/json' },
-      body: '{"probe":true}',
+      method: 'GET',
+      headers: { Authorization: 'Bearer placeholder' },
       timeoutMs: 5_000,
     });
 
     // Assert
-    should(seen?.method).equal('POST');
+    should(seen?.method).equal('GET');
     should(seen?.auth).equal('Bearer placeholder');
-    should(seen?.body).equal('{"probe":true}');
+    should(seen?.body).equal('');
+    should(seen?.contentType).be.null();
   });
 
   it('should abort a response that outlives its deadline', async () => {

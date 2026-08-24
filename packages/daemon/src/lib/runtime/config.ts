@@ -62,8 +62,14 @@ export const UsageFeedConfigSchema = z
     /** An external collector's JSON usage endpoint. */
     url: z.url().optional(),
     /**
-     * Fallback command for hosts that serve usage from another tool's CLI, as argv. The daemon
-     * appends the flags it needs (see `USAGE_PROBE_FLAGS`); an empty list means there is no fallback.
+     * A legacy fallback command, as argv. PARSED AND NOT RUN.
+     *
+     * It used to be a source in the feed the daemon's unattended refresh drives, so a persisted argv
+     * here was executed at boot and on every timer tick with nobody present. That the operator wrote
+     * the argv themselves answers who chose it, not how often it runs unwatched — so the source that
+     * ran it is deleted and this field reaches nothing. It stays in the schema, and only in the
+     * schema, because a host that already carries one must still upgrade and boot rather than be
+     * refused by a strict object it cannot satisfy.
      */
     fallbackCommand: z.array(z.string().trim().min(1)).readonly().default([]),
   })

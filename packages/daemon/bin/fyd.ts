@@ -39,7 +39,6 @@ import {
   NodeSessionBrowserLauncher,
   BrowserWorkerClient,
   BunApiServer,
-  BunCommandRunner,
   BunProcessProbe,
   BunRelayCarrier,
   BunSecretChildRunner,
@@ -53,7 +52,6 @@ import {
   ProcCgroupPlacements,
   RegisteredCgroupPaneLedger,
   SpawnCgroupCommands,
-  CommandUsageSource,
   ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
@@ -540,7 +538,6 @@ import {
   UnknownPeerRefused,
   type UsageFeedPort,
   unreadableManifestPreflight,
-  usageProbeCommand,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
@@ -5015,17 +5012,25 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // runtime dependency of a tool this migration exists to delete. The native source asks the
       // provider directly, through the same collector `GET /v1/fleet/usage` answers with.
       //
-      // The external sources are kept BEHIND it rather than deleted: a host part-way through the
-      // migration may still be running that tool, and this daemon should keep reporting quota if its
-      // own fleet has not been applied yet. Both remain optional, and a daemon configured with
-      // neither and no fleet serves an empty feed and says so rather than pretending every account
-      // is at zero.
-      const command = usageProbeCommand(config.usage.fallbackCommand);
+      // The external collector endpoint is kept BEHIND it rather than deleted: a host part-way
+      // through the migration may still be running that tool, and this daemon should keep reporting
+      // quota if its own fleet has not been applied yet. It remains optional, and a daemon
+      // configured without it and with no fleet serves an empty feed and says so rather than
+      // pretending every account is at zero.
+      //
+      // `usage.fallbackCommand` IS NOT A SOURCE HERE, AND THAT IS THE POINT OF THIS COMPOSITION.
+      //
+      // This feed is what the unattended refresh drives: `FleetRefreshService` runs it once at boot
+      // and again on every timer tick, with nobody present. A persisted argv in `config/daemon.json`
+      // was therefore an arbitrary command this daemon executed on a schedule, on behalf of no
+      // request. "The operator wrote it themselves" answers WHO chose the argv, not how often it
+      // runs unwatched, and the timer is the invariant. The field is still PARSED, so a legacy
+      // configuration carrying one upgrades and starts rather than being refused; it simply reaches
+      // no scheduled source, and the source that ran it is deleted rather than left unmounted.
       return new CachedUsageFeed(
         [
           new FleetUsageSource(fleet, accounts),
           ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
-          ...(command === undefined ? [] : [new CommandUsageSource(new BunCommandRunner(process.env), command)]),
         ],
         // The fleet's own declared probe interval. A host with no fleet configuration has not asked
         // for a cadence at all, so it keeps the default rather than being given one by a refusal.
@@ -6488,12 +6493,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   /**
    * The unattended fleet evidence pass.
    *
-   * It is mounted rather than folded into a route because the point is that `/usage` and
-   * `/v1/fleet/health` are already current before a browser or a person requests them. The tick
-   * drives the established feeds only: `CachedUsageFeed` owns quota caching, shared in-flight work
-   * and last-good retention; the mounted fleet health reader owns the equivalent health evidence.
-   * This loop invents neither a cache nor an error result, so a failed probe cannot replace good
-   * data with an empty fleet.
+   * It is mounted rather than folded into a route because the point is that `/usage` is already
+   * current before a browser or a person requests it. The tick drives the established feed only:
+   * `CachedUsageFeed` owns quota caching, shared in-flight work and last-good retention. This loop
+   * invents neither a cache nor an error result, so a failed read cannot replace good data with an
+   * empty fleet.
+   *
+   * IT DOES NOT WARM ACCOUNT HEALTH, AND IT MUST NOT BE MADE TO. `/v1/fleet/health` collects when it
+   * is asked, because collecting it costs a real model turn per account — see the note on
+   * `FleetRefreshService`. Warming an answer nobody requested is the whole defect this pass no
+   * longer has.
    *
    * ONE CONFIGURATION NAME chooses the cadence. `usage.interval` is the fleet declaration that
    * builds the usage feed's freshness policy too. A daemon without a fleet configuration has made

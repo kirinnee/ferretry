@@ -12,6 +12,11 @@
  * anybody asking. It is removed, not gated: **nothing on a timer may spend money**, and a usage number
  * is never worth buying. Such an account now reports that it cannot be measured, which is true and free.
  *
+ * **And the seam can no longer express one.** {@link QuotaRequest} is a bodyless `GET`, so a completion
+ * request is not merely absent from this file — it is unrepresentable in the type every implementation
+ * of {@link QuotaFetch} is written against. Reviving inference-derived quota would take widening that
+ * type in a reviewed diff, which is the point.
+ *
  * The usage JSON reports utilization as a **percentage**. It is not interpreted here — it is handed to
  * the named readers in `lib/quota.ts`, which is the only place that conversion happens.
  *
@@ -32,7 +37,6 @@ import type { FleetUsageProbe, FleetUsageProbeResult } from '../lib/usage.ts';
 
 export const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 export const ANTHROPIC_VERSION = '2023-06-01';
-export const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
 
 /** The provider label every row from this probe carries. */
 export const ANTHROPIC_PROVIDER = 'anthropic';
@@ -48,11 +52,18 @@ export interface QuotaResponse {
   json(): Promise<unknown>;
 }
 
+/**
+ * One bounded read.
+ *
+ * `method` is the literal `'GET'` and there is no `body` field, so a request that spends inference
+ * quota is unrepresentable rather than merely unwritten. This is the structural half of the fix
+ * above: deleting `#viaInference` stopped the spend, and this stops the next one being a one-line
+ * edit nobody notices.
+ */
 export interface QuotaRequest {
   readonly url: string;
-  readonly method: 'GET' | 'POST';
+  readonly method: 'GET';
   readonly headers: Readonly<Record<string, string>>;
-  readonly body?: string;
   readonly timeoutMs: number;
 }
 
@@ -181,8 +192,10 @@ function requestFailure(error: unknown): string {
 /**
  * The shipped fetch, bounded by a deadline.
  *
- * The body is only read when a caller asks for JSON, and the response object handed back exposes
- * nothing but the status and header lookup — so a caller cannot accidentally hold a stream open.
+ * The response body is only read when a caller asks for JSON, and the response object handed back
+ * exposes nothing but the status and header lookup — so a caller cannot accidentally hold a stream
+ * open. Nothing is ever SENT: there is no request body here because {@link QuotaRequest} has no
+ * field for one.
  */
 export const fetchQuota: QuotaFetch = async request => {
   const controller = new AbortController();
@@ -191,7 +204,6 @@ export const fetchQuota: QuotaFetch = async request => {
     const response = await fetch(request.url, {
       method: request.method,
       headers: { ...request.headers },
-      ...(request.body === undefined ? {} : { body: request.body }),
       signal: controller.signal,
     });
     return {
