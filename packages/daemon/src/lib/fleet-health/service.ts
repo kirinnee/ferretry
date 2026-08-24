@@ -92,8 +92,20 @@ export class FleetAccountHealthService {
   /**
    * Record what the caller's free usage collection established.
    *
-   * Never rejects: this rides a quota read that has its own consumers, and a health store that could
-   * not be written must not fail the usage feed with it. The next pass tries again.
+   * IT PROPAGATES A FAILURE, deliberately. Whether a failed health write matters is knowledge the
+   * CALL SITE has and this service does not: see `MountedFleet.usage()`, where the quota feed, the
+   * advisor and the warden are all waiting on the snapshot this rode in on and none of them asked
+   * about health. A service that swallowed the failure here would be deciding, on its caller's
+   * behalf, that nobody cares whether it failed — and it would leave the caller holding a `.catch()`
+   * that can never fire, which is worse than no error handling at all because it reads like some.
+   *
+   * READ THE TWO AWAITS BELOW CAREFULLY; they are not interchangeable.
+   *
+   * `this.chain` KEEPS BOTH HANDLERS and is what the NEXT observation queues behind, so one failed
+   * pass cannot poison every later one. The awaited expression is `queued` — the un-neutralised copy
+   * — so this call's own failure reaches this call's own caller. Awaiting `this.chain` instead looks
+   * identical and silently restores the dead-`catch` bug; awaiting `queued` but ALSO assigning it to
+   * `this.chain` makes the first failure permanent.
    */
   async observe(input: {
     readonly manifest: FleetManifest;
@@ -105,7 +117,7 @@ export class FleetAccountHealthService {
       () => undefined,
       () => undefined,
     );
-    await this.chain;
+    await queued;
   }
 
   async #record(input: {

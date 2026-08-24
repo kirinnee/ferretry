@@ -1364,6 +1364,12 @@ class MountedFleet implements FleetSubsystem {
       this.options.usageProbe ?? this.probe(config.usage.timeout),
       this.options.clock,
     ).collect(manifest);
+    // WHY THIS IS SWALLOWED HERE, and why it is swallowed HERE rather than inside the service: this
+    // method must return a snapshot even when the health document could not be written, because the
+    // quota feed, the advisor and the warden are all waiting on it and none of them asked about
+    // health. That is knowledge this call site has and the health service does not — so the service
+    // propagates and the decision to ignore it is made where the reason lives. The next pass, one
+    // usage interval later, tries again.
     await this.accountHealth()
       .observe({ manifest, config, usage: snapshot })
       .catch(() => undefined);

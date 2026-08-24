@@ -283,24 +283,46 @@ export function decideAccountHealth(input: AccountHealthInput): AccountHealthCon
       : conclusion('needs_credentials', 'static_credential_missing', 'local_credential', true);
   }
 
-  if (input.remote === 'accepted') return conclusion('healthy', 'provider_accepted', 'anthropic_usage', true);
-  if (input.remote === 'scope_unavailable') {
+  /**
+   * NO REMOTE SIGNAL COUNTS FOR CODEX, and it is suppressed here rather than checked further down.
+   *
+   * The Codex branch used to sit BELOW the remote reads, which was safe only because
+   * `AnthropicUsageProbe` declines Codex and therefore supplies no signal. That is the probe's
+   * RESTRAINT, not a rule — and the seam is public. A later Codex usage probe, model-list read or
+   * cached `getAuthStatus` could set `credentialSignal`, and this table would then publish
+   * `healthy/provider_accepted` for an account whose usage endpoint answers `200` for tokens that are
+   * already STALE. That is the one promise this feature must not break, so it is enforced
+   * structurally instead of resting on a collaborator's manners.
+   *
+   * SUPPRESSED rather than short-circuited, and the difference matters: returning
+   * `codex_liveness_unproven` right here would also swallow the more specific reasons BELOW — a Codex
+   * home whose credential could not be READ deserves `credential_unreadable`, which is actionable,
+   * over "Codex cannot be proved", which is not. Blanking the signal keeps every one of those rows
+   * reachable while making the dangerous ones unreachable.
+   *
+   * A locally dead credential is unaffected: it is decided ABOVE, because that is a fact about this
+   * home rather than a claim about the provider.
+   */
+  const remote = input.kind === 'codex' ? undefined : input.remote;
+
+  if (remote === 'accepted') return conclusion('healthy', 'provider_accepted', 'anthropic_usage', true);
+  if (remote === 'scope_unavailable') {
     // THE most important row in this table. See the module note: this is accepted-and-unmeasurable.
     return conclusion('healthy', 'usage_scope_unavailable', 'anthropic_usage', true);
   }
-  if (input.remote === 'rejected') {
+  if (remote === 'rejected') {
     return input.loginApplies
       ? conclusion('needs_relogin', 'oauth_token_rejected', 'anthropic_usage', true)
       : conclusion('needs_credentials', 'static_credential_rejected', 'anthropic_usage', true);
   }
 
   // Nothing conclusive. Say which unknown this is, most specific first.
-  if (local?.state === 'unreadable' || input.remote === 'absent') {
+  if (local?.state === 'unreadable' || remote === 'absent') {
     return unknown('credential_unreadable', 'local_credential');
   }
   if (input.kind === 'codex') return unknown('codex_liveness_unproven');
-  if (input.remote === 'timeout') return unknown('check_timeout', 'anthropic_usage');
-  if (input.remote === 'inconclusive') return unknown('provider_unavailable', 'anthropic_usage');
+  if (remote === 'timeout') return unknown('check_timeout', 'anthropic_usage');
+  if (remote === 'inconclusive') return unknown('provider_unavailable', 'anthropic_usage');
   if (local?.state === 'refreshable') return unknown('oauth_refreshable', 'local_credential');
   if (local?.state === 'valid') return unknown('provider_not_asked', 'local_credential');
   return unknown('never_checked');

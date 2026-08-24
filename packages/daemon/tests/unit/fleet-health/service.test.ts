@@ -201,9 +201,11 @@ describe('FleetAccountHealthService.observe', () => {
     should(store.current()[0]?.verdict).equal('needs_relogin');
   });
 
-  it('does not reject when the store cannot be written', async () => {
-    // Arrange — this rides a quota read that the feed, the advisor and the warden are waiting on. A
-    // health document that could not be written is not their problem.
+  it('propagates a failed write, so its CALLER decides whether that matters', async () => {
+    // Arrange — this used to swallow the failure and answer successfully, which left the one caller
+    // that has a reason to ignore it holding a `.catch()` that could never fire. Whether a failed
+    // health write matters is the call site's knowledge, not this service's: see
+    // `MountedFleet.usage()`, where the feed, the advisor and the warden are waiting on the snapshot.
     const failing: AccountHealthStore = {
       read: async () => [],
       write: async () => {
@@ -212,11 +214,38 @@ describe('FleetAccountHealthService.observe', () => {
     };
 
     // Act / Assert
-    await service({ store: failing }).observe({
-      manifest: manifest([account(ID_ONE)]),
-      config: config(),
-      usage: usage('accepted'),
-    });
+    await should(
+      service({ store: failing }).observe({
+        manifest: manifest([account(ID_ONE)]),
+        config: config(),
+        usage: usage('accepted'),
+      }),
+    ).be.rejectedWith(/the disk is full/u);
+  });
+
+  it('does not let one failed observation poison the next', async () => {
+    // Arrange — the queue absorbs the failure even though the caller sees it. `this.chain` keeps both
+    // handlers while the awaited copy rejects, and getting that backwards is a one-word edit with a
+    // permanent consequence: every later pass would inherit the first failure.
+    const store = memoryStore();
+    let writes = 0;
+    const flaky: AccountHealthStore = {
+      read: async () => await store.store.read(),
+      write: async heads => {
+        writes += 1;
+        if (writes === 1) throw new Error('the disk was briefly full');
+        await store.store.write(heads);
+      },
+    };
+    const subject = service({ store: flaky });
+    const input = { manifest: manifest([account(ID_ONE)]), config: config(), usage: usage('accepted') };
+
+    // Act
+    await should(subject.observe(input)).be.rejected();
+    await subject.observe(input);
+
+    // Assert — the second pass settled on the same instance.
+    should(store.current()[0]?.verdict).equal('healthy');
   });
 
   it('keeps serving after a failed observation rather than poisoning the queue', async () => {
@@ -233,8 +262,11 @@ describe('FleetAccountHealthService.observe', () => {
     };
     const subject = service({ store: flaky });
 
-    // Act
-    await subject.observe({ manifest: manifest([account(ID_ONE)]), config: config(), usage: usage('accepted') });
+    // Act — the first pass fails at the READ (the sibling test above fails at the write), and the
+    // caller sees it now that `observe` propagates.
+    await should(
+      subject.observe({ manifest: manifest([account(ID_ONE)]), config: config(), usage: usage('accepted') }),
+    ).be.rejectedWith(/a torn read/u);
     await subject.observe({ manifest: manifest([account(ID_ONE)]), config: config(), usage: usage('accepted') });
 
     // Assert — the second pass works, so one failure never disables the feature until a restart.

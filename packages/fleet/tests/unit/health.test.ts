@@ -214,6 +214,58 @@ describe('decideAccountHealth', () => {
     });
   });
 
+  /**
+   * NO REMOTE SIGNAL MAY GIVE CODEX A VERDICT — enforced here rather than left to the probe.
+   *
+   * Today `AnthropicUsageProbe` declines Codex and supplies no signal, so none of these inputs occurs
+   * in production. That is the probe's RESTRAINT, not a rule, and the seam is public: a later Codex
+   * usage probe, model-list read or cached `getAuthStatus` could set one. Its usage endpoint answers
+   * `200` for tokens that are already STALE, so a signal-derived `healthy` would be exactly the lie
+   * this feature promises never to tell.
+   *
+   * These cases are therefore deliberately UNREACHABLE TODAY and asserted anyway. That is the point:
+   * they make the rule structural, so the next person to add a Codex probe cannot break it quietly.
+   */
+  it('refuses to let ANY remote signal produce a Codex verdict', () => {
+    // Arrange — every signal an Anthropic-shaped probe can emit, against a Codex account.
+    const signals: readonly FleetCredentialSignal[] = [
+      'accepted',
+      'scope_unavailable',
+      'rejected',
+      'timeout',
+      'inconclusive',
+    ];
+
+    // Act / Assert — every one is unproven, and in particular NONE is healthy and none is a re-login.
+    for (const remote of signals) {
+      const actual = input({ kind: 'codex', remote, local: { state: 'valid', expiresAt: NOW + 1_000 } });
+      should(actual).deepEqual(
+        { verdict: 'unknown', reason: 'codex_liveness_unproven', evidence: 'none', conclusive: false },
+        `a Codex account must not take a verdict from a ${remote} signal`,
+      );
+    }
+  });
+
+  it('still lets a positively DEAD local Codex credential condemn itself', () => {
+    // Arrange / Act — the suppression is about the PROVIDER's claims, not about this home's own facts.
+    // An absent credential is a fact about the home, so it survives and stays actionable.
+    const actual = input({ kind: 'codex', remote: 'accepted', local: { state: 'missing' } });
+
+    // Assert
+    should(actual.verdict).equal('needs_relogin');
+    should(actual.reason).equal('oauth_credential_missing');
+  });
+
+  it('still prefers the more specific unreadable reason for a Codex home', () => {
+    // Arrange / Act — the signal is SUPPRESSED rather than short-circuited, so the rows below it stay
+    // reachable. "The credential could not be read" is actionable; "Codex cannot be proved" is not,
+    // and collapsing the first into the second would lose the useful half.
+    const actual = input({ kind: 'codex', remote: 'accepted', local: { state: 'unreadable' } });
+
+    // Assert
+    should(actual.reason).equal('credential_unreadable');
+  });
+
   it('keeps a timeout and an unreachable provider as separate inconclusive reasons', () => {
     should(input({ remote: 'timeout' }).reason).equal('check_timeout');
     should(input({ remote: 'inconclusive' }).reason).equal('provider_unavailable');

@@ -464,13 +464,49 @@ export function renderRelativeInstant(instant: number, now: number): string {
   return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
-function renderHealthRow(health: FleetAccountHealth, now: number): string {
+/**
+ * Which account a verdict is ABOUT — and BOTH halves are needed, which is the whole point.
+ *
+ * The row used to print `health.accountId` alone: an opaque UUID. That answered "how many accounts
+ * need a login" and never "which", so the verdict was correct and addressed to nobody.
+ *
+ * BUT THE ID IS NOT DECORATION. `fy fleet login <accountId>` matches on exactly that id — see
+ * `selectIdentities` — so replacing it with a name would have made the row readable and
+ * unactionable, which is the opposite failure. A reader needs the name to know WHICH account and the
+ * id to DO something about it, so the row carries the name and the remedy line carries the id.
+ *
+ * Names come from the manifest the controller already loaded, so nothing new is read and no field is
+ * added to the wire: the browser joins by id against the roster it already holds, and only the
+ * terminal needs this. `displayName` rather than `wrapper`, because a manifest wrapper is an ABSOLUTE
+ * PATH — printing it put `/tmp/…/fleet/bin/claude-default` in the row.
+ *
+ * FALLS BACK TO THE ID rather than hiding the row or inventing a name. A stored head can outlive the
+ * account it is about — the manifest moved, the account was removed — and a verdict about something
+ * the manifest cannot name is still a true verdict.
+ */
+export type FleetAccountNames = ReadonlyMap<string, string>;
+
+function healthSubject(health: FleetAccountHealth, names: FleetAccountNames): string {
+  return names.get(health.accountId) ?? health.accountId;
+}
+
+/** The verdicts a person can actually do something about, and the id the remedy needs. */
+const HEALTH_REMEDY: Readonly<Partial<Record<FleetHealthVerdict, (accountId: string) => string>>> = {
+  needs_relogin: accountId => `fy fleet login ${accountId}`,
+};
+
+function renderHealthRow(health: FleetAccountHealth, now: number, names: FleetAccountNames): string {
   const checked = health.lastCheckedAt === null ? 'never checked' : renderRelativeInstant(health.lastCheckedAt, now);
   // What it WAS, when staleness is the only reason it is unknown. A bare UNKNOWN there reads exactly
   // like an account nobody has ever looked at, which is the opposite of what happened.
   const was = health.staleVerdict === undefined ? '' : ` (was ${HEALTH_VERDICT_LABEL[health.staleVerdict]})`;
   const inconclusive = health.lastCheckInconclusive ? '; last check was inconclusive' : '';
-  return `  ${health.accountId}  ${HEALTH_VERDICT_LABEL[health.verdict]}${was}  checked ${checked} — ${HEALTH_REASON_LABEL[health.reason]}${inconclusive}`;
+  const row = `  ${healthSubject(health, names)}  ${HEALTH_VERDICT_LABEL[health.verdict]}${was}  checked ${checked} — ${HEALTH_REASON_LABEL[health.reason]}${inconclusive}`;
+  // The exact command, on its own line, for the one verdict a person can act on. "NEEDS LOGIN" with
+  // no way to act on it is the state this whole feature exists to stop producing — and the id the
+  // command needs is not something a reader could have derived from the name above it.
+  const remedy = HEALTH_REMEDY[health.verdict]?.(health.accountId);
+  return remedy === undefined ? row : `${row}\n${INDENT}${remedy}`;
 }
 
 /**
@@ -480,7 +516,7 @@ function renderHealthRow(health: FleetAccountHealth, now: number): string {
  * them. Unknown is not a fault: on Codex it is the correct published answer, and counting it beside
  * real rejections would send a person looking for a problem that is not there.
  */
-export function renderHealth(snapshot: FleetHealthSnapshot): string {
+export function renderHealth(snapshot: FleetHealthSnapshot, names: FleetAccountNames = new Map()): string {
   if (snapshot.accounts.length === 0) return 'No accounts to report health for.';
   const counts = (verdict: FleetHealthVerdict): number =>
     snapshot.accounts.filter(account => account.verdict === verdict).length;
@@ -491,7 +527,7 @@ export function renderHealth(snapshot: FleetHealthSnapshot): string {
     .join(', ');
   return [
     `${snapshot.accounts.length} accounts${suffix === '' ? '' : `, ${suffix}`}`,
-    ...snapshot.accounts.map(account => renderHealthRow(account, snapshot.at)),
+    ...snapshot.accounts.map(account => renderHealthRow(account, snapshot.at, names)),
     '',
     // Said every time, because the command it replaces spent real money and somebody who used it
     // before has every reason to assume this one does too.

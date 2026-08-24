@@ -178,6 +178,26 @@ async function waitUntilAsync(predicate: () => Promise<boolean>, what: string): 
   throw new Error(`timed out waiting for ${what}`);
 }
 
+/**
+ * The instant the persisted health document records for its first account, or `undefined`.
+ *
+ * Reads the FILE rather than the route, because the route is the thing under suspicion: a test that
+ * asked `GET /v1/fleet/health` to learn when the last check happened would be using the read to
+ * observe the read. Every failure — absent, mid-rename, unparseable, empty — answers `undefined` so a
+ * poll loop keeps waiting instead of throwing on a torn read of an atomically replaced file.
+ */
+async function recordedCheckedAt(document: string): Promise<number | undefined> {
+  try {
+    const parsed = JSON.parse(await Bun.file(document).text()) as {
+      accounts?: readonly { lastCheckedAt?: unknown }[];
+    };
+    const at = parsed.accounts?.[0]?.lastCheckedAt;
+    return typeof at === 'number' ? at : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     if (predicate()) return;
@@ -5441,13 +5461,24 @@ describe('daemon boot lifecycle', () => {
         if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
         await Bun.sleep(25);
       }
-      // The health document only exists once an unattended pass has written one. Waiting on the FILE
-      // rather than on a clock is what makes this a claim about the tick.
+      // THE BOOT PASS FIRST. `fyd` runs `fleetRefresh.run()` immediately at boot, BEFORE arming the
+      // interval, so the FIRST health document is the boot collection's and waiting for the file to
+      // merely EXIST proves nothing about the timer. Read what the boot pass wrote and keep it.
       const document = join(home, 'fleet', 'account-health.json');
+      await waitUntilAsync(async () => (await recordedCheckedAt(document)) !== undefined, 'the boot pass to record');
+      const bootCheckedAt = await recordedCheckedAt(document);
+      should(bootCheckedAt).be.a.Number();
+      const afterBootAt = Date.now();
+
+      // THEN A REGISTERED TICK, and this is the assertion that makes the test about the timer at all.
+      // `lastCheckedAt` ADVANCING can only be another `observe()`, and with nothing in this test
+      // calling any route the only remaining trigger is the interval.
       await waitUntilAsync(
-        async () => await Bun.file(document).exists(),
-        'the unattended pass to record account health',
+        async () => ((await recordedCheckedAt(document)) ?? 0) > (bootCheckedAt as number),
+        'a SCHEDULED tick to record account health after the boot pass',
       );
+      const tickCheckedAt = await recordedCheckedAt(document);
+      const tickElapsedMs = Date.now() - afterBootAt;
       // Captured BEFORE the read, so the assertion below can prove the instant predates it.
       const boundary = Date.now();
       const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5464,15 +5495,27 @@ describe('daemon boot lifecycle', () => {
       should(code).equal(0);
       should(read.status).equal(200);
       should(snapshot.accounts).have.length(1);
-      // A REAL verdict, not `never_checked`: the tick established it.
+      // A REAL verdict, not `never_checked`: an unattended pass established it.
       should(snapshot.accounts[0]?.verdict).equal('needs_relogin');
       should(snapshot.accounts[0]?.reason).equal('oauth_credential_missing');
       const lastCheckedAt = snapshot.accounts[0]?.lastCheckedAt;
       should(lastCheckedAt).be.a.Number();
-      // THE LOAD-BEARING LINE. The check happened before this test asked anything, so it was the
-      // timer's and not the read's. Without it, "automatic" would be unproven.
+
+      // THE THREE LOAD-BEARING LINES, and they are three because any two of them can hold while the
+      // timer never fires.
+      //
+      // 1. The verdict advanced past what the BOOT pass wrote. Only a second `observe()` moves it,
+      //    and nothing here calls a route — so a timer tick happened. Waiting for the document to
+      //    merely EXIST proved only that the boot collection ran, which is a different claim: this
+      //    test passed with `usage.interval: 600` before this assertion existed.
+      should(tickCheckedAt as number).be.above(bootCheckedAt as number);
+      // 2. That second pass was a REGISTERED TICK rather than a shortened wait — the same standard
+      //    the neighbouring #378 journey holds itself to with `unattendedElapsedMs`.
+      should(tickElapsedMs).be.aboveOrEqual(TICK_SECONDS * 1_000);
+      // 3. The check predates this test asking anything, so the verdict is the timer's and not the
+      //    read's. Without this, "automatic" would be indistinguishable from "reading it checked it".
       should(lastCheckedAt as number).be.below(boundary);
-      // And the pass that produced it launched nothing.
+      // And no pass — boot or tick — launched anything.
       should(launched).be.false();
     });
   });

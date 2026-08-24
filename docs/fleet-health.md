@@ -74,20 +74,21 @@ nothing. The distinction is read from the **declaration** by
 
 Order is the design. First match wins.
 
-| #   | Condition                                              | Verdict / reason                                                                                                             | Conclusive |
-| --- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 1   | manifest says unavailable                              | `unknown` / `account_unavailable`                                                                                            | no         |
-| 2   | local credential positively dead                       | `needs_relogin` / `oauth_access_expired` \| `oauth_credential_missing`, or `needs_credentials` / `static_credential_missing` | **yes**    |
-| 3   | remote `200`                                           | `healthy` / `provider_accepted`                                                                                              | **yes**    |
-| 3   | remote `403`                                           | `healthy` / `usage_scope_unavailable`                                                                                        | **yes**    |
-| 3   | remote `401`                                           | `needs_relogin` / `oauth_token_rejected`, or `needs_credentials` / `static_credential_rejected`                              | **yes**    |
-| 4   | credential unreadable, or nothing to ask with          | `unknown` / `credential_unreadable`                                                                                          | no         |
-| 5   | Codex                                                  | `unknown` / `codex_liveness_unproven`                                                                                        | no         |
-| 6   | remote timed out                                       | `unknown` / `check_timeout`                                                                                                  | no         |
-| 7   | remote `429` / `5xx` / other `4xx` / transport failure | `unknown` / `provider_unavailable`                                                                                           | no         |
-| 8   | local expired **with** a refresh token                 | `unknown` / `oauth_refreshable`                                                                                              | no         |
-| 9   | local valid, provider never asked                      | `unknown` / `provider_not_asked`                                                                                             | no         |
-| 10  | nothing at all                                         | `unknown` / `never_checked`                                                                                                  | no         |
+| #   | Condition                                                                                    | Verdict / reason                                                                                                             | Conclusive |
+| --- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| 1   | manifest says unavailable                                                                    | `unknown` / `account_unavailable`                                                                                            | no         |
+| 2   | local credential positively dead                                                             | `needs_relogin` / `oauth_access_expired` \| `oauth_credential_missing`, or `needs_credentials` / `static_credential_missing` | **yes**    |
+| —   | **Codex: the remote signal is BLANKED here**, so no row below can give it a provider verdict | (falls through)                                                                                                              | —          |
+| 3   | remote `200`                                                                                 | `healthy` / `provider_accepted`                                                                                              | **yes**    |
+| 3   | remote `403`                                                                                 | `healthy` / `usage_scope_unavailable`                                                                                        | **yes**    |
+| 3   | remote `401`                                                                                 | `needs_relogin` / `oauth_token_rejected`, or `needs_credentials` / `static_credential_rejected`                              | **yes**    |
+| 4   | credential unreadable, or nothing to ask with                                                | `unknown` / `credential_unreadable`                                                                                          | no         |
+| 5   | Codex                                                                                        | `unknown` / `codex_liveness_unproven`                                                                                        | no         |
+| 6   | remote timed out                                                                             | `unknown` / `check_timeout`                                                                                                  | no         |
+| 7   | remote `429` / `5xx` / other `4xx` / transport failure                                       | `unknown` / `provider_unavailable`                                                                                           | no         |
+| 8   | local expired **with** a refresh token                                                       | `unknown` / `oauth_refreshable`                                                                                              | no         |
+| 9   | local valid, provider never asked                                                            | `unknown` / `provider_not_asked`                                                                                             | no         |
+| 10  | nothing at all                                                                               | `unknown` / `never_checked`                                                                                                  | no         |
 
 Three things that row order encodes:
 
@@ -99,6 +100,11 @@ Three things that row order encodes:
    reading that is a hard negative, which is why it is the only one that wins.
 3. **A locally valid token is not `healthy`.** It may have been revoked a minute ago. Local
    classification is structural evidence; only the provider can accept a credential.
+4. **Codex's signal is blanked between rows 2 and 3, not checked at row 5.** Row 5 is where a Codex
+   account _lands_; the blanking above is what makes it impossible for one to land anywhere else. It
+   is deliberately a suppression rather than an early return, so rows 4 and 8 stay reachable for
+   Codex — `credential_unreadable` is more useful than "Codex cannot be proved", and losing it would
+   be paying for the safety with the diagnosis.
 
 ### `429` is deliberately not "authenticated, just throttled"
 
@@ -122,6 +128,16 @@ There is no proven non-mutating Codex liveness signal:
 
 So `unknown` / `codex_liveness_unproven` is the **correct published verdict**, not a gap in this
 implementation. Inventing one would be worse than saying so.
+
+**And it is enforced structurally, not by the probe's restraint.** `decideAccountHealth` blanks the
+remote signal for Codex before reading it, so no `credentialSignal` — from any future probe — can
+produce a Codex `healthy` or a Codex rejection. It used to depend on `AnthropicUsageProbe` declining
+Codex and therefore supplying nothing; that is a collaborator's manners rather than a rule, and the
+seam is public. The signal is **suppressed rather than short-circuited**, so the more specific rows
+below it stay reachable: a Codex home whose credential could not be _read_ still reports
+`credential_unreadable`, which is actionable, rather than "Codex cannot be proved", which is not. A
+positively dead local credential still condemns itself, because that is a fact about the home rather
+than a claim about the provider.
 
 ## Freshness
 

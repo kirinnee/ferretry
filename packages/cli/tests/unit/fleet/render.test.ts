@@ -739,14 +739,63 @@ describe('relative instant rendering', () => {
   });
 });
 
+/** The manifest join the controller supplies, so a verdict names something a person can act on. */
+const names = new Map([['a', 'claude-default']]);
+
 describe('health rendering', () => {
   it('should name the verdict, when it was checked, and why', () => {
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] });
+    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] }, names);
 
     // Assert — the time is part of the verdict, not decoration: "HEALTHY" with no instant is a claim
     // with no expiry, and the evidence behind it has a fifteen-minute horizon.
-    should(rendered).containEql('a  HEALTHY  checked 4m ago — the provider accepted this credential');
+    should(rendered).containEql('claude-default  HEALTHY  checked 4m ago — the provider accepted this credential');
+  });
+
+  /**
+   * THE ROW NAMES THE ACCOUNT, not its id.
+   *
+   * It used to print the account UUID. That answered "how many accounts need a login" and never
+   * "which" — and "NEEDS LOGIN" beside an id a person cannot resolve, and cannot type into
+   * `fy fleet login`, is an instruction that cannot be followed.
+   */
+  it('should name the account AND give the exact command, because the id is what the command takes', () => {
+    // Act
+    const rendered = renderHealth(
+      { at: NOW, accounts: [healthRow({ verdict: 'needs_relogin', reason: 'oauth_token_rejected' })] },
+      names,
+    );
+
+    // Assert — BOTH halves. The name answers "which account", and `fy fleet login` matches on the
+    // ACCOUNT ID (see `selectIdentities`), so a row carrying only a name would be readable and
+    // unactionable — the opposite of the failure this replaced.
+    should(rendered).containEql('claude-default  NEEDS LOGIN');
+    should(rendered).containEql('fy fleet login a');
+  });
+
+  it('should offer no command for a verdict a command cannot fix', () => {
+    // Arrange — a static credential cannot be repaired by signing in, and Codex cannot be proved at
+    // all. Printing `fy fleet login` beside either would be an instruction that does not help.
+    const cases = [
+      healthRow({ verdict: 'needs_credentials', reason: 'static_credential_rejected' }),
+      healthRow({ verdict: 'unknown', reason: 'codex_liveness_unproven', kind: 'codex' }),
+      healthRow(),
+    ];
+
+    // Act / Assert
+    for (const account of cases) {
+      should(renderHealth({ at: NOW, accounts: [account] }, names)).not.containEql('fy fleet login');
+    }
+  });
+
+  it('should fall back to the id when the manifest cannot name the account', () => {
+    // Arrange — a stored head can outlive the account it is about: the manifest moved, or somebody
+    // removed the account. A verdict about something the manifest cannot name is STILL a true verdict,
+    // so the row is printed with the id rather than hidden or given an invented name.
+    const rendered = renderHealth({ at: NOW, accounts: [healthRow({ accountId: 'departed' })] }, names);
+
+    // Assert
+    should(rendered).containEql('departed  HEALTHY');
   });
 
   it('should count the two verdicts somebody must ACT on, and not count unknown among them', () => {

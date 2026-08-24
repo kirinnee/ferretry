@@ -13,6 +13,7 @@ import {
 import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
+import { FleetAccountHealthService } from '../../../../src/lib/fleet-health/index.ts';
 import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -38,7 +39,9 @@ interface FleetFixture {
 /** Shared counter behind the deterministic identity a fixture mints. */
 let minted = 1;
 
-async function fixture(options: { readonly guard?: CapabilityGuard } = {}): Promise<FleetFixture> {
+async function fixture(
+  options: { readonly guard?: CapabilityGuard; readonly accountHealth?: FleetAccountHealthService } = {},
+): Promise<FleetFixture> {
   const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-route-'));
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
@@ -59,6 +62,7 @@ async function fixture(options: { readonly guard?: CapabilityGuard } = {}): Prom
     rootPinner: new ProcfsSessionRootPinner(),
     clientName: 'fy',
     harnesses: harnessDiscoveryReader(),
+    ...(options.accountHealth === undefined ? {} : { accountHealth: options.accountHealth }),
   });
   const credentials = {
     ...CREDENTIALS,
@@ -475,6 +479,43 @@ agents:
     should(health.accounts[0]?.lastCheckedAt).equal(GENERATED_AT_MS);
     should(wrapper.startsWith(subject.root)).be.true();
     should(subject.paths.fleetManifest.startsWith(subject.root)).be.true();
+  });
+
+  /**
+   * A FAILED HEALTH WRITE MUST NOT FAIL THE QUOTA READ. This is the live counterpart to the service
+   * propagating its failure: the `.catch()` in `usage()` is the thing under test, and without this it
+   * would be a decorative handler that could never fire.
+   *
+   * The feed, the advisor and the warden are all waiting on this snapshot and none of them asked about
+   * health, so `GET /v1/fleet/usage` must still answer 200 with real rows when the health document
+   * cannot be written.
+   */
+  it('should still serve quota when the health store cannot be written', async () => {
+    // Arrange — a health service whose store refuses every write, which is what a full disk or a
+    // permission change looks like from here.
+    const subject = await fixture({
+      accountHealth: new FleetAccountHealthService({
+        store: {
+          read: async () => [],
+          write: async () => {
+            throw new Error('the disk is full');
+          },
+        },
+        credentials: { classify: async () => ({ state: 'missing' }) },
+        clock: { now: () => GENERATED_AT_MS },
+      }),
+    });
+    await writeConfig(subject);
+    await subject.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/apply', headers: human }));
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/usage', headers: human }));
+
+    // Assert — quota answered, with a real row, despite health failing underneath it.
+    should(response.status).equal(200);
+    const usage = FleetUsageSnapshotSchema.parse(JSON.parse(response.body));
+    should(usage.accounts[0]?.accountId).equal(ACCOUNT_ID);
+    should(usage.at).equal(GENERATED_AT_MS);
   });
 
   it('should answer health from the store alone, so a read before any check is never-checked', async () => {
