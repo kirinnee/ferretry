@@ -5686,10 +5686,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           daemonPid: process.pid,
         }),
         foreignHistory,
-        // This owns no cache and no provider policy: the mounted fleet health reader and the daemon
-        // usage feed already own those. One service per opened state home serializes only this
-        // daemon's timer ticks, so a slow probe in another daemon can neither join nor delay it.
-        fleetRefresh: new FleetRefreshService({ usage, fleet }),
+        // This owns no cache and no provider policy: the daemon usage feed already owns those. One
+        // service per opened state home serializes only this daemon's timer ticks, so a slow read in
+        // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
+        // health probe launches a wrapper and spends a real billable turn per account, which a timer
+        // must never do. Health belongs where a person chose it.
+        fleetRefresh: new FleetRefreshService({ usage }),
         notifications,
         attention,
         pins: new PinService(

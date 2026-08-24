@@ -1,19 +1,19 @@
 /**
  * Asking Anthropic how much quota an account has spent.
  *
- * Two endpoints, tried in that order, because they cost different things and not every token can use
- * the cheap one:
+ * ONE endpoint, and it is read-only: **`GET /api/oauth/usage`** consumes no inference quota and
+ * reports both windows as percentages.
  *
- * 1. **`GET /api/oauth/usage`** — read-only, consumes no inference quota, and reports both windows as
- *    percentages. This is the right answer whenever the token can make the call.
- * 2. **`POST /v1/messages` with `max_tokens: 1`** — the fallback, used only when the first returns
- *    `403`. A `403` there means the token lacks the `user:profile` scope, which is permanent for an
- *    inference-scoped token, so retrying the usage endpoint will never help. The smallest possible
- *    inference request is made instead and the quota is read from its response **headers**.
+ * **There used to be a second.** A `403` from the read-only endpoint means the token lacks the
+ * `user:profile` scope — permanent for an inference-scoped token — and this probe answered it by
+ * sending `POST /v1/messages` with `max_tokens: 1` and reading the quota from its response headers.
+ * That is a real billable turn. The daemon's unattended refresh reaches this probe on a fixed timer,
+ * so an account in that permanent-403 state paid for a model call on every tick, forever, without
+ * anybody asking. It is removed, not gated: **nothing on a timer may spend money**, and a usage number
+ * is never worth buying. Such an account now reports that it cannot be measured, which is true and free.
  *
- * Those headers report utilization as a **fraction of one** while the usage JSON reports a
- * **percentage** — the same field name, 100× apart. Neither scale is interpreted here: both are handed
- * to the named readers in `lib/quota.ts`, which is the only place either conversion happens.
+ * The usage JSON reports utilization as a **percentage**. It is not interpreted here — it is handed to
+ * the named readers in `lib/quota.ts`, which is the only place that conversion happens.
  *
  * **The bearer token never leaves this file.** It is read through the credential store, used as an
  * `Authorization` header, and never returned, logged, or put in an error message. This module is an
@@ -27,18 +27,10 @@
 
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
-import {
-  inferenceHttpVerdict,
-  parseQuotaHeaders,
-  parseStoredUsageBody,
-  type QuotaReading,
-  TOO_MANY_REQUESTS,
-  usageEndpointHttpVerdict,
-} from '../lib/quota.ts';
+import { parseStoredUsageBody, type QuotaReading, usageEndpointHttpVerdict } from '../lib/quota.ts';
 import type { FleetUsageProbe, FleetUsageProbeResult } from '../lib/usage.ts';
 
 export const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-export const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_VERSION = '2023-06-01';
 export const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
 
@@ -47,19 +39,6 @@ export const ANTHROPIC_PROVIDER = 'anthropic';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const FORBIDDEN_STATUS = 403;
-
-/**
- * The smallest request that still produces quota headers.
- *
- * A one-token completion is not free, so it is only ever sent when the read-only endpoint has already
- * refused. The model is a deliberately cheap one.
- */
-export const ANTHROPIC_PROBE_MODEL = 'claude-haiku-4-5-20251001';
-const PROBE_BODY = JSON.stringify({
-  model: ANTHROPIC_PROBE_MODEL,
-  max_tokens: 1,
-  messages: [{ role: 'user', content: '.' }],
-});
 
 /** The slice of an HTTP response this probe reads. Narrow so a test never needs a real one. */
 export interface QuotaResponse {
@@ -145,9 +124,18 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
     }
 
     const stored = await this.#stored(token);
-    // A 403 from the read-only endpoint is permanent for an inference-scoped token, so the fallback is
-    // the only way this account will ever report a number.
-    return stored ?? (await this.#viaInference(token));
+    // A 403 from the read-only endpoint is permanent for an inference-scoped token, so this account
+    // will never report a number. IT IS REPORTED AS UNMEASURABLE, NOT PAID FOR. This used to fall back
+    // to `POST /v1/messages` — a real billable turn — and the daemon's unattended refresh reaches this
+    // probe on a fixed timer, so an account in that permanent-403 state billed on every tick forever.
+    // Spending money to read a usage number is never worth it, and an unattended pass may not spend at
+    // all. "Cannot be measured" is the honest answer and it costs nothing.
+    return (
+      stored ??
+      failure('this token cannot read usage; it lacks the user:profile scope', {
+        authOk: true,
+      })
+    );
   }
 
   /** The read-only usage endpoint. Returns nothing when the caller should fall back. */
@@ -181,49 +169,6 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       return failure(`the usage endpoint answered unreadable JSON: ${requestFailure(error)}`, { authOk: true });
     }
     return fromReading(parseStoredUsageBody(body), 'the usage endpoint');
-  }
-
-  /**
-   * The one-token inference request, read for its quota headers.
-   *
-   * A `429` is a **success** here: the response still carries valid headers, and treating a
-   * rate-limited account as a failed probe is how a fleet loses sight of the accounts it most needs to
-   * route around.
-   */
-  async #viaInference(token: string): Promise<FleetUsageProbeResult> {
-    let response: QuotaResponse;
-    try {
-      response = await this.deps.fetch({
-        url: ANTHROPIC_MESSAGES_URL,
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'anthropic-version': ANTHROPIC_VERSION,
-          'anthropic-beta': ANTHROPIC_OAUTH_BETA,
-          'content-type': 'application/json',
-        },
-        body: PROBE_BODY,
-        timeoutMs: this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      });
-    } catch (error) {
-      return failure(requestFailure(error));
-    }
-
-    if (!response.ok && response.status !== TOO_MANY_REQUESTS) {
-      const verdict = inferenceHttpVerdict(response.status);
-      return failure(`the inference probe answered HTTP ${response.status}`, {
-        ...(verdict.authOk === undefined ? {} : { authOk: verdict.authOk }),
-        ...(verdict.unavailable
-          ? { unavailable: true, unavailableReason: `this account cannot serve work (HTTP ${response.status})` }
-          : {}),
-      });
-    }
-
-    const reading = parseQuotaHeaders(name => response.header(name));
-    if (!reading.hasQuotaSignal && !response.ok) {
-      return failure(`the inference probe answered HTTP ${response.status} with no quota headers`, { authOk: true });
-    }
-    return fromReading(reading, 'the inference probe');
   }
 }
 

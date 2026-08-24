@@ -1,18 +1,19 @@
 import type { UsageFeedPort } from '../usage/types.ts';
 
-/** The fleet evidence that an unattended pass can refresh without knowing how either collector works. */
-export interface FleetRefreshTarget {
-  /** Refreshes the daemon-owned health snapshot, retaining its last good result on failure. */
-  health(): Promise<unknown>;
-}
-
 /**
  * The mounted, daemon-scoped pass that keeps fleet evidence warm while the daemon is supervised.
  *
- * This deliberately drives the existing feeds instead of maintaining another cache: `UsageFeedPort`
- * coalesces concurrent reads and preserves its last good snapshot, while the fleet health target owns
- * the equivalent policy for its own evidence. One instance is constructed per daemon state home, so
- * no pending work or failure from one daemon can affect another daemon's refresh cadence.
+ * This deliberately drives the existing feed instead of maintaining another cache: `UsageFeedPort`
+ * coalesces concurrent reads and preserves its last good snapshot. One instance is constructed per
+ * daemon state home, so no pending work or failure from one daemon can affect another daemon's
+ * refresh cadence.
+ *
+ * WHAT THIS PASS MAY NOT DO: spend money. It ran the fleet health probe until it was removed here,
+ * and that probe LAUNCHES an account's wrapper and asks a model to answer a sentinel prompt — a real
+ * billable turn, per account, on the daemon's fixed timer, whether or not anybody was watching. The
+ * `health.enabled` flag was supposed to prevent it and did not, which is why the rule is now
+ * structural rather than conditional: an unattended pass reaches the usage feed, and the usage feed
+ * reads only. A health probe is a deliberate act with a cost, so it belongs where somebody chose it.
  */
 export interface FleetRefreshLoop {
   /** One pass, queued behind any pass already in flight. It never rejects from background work. */
@@ -21,7 +22,6 @@ export interface FleetRefreshLoop {
 
 export interface FleetRefreshParts {
   readonly usage: UsageFeedPort;
-  readonly fleet: FleetRefreshTarget;
 }
 
 export class FleetRefreshService implements FleetRefreshLoop {
@@ -42,7 +42,7 @@ export class FleetRefreshService implements FleetRefreshLoop {
   private async refresh(): Promise<void> {
     // A collector failure is evidence that its existing feed should mark its prior snapshot stale,
     // never a reason to manufacture an empty fleet or to make the timer retry early. The fixed
-    // daemon timer chooses the next attempt; this pass only asks each established feed to refresh.
-    await Promise.allSettled([this.parts.usage.accounts(), this.parts.fleet.health()]);
+    // daemon timer chooses the next attempt; this pass only asks the established feed to refresh.
+    await Promise.allSettled([this.parts.usage.accounts()]);
   }
 }
