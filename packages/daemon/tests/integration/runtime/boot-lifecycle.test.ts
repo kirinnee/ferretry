@@ -5158,32 +5158,23 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
-   * WHAT AN UNATTENDED PASS IS ALLOWED TO SPEND, proved against recorders that a real host would have
-   * had to run.
+   * WHAT AN UNATTENDED PASS IS ALLOWED TO SPEND, proved against a recorder that a real host would
+   * have had to run.
    *
-   * The v3.6 timer reached two things nobody had asked for. Each is a recorder here rather than a
-   * flag, because a flag can read `false` while a process still starts:
+   * A REAL SENTINEL MODEL PROMPT is what the v3.6 timer reached. `FleetRefreshService` took the
+   * mounted fleet and called its `health()`, which runs `ProcessFleetHealthProbe` — the published
+   * account WRAPPER, launched with a prompt asking for an exact sentinel. The fleet's own
+   * `usage.interval` default is 60 seconds and it drives this timer, so four accounts is a raw
+   * ceiling of 5,760 launches a day; `FLEET_HEALTH_SUCCESS_TTL_MS` is 15 minutes, which reduces the
+   * stable path to roughly 384 billable calls a day, and an unexpected reply or a failed cache write
+   * climbs back to the ceiling. `spendWrapper` records every launch and its full argv, because a
+   * flag can read `false` while a process still starts.
    *
-   * 1. A REAL SENTINEL MODEL PROMPT. `FleetRefreshService` took the mounted fleet and called its
-   *    `health()`, which runs `ProcessFleetHealthProbe` — the published account WRAPPER, launched with
-   *    a prompt asking for an exact sentinel. The fleet's own `usage.interval` default is 60 seconds
-   *    and it drives this timer, so four accounts is a raw ceiling of 5,760 launches a day;
-   *    `FLEET_HEALTH_SUCCESS_TTL_MS` is 15 minutes, which reduces the stable path to roughly 384
-   *    billable calls a day, and an unexpected reply or a failed cache write climbs back to the
-   *    ceiling. `spendWrapper` records every launch and its full argv.
-   * 2. AN OPERATOR-CONFIGURED ARBITRARY COMMAND. `usage.fallbackCommand` was a source in the feed the
-   *    same timer drives, so a persisted argv in `config/daemon.json` was executed at boot and on
-   *    every tick, on behalf of no request. `spendFallback` records every run.
+   * ## THE FIXTURE HAS TO ASK FOR THE EXPENSIVE THING, OR IT PROVES NOTHING
    *
-   * ## THE FIXTURE HAS TO MAKE BOTH REACHABLE, OR IT PROVES NOTHING
-   *
-   * `usage.enabled: false` switches off the daemon's own native collector, which is the source that
-   * WINS the chain when it answers. Without that, the fleet source would return this account's row,
-   * `CachedUsageFeed` would stop there, and the fallback command would go unrun for a reason that has
-   * nothing to do with this patch — a green test that would stay green if the patch were reverted.
-   * With it, the chain reaches the collector endpoint (empty, so the walk continues) and then the
-   * command. `health.enabled: true` is declared for the same reason: the fixture must ask for the
-   * expensive thing.
+   * `health.enabled: true` is declared for exactly that reason. `usage.enabled: false` switches off
+   * the daemon's own native collector so the chain walks as far as the external endpoint below,
+   * which is what counts the unattended passes.
    *
    * ## THE TICK IS REAL, NOT A SHORTENED WAIT
    *
@@ -5192,11 +5183,11 @@ describe('daemon boot lifecycle', () => {
    * with nothing calling it, so a second read is a second unattended pass. The elapsed clock is
    * asserted against the interval too, so the evidence cannot be the boot pass counted twice.
    *
-   * ## AND EVERY RECORDER IS PROVED TO WORK
+   * ## AND THE RECORDER IS PROVED TO WORK
    *
    * An absent file is only evidence if the thing that writes it would have. The explicit health
-   * request is the wrapper's positive control, and the fallback script is executed directly at the
-   * end. A test that could not distinguish "never ran" from "recorder broken" would be worthless.
+   * request is the wrapper's positive control. A test that could not distinguish "never ran" from
+   * "recorder broken" would be worthless.
    */
   describe('what an unattended fleet pass may spend', () => {
     const SPEND_ACCOUNT = '00000000-0000-4000-8000-0000000005e4';
@@ -5204,7 +5195,7 @@ describe('daemon boot lifecycle', () => {
     /** The fleet's own declared cadence, in seconds. It is the timer period and the cache window. */
     const TICK_SECONDS = 1;
 
-    it('should complete the boot pass and a real scheduled tick with no wrapper launch and no fallback command, while an explicit health request still starts the wrapper', async () => {
+    it('should complete the boot pass and a real scheduled tick with no wrapper launch, while an explicit health request still starts the wrapper', async () => {
       // Arrange
       const home = await tempDirectory('fyd-unattended-spend');
       const port = await freeLoopbackPort();
@@ -5216,24 +5207,17 @@ describe('daemon boot lifecycle', () => {
         });
       });
 
-      // The two recorders. Both are real executables on a real host: the only way to prove nothing
-      // was launched is to make a launch leave a trace.
+      // The recorder. It is a real executable on a real host: the only way to prove nothing was
+      // launched is to make a launch leave a trace.
       const binary = join(home, 'bin');
       await mkdir(binary, { recursive: true });
       const wrapperLog = join(home, 'wrapper-launches.log');
-      const fallbackLog = join(home, 'fallback-runs.log');
       const spendWrapper = join(binary, SPEND_WRAPPER);
       // It answers with the exact sentinel, so the positive control below is a genuine `healthy`
       // verdict rather than a launch that happened to fail.
       await writeFile(
         spendWrapper,
         `#!/bin/sh\nprintf '%s\\n' "$*" >> ${wrapperLog}\nprintf '%s' '${FLEET_HEALTH_SENTINEL}'\n`,
-        { mode: 0o755 },
-      );
-      const spendFallback = join(binary, 'usage-fallback');
-      await writeFile(
-        spendFallback,
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> ${fallbackLog}\nprintf '%s' '{"accounts":[]}'\n`,
         { mode: 0o755 },
       );
       await publishManifest(home, [
@@ -5251,9 +5235,8 @@ describe('daemon boot lifecycle', () => {
         },
       ]);
 
-      // The external collector, which is what witnesses each unattended pass. It answers with an
-      // EMPTY account list on purpose: an empty answer is not a win, so `CachedUsageFeed` walks on to
-      // the command source behind it — which is the source this patch removes.
+      // The external collector, which is what witnesses each unattended pass. Every request it
+      // counts is one the daemon made with nothing calling it.
       let usageReads = 0;
       const collector = Bun.serve({
         hostname: '127.0.0.1',
@@ -5276,11 +5259,7 @@ describe('daemon boot lifecycle', () => {
       );
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        JSON.stringify({
-          host: '127.0.0.1',
-          port,
-          usage: { url: collectorUrl, fallbackCommand: [spendFallback] },
-        }),
+        JSON.stringify({ host: '127.0.0.1', port, usage: { url: collectorUrl } }),
         { mode: 0o600 },
       );
 
@@ -5298,7 +5277,6 @@ describe('daemon boot lifecycle', () => {
       const unattendedElapsedMs = Date.now() - bootAt;
       const unattendedReads = usageReads;
       const wrapperAfterUnattended = await Bun.file(wrapperLog).exists();
-      const fallbackAfterUnattended = await Bun.file(fallbackLog).exists();
 
       // The positive control: a caller who ASKS for account health still gets a real probe. This is
       // also what proves the wrapper recorder works, so the absence above means something.
@@ -5308,20 +5286,15 @@ describe('daemon boot lifecycle', () => {
       });
       const snapshot = FleetHealthSnapshotSchema.parse(await explicit.json());
       const wrapperAfterExplicit = await readFile(wrapperLog, 'utf8');
-      const fallbackAfterExplicit = await Bun.file(fallbackLog).exists();
       release();
       const code = await exit;
       await runCleanups(cleanups);
       await collector.stop(true);
 
-      // The fallback recorder's own positive control, run directly now that the daemon is down: an
-      // empty log has to mean "nothing ran it", not "it could never have recorded anything".
-      await Bun.spawn({ cmd: [spendFallback, '--json'], stdout: 'ignore', stderr: 'ignore' }).exited;
-      const fallbackWhenActuallyRun = await readFile(fallbackLog, 'utf8');
       // Re-read what the daemon was actually configured with, so this cannot pass because the
-      // fixture forgot to arm the thing it claims is disarmed.
+      // fixture forgot to point it at the collector that witnesses each pass.
       const daemonConfig = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as {
-        usage: { url: string; fallbackCommand: readonly string[] };
+        usage: { url: string };
       };
 
       // Assert
@@ -5330,14 +5303,11 @@ describe('daemon boot lifecycle', () => {
       // boot pass counted twice.
       should(unattendedReads).be.aboveOrEqual(2);
       should(unattendedElapsedMs).be.aboveOrEqual(TICK_SECONDS * 1_000);
-      should(daemonConfig.usage.fallbackCommand).deepEqual([spendFallback]);
       should(daemonConfig.usage.url).equal(collectorUrl);
 
-      // (1) No account wrapper was launched by either unattended pass, so no sentinel model prompt
-      // was sent and no model call was billed.
+      // No account wrapper was launched by either unattended pass, so no sentinel model prompt was
+      // sent and no model call was billed.
       should(wrapperAfterUnattended).be.false();
-      // (2) And the operator-configured argv was executed neither at boot nor on the tick.
-      should(fallbackAfterUnattended).be.false();
 
       // The explicit diagnostic is unchanged: it launched the wrapper, with the real sentinel prompt,
       // and reported the account healthy.
@@ -5348,10 +5318,6 @@ describe('daemon boot lifecycle', () => {
       should(wrapperAfterExplicit).containEql('--print');
       should(wrapperAfterExplicit).containEql(FLEET_HEALTH_SENTINEL);
       should(wrapperAfterExplicit.trim().split('\n')).have.length(1);
-      // Asking for health does not run somebody's usage command either.
-      should(fallbackAfterExplicit).be.false();
-      // Both recorders demonstrably record, so both absences above are evidence.
-      should(fallbackWhenActuallyRun).containEql('--json');
     });
   });
 });

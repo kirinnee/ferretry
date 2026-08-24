@@ -5006,27 +5006,16 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     createResumeLauncher,
     createSessionResume,
     createUsageFeed: async config => {
-      // THIS HOST'S OWN COLLECTOR FIRST. Everything downstream of this feed — the advisor,
-      // quota-failover, every session's quota block, `/metrics` — used to be answered entirely by
-      // whatever external tool the two sources below were pointed at, so the daemon's quota was a
-      // runtime dependency of a tool this migration exists to delete. The native source asks the
-      // provider directly, through the same collector `GET /v1/fleet/usage` answers with.
+      // THIS HOST'S OWN COLLECTOR FIRST. It asks the provider directly, through the same collector
+      // `GET /v1/fleet/usage` answers with. An external collector endpoint is optional and tried
+      // behind it; a daemon configured without one and with no fleet serves an empty feed and says
+      // so rather than pretending every account is at zero.
       //
-      // The external collector endpoint is kept BEHIND it rather than deleted: a host part-way
-      // through the migration may still be running that tool, and this daemon should keep reporting
-      // quota if its own fleet has not been applied yet. It remains optional, and a daemon
-      // configured without it and with no fleet serves an empty feed and says so rather than
-      // pretending every account is at zero.
-      //
-      // `usage.fallbackCommand` IS NOT A SOURCE HERE, AND THAT IS THE POINT OF THIS COMPOSITION.
-      //
-      // This feed is what the unattended refresh drives: `FleetRefreshService` runs it once at boot
-      // and again on every timer tick, with nobody present. A persisted argv in `config/daemon.json`
-      // was therefore an arbitrary command this daemon executed on a schedule, on behalf of no
-      // request. "The operator wrote it themselves" answers WHO chose the argv, not how often it
-      // runs unwatched, and the timer is the invariant. The field is still PARSED, so a legacy
-      // configuration carrying one upgrades and starts rather than being refused; it simply reaches
-      // no scheduled source, and the source that ran it is deleted rather than left unmounted.
+      // EVERY SOURCE HERE IS A READ, and that is the point of this composition. `FleetRefreshService`
+      // drives this feed once at boot and again on every timer tick, with nobody present, so a source
+      // that could run a command would be an arbitrary command run on a schedule on behalf of no
+      // request. There used to be one, configured as argv. It is deleted, along with the field that
+      // named it, rather than left unmounted behind a default.
       return new CachedUsageFeed(
         [
           new FleetUsageSource(fleet, accounts),
