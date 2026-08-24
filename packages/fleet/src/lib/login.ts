@@ -383,7 +383,7 @@ export class FleetLoginService {
         ? await this.#sync(settled)
         : settled.verdict.kind === 'complete'
           ? this.#settled(settled)
-          : this.#uniform(settled, 'failed', STILL_UNRESOLVED);
+          : this.#unwritten(settled, driver);
 
     // `logged-in` is a claim about where the credential CAME FROM, so it is credited only when this
     // home's credential is its own login's work. Two things disqualify it, and both were observed by
@@ -418,6 +418,33 @@ export class FleetLoginService {
 
   #uniform(status: FleetIdentityStatus, result: FleetLoginStatus, message?: string): readonly FleetLoginResult[] {
     return status.members.map(member => row(status.identity, member.member.accountId, result, message));
+  }
+
+  /**
+   * The sign-in said it worked and no home holds a credential.
+   *
+   * The lane that RAN gets its own sentence, because it is the only account this run has anything
+   * specific to say about, and a person reading a table of identical rows cannot tell which account
+   * they asked about from which came along for the ride. Written after reading the real output: the
+   * one message every row used to carry said "this identity", which names nobody and suggests nothing
+   * to do.
+   *
+   * It names the wrapper rather than diagnosing the cause. The commonest cause is real and already
+   * pinned — an account's declared harness flags are composed ahead of the login subcommand and a
+   * parser can refuse them, printing nothing this reads — but "run it yourself and see what it
+   * printed" is true whatever happened, and guessing would send somebody to the wrong place.
+   */
+  #unwritten(status: FleetIdentityStatus, driver: FleetIdentityMember): readonly FleetLoginResult[] {
+    return status.members.map(member =>
+      member.member.accountId === driver.accountId
+        ? row(
+            status.identity,
+            member.member.accountId,
+            'failed',
+            `the sign-in for "${driver.accountId}" reported success and left no credential in its own home, so nothing was copied anywhere. Run \`${driver.wrapper}\` and log in by hand to see what that harness actually printed`,
+          )
+        : row(status.identity, member.member.accountId, 'failed', STILL_UNRESOLVED),
+    );
   }
 
   /** Every member reports its own reading, so one unreadable home does not accuse the others. */

@@ -241,9 +241,31 @@ describe('FleetLoginService', () => {
     // Act
     const actual = await build(store, port).login({ identities: [identity()], mode: 'full' });
 
-    // Assert
+    // Assert — the lane that ran gets its own sentence: it names the account, says the credential is
+    // not in its own home, and names the wrapper to run by hand. A row every member shared said
+    // "this identity", which names nobody and suggests nothing to do.
     should(actual[0]?.status).equal('failed');
-    should(actual[0]?.message).match(/still has no usable credential/u);
+    should(actual[0]?.message).containEql(ID_ONE);
+    should(actual[0]?.message).match(/left no credential in its own home/u);
+    should(actual[0]?.message).containEql('/fleet/bin/claude-kirin');
+  });
+
+  it('should give a sibling the identity-wide sentence rather than the lane that ran', async () => {
+    // Arrange — nothing usable anywhere and the login writes nothing.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } }]);
+
+    // Act
+    const actual = await build(store, new RecordingLoginPort({ status: 'logged-in' })).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — ID_TWO ran, so it owns the specific sentence; ID_ONE was not asked about and is told
+    // the identity-wide fact rather than being handed somebody else's wrapper to go and run.
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'failed', [ID_TWO]: 'failed' });
+    should(actual[0]?.message).equal('the login finished but this identity still has no usable credential');
+    should(actual[1]?.message).containEql(ID_TWO);
   });
 
   it('should report logged-in when the approval left the launched home usable and no sibling needed it', async () => {
