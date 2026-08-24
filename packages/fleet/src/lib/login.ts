@@ -385,12 +385,19 @@ export class FleetLoginService {
           ? this.#settled(settled)
           : this.#uniform(settled, 'failed', STILL_UNRESOLVED);
 
-    // Only a row that already says this home HOLDS a credential becomes `logged-in`. The launched lane
-    // is now the account somebody named, so its home can perfectly well be the unreadable one — and
-    // "the login exited zero" is not evidence against a read that failed. Crediting anything else would
-    // turn `indeterminate` into a success on the strength of an exit code.
+    // `logged-in` is a claim about where the credential CAME FROM, so it is credited only when this
+    // home's credential is its own login's work. Two things disqualify it, and both were observed by
+    // running the command rather than by reading it:
+    //
+    // - the launched lane received a COPY. Its own login exited zero and wrote nothing, so the
+    //   identity's credential had to be cloned in; `synced` says that, and `logged-in` would credit a
+    //   sign-in that produced nothing while hiding a harness that is failing silently.
+    // - the row does not say this home holds a credential at all. The launched lane is now the account
+    //   somebody named, so its home can perfectly well be the unreadable one — and an exit code is not
+    //   evidence against a read that failed.
+    const donated = new Set(settled.targets.map(target => target.accountId));
     return rows.map(result =>
-      result.accountId === driver.accountId && CLAIMED.has(result.status)
+      result.accountId === driver.accountId && CLAIMED.has(result.status) && !donated.has(result.accountId)
         ? { ...result, status: 'logged-in' as const }
         : result,
     );

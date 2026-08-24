@@ -724,6 +724,28 @@ describe('FleetLoginService signing in the account it was asked about', () => {
     should(port.launched[0]?.accountId).equal(ID_TWO);
   });
 
+  it('should report a copy as synced rather than crediting the login that produced nothing', async () => {
+    // Arrange — the named lane's own login exits zero and writes NOTHING, which is what a harness
+    // whose argv it refused looks like from here. The identity's credential is then copied in from the
+    // sibling, so the account does end up holding one.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — `logged-in` here would credit a sign-in that produced nothing AND hide a harness that
+    // is failing silently. Observed by running the command: it read `logged in` while the credential
+    // had in fact arrived by copy.
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'synced' });
+  });
+
   it('should fail the named account by name when the copy into its home did not take', async () => {
     // Arrange — the named lane's own login exits zero and writes nothing, so the identity's credential
     // has to be copied into its home instead. The store reports that write a success and the home never
