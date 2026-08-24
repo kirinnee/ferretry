@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative as relative_, sep } from 'node:path';
 import {
-  buildFleetHealthCollector,
   buildFleetScaffold,
   buildFleetUsageCollector,
   FleetApplyFailureError,
@@ -11,7 +10,6 @@ import {
   type FleetConfig,
   FleetConfigSchema,
   type FleetDocumentWrite,
-  type FleetHealthProbe,
   type FleetHealthSnapshot,
   type FleetLayout,
   type FleetManifest,
@@ -37,10 +35,14 @@ import {
   fetchQuota,
   fleetApplyLockFor,
   PlatformFleetCredentialStore,
-  ProcessFleetHealthProbe,
-  runFleetHealthProcess,
   SpawnCredentialCommand,
+  StoreCredentialClassifier,
 } from '@ferretry/fleet/adapters';
+import {
+  ACCOUNT_HEALTH_FILE,
+  FileSystemAccountHealthStore,
+  FleetAccountHealthService,
+} from '../../fleet-health/index.ts';
 /**
  * Every wire shape this mount answers with is the shared one.
  *
@@ -162,8 +164,27 @@ export interface FleetSubsystem {
   updateEnvironment(request: FleetEnvironmentUpdate): Promise<FleetEnvironmentView>;
   plan(): Promise<FleetApplyPreview>;
   usage(): Promise<FleetUsageSnapshot>;
-  /** Explicit liveness evidence, keyed to this daemon's FY_HOME. */
+  /**
+   * The PERSISTED health verdicts, read and nothing else.
+   *
+   * It checks nothing. This used to launch every account's agent and ask a model to answer a
+   * sentinel — a real billable turn per account, per call — which is why it was a deliberate button
+   * with a warning beside it. It is now a store read: free, instant, safe to hydrate on page load,
+   * and it serves the last known verdicts straight after a restart instead of an empty fleet.
+   *
+   * Where the verdicts come FROM is {@link FleetSubsystem.usage}: the free read-only usage GET that
+   * pass already makes is the evidence, so health refreshes on the cadence quota does and adds no
+   * provider call at all.
+   */
   health(): Promise<FleetHealthSnapshot>;
+  /**
+   * Collect the free evidence now, then answer with the snapshot.
+   *
+   * The explicit "check now" a person presses. It costs one read-only `GET /api/oauth/usage` per
+   * credential — the same request the quota pass makes — and consumes no inference quota. There is
+   * no path from here to a wrapper launch or a completion request.
+   */
+  checkHealth(): Promise<FleetHealthSnapshot>;
   apply(): Promise<FleetApplyResult>;
   /** What this caller may do here, so the surface can say so before a click. */
   permissions(governance: CallerGovernance | undefined): FleetPermissions;
@@ -277,10 +298,18 @@ export interface DaemonFleetOptions {
   readonly paths: FoundationPaths;
   readonly userHome: string;
   readonly clock: FleetRouteClock;
-  /** The state filesystem owns the durable, atomic replacement of config.yaml. */
-  readonly files: Pick<FileSystemPort, 'writeTextAtomic'>;
+  /**
+   * The state filesystem owns the durable, atomic replacement of config.yaml — and of the
+   * account-health document, which is read back on every observation and after every restart.
+   */
+  readonly files: Pick<FileSystemPort, 'writeTextAtomic' | 'readText'>;
   readonly usageProbe?: FleetUsageProbe;
-  readonly healthProbe?: FleetHealthProbe;
+  /**
+   * The persisted health service. Supplied only by a test that wants to drive the store or the clock
+   * directly; production builds it here over the same `files` port and this daemon's own fleet
+   * directory, so one daemon can never read another's verdicts.
+   */
+  readonly accountHealth?: FleetAccountHealthService;
   /**
    * This host's platform, spelled the way the Node runtime spells it, and the keychain `acct` attribute the
    * credential store falls back to on macOS. Both are supplied rather than read: the composition root
@@ -515,6 +544,17 @@ class MountedFleet implements FleetSubsystem {
   private readonly scaffolder: FleetScaffolder;
   private readonly assetStore: FleetAssetStore;
   private readonly proposals: FleetProposalStore<FleetProposalPayload>;
+  /**
+   * Both built on first use rather than in the constructor, and both memoized.
+   *
+   * The health service must be a singleton per mount because it serializes its own writes to one
+   * document: two instances would each hold their own queue over the same file, which is the exact
+   * lost-update the success-only cache it replaces suffered from. The credential store is memoized so
+   * the quota probe and the health classifier read one store rather than two — on macOS each one is a
+   * keychain lookup per account, and asking twice per pass for the same bytes is pure cost.
+   */
+  private health_: FleetAccountHealthService | undefined;
+  private credentials_: PlatformFleetCredentialStore | undefined;
 
   constructor(private readonly options: DaemonFleetOptions) {
     this.layout = fleetLayout(options.paths, options.userHome);
@@ -1303,22 +1343,49 @@ class MountedFleet implements FleetSubsystem {
    * read could only ever use the defaults. Two call sites each assembling their own is how this route
    * and `fy fleet usage` would come to disagree about whether an account has quota left.
    */
+  /**
+   * Quota — and, as a side effect, account health.
+   *
+   * HEALTH RIDES THIS AND ADDS NOTHING TO IT. The collection below makes one read-only
+   * `GET /api/oauth/usage` per credential, and what that answer says about the credential is exactly
+   * the evidence a health verdict is. So the snapshot is handed to the health service instead of a
+   * second pass collecting a second time. Every caller of this method is already a free read — the
+   * daemon's unattended quota pass, `GET /v1/fleet/usage`, and the explicit check — so health has no
+   * timer of its own and no way to acquire one.
+   *
+   * A HEALTH FAILURE MUST NOT FAIL QUOTA. The feed, the advisor and the warden are all waiting on the
+   * snapshot; a health document that could not be written is not their problem, and the next pass a
+   * minute later tries again.
+   */
   async usage(): Promise<FleetUsageSnapshot> {
     const [config, manifest] = [await this.config(), await this.loadManifest()];
-    return await buildFleetUsageCollector(
+    const snapshot = await buildFleetUsageCollector(
       config,
       this.options.usageProbe ?? this.probe(config.usage.timeout),
       this.options.clock,
     ).collect(manifest);
+    // WHY THIS IS SWALLOWED HERE, and why it is swallowed HERE rather than inside the service: this
+    // method must return a snapshot even when the health document could not be written, because the
+    // quota feed, the advisor and the warden are all waiting on it and none of them asked about
+    // health. That is knowledge this call site has and the health service does not — so the service
+    // propagates and the decision to ignore it is made where the reason lives. The next pass, one
+    // usage interval later, tries again.
+    await this.accountHealth()
+      .observe({ manifest, config, usage: snapshot })
+      .catch(() => undefined);
+    return snapshot;
   }
 
   async health(): Promise<FleetHealthSnapshot> {
-    const [config, manifest] = [await this.config(), await this.loadManifest()];
-    return await buildFleetHealthCollector(
-      config,
-      this.options.healthProbe ?? this.healthProbe(),
-      this.options.clock,
-    ).collect(manifest);
+    return await this.accountHealth().snapshot(await this.loadManifest());
+  }
+
+  async checkHealth(): Promise<FleetHealthSnapshot> {
+    // Collect first, THEN read: `usage()` is what records the evidence, so answering from the store
+    // afterwards is what makes the button's answer the one it just produced rather than the previous
+    // one. A collection failure still answers, with whatever the store already holds.
+    await this.usage().catch(() => undefined);
+    return await this.health();
   }
 
   /**
@@ -1334,22 +1401,47 @@ class MountedFleet implements FleetSubsystem {
     return new AnthropicUsageProbe({
       fetch: fetchQuota,
       timeoutMs: timeoutSeconds * 1_000,
-      credentials: new PlatformFleetCredentialStore({
-        platform: this.options.platform,
-        command: new SpawnCredentialCommand(),
-        now: () => this.options.clock.now(),
-        keychainAccount: this.options.keychainAccount ?? '',
-      }),
+      credentials: this.credentialStore(),
     });
   }
 
-  private healthProbe(): FleetHealthProbe {
-    return new ProcessFleetHealthProbe({
-      process: runFleetHealthProcess,
-      // This is under the mounted daemon's state home: one daemon cannot reuse another's success.
-      cachePath: join(this.options.paths.fleet, 'health-successes.json'),
+  /**
+   * The persisted health service, built once per mount.
+   *
+   * Once rather than per call, because the service serializes its own writes and two instances would
+   * each hold their own queue over one file — which is the lost-update the success-only cache it
+   * replaces had. The document sits under THIS daemon's fleet directory, so one daemon can never
+   * publish another's verdicts.
+   *
+   * The classifier reads local credential material through the same platform store the quota probe
+   * uses. It returns a state and an opaque digest; no material reaches the domain.
+   */
+  private accountHealth(): FleetAccountHealthService {
+    this.health_ ??=
+      this.options.accountHealth ??
+      new FleetAccountHealthService({
+        store: new FileSystemAccountHealthStore(
+          this.options.files,
+          join(this.options.paths.fleet, ACCOUNT_HEALTH_FILE),
+        ),
+        credentials: new StoreCredentialClassifier({
+          credentials: this.credentialStore(),
+          now: () => this.options.clock.now(),
+        }),
+        clock: this.options.clock,
+      });
+    return this.health_;
+  }
+
+  /** One credential store for the quota probe and the health classifier, so both read the same bytes. */
+  private credentialStore(): PlatformFleetCredentialStore {
+    this.credentials_ ??= new PlatformFleetCredentialStore({
+      platform: this.options.platform,
+      command: new SpawnCredentialCommand(),
       now: () => this.options.clock.now(),
+      keychainAccount: this.options.keychainAccount ?? '',
     });
+    return this.credentials_;
   }
 
   async apply(): Promise<FleetApplyResult> {
@@ -1508,6 +1600,27 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.health()),
+    },
+    {
+      /**
+       * Check now: collect the free evidence, then answer with the snapshot.
+       *
+       * POST because it records something, and `fleet.use` rather than `fleet.configure` because what
+       * it records is a READING. It changes no account, writes no credential and launches nothing —
+       * its entire cost is one read-only `GET /api/oauth/usage` per credential, which consumes no
+       * inference quota and is the same request this daemon's quota pass already makes every minute.
+       * Requiring `configure` would put a person's own health check behind the operator password that
+       * guards writing executables into their home, which is a different risk entirely.
+       *
+       * NO BODY. There is nothing to parameterise: the check covers the fleet, exactly as the read
+       * does, and a per-account variant would be a second way to spell the same free collection.
+       */
+      method: 'POST',
+      path: '/v1/fleet/health/check',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      noStore: true,
+      handle: async () => await respond(() => subsystem.checkHealth()),
     },
     {
       method: 'POST',

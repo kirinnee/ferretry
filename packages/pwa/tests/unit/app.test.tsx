@@ -1603,14 +1603,36 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
-  it('mounts both daemon pickers for a new session without probing account health', async () => {
+  /**
+   * A NEW-SESSION PAGE LOAD READS THE STORED VERDICTS AND TRIGGERS NO CHECK.
+   *
+   * This block used to assert that `/v1/fleet/health` was never fetched at all, and that was the right
+   * assertion at the time: reading health LAUNCHED every account's agent and asked a model to answer a
+   * sentinel, so a page load reaching it would have spent real money on a host the reader is not
+   * sitting at.
+   *
+   * That probe is deleted. `GET /v1/fleet/health` is now a stored-snapshot read the daemon answers
+   * from its own file, and the page hydrates it deliberately so every account row shows its verdict
+   * without anybody pressing anything. The property worth keeping was never "health is not fetched" —
+   * it was "a page load must not spend". So this now pins the two paths apart: the SNAPSHOT is read,
+   * and `POST /v1/fleet/health/check`, the one call that collects, is not reached on mount.
+   *
+   * WHAT THIS TEST CANNOT PROVE, and must not be mistaken for. It observes HTTP only. It cannot see a
+   * process spawn, a wrapper launch or an inference request, so it is NOT the guard against a spend
+   * regression. That guard is `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`, the
+   * journey named "what an unattended fleet pass may spend", which boots a real `fyd` and watches for
+   * a wrapper launch. If this assertion and that journey ever disagree, the journey is right.
+   */
+  it('mounts both daemon pickers for a new session, reading stored health and checking nothing', async () => {
     const { healthReads, view } = await renderShell('/d/alpha/new', [alpha.daemonId]);
     try {
       await settle();
       expect(view.container.querySelector('#fy-new-session-agent')?.getAttribute('role')).toBe('combobox');
       expect(view.container.querySelector('#fy-new-session-cwd')?.getAttribute('role')).toBe('combobox');
-      expect(healthReads.map(read => read.path)).toContain('/v1/fleet/accounts');
-      expect(healthReads.map(read => read.path)).not.toContain('/v1/fleet/health');
+      const paths = healthReads.map(read => read.path);
+      expect(paths).toContain('/v1/fleet/accounts');
+      expect(paths).toContain('/v1/fleet/health');
+      expect(paths).not.toContain('/v1/fleet/health/check');
     } finally {
       await view.unmount();
     }

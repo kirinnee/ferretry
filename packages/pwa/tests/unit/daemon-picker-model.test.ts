@@ -3,7 +3,6 @@ import type { FleetManifestSummary } from '@ferretry/protocol';
 
 import {
   type AccountUsageRow,
-  accountHealthLabel,
   accountPickerOptions,
   accountQuotaSummary,
   findAccountOption,
@@ -56,23 +55,25 @@ const usageRow = (overrides: Partial<AccountUsageRow> = {}): AccountUsageRow => 
 const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
   accountId: CLAUDE_ID,
   kind: 'claude',
-  state: 'healthy',
-  cached: false,
-  checkedAt: 0,
-  ms: 1,
+  verdict: 'healthy',
+  reason: 'provider_accepted',
+  evidence: 'anthropic_usage',
+  lastCheckedAt: 0,
+  verdictAt: 0,
+  lastCheckInconclusive: false,
   ...overrides,
 });
 
 describe('accountPickerOptions', () => {
   it('joins quota by wrapper and health by account id, and preserves the daemon order', () => {
     const usage = [usageRow({ agent: 'claude-auto-atelier', fiveHourPercent: 21, atLimit: false })];
-    const health = new Map([[CLAUDE_ID, healthRow({ state: 'healthy' })]]);
+    const health = new Map([[CLAUDE_ID, healthRow({ verdict: 'healthy' })]]);
 
     const options = accountPickerOptions([claudeAccount(), codexAccount()], usage, health);
 
     expect(options?.map(option => option.wrapper)).toEqual(['claude-auto-atelier', 'codex-auto-forge']);
     expect(options?.[0]?.quota?.fiveHourPercent).toBe(21);
-    expect(options?.[0]?.health?.state).toBe('healthy');
+    expect(options?.[0]?.health?.verdict).toBe('healthy');
     // No live row was ever reported for the codex account: it stays missing, not zero or healthy.
     expect(options?.[1]?.quota).toBeNull();
     expect(options?.[1]?.health).toBeNull();
@@ -144,14 +145,6 @@ describe('accountPickerOptions', () => {
     expect(findAccountOption(options, 'codex-auto-forge')?.id).toBe(CODEX_ID);
     expect(findAccountOption(options, 'codex-auto-missing')).toBeNull();
     expect(findAccountOption(null, 'codex-auto-forge')).toBeNull();
-  });
-});
-
-describe('accountHealthLabel', () => {
-  it('distinguishes healthy, down, and unknown-or-missing', () => {
-    expect(accountHealthLabel(healthRow({ state: 'healthy' }))).toBe('healthy');
-    expect(accountHealthLabel(healthRow({ state: 'down' }))).toBe('down');
-    expect(accountHealthLabel(null)).toBe('unknown');
   });
 });
 

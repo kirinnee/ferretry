@@ -134,9 +134,9 @@ describe('NewSessionPage', () => {
 // this page passes and none of the behaviour a reader gets.
 //
 // Nothing below fakes a picker. The stores are the real daemon-scoped ones over
-// fake PORTS, so what a test proves about traffic — one manifest read, no health
-// probe, no project registration — is a claim about the wiring rather than about
-// a stub that agreed with it.
+// fake PORTS, so what a test proves about traffic -- one manifest read, one FREE
+// stored-health read, no COLLECTING check and no project registration -- is a claim
+// about the wiring rather than about a stub that agreed with it.
 
 const workstation = daemonConnection({
   daemonId: 'daemon/b',
@@ -249,7 +249,10 @@ interface Recorder {
   readonly requests: Array<{ readonly method: string; readonly path: string }>;
   readonly starts: Array<{ readonly connection: DaemonConnection; readonly request: StartSessionRequest }>;
   readonly navigated: string[];
+  /** Collecting calls -- the button. A page load reaching this is the regression. */
   probes: number;
+  /** Stored-snapshot reads. Free, and the page hydrates one on mount. */
+  snapshots: number;
   manifests: number;
 }
 
@@ -279,7 +282,7 @@ const stubUsage = (slice: DaemonUsageSlice): DaemonUsageStore =>
 
 const wire = (options: WiredOptions = {}) => {
   const target = options.connection ?? connection;
-  const recorder: Recorder = { requests: [], starts: [], navigated: [], probes: 0, manifests: 0 };
+  const recorder: Recorder = { requests: [], starts: [], navigated: [], probes: 0, snapshots: 0, manifests: 0 };
 
   const accountsPort: DaemonAccountPickerPort = {
     catalog: async daemon => {
@@ -288,7 +291,14 @@ const wire = (options: WiredOptions = {}) => {
       if (roster === 'unreadable') throw new Error('this daemon refused its account manifest');
       return { accounts: roster };
     },
+    // The stored snapshot: free, and the page hydrates it. Answering empty keeps every row
+    // never-checked until the control below is pressed, so the two are told apart by what is on screen.
     health: async () => {
+      recorder.snapshots += 1;
+      return { health: new Map(), error: null };
+    },
+    // The collecting call. `recorder.probes` counts THIS, so a page load reaching it fails a test.
+    checkHealth: async () => {
       recorder.probes += 1;
       return {
         health: new Map([
@@ -297,10 +307,12 @@ const wire = (options: WiredOptions = {}) => {
             {
               accountId: studio.id,
               kind: 'claude' as const,
-              state: 'healthy' as const,
-              cached: false,
-              checkedAt: 5,
-              ms: 900,
+              verdict: 'healthy' as const,
+              reason: 'provider_accepted' as const,
+              evidence: 'anthropic_usage' as const,
+              lastCheckedAt: 5,
+              verdictAt: 5,
+              lastCheckInconclusive: false,
             },
           ],
         ]),
@@ -645,19 +657,39 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(recorder.starts).toHaveLength(1);
   });
 
-  it('probes account health only from the control that says what it costs', async () => {
+  /**
+   * COLLECTS ONLY FROM THE CONTROL, and the control's copy no longer names a cost.
+   *
+   * This block used to assert that the page made no health call at all, over copy that said the check
+   * "starts each published account once and waits for a reply" — a real inference call per account,
+   * disclosed rather than removed. The probe is deleted, so the page hydrates the free stored snapshot
+   * on mount and the property is now about the COLLECTING call.
+   *
+   * WHAT THIS CANNOT PROVE: it counts port calls. It cannot see a process spawn, so it is not the
+   * guard against a spend regression — `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`
+   * ("what an unattended fleet pass may spend") is, because it boots a real `fyd`.
+   */
+  it('hydrates the stored snapshot on mount and collects only from the control', async () => {
+    // Arrange / Act
     const { props, recorder } = wire();
     await show(props);
+
+    // Assert — one free snapshot read, no collection.
+    expect(recorder.snapshots).toBe(1);
     expect(recorder.probes).toBe(0);
 
-    const check = namedButton('Check accounts');
-    expect(root().textContent).toContain('starts each published account once');
+    const check = namedButton('Check now');
+    // The copy states what it does NOT do, because somebody who used the old button has every reason
+    // to assume this one still bills them.
+    expect(root().textContent).toContain('uses no inference quota');
+    expect(root().textContent).not.toContain('starts each published account');
     await press(check);
 
     expect(recorder.probes).toBe(1);
     await openList('fy-new-session-agent');
     expect(rowText(0)).toContain('healthy');
-    expect(rowText(1)).toContain('unchecked');
+    // The account the collection did not cover stays uncovered rather than inheriting a verdict.
+    expect(rowText(1)).toContain('never checked');
   });
 
   it('never offers the previous daemon’s accounts or folders after the connection changes', async () => {

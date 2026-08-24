@@ -48,6 +48,7 @@ describe('useAccountPickerSlice', () => {
         return catalog(daemon.daemonId);
       },
       health: async () => noHealth,
+      checkHealth: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('ready:daemon/laptop');
@@ -66,6 +67,7 @@ describe('useAccountPickerSlice', () => {
         throw new Error('fleet unavailable');
       },
       health: async () => noHealth,
+      checkHealth: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('error:fleet unavailable');
@@ -88,6 +90,7 @@ describe('useAccountPickerSlice', () => {
         return reads === 1 ? catalog('first pairing') : await pending;
       },
       health: async () => noHealth,
+      checkHealth: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('ready:first pairing');
@@ -114,6 +117,7 @@ describe('useAccountPickerSlice', () => {
         return catalog('stable pairing');
       },
       health: async () => noHealth,
+      checkHealth: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     await mounted.render(<Status store={store} daemon={{ ...laptop }} />);

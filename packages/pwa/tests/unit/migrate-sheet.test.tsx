@@ -575,33 +575,45 @@ const QUOTA_FEED = {
 
 interface Roster {
   readonly port: DaemonAccountPickerPort;
-  /** How many times the EXPENSIVE live probe has run. */
+  /**
+   * How many times the COLLECTING check has run.
+   *
+   * It used to count the "expensive live probe", because reading health launched every account's agent
+   * and asked a model for a sentinel. That probe is deleted: the read is a free stored snapshot the
+   * sheet hydrates on open, and only the control below reaches the collection. So this counts the
+   * collection, which is where the property lives now.
+   */
   probes(): number;
 }
 
 const roster = (catalog: DaemonAccountPickerPort['catalog'] = async () => ({ accounts: ROSTER })): Roster => {
   let probes = 0;
+  const snapshot = {
+    health: new Map([
+      [
+        atomi.id,
+        {
+          accountId: atomi.id,
+          kind: 'codex' as const,
+          verdict: 'healthy' as const,
+          reason: 'provider_accepted' as const,
+          evidence: 'anthropic_usage' as const,
+          lastCheckedAt: 1,
+          verdictAt: 1,
+          lastCheckInconclusive: false,
+        },
+      ],
+    ]),
+    error: null,
+  };
   return {
     port: {
       catalog,
-      health: async () => {
+      // Free, and answered on open. It records nothing, so it is not counted.
+      health: async () => snapshot,
+      checkHealth: async () => {
         probes += 1;
-        return {
-          health: new Map([
-            [
-              atomi.id,
-              {
-                accountId: atomi.id,
-                kind: 'codex' as const,
-                state: 'healthy' as const,
-                cached: false,
-                checkedAt: 1,
-                ms: 2,
-              },
-            ],
-          ]),
-          error: null,
-        };
+        return snapshot;
       },
     },
     probes: () => probes,
@@ -912,7 +924,18 @@ describe('MigrateSheet account picker', () => {
     expect(datalist()).toEqual([]);
   });
 
-  it('runs the expensive host probe only when the check is pressed, never on open', async () => {
+  /**
+   * OPENING THE SHEET SHOWS THE STORED VERDICTS AND COLLECTS NOTHING.
+   *
+   * It used to assert no health call at all, because a health read on open would have started every
+   * account's agent on a host the reader is not sitting at. The read is now free, so the sheet shows
+   * the verdicts immediately and only the control reaches the collection.
+   *
+   * WHAT THIS CANNOT PROVE: it counts port calls. It cannot see a process spawn, so it is not the
+   * guard against a spend regression — `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`
+   * ("what an unattended fleet pass may spend") is, because it boots a real `fyd`.
+   */
+  it('shows the stored verdicts on open and collects only when the check is pressed', async () => {
     const probe = roster();
     await showSheet(
       <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(probe.port), usage: quotaStore() })} />,
@@ -923,7 +946,7 @@ describe('MigrateSheet account picker', () => {
     expect(rows()).toHaveLength(3);
     expect(probe.probes()).toBe(0);
 
-    await pressControl('Check accounts');
+    await pressControl('Check now');
 
     expect(probe.probes()).toBe(1);
     expect(must(container().querySelector('[data-picker-health]'), 'the health block').textContent).toContain(

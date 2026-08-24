@@ -1,0 +1,170 @@
+/**
+ * ACCOUNT HEALTH, IN WORDS. One projection, so every surface says the same thing.
+ *
+ * The daemon publishes a verdict and a reason CODE. The words are here, once, and
+ * both the picker row and the Fleet surface read them — because the two screens
+ * showing the same account must not describe it differently, and a second copy
+ * table is how that happens.
+ *
+ * ## The three sentences that must never merge
+ *
+ *   - `Unknown · Never checked`  — nobody has looked. `lastCheckedAt` is `null`.
+ *   - `Unknown · Checked 1m ago` — somebody looked and could not tell.
+ *   - `Needs re-login`          — somebody looked and the credential is dead.
+ *
+ * Each is one collapsed branch away from telling a person their working fleet is
+ * broken, or their broken fleet is fine.
+ *
+ * ## Why `Needs credential` exists beside `Needs re-login`
+ *
+ * An account authenticated by an environment variable or a token file CANNOT be
+ * fixed by signing in: the harness reads that value and never consults its own
+ * credential store, so a sign-in button would open a browser, write a store
+ * nobody reads, and change nothing. Offering it is worse than offering nothing.
+ * {@link accountHealthOffersSignIn} is what a surface asks before drawing one.
+ *
+ * ## The 403 row
+ *
+ * `usage_scope_unavailable` is HEALTHY. The token lacks `user:profile`, which is
+ * permanent and expected for an inference-scoped token, and it says nothing about
+ * whether the account works — only that its quota cannot be read. So the verdict
+ * is healthy and the QUOTA is what goes unknown. A quota bar must not be drawn at
+ * 0 % for it; `QuotaReadout`'s `showUnknown` is how the rows already avoid that.
+ *
+ * Pure. No clock of its own: `now` is passed in, so a relative label is
+ * deterministic in a test and can tick in the client without anything claiming a
+ * fresh check happened.
+ */
+
+import type { PickerAccountHealth, PickerHealthReason, PickerHealthVerdict } from './account-picker-catalog.ts';
+
+/** The tone a row paints itself with. Deliberately four, matching the four verdicts. */
+export type AccountHealthTone = 'ok' | 'bad' | 'warn' | 'muted';
+
+export interface AccountHealthView {
+  /** The headline: `Healthy`, `Needs re-login`, `Needs credential`, `Unknown`. */
+  readonly label: string;
+  /** The instant clause beside it: `Checked 4m ago`, `Never checked`, `Confirmed 8m ago`. */
+  readonly checked: string;
+  /** The reason, in words. Always present: a bare verdict is not actionable. */
+  readonly detail: string;
+  /** A second clause when the newest attempt failed but the conclusion still stands. */
+  readonly secondary?: string;
+  readonly tone: AccountHealthTone;
+  /** Whether a sign-in control can possibly help. See the module note. */
+  readonly offersSignIn: boolean;
+}
+
+const VERDICT_LABEL: Readonly<Record<PickerHealthVerdict, string>> = {
+  healthy: 'Healthy',
+  needs_relogin: 'Needs re-login',
+  needs_credentials: 'Needs credential',
+  unknown: 'Unknown',
+};
+
+const VERDICT_TONE: Readonly<Record<PickerHealthVerdict, AccountHealthTone>> = {
+  healthy: 'ok',
+  needs_relogin: 'bad',
+  needs_credentials: 'bad',
+  unknown: 'warn',
+};
+
+/**
+ * Why, in one clause each.
+ *
+ * Every reason has words. A reason with no sentence would render as a bare
+ * verdict, and "Unknown" with nothing after it is the state this whole feature
+ * exists to stop showing people.
+ */
+const REASON_DETAIL: Readonly<Record<PickerHealthReason, string>> = {
+  provider_accepted: 'The provider accepted this account’s credential.',
+  usage_scope_unavailable: 'Accepted, but this token cannot read usage, so quota is not measurable.',
+  oauth_credential_missing: 'There is no credential in this account’s home.',
+  oauth_access_expired: 'The access token expired and there is nothing to renew it with.',
+  oauth_token_rejected: 'The provider rejected this token.',
+  static_credential_missing: 'The credential this account is configured to use is not there.',
+  static_credential_rejected: 'The provider rejected the credential this account is configured to use.',
+  never_checked: 'Nothing has checked this account yet.',
+  credential_unreadable: 'The credential could not be read, so nothing is known either way.',
+  oauth_refreshable: 'Expired but renewable. This is not signed out.',
+  codex_liveness_unproven: 'Codex has no free way to prove a sign-in, so this is not a verdict about it.',
+  check_timeout: 'The last check timed out.',
+  provider_unavailable: 'The provider could not be reached.',
+  provider_not_asked: 'Signed in on this host. The provider has not confirmed it.',
+  credential_changed_during_check: 'The credential changed while the check was running, so its result was discarded.',
+  account_unavailable: 'This account is published as unavailable, so nothing was checked.',
+  stale: 'The last result is too old to trust.',
+};
+
+/** Whole units, coarsest that fits. A reader wants "4m ago", never a millisecond count. */
+export function relativeInstantLabel(instant: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - instant) / 1_000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+
+/** The exact instant, for the accessible name and the title. A relative label alone is not a time. */
+export function absoluteInstantLabel(instant: number): string {
+  return new Date(instant).toISOString();
+}
+
+/** Whether a sign-in control could possibly fix this. See the module note on `Needs credential`. */
+export function accountHealthOffersSignIn(health: PickerAccountHealth): boolean {
+  return health.verdict === 'needs_relogin';
+}
+
+/**
+ * One account's health as the words a row prints.
+ *
+ * The `checked` clause is chosen from what is actually known rather than from the
+ * verdict, and the three cases are the three sentences in the module note:
+ *
+ *   - never checked      -> `Never checked`, and no time is invented
+ *   - conclusion is live -> `Confirmed 8m ago`, dated from the EVIDENCE, because
+ *     that is when the claim was last true rather than when a request last ran
+ *   - no conclusion      -> `Checked 1m ago`, dated from the check
+ *
+ * `secondary` appears only when both are true at once: there is a conclusion, and
+ * the newest attempt to re-prove it failed. Hiding that is how a fleet reads
+ * healthy while every provider call is failing.
+ */
+export function accountHealthView(health: PickerAccountHealth, now: number): AccountHealthView {
+  const detail =
+    // A stale row's own reason says only "too old"; the reader also wants to know WHAT went stale,
+    // because a bare Unknown there looks exactly like an account nobody ever checked.
+    health.staleVerdict === undefined
+      ? REASON_DETAIL[health.reason]
+      : `${REASON_DETAIL.stale} It last read ${VERDICT_LABEL[health.staleVerdict].toLowerCase()}.`;
+  const secondary =
+    health.lastCheckInconclusive && health.verdictAt !== null && health.lastCheckedAt !== null
+      ? `The check ${relativeInstantLabel(health.lastCheckedAt, now)} was inconclusive.`
+      : undefined;
+  return {
+    label: VERDICT_LABEL[health.verdict],
+    checked: checkedClause(health, now),
+    detail,
+    ...(secondary === undefined ? {} : { secondary }),
+    tone: VERDICT_TONE[health.verdict],
+    offersSignIn: accountHealthOffersSignIn(health),
+  };
+}
+
+function checkedClause(health: PickerAccountHealth, now: number): string {
+  if (health.lastCheckedAt === null) return 'Never checked';
+  if (health.verdictAt !== null && health.lastCheckInconclusive) {
+    return `Confirmed ${relativeInstantLabel(health.verdictAt, now)}`;
+  }
+  return `Checked ${relativeInstantLabel(health.lastCheckedAt, now)}`;
+}
+
+/** The row for an account the daemon published no health for at all: unread, not unhealthy. */
+export const UNREAD_ACCOUNT_HEALTH: AccountHealthView = Object.freeze({
+  label: 'Unknown',
+  checked: 'Never checked',
+  detail: REASON_DETAIL.never_checked,
+  tone: 'muted' as const,
+  offersSignIn: false,
+});

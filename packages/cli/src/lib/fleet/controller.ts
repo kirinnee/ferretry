@@ -197,12 +197,26 @@ export class FleetController {
     this.#report(snapshot, options, () => renderUsage(snapshot));
   }
 
-  /** Explicit only: this spends a tiny provider turn, so it is never an incidental list refresh. */
+  /**
+   * Whether each account is signed in, and when that was last established.
+   *
+   * IT SPENDS NOTHING. This used to launch every account's wrapper and ask a model to answer a
+   * sentinel — a billable turn per account, which is why it was described as an explicit, costly act.
+   * It is now one read-only `GET /api/oauth/usage` per credential plus a local credential read, and
+   * the rendered output says so every time.
+   *
+   * The manifest is loaded for TWO reasons now: the collector needs the accounts, and the renderer
+   * needs their names. A verdict addressed to an opaque account id answers "how many need a login"
+   * and never "which". The id still travels, on the remedy line, because `fy fleet login` matches on
+   * exactly it -- a name alone would be readable and unactionable.
+   */
   async health(options: FleetCommandOptions): Promise<void> {
     if (this.deps.health === undefined) throw new Error('fleet health probing is not configured for this CLI');
     const collector = this.deps.health.forConfig(await this.deps.config.load());
-    const snapshot = await collector.collect(await this.#manifest());
-    this.#report(snapshot, options, () => renderHealth(snapshot));
+    const manifest = await this.#manifest();
+    const snapshot = await collector.collect(manifest);
+    const names = new Map(manifest.accounts.map(account => [account.id, account.displayName]));
+    this.#report(snapshot, options, () => renderHealth(snapshot, names));
   }
 
   /**

@@ -29,7 +29,7 @@
  *
  * Pure throughout: no network, no clock, no credentials. Values in, verdict out.
  */
-import type { FleetUsageWindow } from './usage.ts';
+import type { FleetCredentialSignal, FleetUsageWindow } from './usage.ts';
 import { clampUsagePercent, normalizeResetAt } from './usage.ts';
 
 /** A pair of quota windows, shortest reset horizon first. */
@@ -216,4 +216,31 @@ export function usageEndpointHttpVerdict(status: number): QuotaHttpVerdict {
   if (status === UNAUTHORIZED) return { authOk: false, unavailable: true };
   if (status === FORBIDDEN) return { unavailable: false };
   return { authOk: true, unavailable: false };
+}
+
+/**
+ * The same read-only usage status, as the credential classification a HEALTH verdict is built from.
+ *
+ * WHY THIS IS NOT `usageEndpointHttpVerdict`. That function answers "is the credential repudiated",
+ * and for quota purposes anything that is not a `401` may safely be treated as "not repudiated" —
+ * so it returns `authOk: true` for a `503`, and it is right to. Health asks a different question:
+ * was this credential ACCEPTED. A provider that never answered accepted nothing, and reusing the
+ * quota reading here would publish a healthy verdict for every outage, timeout and rate limit.
+ *
+ * The three interesting rows:
+ *
+ * - `401` -> `rejected`. The one status that condemns a token.
+ * - `403` -> `scope_unavailable`, which is a HEALTHY reading. The token lacks `user:profile`, which
+ *   is permanent for an inference-scoped token and says nothing about whether the account works.
+ *   `usage_scope_unavailable` is the reason a reader sees; "re-login" is never offered for it.
+ * - everything else non-2xx -> `inconclusive`, including `429`. A rate-limited account is an
+ *   authenticated account, and it is certainly not one whose login needs replacing.
+ *
+ * `timeout` and `absent` have no status to map from: they are decided by the caller, which is the
+ * only place that knows a request was abandoned or never made.
+ */
+export function usageEndpointCredentialSignal(status: number): FleetCredentialSignal {
+  if (status === UNAUTHORIZED) return 'rejected';
+  if (status === FORBIDDEN) return 'scope_unavailable';
+  return status >= 200 && status < 300 ? 'accepted' : 'inconclusive';
 }

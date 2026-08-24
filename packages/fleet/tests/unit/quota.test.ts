@@ -11,6 +11,7 @@ import {
   percentFromUtilizationFraction,
   TOO_MANY_REQUESTS,
   UNAUTHORIZED,
+  usageEndpointCredentialSignal,
   usageEndpointHttpVerdict,
 } from '../../src/lib/quota.ts';
 
@@ -253,5 +254,40 @@ describe('usageEndpointHttpVerdict', () => {
 
   it('should treat a success as conclusive', () => {
     should(usageEndpointHttpVerdict(200)).deepEqual({ authOk: true, unavailable: false });
+  });
+});
+
+/**
+ * The same statuses, as the classification a HEALTH verdict is built from.
+ *
+ * These deliberately diverge from `usageEndpointHttpVerdict` above, and the divergence is the point:
+ * for quota, anything that is not a `401` may safely be read as "not repudiated", so a `503` returns
+ * `authOk: true`. Health asks whether the credential was ACCEPTED, and a provider that never answered
+ * accepted nothing. Reusing the quota reading would publish a healthy verdict for every outage.
+ */
+describe('usageEndpointCredentialSignal', () => {
+  it('should classify a 403 as accepted-but-unmeasurable, never as a rejection', () => {
+    // The single most consequential row: this becomes `healthy/usage_scope_unavailable`, and reading
+    // it as a rejection sends somebody to re-login forever on an account that works.
+    should(usageEndpointCredentialSignal(FORBIDDEN)).equal('scope_unavailable');
+  });
+
+  it('should let only 401 reject the credential', () => {
+    should(usageEndpointCredentialSignal(UNAUTHORIZED)).equal('rejected');
+  });
+
+  it('should classify every 2xx as accepted', () => {
+    should([200, 204, 299].map(usageEndpointCredentialSignal)).deepEqual(['accepted', 'accepted', 'accepted']);
+  });
+
+  it('should refuse to conclude anything from a rate limit, a server error or another 4xx', () => {
+    // Arrange / Act
+    const actual = [TOO_MANY_REQUESTS, 500, 503, 418, 302].map(usageEndpointCredentialSignal);
+
+    // Assert — a rate-limited account is an AUTHENTICATED account, and certainly not one whose login
+    // needs replacing. Note `usageEndpointHttpVerdict` reports `authOk: true` for these; health may
+    // not, which is exactly why this is a second function rather than a field on the first.
+    should(actual).deepEqual(['inconclusive', 'inconclusive', 'inconclusive', 'inconclusive', 'inconclusive']);
+    should(usageEndpointHttpVerdict(503).authOk).be.true();
   });
 });

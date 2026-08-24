@@ -10,10 +10,19 @@
  * not part of it, so republishing the carrier set — a relay added, reordered or
  * withdrawn — keeps the slice whole.
  *
- * Automatic hydration reads only the manifest. Quota comes from the existing
- * cached usage store, and health is checked only after a deliberate action.
- * A failed read never replaces a previously proved catalog with a fabricated
- * empty one; the slice keeps its last answer and reports the failure.
+ * AUTOMATIC HYDRATION NOW READS HEALTH BESIDE THE MANIFEST. It did not, and could
+ * not: health used to mean starting every account's agent and asking a model to
+ * answer a sentinel, so reading it on mount would have spent real money on a host
+ * nobody was sitting at. It is now a stored verdict the daemon derived from the
+ * free read-only usage GET it already makes, so `GET /v1/fleet/health` is a
+ * snapshot read and hydrating it is one local HTTP call.
+ *
+ * The deliberate action survives as {@link DaemonAccountPickerStore.checkHealth},
+ * which asks the host to collect that free evidence NOW. It still spends nothing.
+ *
+ * Quota comes from the existing cached usage store. A failed read never replaces
+ * a previously proved catalog with a fabricated empty one; the slice keeps its
+ * last answer and reports the failure.
  */
 
 import type {
@@ -42,7 +51,17 @@ export interface AccountPickerSnapshot {
 
 export interface DaemonAccountPickerPort {
   catalog(daemon: DaemonConnection): Promise<AccountPickerCatalog>;
+  /** The stored verdicts. A snapshot read; the daemon checks nothing to answer it. */
   health(daemon: DaemonConnection): Promise<AccountPickerHealthCatalog>;
+  /**
+   * Collect the free evidence now, then answer with the snapshot.
+   *
+   * A SECOND METHOD RATHER THAN A FLAG, because the two are different HTTP verbs on
+   * different paths and only one of them records anything. A boolean parameter
+   * would put "does this write" behind a call-site argument, which is exactly the
+   * shape that let a read reach a spending probe before.
+   */
+  checkHealth(daemon: DaemonConnection): Promise<AccountPickerHealthCatalog>;
 }
 
 const IDLE_SLICE: DaemonAccountPickerSlice = Object.freeze({
@@ -84,6 +103,12 @@ interface AccountPickerEntry {
   readonly generation: number;
   catalogAttempted: boolean;
   catalogRequest: Promise<AccountPickerCatalog> | null;
+  /**
+   * Whether health has been read once for this authority, so a re-render cannot
+   * re-fetch it. The same latch `catalogAttempted` is, for the same reason: an
+   * automatic read must happen once per pairing generation, not once per mount.
+   */
+  healthAttempted: boolean;
   healthRequest: Promise<AccountPickerHealthCatalog> | null;
 }
 
@@ -119,11 +144,25 @@ export class DaemonAccountPickerStore {
   }
 
   /**
-   * Refresh one daemon's roster. A burst for the same authority shares one
-   * request; another daemon or a re-paired connection never does.
+   * Refresh one daemon's roster, and the stored health beside it.
+   *
+   * A burst for the same authority shares one request; another daemon or a
+   * re-paired connection never does.
+   *
+   * HEALTH IS FETCHED HERE AND ITS FAILURE IS NEVER THE ROSTER'S. The roster is
+   * what a picker cannot function without; health is evidence about the rows. A
+   * daemon that serves accounts and cannot serve verdicts must still fill the
+   * text box, so the health read is fired alongside and its rejection is
+   * swallowed into the slice's own `healthError`. Awaiting it would make an
+   * unrelated failure look like an empty fleet.
    */
   hydrate(daemon: DaemonConnection): Promise<AccountPickerCatalog> {
     const entry = this.#entryFor(daemon);
+    // Before the roster's early returns, and deliberately: this has its own latch, so it fires once
+    // per pairing generation however many times a re-render calls `hydrate`. Putting it after them
+    // would mean a daemon whose FIRST roster read failed never hydrated health at all, even though
+    // the two reads are independent and the verdicts may be perfectly readable.
+    this.#hydrateHealth(entry);
     if (entry.catalogRequest !== null) return entry.catalogRequest;
     const slice = this.sliceFor(daemon);
     if (slice.catalog !== null) return Promise.resolve(slice.catalog);
@@ -132,6 +171,19 @@ export class DaemonAccountPickerStore {
     }
 
     return this.#readCatalog(entry);
+  }
+
+  /**
+   * Read the stored verdicts once per authority, on the same trigger as the roster.
+   *
+   * Once: a re-render must not re-fetch, and `healthAttempted` is what stops it —
+   * the same latch the roster uses, for the same reason. A reader who wants a
+   * fresher answer presses "Check now", which is a different call.
+   */
+  #hydrateHealth(entry: AccountPickerEntry): void {
+    if (entry.healthAttempted || entry.healthRequest !== null) return;
+    entry.healthAttempted = true;
+    void this.#readHealth(entry, connection => this.#port.health(connection)).catch(() => undefined);
   }
 
   /** Deliberately retry the cheap manifest read while retaining last-good rows. */
@@ -164,14 +216,26 @@ export class DaemonAccountPickerStore {
     return request;
   }
 
-  /** Run the live wrapper check only after an explicit reader action. */
+  /**
+   * Collect the free evidence now, on an explicit reader action.
+   *
+   * Shares the in-flight slot with the automatic read, so pressing the button
+   * while the mount's hydration is still running joins that request instead of
+   * starting a second one — and a burst of presses is one collection.
+   */
   checkHealth(daemon: DaemonConnection): Promise<AccountPickerHealthCatalog> {
     const entry = this.#entryFor(daemon);
     if (entry.healthRequest !== null) return entry.healthRequest;
+    entry.healthAttempted = true;
+    return this.#readHealth(entry, connection => this.#port.checkHealth(connection));
+  }
 
+  #readHealth(
+    entry: AccountPickerEntry,
+    read: (connection: DaemonConnection) => Promise<AccountPickerHealthCatalog>,
+  ): Promise<AccountPickerHealthCatalog> {
     this.#patch(entry, { healthStatus: 'loading', healthError: null });
-    const request = this.#port
-      .health(entry.connection)
+    const request = read(entry.connection)
       .then(
         result => {
           if (this.#isCurrent(entry)) {
@@ -224,6 +288,7 @@ export class DaemonAccountPickerStore {
       generation: this.#mintGeneration(),
       catalogAttempted: false,
       catalogRequest: null,
+      healthAttempted: false,
       healthRequest: null,
     };
     this.#entries.set(daemon.daemonId, entry);

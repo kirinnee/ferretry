@@ -5,7 +5,7 @@ import type {
   FleetApplyPreview,
   FleetApplyResult,
   FleetConfig,
-  FleetHealth,
+  FleetAccountHealth,
   FleetHealthSnapshot,
   FleetIdentity,
   FleetIdentityStatus,
@@ -123,19 +123,21 @@ export function usageSnapshot(accounts: readonly FleetUsage[] = [usageRow()]): F
   return { at: 1_785_000_000_000, accounts } as FleetUsageSnapshot;
 }
 
-function healthRow(overrides: Partial<FleetHealth> = {}): FleetHealth {
+function healthRow(overrides: Partial<FleetAccountHealth> = {}): FleetAccountHealth {
   return {
     accountId: ACCOUNT_ID,
     kind: 'claude',
-    state: 'healthy',
-    cached: false,
-    checkedAt: 1_785_000_000_000,
-    ms: 4,
+    verdict: 'healthy',
+    reason: 'provider_accepted',
+    evidence: 'anthropic_usage',
+    lastCheckedAt: 1_785_000_000_000,
+    verdictAt: 1_785_000_000_000,
+    lastCheckInconclusive: false,
     ...overrides,
-  } as FleetHealth;
+  } as FleetAccountHealth;
 }
 
-function healthSnapshot(accounts: readonly FleetHealth[] = [healthRow()]): FleetHealthSnapshot {
+function healthSnapshot(accounts: readonly FleetAccountHealth[] = [healthRow()]): FleetHealthSnapshot {
   return { at: 1_785_000_000_000, accounts } as FleetHealthSnapshot;
 }
 

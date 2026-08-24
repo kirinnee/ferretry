@@ -146,17 +146,6 @@ export const findAccountOption = (
   wrapper: string,
 ): AccountPickerOption | null => options?.find(option => option.wrapper === wrapper) ?? null;
 
-export type AccountHealthLabel = 'healthy' | 'down' | 'unknown';
-
-/**
- * `unknown` covers both an account never checked and one that was checked
- * and could not be told — the option's own `health.state` already carries
- * that second case verbatim, this only adds the "never checked" case without
- * inventing a verdict for it.
- */
-export const accountHealthLabel = (health: PickerAccountHealth | null): AccountHealthLabel =>
-  health?.state ?? 'unknown';
-
 export interface AccountQuotaSummary {
   /** `null` = no evidence; a real reading of 0% used is returned as `0`, never dropped. */
   readonly fiveHourPercent: number | null;

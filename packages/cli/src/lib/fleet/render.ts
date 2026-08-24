@@ -5,8 +5,10 @@ import type {
   FleetApplyFailure,
   FleetApplyPreview,
   FleetApplyResult,
-  FleetHealth,
+  FleetAccountHealth,
+  FleetHealthReason,
   FleetHealthSnapshot,
+  FleetHealthVerdict,
   FleetIdentityStatus,
   FleetLoginResult,
   FleetManifest,
@@ -412,21 +414,124 @@ export function renderUsage(snapshot: FleetUsageSnapshot): string {
   return [header, ...snapshot.accounts.map(renderUsageRow)].join('\n');
 }
 
-function renderHealthRow(health: FleetHealth): string {
-  const reason = health.error === undefined ? '' : ` — ${health.error}`;
-  return `  ${health.accountId}  ${health.state.toUpperCase()}${health.cached ? ' (cached)' : ''}${reason}`;
+/**
+ * Account health in a terminal.
+ *
+ * The verdict is a code on the wire and words here, because the browser renders the same codes in its
+ * own words: a daemon that shipped the sentence would be writing this file's copy, and two surfaces
+ * would eventually disagree about what a `403` means.
+ *
+ * `NEEDS CREDENTIAL` is not a softer `NEEDS LOGIN`. An account authenticated by an environment
+ * variable or a token file cannot be fixed by signing in — the harness reads that value and never
+ * looks at its own credential store — so telling somebody to log in would send them to do something
+ * that cannot work.
+ */
+const HEALTH_VERDICT_LABEL: Readonly<Record<FleetHealthVerdict, string>> = {
+  healthy: 'HEALTHY',
+  needs_relogin: 'NEEDS LOGIN',
+  needs_credentials: 'NEEDS CREDENTIAL',
+  unknown: 'UNKNOWN',
+};
+
+/** Why, in one clause. Every reason has one: a bare verdict with no reason is not actionable. */
+const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
+  provider_accepted: 'the provider accepted this credential',
+  usage_scope_unavailable: 'accepted; this token cannot read usage, so quota is unknown',
+  oauth_credential_missing: 'no credential in this account home',
+  oauth_access_expired: 'the access token expired and there is nothing to renew it with',
+  oauth_token_rejected: 'the provider rejected this token',
+  static_credential_missing: 'the configured credential is absent',
+  static_credential_rejected: 'the provider rejected the configured credential',
+  never_checked: 'never checked',
+  credential_unreadable: 'the credential could not be read',
+  oauth_refreshable: 'expired, but renewable — not signed out',
+  codex_liveness_unproven: 'Codex has no free way to prove a login; nothing here is a verdict',
+  check_timeout: 'the check timed out',
+  provider_unavailable: 'the provider could not be reached',
+  provider_not_asked: 'signed in locally; the provider has not confirmed it',
+  credential_changed_during_check: 'the credential changed while the check ran',
+  account_unavailable: 'the manifest declares this account unavailable',
+  stale: 'the last result is too old to trust',
+};
+
+/** Whole units, coarsest that fits. A terminal reader wants "4m ago", never a millisecond count. */
+export function renderRelativeInstant(instant: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - instant) / 1_000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
-export function renderHealth(snapshot: FleetHealthSnapshot): string {
-  if (snapshot.accounts.length === 0) return 'No accounts to probe for health.';
-  const down = snapshot.accounts.filter(account => account.state === 'down').length;
-  const unknown = snapshot.accounts.filter(account => account.state === 'unknown').length;
-  const suffix = [down === 0 ? '' : `${down} down`, unknown === 0 ? '' : `${unknown} unknown`]
+/**
+ * Which account a verdict is ABOUT — and BOTH halves are needed, which is the whole point.
+ *
+ * The row used to print `health.accountId` alone: an opaque UUID. That answered "how many accounts
+ * need a login" and never "which", so the verdict was correct and addressed to nobody.
+ *
+ * BUT THE ID IS NOT DECORATION. `fy fleet login <accountId>` matches on exactly that id — see
+ * `selectIdentities` — so replacing it with a name would have made the row readable and
+ * unactionable, which is the opposite failure. A reader needs the name to know WHICH account and the
+ * id to DO something about it, so the row carries the name and the remedy line carries the id.
+ *
+ * Names come from the manifest the controller already loaded, so nothing new is read and no field is
+ * added to the wire: the browser joins by id against the roster it already holds, and only the
+ * terminal needs this. `displayName` rather than `wrapper`, because a manifest wrapper is an ABSOLUTE
+ * PATH — printing it put `/tmp/…/fleet/bin/claude-default` in the row.
+ *
+ * FALLS BACK TO THE ID rather than hiding the row or inventing a name. A stored head can outlive the
+ * account it is about — the manifest moved, the account was removed — and a verdict about something
+ * the manifest cannot name is still a true verdict.
+ */
+export type FleetAccountNames = ReadonlyMap<string, string>;
+
+function healthSubject(health: FleetAccountHealth, names: FleetAccountNames): string {
+  return names.get(health.accountId) ?? health.accountId;
+}
+
+/** The verdicts a person can actually do something about, and the id the remedy needs. */
+const HEALTH_REMEDY: Readonly<Partial<Record<FleetHealthVerdict, (accountId: string) => string>>> = {
+  needs_relogin: accountId => `fy fleet login ${accountId}`,
+};
+
+function renderHealthRow(health: FleetAccountHealth, now: number, names: FleetAccountNames): string {
+  const checked = health.lastCheckedAt === null ? 'never checked' : renderRelativeInstant(health.lastCheckedAt, now);
+  // What it WAS, when staleness is the only reason it is unknown. A bare UNKNOWN there reads exactly
+  // like an account nobody has ever looked at, which is the opposite of what happened.
+  const was = health.staleVerdict === undefined ? '' : ` (was ${HEALTH_VERDICT_LABEL[health.staleVerdict]})`;
+  const inconclusive = health.lastCheckInconclusive ? '; last check was inconclusive' : '';
+  const row = `  ${healthSubject(health, names)}  ${HEALTH_VERDICT_LABEL[health.verdict]}${was}  checked ${checked} — ${HEALTH_REASON_LABEL[health.reason]}${inconclusive}`;
+  // The exact command, on its own line, for the one verdict a person can act on. "NEEDS LOGIN" with
+  // no way to act on it is the state this whole feature exists to stop producing — and the id the
+  // command needs is not something a reader could have derived from the name above it.
+  const remedy = HEALTH_REMEDY[health.verdict]?.(health.accountId);
+  return remedy === undefined ? row : `${row}\n${INDENT}${remedy}`;
+}
+
+/**
+ * The whole fleet's health.
+ *
+ * The counts name the two verdicts somebody must act on and deliberately do not add "unknown" to
+ * them. Unknown is not a fault: on Codex it is the correct published answer, and counting it beside
+ * real rejections would send a person looking for a problem that is not there.
+ */
+export function renderHealth(snapshot: FleetHealthSnapshot, names: FleetAccountNames = new Map()): string {
+  if (snapshot.accounts.length === 0) return 'No accounts to report health for.';
+  const counts = (verdict: FleetHealthVerdict): number =>
+    snapshot.accounts.filter(account => account.verdict === verdict).length;
+  const login = counts('needs_relogin');
+  const credential = counts('needs_credentials');
+  const suffix = [login === 0 ? '' : `${login} need sign-in`, credential === 0 ? '' : `${credential} need a credential`]
     .filter(Boolean)
     .join(', ');
   return [
     `${snapshot.accounts.length} accounts${suffix === '' ? '' : `, ${suffix}`}`,
-    ...snapshot.accounts.map(renderHealthRow),
+    ...snapshot.accounts.map(account => renderHealthRow(account, snapshot.at, names)),
+    '',
+    // Said every time, because the command it replaces spent real money and somebody who used it
+    // before has every reason to assume this one does too.
+    'This reads credentials and one free provider status endpoint. It asks no model and uses no inference quota.',
   ].join('\n');
 }
 

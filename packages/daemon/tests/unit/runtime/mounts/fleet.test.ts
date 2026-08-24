@@ -6,7 +6,6 @@ import {
   type FleetApplyPlan,
   type FleetApplyPreview,
   FleetConfigSchema,
-  type FleetHealthProbe,
   FleetHealthSnapshotSchema,
   FleetManifestSchema,
   FleetUsageSnapshotSchema,
@@ -14,6 +13,7 @@ import {
 import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
+import { FleetAccountHealthService } from '../../../../src/lib/fleet-health/index.ts';
 import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -40,7 +40,7 @@ interface FleetFixture {
 let minted = 1;
 
 async function fixture(
-  options: { readonly healthProbe?: FleetHealthProbe; readonly guard?: CapabilityGuard } = {},
+  options: { readonly guard?: CapabilityGuard; readonly accountHealth?: FleetAccountHealthService } = {},
 ): Promise<FleetFixture> {
   const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-route-'));
   temporaryDirectories.push(root);
@@ -61,8 +61,8 @@ async function fixture(
     confirmChange: async () => ({ kind: 'confirmed' }),
     rootPinner: new ProcfsSessionRootPinner(),
     clientName: 'fy',
-    healthProbe: options.healthProbe,
     harnesses: harnessDiscoveryReader(),
+    ...(options.accountHealth === undefined ? {} : { accountHealth: options.accountHealth }),
   });
   const credentials = {
     ...CREDENTIALS,
@@ -113,8 +113,12 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 describe('the daemon fleet mount', () => {
-  it('should construct its daemon-scoped production health probe without running it', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-health-probe-'));
+  it('should build ONE health service per mount, and share one credential store with the quota probe', async () => {
+    // Arrange — the service serializes its own writes to one document, so two instances would each
+    // hold their own queue over the same file. That is the lost-update the success-only cache it
+    // replaces suffered from. The credential store is shared because on macOS each one is a keychain
+    // lookup per account, and asking twice per pass for the same bytes is pure cost.
+    const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-health-service-'));
     temporaryDirectories.push(root);
     const userHome = join(root, 'user');
     const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
@@ -130,8 +134,14 @@ describe('the daemon fleet mount', () => {
       rootPinner: new ProcfsSessionRootPinner(),
       clientName: 'fy',
       harnesses: harnessDiscoveryReader(),
-    }) as unknown as { healthProbe(): { probe: unknown } };
-    should(subsystem.healthProbe().probe).be.a.Function();
+    }) as unknown as {
+      accountHealth(): unknown;
+      credentialStore(): unknown;
+    };
+
+    // Act / Assert
+    should(subsystem.accountHealth()).equal(subsystem.accountHealth());
+    should(subsystem.credentialStore()).equal(subsystem.credentialStore());
   });
 
   it('should preview and atomically apply only portable profile environment, with explicit merge and replace', async () => {
@@ -426,11 +436,7 @@ agents:
 
   it('should apply only inside disposable roots and then serve manifest and honest usage evidence', async () => {
     // Arrange — both FY_HOME and the supplied user home are children of this disposable root.
-    const subject = await fixture({
-      healthProbe: {
-        probe: async () => ({ state: 'healthy', cached: false, checkedAt: GENERATED_AT_MS, ms: 4 }),
-      },
-    });
+    const subject = await fixture();
     await writeConfig(subject);
 
     // Act
@@ -463,32 +469,141 @@ agents:
       atLimit: false,
     });
     should(usage.accounts[0]?.error).match(/no readable access token/u);
+    // The health read is a STORE read. Reaching `/v1/fleet/usage` above already recorded a verdict —
+    // because health rides that collection and adds no request of its own — so by the time this line
+    // runs the account has been checked, and this home has no credential, which is a re-login.
     const health = FleetHealthSnapshotSchema.parse(JSON.parse(healthResponse.body));
     should(healthResponse.status).equal(200);
     should(health.accounts[0]?.accountId).equal(ACCOUNT_ID);
+    should(health.accounts[0]?.verdict).equal('needs_relogin');
+    should(health.accounts[0]?.lastCheckedAt).equal(GENERATED_AT_MS);
     should(wrapper.startsWith(subject.root)).be.true();
     should(subject.paths.fleetManifest.startsWith(subject.root)).be.true();
   });
 
-  it('should construct its default health probe with cache state scoped to this daemon home', async () => {
+  /**
+   * A FAILED HEALTH WRITE MUST NOT FAIL THE QUOTA READ. This is the live counterpart to the service
+   * propagating its failure: the `.catch()` in `usage()` is the thing under test, and without this it
+   * would be a decorative handler that could never fire.
+   *
+   * The feed, the advisor and the warden are all waiting on this snapshot and none of them asked about
+   * health, so `GET /v1/fleet/usage` must still answer 200 with real rows when the health document
+   * cannot be written.
+   */
+  it('should still serve quota when the health store cannot be written', async () => {
+    // Arrange — a health service whose store refuses every write, which is what a full disk or a
+    // permission change looks like from here.
+    const subject = await fixture({
+      accountHealth: new FleetAccountHealthService({
+        store: {
+          read: async () => [],
+          write: async () => {
+            throw new Error('the disk is full');
+          },
+        },
+        credentials: { classify: async () => ({ state: 'missing' }) },
+        clock: { now: () => GENERATED_AT_MS },
+      }),
+    });
+    await writeConfig(subject);
+    await subject.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/apply', headers: human }));
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/usage', headers: human }));
+
+    // Assert — quota answered, with a real row, despite health failing underneath it.
+    should(response.status).equal(200);
+    const usage = FleetUsageSnapshotSchema.parse(JSON.parse(response.body));
+    should(usage.accounts[0]?.accountId).equal(ACCOUNT_ID);
+    should(usage.at).equal(GENERATED_AT_MS);
+  });
+
+  it('should answer health from the store alone, so a read before any check is never-checked', async () => {
+    // Arrange — nothing has collected yet. The route this replaced LAUNCHED every account's wrapper to
+    // answer, which is why it could not be read on a page load; it is now a store read.
+    const subject = await fixture();
+    await writeConfig(subject);
+    await subject.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/apply', headers: human }));
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/health', headers: human }));
+
+    // Assert — `null` rather than a fabricated instant. The contract this replaced required a number,
+    // so a never-checked account was indistinguishable on the wire from one just checked.
+    const health = FleetHealthSnapshotSchema.parse(JSON.parse(response.body));
+    should(response.status).equal(200);
+    should(health.accounts[0]).containEql({
+      accountId: ACCOUNT_ID,
+      verdict: 'unknown',
+      reason: 'never_checked',
+      lastCheckedAt: null,
+      verdictAt: null,
+    });
+    // Nothing was written, because reading is not checking.
+    should(await fileExists(join(subject.paths.fleet, 'account-health.json'))).be.false();
+  });
+
+  it('should persist a verdict under this daemon home when the check is asked for', async () => {
     // Arrange
     const subject = await fixture();
     await writeConfig(subject);
     await subject.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/apply', headers: human }));
-    const previousDirectory = process.cwd();
 
-    // Act — the generated wrapper creates harness state relative to its current directory, so keep it
-    // under the test root while proving the production (non-injected) process and cache construction.
-    process.chdir(subject.root);
-    try {
-      const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/health', headers: human }));
-      should(response.status).equal(200);
-      should(FleetHealthSnapshotSchema.parse(JSON.parse(response.body)).accounts[0]?.accountId).equal(ACCOUNT_ID);
-    } finally {
-      process.chdir(previousDirectory);
-    }
+    // Act — the explicit "check now". It collects the free usage read and answers from the store.
+    const response = await subject.dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/fleet/health/check', headers: human }),
+    );
 
-    // Assert — the process may fail honestly without a real harness, but its cache is never user-global.
-    should(join(subject.paths.fleet, 'health-successes.json').startsWith(subject.root)).be.true();
+    // Assert — a real verdict, dated, and stored inside this daemon's own home so one daemon can
+    // never publish another's.
+    const health = FleetHealthSnapshotSchema.parse(JSON.parse(response.body));
+    should(response.status).equal(200);
+    should(health.accounts[0]?.verdict).equal('needs_relogin');
+    should(health.accounts[0]?.lastCheckedAt).equal(GENERATED_AT_MS);
+    const document = join(subject.paths.fleet, 'account-health.json');
+    should(document.startsWith(subject.root)).be.true();
+    should(await fileExists(document)).be.true();
+    // No credential material, no header, no provider body: codes and instants only.
+    should(await readFile(document, 'utf8')).not.match(/token|Authorization|Bearer/iu);
+  });
+
+  it('should keep serving a stored verdict after the process that recorded it is gone', async () => {
+    // Arrange — record a verdict, then build a WHOLLY NEW subsystem over the same state home, which
+    // is exactly what a daemon restart is.
+    const first = await fixture();
+    await writeConfig(first);
+    await first.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/apply', headers: human }));
+    await first.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/health/check', headers: human }));
+
+    // Act
+    const restarted = new ApiDispatcher(
+      new ApiRouter(
+        fleetRoutes(
+          createDaemonFleetSubsystem({
+            paths: first.paths,
+            userHome: first.userHome,
+            clock: { now: () => GENERATED_AT_MS + 1_000 },
+            files: new StateFileSystem(first.paths),
+            platform: 'linux',
+            mintId: () => 'proposal00000000000001',
+            mintUuid: () => '00000000-0000-4000-8000-000000000002',
+            confirmChange: async () => ({ kind: 'confirmed' }),
+            rootPinner: new ProcfsSessionRootPinner(),
+            clientName: 'fy',
+            harnesses: harnessDiscoveryReader(),
+          }),
+        ),
+      ),
+      { ...CREDENTIALS, devices: { identify: () => undefined } },
+      GRANTED,
+    );
+    const response = await restarted.dispatch(request({ path: '/v1/fleet/health', headers: human }));
+
+    // Assert — the verdict survives, still dated by the check that produced it rather than restamped
+    // by the restart. A restart is not a check.
+    const health = FleetHealthSnapshotSchema.parse(JSON.parse(response.body));
+    should(health.accounts[0]?.verdict).equal('needs_relogin');
+    should(health.accounts[0]?.lastCheckedAt).equal(GENERATED_AT_MS);
+    should(health.at).equal(GENERATED_AT_MS + 1_000);
   });
 });

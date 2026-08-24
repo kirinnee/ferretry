@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { FleetManifestSummary, SessionView } from '@ferretry/protocol';
 
 import {
+  checkAccountPickerHealth,
   type PickerAccountHealth,
   type PickerCatalogClient,
   readAccountPickerCatalog,
@@ -32,18 +33,24 @@ const manifest: FleetManifestSummary = {
   accounts: [account(CLAUDE_ACCOUNT_ID, 'claude-auto-a'), account(CODEX_ACCOUNT_ID, 'codex-auto-b')],
 };
 
+const CHECKED_AT = Date.parse('2026-08-05T11:59:00.000Z');
+
 const healthAccount: PickerAccountHealth = {
   accountId: CLAUDE_ACCOUNT_ID,
   kind: 'claude',
-  state: 'healthy',
-  cached: true,
-  checkedAt: Date.parse('2026-08-05T11:59:00.000Z'),
-  ms: 320,
+  verdict: 'healthy',
+  reason: 'provider_accepted',
+  evidence: 'anthropic_usage',
+  lastCheckedAt: CHECKED_AT,
+  verdictAt: CHECKED_AT,
+  lastCheckInconclusive: false,
 };
 
 interface ClientFixture {
   readonly client: PickerCatalogClient;
   readonly paths: string[];
+  /** The verb each call used, so a read cannot quietly become a write. */
+  readonly methods: (string | undefined)[];
 }
 
 const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): ClientFixture => {
@@ -54,15 +61,22 @@ const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): Client
       at: Date.parse('2026-08-05T12:00:00.000Z'),
       accounts: [healthAccount],
     },
+    '/v1/fleet/health/check': {
+      at: Date.parse('2026-08-05T12:00:00.000Z'),
+      accounts: [healthAccount],
+    },
     ...overrides,
   };
+  const methods: (string | undefined)[] = [];
   return {
     paths,
+    methods,
     client: {
       // Parses through the caller's own schema, so a fixture cannot smuggle in a
       // shape the real daemon reader would have refused — or refuse one it accepts.
-      request: async (path, schema) => {
+      request: async (path, schema, init) => {
         paths.push(path);
+        methods.push(init?.method);
         const response = responses[path];
         if (response instanceof Error) throw response;
         return schema.parse(response);
@@ -128,13 +142,53 @@ describe('readAccountPickerCatalog', () => {
 });
 
 describe('readAccountPickerHealth', () => {
-  it('runs the expensive probe only through the explicit health reader', async () => {
+  it('reads the stored snapshot with a plain GET', async () => {
+    // Arrange / Act
     const fixture = clientFixture();
     const result = await readAccountPickerHealth(fixture.client);
 
+    // Assert — A GET, and only a GET. That is the whole reason the store may now hydrate this on
+    // mount: the daemon answers it from its own file and checks nothing to do so. The reader that
+    // COLLECTS is a different function on a different verb, below.
     expect(fixture.paths).toEqual(['/v1/fleet/health']);
+    expect(fixture.methods).toEqual([undefined]);
     expect(result.error).toBeNull();
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.state).toBe('healthy');
+    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.verdict).toBe('healthy');
+  });
+
+  it('carries the never-checked case through as null rather than an instant', async () => {
+    // Arrange
+    const fixture = clientFixture({
+      '/v1/fleet/health': {
+        at: Date.parse('2026-08-05T12:00:00.000Z'),
+        accounts: [
+          { ...healthAccount, verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null },
+        ],
+      },
+    });
+
+    // Act
+    const result = await readAccountPickerHealth(fixture.client);
+
+    // Assert — the schema this replaced required a number, so this case arrived as a fabricated "now"
+    // and was indistinguishable from a check that had just succeeded.
+    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.lastCheckedAt).toBeNull();
+  });
+
+  it('accepts the stale marker so a reader can be told what the verdict WAS', async () => {
+    // Arrange
+    const fixture = clientFixture({
+      '/v1/fleet/health': {
+        at: Date.parse('2026-08-05T12:00:00.000Z'),
+        accounts: [{ ...healthAccount, verdict: 'unknown', reason: 'stale', staleVerdict: 'healthy' }],
+      },
+    });
+
+    // Act
+    const result = await readAccountPickerHealth(fixture.client);
+
+    // Assert
+    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.staleVerdict).toBe('healthy');
   });
 
   it('keeps a snapshot whose harness kind this build has never heard of', async () => {
@@ -149,7 +203,7 @@ describe('readAccountPickerHealth', () => {
 
     expect(result.error).toBeNull();
     expect(result.health.get(CODEX_ACCOUNT_ID)).toEqual(unfamiliar);
-    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.state).toBe('healthy');
+    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.verdict).toBe('healthy');
   });
 
   it('still refuses a health row with no harness kind at all', async () => {
@@ -163,26 +217,78 @@ describe('readAccountPickerHealth', () => {
     await expect(readAccountPickerHealth(fixture.client)).rejects.toThrow();
   });
 
+  it('refuses a verdict this build does not have words for', async () => {
+    // Arrange — the copy table is exhaustive over the enum, so an unknown member would render as
+    // `undefined` on screen rather than failing loudly here.
+    const fixture = clientFixture({
+      '/v1/fleet/health': {
+        at: Date.parse('2026-08-05T12:00:00.000Z'),
+        accounts: [{ ...healthAccount, verdict: 'probably_fine' }],
+      },
+    });
+
+    // Act / Assert
+    await expect(readAccountPickerHealth(fixture.client)).rejects.toThrow();
+  });
+
   it('drops every duplicate account row while preserving unambiguous evidence', async () => {
     const codexHealth: PickerAccountHealth = {
       ...healthAccount,
       accountId: CODEX_ACCOUNT_ID,
       kind: 'codex',
-      state: 'unknown',
-      cached: false,
-      failureKind: 'launch',
-      error: 'wrapper was unavailable',
+      verdict: 'unknown',
+      reason: 'codex_liveness_unproven',
+      evidence: 'none',
+      verdictAt: null,
     };
     const fixture = clientFixture({
       '/v1/fleet/health': {
         at: Date.parse('2026-08-05T12:00:00.000Z'),
-        accounts: [healthAccount, { ...healthAccount, state: 'down' }, healthAccount, codexHealth],
+        accounts: [
+          healthAccount,
+          { ...healthAccount, verdict: 'needs_relogin', reason: 'oauth_token_rejected' },
+          healthAccount,
+          codexHealth,
+        ],
       },
     });
     const result = await readAccountPickerHealth(fixture.client);
 
     expect(result.health.has(CLAUDE_ACCOUNT_ID)).toBeFalse();
     expect(result.health.get(CODEX_ACCOUNT_ID)).toEqual(codexHealth);
+    expect(result.error).toContain('ambiguous');
+  });
+});
+
+describe('checkAccountPickerHealth', () => {
+  it('POSTs to the check route and answers with the snapshot', async () => {
+    // Arrange / Act
+    const fixture = clientFixture();
+    const result = await checkAccountPickerHealth(fixture.client);
+
+    // Assert — a POST because it RECORDS a reading, on a different path from the read. Two functions
+    // rather than one with a flag: a boolean parameter would put "does this write" behind a call-site
+    // argument, which is the shape that let a read reach a spending probe before.
+    expect(fixture.paths).toEqual(['/v1/fleet/health/check']);
+    expect(fixture.methods).toEqual(['POST']);
+    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.verdict).toBe('healthy');
+  });
+
+  it('applies the same duplicate-row rule as the read', async () => {
+    // Arrange — one parser, one ambiguity rule. Two would eventually disagree about whether a damaged
+    // response is safe to render.
+    const fixture = clientFixture({
+      '/v1/fleet/health/check': {
+        at: Date.parse('2026-08-05T12:00:00.000Z'),
+        accounts: [healthAccount, healthAccount],
+      },
+    });
+
+    // Act
+    const result = await checkAccountPickerHealth(fixture.client);
+
+    // Assert
+    expect(result.health.has(CLAUDE_ACCOUNT_ID)).toBeFalse();
     expect(result.error).toContain('ambiguous');
   });
 });

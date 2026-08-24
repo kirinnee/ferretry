@@ -1,5 +1,11 @@
 import { Bot, CircleAlert, CircleDashed, KeyRound, Layers3, ShieldQuestion, Sparkles } from 'lucide-react';
 
+import {
+  absoluteInstantLabel,
+  type AccountHealthTone,
+  accountHealthView,
+  UNREAD_ACCOUNT_HEALTH,
+} from '../../lib/account-health-view.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import {
@@ -16,6 +22,12 @@ export interface FleetSurfaceProps {
   readonly daemonId: DaemonId;
   /** A missing or damaged read stays unavailable; it is never rendered as zero accounts. */
   readonly state: FleetReadState;
+  /**
+   * The instant each account's relative "checked Nm ago" is measured against.
+   * Defaults to the wall clock; injected so a test asserts against a fixture
+   * rather than against whenever the suite happened to run.
+   */
+  readonly now?: number;
   className?: string;
 }
 
@@ -25,12 +37,64 @@ const harnessTone = (kind: FleetHarnessKind): string =>
 const accountsFor = (accounts: readonly FleetAccountView[], harness: FleetHarnessKind): readonly FleetAccountView[] =>
   accounts.filter(account => account.harness === harness);
 
-function AccountRow({ account }: { readonly account: FleetAccountView }) {
+/**
+ * The health pill's colours. `muted` is the never-checked case and is deliberately
+ * the quietest of the four: it is the absence of a verdict, not a warning.
+ */
+const HEALTH_PILL: Readonly<Record<AccountHealthTone, string>> = {
+  ok: 'border-ok-border bg-ok-bg text-ok',
+  bad: 'border-err-border bg-err-bg text-err',
+  warn: 'border-warn-border bg-warn-bg text-warn',
+  muted: 'border-border bg-surface text-muted',
+};
+
+/**
+ * One account's health, beneath its name.
+ *
+ * The words come from `account-health-view.ts`, which the picker row also reads, so
+ * the same account cannot be described differently on the two screens.
+ *
+ * `Published` was the only thing this surface used to say about an account, over a
+ * sentence admitting that sign-in had not been verified. Both facts are still here
+ * and they are now separate: `Published` is what the manifest declares, and this is
+ * what the provider last said. An account can be published and signed out.
+ */
+function AccountHealth({ account, now }: { readonly account: FleetAccountView; readonly now: number }) {
+  const view = account.health === undefined ? UNREAD_ACCOUNT_HEALTH : accountHealthView(account.health, now);
+  const instant = account.health?.lastCheckedAt ?? null;
+  return (
+    <p
+      className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-meta"
+      data-fleet-health={view.tone}
+    >
+      <span
+        className={cn('shrink-0 rounded-full border px-2 py-0.5 font-medium', HEALTH_PILL[view.tone])}
+        title={view.detail}
+      >
+        {view.label}
+      </span>
+      {/* A semantic instant, so the exact UTC time is in the accessible name while
+          the visible label stays a relative one somebody can read at a glance. */}
+      {instant === null ? (
+        <span className="min-w-0 text-muted">{view.checked}</span>
+      ) : (
+        <time className="min-w-0 text-muted" dateTime={absoluteInstantLabel(instant)}>
+          {view.checked}
+        </time>
+      )}
+      <span className="min-w-0 text-muted">{view.detail}</span>
+      {view.secondary === undefined ? null : <span className="min-w-0 text-warn">{view.secondary}</span>}
+    </p>
+  );
+}
+
+function AccountRow({ account, now }: { readonly account: FleetAccountView; readonly now: number }) {
   return (
     <li className="flex min-w-0 items-start justify-between gap-3 border-t border-border-soft py-3 first:border-t-0 first:pt-0">
       <div className="min-w-0">
         <p className="m-0 truncate text-ui font-semibold text-fg">{account.label}</p>
         <code className="mt-0.5 block truncate font-mono text-meta text-muted">{account.wrapper}</code>
+        <AccountHealth account={account} now={now} />
       </div>
       <span
         className={cn(
@@ -51,10 +115,12 @@ function HarnessCard({
   harness,
   accounts,
   preferred,
+  now,
 }: {
   readonly harness: FleetHarnessView;
   readonly accounts: readonly FleetAccountView[];
   readonly preferred: FleetHarnessKind | undefined;
+  readonly now: number;
 }) {
   const label = fleetHarnessLabel(harness.kind);
   const ready = harness.launchable.length > 0;
@@ -97,7 +163,12 @@ function HarnessCard({
         {harness.launchable.length > 0 ? (
           <p className="m-0 flex items-start gap-2 text-ui leading-base text-muted">
             <KeyRound size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden="true" />
-            Found locally. Sign-in and provider access have not been verified.
+            {/* This used to end "Sign-in and provider access have not been
+                verified", which was true and is no longer: each account below now
+                carries what the provider last said about its credential. What a
+                wrapper on PATH still does NOT prove is per-account sign-in, so the
+                sentence now points at the rows instead of disclaiming everything. */}
+            Found locally. Each account below reports its own sign-in separately.
           </p>
         ) : null}
         {harness.blocked.length > 0 ? (
@@ -118,7 +189,7 @@ function HarnessCard({
           {accounts.length > 0 ? (
             <ul className="m-0 list-none p-0" aria-label={`${label} accounts`}>
               {accounts.map(account => (
-                <AccountRow key={account.id} account={account} />
+                <AccountRow key={account.id} account={account} now={now} />
               ))}
             </ul>
           ) : (
@@ -137,7 +208,7 @@ function HarnessCard({
  * until the daemon exposes a mutation boundary that can materialise wrappers
  * without turning a browser click into an ambient host filesystem write.
  */
-export function FleetSurface({ daemonId, state, className }: FleetSurfaceProps) {
+export function FleetSurface({ daemonId, state, now = Date.now(), className }: FleetSurfaceProps) {
   if (state.kind === 'unavailable') {
     return (
       <section
@@ -197,6 +268,7 @@ export function FleetSurface({ daemonId, state, className }: FleetSurfaceProps) 
             harness={harness}
             accounts={accountsFor(state.accounts, harness.kind)}
             preferred={preferred}
+            now={now}
           />
         ))}
       </div>
