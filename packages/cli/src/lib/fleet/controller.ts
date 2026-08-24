@@ -227,6 +227,15 @@ export class FleetController {
    * request. Most of the work is copying — only an identity with no usable credential anywhere costs a
    * human an approval, which is what turns thirty browser approvals into one per provider account.
    *
+   * BUT NAMING AN ACCOUNT ALSO MEANS SOMETHING, and it did not use to. A bare pass takes the cheapest
+   * route to a signed-in fleet; naming an account says the credential it holds is not working, and
+   * that is a claim no local read can check — a token the provider answers `401` for still classifies
+   * as valid, because it has an access token and its expiry is in the future. So a named account gets
+   * a real sign-in rather than "already had a usable credential", which is what `fy fleet health`'s
+   * printed remedy needs it to be: the command it prints beside an account has to fix that account.
+   * `--sync-only` still asks for nothing, and a renewal that succeeds still settles the pass with no
+   * browser at all.
+   *
    * Before any of that, an identity whose token has expired but can still renew itself does so, with
    * no browser and nobody asked. That is what keeps the *next* run from costing an approval too: a
    * refresh token left unused long enough expires as well, and the copy every sibling was handed is
@@ -245,10 +254,11 @@ export class FleetController {
       return;
     }
 
+    const named = accountIds.length > 0;
     const results = await this.deps.logins.login({
       identities,
-      ...(accountIds.length === 0 ? {} : { accountIds }),
-      mode: options.syncOnly === true ? 'sync-only' : 'full',
+      ...(named ? { accountIds } : {}),
+      mode: options.syncOnly === true ? 'sync-only' : named ? 'reauthenticate' : 'full',
       refresh: options.refresh !== false,
     });
     this.#report(results, options, () => renderLoginResults(results));

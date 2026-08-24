@@ -185,9 +185,18 @@ the entire proposal.
 One flow at a time per identity, started and read over HTTP, with the harness doing the exchange:
 
 1. **Start.** The caller names an **account id** (never a command, never a path). The daemon resolves
-   the identity, picks the member whose wrapper to launch — `chooseLoginMember` already prefers an
-   interactive lane (`identity.ts:356-364`) — and spawns that wrapper with **piped** stdio and the
-   sanitized environment of §1.3, adding `--device-auth` for Codex.
+   the identity and spawns **that account's own wrapper** — `chooseLoginDriver` returns the named
+   member (`identity.ts`) — with **piped** stdio and the sanitized environment of §1.3, adding
+   `--device-auth` for Codex.
+
+   > **This used to launch the identity's interactive lane instead, and that was the defect.** A
+   > harness writes its credential into the home of the wrapper that was launched, so signing
+   > `claude-auto-default` in put the credential in `claude-default`'s home and left the account
+   > somebody clicked signed out with nothing said. `chooseLoginMember`'s reasoning — "a browser
+   > approval is interactive" — was about which WRAPPER can show a browser, and it was being used to
+   > decide WHICH ACCOUNT gets the credential. The interactive preference survives only for a pass
+   > that named nobody, where some lane has to be chosen because one approval covers the identity.
+
 2. **Publish two fields and nothing else.** The daemon reads the child's output only to recognise a
    verification URL and, for Codex, a user code. Those two values are the whole wire projection.
 3. **The human authorises anywhere.** Their own phone, their own laptop, their own browser.
@@ -198,7 +207,21 @@ One flow at a time per identity, started and read over HTTP, with the harness do
      (`docs/migration/surveys/harness-login-flows.md:36-61`). The pasted callback URL is submitted
      once and written straight into the child's stdin.
 5. **Then the existing machinery finishes the job.** Re-survey the identity, clone to the siblings,
-   report per-account outcomes — `FleetLoginService` already does all of this (`login.ts:157-184`).
+   report per-account outcomes — `FleetLoginService` does all of this — and then **read the named
+   account's own home once more**. It has to hold a usable credential or that account's row is
+   `failed` with a message naming it. A sibling's reading is never evidence about this account: two
+   homes are two credentials, and on macOS Claude derives its keychain item name from the home path,
+   so a copy that reports success can still have landed somewhere that is not this account's login.
+
+   > **The flow is `reauthenticate`, not the cheapest pass.** A browser Sign in used to run the same
+   > `full` pass `fy fleet login` runs with nobody named, which reads what the homes hold — and a
+   > credential the provider answers `401` for still classifies as `valid`, because it has an access
+   > token and its expiry is in the future. So the identity looked `complete`, every lane was reported
+   > `usable`, and **no child was ever launched**: pressing Sign in on the one account the provider was
+   > rejecting was guaranteed to do nothing. Naming the account makes it the pass's subject, and
+   > `reauthenticate` reaches the provider rather than trusting the homes. A renewal that succeeds
+   > still settles the pass with no browser, because a rotated refresh token IS the provider accepting
+   > a credential again.
 
 ### 3.2 What the daemon holds, exactly, and for how long
 
@@ -522,10 +545,12 @@ else's CLI is only true at a version.
   (`lib/scaffold.ts` declares `--dangerously-skip-permissions` / `--disallowed-tools=AskUserQuestion` for
   Claude's auto lane and `--dangerously-bypass-approvals-and-sandbox` / `--no-alt-screen` for Codex's), so
   a default fleet is unaffected. What breaks is an operator-declared codex root-only flag — `--full-auto`,
-  `--model`, `--sandbox`, `--cd` — or any future release that moves a flag which is tolerated today. It
-  bites hardest on an identity with **no interactive lane**, because `chooseLoginMember`
-  (`packages/fleet/src/lib/identity.ts:362`) then falls back to the auto lane, which is where the
-  aggressive flags live. The composed argv is pinned by
+  `--model`, `--sandbox`, `--cd` — or any future release that moves a flag which is tolerated today.
+  **Its reach grew, deliberately.** `chooseLoginDriver` now launches the NAMED account's own wrapper,
+  so signing an auto lane in reaches the auto lane's flags rather than borrowing an interactive
+  sibling's. That is the correct trade: borrowing hid this defect by authenticating a **different
+  account** and reporting success, whereas this fails loudly, names the account, and leaves the
+  operator's own declared flag as the thing to fix. The composed argv is pinned by
   `packages/fleet/tests/integration/process-login.test.ts` — as a reproduction, not as a contract.
   Not fixed here because every honest fix — a login-safe path in the wrapper, a second flagless wrapper
   per account, or a login that bypasses the wrapper — changes the bytes of the executables Ferretry

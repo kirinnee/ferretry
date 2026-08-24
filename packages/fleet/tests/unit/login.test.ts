@@ -45,28 +45,51 @@ const identity = (overrides: Partial<FleetIdentity> = {}): FleetIdentity => ({
 /**
  * A credential store whose readings can change between surveys, so the re-read after an interactive
  * login is exercised as it really behaves. No test touches a real credential.
+ *
+ * A SUCCESSFUL CLONE CHANGES WHAT THE TARGET READS, exactly as the real store does — that is what
+ * copying a credential into a home means. A fake whose writes were invisible would make the service's
+ * proof that a named account holds a credential fail for a reason no host has, and would make an
+ * assertion that the proof works impossible to distinguish from an assertion that the fake is inert.
  */
 class ScriptedCredentialStore implements FleetCredentialStore {
   readonly clones: Array<{ donor: string; target: string }> = [];
+  readonly written = new Map<string, CredentialReading>();
   private pass = 0;
 
   constructor(
     private readonly passes: readonly Readonly<Record<string, CredentialReading>>[],
     private readonly cloneOutcomes: Readonly<Record<string, CredentialCloneOutcome>> = {},
+    /**
+     * Homes whose writes report success and change nothing, which is not a hypothetical: a harness
+     * writes credentials by temp-file-and-rename, and on macOS Claude derives its keychain item name
+     * from the home path — so a copy can land somewhere that is not this account's credential and
+     * still exit zero.
+     */
+    private readonly losesWrites: readonly string[] = [],
   ) {}
 
   /** Advance to the next scripted pass; the last one repeats forever. */
   nextPass(): void {
     this.pass = Math.min(this.pass + 1, this.passes.length - 1);
+    // A login writes into one home; the script says which. Copies made before it are history.
+    this.written.clear();
   }
 
   read(_kind: HarnessKind, target: FleetIdentityMember): Promise<CredentialReading> {
-    return Promise.resolve(this.passes[this.pass]?.[target.accountId] ?? { state: 'missing' });
+    return Promise.resolve(this.#read(target.accountId));
   }
 
   clone(_kind: HarnessKind, donor: FleetIdentityMember, target: FleetIdentityMember): Promise<CredentialCloneOutcome> {
     this.clones.push({ donor: donor.accountId, target: target.accountId });
-    return Promise.resolve(this.cloneOutcomes[target.accountId] ?? { ok: true });
+    const outcome = this.cloneOutcomes[target.accountId] ?? { ok: true };
+    if (outcome.ok && !this.losesWrites.includes(target.accountId)) {
+      this.written.set(target.accountId, this.#read(donor.accountId));
+    }
+    return Promise.resolve(outcome);
+  }
+
+  #read(accountId: string): CredentialReading {
+    return this.written.get(accountId) ?? this.passes[this.pass]?.[accountId] ?? { state: 'missing' };
   }
 }
 
@@ -218,9 +241,31 @@ describe('FleetLoginService', () => {
     // Act
     const actual = await build(store, port).login({ identities: [identity()], mode: 'full' });
 
-    // Assert
+    // Assert — the lane that ran gets its own sentence: it names the account, says the credential is
+    // not in its own home, and names the wrapper to run by hand. A row every member shared said
+    // "this identity", which names nobody and suggests nothing to do.
     should(actual[0]?.status).equal('failed');
-    should(actual[0]?.message).match(/still has no usable credential/u);
+    should(actual[0]?.message).containEql(ID_ONE);
+    should(actual[0]?.message).match(/left no credential in its own home/u);
+    should(actual[0]?.message).containEql('/fleet/bin/claude-kirin');
+  });
+
+  it('should give a sibling the identity-wide sentence rather than the lane that ran', async () => {
+    // Arrange — nothing usable anywhere and the login writes nothing.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } }]);
+
+    // Act
+    const actual = await build(store, new RecordingLoginPort({ status: 'logged-in' })).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — ID_TWO ran, so it owns the specific sentence; ID_ONE was not asked about and is told
+    // the identity-wide fact rather than being handed somebody else's wrapper to go and run.
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'failed', [ID_TWO]: 'failed' });
+    should(actual[0]?.message).equal('the login finished but this identity still has no usable credential');
+    should(actual[1]?.message).containEql(ID_TWO);
   });
 
   it('should report logged-in when the approval left the launched home usable and no sibling needed it', async () => {
@@ -591,5 +636,352 @@ describe('FleetLoginService with a renewal', () => {
     // Assert
     should(actual).match([{ accountId: ID_ONE, status: 'login-needed' }]);
     should(actual[0]?.message).not.equal('the refresh token is gone');
+  });
+});
+
+/**
+ * THE ACCOUNT SOMEBODY NAMES IS THE ACCOUNT THAT ENDS UP AUTHENTICATED.
+ *
+ * Every test here is about one class of defect: a pass that reports success for an account it did not
+ * actually sign in. Two shapes of it shipped, and they compound.
+ *
+ * The first is that the approval always ran through the identity's INTERACTIVE lane, so signing an
+ * auto lane in put the credential in its sibling's home. The second is worse and hides the first: a
+ * credential the provider has REVOKED still classifies as `valid` locally — it has an access token and
+ * its expiry is in the future — so the cheapest-path pass decided the identity was `complete`, reported
+ * every lane `usable`, and never launched anything. `fy fleet health` prints `fy fleet login
+ * <accountId>` beside exactly the accounts in that state, and the browser's Sign in button reached the
+ * same code, so the one remedy the product offers was the one thing guaranteed not to run.
+ *
+ * `mode: 'reauthenticate'` is what a named account gets, and the readings below are deliberately the
+ * ones a revoked-but-unexpired token produces: every home reads `valid` and every home is wrong.
+ */
+describe('FleetLoginService signing in the account it was asked about', () => {
+  /** ID_ONE is the interactive lane; ID_TWO is the auto lane somebody clicked. */
+  const twoLanes = identity({
+    members: [member({ accountId: ID_ONE }), member({ accountId: ID_TWO, mode: 'auto' })],
+  });
+
+  it('should sign a named account in even though every home reads as usable', async () => {
+    // Arrange — what a revoked token looks like from here, and the exact state the old pass called
+    // `complete`. The login then rewrites the home it was launched in.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: VALID, [ID_TWO]: VALID },
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: VALID },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — an approval was actually asked for, it ran in the named account's own wrapper, and the
+    // fresh credential then reached the sibling too so the approval is not spent twice.
+    should(port.launched).have.length(1);
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+    should(store.clones).deepEqual([{ donor: ID_TWO, target: ID_ONE }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'synced', [ID_TWO]: 'logged-in' });
+  });
+
+  it('should report usable and launch nothing for the same homes when no account was named', async () => {
+    // Arrange — the SAME store as above. This is the contrast that makes the test above mean something:
+    // what changed is the request, not the readings.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: VALID, [ID_TWO]: VALID },
+      { [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
+
+    // Assert — a whole-fleet pass is still the cheapest one, and still costs nobody an approval.
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'usable' });
+  });
+
+  it('should launch the named account is own wrapper, so the credential lands in its own home', async () => {
+    // Arrange — nothing usable anywhere. A harness writes its credential into the home of the wrapper
+    // that was launched, so which wrapper runs decides which account ends up signed in. ID_TWO is the
+    // auto lane, and the pass used to launch ID_ONE for it.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: VALID },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — no copy is needed for the account that was asked about, and its sibling gets one.
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+    should(port.launched[0]?.home).equal('/fleet/homes/claude-kirin');
+    should(store.clones).deepEqual([{ donor: ID_TWO, target: ID_ONE }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'synced', [ID_TWO]: 'logged-in' });
+  });
+
+  it('should still launch the interactive lane when a whole-fleet pass named nobody', async () => {
+    // Arrange — the preference that remains, for the case it was always about: one approval has to
+    // cover the identity, so some lane is chosen and a lane declared interactive is the right guess.
+    const autoFirst = identity({
+      members: [member({ accountId: ID_ONE, mode: 'auto' }), member({ accountId: ID_TWO, mode: 'interactive' })],
+    });
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: VALID },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    await build(store, port).login({ identities: [autoFirst], mode: 'full' });
+
+    // Assert
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+  });
+
+  it('should report a copy as synced rather than crediting the login that produced nothing', async () => {
+    // Arrange — the named lane's own login exits zero and writes NOTHING, which is what a harness
+    // whose argv it refused looks like from here. The identity's credential is then copied in from the
+    // sibling, so the account does end up holding one.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — `logged-in` here would credit a sign-in that produced nothing AND hide a harness that
+    // is failing silently. Observed by running the command: it read `logged in` while the credential
+    // had in fact arrived by copy.
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'synced' });
+  });
+
+  it('should fail the named account by name when the copy into its home did not take', async () => {
+    // Arrange — the named lane's own login exits zero and writes nothing, so the identity's credential
+    // has to be copied into its home instead. The store reports that write a success and the home never
+    // changes. This is the exact silent success the proof read exists to make impossible: without it
+    // ID_TWO reports `synced` and somebody goes away believing the account they clicked is signed in.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }], {}, [ID_TWO]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — the sibling that does hold a credential still says so, and the named account says, by
+    // name, that it does not.
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'failed' });
+    should(actual[1]?.message).containEql(ID_TWO);
+    should(actual[1]?.message).match(/no usable credential of its own/u);
+  });
+
+  it('should keep the store is own reason when a copy failed rather than replacing it with a general one', async () => {
+    // Arrange — a refusal that already says where to look must not be overwritten by the proof step.
+    const store = new ScriptedCredentialStore(
+      [
+        { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+        { [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } },
+      ],
+      { [ID_TWO]: { ok: false, reason: 'the target home is read-only' } },
+    );
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert
+    should(statusesOf(actual)[ID_TWO]).equal('failed');
+    should(actual[1]?.message).equal('the target home is read-only');
+  });
+
+  it('should say a named account was left alone when its own home could not be read', async () => {
+    // Arrange — an unreadable home is refused a copy, and that refusal is the safe one: overwriting it
+    // could destroy a credential that is working. The named account still has to hear about it.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: VALID, [ID_TWO]: { state: 'unreadable', reason: 'the keychain is locked' } },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — the login ran in that account's own wrapper and exited zero, and the pass STILL refuses
+    // to call it signed in: an exit code is not a credential read. No copy was forced onto the home
+    // nobody could read, and that account hears the store's own reason rather than a general one.
+    should(port.launched).have.length(1);
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+    should(store.clones).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'indeterminate' });
+    should(actual[1]?.message).equal('the keychain is locked');
+  });
+
+  it('should never open a browser for a named account under sync-only', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: VALID }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act — the narrowing still wins; naming an account does not widen what a pass may do.
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'sync-only',
+    });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'usable' });
+  });
+
+  it('should leave a named account the manifest declares unavailable alone, and claim nothing about it', async () => {
+    // Arrange
+    const withUnavailable = identity({
+      members: [
+        member({ accountId: ID_ONE }),
+        member({ accountId: ID_TWO, mode: 'auto', available: false, unavailableReason: 'its wrapper is missing' }),
+      ],
+    });
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [withUnavailable],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — one sentence about ID_TWO, and it is the specific one the manifest already had.
+    should(statusesOf(actual)).deepEqual({ [ID_TWO]: 'unavailable', [ID_ONE]: 'logged-in' });
+    should(actual[0]?.message).equal('its wrapper is missing');
+  });
+
+  it('should prove both accounts when two lanes of one identity are named', async () => {
+    // Arrange — the second one is written to and the write is silently lost.
+    const store = new ScriptedCredentialStore(
+      [
+        { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+        { [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } },
+      ],
+      {},
+      [ID_TWO],
+    );
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_ONE, ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — a subject that was delivered is not dragged down by one that was not.
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'logged-in', [ID_TWO]: 'failed' });
+  });
+
+  it('should refuse a named account whose identity could not be read, without asking for an approval', async () => {
+    // Arrange — no usable credential anywhere AND a home nobody could classify. Naming an account does
+    // not make an unreadable home readable, and a login here would write over one that may be fine.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'unreadable', reason: 'the keychain is locked' }, [ID_TWO]: { state: 'missing' } },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'indeterminate', [ID_TWO]: 'indeterminate' });
+  });
+
+  it('should report a named api-key account as needing no login rather than proving a credential it has none of', async () => {
+    // Arrange — an api-key identity reads nothing at all, so the proof step must not decide its rows
+    // are a failure. There is no provider login to run and saying so is the whole answer.
+    const store = new ScriptedCredentialStore([{}]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [identity({ auth: 'api-key' })],
+      accountIds: [ID_ONE],
+      mode: 'reauthenticate',
+    });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'not-required' });
+  });
+});
+
+describe('FleetLoginService reauthenticating an account that can renew itself', () => {
+  class SucceedingRenewal implements FleetTokenRenewal {
+    constructor(private readonly store: ScriptedCredentialStore) {}
+
+    renew(identityToRenew: FleetIdentity): Promise<FleetTokenRefreshResult> {
+      this.store.nextPass();
+      return Promise.resolve({
+        identity: identityToRenew.key,
+        accountId: ID_ONE,
+        status: 'renewed',
+        ran: true,
+      });
+    }
+  }
+
+  it('should let a renewal settle the pass, because a rotated token is the provider accepting one', async () => {
+    // Arrange — expired with a refresh token, in both homes. A renewal reaches the provider and gets a
+    // live credential back, which is what a sign-in is for; making somebody approve a browser on top of
+    // that would be charging them for something they already have.
+    const expired: CredentialReading = { state: 'refreshable', expiresAt: NOW - HOUR };
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: expired, [ID_TWO]: expired },
+      { [ID_ONE]: VALID, [ID_TWO]: expired },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await new FleetLoginService({
+      identities: new FleetIdentityService(store),
+      loginPort: port,
+      renewal: new SucceedingRenewal(store),
+    }).login({
+      identities: [identity({ members: [member({ accountId: ID_ONE }), member({ accountId: ID_TWO, mode: 'auto' })] })],
+      accountIds: [ID_TWO],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — no browser, and the named account still ends up holding the fresh credential.
+    should(port.launched).deepEqual([]);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'renewed', [ID_TWO]: 'synced' });
   });
 });

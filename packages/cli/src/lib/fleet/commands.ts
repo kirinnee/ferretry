@@ -120,8 +120,8 @@ export function registerFleetCommands(program: Command, controller: FleetControl
   scoped(
     fleet
       .command('login')
-      .description('copy each provider login across the accounts that share it, then ask only for what is missing')
-      .argument('[accountId...]', 'only the identities these accounts belong to; default is every identity')
+      .description('sign the accounts you name in; with none named, copy each provider login across the fleet')
+      .argument('[accountId...]', 'sign these accounts in; default is the cheapest pass over every identity')
       .option('--status', 'report what credential each home holds and change nothing')
       .option('--sync-only', 'copy credentials across identities but never ask for a browser approval')
       .option('--no-refresh', 'do not let an expired credential renew itself first; start no harness')
@@ -137,6 +137,15 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'identity with no usable credential anywhere costs a human an approval. Naming one account\n' +
           'therefore selects its whole identity — the credential is shared, so half an identity is not a\n' +
           'thing you can log in.\n\n' +
+          'Naming an account also SIGNS IT IN rather than reporting what it holds. A token the provider\n' +
+          'has revoked still reads as valid here — it has an access token and its expiry is in the\n' +
+          'future — so a pass that trusted the homes would answer "already had a usable credential" for\n' +
+          'exactly the account you asked about. That is why `fy fleet health` prints this command beside\n' +
+          'an account that needs a login. The approval runs in that account’s OWN wrapper, so the\n' +
+          'credential lands in its own home, and its own home is then read to prove it did — if it did\n' +
+          'not, that account says so by name rather than being reported alongside a sibling that worked.\n' +
+          'Pass --sync-only to ask for nothing; an expired credential still renews itself first, and a\n' +
+          'renewal that works settles the pass with no browser at all.\n\n' +
           'A home whose credential could not be read is reported, never overwritten and never taken as\n' +
           'empty: that is the difference between "nobody is logged in" and "I could not tell".\n\n' +
           'An account whose wrapper reads a secret from the environment still gets it; every other\n' +

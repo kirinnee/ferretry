@@ -263,11 +263,18 @@ describe('ProcessFleetLoginPort', () => {
  *
  * Codex's parser (clap) refuses an unknown ROOT argument outright; Claude's (commander) passes root
  * flags through to the subcommand. Both harnesses' SHIPPED starter flags survive at these versions, so
- * what breaks is an operator-declared codex root-only flag — and it bites hardest on an identity with no
- * interactive lane, because `chooseLoginMember` then falls back to the auto lane, which is exactly where
- * the aggressive flags live. The failure is silent in the worst way: the harness prints no URL and no
- * code, so the daemon reports that this host's harness offered no browser-drivable sign-in and names
+ * what breaks is an operator-declared codex root-only flag — which is exactly the sort of flag an AUTO
+ * lane carries. The failure is silent in the worst way: the harness prints no URL and no code, so the
+ * daemon reports that this host's harness offered no browser-drivable sign-in and names
  * `fy fleet login` — which composes the same flags and fails identically.
+ *
+ * ITS REACH GREW, DELIBERATELY, and the reason belongs here rather than only in the doc. It used to
+ * bite hardest on an identity with no interactive lane, because `chooseLoginMember` fell back to the
+ * auto lane only when there was nothing else to pick. `chooseLoginDriver` now launches the NAMED
+ * account's own wrapper, so signing any auto lane in reaches that lane's flags. That is the correct
+ * trade and not a regression: borrowing an interactive sibling hid this defect by authenticating a
+ * DIFFERENT account and reporting success, whereas this fails loudly, names the account, and leaves
+ * the operator's own declared flag as the thing to fix.
  *
  * Deliberately NOT fixed here: every honest fix changes the bytes of the executables Ferretry writes
  * into somebody's home, which is its own change with its own review.
@@ -285,7 +292,8 @@ describe('the composed login command line', () => {
     await chmod(harness, 0o700);
 
     const config = FleetConfigSchema.parse({
-      // The lane with no interactive sibling, which is the case `chooseLoginMember` falls back into.
+      // An auto lane with an operator-declared root-only flag: what `chooseLoginDriver` launches
+      // whenever this account is the one named, and the only lane there is either way.
       variants: { auto: { mode: 'auto', codex: { flags: ['--full-auto'] } } },
       agents: [
         {
