@@ -36,6 +36,9 @@ import {
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
+// `chooseConnection` is aliased because this file already owns that name for the onboarding
+// chooser's helper below, and the two have nothing to do with each other.
+import { carrierProbe, chooseConnection as chooseCarrier, type ConnectionChoice } from '@ferretry/relay';
 import { type ReactElement, StrictMode } from 'react';
 
 import {
@@ -55,6 +58,7 @@ import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import type { PushRegistrationLike } from '../../src/lib/push-enrolment.ts';
+import type { DaemonCarrierRouter } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
@@ -331,6 +335,11 @@ interface ShellOptions {
    */
   readonly carrierDown?: () => boolean;
   /**
+   * Lets a test publish the measured carrier the SURFACES read — see {@link MeasuredCarrierSeam} for
+   * what it substitutes and, more importantly, for why the real router cannot express it.
+   */
+  readonly carrierSeam?: MeasuredCarrierSeam;
+  /**
    * Holds `get` open. Without it the read resolves inside the mount's own act
    * flush and the loading state never exists to be observed — which is exactly
    * the state the live-region tests are about.
@@ -369,6 +378,16 @@ interface HealthRead {
 interface LiveFeed {
   readonly sessionId: string | undefined;
   readonly after: number;
+  /**
+   * THE TYPED CLIENT THIS SUBSCRIPTION WAS OPENED ON, by identity.
+   *
+   * The route's owner identity is `(client, measured carrier, session)`, and a client REPLACED under
+   * a session that stays open — the daemon republishing its carrier set is the ordinary way it
+   * happens — is the one third of it no count and no cursor can see. A replacement feed opened on the
+   * PREVIOUS client is a subscription on a client the route has let go of, and it looks exactly like a
+   * correct one from the outside. So the fake keeps the object it was called on.
+   */
+  readonly client: FyApiClient;
   readonly emit: (event: FyEvent) => void;
   /** The daemon's quiet-but-alive proof, so a late one can be delivered to an abandoned feed. */
   readonly idle: (frame: FyEventStreamIdle) => void;
@@ -400,12 +419,13 @@ const appStore = async (
   healthReads: HealthRead[] = [],
   liveFeeds: LiveFeed[] = [],
   carrierRequests: string[] = [],
+  clients: FyApiClient[] = [],
 ): Promise<AppStore> =>
   await createAppStore({
     repository: new MemoryRepository(),
     connectClient: async connection => {
       if (options.clientFailure !== undefined) throw new Error(options.clientFailure);
-      return {
+      const client = {
         get: async (sessionId: string) => {
           reads.push(`${connection.daemonId}:${sessionId}`);
           await options.sessionGate;
@@ -453,6 +473,7 @@ const appStore = async (
             liveFeeds.push({
               sessionId,
               after,
+              client,
               emit: onEvent,
               idle: frame => onIdle?.(frame),
               end: finish(resolve),
@@ -485,6 +506,10 @@ const appStore = async (
           return path === '/v1/doctor' ? doctorReport : {};
         },
       } as unknown as FyApiClient;
+      // Every client this pool ever built, in order, so a test can say WHICH one a subscription is
+      // on rather than only how many there are.
+      clients.push(client);
+      return client;
     },
     // Only the pairing exchange and the terminal deck have shapes the root itself depends on; every
     // other page reads through a store port that answers an empty document.
@@ -527,6 +552,62 @@ const appStore = async (
   });
 
 /**
+ * A REPLACEMENT MEASURED CARRIER, PUBLISHED TO THE SURFACES AND TO NOTHING ELSE.
+ *
+ * WHY A SEAM AT ALL, said plainly: today's `DaemonCarrierRouter` cannot replace a winner in one
+ * step. `#decide` refuses to overwrite an `ok: true` choice, a republish KEEPS the same choice
+ * object, and the only way a new winner is ever published is by way of `undefined` — the transition
+ * the restoration regression below already drives. So a carrier object replaced DIRECTLY by another
+ * of the same kind is unreachable through that one call site, and the route's owner identity is
+ * exactly the thing that must not depend on that being true: keyed on the KIND, relay A becoming
+ * relay B would leave a live subscription on a carrier the router has already replaced, silently and
+ * for the life of the session. "Not reachable today" is a fact about the router; this is a test about
+ * the route.
+ *
+ * WHAT IT SUBSTITUTES IS ONE READ. `choice()` — the single fact `useActiveCarrier` subscribes to —
+ * and the notification that it changed. The walk, the fetch, the sessions, the disclosure and the
+ * daemon-bound transport underneath are all the real router, and the store's own internals captured
+ * that router before this wrapper existed, so a published replacement is visible to the surfaces
+ * without redirecting one byte of traffic. Every other member is forwarded BOUND TO THE ROUTER, not
+ * to this proxy: the router reads its own private state, which a call whose receiver is a proxy
+ * cannot see.
+ */
+interface MeasuredCarrierSeam {
+  /** Publishes a replacement winner and wakes every surface subscribed to the router. */
+  readonly publish: (choice: ConnectionChoice) => void;
+  readonly wrap: (router: DaemonCarrierRouter) => DaemonCarrierRouter;
+}
+
+const measuredCarrierSeam = (): MeasuredCarrierSeam => {
+  let published: ConnectionChoice | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    publish: (choice: ConnectionChoice) => {
+      published = choice;
+      for (const listener of [...listeners]) listener();
+    },
+    wrap: (router: DaemonCarrierRouter) =>
+      new Proxy(router, {
+        get(target, property) {
+          if (property === 'choice')
+            return (id: DaemonId): ConnectionChoice | undefined => published ?? target.choice(id);
+          if (property === 'subscribe')
+            return (listener: () => void): (() => void) => {
+              listeners.add(listener);
+              const unsubscribe = target.subscribe(listener);
+              return () => {
+                listeners.delete(listener);
+                unsubscribe();
+              };
+            };
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? (value as (...args: never[]) => unknown).bind(target) : value;
+        },
+      }),
+  };
+};
+
+/**
  * A daemon id names one of the two default fixtures; a whole connection pairs
  * itself, which is how a test says something about the carrier set a pairing
  * published without inventing a third id nothing else knows.
@@ -541,7 +622,13 @@ const renderShell = async (
   const healthReads: HealthRead[] = [];
   const liveFeeds: LiveFeed[] = [];
   const carrierRequests: string[] = [];
-  const store = await appStore(reads, options, transcriptReads, healthReads, liveFeeds, carrierRequests);
+  const clients: FyApiClient[] = [];
+  const built = await appStore(reads, options, transcriptReads, healthReads, liveFeeds, carrierRequests, clients);
+  // ONLY WHEN A TEST ASKS FOR IT. Forwarding every member of the router through a proxy would bind
+  // away exactly the receiver mistake `DaemonCarrierRouter`'s constructor comment exists for, so
+  // every other test in this file keeps the raw router.
+  const store: AppStore =
+    options.carrierSeam === undefined ? built : { ...built, carrier: options.carrierSeam.wrap(built.carrier) };
   for (const daemon of paired) {
     if (typeof daemon !== 'string') store.connections.add(daemon);
     else store.connections.add(daemon === alpha.daemonId ? alpha : beta);
@@ -554,7 +641,7 @@ const renderShell = async (
       </StoreProvider>
     </RouterProvider>,
   );
-  return { carrierRequests, healthReads, liveFeeds, reads, store, transcriptReads, view };
+  return { carrierRequests, clients, healthReads, liveFeeds, reads, store, transcriptReads, view };
 };
 
 const settle = async (): Promise<void> => {
@@ -1162,6 +1249,14 @@ describe('AppShell', () => {
     // request, so `connecting` is the honest reading — but `live` is the one it must never be.
     expect(store.carrier.choice(alpha.daemonId)).toBeUndefined();
     expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    // AND THE OLD FEED IS ALREADY GONE, HERE, at the exact moment the remembered carrier cleared —
+    // not eventually, by the time the walk below reaches its verdict. A route that held the dead
+    // subscription open through this interval and only dropped it at the final refusal would satisfy
+    // every OTHER assertion in this test: the count is the same either way, and so is the chip. What
+    // it would actually be doing is keeping a socket on a carrier the router has forgotten, for as
+    // long as the next walk takes.
+    expect(must(liveFeeds[0], 'the original subscription').aborted()).toBe(true);
+    expect(must(liveFeeds[0], 'the original subscription').settled()).toBe(true);
     expect(liveFeeds).toHaveLength(1);
 
     // Act II — that next walk tries every carrier the daemon publishes and reaches a verdict.
@@ -1178,7 +1273,8 @@ describe('AppShell', () => {
     // AND NO CONTROL THAT WOULD DO NOTHING. The route tore its model down, so a Reconnect button here
     // would be wired to a null control — an affordance that looks like a remedy and is a no-op.
     expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
-    // The subscription is gone because the ROUTE CANCELLED IT, not because nothing reopened one.
+    // The subscription is gone because the ROUTE CANCELLED IT, not because nothing reopened one, and
+    // it is STILL gone — the verdict did not quietly reopen anything on the way to saying so.
     // `liveFeeds.length` counts opens and would read exactly the same with the cleanup deleted.
     expect(must(liveFeeds[0], 'the original subscription').aborted()).toBe(true);
     expect(must(liveFeeds[0], 'the original subscription').settled()).toBe(true);
@@ -1266,6 +1362,180 @@ describe('AppShell', () => {
     expect(must(liveFeeds[1], 'the replacement subscription').aborted()).toBe(false);
 
     // And the recovered feed is a working one.
+    await interact(() => must(liveFeeds[1], 'the replacement subscription').emit(liveEvent(7)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(session.getAttribute('data-live-events')).toBe('7');
+
+    await view.unmount();
+  });
+
+  /**
+   * THE SAME RACE WITHOUT THE GAP: one measured carrier REPLACED BY ANOTHER OF THE SAME KIND.
+   *
+   * The restoration case above goes through `undefined`, so a route that keyed its owner on the
+   * carrier's KIND still survives it — `direct` becomes `none` becomes `direct`, and the kind moved.
+   * Relay A becoming relay B does not move it. Neither does a direct address being replaced by
+   * another direct address, which is this test: the winner is a different object naming a different
+   * machine, and every derived boolean about it is identical. A route keyed on the kind therefore
+   * changes NOTHING — it keeps the old model, on a carrier the router has already replaced, and goes
+   * on reporting that model's `live` for the life of the session. There is no later transition to
+   * catch it, which is what makes this the worse half of the defect rather than the exotic one.
+   *
+   * WHY IT NEEDS A SEAM AND WHAT THE SEAM IS NOT: {@link MeasuredCarrierSeam}. Short version —
+   * today's router only ever replaces a winner by way of `undefined`, that is a property of one call
+   * site rather than of this route, and the owner identity must not be built on it. Everything else
+   * here is the production composition: the same hook, the same memo, the same effect, the same
+   * client, the same feed.
+   */
+  it('never commits the previous owner‘s state when the measured carrier is replaced by its own kind', async () => {
+    const carrierSeam = measuredCarrierSeam();
+    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], { carrierSeam });
+    await settle();
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(4)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+
+    /*
+     * The replacement, built by the router's OWN chooser from the router's own probe so that it is
+     * the shape a walk really publishes rather than a literal shaped like one — and asserted to be
+     * what this test claims it is: a different object, the same kind. If those two facts were not
+     * both true the test would be proving something else entirely.
+     */
+    const measured = store.carrier.choice(alpha.daemonId);
+    if (measured?.ok !== true) throw new Error('the mounted route has not measured a carrier to replace');
+    const replacement = chooseCarrier([
+      carrierProbe(
+        { kind: 'direct', daemonUrl: 'https://alpha-moved.example.test' },
+        { kind: 'answered', status: 200 },
+      ),
+    ]);
+    if (!replacement.ok) throw new Error('the chooser refused a probe it was told had answered');
+    expect(replacement).not.toBe(measured);
+    expect(replacement.method.kind).toBe(measured.method.kind);
+    expect(replacement.method).not.toEqual(measured.method);
+
+    // Act — every committed value, because the broken and the fixed route agree on the last one.
+    const committed: Array<string | null> = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records) committed.push((record.target as HTMLElement).getAttribute('data-live-stream'));
+    });
+    observer.observe(view.container, { attributes: true, attributeFilter: ['data-live-stream'], subtree: true });
+    await interact(() => carrierSeam.publish(replacement));
+    await settle();
+    observer.disconnect();
+
+    // Assert — the kind did not move, and the route noticed anyway.
+    expect(session.getAttribute('data-carrier-kind')).toBe('direct');
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed).not.toContain('live');
+    expect(committed).not.toContain('disconnected');
+    expect(committed.at(-1)).toBe('connecting');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    // The old owner's control would be wired to a model this render has let go of.
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+
+    // The old feed is actually gone, and exactly ONE opened in its place — at the cursor the page is
+    // still showing, on the client that never changed.
+    expect(must(liveFeeds[0], 'the original subscription').aborted()).toBe(true);
+    expect(must(liveFeeds[0], 'the original subscription').settled()).toBe(true);
+    expect(liveFeeds).toHaveLength(2);
+    expect(must(liveFeeds[1], 'the replacement subscription').after).toBe(4);
+    expect(must(liveFeeds[1], 'the replacement subscription').aborted()).toBe(false);
+    expect(must(liveFeeds[1], 'the replacement subscription').client).toBe(
+      must(liveFeeds[0], 'the original subscription').client,
+    );
+
+    // And the replacement is a working feed rather than a reopened socket.
+    await interact(() => must(liveFeeds[1], 'the replacement subscription').emit(liveEvent(7)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(session.getAttribute('data-live-events')).toBe('7');
+
+    await view.unmount();
+  });
+
+  /**
+   * THE THIRD OF THE OWNER NOTHING ELSE IN THIS FILE MOVES: the CLIENT, replaced under a session
+   * that never closes.
+   *
+   * It is not a hypothetical and it is not a re-pair. A daemon's first answer is routinely followed
+   * by `GET /v1/carriers`, whose set REPLACES the cached one — same daemon, same address, same grant,
+   * a new connection object — and `DaemonApiPool` fences its clients on exactly that value, so the
+   * typed client is rebuilt while the daemon, the carrier, its kind and the session all stay put.
+   * Every fact this route derives from the host is unchanged across that moment. The only thing that
+   * moved is the object the subscription is made ON, and a feed left on the previous client is a feed
+   * whose transport the route has already discarded.
+   *
+   * So this is the case that fails if the client is left OUT of the owner key. There is no state
+   * transition to notice, no kind to compare and no count to be wrong: the old model keeps reporting
+   * `live` on a client nobody holds any more, and the attribute never changes at all — which is why
+   * the ledger below asserts that something WAS committed before it asserts what.
+   */
+  it('never commits the previous owner‘s state when the typed client is replaced under the session', async () => {
+    const { clients, liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(4)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    const measured = store.carrier.choice(alpha.daemonId);
+    expect(measured?.ok).toBe(true);
+    expect(clients).toHaveLength(1);
+
+    // Act — the daemon republishes the set it can be reached on, which is the ordinary sequel to its
+    // first answer and is authoritative over the cache. Same address, same grant, new connection.
+    const committed: Array<string | null> = [];
+    const observer = new MutationObserver(records => {
+      for (const record of records) committed.push((record.target as HTMLElement).getAttribute('data-live-stream'));
+    });
+    observer.observe(view.container, { attributes: true, attributeFilter: ['data-live-stream'], subtree: true });
+    await interact(() => {
+      store.connections.replaceCarriers(alpha, alphaRelayed.carriers);
+    });
+    await settle();
+    observer.disconnect();
+
+    // THE OTHER TWO THIRDS OF THE OWNER DID NOT MOVE, and saying so is what makes this a test about
+    // the client: the measured carrier is the same OBJECT, its kind is the same word, and the route
+    // is still mounted on the same session.
+    expect(store.carrier.choice(alpha.daemonId)).toBe(measured);
+    expect(session.getAttribute('data-carrier-kind')).toBe('direct');
+    expect(session.getAttribute('data-session')).toBe('shared');
+
+    // Assert — a new client exists, and no frame in between claimed the old one's state.
+    expect(clients).toHaveLength(2);
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed).not.toContain('live');
+    expect(committed).not.toContain('disconnected');
+    expect(committed.at(-1)).toBe('connecting');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+
+    // Exactly one replacement, at the held cursor, ON THE NEW CLIENT — which is the assertion a
+    // count cannot make and the one that fails if the owner key forgets the client.
+    expect(must(liveFeeds[0], 'the original subscription').aborted()).toBe(true);
+    expect(must(liveFeeds[0], 'the original subscription').settled()).toBe(true);
+    expect(liveFeeds).toHaveLength(2);
+    expect(must(liveFeeds[1], 'the replacement subscription').after).toBe(4);
+    expect(must(liveFeeds[1], 'the replacement subscription').aborted()).toBe(false);
+    expect(must(liveFeeds[0], 'the original subscription').client).toBe(must(clients[0], 'the original client'));
+    expect(must(liveFeeds[1], 'the replacement subscription').client).toBe(must(clients[1], 'the replacement client'));
+
+    // A LATE FRAME FROM THE DISCARDED CLIENT MOVES NOTHING, which is the same fence the restoration
+    // case proves and is worth proving here too: this is the transition where the two feeds are most
+    // alike, because nothing about the carrier or the session distinguishes them.
+    await interact(() => must(liveFeeds[0], 'the original subscription').emit(liveEvent(99)));
+    await settle();
+    expect(session.getAttribute('data-live-events')).toBe('4');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+
+    // And the replacement is a working feed.
     await interact(() => must(liveFeeds[1], 'the replacement subscription').emit(liveEvent(7)));
     await settle();
     expect(region().getAttribute('data-live-stream')).toBe('live');

@@ -287,19 +287,44 @@ async function liveCursor(page: BrowserPage, ledger: StepLedger, step: string, w
   return value;
 }
 
+/** One reading of the rendered cursor, kept RAW so a failure can be read rather than inferred. */
+interface CursorObservation {
+  /** Exactly what the attribute held. `null` means no element in the document carried it at all. */
+  readonly raw: string | null;
+  /** What made this reading happen: the install, a commit, a first render, a route swap, the final read. */
+  readonly source: string;
+  /** Why this reading is not a usable cursor, or `null` when it is one. */
+  readonly reason: string | null;
+  /** Milliseconds since this document's time origin, so the trail can be ordered against the outage. */
+  readonly at: number;
+  readonly lastAt: number;
+  /** How many consecutive identical readings this one row stands for. */
+  readonly repeat: number;
+}
+
 /** What the page must still be when the journey ends, if it is to be called the same page view. */
 interface DocumentLifetime {
   readonly present: boolean;
   readonly sentinel: string | null;
   readonly timeOrigin: number | null;
-  /** The lowest cursor this document ever rendered after the sentinel was installed. */
+  /** The cursor the outage found, which is the value no later reading may go below. */
+  readonly baseline: number | null;
+  /** How many cursor values the observer actually evaluated. Zero means it proved nothing. */
+  readonly evaluations: number;
+  /** The lowest and highest USABLE readings. `null` means not one reading parsed. */
   readonly minCursor: number | null;
-  /** How many times the watcher actually looked. Zero means it proved nothing. */
-  readonly samples: number;
+  readonly maxCursor: number | null;
+  /** The FIRST unusable reading — missing, blank, NaN, infinite, fractional, negative or unsafe. */
+  readonly invalid: CursorObservation | null;
+  /** The FIRST usable reading below the baseline, however briefly it was on screen. */
+  readonly rewound: CursorObservation | null;
+  /** A bounded raw trail — the first readings and the last ones, with the middle counted in `dropped`. */
+  readonly observations: readonly CursorObservation[];
+  readonly dropped: number;
 }
 
 /**
- * Pin this document's identity, and watch its cursor from inside the page.
+ * THE IN-PAGE CURSOR OBSERVER, as text, because the falsifier drives THIS source rather than a copy.
  *
  * WITHOUT THIS THE RECOVERY CLAIM IS UNFALSIFIABLE. A document that reloads on the same Playwright
  * `Page` keeps its pairing in local storage, remounts the route at cursor `0`, reaches
@@ -308,44 +333,219 @@ interface DocumentLifetime {
  * that claim are about things nothing was measuring.
  *
  * A GLOBAL AND `performance.timeOrigin` ARE TWO INDEPENDENT WITNESSES: a reload clears the global,
- * and it also restarts the clock. The interval is the third — a remount to zero inside the SAME
- * document leaves both witnesses intact, so the only thing that can catch it is watching the value
- * itself, continuously, from the page. `samples` is reported so a watcher that never ran cannot be
- * mistaken for a cursor that never dropped.
+ * and it also restarts the clock. Neither can see a remount to zero inside the SAME document, so the
+ * third witness has to be the value itself — and it is a `MutationObserver` and NOT the 20 ms
+ * interval this replaced, for two measured reasons:
+ *
+ *   1. AN INTERVAL SAMPLES. A rewind committed and repaired between two ticks was never on screen as
+ *      far as it was concerned, and it reported a clean minimum with a healthy sample count.
+ *   2. THE INTERVAL FILTERED WHAT IT COULD NOT PARSE. `null`, `""`, `"NaN"`, `"Infinity"`, a
+ *      fractional value or an unsafe integer updated no minimum, so the journey's own watcher could
+ *      observe a cursor a reader cannot trust and still report "never rewound". Driving the shipped
+ *      predicate with baseline `2` and the readings `NaN`, `2` produced
+ *      `{"minCursor":2,"samples":2,"finalChecksPass":true}` — a pass with a malformed observation
+ *      inside it.
+ *
+ * So every value is EVALUATED and the first bad one is LATCHED. Nothing here is filtered, nothing is
+ * repaired by a later commit, and `evaluations` is reported so an observer that looked at nothing
+ * cannot be mistaken for a cursor that never dropped.
  */
+/* fy-e2e:lifetime-watcher:start */
+const LIFETIME_WATCHER_PROGRAM = `config => {
+  const CURSOR = '[data-live-events]';
+  const KEEP = 12;
+  const state = {
+    sentinel: config.sentinel,
+    timeOrigin: performance.timeOrigin,
+    baseline: config.baseline,
+    evaluations: 0,
+    minCursor: null,
+    maxCursor: null,
+    invalid: null,
+    rewound: null,
+    head: [],
+    tail: [],
+    dropped: 0,
+  };
+
+  // Why a reading is not a cursor. THE ORDER IS LOAD-BEARING: Number('') and Number(' ') are both 0,
+  // so a blank has to be rejected before anything parses it, and fractional has to be tested before
+  // safety or every non-integer would be reported as an unsafe integer.
+  const rejection = raw => {
+    if (raw === null) return 'no element in the document carried the cursor attribute';
+    if (raw.trim() === '') return 'the cursor attribute was blank';
+    const value = Number(raw);
+    if (Number.isNaN(value)) return 'the cursor did not parse as a number';
+    if (!Number.isFinite(value)) return 'the cursor was infinite';
+    if (!Number.isInteger(value)) return 'the cursor was fractional';
+    if (!Number.isSafeInteger(value)) return 'the cursor was outside the safe integer range';
+    if (value < 0) return 'the cursor was negative';
+    return null;
+  };
+
+  // Bounded evidence: the first KEEP readings and the last KEEP, with runs of the same value on the
+  // same trigger collapsed. A trail nobody can read is not evidence, and an unbounded one is a leak.
+  const remember = observation => {
+    const head = state.head;
+    const tail = state.tail;
+    const last = tail.length > 0 ? tail[tail.length - 1] : head.length > 0 ? head[head.length - 1] : null;
+    if (last !== null && last.raw === observation.raw && last.source === observation.source) {
+      last.repeat += 1;
+      last.lastAt = observation.at;
+      return;
+    }
+    if (head.length < KEEP) {
+      head.push(observation);
+      return;
+    }
+    tail.push(observation);
+    while (tail.length > KEEP) {
+      tail.shift();
+      state.dropped += 1;
+    }
+  };
+
+  const evaluate = (raw, source) => {
+    state.evaluations += 1;
+    const at = Math.round(performance.now());
+    const reason = rejection(raw);
+    const observation = { raw: raw, source: source, reason: reason, at: at, lastAt: at, repeat: 1 };
+    remember(observation);
+    // LATCHED, NEVER FILTERED, AND NEVER CLEARED BY A REPAIR.
+    if (reason !== null) {
+      if (state.invalid === null) state.invalid = observation;
+      return;
+    }
+    const value = Number(raw);
+    if (state.minCursor === null || value < state.minCursor) state.minCursor = value;
+    if (state.maxCursor === null || value > state.maxCursor) state.maxCursor = value;
+    if (value < state.baseline && state.rewound === null) state.rewound = observation;
+  };
+
+  const look = source => {
+    const element = document.querySelector(CURSOR);
+    evaluate(element === null ? null : element.getAttribute('data-live-events'), source);
+  };
+
+  const carriesCursor = node => {
+    if (node === null || node.nodeType !== 1) return false;
+    if (typeof node.matches === 'function' && node.matches(CURSOR)) return true;
+    return typeof node.querySelector === 'function' && node.querySelector(CURSOR) !== null;
+  };
+
+  // The value the attribute held AFTER the mutation this record describes. Reading the element
+  // instead would report the value at CALLBACK time: two commits inside one task deliver two records
+  // and a repaired value to both, which is exactly how a transient NaN or a rewind that is repaired
+  // in the same task escapes an observer that looks at the DOM rather than at the records.
+  const valueAfter = (records, index) => {
+    const target = records[index].target;
+    for (let next = index + 1; next < records.length; next += 1) {
+      const candidate = records[next];
+      if (candidate.type === 'attributes' && candidate.target === target) return candidate.oldValue;
+    }
+    return typeof target.getAttribute === 'function' ? target.getAttribute('data-live-events') : null;
+  };
+
+  const seen = new WeakSet();
+  const installed = document.querySelector(CURSOR);
+  if (installed !== null) seen.add(installed);
+  look('install');
+
+  const observer = new MutationObserver(records => {
+    let swapped = false;
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (record.type === 'attributes') {
+        // A REMOUNT INSIDE ONE DOCUMENT hands us an element whose first rendered value mutated
+        // nothing, so no record describes it. That value is the oldValue of its first mutation, and
+        // it is where a route that remounted at zero and was repaired in the same task is caught.
+        if (!seen.has(record.target)) {
+          seen.add(record.target);
+          evaluate(record.oldValue, 'first-render');
+        }
+        evaluate(valueAfter(records, index), 'commit');
+        continue;
+      }
+      for (const node of record.addedNodes) if (carriesCursor(node)) swapped = true;
+      for (const node of record.removedNodes) if (carriesCursor(node)) swapped = true;
+    }
+    if (swapped) {
+      const element = document.querySelector(CURSOR);
+      if (element !== null) seen.add(element);
+      look('route');
+    }
+  });
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-live-events'],
+    attributeOldValue: true,
+    childList: true,
+    subtree: true,
+  });
+
+  globalThis.__fyJourney = state;
+  globalThis.__fyJourneyLook = look;
+  globalThis.__fyJourneyObserver = observer;
+  return state.timeOrigin;
+}`;
+/* fy-e2e:lifetime-watcher:end */
+
+/* fy-e2e:lifetime-read:start */
+const LIFETIME_READ_PROGRAM = `() => {
+  const state = globalThis.__fyJourney;
+  if (state === undefined || state === null)
+    return JSON.stringify({
+      present: false,
+      sentinel: null,
+      timeOrigin: null,
+      baseline: null,
+      evaluations: 0,
+      minCursor: null,
+      maxCursor: null,
+      invalid: null,
+      rewound: null,
+      observations: [],
+      dropped: 0,
+    });
+  // The CURRENT value, put through the same predicate as every earlier one, so the reading the
+  // journey ends on is itself part of the observed record rather than a separate untested read.
+  if (typeof globalThis.__fyJourneyLook === 'function') globalThis.__fyJourneyLook('final-read');
+  return JSON.stringify({
+    present: true,
+    sentinel: state.sentinel,
+    timeOrigin: performance.timeOrigin,
+    baseline: state.baseline,
+    evaluations: state.evaluations,
+    minCursor: state.minCursor,
+    maxCursor: state.maxCursor,
+    invalid: state.invalid,
+    rewound: state.rewound,
+    observations: state.head.concat(state.tail),
+    dropped: state.dropped,
+  });
+}`;
+/* fy-e2e:lifetime-read:end */
+
+/** Pin this document's identity, and observe its cursor from inside the page. */
 async function watchDocumentLifetime(page: BrowserPage, token: string, baseline: number): Promise<number> {
-  const timeOrigin = await page.evaluate<number>(`(() => {
-    const state = {
-      sentinel: ${JSON.stringify(token)},
-      timeOrigin: performance.timeOrigin,
-      minCursor: ${String(baseline)},
-      samples: 0,
-    };
-    globalThis.__fyJourney = state;
-    globalThis.__fyJourneyTimer = setInterval(() => {
-      state.samples += 1;
-      const raw = document.querySelector('[data-live-events]')?.getAttribute('data-live-events') ?? null;
-      const value = Number(raw);
-      if (raw !== null && Number.isSafeInteger(value) && value < state.minCursor) state.minCursor = value;
-    }, 20);
-    return state.timeOrigin;
-  })()`);
-  return timeOrigin;
+  return page.evaluate<number>(`(${LIFETIME_WATCHER_PROGRAM})(${JSON.stringify({ sentinel: token, baseline })})`);
 }
 
 async function readDocumentLifetime(page: BrowserPage): Promise<DocumentLifetime> {
-  const encoded = await page.evaluate<string>(`(() => {
-    const state = globalThis.__fyJourney;
-    if (state === undefined) return JSON.stringify({ present: false, sentinel: null, timeOrigin: null, minCursor: null, samples: 0 });
-    return JSON.stringify({
-      present: true,
-      sentinel: state.sentinel,
-      timeOrigin: performance.timeOrigin,
-      minCursor: state.minCursor,
-      samples: state.samples,
-    });
-  })()`);
+  const encoded = await page.evaluate<string>(`(${LIFETIME_READ_PROGRAM})()`);
   return JSON.parse(encoded) as DocumentLifetime;
+}
+
+/** One reading, said in a way a reader can act on: the raw value, what triggered it, and when. */
+function describeObservation(observation: CursorObservation): string {
+  const repeated = observation.repeat > 1 ? ` x${String(observation.repeat)}` : '';
+  const because = observation.reason === null ? '' : `, ${observation.reason}`;
+  return `${JSON.stringify(observation.raw)} (${observation.source}${repeated}, ${String(observation.at)}ms${because})`;
+}
+
+function describeTrail(lifetime: DocumentLifetime): string {
+  const rows = lifetime.observations.map(describeObservation).join(', ');
+  return lifetime.dropped === 0 ? rows : `${rows} [+${String(lifetime.dropped)} readings not kept]`;
 }
 
 /** Everything the journey claims, in the order it can be claimed. */
@@ -1114,9 +1314,9 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           );
         }
         const cursorWhileLive = await liveCursor(browser.page, ledger, 'lost-stream-is-visible', 'before the outage');
-        // From here to the end of the journey, this document must remain THE SAME DOCUMENT and its
-        // cursor must never go backwards. Installed before the daemon is touched, so the whole
-        // outage and recovery happen inside the watched window.
+        // From here to the end of the journey, this document must remain THE SAME DOCUMENT and every
+        // value its cursor renders must be a usable one at or above this baseline. Installed before
+        // the daemon is touched, so the whole outage and recovery happen inside the observed window.
         const lifetimeToken = `${eventMarker}-lifetime`;
         const documentTimeOrigin = await watchDocumentLifetime(browser.page, lifetimeToken, cursorWhileLive);
 
@@ -1245,7 +1445,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
         const recoveredCursor = await liveCursor(browser.page, ledger, 'live-stream-recovers', 'after the recovery');
         const recoveredState = await liveStreamNow();
         const lifetime = await readDocumentLifetime(browser.page);
-        if (recoveredCursor < recoveredEvent.sequence) {
+        if (!Number.isSafeInteger(recoveredCursor) || recoveredCursor < recoveredEvent.sequence) {
           ledger.fail(
             'live-stream-recovers',
             `after the daemon returned, Chrome reached data-live-events=${String(recoveredCursor)} and needed ` +
@@ -1268,8 +1468,8 @@ describe('a real browser, a compiled daemon and a real relay', () => {
          * pairing survives in local storage, the route remounts at cursor `0`, it reaches
          * `reconnecting` on its own, and replay carries it forward to the marked event once the
          * daemon is back. Three independent witnesses are required instead — the in-document global,
-         * the clock, and a continuous reading of the cursor — because a remount inside one document
-         * defeats the first two, and a reload defeats the third.
+         * the clock, and every value the cursor committed while they were watching — because a
+         * remount inside one document defeats the first two, and a reload defeats the third.
          */
         if (!lifetime.present || lifetime.sentinel !== lifetimeToken) {
           ledger.fail(
@@ -1286,18 +1486,47 @@ describe('a real browser, a compiled daemon and a real relay', () => {
               `which only a navigation does`,
           );
         }
-        if (lifetime.samples <= 0) {
+        if (lifetime.evaluations <= 0) {
           ledger.fail(
             'live-stream-recovers',
-            'the in-document cursor watcher never sampled, so "never rewound" would be an untested claim',
+            'the in-document cursor observer evaluated nothing, so "never rewound" would be an untested claim',
           );
         }
-        if (lifetime.minCursor !== cursorWhileLive) {
+        if (lifetime.invalid !== null) {
           ledger.fail(
             'live-stream-recovers',
-            `the rendered cursor dropped to ${String(lifetime.minCursor)} at some point after the outage began, ` +
-              `below the pre-outage ${String(cursorWhileLive)} — the route remounted rather than resuming ` +
-              `(${String(lifetime.samples)} samples taken)`,
+            `the cursor this document rendered was not a usable value at least once after the outage began: ` +
+              `${describeObservation(lifetime.invalid)}. A reading a reader cannot trust is a defect even when the ` +
+              `next commit repairs it, which is why the first one is latched rather than filtered out. ` +
+              `Trail: ${describeTrail(lifetime)}`,
+          );
+        }
+        if (lifetime.rewound !== null) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the rendered cursor dropped to ${describeObservation(lifetime.rewound)} after the outage began, below ` +
+              `the pre-outage ${String(cursorWhileLive)} — the route remounted rather than resuming, however ` +
+              `briefly (${String(lifetime.evaluations)} readings evaluated). Trail: ${describeTrail(lifetime)}`,
+          );
+        }
+        // The two facts the latches above are asserted AGAINST, checked rather than assumed: the
+        // observer was installed against this journey's own baseline, and at least one reading parsed.
+        if (lifetime.baseline !== cursorWhileLive || lifetime.minCursor === null) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the cursor observer measured against baseline ${String(lifetime.baseline)} rather than the pre-outage ` +
+              `${String(cursorWhileLive)}, or never read one usable value (lowest ${String(lifetime.minCursor)}, ` +
+              `${String(lifetime.evaluations)} readings) — so "never rewound" is a claim about nothing. ` +
+              `Trail: ${describeTrail(lifetime)}`,
+          );
+        }
+        // The explicit loss-state read, restated where the recovery claim is made: this step must not
+        // rest on a comparison made earlier in the journey and out of sight of its own evidence.
+        if (cursorWhileLost !== cursorWhileLive) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the cursor read at the loss state was ${String(cursorWhileLost)} rather than the pre-outage ` +
+              `${String(cursorWhileLive)}, so the recovery below started from a place the reader had already lost`,
           );
         }
         ledger.prove(
@@ -1306,10 +1535,15 @@ describe('a real browser, a compiled daemon and a real relay', () => {
             `data-live-stream=live. The marked second waiting signal appended exactly session.waiting at sequence ` +
             `${String(recoveredEvent.sequence)}, and Chrome reached ${String(recoveredCursor)}. It is the SAME ` +
             `document throughout: the in-page sentinel survived and performance.timeOrigin is unchanged at ` +
-            `${String(documentTimeOrigin)}, so no reload occurred. It never rewound: an in-document watcher sampled ` +
-            `the rendered cursor ${String(lifetime.samples)} time(s) across the outage and recovery and its lowest ` +
-            `reading was ${String(lifetime.minCursor)}, equal to the pre-outage cursor. What this CANNOT see is the ` +
-            `\`after\` value the resumed subscription put on the wire — the relay's records are sealed to every ` +
+            `${String(documentTimeOrigin)}, so no reload occurred. Its VISIBLE cursor was never unreadable and ` +
+            `never went backwards: a MutationObserver installed before the daemon was stopped evaluated ` +
+            `${String(lifetime.evaluations)} cursor value(s) — the one in place when it was installed, the value ` +
+            `after every attribute commit taken from the records rather than from the DOM, the first rendered value ` +
+            `of every element that replaced the one carrying it, and the current value after every route swap — and ` +
+            `latched neither an unusable reading nor one below the pre-outage ${String(cursorWhileLive)}, which the ` +
+            `explicit loss-state read also still equalled. Its lowest usable reading was ` +
+            `${String(lifetime.minCursor)} and its highest ${String(lifetime.maxCursor)}. What this CANNOT see is ` +
+            `the \`after\` value the resumed subscription put on the wire — the relay's records are sealed to every ` +
             `observer including this journey — so the exact resumption cursor is proved in the unit suite instead`,
         );
 
