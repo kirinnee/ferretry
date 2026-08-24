@@ -6,7 +6,7 @@ import {
   type CredentialCloneOutcome,
   type CredentialMaterial,
   type CredentialReading,
-  chooseLoginMember,
+  chooseLoginDriver,
   classifyClaudeCredential,
   classifyCodexCredential,
   classifyCredential,
@@ -432,25 +432,48 @@ describe('pickDonor', () => {
   });
 });
 
-describe('chooseLoginMember', () => {
-  it('should prefer an interactive lane, because an approval is interactive', () => {
-    // Arrange
+describe('chooseLoginDriver', () => {
+  const autoThenInteractive = [
+    status(member({ accountId: ID_ONE, mode: 'auto' }), { state: 'missing' }),
+    status(member({ accountId: ID_TWO, mode: 'interactive' }), { state: 'missing' }),
+  ];
+
+  it('should launch the named account is own auto lane rather than its interactive sibling', () => {
+    // Act — the whole defect, in one call. The replaced function answered ID_TWO here, so a harness
+    // wrote its credential into ID_TWO is home while somebody waited for ID_ONE to be signed in.
+    should(chooseLoginDriver(autoThenInteractive, ID_ONE)?.accountId).equal(ID_ONE);
+  });
+
+  it('should launch the named account when it is one of several interactive lanes', () => {
+    // Arrange — TWO interactive lanes, and the one named is not the one listed first. An identity
+    // commonly has several: a fleet gives one provider account a lane per model.
     const members = [
-      status(member({ accountId: ID_ONE, mode: 'auto' }), { state: 'missing' }),
+      status(member({ accountId: ID_ONE, mode: 'interactive' }), { state: 'missing' }),
       status(member({ accountId: ID_TWO, mode: 'interactive' }), { state: 'missing' }),
     ];
 
-    // Act / Assert — read from the declared mode, never from a wrapper called `auto-something`.
-    should(chooseLoginMember(members)?.accountId).equal(ID_TWO);
+    // Act / Assert — "find an interactive lane" would answer ID_ONE and sign in the wrong account.
+    should(chooseLoginDriver(members, ID_TWO)?.accountId).equal(ID_TWO);
   });
 
-  it('should fall back to the first member when no lane is interactive', () => {
+  it('should fall back to the interactive lane when the account asked about is not in this identity', () => {
+    // Act / Assert — a manifest can lose a lane between the survey and the launch.
+    should(chooseLoginDriver(autoThenInteractive, ID_THREE)?.accountId).equal(ID_TWO);
+  });
+
+  it('should prefer an interactive lane when nobody was named, because an approval is interactive', () => {
+    // Act / Assert — read from the declared mode, never from a wrapper called `auto-something`.
+    should(chooseLoginDriver(autoThenInteractive)?.accountId).equal(ID_TWO);
+  });
+
+  it('should fall back to the first member when nobody was named and no lane is interactive', () => {
     const members = [status(member({ accountId: ID_ONE, mode: 'auto' }), { state: 'missing' })];
-    should(chooseLoginMember(members)?.accountId).equal(ID_ONE);
+    should(chooseLoginDriver(members)?.accountId).equal(ID_ONE);
   });
 
   it('should choose nobody when the identity has no available member', () => {
-    should(chooseLoginMember([])).be.undefined();
+    should(chooseLoginDriver([])).be.undefined();
+    should(chooseLoginDriver([], ID_ONE)).be.undefined();
   });
 });
 

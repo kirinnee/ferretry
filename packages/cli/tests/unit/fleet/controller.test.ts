@@ -342,7 +342,7 @@ describe('logging accounts in', () => {
     should(logins.requests[0]?.refresh).be.false();
   });
 
-  it('should pass only the named accounts through', async () => {
+  it('should pass only the named accounts through, and sign them in rather than report on them', async () => {
     // Arrange
     const logins = new RecordingLoginService();
     const { subject } = controller({ logins });
@@ -350,7 +350,24 @@ describe('logging accounts in', () => {
     // Act
     await subject.login([ACCOUNT_ID], {});
 
-    // Assert
+    // Assert — naming an account says its credential is not working, and no local read can check that
+    // claim: a token the provider answers 401 for still classifies as valid. `full` would answer
+    // "already had a usable credential" for exactly the account somebody asked about, which is what
+    // made the remedy `fy fleet health` prints do nothing.
+    should(logins.requests[0]?.accountIds).deepEqual([ACCOUNT_ID]);
+    should(logins.requests[0]?.mode).equal('reauthenticate');
+  });
+
+  it('should still ask for nothing under --sync-only when an account was named', async () => {
+    // Arrange
+    const logins = new RecordingLoginService();
+    const { subject } = controller({ logins });
+
+    // Act
+    await subject.login([ACCOUNT_ID], { syncOnly: true });
+
+    // Assert — every flag here narrows what a pass may do, and naming an account does not widen it.
+    should(logins.requests[0]?.mode).equal('sync-only');
     should(logins.requests[0]?.accountIds).deepEqual([ACCOUNT_ID]);
   });
 

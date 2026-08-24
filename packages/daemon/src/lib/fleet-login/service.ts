@@ -489,8 +489,16 @@ export class HarnessLoginService {
   /**
    * Drive the fleet's own login service, with this flow as its interactive port.
    *
-   * Nothing else decides what happens to the identity: sync-first, one approval, fan the credential out,
-   * report per-account outcomes. This method's whole job is to be the terminal that is not there.
+   * Nothing else decides what happens to the identity: one approval, deliver the credential across the
+   * lanes, report per-account outcomes. This method's whole job is to be the terminal that is not there.
+   *
+   * THE ACCOUNT IS PASSED, and it used to not be. This ran the whole identity with nobody named, so the
+   * fleet service picked the identity's interactive lane, launched THAT wrapper, and the flow went on
+   * reporting `accountId` — the account a person actually clicked — as though the two were the same
+   * thing. Worse, a `full` pass reads what the homes hold: a revoked token still classifies as valid,
+   * so pressing Sign in on the one account the provider is rejecting answered `usable` for every lane
+   * and never launched anything at all. Naming the account makes it the pass's subject, which is both
+   * the thing a `reauthenticate` pass is for and the home it must prove holds a credential at the end.
    */
   async #run(identity: FleetIdentity, record: FlowRecord): Promise<void> {
     const fleetLogin = new FleetLoginService({
@@ -498,7 +506,11 @@ export class HarnessLoginService {
       loginPort: { login: async target => await this.#runChild(record, target) },
     });
     try {
-      const results = await fleetLogin.login({ identities: [identity], mode: 'full' });
+      const results = await fleetLogin.login({
+        identities: [identity],
+        accountIds: [record.accountId],
+        mode: 'reauthenticate',
+      });
       this.#finish(record, outcomesOf(results));
     } catch (error) {
       this.#end(record, error instanceof Error && error.message.length > 0 ? error.message : 'the sign-in failed');

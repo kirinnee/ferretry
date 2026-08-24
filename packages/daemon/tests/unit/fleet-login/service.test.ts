@@ -279,8 +279,8 @@ interface Fixture {
   readonly timers: { milliseconds: number; run: () => void; disarmed: boolean }[];
   /** Let the not-awaited login work run. Everything in the fixture is synchronous or a microtask. */
   settle(): Promise<void>;
-  /** The one child a flow spawned, once it has. */
-  child(): Promise<FakeChild>;
+  /** The child a flow spawned, once it has. `index` picks one out of a run of several flows. */
+  child(index?: number): Promise<FakeChild>;
 }
 
 interface FixtureOptions {
@@ -349,10 +349,10 @@ function fixture(options: FixtureOptions = {}): Fixture {
     children,
     timers,
     settle,
-    child: async () => {
+    child: async (index = 0) => {
       await settle();
-      const child = children[0];
-      if (child === undefined) throw new Error('no child was spawned');
+      const child = children[index];
+      if (child === undefined) throw new Error(`no child was spawned at index ${index}`);
       return child;
     },
   };
@@ -773,7 +773,7 @@ describe('the per-change confirmation', () => {
 // ─── Claude's own flow, end to end ────────────────────────────────────────────────────────────────
 
 describe('the Claude leg', () => {
-  it('should launch the interactive lane’s own wrapper with Claude’s own argv', async () => {
+  it('should launch the clicked account’s own wrapper with Claude’s own argv', async () => {
     // Arrange
     const subject = fixture();
 
@@ -781,9 +781,13 @@ describe('the Claude leg', () => {
     await subject.service.start({ accountId: AUTO_ID }, HOST);
     const child = await subject.child();
 
-    // Assert — the AUTO lane was named and the INTERACTIVE one was launched, because an approval is
-    // something a person performs and the mode is declared rather than read out of a name.
-    should(child.spec.command).deepEqual(['/fleet/bin/claude-kirin', 'auth', 'login', '--claudeai']);
+    // Assert — THE AUTO LANE WAS NAMED AND THE AUTO LANE IS LAUNCHED. This assertion used to demand
+    // `/fleet/bin/claude-kirin`, the interactive sibling, and that is the defect: the credential a
+    // harness writes goes into the home of the wrapper that was launched, so signing one account in
+    // authenticated a different one. An interactive lane is still preferred for an account whose own
+    // lane cannot show a browser — see the sibling case below — but preferring a wrapper was never a
+    // reason to change which account ends up holding the credential.
+    should(child.spec.command).deepEqual(['/fleet/bin/claude-auto', 'auth', 'login', '--claudeai']);
   });
 
   it('should strip the caller’s own provider credential from the child’s environment', async () => {
@@ -927,27 +931,59 @@ describe('the Claude leg', () => {
     should(subject.store.clones).deepEqual([`clone claude ${INTERACTIVE_ID} -> ${AUTO_ID}`]);
   });
 
-  it('should ask nobody anything when a sibling already has a usable credential', async () => {
-    // Arrange — the good case: `FleetLoginService` syncs first, so no child is ever spawned.
+  it('should still sign the account in when a sibling holds a credential, because a revoked one reads as usable', async () => {
+    // Arrange — a sibling home holds something a local read calls usable. That is ALSO what a revoked
+    // token looks like from here: it has an access token and its expiry is in the future. This used to
+    // be answered with a copy and no child at all, which meant pressing Sign in on the one account the
+    // provider was rejecting reported `synced` and signed nothing in.
     const store = new RecordingStore(new Set([AUTO_ID]));
     const subject = fixture({ store });
 
     // Act
     const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, PASTED_CODE);
+    subject.store.signIn(INTERACTIVE_ID);
+    child.exit(0);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert — a sign-in was actually run, and the account somebody pressed the button on is the one
+    // reported signed in.
+    should(subject.children).have.length(1);
+    should(actual).have.property('state', 'complete');
+    should(actual)
+      .have.property('accounts')
+      .deepEqual([
+        { accountId: INTERACTIVE_ID, status: 'logged-in' },
+        { accountId: AUTO_ID, status: 'usable' },
+      ]);
+  });
+
+  it('should report the clicked account signed in, not its sibling', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: AUTO_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, PASTED_CODE);
+
+    // Act — the harness writes into the home of the wrapper that was launched, which is now the auto
+    // lane’s own.
+    subject.store.signIn(AUTO_ID);
+    child.exit(0);
     await subject.settle();
     const actual = await subject.service.status(started.flowId);
 
     // Assert
-    should(subject.children).be.empty();
-    should(actual).have.property('state', 'complete');
-    // Manifest order, which is the order `FleetLoginService` reports its members in — the interactive
-    // lane received the sibling’s credential and the sibling’s own was already usable.
     should(actual)
       .have.property('accounts')
       .deepEqual([
         { accountId: INTERACTIVE_ID, status: 'synced' },
-        { accountId: AUTO_ID, status: 'usable' },
+        { accountId: AUTO_ID, status: 'logged-in' },
       ]);
+    should(subject.store.clones).deepEqual([`clone claude ${AUTO_ID} -> ${INTERACTIVE_ID}`]);
   });
 });
 
@@ -1228,36 +1264,45 @@ describe('a login’s lifetime', () => {
     should(actual.message).match(/may have finished or run out of time/u);
   });
 
+  /**
+   * Run one whole sign-in to a settled flow, the way a person would.
+   *
+   * A flow only settles now that a child has actually run: pressing Sign in signs in, so there is no
+   * longer a shape where a flow completes with nothing launched. Retention is about settled flows, and
+   * this is the shortest honest way to make one.
+   */
+  const settledFlow = async (subject: Fixture): Promise<string> => {
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child(subject.children.length);
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, PASTED_CODE);
+    subject.store.signIn(INTERACTIVE_ID);
+    child.exit(0);
+    await subject.settle();
+    return started.flowId;
+  };
+
   it('should keep a finished flow readable so its own poller learns the outcome', async () => {
     // Arrange
-    const store = new RecordingStore(new Set([AUTO_ID]));
-    const subject = fixture({ store });
-    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    await subject.settle();
+    const subject = fixture({ store: new RecordingStore(new Set([AUTO_ID])) });
+    const started = await settledFlow(subject);
 
     // Act — several later flows, so retention is exercised rather than assumed.
     for (let index = 0; index < 3; index += 1) {
-      const next = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-      await subject.settle();
-      should(next.flowId).not.equal(started.flowId);
+      should(await settledFlow(subject)).not.equal(started);
     }
 
     // Assert
-    should(await subject.service.status(started.flowId)).have.property('state', 'complete');
+    should(await subject.service.status(started)).have.property('state', 'complete');
   });
 
   it('should forget the oldest finished flows rather than growing without bound', async () => {
     // Arrange
-    const store = new RecordingStore(new Set([AUTO_ID]));
-    const subject = fixture({ store });
-    const first = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-    await subject.settle();
+    const subject = fixture({ store: new RecordingStore(new Set([AUTO_ID])) });
+    const first = { flowId: await settledFlow(subject) };
 
     // Act — ten more, all settling, which is more than the retention window.
-    for (let index = 0; index < 10; index += 1) {
-      await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
-      await subject.settle();
-    }
+    for (let index = 0; index < 10; index += 1) await settledFlow(subject);
 
     // Assert
     should((await refusalOf(async () => subject.service.status(first.flowId))).code).equal('fleet_login_unknown');

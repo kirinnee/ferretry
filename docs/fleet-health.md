@@ -63,6 +63,21 @@ and the **quota** is what goes missing — never a quota bar drawn at 0 %.
 | `needs_credentials` | A non-login credential needs repair. **A login cannot fix this account.** |
 | `unknown`           | No conclusive result. Never routeable evidence, and never "zero usage".   |
 
+### The remedy has to actually work
+
+`fy fleet health` prints `fy fleet login <accountId>` beside every `needs_relogin` row, and for a
+while that command was the one thing guaranteed **not** to fix that account. A bare `fy fleet login`
+takes the cheapest route to a signed-in fleet, which means it reads what the homes hold — and the
+commonest cause of `needs_relogin` is `oauth_token_rejected`, a `401`, where the local credential
+still classifies as `valid` because it has an access token whose expiry is in the future. So the
+identity looked `complete`, every lane was reported `usable`, and nothing happened.
+
+Naming an account is therefore a statement that what it holds is not working, and it selects a
+different pass: see the `reauthenticate` mode in `packages/fleet/src/lib/login.ts`. It reaches the
+provider rather than trusting the homes, it launches **that account's own wrapper**, and it reads that
+account's own home afterwards before reporting it signed in. A renewal that succeeds still settles it
+with no browser, and `--sync-only` still asks for nothing.
+
 `needs_credentials` is not a politer `needs_relogin`, and separating them is the point. An account
 whose credential comes from an environment variable or a token file **cannot** be fixed by signing
 in: the harness reads that value and never consults its own credential store, so a login would open

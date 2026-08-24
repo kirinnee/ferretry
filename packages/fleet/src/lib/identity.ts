@@ -354,13 +354,52 @@ export function pickDonor(members: readonly FleetIdentityMemberStatus[]): FleetI
 }
 
 /**
- * Which member's wrapper represents the identity when a human has to approve something.
+ * WHOSE WRAPPER shows the browser. Not whose credential this is, and it used to decide both.
  *
- * An interactive lane is preferred because a browser approval is interactive; the choice is read from
- * the declared `mode`, never from a wrapper called `auto-something`.
+ * ## The defect this replaces
+ *
+ * This was `chooseLoginMember`, and it answered one question that was really two: it returned the
+ * identity's **interactive** lane whatever the caller asked for, and that one member was then treated
+ * as the account being signed in. So signing `claude-auto-default` in ran the approval through
+ * `claude-default`'s wrapper and left the credential in `claude-default`'s home. The account somebody
+ * was trying to fix stayed signed out, and nothing said so.
+ *
+ * The old reasoning — "a browser approval is interactive" — is sound, and it is about which WRAPPER
+ * can talk to a person. It was never a licence to decide WHICH ACCOUNT keeps the credential. That
+ * fact belongs to the request: see `accountIds` on the login request in {@link ./login.ts}, which
+ * names the accounts whose own homes are read and proved before any of them is reported signed in.
+ *
+ * ## The rule
+ *
+ * **A named account drives its own login.** A harness writes its credential into the home of the
+ * wrapper that was launched, so launching the named account's own wrapper is the only arrangement
+ * where the credential lands where it was asked to land BY CONSTRUCTION rather than by a copy that can
+ * fail — and on macOS it must, because Claude derives its keychain item name from the home path, so
+ * "the same credential" in two homes is two separate writes.
+ *
+ * The interactive preference survives for the case it was actually about: a pass where NOBODY was
+ * named. One approval covers the whole identity there, so some lane has to be chosen, and a lane
+ * declared `interactive` is the one built for a person to sit in front of.
+ *
+ * A lane is interactive by its declared `mode`, never because a wrapper is called `auto-something`.
+ *
+ * ## What this gives up, on purpose
+ *
+ * An account's declared harness flags are composed ahead of the login subcommand, and Codex's parser
+ * refuses an unknown root argument — so an auto lane carrying an operator-declared root-only flag can
+ * fail to offer a sign-in at all. That failure is loud, names the account, and is a pinned defect of
+ * the generated wrappers with its own fix. Borrowing a sibling would paper over it by authenticating a
+ * DIFFERENT account and reporting success, which is the defect this function exists to end.
  */
-export function chooseLoginMember(members: readonly FleetIdentityMemberStatus[]): FleetIdentityMember | undefined {
-  return (members.find(status => status.member.mode === 'interactive') ?? members[0])?.member;
+export function chooseLoginDriver(
+  members: readonly FleetIdentityMemberStatus[],
+  preferredAccountId?: string,
+): FleetIdentityMember | undefined {
+  const preferred =
+    preferredAccountId === undefined
+      ? undefined
+      : members.find(status => status.member.accountId === preferredAccountId)?.member;
+  return preferred ?? members.find(status => status.member.mode === 'interactive')?.member ?? members[0]?.member;
 }
 
 /**
