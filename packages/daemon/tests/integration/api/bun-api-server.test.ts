@@ -22,6 +22,13 @@ import {
   textResponse,
 } from '../../../src/lib/api/index.ts';
 import { mayTrustDirectLoopback, parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
+import {
+  type EventStreamScheduler,
+  type EventStreamTimer,
+  FleetEventStreamService,
+  type FleetEventSource,
+} from '../../../src/lib/session/events/index.ts';
+import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
 
 /**
  * These tests bind a REAL socket, so every one of them asks for port 0 on 127.0.0.1 and stops the
@@ -520,6 +527,54 @@ function recordingSocket(
   };
 }
 
+/**
+ * A scheduler that reports whether an idle window is CURRENTLY armed.
+ *
+ * Counted rather than slotted: `armIdle` cancels before it arms, so "armed minus cancelled" is
+ * exactly "a window this handler still holds". A boolean flag would have read the same at open and
+ * been wrong the moment the handler re-armed.
+ */
+class ObservableScheduler implements EventStreamScheduler {
+  armed = 0;
+  cancelled = 0;
+
+  after(_milliseconds: number, _action: () => void): EventStreamTimer {
+    this.armed += 1;
+    return {
+      cancel: () => {
+        this.cancelled += 1;
+      },
+    };
+  }
+
+  get holdsAWindow(): boolean {
+    return this.armed > this.cancelled;
+  }
+}
+
+/** One durable event and no live edge, so the stream opens, writes once, and then goes quiet. */
+function oneEventSource(event: StoredSessionEvent): FleetEventSource {
+  return {
+    replay: async () => [event],
+    fleetBacklog: async () => ({ sessionIds: [event.sessionId], events: [event] }),
+    subscribe: () => () => undefined,
+  };
+}
+
+/** The REAL live-event handler, mounted on the real socket route. No fake handler in between. */
+function eventStreamSocket(scheduler: EventStreamScheduler, source: FleetEventSource): SocketRoute {
+  return {
+    method: 'GET',
+    path: '/v1/stream',
+    minimum: 'operator',
+    accept: async () => async (downstream: SocketDownstream) =>
+      new FleetEventStreamService(source, scheduler).handler(
+        { kind: 'session', sessionId: 's1', after: 0 },
+        downstream,
+      ),
+  };
+}
+
 /** The body of a handshake answer. Fails loudly when the protocol switched instead, so a case can
  *  never optional-chain its way into asserting nothing. */
 async function answered(response: Response | undefined): Promise<Record<string, unknown>> {
@@ -768,6 +823,90 @@ describe('BunApiServer over a live socket', () => {
     // Assert: closed without ever being opened.
     should(record.opened).equal(0);
     should(record.closed).equal(1);
+  });
+
+  /**
+   * THE ORDINARY PEER CLOSE, WITH NOTHING HAVING FAILED — the path that bounds a handler's timers.
+   *
+   * A handler is required to release every timer it holds in `close()`, and the live event stream's
+   * idle proof now RE-ARMS after each frame, so "who calls `close()`" stopped being a housekeeping
+   * question and became the thing that bounds a recurring timer's lifetime. If the only route to
+   * `close()` were a failed write, a transport that never reported failure would leave that timer
+   * running for as long as the daemon lived.
+   *
+   * The two neighbouring cases do not answer it: the one above closes a handler that arrived after
+   * its peer had already gone, and the one below is the daemon shutting itself down. Neither is an
+   * ordinary reader closing a tab on a socket that is working perfectly.
+   *
+   * NOTHING FAILS ANYWHERE IN THIS CASE, and that is the point rather than an omission. The
+   * attachment succeeds, `open()` runs, and its frame is SENT AND RECEIVED — `untilFrames(1)` is
+   * what proves the write path was healthy — so the only thing that ends the handler is the peer
+   * going away. That makes this evidence about the transport rather than about error handling.
+   */
+  it('should tell a healthy handler its socket is gone when the peer simply leaves', async () => {
+    // Arrange
+    const record = recorded();
+    const handle = await listen(recordingSocket({ record }));
+    const viewer = connect(streamUrl(handle));
+    await viewer.opened;
+    // The handler attached, opened, and its send SUCCEEDED. No failure has been reported to anyone.
+    await viewer.untilFrames(1);
+
+    // Act — the reader closes the tab.
+    viewer.close();
+    await viewer.untilClosed();
+    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
+
+    // Assert — the handler was told exactly once, by the transport, with no write having failed.
+    should(record.opened).equal(1);
+    should(record.closed).equal(1);
+  });
+
+  /**
+   * THE SAME TEARDOWN, WITH THE REAL IDLE TIMER ON THE OTHER END OF IT.
+   *
+   * The case above proves the transport calls SOME handler's `close()`. That is route evidence and
+   * it is not the property that matters here, which is that the live event stream's RECURRING idle
+   * window actually stops. Since this PR made `armIdle` re-arm after every proof, a socket whose
+   * only route to `close()` was a failed write would hold a thirty-second timer for the daemon's
+   * whole life. So this composes the real `FleetEventStreamService` onto the real Bun socket route
+   * and watches the real scheduler across a real peer disconnect.
+   *
+   * NOTHING FAILS HERE EITHER, and the replayed event is what proves it: the handler wrote a frame,
+   * the client received it, so the write path was healthy at the moment the window was armed. The
+   * only thing that ends this stream is the reader leaving.
+   */
+  it('should cancel the live stream‘s armed idle window when the peer leaves, with no write having failed', async () => {
+    // Arrange
+    const scheduler = new ObservableScheduler();
+    const stored: StoredSessionEvent = {
+      sessionId: 's1',
+      sequence: 1,
+      time: '2026-08-24T00:00:00.000Z',
+      type: 'session.turn',
+      data: {},
+    };
+    const handle = await listen(eventStreamSocket(scheduler, oneEventSource(stored)));
+    const viewer = connect(streamUrl(handle));
+    await viewer.opened;
+    // The durable replay reached the client, so the socket's write path is healthy.
+    await viewer.untilFrames(1);
+    for (let attempt = 0; attempt < 200 && !scheduler.holdsAWindow; attempt += 1) await Bun.sleep(10);
+
+    // A window IS armed before the disconnect — otherwise "unarmed afterwards" would prove nothing.
+    should(scheduler.holdsAWindow).be.true();
+    should(scheduler.armed).be.aboveOrEqual(1);
+
+    // Act — an ordinary peer close. No write ever failed and nothing threw.
+    viewer.close();
+    await viewer.untilClosed();
+    for (let attempt = 0; attempt < 200 && scheduler.holdsAWindow; attempt += 1) await Bun.sleep(10);
+
+    // Assert — the recurring proof does not outlive the socket, and the route is what stopped it.
+    // This is the bound on the timer risk the recurring idle change introduced: a lying `send` is
+    // not the only thing that can end the schedule, so the exposure is one socket's lifetime.
+    should(scheduler.holdsAWindow).be.false();
+    should(scheduler.cancelled).be.aboveOrEqual(1);
   });
 
   it('should end every live socket when the daemon shuts down', async () => {

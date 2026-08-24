@@ -312,3 +312,9 @@ export * from './tool-extract.ts';
 export * from './usage.ts';
 export * from './usage-store.ts';
 export * from './web-terminals.ts';
+
+// PR 1B — the live event feed's reconnect model and its visible state. APPENDED rather than sorted
+// into the blocks above on the lead's instruction: a second PR is landing one export into this same
+// file, and an alphabetical insertion would put the two diffs in adjacent hunks.
+export * from '../components/live-stream-indicator.tsx';
+export * from '../components/session-event-stream-model.ts';
