@@ -2,8 +2,17 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { FleetRefreshService } from '../../../src/lib/fleet-refresh/index.ts';
 
+/**
+ * The invariant these tests exist for is NEGATIVE: an unattended pass must reach nothing that spends.
+ *
+ * The first test here used to assert `['health', 'usage']` — it pinned the billable health probe as
+ * expected behaviour, so the suite was green the whole time the daemon was launching a wrapper and
+ * spending a real turn per account on its timer. A test that pins a defect is worse than no test,
+ * because it makes the fix read as the regression. It now asserts what the pass may touch, and the
+ * type no longer offers anything else.
+ */
 describe('the fleet refresh loop', () => {
-  it('should refresh the existing usage and health feeds together', async () => {
+  it('should refresh the usage feed and reach nothing that spends', async () => {
     // Arrange
     const calls: string[] = [];
     const service = new FleetRefreshService({
@@ -15,22 +24,16 @@ describe('the fleet refresh loop', () => {
         snapshotAt: () => undefined,
         hasSnapshot: () => false,
       },
-      fleet: {
-        health: async () => {
-          calls.push('health');
-          return {};
-        },
-      },
     });
 
     // Act
     await service.run();
 
-    // Assert
-    should(calls.sort()).deepEqual(['health', 'usage']);
+    // Assert — the whole set, not a membership check: a second collector appearing here is the defect.
+    should(calls).deepEqual(['usage']);
   });
 
-  it('should retain the next scheduled pass after either established feed fails', async () => {
+  it('should retain the next scheduled pass after the established feed fails', async () => {
     // Arrange
     let attempts = 0;
     const service = new FleetRefreshService({
@@ -43,7 +46,6 @@ describe('the fleet refresh loop', () => {
         snapshotAt: () => undefined,
         hasSnapshot: () => false,
       },
-      fleet: { health: async () => ({}) },
     });
 
     // Act
@@ -54,7 +56,7 @@ describe('the fleet refresh loop', () => {
     should(attempts).equal(2);
   });
 
-  it('should serialize overlapping ticks so a costly collector cannot be doubled by the timer', async () => {
+  it('should serialize overlapping ticks so a slow collector cannot be doubled by the timer', async () => {
     // Arrange
     const release = Promise.withResolvers<void>();
     let active = 0;
@@ -71,7 +73,6 @@ describe('the fleet refresh loop', () => {
         snapshotAt: () => undefined,
         hasSnapshot: () => false,
       },
-      fleet: { health: async () => ({}) },
     });
 
     // Act

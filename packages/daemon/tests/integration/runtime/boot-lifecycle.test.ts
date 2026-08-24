@@ -2,7 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { buildFleetManifest, FleetManifestSchema } from '@ferretry/fleet';
+import { buildFleetManifest, FleetHealthSnapshotSchema, FleetManifestSchema } from '@ferretry/fleet';
+import { FLEET_HEALTH_SENTINEL } from '@ferretry/fleet/adapters';
 import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
@@ -5153,6 +5154,170 @@ describe('daemon boot lifecycle', () => {
       // The trail's last word about the fleet is still the seeded account, because nothing moved.
       const checked = said.steps.filter(step => step.startsWith('harnesses checked'));
       should(checked.at(-1)).containEql(`claude: ${WRAPPER}`);
+    });
+  });
+
+  /**
+   * WHAT AN UNATTENDED PASS IS ALLOWED TO SPEND, proved against a recorder that a real host would
+   * have had to run.
+   *
+   * A REAL SENTINEL MODEL PROMPT is what the v3.6 timer reached. `FleetRefreshService` took the
+   * mounted fleet and called its `health()`, which runs `ProcessFleetHealthProbe` — the published
+   * account WRAPPER, launched with a prompt asking for an exact sentinel. The fleet's own
+   * `usage.interval` default is 60 seconds and it drives this timer, so four accounts is a raw
+   * ceiling of 5,760 launches a day; `FLEET_HEALTH_SUCCESS_TTL_MS` is 15 minutes, which reduces the
+   * stable path to roughly 384 billable calls a day, and an unexpected reply or a failed cache write
+   * climbs back to the ceiling. `spendWrapper` records every launch and its full argv, because a
+   * flag can read `false` while a process still starts.
+   *
+   * ## THE FIXTURE HAS TO ASK FOR THE EXPENSIVE THING, OR IT PROVES NOTHING
+   *
+   * `health.enabled: true` is declared for exactly that reason. `usage.enabled: false` switches off
+   * the daemon's own native collector so the chain walks as far as the external endpoint below,
+   * which is what counts the unattended passes.
+   *
+   * ## THE TICK IS REAL, NOT A SHORTENED WAIT
+   *
+   * `usage.interval: 1` is the fleet's own declaration, and it drives the registered `setInterval`
+   * AND the feed's freshness window. `usageReads` counts requests the DAEMON made to the collector
+   * with nothing calling it, so a second read is a second unattended pass. The elapsed clock is
+   * asserted against the interval too, so the evidence cannot be the boot pass counted twice.
+   *
+   * ## AND THE RECORDER IS PROVED TO WORK
+   *
+   * An absent file is only evidence if the thing that writes it would have. The explicit health
+   * request is the wrapper's positive control. A test that could not distinguish "never ran" from
+   * "recorder broken" would be worthless.
+   */
+  describe('what an unattended fleet pass may spend', () => {
+    const SPEND_ACCOUNT = '00000000-0000-4000-8000-0000000005e4';
+    const SPEND_WRAPPER = 'claude-auto-spend';
+    /** The fleet's own declared cadence, in seconds. It is the timer period and the cache window. */
+    const TICK_SECONDS = 1;
+
+    it('should complete the boot pass and a real scheduled tick with no wrapper launch, while an explicit health request still starts the wrapper', async () => {
+      // Arrange
+      const home = await tempDirectory('fyd-unattended-spend');
+      const port = await freeLoopbackPort();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      let release = (): void => {};
+      const world = await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      });
+
+      // The recorder. It is a real executable on a real host: the only way to prove nothing was
+      // launched is to make a launch leave a trace.
+      const binary = join(home, 'bin');
+      await mkdir(binary, { recursive: true });
+      const wrapperLog = join(home, 'wrapper-launches.log');
+      const spendWrapper = join(binary, SPEND_WRAPPER);
+      // It answers with the exact sentinel, so the positive control below is a genuine `healthy`
+      // verdict rather than a launch that happened to fail.
+      await writeFile(
+        spendWrapper,
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> ${wrapperLog}\nprintf '%s' '${FLEET_HEALTH_SENTINEL}'\n`,
+        { mode: 0o755 },
+      );
+      await publishManifest(home, [
+        {
+          id: SPEND_ACCOUNT,
+          kind: 'claude',
+          mode: 'auto',
+          wrapper: spendWrapper,
+          home: join(home, 'harness'),
+          displayName: 'Spend',
+          defaultModel: 'claude-opus-5',
+          models: [{ id: 'claude-opus-5', available: true }],
+          available: true,
+          unavailableReason: null,
+        },
+      ]);
+
+      // The external collector, which is what witnesses each unattended pass. Every request it
+      // counts is one the daemon made with nothing calling it.
+      let usageReads = 0;
+      const collector = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        fetch: () => {
+          usageReads += 1;
+          return Response.json({ accounts: [] });
+        },
+      });
+      const collectorUrl = `http://127.0.0.1:${String(boundPort(collector))}/usage`;
+
+      await mkdir(join(home, 'fleet'), { recursive: true });
+      await writeFile(
+        join(home, 'fleet', 'config.yaml'),
+        Bun.YAML.stringify({
+          health: { enabled: true },
+          usage: { enabled: false, interval: TICK_SECONDS },
+        }),
+        { mode: 0o600 },
+      );
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({ host: '127.0.0.1', port, usage: { url: collectorUrl } }),
+        { mode: 0o600 },
+      );
+
+      // Act
+      const bootAt = Date.now();
+      const exit = start(world, cleanups);
+      const base = `http://127.0.0.1:${String(port)}`;
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      // The boot pass and then a REGISTERED TICK. Nothing in this test reads usage, so every one of
+      // these is the daemon collecting on its own schedule.
+      await waitUntil(() => usageReads >= 2, 'a scheduled fleet refresh tick after the boot pass');
+      const unattendedElapsedMs = Date.now() - bootAt;
+      const unattendedReads = usageReads;
+      const wrapperAfterUnattended = await Bun.file(wrapperLog).exists();
+
+      // The positive control: a caller who ASKS for account health still gets a real probe. This is
+      // also what proves the wrapper recorder works, so the absence above means something.
+      const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+      const explicit = await fetch(`${base}/v1/fleet/health`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      const snapshot = FleetHealthSnapshotSchema.parse(await explicit.json());
+      const wrapperAfterExplicit = await readFile(wrapperLog, 'utf8');
+      release();
+      const code = await exit;
+      await runCleanups(cleanups);
+      await collector.stop(true);
+
+      // Re-read what the daemon was actually configured with, so this cannot pass because the
+      // fixture forgot to point it at the collector that witnesses each pass.
+      const daemonConfig = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as {
+        usage: { url: string };
+      };
+
+      // Assert
+      should(code).equal(0);
+      // The unattended passes really happened, and the second one was a timer tick rather than the
+      // boot pass counted twice.
+      should(unattendedReads).be.aboveOrEqual(2);
+      should(unattendedElapsedMs).be.aboveOrEqual(TICK_SECONDS * 1_000);
+      should(daemonConfig.usage.url).equal(collectorUrl);
+
+      // No account wrapper was launched by either unattended pass, so no sentinel model prompt was
+      // sent and no model call was billed.
+      should(wrapperAfterUnattended).be.false();
+
+      // The explicit diagnostic is unchanged: it launched the wrapper, with the real sentinel prompt,
+      // and reported the account healthy.
+      should(explicit.status).equal(200);
+      should(snapshot.accounts).have.length(1);
+      should(snapshot.accounts[0]?.accountId).equal(SPEND_ACCOUNT);
+      should(snapshot.accounts[0]?.state).equal('healthy');
+      should(wrapperAfterExplicit).containEql('--print');
+      should(wrapperAfterExplicit).containEql(FLEET_HEALTH_SENTINEL);
+      should(wrapperAfterExplicit.trim().split('\n')).have.length(1);
     });
   });
 });

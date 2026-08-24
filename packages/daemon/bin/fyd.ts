@@ -39,7 +39,6 @@ import {
   NodeSessionBrowserLauncher,
   BrowserWorkerClient,
   BunApiServer,
-  BunCommandRunner,
   BunProcessProbe,
   BunRelayCarrier,
   BunSecretChildRunner,
@@ -53,7 +52,6 @@ import {
   ProcCgroupPlacements,
   RegisteredCgroupPaneLedger,
   SpawnCgroupCommands,
-  CommandUsageSource,
   ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
@@ -540,7 +538,6 @@ import {
   UnknownPeerRefused,
   type UsageFeedPort,
   unreadableManifestPreflight,
-  usageProbeCommand,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
@@ -5009,23 +5006,20 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     createResumeLauncher,
     createSessionResume,
     createUsageFeed: async config => {
-      // THIS HOST'S OWN COLLECTOR FIRST. Everything downstream of this feed — the advisor,
-      // quota-failover, every session's quota block, `/metrics` — used to be answered entirely by
-      // whatever external tool the two sources below were pointed at, so the daemon's quota was a
-      // runtime dependency of a tool this migration exists to delete. The native source asks the
-      // provider directly, through the same collector `GET /v1/fleet/usage` answers with.
+      // THIS HOST'S OWN COLLECTOR FIRST. It asks the provider directly, through the same collector
+      // `GET /v1/fleet/usage` answers with. An external collector endpoint is optional and tried
+      // behind it; a daemon configured without one and with no fleet serves an empty feed and says
+      // so rather than pretending every account is at zero.
       //
-      // The external sources are kept BEHIND it rather than deleted: a host part-way through the
-      // migration may still be running that tool, and this daemon should keep reporting quota if its
-      // own fleet has not been applied yet. Both remain optional, and a daemon configured with
-      // neither and no fleet serves an empty feed and says so rather than pretending every account
-      // is at zero.
-      const command = usageProbeCommand(config.usage.fallbackCommand);
+      // EVERY SOURCE HERE IS A READ, and that is the point of this composition. `FleetRefreshService`
+      // drives this feed once at boot and again on every timer tick, with nobody present, so a source
+      // that could run a command would be an arbitrary command run on a schedule on behalf of no
+      // request. There used to be one, configured as argv. It is deleted, along with the field that
+      // named it, rather than left unmounted behind a default.
       return new CachedUsageFeed(
         [
           new FleetUsageSource(fleet, accounts),
           ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
-          ...(command === undefined ? [] : [new CommandUsageSource(new BunCommandRunner(process.env), command)]),
         ],
         // The fleet's own declared probe interval. A host with no fleet configuration has not asked
         // for a cadence at all, so it keeps the default rather than being given one by a refusal.
@@ -5686,10 +5680,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           daemonPid: process.pid,
         }),
         foreignHistory,
-        // This owns no cache and no provider policy: the mounted fleet health reader and the daemon
-        // usage feed already own those. One service per opened state home serializes only this
-        // daemon's timer ticks, so a slow probe in another daemon can neither join nor delay it.
-        fleetRefresh: new FleetRefreshService({ usage, fleet }),
+        // This owns no cache and no provider policy: the daemon usage feed already owns those. One
+        // service per opened state home serializes only this daemon's timer ticks, so a slow read in
+        // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
+        // health probe launches a wrapper and spends a real billable turn per account, which a timer
+        // must never do. Health belongs where a person chose it.
+        fleetRefresh: new FleetRefreshService({ usage }),
         notifications,
         attention,
         pins: new PinService(
@@ -6486,12 +6482,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   /**
    * The unattended fleet evidence pass.
    *
-   * It is mounted rather than folded into a route because the point is that `/usage` and
-   * `/v1/fleet/health` are already current before a browser or a person requests them. The tick
-   * drives the established feeds only: `CachedUsageFeed` owns quota caching, shared in-flight work
-   * and last-good retention; the mounted fleet health reader owns the equivalent health evidence.
-   * This loop invents neither a cache nor an error result, so a failed probe cannot replace good
-   * data with an empty fleet.
+   * It is mounted rather than folded into a route because the point is that `/usage` is already
+   * current before a browser or a person requests it. The tick drives the established feed only:
+   * `CachedUsageFeed` owns quota caching, shared in-flight work and last-good retention. This loop
+   * invents neither a cache nor an error result, so a failed read cannot replace good data with an
+   * empty fleet.
+   *
+   * IT DOES NOT WARM ACCOUNT HEALTH, AND IT MUST NOT BE MADE TO. `/v1/fleet/health` collects when it
+   * is asked, because collecting it costs a real model turn per account — see the note on
+   * `FleetRefreshService`. Warming an answer nobody requested is the whole defect this pass no
+   * longer has.
    *
    * ONE CONFIGURATION NAME chooses the cadence. `usage.interval` is the fleet declaration that
    * builds the usage feed's freshness policy too. A daemon without a fleet configuration has made

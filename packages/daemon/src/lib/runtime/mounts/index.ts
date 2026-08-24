@@ -125,9 +125,11 @@ export interface MountedSubsystems {
    *  supervision it runs are outside the capped slice, and the surface PROVES both from placements
    *  rather than repeating the claim. */
   readonly cgroups: CgroupSubsystem;
-  /** The daemon-scoped timer target that refreshes the mounted fleet's quota and health evidence.
-   *  It serves no route: an unattended pass exists to make the existing routes current before anyone
-   *  asks them. Keeping it here proves production constructs it rather than leaving a dead timer. */
+  /** The daemon-scoped timer target that refreshes the daemon's quota evidence. It serves no route:
+   *  an unattended pass exists to make the existing routes current before anyone asks them. Keeping
+   *  it here proves production constructs it rather than leaving a dead timer. Account health is
+   *  deliberately NOT part of it — that evidence costs a real model turn, so it is collected only for
+   *  a caller who asked. */
   readonly fleetRefresh: FleetRefreshLoop;
   /** Read-only Claude/Codex conversations that existed before Ferretry. */
   readonly foreignHistory: ForeignHistorySubsystem;

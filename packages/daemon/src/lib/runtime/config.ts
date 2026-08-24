@@ -46,12 +46,16 @@ export { AnalyticsPricingCatalogSchema, ConfiguredAnalyticsPricingSourcesSchema 
 export type { AnalyticsPricingCatalog, ConfiguredAnalyticsPricingSources };
 
 /**
- * Where the daemon reads account health from, BESIDES this host's own fleet.
+ * Where the daemon reads account quota from, BESIDES this host's own fleet.
  *
- * The native collector is always first and needs nothing declared here. Both external sources are
- * optional and tried after it, in order. Neither is defaulted to a particular tool or address: the
- * source hardcoded one collector's name and flags into the daemon, so a host that ran anything else
- * had no fallback at all and no way to configure one.
+ * The native collector is always first and needs nothing declared here. One optional external
+ * collector endpoint is tried after it, defaulted to no particular tool or address.
+ *
+ * THERE IS NO WAY TO NAME A COMMAND HERE. A second field used to accept argv and run it as a usage
+ * source, which made it an arbitrary command the daemon executed at boot and on every timer tick
+ * with nobody present. This block is read by the unattended refresh, so an address it can GET is the
+ * only kind of source it may hold. The object is strict, so a configuration still carrying that key
+ * is refused at boot rather than silently ignored.
  *
  * There is deliberately no refresh period in this block. How often quota is re-read is the fleet's
  * `usage.interval`, declared beside the thresholds and concurrency that shape the same collection —
@@ -61,11 +65,6 @@ export const UsageFeedConfigSchema = z
   .object({
     /** An external collector's JSON usage endpoint. */
     url: z.url().optional(),
-    /**
-     * Fallback command for hosts that serve usage from another tool's CLI, as argv. The daemon
-     * appends the flags it needs (see `USAGE_PROBE_FLAGS`); an empty list means there is no fallback.
-     */
-    fallbackCommand: z.array(z.string().trim().min(1)).readonly().default([]),
   })
   .strict();
 

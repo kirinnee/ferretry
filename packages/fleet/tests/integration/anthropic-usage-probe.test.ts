@@ -9,8 +9,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
 import {
-  ANTHROPIC_MESSAGES_URL,
-  ANTHROPIC_PROBE_MODEL,
   ANTHROPIC_USAGE_URL,
   AnthropicUsageProbe,
   type CredentialMaterialSource,
@@ -23,7 +21,6 @@ import type { CredentialMaterial } from '../../src/lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../../src/lib/manifest.ts';
 
 const TOKEN = 'placeholder-access-token';
-const RESET_SECONDS = 1_800_003_600;
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
   id: '00000000-0000-4000-8000-000000000001',
@@ -222,135 +219,42 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
   });
 });
 
-describe('AnthropicUsageProbe falling back to the inference probe', () => {
-  const forbiddenThenHeaders = (headers: Readonly<Record<string, string>>, status = 200) =>
-    transport({
-      [ANTHROPIC_USAGE_URL]: { status: 403 },
-      [ANTHROPIC_MESSAGES_URL]: { status, headers },
-    });
+describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => {
+  /**
+   * A 403 means the token lacks `user:profile`, which is permanent for an inference-scoped token.
+   *
+   * This block used to assert the OPPOSITE: that the probe then sent `POST /v1/messages` and read the
+   * quota from its headers. That is a real billable turn, and the daemon's unattended refresh reaches
+   * this probe on a fixed timer — so those tests pinned an unasked-for spend loop as correct behaviour
+   * and stayed green while it shipped. The account is now reported as unmeasurable, which is true and
+   * costs nothing, and these tests assert the REQUESTS MADE rather than a flag, so a fallback cannot
+   * return without turning them red.
+   */
+  const forbidden = () => transport({ [ANTHROPIC_USAGE_URL]: { status: 403 } });
 
-  it('should read the quota headers as fractions after a 403 from the usage endpoint', async () => {
-    // Arrange — a 403 there means the token lacks `user:profile`, which is permanent.
-    const { fetch, requests } = forbiddenThenHeaders({
-      'anthropic-ratelimit-unified-5h-utilization': '0.42',
-      'anthropic-ratelimit-unified-5h-reset': String(RESET_SECONDS),
-      'anthropic-ratelimit-unified-7d-utilization': '0.11',
-    });
+  it('should report the account as unmeasurable rather than buying the number', async () => {
+    // Arrange
+    const { fetch } = forbidden();
 
     // Act
     const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
 
-    // Assert — 0.42 became 42%, which is only correct under the header rule.
-    should(actual.ok).be.true();
-    should(actual.shortWindow).deepEqual({ usedPercent: 42, resetAt: RESET_SECONDS * 1000 });
-    should(actual.longWindow?.usedPercent).equal(11);
-    should(requests.map(request => request.url)).deepEqual([ANTHROPIC_USAGE_URL, ANTHROPIC_MESSAGES_URL]);
+    // Assert — not measurable, and NOT signed out: the token still works, it just cannot read usage.
+    should(actual.ok).be.false();
+    should(actual.authOk).be.true();
+    should(actual.error ?? '').match(/user:profile/u);
   });
 
-  it('should send the smallest possible inference request', async () => {
+  it('should make exactly one request, and never a POST', async () => {
     // Arrange
-    const { fetch, requests } = forbiddenThenHeaders({ 'anthropic-ratelimit-unified-5h-utilization': '0.1' });
+    const { fetch, requests } = forbidden();
 
     // Act
     await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
 
-    // Assert — a one-token completion is not free, so it must stay minimal.
-    const body = JSON.parse(requests[1]?.body ?? '{}') as Record<string, unknown>;
-    should(requests[1]?.method).equal('POST');
-    should(body).deepEqual({ model: ANTHROPIC_PROBE_MODEL, max_tokens: 1, messages: [{ role: 'user', content: '.' }] });
-    should(requests[1]?.headers['anthropic-beta']).equal('oauth-2025-04-20');
-  });
-
-  it('should treat a rate-limited response carrying headers as a successful reading', async () => {
-    // Arrange — this is the distinction that stops a fleet losing sight of a throttled account.
-    const { fetch } = forbiddenThenHeaders(
-      {
-        'anthropic-ratelimit-unified-5h-utilization': '1.0',
-        'anthropic-ratelimit-unified-5h-status': 'rejected',
-      },
-      429,
-    );
-
-    // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
-
-    // Assert
-    should(actual.ok).be.true();
-    should(actual.atLimit).be.true();
-    should(actual.shortWindow?.usedPercent).equal(100);
-  });
-
-  it('should report a 429 with no quota headers as a failure, not an empty success', async () => {
-    // Arrange
-    const { fetch } = forbiddenThenHeaders({}, 429);
-
-    // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
-
-    // Assert
-    should(actual.ok).be.false();
-    should(actual)
-      .have.property('error')
-      .match(/no quota headers/u);
-  });
-
-  it('should mark a forbidden inference account unavailable without condemning its credential', async () => {
-    // Arrange — a 403 here can be an org or spend-policy block on a perfectly valid token.
-    const { fetch } = transport({
-      [ANTHROPIC_USAGE_URL]: { status: 403 },
-      [ANTHROPIC_MESSAGES_URL]: { status: 403 },
-    });
-
-    // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
-
-    // Assert — unavailable so routing stops picking it, but auth stays inconclusive.
-    should(actual.unavailable).be.true();
-    should(actual.authOk).be.undefined();
-    should(actual.ok).be.false();
-  });
-
-  it('should condemn the credential when the inference probe answers 401', async () => {
-    // Arrange
-    const { fetch } = transport({
-      [ANTHROPIC_USAGE_URL]: { status: 403 },
-      [ANTHROPIC_MESSAGES_URL]: { status: 401 },
-    });
-
-    // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
-
-    // Assert
-    should(actual.authOk).be.false();
-    should(actual.unavailable).be.true();
-  });
-
-  it('should report a transport failure on the fallback with its own message', async () => {
-    // Arrange
-    const { fetch } = transport({
-      [ANTHROPIC_USAGE_URL]: { status: 403 },
-      [ANTHROPIC_MESSAGES_URL]: { throws: new Error('socket hang up') },
-    });
-
-    // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
-
-    // Assert
-    should(actual.error).equal('socket hang up');
-  });
-
-  it('should report a 200 with no headers as a failure rather than an idle account', async () => {
-    // Arrange
-    const { fetch } = forbiddenThenHeaders({});
-
-    // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
-
-    // Assert
-    should(actual.ok).be.false();
-    should(actual)
-      .have.property('error')
-      .match(/no readable quota measurement/u);
+    // Assert — the whole request list, so an added call is a failure rather than an unnoticed cost.
+    should(requests.map(request => request.url)).deepEqual([ANTHROPIC_USAGE_URL]);
+    should(requests.map(request => request.method)).deepEqual(['GET']);
   });
 });
 
@@ -521,27 +425,34 @@ describe('fetchQuota', () => {
     should(actual.ok).be.false();
   });
 
-  it('should send the method, headers and body it was given', async () => {
-    // Arrange
-    let seen: { method: string; auth: string | null; body: string } | undefined;
+  it('should send the headers it was given and no body at all', async () => {
+    // Arrange — what a REAL server saw, which is the only witness that matters here. Narrowing
+    // `QuotaRequest` makes a payload unrepresentable in the type; this proves the transport under
+    // that type sends none, so the two halves of the claim are checked by different means.
+    let seen: { method: string; auth: string | null; body: string; contentType: string | null } | undefined;
     const url = serve(async request => {
-      seen = { method: request.method, auth: request.headers.get('authorization'), body: await request.text() };
+      seen = {
+        method: request.method,
+        auth: request.headers.get('authorization'),
+        body: await request.text(),
+        contentType: request.headers.get('content-type'),
+      };
       return new Response('{}', { status: 200 });
     });
 
     // Act
     await fetchQuota({
       url,
-      method: 'POST',
-      headers: { Authorization: 'Bearer placeholder', 'content-type': 'application/json' },
-      body: '{"probe":true}',
+      method: 'GET',
+      headers: { Authorization: 'Bearer placeholder' },
       timeoutMs: 5_000,
     });
 
     // Assert
-    should(seen?.method).equal('POST');
+    should(seen?.method).equal('GET');
     should(seen?.auth).equal('Bearer placeholder');
-    should(seen?.body).equal('{"probe":true}');
+    should(seen?.body).equal('');
+    should(seen?.contentType).be.null();
   });
 
   it('should abort a response that outlives its deadline', async () => {
