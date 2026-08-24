@@ -35,11 +35,14 @@ import {
   discoveredHarness,
   draftModels,
   type FleetAccountDraft,
+  type FleetAccountMode,
+  type FleetLaneDraft,
   type FleetLayerDraft,
   type FleetUnreadableAsset,
   IMPORTED_INSTRUCTIONS_CHOICE,
   instructionsMiddleOf,
   instructionsPathFor,
+  laneProblems,
   layerProblems,
 } from './fleet-change-model.ts';
 import type { FleetHarnessKind } from './fleet-model.ts';
@@ -118,9 +121,16 @@ export const previousStep = (step: FleetStepId): FleetStepId =>
  * account driven by a person, or does it run unattended — and DERIVES the lane from it. The lane is
  * still shown, as the wrapper name it produces; it is simply no longer a word somebody has to know.
  * A fleet with lanes of its own keeps them: see {@link otherLanes}.
+ *
+ * The answer is a SET rather than one value, and that is a widening of the question, not a collapse
+ * of the two facts. "Both" is an ordinary answer — most people running an unattended agent want the
+ * attended one on the same login — and it used to mean walking the whole sequence twice and typing
+ * every other answer again. One pass, one reviewed change, one account per ticked mode; each of them
+ * still derives its own lane through {@link laneForMode}, so a set of modes is still a set of
+ * `{ variant, mode }` pairs and never one field pretending to be both.
  */
 export const LANE_EXPLANATION =
-  'Interactive accounts are the ones you drive. Auto accounts run unattended. This picks the lane and the wrapper name for you.';
+  'Interactive accounts are the ones you drive. Auto accounts run unattended. Tick both to create one of each — one login, two wrappers. This picks the lane and the wrapper name for each.';
 
 /** The fleet's lane for one mode, or the fallback the daemon itself would use. */
 export const DEFAULT_LANE = 'default';
@@ -134,7 +144,7 @@ export const DEFAULT_LANE = 'default';
  * did declare. An empty list is what the daemon defaults to, so the browser agrees with it rather
  * than inventing a second answer.
  */
-export const laneForMode = (mode: FleetAccountDraft['mode'], variants: readonly string[]): string => {
+export const laneForMode = (mode: FleetAccountMode, variants: readonly string[]): string => {
   if (variants.includes(mode)) return mode;
   if (variants.includes(DEFAULT_LANE)) return DEFAULT_LANE;
   return variants[0] ?? DEFAULT_LANE;
@@ -154,12 +164,79 @@ export const otherLanes = (variants: readonly string[]): readonly string[] => {
   return variants.filter(variant => !derivable.has(variant));
 };
 
-/** The draft after choosing a mode, with the lane it implies. Kept together: one is derived from the other. */
-export const withMode = (
+/**
+ * The two modes, in the order they are offered and the order the accounts they create are listed in.
+ *
+ * Annotated rather than left to selection order, because the order reaches a person: it is the order
+ * the wrapper names appear in on the identity step, in the recap, and in the mutation the daemon
+ * derives routes from. A set that reordered itself depending on which box was ticked first would make
+ * the same two accounts read as a different change.
+ */
+export const FLEET_ACCOUNT_MODES: readonly FleetAccountMode[] = ['interactive', 'auto'];
+
+/** The modes this draft currently selects, in {@link FLEET_ACCOUNT_MODES} order. */
+export const selectedModes = (draft: FleetAccountDraft): readonly FleetAccountMode[] =>
+  draft.lanes.map(lane => lane.mode);
+
+/** The draft carrying exactly these lanes, put back into {@link FLEET_ACCOUNT_MODES} order. */
+const withLanes = (draft: FleetAccountDraft, lanes: readonly FleetLaneDraft[]): FleetAccountDraft => ({
+  ...draft,
+  lanes: FLEET_ACCOUNT_MODES.flatMap(mode => lanes.filter(lane => lane.mode === mode)),
+});
+
+/**
+ * The draft after choosing a SET of modes, every lane DERIVED afresh.
+ *
+ * This is the re-laning operation, and it is not the same thing as ticking a box — which is why
+ * {@link toggleMode} is a separate function rather than this one called with one more mode. A draft
+ * opened against a fleet has to have every lane derived against THAT fleet's variants: a seed that
+ * says "auto" while claiming the `default` lane must not survive first contact with a fleet that
+ * declares an `auto` one, because the first frame a person sees would then disagree with itself.
+ */
+export const withModes = (
   draft: FleetAccountDraft,
-  mode: FleetAccountDraft['mode'],
+  modes: readonly FleetAccountMode[],
   variants: readonly string[],
-): FleetAccountDraft => ({ ...draft, mode, variant: laneForMode(mode, variants) });
+): FleetAccountDraft =>
+  withLanes(
+    draft,
+    [...new Set(modes)].map(mode => ({ mode, variant: laneForMode(mode, variants) })),
+  );
+
+/**
+ * Add or remove one mode from the selection, leaving every other lane exactly as it is.
+ *
+ * A lane already held keeps its variant rather than being re-derived, which is what makes the escape
+ * hatch survive: somebody who moved the interactive account into this fleet's `review` lane and then
+ * ticks "auto" as well must not have that choice quietly rewritten back to the derived one. Removing
+ * the last mode is allowed — the step blocks on it, where the boxes are, rather than a control
+ * refusing to be untickable for a reason nobody can see.
+ */
+export const toggleMode = (
+  draft: FleetAccountDraft,
+  mode: FleetAccountMode,
+  variants: readonly string[],
+): FleetAccountDraft => {
+  const held = draft.lanes.filter(lane => lane.mode !== mode);
+  if (held.length !== draft.lanes.length) return withLanes(draft, held);
+  return withLanes(draft, [...held, { mode, variant: laneForMode(mode, variants) }]);
+};
+
+/**
+ * The draft after moving ONE of its accounts into a lane the fleet declares.
+ *
+ * Per mode, because with two accounts in play a single lane control would have no answer to "which of
+ * them". Keyed on the mode rather than on a list index, so a re-tick that reorders nothing still
+ * lands on the account the person was looking at.
+ */
+export const withLaneVariant = (
+  draft: FleetAccountDraft,
+  mode: FleetAccountMode,
+  variant: string,
+): FleetAccountDraft => ({
+  ...draft,
+  lanes: draft.lanes.map(lane => (lane.mode === mode ? { ...lane, variant } : lane)),
+});
 
 // ─── models: what the host and this fleet actually name ────────────────────────────────────────
 
@@ -564,7 +641,14 @@ const ownedProblems: Readonly<
 
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
-/** The account's own identity: the name it is known by, and the lane the mode derived. */
+/**
+ * The account's own identity: the name it is known by, and the lanes its modes derived.
+ *
+ * The lane sentences are {@link laneProblems}' rather than restated here — including the one that
+ * refuses an empty selection, which is this step's because this step holds the control. Ticking
+ * nothing is the state the multi-select made reachable, and it has to block somewhere a person can
+ * see the boxes.
+ */
 const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
   const problems: string[] = [];
   const name = draft.name.trim();
@@ -574,12 +658,7 @@ const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | nu
   else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {
     problems.push('the account name must not contain a path separator, "..", or control characters');
   }
-  const variant = draft.variant.trim();
-  if (variant === '') problems.push('name the lane this account occupies');
-  else if (config !== null && config.variants[variant] === undefined) {
-    problems.push(`this fleet declares no "${variant}" lane; declare it on the host before adding an account to it`);
-  }
-  return problems;
+  return [...problems, ...laneProblems(draft.lanes, config)];
 };
 
 const modelProblems = (draft: FleetAccountDraft): readonly string[] => {

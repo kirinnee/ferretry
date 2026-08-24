@@ -11,7 +11,7 @@ import {
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { grantGuidance, UNLOCK_LIMIT_NOTE } from '../../../../src/lib/grants.ts';
 import type { LocalNetworkAccess } from '../../../../src/lib/local-network-access.ts';
-import { interact, mount } from '../../../support/dom.ts';
+import { interact, mount, must } from '../../../support/dom.ts';
 import {
   absent,
   absentCodex,
@@ -725,8 +725,57 @@ describe('creating an account', () => {
     await type(field(surface.container, '-name'), 'atelier');
 
     expect(pick(surface.container, '[data-fleet-other-lanes]')).toBeDefined();
-    await choose(chooser(surface.container, '-lane'), 'review');
+    // Per ACCOUNT: with two of them in play a single lane control would have no answer to "which one".
+    await choose(chooser(surface.container, '-lane-auto'), 'review');
     expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-review-atelier');
+    await surface.unmount();
+  });
+
+  it('creates one account per ticked mode from a single pass, and says both names before the recap', async () => {
+    // The owner's words: ticking both creates TWO accounts from one pass, instead of running the flow
+    // twice. Both wrapper names are shown on the step that asks, not discovered at the end.
+    const surface = await open({ config: () => ({ variants: { default: {}, auto: {} }, agents: [] }) });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+
+    // Act — the draft opens on "auto"; ticking "interactive" as well is the second account.
+    await click(card(surface.container, 'mode', 'interactive'));
+
+    // Assert — two wrappers and two homes, named rather than counted.
+    const wrappers = [...surface.container.querySelectorAll('[data-fleet-derived-wrapper]')].map(
+      node => node.textContent,
+    );
+    expect(wrappers).toEqual(['claude-atelier', 'claude-auto-atelier']);
+    expect(cardChosen(surface.container, 'mode', 'auto')).toBe(true);
+    expect(cardChosen(surface.container, 'mode', 'interactive')).toBe(true);
+    await surface.unmount();
+  });
+
+  it('sends ONE proposal carrying both lanes, not two proposals', async () => {
+    // Two proposals would mean two reviews and — for a caller this host's grants govern — two
+    // operator-password confirmations for one decision a person made once.
+    const surface = await open({
+      propose: () => proposal(),
+      config: () => ({ variants: { default: {}, auto: {} }, agents: [] }),
+    });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await type(field(surface.container, '-name'), 'atelier');
+    await click(card(surface.container, 'mode', 'interactive'));
+    await walkTo(surface.container, 'review');
+    await click(button(surface.container, 'Preview this change'));
+
+    // Assert
+    const proposals = surface.daemon.calls.filter(call => call.path.endsWith('/proposals'));
+    expect(proposals).toHaveLength(1);
+    const sent = must(proposals[0], 'the one proposal').body as { mutation: { lanes: unknown } };
+    expect(sent.mutation.lanes).toEqual([
+      { variant: 'default', mode: 'interactive' },
+      { variant: 'auto', mode: 'auto' },
+    ]);
     await surface.unmount();
   });
 
@@ -913,7 +962,7 @@ describe('creating an account', () => {
       kind: 'create-account',
       harness: 'claude',
       name: 'atelier',
-      variant: 'default',
+      lanes: [{ variant: 'default', mode: 'auto' }],
       models: ['claude-opus-5', 'claude-sonnet-5'],
       defaultModel: 'claude-opus-5',
       layer: { memory: 'instructions/CLAUDE-atelier.md' },

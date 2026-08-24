@@ -205,6 +205,17 @@ sent** (a fallback says so and is the fleet package's own starter model, never a
 A host with no harness on `PATH` is a warning and never a refusal, exactly as at boot. Nothing here
 writes: the form hands off to the existing review-and-authorize step at one call.
 
+**Starting the daemon IS the setup**, and the contract is [docs/fleet-defaults.md](docs/fleet-defaults.md).
+A harness the boot detects earns four names and no others — `claude-default` / `claude-auto-default`,
+`codex-default` / `codex-auto-default` — from `packages/fleet/src/lib/defaults.ts`, which is the single
+owner of the naming rule a browser form also uses. **This writes executable wrappers into the operator's
+home, so the boot says what it created, where, and the key that switches it off**; nothing is ever
+replaced, because scaffolding stays create-if-absent and a host that already has a fleet keeps it byte
+for byte. Detection is `locateHarnessCommand`'s and there is no second detector, an unreadable manifest
+prepares nothing rather than guessing, and a preparation that fails is a loud notice and never a refused
+boot. An account created this way is **published and runnable, not signed in** — that is a different
+fact and the boot says which it is claiming.
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

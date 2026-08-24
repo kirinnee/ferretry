@@ -551,6 +551,14 @@ import {
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
 import { MAX_ASSET_FILE_BYTES } from '../src/lib/fleet/assets.ts';
+import {
+  decideFleetBootPreparation,
+  fleetNothingAddedNotice,
+  fleetPreparationDisclosure,
+  fleetPreparationFailure,
+  fleetPreparationRefusal,
+  fleetPreparedDisclosure,
+} from '../src/lib/fleet/boot-preparation.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import { PlatformFleetCredentialStore, readFleetWrapperScript, SpawnCredentialCommand } from '@ferretry/fleet/adapters';
@@ -6098,7 +6106,34 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // configured something, this daemon did NOT fall back to a search, and both halves of that have to
   // be said or they are left believing the opposite.
   for (const failure of harnessOverrideFailures(harnesses)) world.notices.state(failure);
-  if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
+  /**
+   * Whether this start is about to give the host a fleet, decided HERE and acted on after the mounts.
+   *
+   * DECIDED EARLY BECAUSE IT CHANGES WHAT IS SAID NEXT. The absent-harness warning below is the
+   * sentence this whole feature exists to make unreachable — "claude is on this host's PATH, but the
+   * fleet manifest publishes no account for it" — and emitting it a few lines before correcting it
+   * would be a boot trail that argues with itself. So the decision comes first and the warning is
+   * withheld when preparation is going to run; the trail then reports the true FINAL state from a
+   * re-read preflight, further down, rather than the state this line saw.
+   */
+  const fleetPreparation = decideFleetBootPreparation({ enabled: config.fleet.prepareDefaults, preflight: harnesses });
+  const fleetLocations = {
+    fleetDirectory: opened.paths.fleet,
+    binDirectory: join(opened.paths.fleet, 'bin'),
+    configPath: world.config.path,
+  };
+  if (fleetPreparation.kind === 'prepare') {
+    // Said BEFORE a byte is written. This is the disclosure the whole change turns on: starting a
+    // daemon is about to create executable wrappers in somebody's home, and a first run that did
+    // that silently would be indefensible however local and however convenient.
+    world.notices.state(fleetPreparationDisclosure(fleetPreparation.harnesses, fleetLocations));
+  } else if (!harnesses.ready) {
+    world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
+    // WHY nothing was created, beside the warning that says nothing can be launched. The two are one
+    // question for the reader — "there is a harness here, why can I not use it" — and the skip reason
+    // is the half that names the key or the file standing in the way.
+    world.notices.state(fleetPreparation.reason);
+  }
 
   const usage = await world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
@@ -6183,6 +6218,66 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // self-check that could not run is reported by the next one's freshness, and refusing to serve
   // because the daemon could not measure itself is strictly worse than serving and saying so.
   world.notices.step('subsystems mounted');
+  /**
+   * The fleet this host gets for starting a daemon.
+   *
+   * AFTER THE MOUNTS, because the scaffold and the apply are the fleet subsystem's own two steps and
+   * this is not a third one: the mount already owns the scaffolder, the provisioner, the configuration
+   * path and the exclusive apply claim. BEFORE THE BIND, so the first caller that asks what this
+   * daemon can launch is answered by a published manifest rather than by a race.
+   *
+   * A FAILURE NEVER REFUSES THE BOOT. `prepareDefaults` answers with a value for exactly that reason,
+   * and the failure is said as a `state` so no log level can hide a host that was left part-prepared.
+   */
+  if (fleetPreparation.kind === 'prepare') {
+    const prepared = await subsystems.fleet.prepareDefaults(fleetPreparation.harnesses);
+    if (prepared.kind === 'prepared') {
+      world.notices.state(
+        fleetPreparedDisclosure({
+          wrappers: prepared.wrappers,
+          published: prepared.published,
+          locations: fleetLocations,
+          pathEntry: prepared.pathEntry,
+          clientName: CLIENT_NAME,
+        }),
+      );
+    } else if (prepared.kind === 'refused') {
+      // NOTHING WAS WRITTEN. Applying this configuration would have taken an account away, so the
+      // whole preparation was refused — and the disagreement between the configuration and the
+      // manifest is itself the fact the operator needs.
+      world.notices.state(
+        fleetPreparationRefusal({
+          harnesses: fleetPreparation.harnesses,
+          conflicts: prepared.conflicts,
+          locations: fleetLocations,
+          clientName: CLIENT_NAME,
+        }),
+      );
+    } else if (prepared.kind === 'nothing-added') {
+      world.notices.state(
+        fleetNothingAddedNotice({
+          harnesses: fleetPreparation.harnesses,
+          locations: fleetLocations,
+          clientName: CLIENT_NAME,
+        }),
+      );
+    } else {
+      world.notices.state(
+        fleetPreparationFailure({ reason: prepared.reason, created: prepared.created, clientName: CLIENT_NAME }),
+      );
+    }
+    /**
+     * The preflight taken AGAIN, so the trail reports what is true at the end of this boot.
+     *
+     * The first read happened before the fleet existed and its answer is now stale in the one way
+     * that matters: it said no account was published for a harness that now has four. Re-reading is
+     * a manifest parse and two stats — nothing is launched — and it is the only honest way to leave a
+     * boot trail whose last word about the fleet is the state a session will actually meet.
+     */
+    const after = await readHarnesses(world.harnesses.accounts, world.harnesses.executables, harnessDiscovery);
+    world.notices.step('harnesses checked', harnessPreflightSummary(after));
+    if (!after.ready) world.notices.state(harnessAbsentWarning(after, CLIENT_NAME));
+  }
   /**
    * The grants, read BEFORE the address is bound.
    *

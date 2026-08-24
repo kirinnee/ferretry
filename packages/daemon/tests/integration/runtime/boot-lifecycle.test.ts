@@ -1,8 +1,8 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { buildFleetManifest } from '@ferretry/fleet';
+import { basename, join } from 'node:path';
+import { buildFleetManifest, FleetManifestSchema } from '@ferretry/fleet';
 import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
@@ -59,6 +59,7 @@ import {
   digestConversation,
   EXIT_ADDRESS_CONFLICT,
   EXIT_ALREADY_RUNNING,
+  type ExecutableResolverPort,
   MigrationPreflight,
   NO_RELAY_DIRECTORY,
   type PaneObservation,
@@ -133,9 +134,31 @@ function relaySocketProbe() {
  * not register a throwaway daemon identity with the hosted control plane merely because its fixture
  * omitted a relay block, nor make an integration result depend on that service being reachable.
  */
-function buildIntegrationWorld(): DaemonWorld {
+/**
+ * A resolver that finds everything this host really has EXCEPT an agent harness.
+ *
+ * A boot now prepares the default fleet for any harness it locates and publishes no account for, so
+ * without this the machine running these tests would decide what most of them assert: a developer
+ * with Claude Code installed gets a scaffold, an apply and two extra notices that the CI runner never
+ * sees, and every `said.stated[n]` below shifts. Clearing `PATH` instead would have made the doctor
+ * report every program it needs missing and turned `--check` non-zero, which is a different lie.
+ *
+ * Only `claude` and `codex` are hidden. Everything else resolves exactly as it does in production, so
+ * "this host has no agent harness" becomes a property of the fixture rather than of the developer.
+ */
+function hostWithoutHarnesses(executables: ExecutableResolverPort): ExecutableResolverPort {
+  const hidden = new Set(['claude', 'codex']);
   return {
-    ...buildWorld(),
+    resolve: name => (hidden.has(name) ? undefined : executables.resolve(name)),
+    runnable: path => executables.runnable(path),
+  };
+}
+
+function buildIntegrationWorld(): DaemonWorld {
+  const world = buildWorld();
+  return {
+    ...world,
+    harnesses: { ...world.harnesses, executables: hostWithoutHarnesses(world.harnesses.executables) },
     relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
   };
 }
@@ -4912,6 +4935,224 @@ describe('daemon boot lifecycle', () => {
       const notice = said.stated.filter(message => /relay|pair/u.test(message));
       should(notice[0]).match(/^no relay carrier — the configured relay https:\/\/mine\.example is switched off/u);
       should(notice[3]).match(/correct it or remove it/u);
+    });
+  });
+
+  /**
+   * The fleet a host gets for starting a daemon, through the REAL composition root.
+   *
+   * This is the only tier that can catch the failure that mattered most here: the scaffold and the
+   * apply each take the fleet's exclusive apply claim, and the boot is already holding the state
+   * home's lifetime lock. A unit test with fakes proves the decision; only a real boot proves the
+   * three locks do not deadlock, and a deadlock here hangs every start on the machine.
+   */
+  describe('the default fleet a start prepares', () => {
+    /**
+     * A host whose harnesses are exactly the fake ones this case wrote, and no others.
+     *
+     * The world's own resolver is restored — `buildIntegrationWorld` hides `claude` and `codex` so the
+     * developer's machine cannot decide what the rest of this file asserts — and `PATH` is REPLACED
+     * rather than prepended, so a real Claude Code installation cannot leak into a case about a host
+     * with exactly one harness.
+     */
+    async function harnessOnPath(home: string, kinds: readonly string[]): Promise<DaemonWorld> {
+      const binary = join(home, 'harness-bin');
+      await mkdir(binary, { recursive: true });
+      for (const kind of kinds) {
+        await writeFile(join(binary, kind), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      }
+      process.env.PATH = binary;
+      const production = buildWorld();
+      return { ...buildIntegrationWorld(), harnesses: production.harnesses };
+    }
+
+    it('should create, publish and disclose the default accounts for the harness it found', async () => {
+      // Arrange
+      const home = await tempDirectory('fyd-fleet-prepare');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const found = await harnessOnPath(home, ['claude']);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — the boot completed, so nothing deadlocked on the two claims it took.
+      should(code).equal(0);
+
+      // The manifest a start reads now publishes both lanes, and both wrappers are runnable.
+      const manifest = FleetManifestSchema.parse(
+        JSON.parse(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')),
+      );
+      should(manifest.accounts.map(account => basename(account.wrapper))).deepEqual([
+        'claude-default',
+        'claude-auto-default',
+      ]);
+      should(manifest.accounts.map(account => account.mode)).deepEqual(['interactive', 'auto']);
+      for (const account of manifest.accounts) {
+        should((await Bun.file(account.wrapper).stat()).mode & 0o111).be.above(0);
+      }
+
+      // Each lane reads its own document, in the home the apply filled.
+      should(await readFile(join(home, 'fleet', 'homes', 'claude-default', 'CLAUDE.md'), 'utf8')).equal(
+        await readFile(join(home, 'fleet', 'assets', 'CLAUDE.md'), 'utf8'),
+      );
+      should(await readFile(join(home, 'fleet', 'homes', 'claude-auto-default', 'CLAUDE.md'), 'utf8')).equal(
+        await readFile(join(home, 'fleet', 'assets', 'CLAUDE-auto.md'), 'utf8'),
+      );
+
+      // The DISCLOSURE, both halves. Creating executables in somebody's home is exactly the act the
+      // fleet's authority model exists to govern, so a first run that said nothing would be
+      // indefensible however local and however convenient.
+      const disclosure = said.stated.join('\n');
+      should(disclosure).containEql('starting this daemon is creating the default accounts');
+      should(disclosure).containEql('created 2 default accounts: claude-default, claude-auto-default');
+      should(disclosure).containEql(join(home, 'fleet', 'bin'));
+      should(disclosure).containEql('"fleet.prepareDefaults": false');
+      should(disclosure).containEql('NOT that they are signed in');
+
+      // And the sentence this whole change exists to make unreachable was NOT said — not before the
+      // preparation (it would have been a lie about to be corrected) and not after it.
+      should(disclosure).not.containEql('this daemon launches the wrappers the manifest declares');
+      should(disclosure).not.containEql('no agent harness is ready on this host');
+      // The trail's LAST word about the fleet is the re-read state, not the state before the apply.
+      const checked = said.steps.filter(step => step.startsWith('harnesses checked'));
+      should(checked).have.length(2);
+      should(checked[0]).containEql('claude: none');
+      should(checked[1]).containEql('claude: claude-default, claude-auto-default');
+    });
+
+    it('should create nothing and say why when the operator switched preparation off', async () => {
+      // Arrange — an explicit false, honoured on a FIRST start: there is no marker to consult, so
+      // somebody who does not want a daemon writing into their home is obeyed before the write.
+      const home = await tempDirectory('fyd-fleet-optout');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({ host: '127.0.0.1', port, fleet: { prepareDefaults: false } }),
+        { mode: 0o600 },
+      );
+      const found = await harnessOnPath(home, ['claude']);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — nothing at all was written, and the boot said both what is missing and why.
+      should(code).equal(0);
+      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
+      should(await Bun.file(join(home, 'fleet', 'manifest.json')).exists()).be.false();
+      const stated = said.stated.join('\n');
+      should(stated).containEql('fleet.prepareDefaults is false');
+      should(stated).containEql('publishes no account for');
+      should(said.stated.join('\n')).not.containEql('created 2 default accounts');
+    });
+
+    it('should create nothing on a host with no harness, and still start', async () => {
+      // Arrange
+      const home = await tempDirectory('fyd-fleet-no-harness');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const found = await harnessOnPath(home, []);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — a warning, never a refusal: somebody may install a harness minutes from now.
+      should(code).equal(0);
+      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
+      should(said.stated.join('\n')).containEql('no agent harness could be located');
+    });
+
+    it('should prepare nothing when the published manifest is not reproducible from the configuration', async () => {
+      // Arrange — a host whose manifest publishes one Claude account and whose `config.yaml` does not
+      // exist. This is the reproduction that made the assertion necessary: preparation fired because
+      // CODEX had no account, and the whole-fleet apply republished the manifest from a configuration
+      // that declares only what preparation had just created — taking the Claude account away.
+      const home = await tempDirectory('fyd-fleet-only-add');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const seeded = await seedFleet(home);
+      const before = await readFile(join(home, 'fleet', 'manifest.json'), 'utf8');
+      const found = await harnessOnPath(home, ['codex']);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — the daemon started, and the manifest is byte-identical: the seeded account is still
+      // published and nothing of the fleet was written.
+      should(code).equal(0);
+      should(await readFile(join(home, 'fleet', 'manifest.json'), 'utf8')).equal(before);
+      should(FleetManifestSchema.parse(JSON.parse(before)).accounts.map(account => account.wrapper)).deepEqual([
+        seeded,
+      ]);
+      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
+
+      // And it said so, naming the account it would have removed and the deliberate remedy.
+      const stated = said.stated.join('\n');
+      should(stated).containEql('were NOT created, and nothing was written');
+      should(stated).containEql(`${WRAPPER}: it is published now and the configuration does not declare it`);
+      should(stated).containEql('Preparation may only add');
+      should(stated).containEql('`fy fleet apply` publishes the configuration deliberately');
+      should(stated).not.containEql('created 2 default accounts');
+      // The trail's last word about the fleet is still the seeded account, because nothing moved.
+      const checked = said.steps.filter(step => step.startsWith('harnesses checked'));
+      should(checked.at(-1)).containEql(`claude: ${WRAPPER}`);
     });
   });
 });

@@ -35,11 +35,18 @@ describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled b
     const initialized = await driver.run(['fleet', 'init', '--first-account=codex'], environment);
 
     // Assert — this is deliberately an init-only assertion: no wrapper is materialised until apply.
+    // TWO LANES on one agent, because a detected harness earns an interactive account and an
+    // unattended one, and they share the provider login a single agent carries.
     should(initialized.code).equal(0, initialized.err);
     const config = Bun.YAML.parse(await readFile(path.join(stateHome, 'fleet', 'config.yaml'), 'utf8')) as {
       agents?: readonly { kind?: string; routes?: Record<string, { wrapper?: string }> }[];
     };
-    should(config.agents).match([{ kind: 'codex', routes: { default: { wrapper: 'codex-primary' } } }]);
+    should(config.agents).match([
+      {
+        kind: 'codex',
+        routes: { default: { wrapper: 'codex-default' }, auto: { wrapper: 'codex-auto-default' } },
+      },
+    ]);
   });
 
   it('should add the first account after plain init left an empty configuration', async () => {
@@ -56,10 +63,11 @@ describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled b
     // Assert
     should(plainInit.code).equal(0, plainInit.err);
     should(firstAccount.code).equal(0, firstAccount.err);
-    should(firstAccount.out).containEql('Declared one codex account');
+    should(firstAccount.out).containEql('Declared the default codex accounts');
     should(applied.code).equal(0, applied.err);
     should(listed.code).equal(0, listed.err);
-    should(listed.out).containEql('1 account provisioned');
+    // TWO accounts, because a harness earns an interactive lane and an unattended one.
+    should(listed.out).containEql('2 accounts provisioned');
     const config = Bun.YAML.parse(await readFile(path.join(stateHome, 'fleet', 'config.yaml'), 'utf8')) as {
       agents?: readonly { kind?: string }[];
     };
@@ -113,6 +121,9 @@ describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled b
       path.join(fleet, 'config.yaml'),
       path.join(assets, 'README.md'),
       path.join(assets, 'CLAUDE.md'),
+      path.join(assets, 'CLAUDE-auto.md'),
+      path.join(assets, 'AGENTS.md'),
+      path.join(assets, 'AGENTS-auto.md'),
       path.join(assets, 'templates', 'claude', 'settings.json'),
       path.join(assets, 'templates', 'codex', 'config.toml'),
     ];
@@ -122,15 +133,22 @@ describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled b
       profiles?: {
         base?: {
           memory?: string;
-          claude?: { settings?: string };
-          codex?: { settings?: string };
+          claude?: { memory?: string; settings?: string };
+          codex?: { memory?: string; settings?: string };
         };
       };
+      variants?: { auto?: { claude?: { memory?: string }; codex?: { memory?: string } } };
     };
+    // PER HARNESS, and no flat `memory`: one shared source is what handed Codex a document whose own
+    // text said it belonged to Claude.
     should(config.profiles?.base).match({
-      memory: './CLAUDE.md',
-      claude: { settings: './templates/claude/settings.json' },
-      codex: { settings: './templates/codex/config.toml' },
+      claude: { memory: './CLAUDE.md', settings: './templates/claude/settings.json' },
+      codex: { memory: './AGENTS.md', settings: './templates/codex/config.toml' },
+    });
+    should(config.profiles?.base?.memory).be.undefined();
+    should(config.variants?.auto).match({
+      claude: { memory: './CLAUDE-auto.md' },
+      codex: { memory: './AGENTS-auto.md' },
     });
     should(JSON.parse(await readFile(path.join(assets, 'templates', 'claude', 'settings.json'), 'utf8'))).match({
       includeCoAuthoredBy: false,

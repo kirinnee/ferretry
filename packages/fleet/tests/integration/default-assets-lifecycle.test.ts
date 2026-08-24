@@ -8,12 +8,15 @@ import { FileFleetScaffolder } from '../../src/adapters/file-scaffolder.ts';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import { FleetPlan } from '../../src/lib/plan.ts';
 import type { FleetLayout } from '../../src/lib/provisioning.ts';
-import { buildFleetScaffold } from '../../src/lib/scaffold.ts';
+import { buildFleetScaffold, fleetScaffoldIds } from '../../src/lib/scaffold.ts';
 import { parseSettings } from '../../src/lib/settings.ts';
 
 const CLAUDE_ID = '00000000-0000-4000-8000-00000000c1a1';
 const CODEX_ID = '00000000-0000-4000-8000-00000000c0de';
 const GENERATED_AT = '2027-03-04T05:06:07.000Z';
+/** Counted rather than random, so the starter this host is given is byte-identical across runs. */
+let minted = 0;
+const SCAFFOLD_IDS = fleetScaffoldIds(() => `00000000-0000-4000-8000-0000000c${String(++minted).padStart(4, '0')}`);
 
 const account = (kind: 'claude' | 'codex', id: string): Record<string, unknown> => ({
   name: kind,
@@ -81,7 +84,7 @@ describe('built-in fleet assets from init through launch', () => {
     const scaffold = buildFleetScaffold({
       layout,
       configPath,
-      ids: { claude: CLAUDE_ID, codex: CODEX_ID },
+      ids: SCAFFOLD_IDS,
     });
     const scaffolder = new FileFleetScaffolder([fleet]);
     const provisioner = new FileFleetProvisioner([fleet]);
@@ -107,17 +110,23 @@ describe('built-in fleet assets from init through launch', () => {
       const plan = new FleetPlan().build(config, layout, GENERATED_AT);
       await provisioner.apply(plan);
 
-      // Assert — all five files came from code embedded in the product, including through a
+      // Assert — all eight files came from code embedded in the product, including through a
       // standalone build; the nested private directories did not come from an umask-dependent
       // fallback mkdir.
-      should(initialized.created).have.length(5);
+      should(initialized.created).have.length(8);
       for (const directory of ['templates', 'templates/claude', 'templates/codex']) {
         should((await stat(path.join(layout.assetsDirectory, directory))).mode & 0o777).equal(0o700);
       }
 
-      const instructions = await readFile(path.join(layout.assetsDirectory, 'CLAUDE.md'), 'utf8');
-      should(await readFile(path.join(layout.homesDirectory, 'claude-fresh', 'CLAUDE.md'), 'utf8')).equal(instructions);
-      should(await readFile(path.join(layout.homesDirectory, 'codex-fresh', 'AGENTS.md'), 'utf8')).equal(instructions);
+      // BOTH ACCOUNTS ARE ON THE `auto` LANE, so each reads its own harness's `-auto` document —
+      // which is the point: an unattended agent must not be handed guidance written for one that can
+      // stop and ask a question, and Codex must not be handed Claude's document at all.
+      should(await readFile(path.join(layout.homesDirectory, 'claude-fresh', 'CLAUDE.md'), 'utf8')).equal(
+        await readFile(path.join(layout.assetsDirectory, 'CLAUDE-auto.md'), 'utf8'),
+      );
+      should(await readFile(path.join(layout.homesDirectory, 'codex-fresh', 'AGENTS.md'), 'utf8')).equal(
+        await readFile(path.join(layout.assetsDirectory, 'AGENTS-auto.md'), 'utf8'),
+      );
 
       const claudeSettings = JSON.parse(
         await readFile(path.join(layout.homesDirectory, 'claude-fresh', 'settings.json'), 'utf8'),
@@ -152,11 +161,12 @@ describe('built-in fleet assets from init through launch', () => {
 
       // A person's source asset remains the authority on every later init and apply.
       const replacement = '# My fleet instructions\n\nThis replaces the starter.\n';
-      await writeFile(path.join(layout.assetsDirectory, 'CLAUDE.md'), replacement, 'utf8');
+      await writeFile(path.join(layout.assetsDirectory, 'CLAUDE-auto.md'), replacement, 'utf8');
+      await writeFile(path.join(layout.assetsDirectory, 'AGENTS-auto.md'), replacement, 'utf8');
       const repeated = await scaffolder.scaffold(scaffold);
       should(repeated.created).be.empty();
-      should(repeated.kept).have.length(5);
-      should(await readFile(path.join(layout.assetsDirectory, 'CLAUDE.md'), 'utf8')).equal(replacement);
+      should(repeated.kept).have.length(8);
+      should(await readFile(path.join(layout.assetsDirectory, 'CLAUDE-auto.md'), 'utf8')).equal(replacement);
 
       await provisioner.apply(new FleetPlan().build(config, layout, GENERATED_AT));
       should(await readFile(path.join(layout.homesDirectory, 'claude-fresh', 'CLAUDE.md'), 'utf8')).equal(replacement);

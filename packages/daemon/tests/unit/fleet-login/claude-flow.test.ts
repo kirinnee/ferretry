@@ -127,6 +127,36 @@ describe('observeClaudeLine', () => {
   it('should send people only to hosts this product owns', () => {
     should(CLAUDE_VERIFICATION_HOSTS).deepEqual(['claude.com', 'claude.ai', 'anthropic.com']);
   });
+
+  it('should publish the URL when the harness prints it as PLAIN TEXT, with no hyperlink escape', () => {
+    // RE-OBSERVED at claude-code 2.1.220 on 2026-08-24, running `claude auth login --claudeai` with
+    // piped stdio and `TERM=dumb`: the address arrives ONCE, unwrapped, with no OSC 8 sequence at all.
+    // Every other fixture in this file carries the hyperlink form, so without this case the shape the
+    // harness actually emitted when measured would be the one shape the recogniser is never asked about.
+    // Both forms must work, and which one a run produces is not this flow's business.
+    // Act
+    const actual = observeClaudeLine(CLAUDE_LOGIN_START, `If the browser didn't open, visit: ${CLAUDE_URL}`);
+
+    // Assert
+    should(actual).deepEqual({ stage: 'awaiting-code', verificationUrl: CLAUDE_URL });
+  });
+
+  it('should publish exactly one URL from the whole observed transcript, fed line by line', () => {
+    // The bytes `claude auth login --claudeai` wrote at 2.1.220, in order, ending with the prompt that
+    // carries no newline. A recogniser is only as good as the sequence it is driven with: three separate
+    // single-line cases cannot show that an earlier line does not spoil a later one.
+    const transcript = [
+      'Opening browser to sign in…',
+      `If the browser didn't open, visit: ${CLAUDE_URL}`,
+      'Paste code here if prompted > ',
+    ];
+
+    // Act
+    const actual = transcript.reduce(observeClaudeLine, CLAUDE_LOGIN_START);
+
+    // Assert
+    should(actual).deepEqual({ stage: 'awaiting-code', verificationUrl: CLAUDE_URL });
+  });
 });
 
 describe('decideClaudeSubmit', () => {

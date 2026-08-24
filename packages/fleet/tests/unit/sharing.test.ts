@@ -12,7 +12,6 @@ import { BaseProfileSchema, type FleetConfig, FleetConfigSchema } from '../../sr
 import {
   accountAssetPath,
   accountSharing,
-  DEFAULT_SHARED_NAME,
   LINKABLE_FIELDS,
   orphanedSharedDocuments,
   PER_ACCOUNT_FIELDS,
@@ -45,10 +44,10 @@ const route = (id: string, wrapper: string, overrides: Record<string, unknown> =
   ...overrides,
 });
 
-/** Two Claude accounts on one shared memory document, declared under its conventional name. */
+/** Two Claude accounts on one shared memory document, declared under an arbitrary name. */
 const twoSharedAccounts = (): FleetConfig =>
   parse({
-    shared: { memory: { [DEFAULT_SHARED_NAME]: './CLAUDE.md' } },
+    shared: { memory: { default: './CLAUDE.md' } },
     profiles: { base: { memory: './CLAUDE.md' } },
     variants: { default: {} },
     agents: [
@@ -73,9 +72,9 @@ describe('the shared asset registry', () => {
     const config = twoSharedAccounts();
 
     // Act / Assert
-    should(sharedAssetPath(config, 'memory', DEFAULT_SHARED_NAME)).equal('./CLAUDE.md');
+    should(sharedAssetPath(config, 'memory', 'default')).equal('./CLAUDE.md');
     should(sharedAssetPath(config, 'memory', 'terse')).be.undefined();
-    should(sharedAssetNames(config, 'memory')).deepEqual([DEFAULT_SHARED_NAME]);
+    should(sharedAssetNames(config, 'memory')).deepEqual(['default']);
     should(sharedAssetNames(config, 'skills')).deepEqual([]);
   });
 
@@ -114,11 +113,11 @@ describe('resolveFleetSharing', () => {
     // Assert — the document names both accounts, and each account reports the shared state without a
     // consumer having to compare any strings itself.
     should(sharing.documents).deepEqual([
-      { field: 'memory', name: DEFAULT_SHARED_NAME, path: './CLAUDE.md', accounts: [ID_ONE, ID_TWO] },
+      { field: 'memory', name: 'default', path: './CLAUDE.md', accounts: [ID_ONE, ID_TWO] },
     ]);
     should(accountSharing(sharing, ID_ONE)?.fields.memory).deepEqual({
       state: 'shared',
-      name: DEFAULT_SHARED_NAME,
+      name: 'default',
       path: './CLAUDE.md',
       origin: { kind: 'base-profile', name: 'base' },
       referrers: 2,

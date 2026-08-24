@@ -15,8 +15,11 @@ one by referencing it somewhere in its composition chain, and `fy fleet apply` *
 referenced source into that account's home.
 
 Sharing is therefore already what happens when two accounts reference one path. The starter
-configuration does exactly this: `profiles.base.memory: ./CLAUDE.md` points every account at one
-document, which Claude receives as `CLAUDE.md` and Codex receives as `AGENTS.md`.
+configuration does exactly this: `profiles.base.claude.memory` and `profiles.base.codex.memory` point
+every account of each harness at one document, which Claude receives as `CLAUDE.md` and Codex receives
+as `AGENTS.md`. It is declared PER HARNESS rather than once, because a single shared source handed
+Codex a document whose own first paragraph told it that it was Claude's; the `auto` variant overrides
+it again, so an unattended lane reads guidance written for one that cannot stop and ask a question.
 
 What was missing was any way to **say so**. Nothing declared which paths were the shared ones, nothing
 reported per account whether its instructions were the shared document or its own, and there was no
@@ -37,7 +40,10 @@ Three things close that, and nothing else changes:
 ```yaml
 shared:
   memory:
-    default: ./CLAUDE.md
+    claude: ./CLAUDE.md
+    claude-auto: ./CLAUDE-auto.md
+    codex: ./AGENTS.md
+    codex-auto: ./AGENTS-auto.md
     terse: ./memory/terse.md
   skills:
     review: ./skills/review
@@ -180,8 +186,8 @@ asked for.
 
 ## Migration is a declaration
 
-A host that already shares one `CLAUDE.md` — which is every host the starter configuration made —
-migrates by **declaring the registry**. Every account that already references that path becomes
+A host that already shares one `CLAUDE.md` — which is every host a starter configuration written
+before the four per-harness documents made — migrates by **declaring the registry**. Every account that already references that path becomes
 recognised as sharing it. Nothing is renamed, copied or moved.
 
 An account that has diverged onto its own document migrates with one `link-shared-asset`, which is
@@ -240,7 +246,7 @@ These are declared, not hidden. Each is a thing a reader might reasonably assume
   which of the two it is.
 - **A settings layer cannot be linked or unlinked**, for the reason above. It is reported.
 - **Renaming a shared document does not follow.** Accounts reference the path, so changing
-  `shared.memory.default` to a different path leaves referrers on the old one, and the next apply fails
+  `shared.memory.claude` to a different path leaves referrers on the old one, and the next apply fails
   loudly on a missing source. Editing the document in place is the supported operation.
 - **Two references reaching one document by different roots are two documents.** `~/notes.md` and
   `/home/me/notes.md` may be the same file; nothing pure can know that. Declare shared documents as

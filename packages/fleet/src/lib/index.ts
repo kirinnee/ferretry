@@ -5,6 +5,7 @@ export * from './assets.ts';
 export * from './capabilities.ts';
 export * from './config.ts';
 export * from './credential-source.ts';
+export * from './defaults.ts';
 export * from './harness.ts';
 export * from './harness-env.ts';
 export * from './harness-login.ts';

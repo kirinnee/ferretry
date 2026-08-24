@@ -99,6 +99,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   fleet: {
     accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),
     harnesses: async () => await harnessDiscoveryReader().report(),
+    // Declared and never called: preparing the default fleet is the BOOT's step, not a route's, so a
+    // surface inventory that reached it would be evidence of exactly the mistake to avoid.
+    prepareDefaults: async () => {
+      throw new Error('preparing the default fleet is never reachable from the served surface');
+    },
     config: async () => {
       throw new Error('not exercised by the surface inventory');
     },

@@ -146,6 +146,50 @@ describe('observeCodexLine', () => {
     should(actual).deepEqual([complete, failed]);
   });
 
+  it('should publish exactly the pair from the whole observed transcript, banner and caution included', () => {
+    // RE-OBSERVED at codex-cli 0.145.0 on 2026-08-24, running `codex login --device-auth` with piped
+    // stdio: the run opens with a version banner these fixtures did not previously carry, and closes with
+    // the provider's caution. Fed as a sequence rather than as separate lines, because that is the only
+    // way to show that an earlier line neither publishes nor spoils a later one — a banner reading
+    // `Welcome to Codex [v0.145.0]` is exactly the kind of line a looser recogniser would take a value out
+    // of, and the user code arrives AFTER it.
+    const transcript = [
+      '',
+      `Welcome to Codex [v${ESC}[90m0.145.0${ESC}[0m]`,
+      `${ESC}[90mOpenAI's command-line coding agent${ESC}[0m`,
+      '',
+      HEADING,
+      '',
+      STEP_ONE,
+      URL_LINE,
+      '',
+      STEP_TWO,
+      CODE_LINE,
+      '',
+      `${ESC}[90mContinue only if you started this login in Codex. If a website or another person gave you this code, cancel.${ESC}[0m`,
+    ];
+
+    // Act
+    const actual = transcript.reduce(observeCodexLine, CODEX_LOGIN_START);
+
+    // Assert
+    should(actual).deepEqual({ stage: 'awaiting-approval', verificationUrl: CODEX_URL, userCode: USER_CODE });
+  });
+
+  it('should read a user code whose groups are four and five characters long', () => {
+    // `99BS-Z51VR` was what the provider printed when this was re-measured on 2026-08-24, and the
+    // fixture code above is 4-5 as well — but the schema admits three to eight per group, so a case that
+    // only ever fed one width would not show that the width is not pinned to the one somebody saw.
+    // Act
+    const actual = observeCodexLine(
+      { stage: 'collecting', verificationUrl: CODEX_URL },
+      `   ${ESC}[94m99BS-Z51VR${ESC}[0m`,
+    );
+
+    // Assert
+    should(actual).deepEqual({ stage: 'awaiting-approval', verificationUrl: CODEX_URL, userCode: '99BS-Z51VR' });
+  });
+
   it('should send people only to hosts this provider owns', () => {
     should(CODEX_VERIFICATION_HOSTS).deepEqual(['openai.com', 'chatgpt.com']);
   });

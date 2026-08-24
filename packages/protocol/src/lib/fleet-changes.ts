@@ -207,6 +207,26 @@ const NonEmpty = z.string().min(1);
 const AccountModeSchema = z.enum(['interactive', 'auto']);
 
 /**
+ * One lane a create-account produces: a composition slot, and the mode the account in it publishes.
+ *
+ * The PAIR is the unit, and that is the whole reason this is a shape rather than two parallel lists.
+ * A **variant** is a named composition slot the fleet declares; a **mode** is the closed enum
+ * consumers read to decide whether an account may be driven unattended. They are usually the same
+ * word and are not the same fact — a fleet may legitimately declare a `review` lane whose accounts
+ * run interactively — so a caller that sent `variants: [...]` beside `modes: [...]` would be sending
+ * two lists somebody has to zip, and the zip is where they stop lining up.
+ *
+ * Both fields stay optional per lane, exactly as the single spelling had them: an absent `variant` is
+ * the default lane, and an absent `mode` leaves the variant's own default to decide. Not exported —
+ * a caller composes one through {@link FleetMutationSchema}, and a second exported name for it would
+ * be a second place to keep in step.
+ */
+const FleetAccountLaneSchema = z.strictObject({
+  variant: NonEmpty.optional(),
+  mode: AccountModeSchema.optional(),
+});
+
+/**
  * A settings document, spelled out rather than left as `unknown`.
  *
  * Harness settings are ordinary JSON — objects, arrays, strings, numbers, booleans and nulls — and
@@ -477,9 +497,22 @@ export const FleetMutationSchema = z.discriminatedUnion('kind', [
     kind: z.literal('create-account'),
     harness: z.enum(['claude', 'codex']),
     name: NonEmpty,
-    variant: NonEmpty.optional(),
+    /**
+     * The lanes this one change creates, one account each, on ONE provider account.
+     *
+     * A SET rather than the single `variant`/`mode` pair this replaces, because "add this account,
+     * interactive and unattended" is one decision a person made once. Two proposals would mean two
+     * reviews and — for a caller this host's grants govern — two operator-password confirmations for
+     * that one decision. There is no second spelling: a create names its lanes here or it names none,
+     * and a transient wire request is exactly the thing that can be replaced rather than widened,
+     * because a held proposal stores the resulting PLAN and never the mutation.
+     *
+     * Non-empty, since a create that produced no account is a request with no effect. Two lanes that
+     * resolve to the same variant are refused by the daemon rather than here: the default a bare lane
+     * takes is the daemon's to know, so this schema cannot see the collision that would follow.
+     */
+    lanes: z.array(FleetAccountLaneSchema).min(1).readonly(),
     displayName: NonEmpty.optional(),
-    mode: AccountModeSchema.optional(),
     models: z.array(NonEmpty).readonly(),
     defaultModel: NonEmpty.optional(),
     available: z.boolean().optional(),

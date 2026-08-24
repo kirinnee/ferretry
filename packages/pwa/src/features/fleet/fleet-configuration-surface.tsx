@@ -107,8 +107,9 @@ import {
   type FleetStepId,
   instructionsChoiceFor,
   openingInstructionsSource,
+  selectedModes,
   skillsStoreItems,
-  withMode,
+  withModes,
 } from './fleet-stepper-model.ts';
 
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;
@@ -805,14 +806,15 @@ export function FleetConfigurationSurface({
   const startCreate = (): void => {
     // Opened ALREADY FILLED IN from what the daemon detected, rather than opened blank and then
     // patched: a form that flickers from empty to prefilled is a form whose first frame is a lie about
-    // what a person has to type. The lane is DERIVED from how the account runs, so the first frame also
-    // agrees with itself — a draft opening on "auto" against a fleet that declares an "auto" lane must
-    // not simultaneously claim "default".
+    // what a person has to type. Each lane is DERIVED from how that account runs, so the first frame
+    // also agrees with itself — a draft opening on "auto" against a fleet that declares an "auto" lane
+    // must not simultaneously claim "default". The modes it opens on are the draft's own, re-laned
+    // against THIS fleet's variants rather than replaced, so a detected default survives the pass.
     const detected = detectedAccountDraft(detection, session.discovery);
     patch(generation, {
       mode: {
         kind: 'create',
-        draft: withMode(detected, detected.mode, variants),
+        draft: withModes(detected, selectedModes(detected), variants),
         step: 'harness',
         instructionsSource: openingInstructionsSource(detected),
         unreadable: [],

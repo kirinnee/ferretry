@@ -19,13 +19,30 @@
  *   safe to run on a machine that already has a fleet.
  * - **The `PATH` line is part of the output.** A command that creates a directory of executables and
  *   does not say how the shell will find them has not finished the job — an apply that writes
- *   wrappers nowhere on `PATH` reports success and produces nothing a person can run.
+ *   wrappers nowhere on `PATH` reports success and produces nothing a *person* can type. It is not
+ *   what a daemon needs: the manifest publishes each wrapper's absolute path and a start launches
+ *   that, so a session works before anybody has edited a shell profile.
+ *
+ * WHAT IT DECLARES has since widened from "an empty fleet" to "the accounts a detected harness
+ * earns", because a starter configuration with no accounts in it was setup somebody had to finish
+ * before anything worked at all. The names come from {@link module:defaults} rather than from here,
+ * so the boot trail that reports what it created and the file that declares it read one table.
  *
  * Pure: this module decides *what* a fresh fleet contains. Writing it — and deciding what is already
  * there — is an adapter's job.
  */
 
+import {
+  DEFAULT_ACCOUNT_NAME,
+  DEFAULT_INSTRUCTIONS,
+  defaultAccountsFor,
+  defaultInstructionsName,
+  FLEET_DEFAULT_LANES,
+  type FleetDefaultAccount,
+  type FleetDefaultLane,
+} from './defaults.ts';
 import type { HarnessKind } from './manifest.ts';
+import { canonicalAssetReference } from './paths.ts';
 import type { FleetLayout } from './provisioning.ts';
 
 /** Directories the fleet owns are private: they hold credentials and generated executables. */
@@ -73,59 +90,111 @@ export interface FleetScaffold {
   readonly directories: readonly string[];
   readonly directoryMode: number;
   readonly files: readonly FleetScaffoldFile[];
-  /** The configuration declaration this scaffold can add to an empty file. */
-  readonly declaration?: { readonly path: string; readonly account: HarnessKind };
+  /**
+   * The configuration declaration this scaffold can add to an empty file.
+   *
+   * A SET of harnesses rather than one, because "the accounts a detected harness earns" is what is
+   * declared now and a host may have both installed. One-harness spelling is a one-element set, so
+   * there is a single shape rather than a special case for the command-line flag that names one.
+   */
+  readonly declaration?: { readonly path: string; readonly accounts: readonly HarnessKind[] };
   /** The line a person must add to their shell profile for the generated wrappers to be runnable. */
   readonly pathEntry: string;
 }
 
 /**
- * Identifiers for the commented example in the starter configuration.
+ * Identifiers for the accounts a starter configuration declares, one per (harness × lane).
+ *
+ * ONE PER LANE, not one per harness. A default account occupies two lanes — the interactive one and
+ * the unattended one — and an account id must never change once anything has referenced it, so two
+ * lanes sharing one id would be two accounts the manifest could not tell apart. The previous shape
+ * had exactly that defect in miniature: its commented example spent the *codex* id on a claude
+ * account's `auto` route because there was no third identifier to spend.
  *
  * Supplied rather than generated, because an account id is a UUID this module has no business
  * inventing — and because a scaffold has to be a value a test can assert on.
  */
-export interface FleetScaffoldIds {
-  readonly claude: string;
-  readonly codex: string;
-}
+export type FleetScaffoldIds = Readonly<Record<HarnessKind, Readonly<Record<FleetDefaultLane, string>>>>;
 
 /**
- * The model a first account starts with, per harness.
+ * One identifier per (harness × lane), from one mint.
  *
- * EXPORTED because a second consumer needs the same value: when a harness reports no model of its
- * own, the account form offers this one and says out loud that it is Ferretry's starter rather than
- * something the host declared. Two copies of a model identifier would drift the first time either
- * moved, and the drift would be invisible in the worst way — a form offering a model no scaffold
- * ever wrote, on an account that then claims to serve it.
+ * Declared here so no caller hand-builds the nested shape: four call sites each spelling the same
+ * two-level literal is four chances to reuse an id across lanes, and a reused account id is the one
+ * mistake this table exists to make impossible.
  */
-export const FLEET_STARTER_MODELS: Readonly<Record<HarnessKind, string>> = {
-  claude: 'claude-opus-5',
-  codex: 'gpt-5.6',
-};
+export function fleetScaffoldIds(mint: () => string): FleetScaffoldIds {
+  const lanes = (): Readonly<Record<FleetDefaultLane, string>> =>
+    Object.fromEntries(FLEET_DEFAULT_LANES.map(lane => [lane, mint()])) as Record<FleetDefaultLane, string>;
+  return { claude: lanes(), codex: lanes() };
+}
 
-const starterAccount = (kind: HarnessKind, id: string): string => {
-  const label = kind === 'claude' ? 'Claude' : 'Codex';
-  const model = FLEET_STARTER_MODELS[kind];
-  return `agents:
-  - name: primary
+/** One declared lane of a starter account, at the indentation a route sits under `routes:`. */
+const starterRoute = (account: FleetDefaultAccount, id: string): string => `      ${account.lane}:
+        id: ${id}
+        wrapper: ${account.wrapper}
+        home: ${account.home}
+        displayName: "${account.displayName}"
+        defaultModel: ${account.defaultModel}
+        models:
+          - ${account.defaultModel}`;
+
+/**
+ * One agent per detected harness, with every default lane declared as a route on it.
+ *
+ * ONE AGENT AND TWO ROUTES, never two agents. The lanes share a provider login, which is what
+ * `identity` was built for, so signing in once makes both usable; two agents would ask a person to
+ * do the same sign-in twice. Every name here comes from {@link defaultAccountsFor} rather than being
+ * re-derived, because the boot trail that tells somebody what was created reads the same function.
+ */
+const starterAgents = (
+  harnesses: readonly HarnessKind[],
+  ids: FleetScaffoldIds,
+  /**
+   * The lanes this configuration actually has variants for.
+   *
+   * PASSED IN rather than assumed, because a route names a variant and the configuration schema
+   * refuses one that is not declared. The template below declares both, so the fresh-file path always
+   * gets both; a configuration somebody else wrote may declare only `default`, and declaring an `auto`
+   * route into it would turn their valid empty fleet into a file that no longer parses.
+   */
+  lanes: readonly FleetDefaultLane[] = FLEET_DEFAULT_LANES,
+): string => {
+  const accounts = defaultAccountsFor(harnesses).filter(account => lanes.includes(account.lane));
+  const kinds = (['claude', 'codex'] as const).filter(kind => accounts.some(account => account.kind === kind));
+  const agent = (kind: HarnessKind): string => `  - name: ${DEFAULT_ACCOUNT_NAME}
     kind: ${kind}
     # "oauth" signs in through the provider; "api-key" has nothing to sign into.
     auth: oauth
     routes:
-      default:
-        id: ${id}
-        wrapper: ${kind}-primary
-        home: ${kind}-primary
-        displayName: ${label} (primary)
-        defaultModel: ${model}
-        models:
-          - ${model}`;
+${accounts
+  .filter(account => account.kind === kind)
+  .map(account => starterRoute(account, ids[kind][account.lane]))
+  .join('\n')}`;
+  return `agents:\n${kinds.map(agent).join('\n')}`;
 };
+
+/**
+ * The shared registry lines for the four default instruction documents.
+ *
+ * FOUR NAMES rather than the one `default` this used to register. A single shared document forced
+ * Codex to read a file whose own text said it was Claude's, and forced an unattended account to read
+ * guidance written for one that can ask a question. Both the names and the paths come from
+ * {@link DEFAULT_INSTRUCTIONS} and {@link defaultInstructionsName}, so a registry entry can never
+ * name a path the writer below does not create.
+ */
+const sharedInstructions = (): string =>
+  (['claude', 'codex'] as const)
+    .flatMap(kind =>
+      FLEET_DEFAULT_LANES.map(
+        lane => `    ${defaultInstructionsName(kind, lane)}: ${DEFAULT_INSTRUCTIONS[kind][lane]}`,
+      ),
+    )
+    .join('\n');
 
 const configTemplate = (
   ids: FleetScaffoldIds,
-  firstAccount: HarnessKind | undefined,
+  firstAccounts: readonly HarnessKind[],
 ): string => `# The fleet: every agent account this host can run.
 #
 # Each account gets its own home, its own generated wrapper, and its own settings.
@@ -141,10 +210,11 @@ const configTemplate = (
 # The documents this fleet shares, by name. Declaring one here does not link any
 # account to it — it gives the path a name, so a surface can offer it, say how many
 # accounts use it, and switch one account between the shared document and its own
-# copy. Add a second name to give some accounts different instructions.
+# copy. There are four, because each harness reads a document named after itself and
+# an unattended lane needs different guidance from an attended one.
 shared:
   memory:
-    default: ./CLAUDE.md
+${sharedInstructions()}
   settings:
     claude: ./templates/claude/settings.json
     codex: ./templates/codex/config.toml
@@ -157,10 +227,15 @@ profiles:
     # These neutral Ferretry starters make a newly declared account usable.
     # Each path is relative to this fleet's assets directory. Edit those files,
     # or layer inline settings later in the composition chain to override them.
-    memory: ./CLAUDE.md
+    #
+    # "memory" is declared per harness rather than once: Claude reads its document
+    # as CLAUDE.md and Codex reads its own as AGENTS.md, so one shared source would
+    # give Codex a file whose own text says it belongs to Claude.
     claude:
+      memory: ${DEFAULT_INSTRUCTIONS.claude.default}
       settings: ./templates/claude/settings.json
     codex:
+      memory: ${DEFAULT_INSTRUCTIONS.codex.default}
       settings: ./templates/codex/config.toml
 
 # Lanes every account can be cloned into. "default" is the interactive lane;
@@ -173,22 +248,27 @@ variants:
     # The auto lane is Ferretry's unattended path. These harness flags keep a
     # session from stopping for permission input; Claude's remaining first-run
     # prompts are seeded safely by the generated wrapper itself.
+    #
+    # A variant is applied AFTER the base profile, so the "-auto" document below
+    # replaces the base one for this lane only.
     claude:
+      memory: ${DEFAULT_INSTRUCTIONS.claude.auto}
       flags:
         - --dangerously-skip-permissions
         - --disallowed-tools=AskUserQuestion
       settings:
         - skipDangerousModePermissionPrompt: true
     codex:
+      memory: ${DEFAULT_INSTRUCTIONS.codex.auto}
       flags:
         - --dangerously-bypass-approvals-and-sandbox
         - --no-alt-screen
 
-${firstAccount === undefined ? 'agents: []' : starterAccount(firstAccount, ids[firstAccount])}
+${firstAccounts.length === 0 ? 'agents: []' : starterAgents(firstAccounts, ids)}
 
 # ── Example ───────────────────────────────────────────────────────────────────
 # ${
-  firstAccount === undefined
+  firstAccounts.length === 0
     ? 'Delete the "agents: []" line above and uncomment this to declare one Claude'
     : 'This is a second Claude account with an interactive lane and an automation lane.'
 }
@@ -202,7 +282,7 @@ ${firstAccount === undefined ? 'agents: []' : starterAccount(firstAccount, ids[f
 #     auth: oauth
 #     routes:
 #       default:
-#         id: ${ids.claude}
+#         id: ${ids.claude.default}
 #         wrapper: claude-work
 #         home: claude-work
 #         displayName: Claude (work)
@@ -211,7 +291,7 @@ ${firstAccount === undefined ? 'agents: []' : starterAccount(firstAccount, ids[f
 #           - claude-opus-4-5
 #           - claude-sonnet-4-5
 #       auto:
-#         id: ${ids.codex}
+#         id: ${ids.claude.auto}
 #         wrapper: claude-auto-work
 #         home: claude-auto-work
 #         displayName: Claude (work, automation)
@@ -229,19 +309,57 @@ ${firstAccount === undefined ? 'agents: []' : starterAccount(firstAccount, ids[f
 # defaultHomes: {}
 `;
 
-const STARTER_INSTRUCTIONS = `# Ferretry starter instructions
+/** What a harness is called where a person reads it. Kept beside the text that spells it. */
+const HARNESS_LABEL: Readonly<Record<HarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };
 
-This is the neutral shared guidance installed by \`fy fleet init\`. Claude receives
-it as \`CLAUDE.md\`; Codex receives the same source as \`AGENTS.md\`.
+const attendedInstructions = (kind: HarnessKind): string => `# Ferretry starter instructions
 
-Replace this file with your own global instructions when you are ready. Ferretry
-will not overwrite it on a later init or upgrade. Repository-local instructions
-may add to or refine this starting point.
+Neutral guidance installed with this fleet. Every ${HARNESS_LABEL[kind]} account that has not been
+pointed at something else reads it, as \`${kind === 'claude' ? 'CLAUDE.md' : 'AGENTS.md'}\` in its own home.
 
-- Follow the repository's contributor and agent instructions.
-- Keep changes scoped to the requested task and preserve unrelated work.
+Replace it with your own global instructions when you are ready. Ferretry creates
+this file only when it is absent and never overwrites it, so a later init or
+upgrade leaves your edits alone. Repository-local instructions may add to or
+refine this starting point.
+
+- Follow the repository's own contributor and agent instructions first.
+- Keep changes scoped to what was asked and preserve unrelated work.
 - Run the repository's relevant checks before reporting that work is complete.
+- Say what you did, and say what you did not do.
 `;
+
+/**
+ * The unattended lane's document.
+ *
+ * A SEPARATE DOCUMENT rather than a paragraph in the one above, because the advice inverts: "ask
+ * before you do something ambiguous" is right for somebody sitting at a terminal and is a deadlock
+ * for a run nobody is watching. An agent that cannot be asked has to be told so.
+ */
+const unattendedInstructions = (kind: HarnessKind): string => `# Ferretry starter instructions — unattended
+
+Neutral guidance installed with this fleet, for a ${HARNESS_LABEL[kind]} account that runs with
+nobody watching. Replace it with your own when you are ready; Ferretry creates this
+file only when it is absent and never overwrites it.
+
+Nobody is there to answer a question, so this lane differs from the attended one:
+
+- Never wait for input. Choose the most reasonable option and write down the
+  assumption you made.
+- Prefer a smaller reversible step over a larger irreversible one.
+- Keep changes scoped to what was asked and preserve unrelated work.
+- Run the repository's relevant checks before claiming the work is complete.
+- Report what was done AND what was not, including anything skipped and why.
+- When a choice cannot be made safely, stop and report it rather than guess.
+`;
+
+/**
+ * The four documents a fresh fleet ships, keyed exactly as {@link DEFAULT_INSTRUCTIONS} keys their
+ * paths — so a path the configuration points at and the content written to it cannot disagree.
+ */
+const INSTRUCTION_DOCUMENTS: Readonly<Record<HarnessKind, Readonly<Record<FleetDefaultLane, string>>>> = {
+  claude: { default: attendedInstructions('claude'), auto: unattendedInstructions('claude') },
+  codex: { default: attendedInstructions('codex'), auto: unattendedInstructions('codex') },
+};
 
 /** Claude accepts JSON only, so `$schema` is its in-file editing guidance. */
 const CLAUDE_SETTINGS = `{
@@ -267,8 +385,12 @@ absolute path is used as written.
 
 ## Included starters
 
-- \`CLAUDE.md\` is concise shared guidance. The base profile materializes it as
-  Claude's \`CLAUDE.md\` and Codex's \`AGENTS.md\`.
+- \`${DEFAULT_INSTRUCTIONS.claude.default}\` and \`${DEFAULT_INSTRUCTIONS.codex.default}\` are concise
+  shared guidance, one per harness. The base profile points each harness at its own,
+  and both land in an account's home under the name that harness reads.
+- \`${DEFAULT_INSTRUCTIONS.claude.auto}\` and \`${DEFAULT_INSTRUCTIONS.codex.auto}\` are the same thing for
+  the \`auto\` lane. An unattended agent cannot ask a question, so it is given
+  different advice rather than the same advice with a caveat.
 - \`templates/claude/settings.json\` is the neutral Claude settings layer.
 - \`templates/codex/config.toml\` is an intentionally policy-free Codex layer.
 
@@ -278,11 +400,12 @@ encode workflow preferences, so add only the ones you have chosen and reviewed.
 ## Shared documents
 
 The \`shared:\` block in \`config.yaml\` gives a name to each document the fleet offers
-to every account — \`memory.default\` is the \`CLAUDE.md\` beside this README. Naming a
+to every account — the four instruction documents above are registered as
+\`${defaultInstructionsName('claude', 'default')}\`, \`${defaultInstructionsName('claude', 'auto')}\`, \`${defaultInstructionsName('codex', 'default')}\` and \`${defaultInstructionsName('codex', 'auto')}\`. Naming a
 document there changes nothing on its own: an account uses one by referencing it, and
-the base profile is what makes it the default for everybody.
+the base profile and the \`auto\` variant are what make them the defaults.
 
-Declare a second name under \`memory:\` and you have two shared instruction documents,
+Declare another name under \`memory:\` and you have another shared instruction document,
 each account using whichever it references. An account that needs its own copy points
 at a path under \`accounts/<wrapper>/\`, which is what unlinking writes.
 
@@ -320,12 +443,35 @@ export interface FleetScaffoldInput {
    * second notion of that here would let init seed a configuration apply never looks at.
    */
   readonly configPath: string;
-  /** A single account to declare in a newly-created starter; absent keeps the file-first empty fleet. */
-  readonly firstAccount?: HarnessKind;
+  /**
+   * The harnesses whose default accounts a newly-created starter declares; empty keeps the
+   * file-first empty fleet.
+   *
+   * A SET, because "which harnesses does this host have" is the question a boot answers and a host
+   * can answer it with both. `fy fleet init --first-account=claude` is that same question narrowed
+   * to one by hand, so it passes a one-element set rather than a second spelling of the same fact.
+   */
+  readonly firstAccounts?: readonly HarnessKind[];
 }
 
 /**
- * Adds the generated starter account to a configuration that explicitly has
+ * Which default lanes an existing configuration has variants for.
+ *
+ * An ABSENT `variants` key is the schema's `{ default: {} }`, so the interactive lane is available on
+ * a document that says nothing — and a lane whose variant is missing is dropped rather than refused,
+ * because an account with one lane is useful and a configuration that will not parse is not. A
+ * `variants` value that is not a mapping is left to the schema to reject on the next read; nothing
+ * here can be declared safely against it, so no lane is.
+ */
+function declaredLanes(document: Record<string, unknown>): readonly FleetDefaultLane[] {
+  const variants = document.variants;
+  if (variants === undefined) return FLEET_DEFAULT_LANES.filter(lane => lane === 'default');
+  if (typeof variants !== 'object' || variants === null || Array.isArray(variants)) return [];
+  return FLEET_DEFAULT_LANES.filter(lane => lane in variants);
+}
+
+/**
+ * Adds the generated starter accounts to a configuration that explicitly has
  * no accounts, without normalising the rest of the person's YAML.
  *
  * The initial starter uses `agents: []`, so that common path is a one-line
@@ -333,10 +479,16 @@ export interface FleetScaffoldInput {
  * omitted `agents` key is also an empty declaration under the configuration
  * schema; append a new root key in that case. Any other zero-looking shape is
  * refused rather than guessed at: damaged state is not an empty fleet.
+ *
+ * ONLY THE LANES THIS DOCUMENT DECLARES VARIANTS FOR are given routes. A route
+ * names a variant, and the configuration schema refuses an undeclared one — so
+ * writing an `auto` route into a document that declares only `default` would
+ * take somebody's valid empty fleet and leave it a file that no longer parses,
+ * which is a strictly worse outcome than the account they did not get.
  */
-function declareFirstAccountInEmptyConfig(
+function declareFirstAccountsInEmptyConfig(
   existing: string,
-  kind: HarnessKind,
+  harnesses: readonly HarnessKind[],
   ids: FleetScaffoldIds,
 ): string | undefined {
   let parsed: unknown;
@@ -352,14 +504,22 @@ function declareFirstAccountInEmptyConfig(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('cannot add a first account because the existing configuration is not a YAML mapping');
   }
+  const lanes = declaredLanes(parsed as Record<string, unknown>);
+  if (lanes.length === 0) {
+    // An agent must declare at least one route, so there is nothing to write. Refused rather than
+    // written empty, which would be a document the very next read rejects.
+    throw new Error(
+      `cannot add a first account because the existing configuration declares none of the default lanes (${FLEET_DEFAULT_LANES.join(', ')}) as variants`,
+    );
+  }
   const agents = (parsed as Record<string, unknown>).agents;
-  if (agents === undefined) return `${existing.replace(/\s*$/u, '')}\n\n${starterAccount(kind, ids[kind])}\n`;
+  if (agents === undefined) return `${existing.replace(/\s*$/u, '')}\n\n${starterAgents(harnesses, ids, lanes)}\n`;
   if (!Array.isArray(agents)) {
     throw new Error('cannot add a first account because the existing configuration has a non-list "agents" value');
   }
   if (agents.length > 0) return undefined;
 
-  const replacement = starterAccount(kind, ids[kind]);
+  const replacement = starterAgents(harnesses, ids, lanes);
   const updated = existing.replace(/^agents\s*:\s*\[\s*\](\s*(?:#.*)?)$/mu, (_line, comment: string) => {
     return `${replacement.slice(0, 'agents:'.length)}${comment}${replacement.slice('agents:'.length)}`;
   });
@@ -378,9 +538,27 @@ function declareFirstAccountInEmptyConfig(
  * asset reference used to resolve into a path nothing had made.
  */
 export function buildFleetScaffold(input: FleetScaffoldInput): FleetScaffold {
-  const { layout, ids, configPath, firstAccount } = input;
+  const { layout, ids, configPath } = input;
+  const firstAccounts = input.firstAccounts ?? [];
   const separator = layout.assetsDirectory.endsWith('/') ? '' : '/';
   const assetPath = (name: string): string => `${layout.assetsDirectory}${separator}${name}`;
+  /**
+   * All four instruction documents, on every host.
+   *
+   * A CLAUDE-ONLY HOST STILL GETS THE CODEX PAIR. The configuration this scaffold writes points both
+   * harnesses at their own documents whether or not either is installed, so writing only the detected
+   * one would leave a live reference to a file nothing had made — and installing the other harness
+   * later would then need a second, differently-shaped step to fix it.
+   */
+  const instructions = (['claude', 'codex'] as const).flatMap(kind =>
+    FLEET_DEFAULT_LANES.map(lane => ({
+      // Canonicalised rather than trimmed by hand: `./CLAUDE.md` and `CLAUDE.md` are one document,
+      // and the same function is what every reader of an asset reference compares through.
+      path: assetPath(canonicalAssetReference(DEFAULT_INSTRUCTIONS[kind][lane])),
+      content: INSTRUCTION_DOCUMENTS[kind][lane],
+      mode: FILE_MODE,
+    })),
+  );
   return {
     directories: [
       layout.fleetDirectory,
@@ -395,18 +573,20 @@ export function buildFleetScaffold(input: FleetScaffoldInput): FleetScaffold {
     files: [
       {
         path: configPath,
-        content: configTemplate(ids, firstAccount),
+        content: configTemplate(ids, firstAccounts),
         mode: FILE_MODE,
-        ...(firstAccount === undefined
+        ...(firstAccounts.length === 0
           ? {}
-          : { updateIfPresent: (existing: string) => declareFirstAccountInEmptyConfig(existing, firstAccount, ids) }),
+          : {
+              updateIfPresent: (existing: string) => declareFirstAccountsInEmptyConfig(existing, firstAccounts, ids),
+            }),
       },
       { path: assetPath('README.md'), content: ASSETS_README, mode: FILE_MODE },
-      { path: assetPath('CLAUDE.md'), content: STARTER_INSTRUCTIONS, mode: FILE_MODE },
+      ...instructions,
       { path: assetPath('templates/claude/settings.json'), content: CLAUDE_SETTINGS, mode: FILE_MODE },
       { path: assetPath('templates/codex/config.toml'), content: CODEX_SETTINGS, mode: FILE_MODE },
     ],
-    ...(firstAccount === undefined ? {} : { declaration: { path: configPath, account: firstAccount } }),
+    ...(firstAccounts.length === 0 ? {} : { declaration: { path: configPath, accounts: firstAccounts } }),
     pathEntry: `export PATH="${layout.binDirectory}:$PATH"`,
   };
 }
@@ -419,8 +599,8 @@ export interface FleetScaffoldResult {
   readonly kept: readonly string[];
   /** Existing declarations that were safely extended rather than replaced. */
   readonly updated: readonly string[];
-  /** Present only when this run actually declared the requested first account. */
-  readonly declaredFirstAccount?: HarnessKind;
+  /** Present only when this run actually declared the requested accounts, naming their harnesses. */
+  readonly declaredAccounts?: readonly HarnessKind[];
   /** Directories ensured, whether or not they already existed. */
   readonly directories: readonly string[];
   readonly pathEntry: string;

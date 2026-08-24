@@ -506,3 +506,26 @@ describe('the relay carrier block', () => {
     should(() => parseDaemonConfig({ relay: { url: 'https://relay.example', unknown: true } })).throw();
   });
 });
+
+describe('the fleet preparation block', () => {
+  it('should prepare the default accounts unless the operator said otherwise', () => {
+    // Assert — ON by default, and that default is the feature: a machine with a harness installed and
+    // no declared account could serve this whole API and start no session.
+    should(defaultDaemonConfig().fleet).deepEqual({ prepareDefaults: true });
+    should(parseDaemonConfig({}).fleet).deepEqual({ prepareDefaults: true });
+    should(defaultDaemonConfigDocument().fleet).deepEqual({ prepareDefaults: true });
+  });
+
+  it('should honour an explicit false, including on a document that says nothing else', () => {
+    // Assert — read from the document on every start rather than from an "already prepared" marker,
+    // so somebody who does not want a daemon writing into their home is obeyed on the FIRST start.
+    should(parseDaemonConfig({ fleet: { prepareDefaults: false } }).fleet).deepEqual({ prepareDefaults: false });
+  });
+
+  it('should refuse a key nothing reads rather than accept a silent typo', () => {
+    // Assert — strict, like every other block here: a misspelled opt-out that parsed would leave
+    // somebody believing they had turned this off.
+    should(() => parseDaemonConfig({ fleet: { prepareDefault: false } })).throw();
+    should(() => parseDaemonConfig({ fleet: { prepareDefaults: 'no' } })).throw();
+  });
+});

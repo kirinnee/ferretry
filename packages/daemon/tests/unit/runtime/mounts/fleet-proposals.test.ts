@@ -158,6 +158,7 @@ const CREATE = {
     kind: 'create-account',
     harness: 'claude',
     name: 'atomi',
+    lanes: [{ variant: 'default' }],
     models: ['opus'],
     defaultModel: 'opus',
   },
@@ -176,7 +177,7 @@ async function propose(subject: Fixture, body: unknown = CREATE, headers: Readon
     preview: {
       kind: string;
       documents: { path: string; bytes: number }[];
-      plan?: { manifest: { generatedAt: string } };
+      plan?: { manifest: { generatedAt: string; accounts: { wrapper: string }[] } };
     };
   };
 }
@@ -351,6 +352,33 @@ describe('composing a fleet change', () => {
     // Assert
     should(actual.status).equal(409);
     should(jsonBody(actual)).match({ code: 'fleet_asset_refused' });
+  });
+
+  it('should name EVERY account a multi-lane create adds, in the one line somebody approves', async () => {
+    // Arrange — the summary is the whole description of the change for the person confirming it, so
+    // one that mentioned the first of two wrappers would be a line that is not what happens.
+    const subject = await fixture();
+    await writeConfig(subject, 'variants:\n  default: {}\n  auto: {}\nagents: []\n');
+
+    // Act
+    const proposal = await propose(subject, {
+      mutation: {
+        ...CREATE.mutation,
+        lanes: [
+          { variant: 'default', mode: 'interactive' },
+          { variant: 'auto', mode: 'auto' },
+        ],
+      },
+    });
+
+    // Assert
+    should(proposal.summary).equal('add claude-atomi, claude-auto-atomi');
+    // ONE plan, one review, two accounts. Two proposals would have been two confirmations for one
+    // decision. The wrapper is the path the plan will write, so the NAME is its last segment.
+    should(proposal.preview.plan?.manifest.accounts.map(account => account.wrapper.split('/').at(-1))).deepEqual([
+      'claude-atomi',
+      'claude-auto-atomi',
+    ]);
   });
 });
 

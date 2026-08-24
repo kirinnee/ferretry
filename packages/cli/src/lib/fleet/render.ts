@@ -455,8 +455,10 @@ export function renderScaffoldResult(
   lines.push('', 'Add this to your shell profile so the generated wrappers are on PATH:', `  ${result.pathEntry}`);
   lines.push(
     '',
-    result.declaredFirstAccount !== undefined
-      ? `Declared one ${result.declaredFirstAccount} account. Run "fy fleet apply" to materialise its wrapper.`
+    result.declaredAccounts !== undefined
+      ? // The harnesses rather than a count, because each one declares two accounts — an interactive
+        // lane and an unattended one — so "declared 2 accounts" would read as two harnesses.
+        `Declared the default ${result.declaredAccounts.join(' and ')} accounts. Run "fy fleet apply" to materialise their wrappers.`
       : firstAccount === undefined
         ? 'Then declare an account in the configuration and run "fy fleet apply".'
         : 'Kept the existing configuration unchanged; it already declares one or more accounts, so no account was added.',

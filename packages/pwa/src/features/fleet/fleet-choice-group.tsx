@@ -116,6 +116,14 @@ export interface FleetCheckChoiceProps {
   readonly name: string;
   /** Shown in place of the list when there is nothing to offer. An empty list is never silent. */
   readonly empty: string;
+  /**
+   * Whether the labels are identifiers. Default true, because the first caller's are model ids.
+   *
+   * A monospace face is a claim that the string is data a person will retype exactly — which is right
+   * for `claude-opus-5` and wrong for "Interactive", where it reads as a code word rather than as the
+   * plain English it is.
+   */
+  readonly mono?: boolean;
 }
 
 /**
@@ -135,6 +143,7 @@ export function FleetCheckChoice({
   disabled = false,
   name,
   empty,
+  mono = true,
 }: FleetCheckChoiceProps) {
   const uid = useId();
   const chosen = new Set(selected);
@@ -170,7 +179,7 @@ export function FleetCheckChoice({
                 onChange={() => onToggle(option.id)}
               />
               <span className="flex w-full min-w-0 items-center gap-2 text-ui font-semibold">
-                <span className="min-w-0 break-words font-mono">{option.label}</span>
+                <span className={cn('min-w-0 break-words', mono && 'font-mono')}>{option.label}</span>
                 {option.badge === undefined ? null : (
                   <span className="shrink-0 rounded-control bg-surface-3 px-1.5 py-0.5 text-meta font-normal text-muted">
                     {option.badge}

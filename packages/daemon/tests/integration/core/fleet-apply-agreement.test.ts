@@ -8,6 +8,7 @@ import {
   FleetPlan,
   type FleetLayout,
   type FleetScaffoldIds,
+  fleetScaffoldIds,
   FleetConfigSchema,
 } from '@ferretry/fleet';
 import { FileFleetProvisioner, FileFleetScaffolder } from '@ferretry/fleet/adapters';
@@ -45,7 +46,7 @@ const CONFIG = (kind: string, ids: FleetScaffoldIds): string => `agents:
     auth: oauth
     routes:
       default:
-        id: ${kind === 'claude' ? ids.claude : ids.codex}
+        id: ${kind === 'claude' ? ids.claude.default : ids.codex.default}
         wrapper: ${kind}-primary
         home: ${kind}-primary
         displayName: ${kind} (primary)
@@ -94,13 +95,11 @@ function layoutFor(home: string): { readonly layout: FleetLayout; readonly manif
 /** `fy fleet init --first-account` then `fy fleet apply`, through the code both commands run. */
 async function provision(home: string): Promise<{ readonly manifestPath: string }> {
   const { layout, manifestPath } = layoutFor(home);
-  const ids: FleetScaffoldIds = {
-    claude: '00000000-0000-4000-8000-0000000000c1',
-    codex: '00000000-0000-4000-8000-0000000000c2',
-  };
+  let minted = 0;
+  const ids: FleetScaffoldIds = fleetScaffoldIds(() => `00000000-0000-4000-8000-0000000000c${String(++minted)}`);
   const configPath = join(layout.fleetDirectory, 'config.yaml');
   await new FileFleetScaffolder([layout.stateHome, home]).scaffold(
-    buildFleetScaffold({ layout, ids, configPath, firstAccount: 'claude' }),
+    buildFleetScaffold({ layout, ids, configPath, firstAccounts: ['claude'] }),
   );
   // The starter template is the product's, not this test's: the account below is written over it in
   // the same shape `--first-account` produces, with a neutral model so no catalog is smuggled in.

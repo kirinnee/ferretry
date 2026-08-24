@@ -5,7 +5,7 @@
  * and every wrapper it is pointed at lives in a temporary directory this test created.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -17,7 +17,16 @@ import {
   spawnFleetLoginProcess,
   whichHarnessBinary,
 } from '../../src/adapters/process-login.ts';
+import { FleetConfigSchema } from '../../src/lib/config.ts';
 import type { FleetLoginTarget } from '../../src/lib/login.ts';
+import { resolveAccounts } from '../../src/lib/profiles.ts';
+import { renderWrapperScript } from '../../src/lib/wrappers.ts';
+
+/** The value, or a failure naming what was missing rather than a `TypeError` three lines later. */
+function must<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what}`);
+  return value;
+}
 
 const temporaryDirectories: string[] = [];
 
@@ -228,6 +237,139 @@ describe('ProcessFleetLoginPort', () => {
 
     // Assert
     should(actual).deepEqual({ status: 'failed', message: 'login process exited with code 7' });
+  });
+});
+
+/**
+ * WHAT THE COMPOSED COMMAND LINE ACTUALLY IS, AND WHY THAT IS A DEFECT.
+ *
+ * This block is DOCUMENTATION OF A DEFECT, not an approval of one. It is green because the behaviour it
+ * describes is the behaviour that ships; read it as the reproduction, not as the contract.
+ *
+ * `renderWrapperScript` ends a generated wrapper with `exec <binary> <account flags> "$@"`
+ * (`packages/fleet/src/lib/wrappers.ts:259`), and both login paths launch `[wrapper, <login argv>]` —
+ * this port at `process-login.ts:78`, and the daemon's browser-driven flow at
+ * `packages/daemon/src/lib/fleet-login/service.ts:536`. So an account's declared SESSION flags arrive
+ * ahead of a SUBCOMMAND, which is a position no harness promises to accept them in.
+ *
+ * Measured on this host, at codex-cli 0.145.0 and claude-code 2.1.220:
+ *
+ *     codex login --device-auth                                       -> prints a URL and a user code
+ *     codex --full-auto login --device-auth                           -> error: unexpected argument
+ *                                                                        '--full-auto' found
+ *     codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen login --device-auth -> works
+ *     claude --dangerously-skip-permissions --disallowed-tools=AskUserQuestion auth login --claudeai
+ *                                                                     -> works
+ *
+ * Codex's parser (clap) refuses an unknown ROOT argument outright; Claude's (commander) passes root
+ * flags through to the subcommand. Both harnesses' SHIPPED starter flags survive at these versions, so
+ * what breaks is an operator-declared codex root-only flag — and it bites hardest on an identity with no
+ * interactive lane, because `chooseLoginMember` then falls back to the auto lane, which is exactly where
+ * the aggressive flags live. The failure is silent in the worst way: the harness prints no URL and no
+ * code, so the daemon reports that this host's harness offered no browser-drivable sign-in and names
+ * `fy fleet login` — which composes the same flags and fails identically.
+ *
+ * Deliberately NOT fixed here: every honest fix changes the bytes of the executables Ferretry writes
+ * into somebody's home, which is its own change with its own review.
+ */
+describe('the composed login command line', () => {
+  it('should place the account’s declared harness flags BEFORE the login subcommand — pinned as the DEFECT it is', async () => {
+    // Arrange — a real generated wrapper for a real resolved account, and a stand-in for the harness
+    // binary the wrapper execs BY NAME off `PATH`, so what is asserted is the argv a harness would see.
+    const root = await temporaryDirectory();
+    const bin = path.join(root, 'bin');
+    await mkdir(bin, { recursive: true });
+    const argv = path.join(root, 'argv');
+    const harness = path.join(bin, 'codex');
+    await writeFile(harness, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argv)}\n`);
+    await chmod(harness, 0o700);
+
+    const config = FleetConfigSchema.parse({
+      // The lane with no interactive sibling, which is the case `chooseLoginMember` falls back into.
+      variants: { auto: { mode: 'auto', codex: { flags: ['--full-auto'] } } },
+      agents: [
+        {
+          name: 'unattended',
+          kind: 'codex',
+          routes: {
+            auto: {
+              id: '00000000-0000-4000-8000-0000000000aa',
+              wrapper: 'codex-unattended',
+              home: path.join(root, 'home'),
+              defaultModel: 'model-one',
+              models: ['model-one'],
+            },
+          },
+        },
+      ],
+    });
+    const account = resolveAccounts(config)[0];
+    const wrapper = path.join(bin, 'codex-unattended');
+    await writeFile(wrapper, renderWrapperScript(must(account, 'the resolved account')));
+    await chmod(wrapper, 0o700);
+
+    const subject = new ProcessFleetLoginPort({
+      spawn: spawnFleetLoginProcess,
+      environment: { PATH: bin },
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
+
+    // Act
+    const actual = await subject.login(target({ kind: 'codex', wrapper, home: path.join(root, 'home') }));
+
+    // Assert — the flag precedes `login`. A harness whose parser refuses a root flag in that position
+    // never reaches its own login at all, and this port reports only the exit code.
+    should(actual).deepEqual({ status: 'logged-in' });
+    should((await readFile(argv, 'utf8')).split('\n').filter(line => line !== '')).deepEqual(['--full-auto', 'login']);
+  });
+
+  it('should compose a flagless account’s command line as the harness’s own login and nothing else', async () => {
+    // The control case, and the reason the one above is a defect rather than a design: with no declared
+    // flags the wrapper hands the harness exactly the login argument, which is what every harness accepts.
+    // Arrange
+    const root = await temporaryDirectory();
+    const bin = path.join(root, 'bin');
+    await mkdir(bin, { recursive: true });
+    const argv = path.join(root, 'argv');
+    const harness = path.join(bin, 'codex');
+    await writeFile(harness, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argv)}\n`);
+    await chmod(harness, 0o700);
+
+    const config = FleetConfigSchema.parse({
+      variants: { default: {} },
+      agents: [
+        {
+          name: 'attended',
+          kind: 'codex',
+          routes: {
+            default: {
+              id: '00000000-0000-4000-8000-0000000000bb',
+              wrapper: 'codex-attended',
+              home: path.join(root, 'home'),
+              defaultModel: 'model-one',
+              models: ['model-one'],
+            },
+          },
+        },
+      ],
+    });
+    const wrapper = path.join(bin, 'codex-attended');
+    await writeFile(wrapper, renderWrapperScript(must(resolveAccounts(config)[0], 'the resolved account')));
+    await chmod(wrapper, 0o700);
+
+    const subject = new ProcessFleetLoginPort({
+      spawn: spawnFleetLoginProcess,
+      environment: { PATH: bin },
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
+
+    // Act
+    await subject.login(target({ kind: 'codex', wrapper, home: path.join(root, 'home') }));
+
+    // Assert
+    should((await readFile(argv, 'utf8')).split('\n').filter(line => line !== '')).deepEqual(['login']);
   });
 });
 
