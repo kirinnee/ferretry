@@ -29,6 +29,7 @@
 
 import { CloudOff, Layers3, Lock, Plus, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { PickerAccountHealth } from '../../lib/account-picker-catalog.ts';
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
@@ -51,6 +52,7 @@ import {
   fleetRefusal,
   type HarnessDiscoveryReport,
   listFleetAssets,
+  readFleetAccountHealth,
   readFleetAsset,
   readFleetConfig,
   readFleetHarnesses,
@@ -196,6 +198,14 @@ interface FleetSession {
    * the old, unprefilled behaviour and say so, never fill boxes in from an absence of evidence.
    */
   readonly discovery: HarnessDiscoveryReport | null;
+  /**
+   * The daemon-'s stored health verdicts, keyed by account id, or `null` when the read did not land.
+   *
+   * DECORATION ON A CONFIGURATION SCREEN, and the null is the whole reason it is a separate field: a
+   * daemon that publishes a manifest and cannot serve verdicts still has accounts to configure, so
+   * this being absent must cost the roster nothing. Every row then reads "Never checked".
+   */
+  readonly health: ReadonlyMap<string, PickerAccountHealth> | null;
   readonly mode: FleetComposeMode;
   readonly proposal: FleetProposalView | null;
   /**
@@ -228,6 +238,7 @@ const freshSession = (generation: string): FleetSession => ({
   config: null,
   permissions: null,
   discovery: null,
+  health: null,
   mode: { kind: 'idle' },
   proposal: null,
   held: null,
@@ -455,11 +466,18 @@ export function FleetConfigurationSurface({
       // refused it, must still produce a working fleet panel. A failure here means "nothing was
       // detected", which the form states, rather than a panel that will not load.
       const discovery = await probe(() => readFleetHarnesses(client));
+      // A SEPARATE PROBE, for the same reason the harness read above is one, and it matters more here:
+      // health is decoration on a screen whose job is configuration. A daemon too old to serve the
+      // route, a credential that refused it, or a damaged health document must all leave a working
+      // panel with rows that say "Never checked" — never a panel that will not load. It is also a
+      // pure SNAPSHOT read: opening this screen collects nothing and costs no provider call.
+      const health = await probe(() => readFleetAccountHealth(client));
       if (!live) return;
       patch(generation, {
         client,
         permissions: permissions.ok ? permissions.value : null,
         discovery: discovery.ok ? discovery.value : null,
+        health: health.ok ? health.value.health : null,
         ...evidence,
       });
     })();
@@ -1067,6 +1085,7 @@ export function FleetConfigurationSurface({
             generatedAt={inventory.manifest.generatedAt}
             onEdit={startEdit}
             editable={composable && session.proposal === null}
+            {...(session.health === null ? {} : { health: session.health })}
           />
         ) : null}
 

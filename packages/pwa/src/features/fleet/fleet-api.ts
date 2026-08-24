@@ -18,6 +18,7 @@
  * paired to several, so nothing is cached at module scope.
  */
 
+import { type AccountPickerHealthCatalog, readAccountPickerHealth } from '../../lib/account-picker-catalog.ts';
 import {
   type FleetApplyOutcome,
   FleetApplyOutcomeSchema,
@@ -134,6 +135,21 @@ export const readFleetManifest = async (client: FleetClient): Promise<FleetManif
  */
 export const readFleetHarnesses = async (client: FleetClient): Promise<HarnessDiscoveryReport> =>
   await client.request(`${FLEET_PATH}/harnesses`, HarnessDiscoveryReportSchema);
+
+/**
+ * The stored health verdicts, for the roster on this screen.
+ *
+ * A SNAPSHOT READ, and that is why a configuration screen may make it at all: the daemon answers from
+ * its own file and checks nothing, so opening this panel cannot cost a provider call. The route that
+ * COLLECTS is a different verb on a different path, and this module deliberately does not dial it — a
+ * configuration screen has no business collecting evidence.
+ *
+ * DELEGATES rather than declaring a second reader, so this screen and the account picker cannot come
+ * to disagree about how a damaged snapshot is handled: one parser, one duplicate-row rule, one place
+ * that decides a repeated account is ambiguous rather than last-one-wins.
+ */
+export const readFleetAccountHealth = async (client: FleetClient): Promise<AccountPickerHealthCatalog> =>
+  await readAccountPickerHealth(client);
 
 export const readFleetConfig = async (client: FleetClient): Promise<FleetConfigView> =>
   await client.request(`${FLEET_PATH}/config`, FleetConfigViewSchema);

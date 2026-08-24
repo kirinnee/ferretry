@@ -25,6 +25,13 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useId, useState } from 'react';
+import {
+  absoluteInstantLabel,
+  type AccountHealthTone,
+  accountHealthView,
+  UNREAD_ACCOUNT_HEALTH,
+} from '../../lib/account-health-view.ts';
+import type { PickerAccountHealth } from '../../lib/account-picker-catalog.ts';
 import { cn } from '../../lib/class-names.ts';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import type { OperatorUnlockFailure } from '../../lib/grants.ts';
@@ -86,6 +93,68 @@ function AccountLine({ account }: { readonly account: FleetManifestAccountView }
 }
 
 /**
+ * Whether each published account is signed in, on the screen an operator actually opens.
+ *
+ * TWO FACTS, KEPT APART. `N published` above is what the MANIFEST declares. This is what the
+ * PROVIDER last said about the credential in that account's home. An account can be published and
+ * signed out, so neither line may stand in for the other.
+ *
+ * THE WORDS COME FROM `account-health-view.ts`, which the account picker also reads. A second copy
+ * table here is how the same account ends up described differently on two screens, so there is not
+ * one — `accountHealthView` is the single owner and this component only positions its output.
+ *
+ * ABSENT IS NOT UNHEALTHY. An account with no published row renders through
+ * `UNREAD_ACCOUNT_HEALTH` ("Never checked"), which is a different sentence from a row that SAYS
+ * unknown — that one carries its own reason, such as a timeout or Codex having no free proof. And
+ * when the whole health read failed, EVERY row lands here: this screen's job is configuration, so
+ * missing health is a quiet "Unknown" rather than anything that stops the roster rendering.
+ */
+function LiveAccountHealth({
+  health,
+  now,
+}: {
+  readonly health: PickerAccountHealth | undefined;
+  readonly now: number;
+}) {
+  const view = health === undefined ? UNREAD_ACCOUNT_HEALTH : accountHealthView(health, now);
+  const instant = health?.lastCheckedAt ?? null;
+  return (
+    <p
+      className="m-0 mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 text-meta leading-base"
+      data-fleet-live-health={view.tone}
+    >
+      <span className={cn('shrink-0 font-semibold', HEALTH_TONE_CLASS[view.tone])} title={view.detail}>
+        {view.label}
+      </span>
+      {/* A semantic instant, so the exact UTC time reaches the accessible name while the visible
+          label stays the relative one somebody can read at a glance. The relative label may tick in
+          the client without anything claiming a fresh check happened. */}
+      {instant === null ? (
+        <span className="min-w-0 text-muted">{view.checked}</span>
+      ) : (
+        <time className="min-w-0 text-muted" dateTime={absoluteInstantLabel(instant)}>
+          {view.checked}
+        </time>
+      )}
+      {/* THE REASON IS VISIBLE, not only a title. A `title` has no touch equivalent, and "Healthy"
+          beside "quota is not measurable" is the pair that stops somebody reading an unmeasurable
+          account as a broken one. It wraps rather than truncating: a clipped reason is the fact a
+          reader came for. */}
+      <span className="min-w-0 text-muted">{view.detail}</span>
+      {view.secondary === undefined ? null : <span className="min-w-0 text-warn">{view.secondary}</span>}
+    </p>
+  );
+}
+
+/** The four tones, in this panel's own palette. `muted` is an absence, not a warning. */
+const HEALTH_TONE_CLASS: Readonly<Record<AccountHealthTone, string>> = {
+  ok: 'text-ok',
+  bad: 'text-err',
+  warn: 'text-warn',
+  muted: 'text-faint',
+};
+
+/**
  * The accounts this daemon POSITIVELY published.
  *
  * An empty list here is a fleet observed to be empty. Every other reason a roster could be empty —
@@ -97,11 +166,21 @@ export function FleetLiveRoster({
   generatedAt,
   onEdit,
   editable,
+  health,
+  now = Date.now(),
 }: {
   readonly accounts: readonly FleetManifestAccountView[];
   readonly generatedAt: string;
   readonly onEdit: (account: FleetManifestAccountView) => void;
   readonly editable: boolean;
+  /**
+   * The daemon's stored verdicts, keyed by account id. OPTIONAL, and absent is a first-class case:
+   * a daemon that can publish a manifest and cannot serve verdicts still has accounts, and this
+   * panel's job is configuration. Absent means every row reads "Never checked".
+   */
+  readonly health?: ReadonlyMap<string, PickerAccountHealth>;
+  /** The instant relative labels are measured against. Injected so a test asserts against a fixture. */
+  readonly now?: number;
 }) {
   // Instance-local: a page may hold more than one cockpit, so a roster may appear more than once.
   const uid = useId();
@@ -133,7 +212,10 @@ export function FleetLiveRoster({
               key={account.id}
               className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border-soft px-panel py-2 first:border-t-0"
             >
-              <AccountLine account={account} />
+              <div className="min-w-0 flex-1 basis-[12rem]">
+                <AccountLine account={account} />
+                <LiveAccountHealth health={health?.get(account.id)} now={now} />
+              </div>
               <button
                 type="button"
                 className="kt-btn kt-btn--sm ml-auto shrink-0"
