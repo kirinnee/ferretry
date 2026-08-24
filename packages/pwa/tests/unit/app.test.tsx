@@ -322,6 +322,14 @@ interface ShellOptions {
   /** Makes creating the daemon-bound client reject before any read starts. */
   readonly clientFailure?: string;
   /**
+   * When this answers true, every carrier probe fails, so the next walk reaches `ok: false`.
+   *
+   * A PREDICATE RATHER THAN A FLAG, because the interesting case is a daemon that WAS reachable and
+   * then stopped being: the router's `ok: false` branch is only entered by a later walk, and a fixed
+   * option could only ever make a session unreachable from the start.
+   */
+  readonly carrierDown?: () => boolean;
+  /**
    * Holds `get` open. Without it the read resolves inside the mount's own act
    * flush and the loading state never exists to be observed — which is exactly
    * the state the live-region tests are about.
@@ -451,6 +459,9 @@ const appStore = async (
     fetcher: async input => {
       const url = String(input);
       carrierRequests.push(url);
+      // Every carrier this daemon publishes fails at transport, which is what a walk needs to see
+      // before it can answer `ok: false` rather than picking a winner.
+      if (options.carrierDown?.() === true) throw new Error('the daemon is unreachable');
       // The board a live session reads. A test that wants to watch a refresh
       // land supplies its own answer per read; every other test gets the same
       // empty deck the shell has always been given here.
@@ -1069,6 +1080,75 @@ describe('AppShell', () => {
     await settle();
 
     expect(session.getAttribute('data-live-events')).toBe('9');
+    await view.unmount();
+  });
+
+  /**
+   * THE OTHER WAY A PAGE CAN GO ON CLAIMING TO BE LIVE, which is not a stream failure at all.
+   *
+   * The effect below only subscribes while there is a client AND a measured, reachable carrier. When
+   * that stops being true — the client is replaced with `null`, or a later carrier walk answers
+   * `ok: false` for a daemon that was reachable a minute ago — React runs the cleanup and the effect
+   * RETURNS EARLY. The subscription is gone and no status is ever published, so a `useState` holding
+   * the last reported value simply kept saying `live`: the same "a dead stream looks alive" defect
+   * this route was changed to end, arrived at from the opposite direction and invisible to every
+   * assertion about the stream itself, because the stream is not the thing that broke.
+   *
+   * IT HAPPENS IN TWO STEPS AND BOTH ARE ASSERTED, because the router does not go straight to a
+   * verdict. A remembered winner that stops carrying is FORGOTTEN — `choice` becomes `undefined` and
+   * the next request walks again — and only that later walk, having failed every carrier the daemon
+   * publishes, publishes `ok: false`. So the page passes through "nothing is measured" on its way to
+   * "this daemon cannot be reached", and it must not claim to be live in either.
+   */
+  it('stops claiming a live feed the moment its carrier stops carrying', async () => {
+    let reachable = true;
+    const { liveFeeds, store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      carrierDown: () => !reachable,
+    });
+    await settle();
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+    const walk = async (): Promise<void> => {
+      await interact(async () => {
+        // The request itself rejects — every carrier failed, which is the point. What matters is the
+        // choice the router publishes on its way out.
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`).catch(() => undefined);
+      });
+      await settle();
+    };
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(4)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+
+    // Act I — the daemon stops answering, so the remembered carrier is forgotten.
+    reachable = false;
+    await walk();
+
+    // Assert I — this is the transition that used to leave `Live` on screen with nothing behind it:
+    // the effect's guard stopped holding, React ran the cleanup, and the effect returned early
+    // without ever publishing a status. Nothing is measured now, and the app walks again on its next
+    // request, so `connecting` is the honest reading — but `live` is the one it must never be.
+    expect(store.carrier.choice(alpha.daemonId)).toBeUndefined();
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+    expect(liveFeeds).toHaveLength(1);
+
+    // Act II — that next walk tries every carrier the daemon publishes and reaches a verdict.
+    await walk();
+
+    // Assert II
+    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(false);
+    expect(region().getAttribute('data-live-stream')).toBe('unavailable');
+    const sentence = must(region().querySelector('.sr-only'), 'the announced sentence').textContent ?? '';
+    expect(sentence).toContain('cannot be reached');
+    // NOT a promise of a timer refresh, and that is not pedantry: the poll underneath takes the same
+    // carrier that just failed, so it is not refreshing anything either.
+    expect(sentence).not.toContain('timer');
+    // AND NO CONTROL THAT WOULD DO NOTHING. The route tore its model down, so a Reconnect button here
+    // would be wired to a null control — an affordance that looks like a remedy and is a no-op.
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+    // The subscription really is gone rather than merely unreported: nothing reopened one.
+    expect(liveFeeds).toHaveLength(1);
+
     await view.unmount();
   });
 

@@ -166,12 +166,14 @@ export interface SessionEventStreamControl {
  * instead. A stream that connects, sits quiet for an hour and then flaps must not resume at the
  * backoff it reached an hour ago, and recurring idle traffic is what makes that true.
  *
- * A STALE CALLBACK CANNOT TOUCH THE REPLACEMENT. Every attempt carries a generation, and a
- * cancelled transport is not obliged to fall silent the instant its signal aborts — a relayed
- * session in particular settles across the network. So a late event from an abandoned socket must
- * not advance the cursor, refresh the host, reset the budget or schedule a retry alongside the one
- * that replaced it, and the generation check is what makes each of those impossible rather than
- * unlikely.
+ * A STALE CALLBACK CANNOT TOUCH THE REPLACEMENT, and "stale" is two different things. A cancelled
+ * transport is not obliged to fall silent the instant its signal aborts — a relayed session in
+ * particular settles across the network — so an attempt is only current while it is BOTH the newest
+ * one and unfinished. Those come apart: being replaced advances the generation, but simply ENDING
+ * does not, because during a backoff window the replacement has not been opened yet. A late event
+ * from either kind of dead attempt must not advance the cursor, refresh the host, reset the budget,
+ * arm a deadline, publish `live` or schedule a retry beside the pending one, and asking both
+ * questions is what makes each of those impossible rather than unlikely.
  */
 export const startSessionEventStream = (input: SessionEventStreamInput): SessionEventStreamControl => {
   const budget = input.attemptBudget ?? SESSION_EVENT_STREAM_BACKOFF.attemptBudget;
@@ -208,8 +210,17 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
     clearSilence();
   };
 
-  const proved = (mine: number): boolean => {
-    if (stopped || mine !== generation) return false;
+  /**
+   * Accept a frame as evidence, but only from the attempt that is still the live one.
+   *
+   * `current` is the attempt's own predicate rather than a generation number, because a generation
+   * is not enough on its own: an attempt that has ENDED keeps the newest generation until its retry
+   * timer opens the replacement, and a late frame arriving inside that gap would otherwise pass. See
+   * {@link SessionEventStreamControl} — the two ways an attempt stops being current are different
+   * facts and both have to be asked about.
+   */
+  const proved = (current: () => boolean): boolean => {
+    if (!current()) return false;
     attempt = 0;
     publish('live');
     return true;
@@ -244,8 +255,21 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
     // is exactly what finally makes its promise settle. Without this, one dead attempt would schedule
     // two reconnections and the browser would end up holding two live streams for one session.
     let finished = false;
+    /**
+     * Whether this attempt is still the one whose frames count, which is TWO facts and not one.
+     *
+     * A generation alone says whether something REPLACED this attempt. It says nothing about whether
+     * this attempt already ended, and those come apart for the whole length of a backoff window: a
+     * settlement schedules a retry WITHOUT advancing the generation, because the replacement does not
+     * exist yet. A frame arriving from the settled transport in that gap therefore still carried the
+     * newest generation, and would have been accepted as proof — publishing `live` over a feed that
+     * had stopped, restoring the full retry budget, moving the cursor and arming a deadline for a
+     * socket nobody held, all while the scheduled reconnection was still pending. That is the same
+     * "a dead stream looks alive" defect this model exists to end, reintroduced one layer in.
+     */
+    const currentAttempt = (): boolean => !stopped && mine === generation && !finished;
     const finish = (): void => {
-      if (finished) return;
+      if (!currentAttempt()) return;
       finished = true;
       ended(mine);
     };
@@ -253,7 +277,7 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
       clearSilence();
       silence = environment.setTimeout(() => {
         silence = undefined;
-        if (stopped || mine !== generation) return;
+        if (!currentAttempt()) return;
         // Nothing at all for three of the daemon's own windows. Cancelling is what turns a socket
         // that will never close into an attempt that has ended, which is the only shape the retry
         // schedule below knows how to act on.
@@ -267,14 +291,14 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
         input.sessionId,
         cursor,
         event => {
-          if (!proved(mine)) return;
+          if (!proved(currentAttempt)) return;
           watch();
           cursor = Math.max(cursor, event.sequence);
           input.onEvent(event);
         },
         controller.signal,
         idle => {
-          if (!proved(mine)) return;
+          if (!proved(currentAttempt)) return;
           declaredIdleSeconds = idle.idleSeconds;
           watch();
         },

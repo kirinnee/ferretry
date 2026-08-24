@@ -603,6 +603,43 @@ describe('the live feed teardown', () => {
     harness.control.stop();
   });
 
+  test('ignores a late frame from an attempt that ended while its retry was pending', async () => {
+    // Arrange — the gap a generation alone does not close. A settlement schedules the reconnection
+    // WITHOUT advancing the generation, because the replacement has not been opened yet, so for the
+    // whole length of the backoff window the dead attempt still carries the newest one.
+    const harness = subject();
+    const settled = harness.transport.last;
+    settled.emit(event(5));
+    settled.fail();
+    await settle();
+    expect(harness.statuses).toEqual(['live', 'reconnecting']);
+    expect(harness.clock.delays).toEqual([500]);
+
+    // Act — the transport that already ended keeps talking.
+    settled.emit(event(6));
+    settled.idle(idleFrame(120));
+    settled.fail();
+    await settle();
+
+    // Assert — nothing it says counts. No `live` over a feed that has stopped, no restored budget,
+    // no cursor move, no deadline armed for a socket nobody holds, and EXACTLY one retry pending
+    // rather than a second scheduled beside it.
+    expect(harness.statuses).toEqual(['live', 'reconnecting']);
+    expect(harness.control.status()).toBe('reconnecting');
+    expect(harness.events.map(value => value.sequence)).toEqual([5]);
+    expect(harness.clock.delays).toEqual([500]);
+
+    // And the budget really was not restored: the reconnection resumes at the cursor the live frame
+    // reached, and the window after it is the SECOND one, not the first over again.
+    harness.clock.fire(500);
+    expect(harness.transport.attempts).toHaveLength(2);
+    expect(harness.transport.last.after).toBe(5);
+    harness.transport.last.fail();
+    await settle();
+    expect(harness.clock.delays).toEqual([1_000]);
+    harness.control.stop();
+  });
+
   test('ignores a late frame delivered after teardown', () => {
     // Arrange
     const harness = subject();

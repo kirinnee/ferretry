@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
+import { liveStreamState } from './components/live-stream-indicator.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
 import {
   type SessionEventStreamControl,
@@ -765,9 +766,27 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const reconnectStream = useCallback(() => {
     streamControl.current?.reconnect();
   }, []);
+  /**
+   * WHAT THE CHIP READS, DERIVED FROM THE SAME TWO VALUES THE EFFECT ABOVE GATES ON.
+   *
+   * `streamStatus` alone was not enough and the gap was silent. When the effect's guard stops being
+   * satisfied — the client is replaced with `null`, or a later carrier walk answers `ok: false` for a
+   * daemon that was reachable a minute ago — React runs the cleanup and then the effect RETURNS
+   * EARLY. The subscription is gone and `setStreamStatus` is never reached, so the state kept saying
+   * whatever it last said. A page that had been `live` went on saying `live` with nothing behind it,
+   * which is precisely the defect this whole route was changed to end.
+   *
+   * Deriving it instead of remembering it makes that disagreement unrepresentable: the status is only
+   * consulted while a subscription may exist, and the two host facts are the same expression the
+   * effect uses rather than a second copy that could drift from it.
+   */
+  const subscribed = client !== null && measuredCarrier?.ok === true;
   const liveStream = useMemo(
-    () => ({ status: streamStatus, onReconnect: reconnectStream }),
-    [reconnectStream, streamStatus],
+    () => ({
+      status: liveStreamState(subscribed, measuredCarrier?.ok === false, streamStatus),
+      onReconnect: reconnectStream,
+    }),
+    [measuredCarrier, reconnectStream, streamStatus, subscribed],
   );
 
   useEffect(() => {
