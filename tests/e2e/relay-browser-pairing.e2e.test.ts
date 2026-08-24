@@ -310,6 +310,17 @@ const STEPS: readonly LedgerStep[] = [
     id: 'live-stream-rendered',
     claim: 'a real daemon event reached Chrome, and its payload appears in no relay-observable frame',
   },
+  {
+    id: 'lost-stream-is-visible',
+    claim: 'the daemon going away stops the page claiming to be live and says so on screen instead',
+  },
+  {
+    id: 'live-stream-recovers',
+    // NOT "resumed at the cursor rather than from zero" — the relay's records are sealed, so no
+    // observer here can read the `after` this subscription sent. What a browser can show is that the
+    // page picked the daemon back up unaided and moved on from the cursor it was holding.
+    claim: 'the returning daemon is picked back up unaided, and the never-reloaded page advances from its held cursor',
+  },
 ];
 
 async function reportAndRethrow(error: unknown, report: string): Promise<never> {
@@ -997,6 +1008,166 @@ describe('a real browser, a compiled daemon and a real relay', () => {
             `at sequence ${String(waitingEvent.sequence)} followed by session.waiting_cleared at ${String(workingEvent.sequence)}. ` +
             `Chrome reached those sequences in order, ending at ${String(advanced)} (delta ${String(advanced - before)}; ` +
             `at least ${String(workingEvent.sequence - before)} needed to reach the latter sequence), and that marker appears in no relay-observable frame`,
+        );
+
+        /**
+         * THE DAEMON GOES AWAY, AND THE PAGE HAS TO STOP CLAIMING TO BE LIVE.
+         *
+         * Everything above this line passed before the reconnect work existed AND after the socket
+         * had died — that is precisely the defect. The transcript kept refreshing on its poll, the
+         * session stayed connected, the carrier stayed relayed, and a page whose live feed had ended
+         * twenty minutes earlier was indistinguishable from one that was merely quiet. Nothing a
+         * browser rendered could tell the two apart, so nothing a JOURNEY asserted could either.
+         *
+         * Stopping the compiled daemon is the honest version of that event: the rendezvous loses its
+         * daemon socket, the browser's §14 stream session ends, and no amount of polling brings the
+         * feed back. What is asserted is what a reader would see.
+         */
+        const liveStreamNow = async (): Promise<string> =>
+          String(await attributeNow(browser.page, '[data-live-stream]', 'data-live-stream'));
+        if ((await liveStreamNow()) !== 'live') {
+          ledger.fail(
+            'lost-stream-is-visible',
+            `the page did not read as live before the daemon was stopped: data-live-stream=${await liveStreamNow()}. ` +
+              `The page renders: ${await renderedDataAttributes(browser.page)}`,
+          );
+        }
+        const cursorWhileLive = Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events'));
+
+        await environment.stopDaemon();
+        /**
+         * `reconnecting` EXACTLY, and `disconnected` would be the wrong success.
+         *
+         * The two are not interchangeable outcomes of one event. `reconnecting` is a schedule that is
+         * still running; `disconnected` is the budget exhausted, and it deliberately does NOT recover
+         * on its own — the reader's control is the way back from it, by design. Accepting either here
+         * would let the step below claim an automatic recovery from a state that cannot have one, and
+         * whether the outage happened to outlast the budget is a fact about how fast this machine
+         * restarts a daemon rather than about the product.
+         *
+         * The close should arrive at once: the rendezvous drops the daemon socket when the process
+         * goes, so the browser's stream session ends rather than waiting out the silence watchdog.
+         */
+        const lost = await browser.page
+          .waitForSelector('[data-live-stream="reconnecting"]', { timeout: 60_000 })
+          .then(() => true)
+          .catch(() => false);
+        const lostState = await liveStreamNow();
+        if (!lost) {
+          ledger.fail(
+            'lost-stream-is-visible',
+            `Chrome reads data-live-stream=${lostState} 60s after the compiled daemon was stopped, and this step ` +
+              `needs "reconnecting". "live" is the defect this journey exists for; "disconnected" would mean the ` +
+              `retry budget ran out during the outage, which no longer proves the automatic recovery below. ` +
+              `Console: ${browser.console.slice(-6).join(' | ') || 'silent'}`,
+          );
+        }
+        ledger.prove(
+          'lost-stream-is-visible',
+          `with the compiled daemon stopped, Chrome left "live" for data-live-stream=${lostState} on screen, ` +
+            `holding the cursor it had already reached (${String(cursorWhileLive)}) rather than rewinding it`,
+        );
+
+        /**
+         * AND IT COMES BACK BY ITSELF.
+         *
+         * The manual control is proved in the unit tier, where a click is a click; what only a real
+         * browser can show is that the SCHEDULE actually runs in one — that a page nobody touched
+         * picks a returning daemon back up. So nothing is clicked here.
+         *
+         * A reopened socket is not a recovered feed, which is why the assertion is an EVENT and not
+         * a state: the daemon proves a quiet stream only every thirty seconds, so a page that
+         * reconnected and then sat unproved would be indistinguishable from one that never did.
+         *
+         * WHAT THIS CANNOT SEE, said out loud: the relay carries sealed records, so no observer here
+         * — this journey included — can read the `after` cursor the resumed subscription actually put
+         * on the wire. What it proves is narrower and is still the thing a reader cares about: THIS
+         * page, never reloaded, resumed delivery and its cursor moved forward from the value it held
+         * before the outage. That a reconnection sends the cursor it reached rather than zero is
+         * proved where it can be read directly, in `session-event-stream-model.test.ts`.
+         */
+        await environment.startDaemon({
+          command: [compiledDaemon(), '--config', configPath],
+          readyUrl: environment.httpUrl('/v1/health'),
+          timeoutMs: 30_000,
+          env: { FY_RELAY_DIRECTORY_ORIGIN: directory.origin },
+        });
+        await waitForDaemonAtRendezvous(rendezvous);
+
+        /**
+         * The post-restart baseline, read BEFORE the signal rather than assumed.
+         *
+         * A boot is allowed to append to a session's journal, so "the newest event after the outage"
+         * is not the same claim as "the event this signal caused" — taking the last row would let
+         * unrelated startup activity stand in for the recovery, and the step would pass on a browser
+         * that recovered nothing. Measuring here makes the attribution below exact in the same way
+         * the first pair's is: one event, at a named sequence, of a named kind, carrying the marker.
+         */
+        const afterRestart = await sessionEvents(environment, session.sessionId, workingEvent.sequence);
+        const restartBaseline = afterRestart.at(-1)?.sequence ?? workingEvent.sequence;
+
+        const recoveredMarker = `${eventMarker}-again`;
+        const parkedAgain = await signalSession(environment, session.sessionId, 'waiting', recoveredMarker);
+        if (!parkedAgain.ok) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the restarted daemon refused the second waiting signal with HTTP ${String(parkedAgain.status)}`,
+          );
+        }
+        if (
+          parkedAgain.session?.state.status !== 'waiting' ||
+          !parkedAgain.session.state.reason?.includes(recoveredMarker)
+        ) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the second waiting signal did not durably report the marker ${recoveredMarker}: ` +
+              `status=${parkedAgain.session?.state.status ?? 'absent'}, reason=${parkedAgain.session?.state.reason ?? 'absent'}`,
+          );
+        }
+        const recoveredAppends = await sessionEvents(environment, session.sessionId, restartBaseline);
+        const recoveredEvent = recoveredAppends[0];
+        if (
+          recoveredAppends.length !== 1 ||
+          recoveredEvent === undefined ||
+          recoveredEvent.sequence !== restartBaseline + 1 ||
+          recoveredEvent.sessionId !== session.sessionId ||
+          recoveredEvent.type !== 'session.waiting'
+        ) {
+          ledger.fail(
+            'live-stream-recovers',
+            `the second waiting signal did not append exactly session.waiting at sequence ${String(restartBaseline + 1)}: ` +
+              `${JSON.stringify(recoveredAppends.map(entry => ({ sequence: entry.sequence, sessionId: entry.sessionId, type: entry.type })))}`,
+          );
+        }
+        const recoveredCursor = await browser.page
+          .waitForSelector(liveCursorAtLeast(recoveredEvent.sequence), { timeout: 120_000 })
+          .then(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')))
+          .catch(async () => Number(await attributeNow(browser.page, '[data-live-events]', 'data-live-events')));
+        const recoveredState = await liveStreamNow();
+        if (recoveredCursor < recoveredEvent.sequence) {
+          ledger.fail(
+            'live-stream-recovers',
+            `after the daemon returned, Chrome reached data-live-events=${String(recoveredCursor)} and needed ` +
+              `${String(recoveredEvent.sequence)}; it reads data-live-stream=${recoveredState}. ` +
+              `Nobody clicked anything, so this is the automatic schedule failing to pick the daemon back up. ` +
+              `Console: ${browser.console.slice(-6).join(' | ') || 'silent'}`,
+          );
+        }
+        if (recoveredState !== 'live') {
+          ledger.fail(
+            'live-stream-recovers',
+            `a delivered event moved the cursor to ${String(recoveredCursor)} but the page still reads ` +
+              `data-live-stream=${recoveredState}, so the visible state and the feed disagree`,
+          );
+        }
+        ledger.prove(
+          'live-stream-recovers',
+          `with nothing clicked, the never-reloaded page reconnected to the restarted daemon by itself and returned to ` +
+            `data-live-stream=live. The marked second waiting signal appended exactly session.waiting at sequence ` +
+            `${String(recoveredEvent.sequence)}, and Chrome reached ${String(recoveredCursor)} — forward from the ` +
+            `pre-outage cursor ${String(cursorWhileLive)} on the same page view. The sealed relay hides the wire ` +
+            `\`after\` value from every observer including this one, so the exact resumption cursor is proved in the ` +
+            `unit suite rather than claimed here`,
         );
 
         // A noted step does not abort, so the journey can reach here with one still unproven. It is
