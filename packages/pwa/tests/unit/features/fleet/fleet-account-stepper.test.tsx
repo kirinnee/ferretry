@@ -293,12 +293,68 @@ describe('the whole sequence', () => {
   });
 
   it('recaps an account that runs unattended in words rather than in an enum', async () => {
-    const auto = await stepper({ step: 'review', draft: { mode: 'auto' } });
-    expect(pick(auto.container, '[data-fleet-recap]').textContent).toContain('unattended (auto)');
+    const auto = await stepper({ step: 'review', draft: { lanes: [{ mode: 'auto', variant: 'auto' }] } });
+    expect(pick(auto.container, '[data-fleet-recap]').textContent).toContain('Account (unattended)');
     await auto.unmount();
 
-    const driven = await stepper({ step: 'review', draft: { mode: 'interactive' } });
+    const driven = await stepper({
+      step: 'review',
+      draft: { lanes: [{ mode: 'interactive', variant: 'default' }] },
+    });
     expect(pick(driven.container, '[data-fleet-recap]').textContent).toContain('driven by a person');
     await driven.unmount();
+  });
+
+  it('recaps BOTH accounts by name when both modes are ticked', async () => {
+    // A recap that said "2 accounts" would be the last place a person could still be surprised by
+    // the second one. Wrapper AND home, because they are the two things they will go looking for.
+    const surface = await stepper({
+      step: 'review',
+      draft: {
+        lanes: [
+          { mode: 'interactive', variant: 'default' },
+          { mode: 'auto', variant: 'auto' },
+        ],
+      },
+    });
+
+    const recap = pick(surface.container, '[data-fleet-recap]').textContent ?? '';
+    expect(recap).toContain('claude-atelier · lane default · home claude-atelier');
+    expect(recap).toContain('claude-auto-atelier · lane auto · home claude-auto-atelier');
+    await surface.unmount();
+  });
+
+  it('says nothing would be created when no mode is ticked', async () => {
+    const surface = await stepper({ step: 'review', draft: { lanes: [] } });
+    expect(pick(surface.container, '[data-fleet-recap]').textContent).toContain('no mode chosen');
+    await surface.unmount();
+  });
+
+  it('names both wrappers on the step that asks, and warns that they share one instructions document', async () => {
+    // The step must say what it will do BEFORE somebody leaves it, and the one thing two accounts from
+    // one pass cannot each have is their own instructions text — so that limit is said out loud.
+    const both = {
+      lanes: [
+        { mode: 'interactive' as const, variant: 'default' },
+        { mode: 'auto' as const, variant: 'auto' },
+      ],
+    };
+    const identity = await stepper({ step: 'identity', draft: both });
+    const wrappers = [...identity.container.querySelectorAll('[data-fleet-derived-wrapper]')].map(
+      node => node.textContent,
+    );
+    expect(wrappers).toEqual(['claude-atelier', 'claude-auto-atelier']);
+    await identity.unmount();
+
+    const instructions = await stepper({ step: 'instructions', draft: both });
+    expect(pick(instructions.container, '[data-fleet-shared-instructions]').textContent).toContain(
+      'Both accounts read this one document',
+    );
+    await instructions.unmount();
+
+    // One mode is one account, so neither the plural line nor the warning appears.
+    const one = await stepper({ step: 'instructions', draft: { lanes: [{ mode: 'auto', variant: 'auto' }] } });
+    expect(one.container.querySelector('[data-fleet-shared-instructions]')).toBeNull();
+    await one.unmount();
   });
 });

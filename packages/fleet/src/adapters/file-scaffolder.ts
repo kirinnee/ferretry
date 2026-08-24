@@ -84,7 +84,7 @@ export class FileFleetScaffolder implements FleetScaffolder {
       updated,
       ...(scaffold.declaration !== undefined &&
       (created.includes(scaffold.declaration.path) || updated.includes(scaffold.declaration.path))
-        ? { declaredFirstAccount: scaffold.declaration.account }
+        ? { declaredAccounts: scaffold.declaration.accounts }
         : {}),
       directories: scaffold.directories,
       pathEntry: scaffold.pathEntry,

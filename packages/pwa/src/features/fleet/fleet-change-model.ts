@@ -838,12 +838,38 @@ export type FleetPrefilledField = 'models' | 'defaultModel' | 'instructionsPath'
  */
 export type FleetPrefillNotes = Readonly<Partial<Record<FleetPrefilledField, string>>>;
 
+/** The two ways an account can run, and the only two the manifest publishes. */
+export type FleetAccountMode = 'interactive' | 'auto';
+
+/**
+ * One account this draft will create: the composition slot it occupies, and the mode it publishes.
+ *
+ * The PAIR is the unit. `variant` and `mode` are not one field wearing two names — a variant is a
+ * named slot the fleet declares, a mode is what consumers read to decide whether an account may be
+ * driven unattended — and the stepper DERIVES the first from the second rather than asking for both.
+ * Holding them together is what lets one pass create two accounts without a second list somebody has
+ * to zip against this one.
+ */
+export interface FleetLaneDraft {
+  readonly mode: FleetAccountMode;
+  readonly variant: string;
+}
+
+/**
+ * One provider account, and every lane this pass will create on it.
+ *
+ * `lanes` is a LIST because the mode question is multi-select: ticking both "interactive" and "auto"
+ * creates two accounts — two wrappers, two homes — on the ONE provider login, in one reviewed change.
+ * Everything else here is shared by all of them, which is the shape that makes a single sign-in reach
+ * both. An EMPTY list is representable and is a blocker the identity step owns: a person who has
+ * ticked nothing has not yet answered, and a draft that silently kept the last answer would be one
+ * that creates an account nobody asked for.
+ */
 export interface FleetAccountDraft {
   readonly harness: FleetHarnessKind;
   readonly name: string;
-  readonly variant: string;
+  readonly lanes: readonly FleetLaneDraft[];
   readonly displayName: string;
-  readonly mode: 'interactive' | 'auto';
   /** One model per line, or comma separated. Whichever the person typed. */
   readonly modelsText: string;
   readonly defaultModel: string;
@@ -854,9 +880,8 @@ export interface FleetAccountDraft {
 export const emptyAccountDraft = (harness: FleetHarnessKind): FleetAccountDraft => ({
   harness,
   name: '',
-  variant: 'default',
+  lanes: [{ mode: 'auto', variant: 'default' }],
   displayName: '',
-  mode: 'auto',
   modelsText: '',
   defaultModel: '',
   layer: emptyLayerDraft(),
@@ -869,9 +894,20 @@ export const draftModels = (modelsText: string): readonly string[] =>
     .map(model => model.trim())
     .filter(model => model.length > 0);
 
-/** The wrapper name the daemon will derive. Shown, never sent: identity stays server-derived. */
-export const derivedWrapper = (draft: FleetAccountDraft): string =>
-  draft.variant === 'default' ? `${draft.harness}-${draft.name}` : `${draft.harness}-${draft.variant}-${draft.name}`;
+/** The wrapper name the daemon will derive for ONE lane. Shown, never sent: identity stays server-derived. */
+export const derivedWrapper = (draft: FleetAccountDraft, lane: FleetLaneDraft): string =>
+  lane.variant === 'default' ? `${draft.harness}-${draft.name}` : `${draft.harness}-${lane.variant}-${draft.name}`;
+
+/**
+ * Every wrapper this one pass will create, in lane order.
+ *
+ * Named rather than counted, wherever it is shown. "2 accounts" tells a person nothing they can act
+ * on; `claude-atelier` and `claude-auto-atelier` are what they will type and what `fy fleet ls` will
+ * print, and seeing both before they leave the step is how ticking a second box stops being a
+ * surprise at the end.
+ */
+export const derivedWrappers = (draft: FleetAccountDraft): readonly string[] =>
+  draft.lanes.map(lane => derivedWrapper(draft, lane));
 
 // ─── what the host detected, and what the person chose ─────────────────────────────────────────
 
@@ -919,17 +955,26 @@ export const instructionsMiddleOf = (harness: FleetHarnessKind, path: string): s
 /**
  * The document a NEW account's instructions are written to, derived from the account being created.
  *
- * The middle is the WRAPPER minus its harness prefix, which is what makes it unique per lane:
- * `claude-auto-atelier` gives `CLAUDE-auto-atelier.md`, so two lanes of one provider account cannot
- * derive one path and silently write over each other. The person renames it to anything they like.
+ * The middle is the FIRST lane's wrapper minus its harness prefix: `claude-auto-atelier` gives
+ * `CLAUDE-auto-atelier.md`, so an account created only in the unattended lane derives a name that
+ * says so, and one created in the ordinary lane derives the bare `CLAUDE-atelier.md`. The person
+ * renames it to anything they like.
  *
- * Empty while the account has no name. Deriving `instructions/CLAUDE-.md` from a half-typed form
- * would be a fabricated path — and worse, one that stops matching the account the moment a name lands.
+ * **A DECLARED GAP when both modes are ticked.** This step composes ONE document, so both accounts
+ * point at it, and the identity step says so out loud rather than leaving somebody to find out. The
+ * default fleet gives each lane its own document for a real reason — "never stop and ask" is correct
+ * advice in exactly one of the two lanes — so composing a second document per lane is worth having;
+ * it is a redesign of this step rather than a derivation, and it is not pretended here.
+ *
+ * Empty while the account has no name, and while it has no lane. Deriving `instructions/CLAUDE-.md`
+ * from a half-typed form would be a fabricated path — and worse, one that stops matching the account
+ * the moment a name lands.
  */
 export const derivedInstructionsPath = (draft: FleetAccountDraft): string => {
   const name = draft.name.trim();
-  if (name === '') return '';
-  const wrapper = derivedWrapper({ ...draft, name });
+  const first = draft.lanes[0];
+  if (name === '' || first === undefined) return '';
+  const wrapper = derivedWrapper({ ...draft, name }, first);
   return instructionsPathFor(draft.harness, wrapper.slice(`${draft.harness}-`.length));
 };
 
@@ -1438,6 +1483,41 @@ export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblem
   return problems;
 };
 
+/**
+ * What is wrong with the SET of lanes this draft would create, or nothing.
+ *
+ * Exported and single-sourced because two places ask: the whole-draft check below, and the identity
+ * step that owns these sentences in the stepper's partition. Restating them there would be two
+ * descriptions of one grammar, and the way two descriptions drift is that the recap refuses a change
+ * for a reason no step would show — which is the exact failure the partition exists to prevent.
+ *
+ * The DUPLICATE rule is not a variation of the unknown-lane one. Two lanes derive their variants
+ * independently, so a fleet declaring only `default` sends both modes to the same slot: two accounts
+ * asked for, one wrapper name available. Nothing about either lane is invalid on its own, and the
+ * daemon would refuse the pair — so the sentence has to arrive here, before somebody walks six steps
+ * to be told.
+ */
+export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConfigView | null): readonly string[] => {
+  if (lanes.length === 0) return ['pick at least one way this account runs; each one creates its own account'];
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const lane of lanes) {
+    const variant = lane.variant.trim();
+    if (variant === '') {
+      problems.push('name the lane this account occupies');
+      continue;
+    }
+    if (config !== null && config.variants[variant] === undefined) {
+      problems.push(`this fleet declares no "${variant}" lane; declare it on the host before adding an account to it`);
+    }
+    if (seen.has(variant)) {
+      problems.push(`"${variant}" is the lane for two of these accounts; one lane is one account, so they must differ`);
+    }
+    seen.add(variant);
+  }
+  return problems;
+};
+
 export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
   const problems: string[] = [];
   const name = draft.name.trim();
@@ -1448,11 +1528,7 @@ export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigVie
     problems.push('the account name must not contain a path separator, "..", or control characters');
   }
 
-  const variant = draft.variant.trim();
-  if (variant === '') problems.push('name the lane this account occupies');
-  else if (config !== null && config.variants[variant] === undefined) {
-    problems.push(`this fleet declares no "${variant}" lane; declare it on the host before adding an account to it`);
-  }
+  problems.push(...laneProblems(draft.lanes, config));
 
   const models = draftModels(draft.modelsText);
   const defaultModel = draft.defaultModel.trim();
@@ -1532,6 +1608,14 @@ const assetEdits = (layer: FleetLayerDraft): { path: string; content: string }[]
   return edits;
 };
 
+/**
+ * ONE proposal, however many lanes were ticked.
+ *
+ * Two requests would mean two previews, two reviews and — for a caller this host's grants govern —
+ * two operator-password confirmations for one decision a person made once. So the set of lanes
+ * travels inside the single named intent, the daemon derives one configuration from it, and the
+ * reviewer approves one plan that names both accounts.
+ */
 export const createAccountProposal = (draft: FleetAccountDraft): FleetProposalRequest => {
   const layer = createLayer(draft.layer);
   const displayName = draft.displayName.trim();
@@ -1540,8 +1624,7 @@ export const createAccountProposal = (draft: FleetAccountDraft): FleetProposalRe
       kind: 'create-account',
       harness: draft.harness,
       name: draft.name.trim(),
-      variant: draft.variant.trim(),
-      mode: draft.mode,
+      lanes: draft.lanes.map(lane => ({ variant: lane.variant.trim(), mode: lane.mode })),
       models: draftModels(draft.modelsText),
       defaultModel: draft.defaultModel.trim(),
       ...(displayName === '' ? {} : { displayName }),

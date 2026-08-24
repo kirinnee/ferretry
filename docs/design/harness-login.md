@@ -494,6 +494,70 @@ UI in front of a phone.
   recorded trap (§4.2a); `usage.cliProxy` is already a declared unimplemented capability that a
   configuration asking for it is REFUSED on, and building any of them is separate work.
 
+### Found by verifying the shipped build, and deliberately not fixed here
+
+Three defects. The first two are listed apart because a fix for the first makes the second moot while a
+fix for the second would leave the first exactly where it is; the third is independent of both. All three
+were measured on one host at **claude-code 2.1.220** and **codex-cli 0.145.0** — a measurement of somebody
+else's CLI is only true at a version.
+
+- **GAP: the generated wrapper prepends an account's session flags to a login SUBCOMMAND.**
+  `renderWrapperScript` ends every wrapper with `exec <binary> <account flags> "$@"`
+  (`packages/fleet/src/lib/wrappers.ts:259`), and both login paths launch `[wrapper, <login argv>]` — the
+  daemon's flow at `packages/daemon/src/lib/fleet-login/service.ts:536` and `fy fleet login` at
+  `packages/fleet/src/adapters/process-login.ts:78`. So a flag declared for a SESSION arrives in a
+  position no harness promises to accept it in, and the two harnesses disagree about what happens next:
+
+  ```
+  codex login --device-auth                                            # prints a URL and a user code
+  codex --full-auto login --device-auth                                # error: unexpected argument
+                                                                       #        '--full-auto' found
+  codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen login --device-auth   # works
+  claude auth login --claudeai                                                            # works
+  claude --dangerously-skip-permissions --disallowed-tools=AskUserQuestion auth login --claudeai  # works
+  ```
+
+  Codex's parser (clap) refuses an unknown ROOT argument outright; Claude's (commander) passes root flags
+  through to the subcommand. **Both harnesses' shipped starter flags survive at these versions**
+  (`lib/scaffold.ts` declares `--dangerously-skip-permissions` / `--disallowed-tools=AskUserQuestion` for
+  Claude's auto lane and `--dangerously-bypass-approvals-and-sandbox` / `--no-alt-screen` for Codex's), so
+  a default fleet is unaffected. What breaks is an operator-declared codex root-only flag — `--full-auto`,
+  `--model`, `--sandbox`, `--cd` — or any future release that moves a flag which is tolerated today. It
+  bites hardest on an identity with **no interactive lane**, because `chooseLoginMember`
+  (`packages/fleet/src/lib/identity.ts:362`) then falls back to the auto lane, which is where the
+  aggressive flags live. The composed argv is pinned by
+  `packages/fleet/tests/integration/process-login.test.ts` — as a reproduction, not as a contract.
+  Not fixed here because every honest fix — a login-safe path in the wrapper, a second flagless wrapper
+  per account, or a login that bypasses the wrapper — changes the bytes of the executables Ferretry
+  writes into somebody's home, which deserves its own change and its own review.
+
+- **GAP: the failure that results names the wrong cause and a remedy that cannot work.** A harness that
+  refuses the flag prints neither a URL nor a code, so the flow lands on §4.5 rule 2's "recognised
+  nothing" path and reports _this host's codex did not offer a sign-in that can be driven from a browser_,
+  remedy _sign this account in on the host with `fy fleet login`_. Both halves are wrong for this cause:
+  the harness offered a sign-in and Ferretry's own wrapper prevented it, and `fy fleet login` composes the
+  same flags and fails identically. The person is sent to the one command that cannot help, with nothing
+  naming the flags. Pinned at
+  `packages/daemon/tests/unit/fleet-login/service.test.ts` ("should end as itself when it recognised
+  nothing it could publish"), whose comment names this defect so a green test is not read as approval.
+
+- **GAP: a REJECTED code is indistinguishable from no attempt at all.** Driving the shipped spawn adapter
+  against the real `claude auth login --claudeai` with a wrong code, the harness answers
+  `Invalid code. Please make sure the full code was copied.` on its own output and keeps running. The
+  write did land, so the daemon answers `accepted` — which is true about the write and is not the question
+  the person is asking — and the flow stays `awaiting-code`, so the panel clears the field and shows the
+  same paste form again **with nothing saying the previous attempt was refused**. Somebody who mistypes one
+  character of a code sees a form reset and cannot tell "rejected, try again" from "nothing happened" from
+  "still working"; the retry does work, which is the only reason this is a usability defect rather than a
+  dead end.
+
+  It follows from §3.3 rule 2 — only two recognised values may leave the reader — and that rule is right:
+  forwarding arbitrary child output to a remote client is how a token escapes. But **"the harness refused
+  the code" is a recognisable STATE, not arbitrary output.** A third recognised value carrying no child
+  text at all would say it, so the rule that produced this gap does not stand in the way of closing it.
+  Not fixed here for the same reason as the two above: it reaches the flow, the wire contract and the
+  panel, and it is not what the change this was found in is about.
+
 ### Named because it has an owner now
 
 - **Silent token renewal**, the mechanism that shrinks the notification gap by reducing how often anybody

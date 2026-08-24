@@ -18,11 +18,14 @@ import { FileFleetScaffolder } from '../../src/adapters/file-scaffolder.ts';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import { FleetPlan } from '../../src/lib/plan.ts';
 import type { FleetLayout } from '../../src/lib/provisioning.ts';
-import { buildFleetScaffold } from '../../src/lib/scaffold.ts';
+import { buildFleetScaffold, fleetScaffoldIds } from '../../src/lib/scaffold.ts';
 import { accountSharing, resolveFleetSharing } from '../../src/lib/sharing.ts';
 
 const CLAUDE_ID = '00000000-0000-4000-8000-00000000e1a1';
 const CODEX_ID = '00000000-0000-4000-8000-00000000e0de';
+/** Counted rather than random, so the starter this host is given is byte-identical across runs. */
+let minted = 0;
+const SCAFFOLD_IDS = fleetScaffoldIds(() => `00000000-0000-4000-8000-0000000e${String(++minted).padStart(4, '0')}`);
 const GENERATED_AT = '2027-05-06T07:08:09.000Z';
 const PRIVATE_TEXT = '# Only this account\n\nIts own instructions.\n';
 
@@ -63,9 +66,7 @@ async function prepared(): Promise<Host> {
     defaultHomeDirectories: { claude: path.join(root, 'user', '.claude'), codex: path.join(root, 'user', '.codex') },
   };
   const configPath = path.join(fleet, 'config.yaml');
-  await new FileFleetScaffolder([fleet]).scaffold(
-    buildFleetScaffold({ layout, configPath, ids: { claude: CLAUDE_ID, codex: CODEX_ID } }),
-  );
+  await new FileFleetScaffolder([fleet]).scaffold(buildFleetScaffold({ layout, configPath, ids: SCAFFOLD_IDS }));
   return {
     root,
     layout,
@@ -81,7 +82,7 @@ const applied = async (host: Host, config: FleetConfig): Promise<void> => {
 };
 
 describe('shared fleet assets on a real host', () => {
-  it('should recognise the shipped starter document as the shared default both accounts read', async () => {
+  it('should recognise each shipped starter document as the shared default its own harness reads', async () => {
     // Arrange
     const host = await prepared();
     try {
@@ -93,23 +94,40 @@ describe('shared fleet assets on a real host', () => {
       // Act
       await applied(host, config);
 
-      // Assert — the registry the scaffold declares names the file the scaffold wrote, so both accounts
-      // report as SHARING it rather than as two accounts that happen to name one path. This is the whole
-      // migration story for an existing host: a declaration, with nothing moved.
+      // Assert — the registry the scaffold declares names the files the scaffold wrote, so each
+      // account reports as SHARING one rather than as an account that happens to name a path. This is
+      // the whole migration story for an existing host: a declaration, with nothing moved.
+      //
+      // TWO DOCUMENTS RATHER THAN ONE, which is the correction: the previous starter registered a
+      // single `default` and handed Codex a file whose own text said it belonged to Claude.
       const sharing = resolveFleetSharing(config);
       should(sharing.documents).containEql({
         field: 'memory',
-        name: 'default',
+        name: 'claude',
         path: './CLAUDE.md',
-        accounts: [CLAUDE_ID, CODEX_ID],
+        accounts: [CLAUDE_ID],
       });
-      should(accountSharing(sharing, CLAUDE_ID)?.fields.memory).match({ state: 'shared', name: 'default' });
+      should(sharing.documents).containEql({
+        field: 'memory',
+        name: 'codex',
+        path: './AGENTS.md',
+        accounts: [CODEX_ID],
+      });
+      should(accountSharing(sharing, CLAUDE_ID)?.fields.memory).match({ state: 'shared', name: 'claude' });
+      should(accountSharing(sharing, CODEX_ID)?.fields.memory).match({ state: 'shared', name: 'codex' });
 
-      // And "reads it" is the filesystem's answer, not the report's: one document, two homes, and the
-      // harness-specific name each one expects.
-      const shared = await readFile(path.join(host.layout.assetsDirectory, 'CLAUDE.md'), 'utf8');
-      should(await readFile(path.join(host.layout.homesDirectory, 'claude-shared', 'CLAUDE.md'), 'utf8')).equal(shared);
-      should(await readFile(path.join(host.layout.homesDirectory, 'codex-shared', 'AGENTS.md'), 'utf8')).equal(shared);
+      // And "reads it" is the filesystem's answer, not the report's: each home holds the bytes of its
+      // own harness's document, under the name that harness expects.
+      should(await readFile(path.join(host.layout.homesDirectory, 'claude-shared', 'CLAUDE.md'), 'utf8')).equal(
+        await readFile(path.join(host.layout.assetsDirectory, 'CLAUDE.md'), 'utf8'),
+      );
+      should(await readFile(path.join(host.layout.homesDirectory, 'codex-shared', 'AGENTS.md'), 'utf8')).equal(
+        await readFile(path.join(host.layout.assetsDirectory, 'AGENTS.md'), 'utf8'),
+      );
+      // Not each other's. A Codex home holding Claude's document is the defect, and it has to fail here.
+      should(await readFile(path.join(host.layout.homesDirectory, 'codex-shared', 'AGENTS.md'), 'utf8')).not.equal(
+        await readFile(path.join(host.layout.assetsDirectory, 'CLAUDE.md'), 'utf8'),
+      );
     } finally {
       await rm(host.root, { recursive: true, force: true });
     }
@@ -121,10 +139,11 @@ describe('shared fleet assets on a real host', () => {
     const host = await prepared();
     try {
       await writeFile(path.join(host.layout.assetsDirectory, 'terse.md'), 'Be brief.\n', 'utf8');
-      const shared = { ...(host.starter.shared as Record<string, unknown>) };
+      const shared = host.starter.shared as { readonly memory: Record<string, string> };
       const config = FleetConfigSchema.parse({
         ...host.starter,
-        shared: { ...shared, memory: { default: './CLAUDE.md', terse: './terse.md' } },
+        // The shipped registry plus one more name, so the four starters keep their declarations.
+        shared: { ...shared, memory: { ...shared.memory, terse: './terse.md' } },
         agents: [account('claude', CLAUDE_ID, { memory: './terse.md' }), account('codex', CODEX_ID)],
       });
 
@@ -134,12 +153,12 @@ describe('shared fleet assets on a real host', () => {
       // Assert
       const sharing = resolveFleetSharing(config);
       should(accountSharing(sharing, CLAUDE_ID)?.fields.memory).match({ state: 'shared', name: 'terse', referrers: 1 });
-      should(accountSharing(sharing, CODEX_ID)?.fields.memory).match({ state: 'shared', name: 'default' });
+      should(accountSharing(sharing, CODEX_ID)?.fields.memory).match({ state: 'shared', name: 'codex' });
       should(await readFile(path.join(host.layout.homesDirectory, 'claude-shared', 'CLAUDE.md'), 'utf8')).equal(
         'Be brief.\n',
       );
       should(await readFile(path.join(host.layout.homesDirectory, 'codex-shared', 'AGENTS.md'), 'utf8')).equal(
-        await readFile(path.join(host.layout.assetsDirectory, 'CLAUDE.md'), 'utf8'),
+        await readFile(path.join(host.layout.assetsDirectory, 'AGENTS.md'), 'utf8'),
       );
     } finally {
       await rm(host.root, { recursive: true, force: true });
@@ -179,8 +198,10 @@ describe('shared fleet assets on a real host', () => {
       const shared = await readFile(path.join(host.layout.assetsDirectory, 'CLAUDE.md'), 'utf8');
       should(accountSharing(resolveFleetSharing(after), CLAUDE_ID)?.fields.memory).match({
         state: 'shared',
-        name: 'default',
-        referrers: 2,
+        name: 'claude',
+        // One, not two: the Codex account resolves to its own `AGENTS.md`, so Claude's document has
+        // exactly one referrer even though both accounts read a declared shared document.
+        referrers: 1,
       });
       should(await readFile(path.join(host.layout.homesDirectory, 'claude-shared', 'CLAUDE.md'), 'utf8')).equal(shared);
       should(await readFile(own, 'utf8')).equal(PRIVATE_TEXT);

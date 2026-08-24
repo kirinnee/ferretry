@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, join, relative as relative_, sep } from 'node:path';
+import { basename, isAbsolute, join, relative as relative_, sep } from 'node:path';
 import {
   buildFleetHealthCollector,
   buildFleetScaffold,
@@ -15,13 +15,16 @@ import {
   type FleetHealthSnapshot,
   type FleetLayout,
   type FleetManifest,
+  type FleetManifestAccount,
   FleetManifestSchema,
   FleetPlan,
   type FleetScaffold,
   type FleetScaffolder,
+  fleetScaffoldIds,
   FleetScaffoldPartialError,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
+  type HarnessKind,
   resolveFleetSharing,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
@@ -81,10 +84,15 @@ import {
 } from '../../fleet/assets.ts';
 import {
   applyFleetMutation,
-  derivedWrapperName,
+  createdWrapperNames,
   type FleetMutation,
   FleetMutationRefusal,
 } from '../../fleet/mutations.ts';
+import {
+  type FleetPreparationConflict,
+  preparationAdditions,
+  preparationConflicts,
+} from '../../fleet/boot-preparation.ts';
 import { planSharedAssetUnlink, sharingSummary } from '../../fleet/sharing.ts';
 import {
   type FleetProposalProblem,
@@ -173,7 +181,66 @@ export interface FleetSubsystem {
     request: FleetProposalApplyRequest,
     governance: CallerGovernance | undefined,
   ): Promise<FleetApplyOutcome>;
+  /**
+   * Give this host the default accounts for these harnesses, and publish them.
+   *
+   * NOT A ROUTE, and it must never become one. It is the boot's own step, called from the composition
+   * root after the mounts exist, because the decision that reaches it comes from the harness preflight
+   * this daemon took of the machine it is running on. Every remote path into the fleet still goes
+   * through a reviewed proposal and the operator-password confirmation; this adds no way for a caller
+   * to reach either.
+   *
+   * IT EXTENDS THE EXISTING SCAFFOLD AND THE EXISTING PROVISIONER rather than being a second write
+   * path: `prepareHost` already writes a create-if-absent scaffold under the exclusive apply claim,
+   * and the provisioner already materializes a plan. This runs them in that order and reports both.
+   *
+   * IT MAY ONLY ADD, and that is proved before a byte is written rather than assumed. See
+   * {@link preparationConflicts}.
+   */
+  prepareDefaults(harnesses: readonly HarnessKind[]): Promise<FleetDefaultsPreparation>;
 }
+
+/**
+ * What preparing the default fleet did.
+ *
+ * FOUR ENDINGS, because each is a different thing to tell a person and a different next step. Three
+ * of them write nothing at all, and the fourth reports a scaffold that landed part-way — which is a
+ * real state, since a scaffold has no undo.
+ */
+export type FleetDefaultsPreparation =
+  | {
+      readonly kind: 'prepared';
+      /** Wrapper names this preparation ADDED, never the whole roster. */
+      readonly wrappers: readonly string[];
+      /** Every account the manifest publishes now, so the disclosure can be the whole truth. */
+      readonly published: readonly string[];
+      readonly created: readonly string[];
+      readonly kept: readonly string[];
+      readonly pathEntry: string;
+    }
+  | {
+      /**
+       * Applying would have removed or redefined an account that is published now, so nothing at all
+       * was done. The operator's configuration and their manifest disagree, which is the fact to
+       * report — `fleet apply` is how somebody publishes a configuration on purpose.
+       */
+      readonly kind: 'refused';
+      readonly conflicts: readonly FleetPreparationConflict[];
+    }
+  | {
+      /**
+       * There was nothing to add. A configuration that already declares agents is never edited, so a
+       * preparation triggered by the other harness can reach this — and reporting it as accounts
+       * created would be a false sentence about somebody's home directory.
+       */
+      readonly kind: 'nothing-added';
+    }
+  | {
+      readonly kind: 'failed';
+      readonly reason: string;
+      /** Files that were written before it stopped. A scaffold has no undo, so these are on the host. */
+      readonly created: readonly string[];
+    };
 
 /**
  * What a reviewer is shown: a real plan, or the first-run scaffold that has no plan yet.
@@ -349,7 +416,9 @@ const PROPOSAL_CODES: Record<FleetProposalProblem, FleetRefusalCode> = {
 function summarize(mutation: FleetMutation, candidate: FleetConfig): string {
   if (mutation.kind === 'initialize') return 'prepare this host for a fleet';
   if (mutation.kind === 'create-account') {
-    return `add ${derivedWrapperName(mutation.harness, mutation.name, mutation.variant ?? 'default')}`;
+    // Every wrapper, not the first: one create can name several lanes, and a summary that mentioned
+    // one of them would be a line somebody approves that is not the change they get.
+    return `add ${createdWrapperNames(mutation).join(', ')}`;
   }
   const wrapper = wrapperOf(candidate, mutation.accountId);
   // A sharing change says which document and which direction, because "change claude-work" is not
@@ -948,12 +1017,148 @@ class MountedFleet implements FleetSubsystem {
     }
   }
 
-  private scaffold(): FleetScaffold {
+  private scaffold(firstAccounts: readonly HarnessKind[] = []): FleetScaffold {
     return buildFleetScaffold({
       layout: this.layout,
-      ids: { claude: this.options.mintUuid(), codex: this.options.mintUuid() },
+      ids: fleetScaffoldIds(() => this.options.mintUuid()),
       configPath: this.configPath,
+      firstAccounts,
     });
+  }
+
+  /**
+   * The configuration this preparation WOULD produce, without writing anything.
+   *
+   * IT EXISTS SO THE ONLY-ADD ASSERTION CAN RUN BEFORE THE FIRST BYTE. The scaffold's own value
+   * already carries both halves — the text to write when the file is absent, and the in-place edit to
+   * make when it is present — so the prospective document is derivable rather than discoverable. The
+   * alternative was to scaffold first and check afterwards, which would leave a refused preparation
+   * having written a `config.yaml` declaring accounts the manifest does not publish: a trap, because
+   * the operator's next `fleet apply` would then silently drop what they still had.
+   *
+   * An `updateIfPresent` that returns `undefined` means the file stands as it is, so the prospective
+   * document is the existing one — and comparing THAT against the manifest is exactly how "your
+   * configuration and your published manifest disagree" gets reported.
+   */
+  private async prospectiveConfig(scaffold: FleetScaffold): Promise<FleetConfig> {
+    const declaration = scaffold.files.find(file => file.path === this.configPath);
+    if (declaration === undefined)
+      throw new Error(`the fleet scaffold declares no configuration at ${this.configPath}`);
+    let existing: string | undefined;
+    try {
+      existing = await readFile(this.configPath, 'utf8');
+    } catch (error) {
+      if (!missingFile(error)) throw error;
+    }
+    const text = existing === undefined ? declaration.content : (declaration.updateIfPresent?.(existing) ?? existing);
+    return FleetConfigSchema.parse(Bun.YAML.parse(text));
+  }
+
+  /** What the manifest publishes right now, or nothing when this host has never applied one. */
+  private async publishedAccounts(): Promise<readonly FleetManifestAccount[]> {
+    try {
+      return (await this.loadManifest()).accounts;
+    } catch (error) {
+      // A manifest that is genuinely ABSENT publishes nothing, and nothing can be taken away from it.
+      // One that exists and will not parse is different in kind: this daemon cannot say what is
+      // published, so it must not act as though the answer were "nothing".
+      if (error instanceof FleetRefusal && error.code === 'fleet_not_applied') return [];
+      throw error;
+    }
+  }
+
+  /**
+   * Scaffold this host's default fleet, then publish it.
+   *
+   * ## PREPARATION MAY ONLY ADD, PROVED BEFORE ANYTHING IS WRITTEN
+   *
+   * The plan is built from the configuration this preparation WOULD produce, and the manifest that
+   * plan would publish is compared against the one published now. Anything that is not a pure
+   * addition — an account removed, or one coming back with a different harness, mode, wrapper, home,
+   * model or availability — refuses the whole preparation and writes nothing.
+   *
+   * This is an assertion rather than a hope about the apply, and it is here because the hope was
+   * wrong: a whole-fleet apply republishes the manifest from `config.yaml` as it stands, so a host
+   * whose manifest published one Claude account and whose `config.yaml` did not exist LOST that
+   * account to a preparation triggered by Codex. The general case is worse than the reproduction — an
+   * operator who had edited their configuration and not yet applied it would get those edits
+   * published by a restart, silently, with none of the review every remote change to this fleet needs.
+   *
+   * ## THE PLAN THAT IS CHECKED IS THE PLAN THAT LANDS
+   *
+   * The provisioner is handed that exact plan rather than a rebuilt one, for the same reason a
+   * reviewed proposal is: a second build could differ, and then the thing that was proved safe would
+   * not be the thing that happened.
+   *
+   * ## THE TWO WRITES ARE SEQUENTIAL AND NEITHER NESTS INSIDE THE OTHER'S LOCK
+   *
+   * `prepareHost` holds the exclusive apply claim for the duration of the scaffold and releases it;
+   * the provisioner takes the same claim for itself. Interleaving them — scaffolding inside a claim
+   * and then applying while still holding it — would deadlock on the second acquire, and a deadlock
+   * here hangs every start on the machine.
+   *
+   * ## IT CREATES AND NEVER REPLACES, AND THAT IS THE KERNEL'S DECISION RATHER THAN A CHECK
+   *
+   * Every file goes through `writeFile` with `wx`, so a host that already has a configuration keeps
+   * it byte for byte and the four instruction documents are written only where one is absent. The one
+   * narrow exception is a configuration whose `agents` list is EXPLICITLY empty, which
+   * `declareFirstAccountsInEmptyConfig` extends — and refuses outright when it cannot edit it safely.
+   *
+   * ## A FAILURE IS A VALUE, NOT A THROW
+   *
+   * The caller is a boot, and a boot that refused to start because it could not scaffold a
+   * convenience would be strictly worse than one that starts and says what did not happen.
+   */
+  async prepareDefaults(harnesses: readonly HarnessKind[]): Promise<FleetDefaultsPreparation> {
+    const scaffold = this.scaffold(harnesses);
+    let plan: FleetApplyPlan;
+    let published: readonly FleetManifestAccount[];
+    try {
+      published = await this.publishedAccounts();
+      plan = this.buildPlan(await this.prospectiveConfig(scaffold));
+    } catch (error) {
+      return { kind: 'failed', reason: errorMessage(error), created: [] };
+    }
+    const conflicts = preparationConflicts(published, plan.manifest.accounts);
+    if (conflicts.length > 0) return { kind: 'refused', conflicts };
+    const additions = preparationAdditions(published, plan.manifest.accounts);
+    if (additions.length === 0) return { kind: 'nothing-added' };
+
+    let scaffolded: FleetApplyOutcome;
+    try {
+      scaffolded = await this.prepareHost(scaffold);
+    } catch (error) {
+      return { kind: 'failed', reason: errorMessage(error), created: [] };
+    }
+    if (scaffolded.outcome === 'initialization-partial') {
+      return { kind: 'failed', reason: scaffolded.reason, created: scaffolded.created };
+    }
+    // Narrowed rather than assumed: `prepareHost` answers with the apply outcome union, and only
+    // these two arms can come out of a scaffold. Anything else is a defect in that method, and
+    // reporting it as a failure the boot states is better than asserting it away.
+    if (scaffolded.outcome !== 'initialized') {
+      return {
+        kind: 'failed',
+        reason: `preparing the fleet reported an unexpected ${scaffolded.outcome}`,
+        created: [],
+      };
+    }
+    try {
+      await this.provisioner.apply(plan);
+      return {
+        kind: 'prepared',
+        wrappers: additions,
+        // Read BACK from the manifest the apply just published rather than from the plan that
+        // produced it: the names a boot puts in front of a person have to be ones a start could
+        // resolve, and the manifest is the file a start reads.
+        published: (await this.accounts()).accounts.map(account => basename(account.wrapper)),
+        created: scaffolded.created,
+        kept: scaffolded.kept,
+        pathEntry: scaffolded.pathEntry,
+      };
+    } catch (error) {
+      return { kind: 'failed', reason: errorMessage(error), created: scaffolded.created };
+    }
   }
 
   private deriveCandidate(config: FleetConfig, mutation: FleetMutation): FleetConfig {

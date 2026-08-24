@@ -38,7 +38,10 @@ import {
   toggleModel,
   unverifiedModels,
   withInstructionsMiddle,
-  withMode,
+  selectedModes,
+  toggleMode,
+  withLaneVariant,
+  withModes,
   withModels,
   withSettingsChoice,
   withSkillsSelection,
@@ -96,9 +99,11 @@ describe('the lane, derived from how the account runs', () => {
   });
 
   it('moves the lane with the answer, so the two can never disagree', () => {
-    const auto = withMode(complete(), 'auto', ['default', 'auto']);
-    expect(auto).toMatchObject({ mode: 'auto', variant: 'auto' });
-    expect(withMode(auto, 'interactive', ['default', 'auto']).variant).toBe('default');
+    const auto = withModes(complete(), ['auto'], ['default', 'auto']);
+    expect(auto.lanes).toEqual([{ mode: 'auto', variant: 'auto' }]);
+    expect(withModes(auto, ['interactive'], ['default', 'auto']).lanes).toEqual([
+      { mode: 'interactive', variant: 'default' },
+    ]);
   });
 });
 
@@ -333,8 +338,15 @@ describe('which step owns which blocker', () => {
       complete({ modelsText: '', defaultModel: '' }),
       complete({ defaultModel: '' }),
       complete({ defaultModel: 'not-listed' }),
-      complete({ variant: '' }),
-      complete({ variant: 'nope' }),
+      complete({ lanes: [{ mode: 'auto', variant: '' }] }),
+      complete({ lanes: [{ mode: 'auto', variant: 'nope' }] }),
+      complete({ lanes: [] }),
+      complete({
+        lanes: [
+          { mode: 'interactive', variant: 'default' },
+          { mode: 'auto', variant: 'default' },
+        ],
+      }),
       complete({ layer: layerWith({ settingsText: '{ not json' }) }),
       complete({ layer: layerWith({ settingsText: '[1]' }) }),
       complete({ layer: layerWith({ env: [{ id: '1', name: '', value: 'x' }] }) }),
@@ -385,6 +397,42 @@ describe('which step owns which blocker', () => {
     expect(mayAdvance('instructions', complete(), declared, ['could not be read'])).toBe(false);
     // The recap owns nothing of its own: it shows everything, which is what a recap is.
     expect(stepProblems('review', nameless, declared)).toEqual([]);
+  });
+
+  it('ticks a mode on and off, deriving a lane for a new one and keeping a chosen one', () => {
+    // Arrange — a fleet with a lane no mode would derive, so the escape hatch has something to hold.
+    const variants = ['default', 'auto', 'review'];
+    const one = withModes(complete(), ['interactive'], variants);
+
+    // Act — move that account into `review`, then tick the second mode.
+    const moved = withLaneVariant(one, 'interactive', 'review');
+    const both = toggleMode(moved, 'auto', variants);
+
+    // Assert — the chosen lane survives; the newly ticked mode derives its own.
+    expect(both.lanes).toEqual([
+      { mode: 'interactive', variant: 'review' },
+      { mode: 'auto', variant: 'auto' },
+    ]);
+    expect(selectedModes(both)).toEqual(['interactive', 'auto']);
+    // Order is annotated, not selection order: the same two accounts always read as the same change.
+    expect(toggleMode(withModes(complete(), ['auto'], variants), 'interactive', variants).lanes).toEqual([
+      { mode: 'interactive', variant: 'default' },
+      { mode: 'auto', variant: 'auto' },
+    ]);
+    // Untick, and only that lane goes.
+    expect(toggleMode(both, 'auto', variants).lanes).toEqual([{ mode: 'interactive', variant: 'review' }]);
+    expect(toggleMode(toggleMode(both, 'auto', variants), 'interactive', variants).lanes).toEqual([]);
+  });
+
+  it('blocks the identity step, and only that step, when no mode is ticked', () => {
+    // The one blocker the multi-select made reachable. It belongs where the boxes are.
+    const declared = config();
+    const nothing = complete({ lanes: [] });
+    expect(stepProblems('identity', nothing, declared)).toContain(
+      'pick at least one way this account runs; each one creates its own account',
+    );
+    expect(mayAdvance('identity', nothing, declared)).toBe(false);
+    expect(mayAdvance('models', nothing, declared)).toBe(true);
   });
 
   it('says whether the whole draft is composable', () => {

@@ -950,20 +950,30 @@ describe('renderScaffoldResult', () => {
     should(actual).containEql('export PATH=');
   });
 
-  it('should say directly when this run declared the requested first account', () => {
+  it('should say directly which harnesses this run declared accounts for', () => {
     // Act
     const actual = renderScaffoldResult(
       scaffoldResult({
         created: [],
         updated: ['/state/fleet/config.yaml'],
-        declaredFirstAccount: 'codex',
+        declaredAccounts: ['codex'],
       }),
       'codex',
     );
 
-    // Assert
-    should(actual).containEql('Declared one codex account');
+    // Assert — the harnesses rather than a count, because each declares two lanes.
+    should(actual).containEql('Declared the default codex accounts');
     should(actual).not.containEql('If this command');
+  });
+
+  it('should name every harness when a host had both detected', () => {
+    // Act
+    const actual = renderScaffoldResult(
+      scaffoldResult({ created: ['/state/fleet/config.yaml'], declaredAccounts: ['claude', 'codex'] }),
+    );
+
+    // Assert
+    should(actual).containEql('Declared the default claude and codex accounts');
   });
 
   it('should not claim a directory it does not know', () => {

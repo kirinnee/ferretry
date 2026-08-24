@@ -13,7 +13,9 @@ import {
   currentUnreadable,
   daemonOutOfReach,
   declaredLayer,
+  derivedInstructionsPath,
   derivedWrapper,
+  derivedWrappers,
   detectedAccountDraft,
   draftModels,
   editAccountProposal,
@@ -607,9 +609,20 @@ describe('drafts', () => {
     });
     const draft = emptyAccountDraft('codex');
     expect(draft.harness).toBe('codex');
-    expect(draft.variant).toBe('default');
-    expect(derivedWrapper({ ...draft, name: 'studio' })).toBe('codex-studio');
-    expect(derivedWrapper({ ...draft, name: 'studio', variant: 'auto' })).toBe('codex-auto-studio');
+    expect(draft.lanes).toEqual([{ mode: 'auto', variant: 'default' }]);
+    expect(derivedWrapper({ ...draft, name: 'studio' }, { mode: 'auto', variant: 'default' })).toBe('codex-studio');
+    expect(derivedWrapper({ ...draft, name: 'studio' }, { mode: 'auto', variant: 'auto' })).toBe('codex-auto-studio');
+    // Every account this one pass creates, named rather than counted.
+    expect(
+      derivedWrappers({
+        ...draft,
+        name: 'studio',
+        lanes: [
+          { mode: 'interactive', variant: 'default' },
+          { mode: 'auto', variant: 'auto' },
+        ],
+      }),
+    ).toEqual(['codex-studio', 'codex-auto-studio']);
   });
 
   it('accepts models one per line or comma separated', () => {
@@ -1101,10 +1114,30 @@ describe('account problems', () => {
   });
 
   it('will not put an account in a lane this fleet does not declare', () => {
-    expect(accountProblems(draft({ variant: '' }), declared)).toContain('name the lane this account occupies');
-    expect(accountProblems(draft({ variant: 'ghost' }), declared)[0]).toContain('declares no "ghost" lane');
+    const lane = (variant: string) => ({ lanes: [{ mode: 'auto' as const, variant }] });
+    expect(accountProblems(draft(lane('')), declared)).toContain('name the lane this account occupies');
+    expect(accountProblems(draft(lane('ghost')), declared)[0]).toContain('declares no "ghost" lane');
     // With no configuration read there is nothing to check the lane against, so it is not invented.
-    expect(accountProblems(draft({ variant: 'ghost' }), null)).toHaveLength(0);
+    expect(accountProblems(draft(lane('ghost')), null)).toHaveLength(0);
+  });
+
+  it('refuses a selection of no mode at all, and two accounts that would share one lane', () => {
+    // Both are reachable only because the answer became a set: nothing ticked, and two modes a fleet
+    // sends to the same slot. Neither lane is wrong on its own, which is why the pair is the subject.
+    expect(accountProblems(draft({ lanes: [] }), declared)).toContain(
+      'pick at least one way this account runs; each one creates its own account',
+    );
+    expect(
+      accountProblems(
+        draft({
+          lanes: [
+            { mode: 'interactive', variant: 'default' },
+            { mode: 'auto', variant: 'default' },
+          ],
+        }),
+        declared,
+      ),
+    ).toContain('"default" is the lane for two of these accounts; one lane is one account, so they must differ');
   });
 
   it('requires an account that claims to be available to be able to serve something', () => {
@@ -1284,9 +1317,11 @@ describe('the account form fills itself in from what the host has', () => {
 
     // Assert
     expect(named.layer.instructions.path).toBe('instructions/CLAUDE-studio.md');
+    // No lane is no wrapper, so there is no name to derive one from — and a fabricated path is worse.
+    expect(derivedInstructionsPath({ ...named, lanes: [] })).toBe('');
     expect(named.prefilled.instructionsPath).toContain('Derived');
     // It keeps up with the account: a lane and a harness are part of the wrapper name.
-    const relaned = reconcileAccountDraft(named, { ...named, variant: 'auto' }, discovery());
+    const relaned = reconcileAccountDraft(named, { ...named, lanes: [{ mode: 'auto', variant: 'auto' }] }, discovery());
     expect(relaned.layer.instructions.path).toBe('instructions/CLAUDE-auto-studio.md');
   });
 
@@ -1539,9 +1574,8 @@ describe('drafts become one named mutation', () => {
     const request = createAccountProposal({
       harness: 'claude',
       name: ' studio '.trim(),
-      variant: 'default',
+      lanes: [{ mode: 'auto', variant: 'default' }],
       displayName: ' Studio Claude ',
-      mode: 'auto',
       modelsText: 'opus, sonnet',
       defaultModel: 'opus',
       layer: {
@@ -1558,8 +1592,7 @@ describe('drafts become one named mutation', () => {
       kind: 'create-account',
       harness: 'claude',
       name: 'studio',
-      variant: 'default',
-      mode: 'auto',
+      lanes: [{ variant: 'default', mode: 'auto' }],
       models: ['opus', 'sonnet'],
       defaultModel: 'opus',
       displayName: 'Studio Claude',
@@ -1587,12 +1620,59 @@ describe('drafts become one named mutation', () => {
       kind: 'create-account',
       harness: 'codex',
       name: 'solo',
-      variant: 'default',
-      mode: 'auto',
+      lanes: [{ variant: 'default', mode: 'auto' }],
       models: ['gpt'],
       defaultModel: 'gpt',
     });
     expect(request.assetEdits).toHaveLength(0);
+  });
+
+  it('creates one account per selected mode from a single pass', () => {
+    // The owner's words: ticking both auto and interactive creates TWO accounts from one pass. One
+    // request, so one preview, one review and — for a governed caller — one confirmation.
+    const draft: FleetAccountDraft = {
+      ...emptyAccountDraft('claude'),
+      name: 'atelier',
+      modelsText: 'opus',
+      defaultModel: 'opus',
+      lanes: [
+        { mode: 'interactive', variant: 'default' },
+        { mode: 'auto', variant: 'auto' },
+      ],
+    };
+
+    // Act
+    const request = createAccountProposal(draft);
+
+    // Assert — the two names, not a count. The daemon derives one home per wrapper, so these are also
+    // the two homes; the daemon's own test asserts that half.
+    expect(derivedWrappers(draft)).toEqual(['claude-atelier', 'claude-auto-atelier']);
+    expect(request.mutation).toMatchObject({
+      kind: 'create-account',
+      lanes: [
+        { variant: 'default', mode: 'interactive' },
+        { variant: 'auto', mode: 'auto' },
+      ],
+    });
+    // ONE mutation, and it is the only one: a second request would be a second review.
+    expect(Object.keys(request)).toEqual(['mutation', 'assetEdits']);
+  });
+
+  it('still creates exactly one account when one mode is selected', () => {
+    // Arrange — the regression the multi-select could have caused: an unticked mode must not linger.
+    const draft: FleetAccountDraft = {
+      ...emptyAccountDraft('claude'),
+      name: 'atelier',
+      modelsText: 'opus',
+      defaultModel: 'opus',
+      lanes: [{ mode: 'interactive', variant: 'default' }],
+    };
+
+    // Act + Assert
+    expect(derivedWrappers(draft)).toEqual(['claude-atelier']);
+    expect(createAccountProposal(draft).mutation).toMatchObject({
+      lanes: [{ variant: 'default', mode: 'interactive' }],
+    });
   });
 
   it('sends an edit as a patch that removes every concern the person cleared', () => {

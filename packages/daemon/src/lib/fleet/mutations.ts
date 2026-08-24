@@ -11,7 +11,13 @@
  * declared account name for the same reason, and every derivation is checked by the shared
  * configuration schema before it can be previewed.
  */
-import { type FleetConfig, FleetConfigSchema, orphanedSharedDocuments, SafeNameSchema } from '@ferretry/fleet';
+import {
+  derivedWrapperName,
+  type FleetConfig,
+  FleetConfigSchema,
+  orphanedSharedDocuments,
+  SafeNameSchema,
+} from '@ferretry/fleet';
 import { type FleetMutation, FleetMutationSchema } from '@ferretry/protocol';
 import { planSharedAssetUnlink, sharedAssetLinkPath } from './sharing.ts';
 
@@ -32,27 +38,54 @@ export class FleetMutationRefusal extends Error {
   }
 }
 
-/**
- * The wrapper name an account gets. The default lane keeps the bare `<harness>-<name>` a person
- * would type; any other lane is spelled out, so two lanes of one account never collide.
- */
-export function derivedWrapperName(harness: string, name: string, variant: string): string {
-  return variant === 'default' ? `${harness}-${name}` : `${harness}-${variant}-${name}`;
+/** One lane a create asks for, with the default this module supplies for a lane that names none. */
+interface CreateLane {
+  readonly variant: string;
+  readonly mode?: 'interactive' | 'auto';
 }
 
-/** The lane a create names, or the default one. Defaulted here rather than in the wire schema. */
-const variantOf = (mutation: Extract<FleetMutation, { kind: 'create-account' }>): string =>
-  mutation.variant ?? DEFAULT_VARIANT;
+/**
+ * The lanes a create names, each with its variant defaulted. Defaulted here rather than in the wire
+ * schema, because the fallback lane is a fact about this fleet and not about the wire.
+ */
+const lanesOf = (mutation: Extract<FleetMutation, { kind: 'create-account' }>): readonly CreateLane[] =>
+  mutation.lanes.map(lane => ({
+    variant: lane.variant ?? DEFAULT_VARIANT,
+    ...(lane.mode === undefined ? {} : { mode: lane.mode }),
+  }));
+
+/**
+ * Every wrapper name one create-account will publish, in the order its lanes were named.
+ *
+ * Exported because the route that SUMMARIZES a staged change has to say what it will add, and a
+ * summary that named one wrapper for a change adding two would be a one-line description a person
+ * approves that is not what happens. It reads {@link derivedWrapperName} rather than restating the
+ * naming rule, and it is the one thing a caller outside this module needs from a create.
+ */
+export function createdWrapperNames(mutation: Extract<FleetMutation, { kind: 'create-account' }>): readonly string[] {
+  return lanesOf(mutation).map(lane => derivedWrapperName(mutation.harness, mutation.name, lane.variant));
+}
 
 /** Availability defaults to true: an account nobody said was down is up. */
 const availabilityOf = (mutation: Extract<FleetMutation, { kind: 'create-account' }>): boolean =>
   mutation.available ?? true;
 
-const createFields = (mutation: Extract<FleetMutation, { kind: 'create-account' }>): Record<string, unknown> => ({
+/**
+ * The fields every route this create produces carries, plus the one that is the LANE's.
+ *
+ * Everything but the mode is shared: one provider account, one model list, one overlay, one display
+ * name. The mode is per lane because that is what distinguishes the accounts — an unattended lane
+ * publishes `auto` so consumers know it may be driven without a person, and the interactive one does
+ * not.
+ */
+const createFields = (
+  mutation: Extract<FleetMutation, { kind: 'create-account' }>,
+  lane: CreateLane,
+): Record<string, unknown> => ({
   models: [...mutation.models],
   available: availabilityOf(mutation),
   ...(mutation.displayName === undefined ? {} : { displayName: mutation.displayName }),
-  ...(mutation.mode === undefined ? {} : { mode: mutation.mode }),
+  ...(lane.mode === undefined ? {} : { mode: lane.mode }),
   ...(mutation.defaultModel === undefined ? {} : { defaultModel: mutation.defaultModel }),
   ...(mutation.unavailableReason === undefined ? {} : { unavailableReason: mutation.unavailableReason }),
   ...(mutation.layer === undefined || mutation.layer === null ? {} : { layer: mergedLayer({}, mutation.layer) }),
@@ -113,39 +146,78 @@ function assertServable(mutation: Extract<FleetMutation, { kind: 'create-account
   }
 }
 
+/**
+ * Every lane this create asks for, refused before ANY of them is added when one cannot be.
+ *
+ * The order is the point. A create naming two lanes derives two routes, and a check that ran per
+ * route as it was built would refuse the second after the first had already been folded into the
+ * candidate — the derivation would be abandoned, but the refusal would name a collision half a change
+ * away from the one the caller wrote. So every lane is checked against the fleet and against the
+ * lanes beside it first, and the refusal names the lane that earned it.
+ *
+ * The duplicate check is not redundant with the "already has this lane" one below. Two lanes of one
+ * mutation collide with EACH OTHER — nothing on the fleet has that variant yet — so the existing
+ * routes cannot see it, and the second write would silently replace the first in the object literal.
+ */
+function assertLanesAddable(
+  config: FleetConfig,
+  name: string,
+  lanes: readonly CreateLane[],
+  existing: Readonly<Record<string, unknown>>,
+): void {
+  const seen = new Set<string>();
+  for (const lane of lanes) {
+    if (config.variants[lane.variant] === undefined) {
+      throw new FleetMutationRefusal(
+        `this fleet does not declare a "${lane.variant}" lane; declare it before adding an account to it`,
+      );
+    }
+    if (seen.has(lane.variant)) {
+      throw new FleetMutationRefusal(
+        `this change names the "${lane.variant}" lane twice; one lane is one account, so two of them cannot be the same`,
+      );
+    }
+    seen.add(lane.variant);
+    if (existing[lane.variant] !== undefined) {
+      throw new FleetMutationRefusal(`account "${name}" already has a "${lane.variant}" lane on this fleet`);
+    }
+  }
+}
+
+/**
+ * One provider account, one route per named lane, derived in a single pass.
+ *
+ * ONE AGENT AND NOT N. The lanes are two homes for one provider login, which is what makes ticking
+ * both modes worth doing at all: signing in once makes both usable. Two agents would be two logins
+ * for one account.
+ */
 function createAccount(
   config: FleetConfig,
   mutation: Extract<FleetMutation, { kind: 'create-account' }>,
   mintId: () => string,
 ): unknown {
-  const variant = variantOf(mutation);
-  if (config.variants[variant] === undefined) {
-    throw new FleetMutationRefusal(
-      `this fleet does not declare a "${variant}" lane; declare it before adding an account to it`,
-    );
-  }
   // The name becomes a path component and an executable name, so it is held to the same rule the
   // configuration schema applies rather than only to the wire schema's "non-empty".
   const name = SafeNameSchema.parse(mutation.name);
   assertServable(mutation);
 
-  const wrapper = derivedWrapperName(mutation.harness, name, variant);
-  const route = { id: mintId(), wrapper, home: wrapper, ...createFields(mutation) };
-
   const agents = config.agents as unknown as Record<string, unknown>[];
   const index = agents.findIndex(agent => agent.name === name && agent.kind === mutation.harness);
-  if (index < 0) {
-    return {
-      ...config,
-      agents: [...agents, { name, kind: mutation.harness, routes: { [variant]: route } }],
-    };
-  }
+  const agent = index < 0 ? undefined : (agents[index] as { routes: Record<string, unknown> });
+  const lanes = lanesOf(mutation);
+  assertLanesAddable(config, name, lanes, agent?.routes ?? {});
 
-  const agent = agents[index] as { routes: Record<string, unknown> };
-  if (agent.routes[variant] !== undefined) {
-    throw new FleetMutationRefusal(`account "${name}" already has a "${variant}" lane on this fleet`);
+  const added = Object.fromEntries(
+    lanes.map(lane => {
+      const wrapper = derivedWrapperName(mutation.harness, name, lane.variant);
+      return [lane.variant, { id: mintId(), wrapper, home: wrapper, ...createFields(mutation, lane) }];
+    }),
+  );
+
+  if (agent === undefined) {
+    return { ...config, agents: [...agents, { name, kind: mutation.harness, routes: added }] };
   }
-  const next = { ...agent, routes: { ...agent.routes, [variant]: route } };
+  const next = { ...agent, routes: { ...agent.routes, ...added } };
   return { ...config, agents: agents.map((existing, at) => (at === index ? next : existing)) };
 }
 

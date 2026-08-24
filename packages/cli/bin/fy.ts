@@ -11,6 +11,7 @@ import {
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
+  fleetScaffoldIds,
   FleetTokenRefreshService,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
@@ -737,8 +738,11 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
           buildFleetScaffold({
             layout,
             configPath,
-            ids: { claude: randomUUID(), codex: randomUUID() },
-            ...(firstAccount === undefined ? {} : { firstAccount }),
+            ids: fleetScaffoldIds(() => randomUUID()),
+            // A ONE-ELEMENT SET: `--first-account` names one harness by hand, and the shared scaffold
+            // takes the set so a daemon preparing every harness it found reaches the same declaration
+            // rather than a second one shaped for many.
+            ...(firstAccount === undefined ? {} : { firstAccounts: [firstAccount] }),
           }),
         );
       },

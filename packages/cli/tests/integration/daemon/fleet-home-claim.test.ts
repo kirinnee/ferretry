@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildFleetScaffold } from '@ferretry/fleet';
+import { buildFleetScaffold, fleetScaffoldIds } from '@ferretry/fleet';
 import { FileFleetScaffolder } from '@ferretry/fleet/adapters';
 import should from 'should';
 import {
@@ -64,14 +64,15 @@ function claims(): StateHomeClaimService {
  * no undo, so a home this client will not adopt must be left exactly as it was found.
  */
 async function fleetInitThroughTheCli(stateHome: string): Promise<void> {
+  let minted = 0;
   const layout = resolveFleetLayout({ stateHome, userHome: '/home-must-not-be-used', product: 'ferretry' });
   await claims().claim(layout.stateHome);
   await new FileFleetScaffolder([layout.fleetDirectory]).scaffold(
     buildFleetScaffold({
       layout,
       configPath: defaultConfigPath(layout),
-      ids: { claude: 'aaaaaaaa-0000-4000-8000-000000000001', codex: 'aaaaaaaa-0000-4000-8000-000000000002' },
-      firstAccount: 'claude',
+      ids: fleetScaffoldIds(() => `aaaaaaaa-0000-4000-8000-00000000000${String(++minted)}`),
+      firstAccounts: ['claude'],
     }),
   );
 }

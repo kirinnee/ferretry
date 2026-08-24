@@ -36,7 +36,7 @@ import {
 import type { HarnessLoginChild, HarnessLoginChildSpec } from '../../../src/lib/fleet-login/ports.ts';
 import { harnessLoginRoutes } from '../../../src/lib/runtime/mounts/fleet-login.ts';
 import { jsonBody, request } from '../api/support.ts';
-import { CREDENTIALS, GOVERNED, GRANTED, human } from '../runtime/mounts/support.ts';
+import { CREDENTIALS, GOVERNED, GRANTED, human, NARROWED } from '../runtime/mounts/support.ts';
 
 const ESC = '\u001b';
 const BEL = '\u0007';
@@ -68,6 +68,18 @@ const CREDENTIAL_SHAPED_LINE = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-TE
 
 /** What a person pastes. Recognisable, so its absence from every answer is checkable. */
 const PASTED_CODE = 'pasted-authorization-code-TESTONLY';
+
+// One export the wrapper resolves at run time from a name that is NOT provider state, and one it
+// resolves from a name that is. Both are the shape `renderWrapperScript` emits for a configured value
+// of exactly `$NAME`, and the second is the only one that can tell a working preserve list from an
+// empty one — see the environment case below.
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a generated WRAPPER, where `${…}` is shell
+const BASE_URL_EXPORT = 'export ANTHROPIC_BASE_URL="${FY_BASE}"';
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a generated WRAPPER, where `${…}` is shell
+const CREDENTIAL_EXPORT = 'export OPENAI_API_KEY="${OPENAI_API_KEY}"';
+
+/** A generated wrapper, as `renderWrapperScript` writes one. */
+const WRAPPER_SCRIPT = `${BASE_URL_EXPORT}\n${CREDENTIAL_EXPORT}\nexec claude "$@"\n`;
 
 const temporaryDirectories: string[] = [];
 
@@ -139,6 +151,56 @@ const MANIFEST: FleetManifest = FleetManifestSchema.parse({
     manifestAccount(AUTO_ID, 'claude', 'claude-auto', 'auto'),
     manifestAccount(CODEX_ID, 'codex', 'codex-kirin', 'interactive'),
     manifestAccount(KEYED_ID, 'claude', 'claude-proxy', 'interactive'),
+  ],
+});
+
+const ENV_ID = '00000000-0000-4000-8000-000000000005';
+const LITERAL_ID = '00000000-0000-4000-8000-000000000006';
+const BARE_ID = '00000000-0000-4000-8000-000000000007';
+
+/**
+ * A fleet declaring the three credential sources {@link CONFIG} has no account of.
+ *
+ * NO `secretsFile`, and that is the point of the first account: `wrappers.ts` renders a configured value
+ * of exactly `$NAME` as a run-time reference, and without a declared secrets file the value comes from
+ * whatever environment launched the wrapper — which is the `environment` source rather than the
+ * `token-file` one {@link CONFIG} produces from the same declaration.
+ */
+const SOURCES_CONFIG = parseConfig({
+  variants: { default: {} },
+  agents: [
+    {
+      name: 'envkey',
+      kind: 'claude',
+      auth: 'api-key',
+      env: { ANTHROPIC_API_KEY: '$CALLER_KEY' },
+      routes: { default: route(ENV_ID, 'claude-envkey', 'interactive') },
+    },
+    {
+      name: 'literal',
+      kind: 'claude',
+      auth: 'api-key',
+      env: { ANTHROPIC_API_KEY: 'sk-configured-TESTONLY' },
+      routes: { default: route(LITERAL_ID, 'claude-literal', 'interactive') },
+    },
+    // Declares that it authenticates with a key and says nowhere the key comes from: the fail-closed
+    // member, which must not be read as "the harness writes this one".
+    {
+      name: 'bare',
+      kind: 'claude',
+      auth: 'api-key',
+      routes: { default: route(BARE_ID, 'claude-bare', 'interactive') },
+    },
+  ],
+});
+
+const SOURCES_MANIFEST: FleetManifest = FleetManifestSchema.parse({
+  version: 1,
+  generatedAt: '2026-08-19T09:00:00.000Z',
+  accounts: [
+    manifestAccount(ENV_ID, 'claude', 'claude-envkey', 'interactive'),
+    manifestAccount(LITERAL_ID, 'claude', 'claude-literal', 'interactive'),
+    manifestAccount(BARE_ID, 'claude', 'claude-bare', 'interactive'),
   ],
 });
 
@@ -223,6 +285,9 @@ interface Fixture {
 
 interface FixtureOptions {
   readonly wrapperMissing?: boolean;
+  /** A different declared fleet, for the credential sources {@link CONFIG} has no account of. */
+  readonly config?: FleetConfig;
+  readonly manifest?: FleetManifest;
   readonly declarations?: HarnessLoginDeclarations;
   readonly confirmChange?: (password: string) => Promise<ChangeConfirmation>;
   readonly windowMinutes?: number;
@@ -237,7 +302,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
   let minted = 0;
 
   const service = new HarnessLoginService({
-    fleet: { config: async () => CONFIG, accounts: async () => MANIFEST },
+    fleet: { config: async () => options.config ?? CONFIG, accounts: async () => options.manifest ?? MANIFEST },
     credentials: store,
     clock: { now: options.now ?? (() => NOW) },
     mintId: () => `flow${String(++minted).padStart(2, '0')}`,
@@ -246,11 +311,17 @@ function fixture(options: FixtureOptions = {}): Fixture {
       children.push(child);
       return child;
     },
-    // A provider credential the caller happens to hold, so the sanitizer has something to strip.
-    environment: { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'inherited-key-TESTONLY', PROXY_KEY: 'proxy-key' },
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: a generated WRAPPER, where `${…}` is shell
-    readWrapper: async () =>
-      options.wrapperMissing === true ? undefined : 'export ANTHROPIC_BASE_URL="${FY_BASE}"\nexec claude "$@"\n',
+    // TWO provider credentials the caller happens to hold. The wrapper says nothing about
+    // `ANTHROPIC_API_KEY`, so it must be stripped; it deliberately reads `OPENAI_API_KEY` out of its
+    // surroundings, so that one must survive. An environment carrying only the first cannot distinguish
+    // a working preserve list from an empty one.
+    environment: {
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'inherited-key-TESTONLY',
+      OPENAI_API_KEY: 'referenced-key-TESTONLY',
+      PROXY_KEY: 'proxy-key',
+    },
+    readWrapper: async () => (options.wrapperMissing === true ? undefined : WRAPPER_SCRIPT),
     timer: {
       after: (milliseconds, run) => {
         const entry = { milliseconds, run, disarmed: false };
@@ -525,6 +596,85 @@ describe('starting a harness login', () => {
   });
 });
 
+// ─── every credential source that is not a login ─────────────────────────────────────────────────
+
+/**
+ * One case per member of `FleetCredentialSource`, because a login control that cannot succeed is worse
+ * than no control.
+ *
+ * `describeSource` is proved over the union on its own further down, but wording is not the property
+ * here: what these establish is that {@link HarnessLoginService.start} REFUSES for each source and
+ * launches nothing. A regression that made one source applicable would offer a sign-in that opens a
+ * browser, writes a store nobody reads, and leaves the account exactly as it was — and the wording test
+ * would still pass, because it never calls `start`.
+ */
+describe('an account whose credential is not a login', () => {
+  const sources = fixture.bind(null, { config: SOURCES_CONFIG, manifest: SOURCES_MANIFEST });
+
+  it('should refuse an account whose credential comes from the environment, naming the variable', async () => {
+    // Arrange — no secrets file is declared, so the reference resolves from whatever launched the wrapper.
+    const subject = sources();
+
+    // Act
+    const actual = await refusalOf(async () => subject.service.start({ accountId: ENV_ID }, HOST));
+
+    // Assert
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).match(/ANTHROPIC_API_KEY environment variable/u);
+    should(subject.children).be.empty();
+  });
+
+  it('should refuse an account whose credential the fleet configuration carries itself', async () => {
+    // Arrange
+    const subject = sources();
+
+    // Act
+    const actual = await refusalOf(async () => subject.service.start({ accountId: LITERAL_ID }, HOST));
+
+    // Assert
+    should(actual.message).match(/as the fleet configuration sets it/u);
+    should(subject.children).be.empty();
+  });
+
+  it('should refuse an account nothing declares a credential source for, rather than offering a login', async () => {
+    // The fail-closed member. Reading `undeclared` as `interactive-login` would offer a sign-in for an
+    // API-key account, which is the one reading this union exists to prevent.
+    // Arrange
+    const subject = sources();
+
+    // Act
+    const actual = await refusalOf(async () => subject.service.start({ accountId: BARE_ID }, HOST));
+
+    // Assert
+    should(actual.message).match(/nothing in this fleet/u);
+    should(subject.children).be.empty();
+  });
+
+  it('should report each source on the readiness row, so a surface can say which one it is', async () => {
+    // Act
+    const actual = await sources().service.readiness();
+
+    // Assert
+    should([ENV_ID, LITERAL_ID, BARE_ID].map(id => accountOf(actual, id).source)).deepEqual([
+      { source: 'environment', variable: 'ANTHROPIC_API_KEY' },
+      { source: 'configured-value', variable: 'ANTHROPIC_API_KEY' },
+      { source: 'undeclared' },
+    ]);
+  });
+
+  it('should offer no sign-in on any of those rows', async () => {
+    // Act
+    const actual = await sources().service.readiness();
+
+    // Assert
+    should([ENV_ID, LITERAL_ID, BARE_ID].map(id => accountOf(actual, id).login)).deepEqual([
+      { applies: false, because: 'credential-is-not-a-login' },
+      { applies: false, because: 'credential-is-not-a-login' },
+      { applies: false, because: 'credential-is-not-a-login' },
+    ]);
+  });
+});
+
 // ─── the operator password ────────────────────────────────────────────────────────────────────────
 
 describe('the per-change confirmation', () => {
@@ -649,8 +799,13 @@ describe('the Claude leg', () => {
     should(child.spec.environment).have.property('PATH', '/usr/bin');
   });
 
-  it('should keep a variable the wrapper deliberately references', async () => {
-    // Arrange — the wrapper exports FY_BASE by reference, so stripping it would break the account.
+  it('should keep a credential variable the wrapper deliberately reads from its surroundings', async () => {
+    // Arrange — the wrapper renders `export OPENAI_API_KEY="${OPENAI_API_KEY}"`, which is a supported
+    // and documented shape: the account's credential arrives from the environment at run time. Stripping
+    // it would break the very account somebody is trying to sign in, so the sanitizer is told to keep it.
+    // ASSERTED ON A NAME THE SANITIZER WOULD OTHERWISE REMOVE — `OPENAI_API_KEY` is in
+    // `INHERITED_HARNESS_ENV`, so this case fails if the preserve list is ever passed empty. A case
+    // asserting a name nothing strips would pass either way and prove nothing.
     const subject = fixture();
 
     // Act
@@ -658,7 +813,23 @@ describe('the Claude leg', () => {
     const child = await subject.child();
 
     // Assert
-    should(Object.keys(child.spec.environment)).containEql('PATH');
+    should(child.spec.environment).have.property('OPENAI_API_KEY', 'referenced-key-TESTONLY');
+    should(child.spec.environment).not.have.property('ANTHROPIC_API_KEY');
+  });
+
+  it('should keep everything the wrapper says nothing about, rather than launching a bare environment', async () => {
+    // A sanitizer that stripped by allowlist would take `PATH` with it, and the child would fail to find
+    // anything it execs — which looks like a harness with no login rather than a broken launch.
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+
+    // Assert
+    should(child.spec.environment).have.property('PATH', '/usr/bin');
+    should(child.spec.environment).have.property('PROXY_KEY', 'proxy-key');
   });
 
   it('should publish the URL Claude prints and nothing else', async () => {
@@ -877,6 +1048,16 @@ describe('a login that cannot run', () => {
   it('should end as itself when it recognised nothing it could publish', async () => {
     // Arrange — the outcome §4.5 rule 2 demands when a third party changes its output, or when an
     // undocumented flag such as `codex login --device-auth` disappears.
+    //
+    // THIS IS ALSO THE MESSAGE A SEPARATE DEFECT ARRIVES UNDER, and the wording asserted below is the
+    // wording that misleads. A generated wrapper renders `exec <binary> <account flags> "$@"`
+    // (`packages/fleet/src/lib/wrappers.ts:259`), so an account's declared session flags precede the
+    // login subcommand; measured at codex-cli 0.145.0, `codex --full-auto login --device-auth` exits with
+    // `unexpected argument '--full-auto' found` and prints neither a URL nor a code, which lands exactly
+    // here. The reason then blames this host's codex when the cause is Ferretry's own wrapper, and the
+    // remedy it names — `fy fleet login` — composes the same flags and fails the same way. See
+    // `docs/design/harness-login.md` (GAP: the wrapper prepends session flags to a login subcommand) and
+    // `packages/fleet/tests/integration/process-login.test.ts`, which pins the composed argv.
     const subject = fixture();
     const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
     const child = await subject.child();
@@ -1300,6 +1481,130 @@ describe('the harness login routes', () => {
     should(jsonBody(submitted)).have.property('outcome', 'accepted');
     should(jsonBody(cancelled)).have.property('state', 'failed');
     should(child.written).deepEqual([`${PASTED_CODE}\n`]);
+  });
+
+  /**
+   * The caller this whole feature exists for: a PAIRED BROWSER, which holds a device credential and
+   * never the admin token.
+   *
+   * Every case above presents the host's own admin bearer, which proves the route is mounted and says
+   * nothing about the credential a browser has. `minimum: 'operator'` is what admits a device — an
+   * `admin-token` minimum would 403 the browser on every one of these five paths, and a browser is
+   * always a paired device, so the feature would be reachable from nowhere but the machine it is meant
+   * to be driven from. That is not a hypothetical: it is the recorded reason the minimum is `operator`.
+   */
+  const paired = {
+    ...CREDENTIALS,
+    devices: { identify: (token: string) => (token === 'paired' ? 'device-1' : undefined) },
+  };
+  const browser = { authorization: 'Bearer paired', 'x-ferretry-client': 'ui' } as const;
+  const wardenCaller = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
+  const pairedDispatcher = (subject: Fixture, guard = GRANTED) =>
+    new ApiDispatcher(new ApiRouter(harnessLoginRoutes(subject.service)), paired, guard);
+
+  it('should let a paired browser reach every one of the five login paths', async () => {
+    // Arrange
+    const subject = fixture();
+    const dispatcher = pairedDispatcher(subject);
+    const started = jsonBody(
+      await dispatcher.dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/login',
+          headers: { ...browser, 'content-type': 'application/json' },
+          body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+        }),
+      ),
+    );
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+
+    // Act
+    const statuses = [
+      await dispatcher.dispatch(request({ path: '/v1/fleet/login', headers: browser })),
+      await dispatcher.dispatch(request({ path: `/v1/fleet/login/${started.flowId}`, headers: browser })),
+      await dispatcher.dispatch(
+        request({
+          method: 'POST',
+          path: `/v1/fleet/login/${started.flowId}`,
+          headers: { ...browser, 'content-type': 'application/json' },
+          body: JSON.stringify({ code: PASTED_CODE }),
+        }),
+      ),
+      await dispatcher.dispatch(
+        request({ method: 'DELETE', path: `/v1/fleet/login/${started.flowId}`, headers: browser }),
+      ),
+    ].map(response => response.status);
+
+    // Assert — the start above already answered, so five paths served a device credential.
+    should(started).have.property('state', 'starting');
+    should(statuses).deepEqual([200, 200, 200, 200]);
+  });
+
+  it('should refuse a warden token on every login path, because a login is not a remedy', async () => {
+    // The other half of `minimum: 'operator'`, and the half a passing device case cannot show: a warden
+    // credential is scoped to what an assignment allows and re-pointing a fleet at another provider
+    // account is not one of those things.
+    // Arrange
+    const subject = fixture();
+    const dispatcher = pairedDispatcher(subject);
+
+    // Act
+    const statuses = [
+      await dispatcher.dispatch(request({ path: '/v1/fleet/login', headers: wardenCaller })),
+      await dispatcher.dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/login',
+          headers: { ...wardenCaller, 'content-type': 'application/json' },
+          body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+        }),
+      ),
+      await dispatcher.dispatch(request({ path: '/v1/fleet/login/flow01', headers: wardenCaller })),
+      await dispatcher.dispatch(request({ method: 'DELETE', path: '/v1/fleet/login/flow01', headers: wardenCaller })),
+    ].map(response => response.status);
+
+    // Assert
+    should(statuses).deepEqual([403, 403, 403, 403]);
+    should(subject.children).be.empty();
+  });
+
+  it('should refuse an unauthenticated caller before it decides anything else', async () => {
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    const actual = await pairedDispatcher(subject).dispatch(request({ path: '/v1/fleet/login' }));
+
+    // Assert — 401, not 403: nothing presented a credential, so there is no caller to refuse.
+    should(actual.status).equal(401);
+  });
+
+  it('should still serve the readiness READ to a caller whose configure axis the operator switched off', async () => {
+    // The one route on this table that is `fleet.use`. An operator who turned `configure` off has said
+    // "nothing on this machine may be re-provisioned from off it", not "nobody may see which accounts
+    // need signing in" — and a surface that could not read it would have to grey a control with no
+    // sentence beside it, which is the dead end this feature removes.
+    // Arrange
+    const subject = fixture({ store: new RecordingStore() });
+    const dispatcher = pairedDispatcher(subject, NARROWED);
+
+    // Act
+    const read = await dispatcher.dispatch(request({ path: '/v1/fleet/login', headers: browser }));
+    const start = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/login',
+        headers: { ...browser, 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: INTERACTIVE_ID, operatorPassword: 'the operator password' }),
+      }),
+    );
+
+    // Assert
+    should(read.status).equal(200);
+    should(start.status).equal(403);
+    should(jsonBody(start)).have.property('code', 'grant_not_granted');
+    should(subject.children).be.empty();
   });
 
   it('should refuse a flow id the path cannot carry', async () => {

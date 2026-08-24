@@ -46,6 +46,7 @@ import { FleetProblems } from './fleet-change-forms.tsx';
 import {
   derivedWrapper,
   type FleetAccountDraft,
+  type FleetAccountMode,
   type FleetHarnessDetection,
   type FleetLayerDraft,
   type FleetPrefilledField,
@@ -75,15 +76,17 @@ import {
   previousStep,
   SHARED_DOCUMENT_CONSEQUENCE,
   selectedModels,
+  selectedModes,
   settingsChoice,
   skillsSelection,
   stepCopy,
   stepIndex,
   stepProblems,
+  toggleMode,
   toggleModel,
   unverifiedModels,
   withInstructionsMiddle,
-  withMode,
+  withLaneVariant,
   withModels,
   withSettingsChoice,
   withSkillsSelection,
@@ -93,6 +96,14 @@ import {
 const FILTER_THRESHOLD = 6;
 
 const SECTION = 'px-panel py-3';
+
+/**
+ * What each mode is called where a person reads it, rather than where a schema does.
+ *
+ * Annotated over the modes so a third one would be a compile error here rather than a control with a
+ * blank label beside it.
+ */
+const MODE_LABEL: Readonly<Record<FleetAccountMode, string>> = { interactive: 'interactive', auto: 'auto' };
 
 /** The provenance line a prefilled field carries, so a filled box is never mistaken for a typed one. */
 function PrefillNote({ field, notes }: { readonly field: FleetPrefilledField; readonly notes: FleetPrefillNotes }) {
@@ -506,55 +517,82 @@ function IdentityStep({
         />
       </div>
 
-      {/* ONE control where there used to be two. `lane` and `mode` are not the same field, and the
-          comment on `laneForMode` says what each one really is; what is true is that on an ordinary
-          fleet they agree, so asking twice asked a person to restate an answer. */}
-      <FleetChoiceGroup
+      {/* ONE control where there used to be two, and now a MULTI-SELECT where there used to be one.
+          `lane` and `mode` are still not the same field — the comment on `laneForMode` says what each
+          one really is — but "both" is an ordinary answer, and it used to mean walking the whole
+          sequence twice and retyping every other answer. Each ticked mode derives its own lane. */}
+      <FleetCheckChoice
         legend="How does this account run?"
         name="mode"
+        mono={false}
         options={[
           { id: 'interactive', label: 'Interactive', detail: 'You drive it. Sessions wait for you.' },
           { id: 'auto', label: 'Auto', detail: 'It runs unattended, without waiting for a person.' },
         ]}
-        value={draft.mode}
+        selected={selectedModes(draft)}
         disabled={disabled}
-        onChoose={mode => onChange(withMode(draft, mode === 'auto' ? 'auto' : 'interactive', variants))}
+        onToggle={mode => onChange(toggleMode(draft, mode === 'auto' ? 'auto' : 'interactive', variants))}
+        empty="No mode is offered, which should not be possible."
       />
       <p className="m-0 text-meta leading-base text-muted">{LANE_EXPLANATION}</p>
 
+      {/* Offered ONLY because this fleet declares lanes no mode would derive, and offered PER
+          ACCOUNT: with two of them in play a single lane control would have no answer to "which
+          one". A surface that cannot express what the configuration can is the reason somebody edits
+          YAML by hand. */}
+      {spare.length === 0
+        ? null
+        : draft.lanes.map(lane => (
+            <div key={lane.mode} data-fleet-other-lanes={String(spare.length)} data-fleet-lane-mode={lane.mode}>
+              <label className={FIELD_LABEL} htmlFor={id(`-lane-${lane.mode}`)}>
+                Lane for the {MODE_LABEL[lane.mode]} account
+              </label>
+              <select
+                id={id(`-lane-${lane.mode}`)}
+                className="kt-input"
+                value={lane.variant}
+                disabled={disabled}
+                onChange={event => onChange(withLaneVariant(draft, lane.mode, event.target.value))}
+              >
+                {variants.map(variant => (
+                  <option key={variant} value={variant}>
+                    {variant}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
       {spare.length === 0 ? null : (
-        <div data-fleet-other-lanes={String(spare.length)}>
-          <label className={FIELD_LABEL} htmlFor={id('-lane')}>
-            Lane
-          </label>
-          {/* Offered ONLY because this fleet declares lanes no mode would derive. A surface that
-              cannot express what the configuration can is the reason somebody edits YAML by hand. */}
-          <select
-            id={id('-lane')}
-            className="kt-input"
-            value={draft.variant}
-            disabled={disabled}
-            onChange={event => onChange({ ...draft, variant: event.target.value })}
-          >
-            {variants.map(variant => (
-              <option key={variant} value={variant}>
-                {variant}
-              </option>
-            ))}
-          </select>
-          <p className="m-0 mt-1 text-meta text-muted">
-            This fleet declares lanes of its own. The one above is picked from how the account runs; change it here if
-            you meant another.
-          </p>
-        </div>
+        <p className="m-0 text-meta leading-base text-muted">
+          This fleet declares lanes of its own. Each lane above is picked from how that account runs; change it here if
+          you meant another.
+        </p>
       )}
 
-      <p className="m-0 flex flex-wrap items-baseline gap-2 text-meta text-muted">
-        Wrapper the daemon will derive:
-        <span className="min-w-0" data-fleet-derived-wrapper="">
-          <PanelPath value={derivedWrapper(draft)} className="text-meta text-fg" label="Derived wrapper" />
-        </span>
-      </p>
+      {/* Every wrapper, before they leave the step. Ticking a second box creates a second account
+          with its own wrapper and its own home, and a person who is not shown both finds that out
+          from the recap at the earliest and from `fy fleet ls` at the latest. */}
+      <div className="grid gap-1" data-fleet-derived-wrappers={String(draft.lanes.length)}>
+        <p className="m-0 text-meta text-muted">
+          {draft.lanes.length === 1
+            ? 'Wrapper the daemon will derive:'
+            : 'Wrappers the daemon will derive, one account each:'}
+        </p>
+        {draft.lanes.map(lane => (
+          <p key={lane.mode} className="m-0 flex flex-wrap items-baseline gap-2 text-meta text-muted">
+            <span className="min-w-0" data-fleet-derived-wrapper={lane.mode}>
+              <PanelPath
+                value={derivedWrapper(draft, lane)}
+                className="text-meta text-fg"
+                label={`Derived wrapper for the ${MODE_LABEL[lane.mode]} account`}
+              />
+            </span>
+            <span>
+              · {MODE_LABEL[lane.mode]}, lane {lane.variant}
+            </span>
+          </p>
+        ))}
+      </div>
     </div>
   );
 }
@@ -732,6 +770,17 @@ function InstructionsStep({
           the three you pick, this account ends up POINTING AT one named document.
         </p>
       </div>
+
+      {/* A DECLARED GAP, said where somebody is standing rather than left to be discovered. This step
+          composes ONE document, so every account this pass creates points at it. The default fleet
+          gives each lane its own for a real reason — "never stop and ask" is right in exactly one of
+          them — and a document per lane is a redesign of this step, not something to imply here. */}
+      {draft.lanes.length < 2 ? null : (
+        <p className="m-0 text-meta leading-base text-warn" data-fleet-shared-instructions="">
+          Both accounts read this one document. A separate document per account is not offered here — add it after, from
+          the account’s own editor.
+        </p>
+      )}
 
       <FleetChoiceGroup
         legend="Where do its instructions come from?"
@@ -1034,12 +1083,20 @@ function ReviewStep({ draft }: { readonly draft: FleetAccountDraft }) {
           label="Display name"
           value={draft.displayName.trim() === '' ? draft.name.trim() : draft.displayName.trim()}
         />
-        <RecapRow
-          label="Runs"
-          value={draft.mode === 'auto' ? 'unattended (auto)' : 'driven by a person (interactive)'}
-        />
-        <RecapRow label="Lane" value={draft.variant} />
-        <RecapRow label="Wrapper" value={derivedWrapper(draft)} />
+        {/* One row PER ACCOUNT, named rather than counted. Ticking both modes creates two accounts
+            with two wrapper names and two homes, and a recap that said "2" would be the one place
+            left where a person could still be surprised by the second one. */}
+        {draft.lanes.length === 0 ? (
+          <RecapRow label="Accounts" value="— no mode chosen, so nothing would be created" />
+        ) : (
+          draft.lanes.map(lane => (
+            <RecapRow
+              key={lane.mode}
+              label={lane.mode === 'auto' ? 'Account (unattended)' : 'Account (driven by a person)'}
+              value={`${derivedWrapper(draft, lane)} · lane ${lane.variant} · home ${derivedWrapper(draft, lane)}`}
+            />
+          ))
+        )}
         <RecapRow label="Models" value={models.length === 0 ? '—' : models.join(', ')} />
         <RecapRow label="Default model" value={draft.defaultModel.trim() === '' ? '—' : draft.defaultModel.trim()} />
         <RecapRow

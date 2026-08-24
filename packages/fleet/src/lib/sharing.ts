@@ -117,9 +117,6 @@ export const PER_ACCOUNT_FIELDS: readonly string[] = [
   'routes',
 ];
 
-/** The conventional name for the document a fleet offers to everything by default. */
-export const DEFAULT_SHARED_NAME = 'default';
-
 /** The asset-tree directory a privately materialized copy is written under, per account. */
 export const ACCOUNT_ASSET_PREFIX = 'accounts';
 

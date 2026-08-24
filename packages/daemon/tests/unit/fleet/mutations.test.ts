@@ -4,7 +4,7 @@ import should from 'should';
 import {
   applyFleetMutation,
   assertNoOrphanedSharedDocuments,
-  derivedWrapperName,
+  createdWrapperNames,
   type FleetMutation,
   FleetMutationRefusal,
   FleetMutationSchema,
@@ -68,11 +68,43 @@ const routeOf = (config: FleetConfig, accountId: string): Record<string, unknown
   throw new Error(`no account ${accountId}`);
 };
 
-describe('derivedWrapperName', () => {
-  it('should keep the bare name for the default lane and spell out every other', () => {
-    // Act + Assert
-    should(derivedWrapperName('claude', 'kirin', 'default')).equal('claude-kirin');
-    should(derivedWrapperName('claude', 'kirin', 'auto')).equal('claude-auto-kirin');
+/** The one-lane create that every pre-multi-select test was written against. */
+const oneLane = (variant = 'default'): Record<string, unknown> => ({ lanes: [{ variant }] });
+
+describe('createdWrapperNames', () => {
+  it('should name every wrapper a create publishes, in the order its lanes were named', () => {
+    // Arrange — the summary a person approves is derived from this, so a create adding two accounts
+    // that named one of them would be a one-line description that is not the change.
+    const mutation = mutationOf({
+      kind: 'create-account',
+      harness: 'claude',
+      name: 'kirin',
+      lanes: [{ variant: 'default' }, { variant: 'auto' }],
+      models: ['model-one'],
+      defaultModel: 'model-one',
+    });
+
+    // Act + Assert — the naming rule itself lives in @ferretry/fleet and is not restated here.
+    should(mutation.kind).equal('create-account');
+    if (mutation.kind !== 'create-account') return;
+    should(createdWrapperNames(mutation)).deepEqual(['claude-kirin', 'claude-auto-kirin']);
+  });
+
+  it('should read a lane that names neither field as the default one', () => {
+    // Act
+    const mutation = mutationOf({
+      kind: 'create-account',
+      harness: 'codex',
+      name: 'atomi',
+      lanes: [{}],
+      models: ['model-one'],
+      defaultModel: 'model-one',
+    });
+
+    // Assert — the wire may omit both members; the fallback lane is this module's, not the schema's.
+    should(mutation.kind).equal('create-account');
+    if (mutation.kind !== 'create-account') return;
+    should(createdWrapperNames(mutation)).deepEqual(['codex-atomi']);
   });
 });
 
@@ -85,6 +117,7 @@ describe('applyFleetMutation creating an account', () => {
         kind: 'create-account',
         harness: 'codex',
         name: 'atomi',
+        ...oneLane(),
         models: ['model-one'],
         defaultModel: 'model-one',
       }),
@@ -103,7 +136,7 @@ describe('applyFleetMutation creating an account', () => {
         kind: 'create-account',
         harness: 'claude',
         name: 'kirin',
-        variant: 'auto',
+        ...oneLane('auto'),
         models: ['model-one'],
         defaultModel: 'model-one',
       }),
@@ -125,7 +158,7 @@ describe('applyFleetMutation creating an account', () => {
           kind: 'create-account',
           harness: 'claude',
           name: 'kirin',
-          variant: 'turbo',
+          ...oneLane('turbo'),
           models: ['model-one'],
           defaultModel: 'model-one',
         }),
@@ -146,6 +179,7 @@ describe('applyFleetMutation creating an account', () => {
           kind: 'create-account',
           harness: 'claude',
           name: 'kirin',
+          ...oneLane(),
           models: ['model-one'],
           defaultModel: 'model-one',
         }),
@@ -167,7 +201,7 @@ describe('applyFleetMutation creating an account', () => {
     const actual = refusalOf(() =>
       applyFleetMutation(
         configOf(),
-        mutationOf({ kind: 'create-account', harness: 'claude', name: 'kirin', ...overrides }),
+        mutationOf({ kind: 'create-account', harness: 'claude', name: 'kirin', ...oneLane(), ...overrides }),
         mintId,
       ),
     );
@@ -184,6 +218,7 @@ describe('applyFleetMutation creating an account', () => {
         kind: 'create-account',
         harness: 'claude',
         name: 'kirin',
+        ...oneLane(),
         models: [],
         available: false,
         unavailableReason: 'the provider is down',
@@ -193,6 +228,140 @@ describe('applyFleetMutation creating an account', () => {
 
     // Assert
     should(routeOf(actual, ID_MINTED)).match({ available: false, unavailableReason: 'the provider is down' });
+  });
+});
+
+describe('applyFleetMutation creating several lanes at once', () => {
+  /** Distinct ids, so two routes minted in one pass are two accounts rather than one written twice. */
+  const mintSequence = (): (() => string) => {
+    let at = 0;
+    return () => {
+      at += 1;
+      return `00000000-0000-4000-8000-0000000000b${at}`;
+    };
+  };
+
+  const bothLanes = (overrides: Record<string, unknown> = {}): FleetMutation =>
+    mutationOf({
+      kind: 'create-account',
+      harness: 'claude',
+      name: 'kirin',
+      displayName: 'Kirin',
+      lanes: [
+        { variant: 'default', mode: 'interactive' },
+        { variant: 'auto', mode: 'auto' },
+      ],
+      models: ['model-one'],
+      defaultModel: 'model-one',
+      ...overrides,
+    });
+
+  it('should add one route per lane to ONE agent, with one wrapper and one home each', () => {
+    // Act
+    const actual = applyFleetMutation(configOf(), bothLanes(), mintSequence());
+
+    // Assert — one provider login, two homes. Two agents would be two sign-ins for one account.
+    should(actual.agents).have.length(1);
+    should(actual.agents[0]).match({ name: 'kirin', kind: 'claude' });
+    const routes = actual.agents[0]?.routes ?? {};
+    should(Object.keys(routes)).deepEqual(['default', 'auto']);
+    should(routes.default).match({ wrapper: 'claude-kirin', home: 'claude-kirin', mode: 'interactive' });
+    should(routes.auto).match({ wrapper: 'claude-auto-kirin', home: 'claude-auto-kirin', mode: 'auto' });
+    // Identity is minted per route: two accounts that shared an id would be indistinguishable
+    // exactly where every consumer joins on it.
+    should(routes.default?.id).not.equal(routes.auto?.id);
+  });
+
+  it('should share everything but the mode across the accounts one pass creates', () => {
+    // Act
+    const actual = applyFleetMutation(
+      configOf(),
+      bothLanes({ layer: { memory: 'instructions/kirin.md' } }),
+      mintSequence(),
+    );
+
+    // Assert — one model list, one display name, one overlay; the mode is what tells them apart.
+    const routes = actual.agents[0]?.routes ?? {};
+    for (const route of [routes.default, routes.auto]) {
+      should(route).match({ displayName: 'Kirin', defaultModel: 'model-one', available: true });
+      should(route?.models).match([{ id: 'model-one' }]);
+      should(route?.layer).match({ memory: 'instructions/kirin.md' });
+    }
+  });
+
+  it('should add every lane to an agent that already exists rather than a second agent', () => {
+    // Act — one lane is already there, so only the other is addable.
+    const actual = applyFleetMutation(
+      existing(),
+      mutationOf({
+        kind: 'create-account',
+        harness: 'claude',
+        name: 'kirin',
+        lanes: [{ variant: 'auto', mode: 'auto' }],
+        models: ['model-one'],
+        defaultModel: 'model-one',
+      }),
+      mintSequence(),
+    );
+
+    // Assert
+    should(actual.agents).have.length(1);
+    should(Object.keys(actual.agents[0]?.routes ?? {})).deepEqual(['default', 'auto']);
+  });
+
+  it('should refuse the whole change when ONE of its lanes collides, naming that lane', () => {
+    // Act — the fleet already publishes claude-kirin in the default lane.
+    const actual = refusalOf(() => applyFleetMutation(existing(), bothLanes(), mintSequence()));
+
+    // Assert — refused before anything was added, and the sentence names which lane earned it.
+    should(actual).match(/already has a "default" lane/u);
+  });
+
+  it('should refuse two lanes that resolve to the same variant, naming it', () => {
+    // Act — a fleet declaring only `default` sends both modes to one slot: two accounts asked for,
+    // one wrapper name available. Nothing about either lane is wrong on its own.
+    const actual = refusalOf(() =>
+      applyFleetMutation(
+        configOf({ variants: { default: {} } }),
+        mutationOf({
+          kind: 'create-account',
+          harness: 'claude',
+          name: 'kirin',
+          lanes: [{ mode: 'interactive' }, { mode: 'auto' }],
+          models: ['model-one'],
+          defaultModel: 'model-one',
+        }),
+        mintSequence(),
+      ),
+    );
+
+    // Assert
+    should(actual).match(/names the "default" lane twice/u);
+  });
+
+  it('should refuse a lane this fleet does not declare even when another lane is fine', () => {
+    // Act
+    const actual = refusalOf(() =>
+      applyFleetMutation(
+        configOf(),
+        bothLanes({ lanes: [{ variant: 'default' }, { variant: 'turbo' }] }),
+        mintSequence(),
+      ),
+    );
+
+    // Assert
+    should(actual).match(/does not declare a "turbo" lane/u);
+  });
+
+  it('should refuse an incoherent availability once, for the whole create', () => {
+    // Act — models, the default model and availability are the ACCOUNT's, not the lane's, so every
+    // account this pass creates would carry the same defect and one sentence describes all of them.
+    const actual = refusalOf(() =>
+      applyFleetMutation(configOf(), bothLanes({ defaultModel: 'model-nine' }), mintSequence()),
+    );
+
+    // Assert
+    should(actual).match(/"model-nine" is not one of the models this account lists/u);
   });
 });
 

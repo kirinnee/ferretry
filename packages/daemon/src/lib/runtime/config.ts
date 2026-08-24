@@ -106,6 +106,32 @@ export const DaemonRelayConfigSchema = z
 export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
 
 /**
+ * What STARTING this daemon is allowed to set up on the host's behalf.
+ *
+ * ON BY DEFAULT, and that default is the feature. A machine with a harness installed and no declared
+ * account could serve this daemon's whole API and start no session, and the setup step that fixed it
+ * was one nobody had been told about. So a start creates the default accounts for whatever harness it
+ * finds, discloses that it did, and names this key.
+ *
+ * AN EXPLICIT `false` IS HONOURED ON EVERY START, INCLUDING THE FIRST. There is no "already prepared"
+ * marker to consult and deliberately so: the flag is read from the document each boot, so somebody
+ * who does not want a daemon writing into their home writes it once and it is true from then on,
+ * rather than being true only after the write they were trying to prevent has happened.
+ *
+ * TURNING IT OFF LATER REMOVES NOTHING. Accounts already created stay declared, because deleting an
+ * account is an edit to the fleet configuration and this key is not one — the boot's own disclosure
+ * says so rather than leaving somebody to discover it.
+ */
+export const DaemonFleetConfigSchema = z
+  .strictObject({
+    /** Create the default accounts for every harness this host has and publishes none for. */
+    prepareDefaults: z.boolean().default(true),
+  })
+  .prefault({});
+
+export type DaemonFleetConfig = z.output<typeof DaemonFleetConfigSchema>;
+
+/**
  * What the operator has agreed the UI may do on this machine, per capability and per axis.
  *
  * EVERY FIELD HAS A DEFAULT, so a document that says nothing is a complete decision rather than an
@@ -224,6 +250,8 @@ export const DaemonConfigDocumentSchema = z
      * end.
      */
     harness: HarnessDiscoveryDocumentSchema,
+    /** What starting this daemon may set up on the host's behalf. See {@link DaemonFleetConfigSchema}. */
+    fleet: DaemonFleetConfigSchema,
     /**
      * Reusable environment recipes for the use-without-read primitive, holding REFERENCES only.
      *

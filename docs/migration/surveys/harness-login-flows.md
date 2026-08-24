@@ -153,6 +153,33 @@ against the help text, and three of them are not guessable.
   which hands a slash command to the interactive TUI; `auth login` is what was observed to work with a
   pipe. The daemon flow uses `auth login` and the CLI path is unchanged.
 
+## Re-measured 2026-08-24, same host, same two versions
+
+Everything above still holds, with two corrections and one new observation. All three were taken by
+running the installed CLIs with piped stdio and `TERM=dumb`, and killing the child before any approval.
+
+- **Claude printed the URL as PLAIN TEXT, with no OSC 8 hyperlink at all.** The address arrived once,
+  unwrapped. So the hyperlink form recorded above is not the only shape a run produces, and a recogniser
+  must handle both — which it does, because stripping is a no-op on the plain form.
+  `packages/daemon/tests/unit/fleet-login/claude-flow.test.ts` now carries the plain form as well.
+- **`codex login --device-auth` opens with a version banner** (`Welcome to Codex [v0.145.0]`) that the
+  earlier capture did not include, and closes with the provider's own caution line. Neither contributes a
+  value; the whole transcript is now replayed as a sequence in
+  `packages/daemon/tests/unit/fleet-login/codex-flow.test.ts` rather than line by line.
+- **A pasted code really does reach the child, and the harness really does answer.** Driving the shipped
+  adapter (`spawnHarnessLoginChild`) against the real `claude auth login --claudeai` and writing a
+  deliberately wrong code produced `Invalid code. Please make sure the full code was copied.` on the
+  child's own output, with the child still running. That is the closest thing to end-to-end evidence this
+  repository can hold: it proves the write lands and the harness reads it. It does **not** prove a real
+  provider accepts a real code, and nothing here can.
+- **`codex login --help` still lists `--device-auth` with an empty description** at 0.145.0, and
+  `claude auth login --help` still lists `--claudeai` and `--console`. The undocumented flag §4.5 worries
+  about is still undocumented and still present.
+
+One defect surfaced during the same pass — an account's declared session flags are prepended to the login
+subcommand — and it is declared in
+[harness-login.md](../../design/harness-login.md) §6 rather than restated here.
+
 ## State
 
 The identity model, donor policy, credential store and per-identity login are implemented — see

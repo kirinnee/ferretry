@@ -413,6 +413,13 @@ const HARNESS_FLEET_ACCOUNTS = [
 const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
   ...emptyAccountDraft('claude'),
   name: 'atelier',
+  // BOTH modes ticked, which is the widest the identity step and the recap ever get: two lane
+  // selects, two derived wrapper lines, two recap rows and the shared-document warning. The geometry
+  // gate drives this fixture, so a state it cannot reach here is a state it cannot measure.
+  lanes: [
+    { mode: 'interactive', variant: 'default' },
+    { mode: 'auto', variant: 'auto' },
+  ],
   displayName: 'Atelier Claude',
   modelsText: 'claude-opus-5\nclaude-sonnet-5',
   defaultModel: 'claude-opus-5',
@@ -588,11 +595,14 @@ const HARNESS_FLEET_PROPOSAL = {
     kind: 'create-account',
     harness: 'claude',
     name: 'atelier',
-    variant: 'default',
+    lanes: [
+      { variant: 'default', mode: 'interactive' },
+      { variant: 'auto', mode: 'auto' },
+    ],
     models: ['claude-opus-5'],
     defaultModel: 'claude-opus-5',
   },
-  summary: 'add claude-atelier',
+  summary: 'add claude-atelier, claude-auto-atelier',
   expiresAt: '2026-08-05T08:41:00.000Z',
   state: 'pending',
   assetEdits: [

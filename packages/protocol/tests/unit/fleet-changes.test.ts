@@ -177,6 +177,59 @@ describe('FleetProposalApplyRequestSchema', () => {
 });
 
 describe('FleetMutationSchema', () => {
+  /** Everything a create needs beyond the lanes it names. */
+  const CREATE = { kind: 'create-account', harness: 'claude', name: 'atelier', models: ['opus'] } as const;
+
+  it('should carry the SET of lanes one create produces, each with its own mode', () => {
+    // Act — ticking both modes is one decision a person made once, so it travels as one intent.
+    const actual = FleetMutationSchema.safeParse({
+      ...CREATE,
+      lanes: [
+        { variant: 'default', mode: 'interactive' },
+        { variant: 'auto', mode: 'auto' },
+      ],
+    });
+
+    // Assert
+    should(actual.success && actual.data.kind === 'create-account' && actual.data.lanes).deepEqual([
+      { variant: 'default', mode: 'interactive' },
+      { variant: 'auto', mode: 'auto' },
+    ]);
+  });
+
+  it('should accept a lane that names neither member, which is the default one', () => {
+    // Act — both members stay optional per lane, exactly as the single spelling had them.
+    const actual = FleetMutationSchema.safeParse({ ...CREATE, lanes: [{}] });
+
+    // Assert — the fallback lane is the daemon's fact, so the wire simply carries the absence.
+    should(actual.success && actual.data.kind === 'create-account' && actual.data.lanes).deepEqual([{}]);
+  });
+
+  it('should refuse a create that names no lane at all', () => {
+    // Act — a create producing no account is a request with no effect.
+    const actual = FleetMutationSchema.safeParse({ ...CREATE, lanes: [] });
+
+    // Assert
+    should(actual.success).be.false();
+  });
+
+  it('should refuse the single-lane spelling this replaced, rather than carrying both', () => {
+    // Act — two spellings of one fact is what a strict object exists to prevent, and the mutation is
+    // a transient wire request: a held proposal stores the resulting PLAN, never this.
+    const actual = FleetMutationSchema.safeParse({ ...CREATE, variant: 'default', mode: 'auto' });
+
+    // Assert
+    should(actual.success).be.false();
+  });
+
+  it('should refuse an unknown mode inside a lane', () => {
+    // Act
+    const actual = FleetMutationSchema.safeParse({ ...CREATE, lanes: [{ mode: 'unattended' }] });
+
+    // Assert
+    should(actual.success).be.false();
+  });
+
   it('should refuse an arbitrary key inside an account layer', () => {
     // Act + Assert — the overlay is spelled out, so a typo is an error rather than carried along.
     const actual = FleetMutationSchema.safeParse({

@@ -1577,8 +1577,15 @@ try {
                 // The account name is the ONE thing the host cannot answer, and every step after it is
                 // unreachable until it is there. Typed rather than skipped, because a sequence walked
                 // with an empty draft would be measuring the refusal, not the screen.
-                if (step === 'identity')
+                if (step === 'identity') {
                   await sequence.getByRole('textbox', { name: 'Provider account name' }).fill('atelier');
+                  // BOTH modes, because that is the WIDEST this sequence ever gets: the mode question
+                  // is a multi-select, so ticking the second one adds a second lane control, a second
+                  // derived wrapper line, a second recap row and the shared-document warning on the
+                  // instructions step. A walk that only ever saw one account would measure the narrow
+                  // half of the control and report it as the whole thing.
+                  await sequence.locator('[data-fleet-check="interactive"]').click();
+                }
                 await assertNoSidewaysScroll(page, `the new-account "${step}" step at ${viewport.name}`);
                 const stepTarget = join(outDir, `settings-fleet-new-account-${step}-${viewport.name}.png`);
                 await page.screenshot({ path: stepTarget });
