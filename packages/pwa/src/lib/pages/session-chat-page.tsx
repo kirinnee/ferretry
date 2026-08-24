@@ -19,6 +19,7 @@ import {
   RuntimeModelControls,
 } from '../../components/runtime-controls.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
+import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
@@ -151,6 +152,14 @@ export interface SessionChatPageProps {
   readonly onNavigate?: (to: string) => void;
   /** This session's live Attention, when the host has subscribed to it. */
   readonly attention?: SessionAttentionModel;
+  /**
+   * This session's live-feed state and the reader's manual reconnect.
+   *
+   * Absent means the host is not subscribed to a live feed at all, which is what every test mount
+   * and every embedding short of the composition root actually is — and it renders nothing rather
+   * than a chip claiming a state nobody is measuring.
+   */
+  readonly liveStream?: LiveStreamIndicatorProps;
 }
 
 const actionFailureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
@@ -395,6 +404,7 @@ export function SessionChatPage({
   daemonSessions,
   onNavigate,
   attention,
+  liveStream,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const search = useSessionSearch();
@@ -754,6 +764,11 @@ export function SessionChatPage({
                 onOpen={opener => openAttention(null, opener)}
               />
             )}
+            {/* THE LIVE FEED'S OWN STATE, in the one row a phone keeps. It is here rather than in
+                the session header because the header's meta column is `display: none` on compact —
+                and a reader on a phone is the one most likely to have lost the socket to a screen
+                lock or a Wi-Fi roam in the first place. */}
+            {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} />}
             <SidePaneCapture onHost={captureSidePane} />
           </div>
           {/* NOT a live region. App.tsx owns the single announcement for a refresh

@@ -228,14 +228,32 @@ class FleetEventSocketHandler implements SocketHandler {
       : { kind: 'fleet', followedSessions: this.knownSessions.size };
   }
 
+  /**
+   * Keep proving this socket is alive for as long as it is quiet.
+   *
+   * EVERY QUIET WINDOW, NOT ONCE PER QUIET STRETCH. A single frame per silence was enough to tell a
+   * reader "nothing has happened yet" and is not enough to keep the connection itself alive: a
+   * session nobody is typing into emitted one frame at thirty seconds and then nothing at all,
+   * forever, and every stateful hop between the two ends — a home router's NAT table, a corporate
+   * proxy's idle list — stops being refreshed from that moment. What dies then dies silently, with
+   * no close frame either end can observe, which is the one failure a reader cannot be told about.
+   * Recurring traffic is what turns a dead path into a close the other end can actually see, which
+   * is the whole precondition for the browser deciding to reconnect.
+   *
+   * A REAL EVENT RE-ARMS THIS FROM `deliver`, so an active stream never carries an idle frame: the
+   * window is measured from the last thing actually sent, whichever kind it was.
+   *
+   * A REFUSED WRITE STOPS THE SCHEDULE. `send` answers false once it has closed or failed the
+   * handler, and re-arming past that would leave a timer holding a socket nobody owns.
+   */
   private armIdle(): void {
     if (this.closed) return;
     this.idle?.cancel();
     this.idle = this.scheduler.after(EVENT_STREAM_IDLE_MS, () => {
       this.idle = undefined;
       try {
-        // Once per quiet stretch, matching the poller's precedent. A later event re-arms it.
-        this.send({ kind: 'idle', idleSeconds: EVENT_STREAM_IDLE_MS / 1_000, scope: this.idleScope() });
+        if (!this.send({ kind: 'idle', idleSeconds: EVENT_STREAM_IDLE_MS / 1_000, scope: this.idleScope() })) return;
+        this.armIdle();
       } catch {
         this.fail(FLEET_EVENT_STREAM_CLOSES.evidence);
       }

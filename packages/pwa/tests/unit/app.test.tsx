@@ -361,6 +361,14 @@ interface LiveFeed {
   readonly sessionId: string | undefined;
   readonly after: number;
   readonly emit: (event: FyEvent) => void;
+  /**
+   * Ends this subscription the way a daemon going away does.
+   *
+   * The fake cannot resolve on its own — see below — but a test that never CAN resolve it could not
+   * reach the half of the route that matters most: what the reader is shown once the feed has
+   * stopped. This is the daemon's half of that, held by the test rather than by a timer.
+   */
+  readonly end: () => void;
 }
 
 const appStore = async (
@@ -415,7 +423,7 @@ const appStore = async (
               resolve();
               return;
             }
-            liveFeeds.push({ sessionId, after, emit: onEvent });
+            liveFeeds.push({ sessionId, after, emit: onEvent, end: resolve });
             signal?.addEventListener('abort', () => resolve(), { once: true });
           }),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
@@ -1061,6 +1069,72 @@ describe('AppShell', () => {
     await settle();
 
     expect(session.getAttribute('data-live-events')).toBe('9');
+    await view.unmount();
+  });
+
+  /**
+   * WHAT THE READER IS SHOWN WHEN THE FEED STOPS, driven through the real route.
+   *
+   * This is the defect the whole PR exists for, and it was invisible precisely BECAUSE every other
+   * assertion in this file still passed after it happened: the transcript kept refreshing on its
+   * three-second poll, the session stayed `connected`, the carrier stayed `direct`, and the page
+   * went on looking live forever. Nothing rendered by this route distinguished "the daemon has said
+   * nothing because nothing has happened" from "the socket died and nobody noticed".
+   *
+   * So the assertions here are the ones that could not have been made before: a stopped feed is a
+   * VISIBLE state, and the reader's way out of it is a real control wired to a real resubscription.
+   * The route's own state — the model's schedule, its jitter and its budget — belongs to
+   * `session-event-stream-model.test.ts`; what this proves is that the composition root actually
+   * connected the three of them.
+   */
+  it('shows the reader a stopped live feed and reconnects it on demand', async () => {
+    const { liveFeeds, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+    const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+
+    // A subscription exists but nothing has proved it: constructing a socket is not evidence a daemon
+    // is on the other end, and the route says the honest one of the two.
+    expect(liveFeeds).toHaveLength(1);
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+
+    await interact(() => must(liveFeeds[0], 'the live event subscription').emit(liveEvent(3)));
+    await settle();
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(region().querySelector('button[data-live-stream-reconnect]')).toBeNull();
+
+    // The daemon goes away. Before this PR the route swallowed exactly this and changed nothing.
+    await interact(() => must(liveFeeds[0], 'the live event subscription').end());
+    await settle();
+
+    expect(region().getAttribute('data-live-stream')).toBe('reconnecting');
+    expect(must(region().querySelector('.sr-only'), 'the announced sentence').textContent).toContain(
+      'still refreshes on a timer',
+    );
+    // NO SECOND SUBSCRIPTION YET. The reconnection is waiting out a backoff window on the real
+    // browser clock, which is what makes the manual control below a distinct fact and not a race.
+    expect(liveFeeds).toHaveLength(1);
+
+    const reconnect = must(
+      region().querySelector<HTMLButtonElement>('button[data-live-stream-reconnect]'),
+      'the reconnect button',
+    );
+    await interact(() => reconnect.click());
+    await settle();
+
+    // ONE new subscription, resuming at the cursor the old one reached rather than replaying the
+    // tail — and the route is back to an honest unproved state rather than claiming to be live.
+    expect(liveFeeds).toHaveLength(2);
+    expect(must(liveFeeds[1], 'the resumed subscription').after).toBe(3);
+    expect(session.getAttribute('data-live-events')).toBe('3');
+    expect(region().getAttribute('data-live-stream')).toBe('connecting');
+
+    await interact(() => must(liveFeeds[1], 'the resumed subscription').emit(liveEvent(11)));
+    await settle();
+
+    // RECOVERED: the resubscription is a working feed, not just a reopened socket.
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    expect(session.getAttribute('data-live-events')).toBe('11');
     await view.unmount();
   });
 
