@@ -10,7 +10,7 @@
  * ({@link unsupportedAssetFields}) rather than an absent file nobody notices.
  */
 import type { HarnessKind } from './manifest.ts';
-import { canonicalAssetReference } from './paths.ts';
+import { canonicalAssetReference, isAssetTreeReference } from './paths.ts';
 import type { SettingsFormat } from './settings.ts';
 
 /** The profile fields that name an asset on disk. `settings` is layered; the rest are paths. */
@@ -65,11 +65,35 @@ export const ASSET_FIELD_SHAPES: Readonly<Record<AssetField, AssetShape>> = {
 };
 
 /**
- * How one asset field is materialized.
+ * How one asset field's value actually reaches an account's home.
  *
- * `link` is available to plans outside an account home. Generated account homes always use `copy`:
- * their parent is the Ferretry state home, whose filesystem invariant rejects symlink components.
- * A copy also survives moving its source and changes only on the next explicit fleet apply.
+ * The three answers are not three implementations of one idea; they are three different promises, and
+ * which one is in play is the thing a person has to be told:
+ *
+ * - **`link`** — the destination IS the source. One inode, so an edit to the shared document is
+ *   already every account's: nothing has to be re-applied, and there is no second copy to drift.
+ *   This is what "shared" means when somebody says they want two accounts to have the same file.
+ * - **`copy`** — the destination holds the source's bytes as of the last apply. Reserved for a source
+ *   the fleet may not link to at all, which is a source outside its own asset tree
+ *   ({@link isAssetTreeReference}); an edit reaches the account on the next apply and not before.
+ * - **`generated`** — the destination is composed from a STACK of layers merged in memory and written
+ *   as one file. A merge of N sources cannot be a link to any of them. `settings` is the only such
+ *   field, and it has to be a real file for a second reason: each harness rewrites its own settings at
+ *   runtime (`/effort` persists into Claude's `settings.json`), so the destination is also an input.
+ *
+ * Two of these overwrite what is at the destination on every apply, and one of them does not, which is
+ * why the vocabulary exists rather than a boolean. A person editing a *generated* file loses the edit;
+ * a person editing a *linked* one is editing the shared document and every account with it.
+ */
+export type AssetMaterialization = 'link' | 'copy' | 'generated';
+
+/**
+ * One harness's destination for one asset field.
+ *
+ * `materialization` is the field's own ceiling rather than the final answer: a `link` entry still
+ * becomes a copy for a source the fleet may not link to. The plan builder resolves that per operation
+ * — see {@link resolveAssetMaterialization}, which the sharing report reads too, so what a person is
+ * told and what the apply does come from one function.
  */
 export interface HarnessAsset {
   readonly field: AssetField;
@@ -79,26 +103,27 @@ export interface HarnessAsset {
    * with one source tree.
    */
   readonly dest: string;
-  readonly mode: 'link' | 'copy';
+  readonly materialization: AssetMaterialization;
   /** Set only for the layered settings field; names the format its layers merge into. */
   readonly format?: SettingsFormat;
 }
 
 const CLAUDE_ASSETS: readonly HarnessAsset[] = [
-  // Claude rewrites settings.json at runtime (`/effort` persists there), so it must be a real file.
-  { field: 'settings', dest: 'settings.json', mode: 'copy', format: 'json' },
-  { field: 'memory', dest: 'CLAUDE.md', mode: 'copy' },
-  { field: 'skills', dest: 'skills', mode: 'copy' },
-  { field: 'mcp', dest: '.mcp.json', mode: 'copy' },
+  // Claude rewrites settings.json at runtime (`/effort` persists there), and a stack of layers has no
+  // single source to point at, so this one is composed and written rather than linked.
+  { field: 'settings', dest: 'settings.json', materialization: 'generated', format: 'json' },
+  { field: 'memory', dest: 'CLAUDE.md', materialization: 'link' },
+  { field: 'skills', dest: 'skills', materialization: 'link' },
+  { field: 'mcp', dest: '.mcp.json', materialization: 'link' },
 ];
 
 const CODEX_ASSETS: readonly HarnessAsset[] = [
-  // Codex likewise rewrites config.toml, so this is a copy rather than a link.
-  { field: 'settings', dest: 'config.toml', mode: 'copy', format: 'toml' },
-  { field: 'memory', dest: 'AGENTS.md', mode: 'copy' },
-  { field: 'hooks', dest: 'hooks.json', mode: 'copy' },
-  { field: 'hooksDir', dest: 'hooks', mode: 'copy' },
-  { field: 'skills', dest: 'skills', mode: 'copy' },
+  // Codex likewise rewrites config.toml, so its settings are composed rather than linked.
+  { field: 'settings', dest: 'config.toml', materialization: 'generated', format: 'toml' },
+  { field: 'memory', dest: 'AGENTS.md', materialization: 'link' },
+  { field: 'hooks', dest: 'hooks.json', materialization: 'link' },
+  { field: 'hooksDir', dest: 'hooks', materialization: 'link' },
+  { field: 'skills', dest: 'skills', materialization: 'link' },
 ];
 
 /** Every harness's destinations. Injected rather than imported, so a caller can substitute one. */
@@ -118,4 +143,26 @@ export function unsupportedAssetFields(table: HarnessAssetTable, kind: HarnessKi
 /** The asset entry for one field, or `undefined` when this harness has no destination for it. */
 export function harnessAsset(table: HarnessAssetTable, kind: HarnessKind, field: AssetField): HarnessAsset | undefined {
   return table[kind].find(asset => asset.field === field);
+}
+
+/**
+ * How one reference for one field will actually reach one harness's home.
+ *
+ * `undefined` means nothing will: this harness has no destination for the field, which is the same set
+ * of fields a sharing report leaves out of `linkable`. Saying `copy` there would be a sentence about a
+ * write that never happens.
+ *
+ * The one downgrade is `link` → `copy` for a source the fleet may not link to. It is decided from the
+ * REFERENCE rather than from an expanded path, so the answer is the same on a host and in a pure
+ * report, and a surface can never promise a live link that the apply then turns into a copy.
+ */
+export function resolveAssetMaterialization(
+  table: HarnessAssetTable,
+  kind: HarnessKind,
+  field: AssetField,
+  reference: string,
+): AssetMaterialization | undefined {
+  const asset = harnessAsset(table, kind, field);
+  if (asset === undefined) return undefined;
+  return asset.materialization === 'link' && !isAssetTreeReference(reference) ? 'copy' : asset.materialization;
 }

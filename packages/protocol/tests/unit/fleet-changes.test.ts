@@ -492,11 +492,24 @@ describe('FleetSharingSchema', () => {
         wrapper: 'claude-kirin',
         displayName: 'Kirin',
         fields: {
-          memory: { state: 'shared', name: 'default', path: './CLAUDE.md', origin, referrers: 1 },
+          memory: {
+            state: 'shared',
+            name: 'default',
+            path: './CLAUDE.md',
+            origin,
+            referrers: 1,
+            materialization: 'link',
+          },
           skills: { state: 'absent' },
           hooks: { state: 'absent' },
           hooksDir: { state: 'absent' },
-          mcp: { state: 'local', path: './own.json', origin: { kind: 'account' }, referrers: 1 },
+          mcp: {
+            state: 'local',
+            path: '~/own.json',
+            origin: { kind: 'account' },
+            referrers: 1,
+            materialization: 'copy',
+          },
         },
         settings: [{ position: 0, kind: 'inline', origin }],
         linkable: ['memory', 'skills', 'mcp'],
@@ -508,6 +521,35 @@ describe('FleetSharingSchema', () => {
   it('should accept a report carrying every state a field can be in', () => {
     // Act / Assert
     should(FleetSharingSchema.parse(sharingOf())).match({ accounts: [{ fields: { memory: { referrers: 1 } } }] });
+  });
+
+  it('should carry how each field reaches the home, and allow it to be absent', () => {
+    // Act
+    const parsed = FleetSharingSchema.parse(sharingOf());
+    const fields = parsed.accounts[0]?.fields;
+
+    // Assert — the mechanism travels on the wire so a surface can say whether an edit is shared or
+    // waits for an apply, rather than inferring it from the path shape. Absence is a field the harness
+    // has no destination for, which is why it is optional rather than defaulted to a mechanism.
+    should(fields?.memory).match({ materialization: 'link' });
+    should(fields?.mcp).match({ materialization: 'copy' });
+    should(
+      FleetAssetSharingSchema.safeParse({ state: 'local', path: './x.md', origin, referrers: 1 }).success,
+    ).be.true();
+  });
+
+  it('should refuse a mechanism this wire does not name', () => {
+    // Act / Assert — an enum rather than a string, so a daemon inventing a fourth answer is caught here
+    // instead of rendering as an unhandled case in a surface.
+    should(
+      FleetAssetSharingSchema.safeParse({
+        state: 'local',
+        path: './x.md',
+        origin,
+        referrers: 1,
+        materialization: 'hardlink',
+      }).success,
+    ).be.false();
   });
 
   it('should refuse a field that resolves to a path no account refers to', () => {

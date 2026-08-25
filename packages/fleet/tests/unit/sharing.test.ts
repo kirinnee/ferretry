@@ -121,6 +121,9 @@ describe('resolveFleetSharing', () => {
       path: './CLAUDE.md',
       origin: { kind: 'base-profile', name: 'base' },
       referrers: 2,
+      // Both accounts do not have equal copies of this document; they have it. Reported, so a surface
+      // can say so rather than leaving somebody to find out by editing one.
+      materialization: 'link',
     });
   });
 
@@ -166,6 +169,7 @@ describe('resolveFleetSharing', () => {
       path: './CLAUDE.md',
       origin: { kind: 'base-profile', name: 'base' },
       referrers: 2,
+      materialization: 'link',
     });
     should(sharing.documents).deepEqual([]);
   });
@@ -208,6 +212,7 @@ describe('resolveFleetSharing', () => {
       path: './CLAUDE.md',
       origin: { kind: 'account' },
       referrers: 1,
+      materialization: 'link',
     });
   });
 
@@ -503,8 +508,8 @@ describe('reporting a per-item skills selection', () => {
       state: 'selection',
       origin: { kind: 'account' },
       items: [
-        { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 1 },
-        { name: 'mine', path: 'skills/mine', sharedName: undefined, referrers: 1 },
+        { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 1, materialization: 'link' },
+        { name: 'mine', path: 'skills/mine', sharedName: undefined, referrers: 1, materialization: 'link' },
       ],
     });
   });
@@ -532,8 +537,8 @@ describe('reporting a per-item skills selection', () => {
     // Assert
     should(items).match({ state: 'selection' });
     should(items?.state === 'selection' && items.items).deepEqual([
-      { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2 },
-      { name: 'deploy', path: 'skills/deploy', sharedName: 'deploy', referrers: 1 },
+      { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2, materialization: 'link' },
+      { name: 'deploy', path: 'skills/deploy', sharedName: 'deploy', referrers: 1, materialization: 'link' },
     ]);
   });
 
@@ -567,7 +572,7 @@ describe('reporting a per-item skills selection', () => {
 
     // Assert
     should(skills?.state === 'selection' && skills.items).deepEqual([
-      { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 1 },
+      { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 1, materialization: 'link' },
     ]);
   });
 

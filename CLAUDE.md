@@ -103,10 +103,21 @@ outstanding around it rather than restating either here.
 `packages/fleet` gives a fleet **one default set of instructions, skills and base settings** that
 every account uses, with a per-account switch between that shared document and the account's own copy.
 The contract is [docs/fleet-sharing.md](docs/fleet-sharing.md). Sharing was always expressible — two
-accounts referencing one path in the asset tree each get a copy of it — so what this adds is a
+accounts referencing one path in the asset tree — so what this adds is a
 **declaration and a report**, not a second mechanism: `config.shared` names documents, the sharing
-report says per account and per field whether the effective value is a declared shared one or its own
-and which slot supplied it, and `link` / `unlink` are reviewed mutations like any other. **`skills` is
+report says per account and per field whether the effective value is a declared shared one or its own,
+which slot supplied it, and HOW it reaches the home, and `link` / `unlink` are reviewed mutations like
+any other. **A shared document IS the file in every home that references it**: every single-pick asset
+(`memory`, each `skills` item, `hooks`, `hooksDir`, `mcp`) is materialised as a real symlink into
+`fleet/assets`, so editing the document changes every account immediately with no apply in between —
+which is what made extending `StateFileSystem`'s narrow `fleet/homes` symlink exemption from
+`fleet/shared` to `fleet/assets` necessary, and it admits nothing else. **`settings` is the one
+`generated` field**: a stack deep-merged in memory and written as one file, because a merge of N
+sources cannot be a link to any of them AND each harness rewrites its own settings at runtime, so the
+destination is also an input. A source outside the asset tree (`/`, `~`, `$HOME`, or a `..` that climbs
+out) stays a **copy**, because a link inside a home may only ever resolve into the asset tree.
+`resolveAssetMaterialization` is the single owner of that decision and the plan builder and the report
+both read it, so a surface can never promise a live link the apply then copies. **`skills` is
 per ITEM, not one directory**: the store registers one entry per skill, an account's `skills` is the
 LIST it selected, a later slot replaces that whole list, and each item lands under its own name at
 `<home>/skills/<item>` — so two accounts can overlap on some items and not others, and an item dropped
@@ -115,9 +126,9 @@ materialises a private copy** rather than leaving an account with nothing, and n
 document. **Identity and auth are never shared**, enforced by the schema rather than by convention:
 everything shareable is a `Profile` field, and an account's identity and provider login are
 `AccountRoute` / `Agent` fields that no strict profile can express. This is deliberately **not** the
-`shared-history.ts` pool — every asset path is a destination the fleet plan writes on every apply,
-which is the exact opposite of the pool's "the harness owns this and Ferretry never writes it", and
-pooling one would give a single inode two owners. Migration is therefore a declaration and moves
+`shared-history.ts` pool even though both are symlinks — every asset path is a destination the fleet
+plan writes on every apply, which is the exact opposite of the pool's "the harness owns this and
+Ferretry never writes it", and pooling one would give a single inode two owners. Migration is therefore a declaration and moves
 nothing. `settings` is reported but not linkable, and a directory asset cannot be privately
 materialised; the doc names each remaining limit.
 

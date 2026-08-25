@@ -18,6 +18,7 @@ import {
   accountAssetPath,
   canonicalAssetReference,
   accountSharing,
+  type AssetMaterialization,
   type AssetSharing,
   type FleetConfig,
   type FleetSharing,
@@ -29,8 +30,25 @@ import {
   unlinkableReason,
   unreadableSourceReason,
 } from '@ferretry/fleet';
-import type { FleetAccountSharing, FleetAssetSharing, FleetSharing as FleetWireSharing } from '@ferretry/protocol';
+import type {
+  FleetAccountSharing,
+  FleetAssetMaterialization,
+  FleetAssetSharing,
+  FleetSharing as FleetWireSharing,
+} from '@ferretry/protocol';
 import { FleetMutationRefusal } from './mutations.ts';
+
+/**
+ * How the value reaches the home, omitted rather than sent as null when nothing does.
+ *
+ * Absence carries the same meaning here as everywhere else on this wire: this harness has no
+ * destination for the field, which is exactly the set `linkable` leaves out. A `copy` sent in its place
+ * would describe a write that never happens.
+ */
+const materializationOf = (
+  materialization: AssetMaterialization | undefined,
+): { readonly materialization?: FleetAssetMaterialization } =>
+  materialization === undefined ? {} : { materialization };
 
 const sharingSummaryOf = (sharing: AssetSharing): FleetAssetSharing => {
   if (sharing.state === 'absent') return { state: 'absent' };
@@ -45,6 +63,7 @@ const sharingSummaryOf = (sharing: AssetSharing): FleetAssetSharing => {
         // item with no shared name is account-local, and there is no name to render for it.
         ...(item.sharedName === undefined ? {} : { sharedName: item.sharedName }),
         referrers: item.referrers,
+        ...materializationOf(item.materialization),
       })),
     };
   }
@@ -55,9 +74,16 @@ const sharingSummaryOf = (sharing: AssetSharing): FleetAssetSharing => {
       path: sharing.path,
       origin: sharing.origin,
       referrers: sharing.referrers,
+      ...materializationOf(sharing.materialization),
     };
   }
-  return { state: 'local', path: sharing.path, origin: sharing.origin, referrers: sharing.referrers };
+  return {
+    state: 'local',
+    path: sharing.path,
+    origin: sharing.origin,
+    referrers: sharing.referrers,
+    ...materializationOf(sharing.materialization),
+  };
 };
 
 const accountSummary = (account: FleetSharing['accounts'][number]): FleetAccountSharing => ({

@@ -330,6 +330,22 @@ export const FleetCompositionOriginSchema = z.discriminatedUnion('kind', [
 export type FleetCompositionOrigin = z.infer<typeof FleetCompositionOriginSchema>;
 
 /**
+ * How an asset field's value actually reaches an account's home.
+ *
+ * The distinction a surface must render, because two of the three overwrite the destination on every
+ * apply and one of them does not:
+ *
+ * - `link` — the destination IS the shared document. One inode, so an edit to the document is already
+ *   this account's, with no apply in between.
+ * - `copy` — the destination holds the document's bytes as of the last apply. Only for a source the
+ *   fleet may not link to, which is a source outside its own asset tree.
+ * - `generated` — the destination is composed from a stack of layers merged in memory and written as one
+ *   file. Editing it loses the edit on the next apply; edit a layer instead.
+ */
+export const FleetAssetMaterializationSchema = z.enum(['link', 'copy', 'generated']);
+export type FleetAssetMaterialization = z.infer<typeof FleetAssetMaterializationSchema>;
+
+/**
  * One item of a per-item selection. `sharedName` is absent when the item is not a declared one.
  *
  * Not exported: a client reads an item through the `selection` arm of {@link FleetAssetSharingSchema},
@@ -342,6 +358,7 @@ const FleetSelectedItemSchema = z.strictObject({
   path: z.string().min(1),
   sharedName: z.string().min(1).optional(),
   referrers: z.number().int().positive(),
+  materialization: FleetAssetMaterializationSchema.optional(),
 });
 
 /**
@@ -352,6 +369,10 @@ const FleetSelectedItemSchema = z.strictObject({
  * is itself a referrer, so a zero would mean the count and the value disagree. `local` with more than
  * one referrer is a path a fleet already shares without having declared it, which is a state a surface
  * should offer to fix rather than one it should hide.
+ *
+ * `materialization` is how the value reaches the home, and it is absent for exactly the fields missing
+ * from `linkable` — a harness with no destination for a field materializes nothing there, so naming a
+ * mechanism would describe a write that never happens.
  *
  * `skills` is the only field that reports `selection`, and it reports nothing else: asking "shared or
  * its own copy" about a selection has no answer, because each item answers it separately and the whole
@@ -367,12 +388,14 @@ export const FleetAssetSharingSchema = z.discriminatedUnion('state', [
     path: z.string().min(1),
     origin: FleetCompositionOriginSchema,
     referrers: z.number().int().positive(),
+    materialization: FleetAssetMaterializationSchema.optional(),
   }),
   z.strictObject({
     state: z.literal('local'),
     path: z.string().min(1),
     origin: FleetCompositionOriginSchema,
     referrers: z.number().int().positive(),
+    materialization: FleetAssetMaterializationSchema.optional(),
   }),
   z.strictObject({
     state: z.literal('selection'),

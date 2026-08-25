@@ -109,16 +109,34 @@ export class StateFileSystem implements FileSystemPort {
   }
 
   /**
-   * Fleet provisioning owns one deliberately narrow class of links beneath the state home:
-   * account history entries under `fleet/homes` point into the same daemon's `fleet/shared` pool.
-   * Resolve the complete link chain before accepting it, so a planted intermediate link cannot use
-   * this exemption to escape the shared pool. Every link elsewhere keeps the blanket refusal below.
+   * Fleet provisioning owns one deliberately narrow class of links beneath the state home: an entry
+   * under `fleet/homes` whose whole chain resolves back into one of the two directories the fleet owns
+   * and writes.
+   *
+   * TWO DESTINATIONS, and they are two different contracts rather than one widened rule:
+   *
+   * - `fleet/shared` is the history pool. The harness owns that state and Ferretry never writes it,
+   *   which is what makes a transcript safe to pool.
+   * - `fleet/assets` is the asset tree. Ferretry owns it outright and every apply writes it, and the
+   *   link is the whole point: an account's `CLAUDE.md` IS the shared document, so editing the document
+   *   is editing every account that references it, with no apply in between.
+   *
+   * The exemption stays narrow in the direction that matters — the SOURCE must be under `fleet/homes`
+   * and the resolved TARGET must be inside one of those two — because the invariant this makes a hole
+   * in is "no operation follows a link out of the state home". A link pointing anywhere else, including
+   * elsewhere in the state home, keeps the blanket refusal below. The complete chain is resolved rather
+   * than the one hop, so a planted intermediate link cannot use this to escape either directory, and
+   * anything unresolvable fails closed.
    */
-  private async isProvisionedFleetHistoryLink(path: string): Promise<boolean> {
+  private async isProvisionedFleetLink(path: string): Promise<boolean> {
     const homes = join(this.paths.fleet, 'homes');
     if (path === homes || !pathIsInside(homes, path)) return false;
     try {
-      return pathIsInside(join(this.paths.fleet, 'shared'), await realpath(path));
+      const resolved = await realpath(path);
+      return (
+        pathIsInside(join(this.paths.fleet, 'shared'), resolved) ||
+        pathIsInside(join(this.paths.fleet, 'assets'), resolved)
+      );
     } catch {
       // A dangling, unreadable, or cyclic link is not provisioner-owned evidence. Fail closed.
       return false;
@@ -131,7 +149,7 @@ export class StateFileSystem implements FileSystemPort {
     let current: string = this.paths.home;
     try {
       const information = await lstat(current);
-      if (information.isSymbolicLink() && !(await this.isProvisionedFleetHistoryLink(current)))
+      if (information.isSymbolicLink() && !(await this.isProvisionedFleetLink(current)))
         throw new Error(`symbolic links are not allowed inside the state home: ${current}`);
     } catch (error) {
       if (isMissing(error)) return target;
@@ -142,7 +160,7 @@ export class StateFileSystem implements FileSystemPort {
       current = join(current, component);
       try {
         const information = await lstat(current);
-        if (information.isSymbolicLink() && !(await this.isProvisionedFleetHistoryLink(current)))
+        if (information.isSymbolicLink() && !(await this.isProvisionedFleetLink(current)))
           throw new Error(`symbolic links are not allowed inside the state home: ${current}`);
       } catch (error) {
         if (isMissing(error)) break;

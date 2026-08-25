@@ -118,9 +118,9 @@ describe('FleetPlan skills selection', () => {
       ],
     });
 
-  const copiesFor = (built: { operations: readonly FleetWriteOperation[] }, home: string): readonly string[] =>
+  const linksFor = (built: { operations: readonly FleetWriteOperation[] }, home: string): readonly string[] =>
     built.operations.flatMap(operation =>
-      operation.kind === 'copy' && operation.path.startsWith(`/state/fleet/homes/${home}/skills/`)
+      operation.kind === 'symlink' && operation.path.startsWith(`/state/fleet/homes/${home}/skills/`)
         ? [`${operation.path} ← ${operation.source}`]
         : [],
     );
@@ -142,7 +142,7 @@ describe('FleetPlan skills selection', () => {
     const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
     // Assert — one operation per selected item, under its own name, and nothing for `research`.
-    should(copiesFor(actual, 'claude-work')).deepEqual([
+    should(linksFor(actual, 'claude-work')).deepEqual([
       '/state/fleet/homes/claude-work/skills/review ← /state/fleet/assets/skills/review',
       '/state/fleet/homes/claude-work/skills/deploy ← /state/fleet/assets/skills/deploy',
     ]);
@@ -162,11 +162,11 @@ describe('FleetPlan skills selection', () => {
     const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
     // Assert — one source, two destinations, and neither home holds the other's extra item.
-    should(copiesFor(actual, 'claude-work')).deepEqual([
+    should(linksFor(actual, 'claude-work')).deepEqual([
       '/state/fleet/homes/claude-work/skills/review ← /state/fleet/assets/skills/review',
       '/state/fleet/homes/claude-work/skills/deploy ← /state/fleet/assets/skills/deploy',
     ]);
-    should(copiesFor(actual, 'claude-auto')).deepEqual([
+    should(linksFor(actual, 'claude-auto')).deepEqual([
       '/state/fleet/homes/claude-auto/skills/review ← /state/fleet/assets/skills/review',
       '/state/fleet/homes/claude-auto/skills/research ← /state/fleet/assets/skills/research',
     ]);
@@ -193,7 +193,7 @@ describe('FleetPlan skills selection', () => {
       { kind: 'prune-directory', path: '/state/fleet/homes/claude-work/skills', keep: [] },
       { kind: 'prune-directory', path: '/state/fleet/homes/claude-auto/skills', keep: [] },
     ]);
-    should(copiesFor(actual, 'claude-work')).deepEqual([]);
+    should(linksFor(actual, 'claude-work')).deepEqual([]);
   });
 
   it('should plan nothing for skills when no slot declared a selection', () => {
@@ -214,7 +214,7 @@ describe('FleetPlan skills selection', () => {
     const actual = subject.build(twoAccounts(['skills/review', './skills/review'], []), LAYOUT, GENERATED_AT);
 
     // Assert
-    should(copiesFor(actual, 'claude-work')).deepEqual([
+    should(linksFor(actual, 'claude-work')).deepEqual([
       '/state/fleet/homes/claude-work/skills/review ← /state/fleet/assets/skills/review',
     ]);
   });
@@ -235,24 +235,42 @@ describe('FleetPlan skills selection', () => {
     should(() => subject.build(twoAccounts(['.'], []), LAYOUT, GENERATED_AT)).throw(UnnamedSkillItemError);
   });
 
-  it('should honour a link destination table that asks for a symlink rather than a copy', () => {
+  it('should honour a destination table that asks for a copy rather than a link', () => {
     // Arrange — the destination table is a policy, and per-item selection is agnostic to which one it
-    // is. A build with links must produce one link per item at the same destinations.
-    const linking = new FleetPlan({
-      claude: [{ field: 'skills', dest: 'skills', mode: 'link' }],
+    // is. A build declaring copies must produce one copy per item at the same destinations.
+    const copying = new FleetPlan({
+      claude: [{ field: 'skills', dest: 'skills', materialization: 'copy' }],
       codex: [],
     });
 
     // Act
-    const actual = linking.build(twoAccounts(['skills/review'], []), LAYOUT, GENERATED_AT);
+    const actual = copying.build(twoAccounts(['skills/review'], []), LAYOUT, GENERATED_AT);
 
     // Assert
-    should(operationsOf(actual, 'symlink')).containEql({
-      kind: 'symlink',
+    should(operationsOf(actual, 'copy')).containEql({
+      kind: 'copy',
       source: '/state/fleet/assets/skills/review',
       path: '/state/fleet/homes/claude-work/skills/review',
     });
-    should(operationsOf(actual, 'copy')).deepEqual([]);
+    should(operationsOf(actual, 'symlink')).deepEqual([]);
+  });
+
+  it('should copy rather than link an item whose source is outside the asset tree', () => {
+    // Arrange — a store item an operator keeps in their own dotfiles. The table says `link`, and the
+    // reference is what downgrades it.
+    const input = twoAccounts(['~/dotfiles/skills/review'], []);
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert — a link inside an account home may only ever resolve into the asset tree, so this one is
+    // copied. Silently linking it would put a symlink escaping the state home under `fleet/homes`.
+    should(linksFor(actual, 'claude-work')).deepEqual([]);
+    should(operationsOf(actual, 'copy')).containEql({
+      kind: 'copy',
+      source: '/home/tester/dotfiles/skills/review',
+      path: '/state/fleet/homes/claude-work/skills/review',
+    });
   });
 });
 
@@ -348,8 +366,8 @@ describe('FleetPlan', () => {
     should(wrapper?.kind === 'file' && wrapper.content).containEql('. "$HOME/.config/fy/secrets.sh"');
   });
 
-  it('should copy path assets into the account home and plan settings as unresolved layers', () => {
-    // Arrange
+  it('should link path assets in the asset tree, copy one outside it, and plan settings as layers', () => {
+    // Arrange — one document in the fleet's own tree, one selected item in the operator's home.
     const input = config({
       profiles: { shared: { memory: 'CLAUDE.md', skills: '~/assets/skills', settings: ['base.json', { model: 'x' }] } },
       agents: [{ name: 'work', kind: 'claude', profiles: ['shared'], routes: { default: route() } }],
@@ -358,11 +376,13 @@ describe('FleetPlan', () => {
     // Act
     const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
-    // Assert
+    // Assert — the document becomes one file with two names, so editing it is editing the home.
+    should(operationsOf(actual, 'symlink')).deepEqual([
+      { kind: 'symlink', source: '/state/fleet/assets/CLAUDE.md', path: '/state/fleet/homes/claude-work/CLAUDE.md' },
+    ]);
+    // The item outside the asset tree is copied instead, under its own name inside the skills
+    // directory rather than replacing the directory with the source tree.
     should(operationsOf(actual, 'copy')).deepEqual([
-      { kind: 'copy', source: '/state/fleet/assets/CLAUDE.md', path: '/state/fleet/homes/claude-work/CLAUDE.md' },
-      // One selected item, materialized under its own name inside the skills directory rather than
-      // replacing the directory with the source tree.
       { kind: 'copy', source: '/home/tester/assets/skills', path: '/state/fleet/homes/claude-work/skills/skills' },
     ]);
     should(operationsOf(actual, 'settings')).deepEqual([
@@ -378,7 +398,6 @@ describe('FleetPlan', () => {
         preserveExisting: true,
       },
     ]);
-    should(operationsOf(actual, 'symlink')).deepEqual([]);
   });
 
   it('should plan no settings operation when the account declares no layers', () => {
@@ -410,7 +429,7 @@ describe('FleetPlan', () => {
     should(operationsOf(actual, 'settings').map(operation => operation.path)).deepEqual([
       '/state/fleet/homes/codex-work/config.toml',
     ]);
-    should(operationsOf(actual, 'copy').map(operation => operation.path)).deepEqual([
+    should(operationsOf(actual, 'symlink').map(operation => operation.path)).deepEqual([
       '/state/fleet/homes/codex-work/AGENTS.md',
       '/state/fleet/homes/codex-work/hooks.json',
       '/state/fleet/homes/codex-work/hooks',
@@ -453,8 +472,9 @@ describe('FleetPlan', () => {
     // Act
     const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
-    // Assert
-    should(operationsOf(actual, 'copy').map(operation => operation.path)).deepEqual([
+    // Assert — the bare harness home gets a link to the same document, so `claude` with no wrapper and
+    // the nominated account read one file rather than two that started out equal.
+    should(operationsOf(actual, 'symlink').map(operation => operation.path)).deepEqual([
       '/state/fleet/homes/claude-work/CLAUDE.md',
       '/home/tester/.claude/CLAUDE.md',
     ]);
