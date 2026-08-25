@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { FleetApplyFailureError } from '@ferretry/fleet';
 import should from 'should';
 import { FleetController, type FleetControllerDeps } from '../../../src/lib/fleet/controller';
+import { PLAIN_FLEET_PRESENTATION } from '../../../src/lib/fleet/presentation';
 import {
   ACCOUNT_ID,
   applyResult,
@@ -16,10 +17,10 @@ import {
   RecordingHealthCollector,
   RecordingIdentitySource,
   RecordingLoginService,
-  RecordingSharingGateway,
   RecordingPlanner,
   RecordingRecommendationGateway,
   RecordingScaffolder,
+  RecordingSharingGateway,
   RecordingUsageCollector,
   ROLLBACK_INCOMPLETE,
   ROLLBACK_WITH_DISPLACED,
@@ -49,6 +50,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
     clock: new FrozenClock(),
     recommendations: new RecordingRecommendationGateway(),
     out,
+    presentation: PLAIN_FLEET_PRESENTATION,
     ...overrides,
   };
   return { subject: new FleetController(deps), deps, out };
@@ -270,6 +272,35 @@ describe('reporting health', () => {
     // Assert
     should(health.collected).have.length(1);
     should(out.text).containEql('HEALTHY');
+  });
+
+  it('should send the report to stdout UNPAINTED, because its own colour is the verdict', async () => {
+    // Arrange — `success` paints its whole message one colour, which is right for "that worked" and
+    // wrong here: a uniform wrap gave a rejected account and a healthy one the same paint, so colour
+    // carried nothing and every row had to be read to be triaged.
+    const health = new RecordingHealthCollector();
+    const { subject, out } = controller({ health });
+
+    // Act
+    await subject.health({});
+
+    // Assert
+    should(out.reports).have.length(1);
+    should(out.reports[0]).containEql('HEALTHY');
+  });
+
+  it('should leave --json on the ordinary channel, because a payload has no presentation to keep', async () => {
+    // Arrange
+    const health = new RecordingHealthCollector();
+    const { subject, out } = controller({ health });
+
+    // Act
+    await subject.health({ json: true });
+
+    // Assert — the machine surface is unchanged, and routing it through the presentational channel
+    // would be inventing a difference nobody asked for.
+    should(out.reports).be.empty();
+    should(JSON.parse(out.text)).have.property('accounts');
   });
 
   it('should refuse health probing when a transitional embedding did not configure it', async () => {

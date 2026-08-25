@@ -1,11 +1,11 @@
 import type {
   CredentialState,
   DisplacedState,
+  FleetAccountHealth,
   FleetApplyCommittedState,
   FleetApplyFailure,
   FleetApplyPreview,
   FleetApplyResult,
-  FleetAccountHealth,
   FleetHealthReason,
   FleetHealthSnapshot,
   FleetHealthVerdict,
@@ -26,6 +26,8 @@ import type {
   FleetCompositionOrigin,
   FleetSharing,
 } from '@ferretry/protocol';
+import type { FleetInk, FleetPalette, FleetPresentation, PaintedFragment } from './presentation.ts';
+import { packFragments, softWrap } from './presentation.ts';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
 const INDENT = '    ';
@@ -522,7 +524,21 @@ const HEALTH_VERDICT_LABEL: Readonly<Record<FleetHealthVerdict, string>> = {
   unknown: 'UNKNOWN',
 };
 
-/** Why, in one clause. Every reason has one: a bare verdict with no reason is not actionable. */
+/**
+ * Why, in ONE clause. Every reason has one: a bare verdict with no reason is not actionable.
+ *
+ * One clause, not three. `codex_liveness_unproven` used to say "Codex has no free way to prove a
+ * login; nothing here is a verdict" and then had "; last check was inconclusive" appended to it — the
+ * same fact three times, on the row where the reader has least reason to keep reading, on the only
+ * verdict that repeats identically down the whole report.
+ *
+ * `oauth_rejection_unconfirmed` is TRIMMED FROM ITS AGREED WORDING and the trim is the point of this
+ * file: a row has roughly forty columns for a clause on an eighty-column terminal, and the agreed
+ * sentence is a hundred. The browser keeps it whole in `account-health-view.ts`, where nothing is
+ * competing for the width. All three meanings survive the trim — refused, cause unattributed, and NO
+ * instruction to sign in — and the last of those is also carried structurally, because the verdict is
+ * `unknown`, the row is muted and `HEALTH_REMEDY` offers nothing for it.
+ */
 const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   provider_accepted: 'the provider accepted this credential',
   usage_scope_unavailable: 'accepted; this token cannot read usage, so quota is unknown',
@@ -531,10 +547,11 @@ const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   oauth_token_rejected: 'the provider rejected this token',
   static_credential_missing: 'the configured credential is absent',
   static_credential_rejected: 'the provider rejected the configured credential',
-  never_checked: 'never checked',
+  never_checked: 'no check has run for this account',
   credential_unreadable: 'the credential could not be read',
-  oauth_refreshable: 'expired, but renewable — not signed out',
-  codex_liveness_unproven: 'Codex has no free way to prove a login; nothing here is a verdict',
+  oauth_refreshable: 'signed in, but this copy needs refreshing',
+  oauth_rejection_unconfirmed: 'the check was refused — possibly this client, not the login',
+  codex_liveness_unproven: 'Codex offers no free check',
   check_timeout: 'the check timed out',
   provider_unavailable: 'the provider could not be reached',
   provider_not_asked: 'signed in locally; the provider has not confirmed it',
@@ -542,6 +559,71 @@ const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   account_unavailable: 'the manifest declares this account unavailable',
   stale: 'the last result is too old to trust',
 };
+
+/**
+ * Worst first, and every verdict appears exactly once.
+ *
+ * Rows used to come out in manifest order, so an account a person must act on sat between two that
+ * need nothing and the report had to be read end to end before anything could be triaged. This is
+ * also the order the summary counts in, so the header and the rows tell the same story top to bottom.
+ *
+ * The two actionable verdicts lead, `needs_relogin` first because it is the one with a command beside
+ * it. `unknown` sits BELOW both and above `healthy`: it is not a fault, and putting it among the
+ * faults is what made the old header undercount.
+ */
+const HEALTH_VERDICT_ORDER: readonly FleetHealthVerdict[] = [
+  'needs_relogin',
+  'needs_credentials',
+  'unknown',
+  'healthy',
+];
+
+/**
+ * The second channel, so triage survives `NO_COLOR`, a pipe and colour blindness.
+ *
+ * Colour carries severity here, and colour alone would be the only channel — which is exactly what a
+ * redirect, a `NO_COLOR` terminal or a reader who cannot separate red from grey would silently lose.
+ * The glyph says the same thing in the same column on every row, with or without paint.
+ */
+const HEALTH_GLYPH: Readonly<Record<FleetHealthVerdict, string>> = {
+  needs_relogin: '✗',
+  needs_credentials: '✗',
+  unknown: '?',
+  healthy: '✓',
+};
+
+/**
+ * Each verdict's share of the fleet, in words.
+ *
+ * EVERY ACCOUNT IS COUNTED. The header used to name only the two actionable verdicts, so "4 accounts,
+ * 2 need sign-in" said nothing about the other two and read as a promise that they were fine. They
+ * were `UNKNOWN`.
+ */
+const HEALTH_COUNT_LABEL: Readonly<Record<FleetHealthVerdict, (count: number) => string>> = {
+  needs_relogin: count => `${count} need${count === 1 ? 's' : ''} sign-in`,
+  needs_credentials: count => `${count} need${count === 1 ? 's' : ''} a credential`,
+  unknown: count => `${count} unknown`,
+  healthy: count => `${count} healthy`,
+};
+
+/**
+ * Which ink a verdict is written in.
+ *
+ * `UNKNOWN` IS MUTED AND DELIBERATELY NOT A WARNING COLOUR. It is the honest published answer for a
+ * Codex account rather than a problem, and a fleet whose every Codex row glowed amber would teach its
+ * owner to look past amber — which is the one place a real warning has to work.
+ */
+function healthInk(verdict: FleetHealthVerdict, palette: FleetPalette): FleetInk {
+  switch (verdict) {
+    case 'needs_relogin':
+    case 'needs_credentials':
+      return palette.danger;
+    case 'healthy':
+      return palette.good;
+    default:
+      return palette.muted;
+  }
+}
 
 /** Whole units, coarsest that fits. A terminal reader wants "4m ago", never a millisecond count. */
 export function renderRelativeInstant(instant: number, now: number): string {
@@ -565,43 +647,189 @@ const HEALTH_REMEDY: Readonly<Partial<Record<FleetHealthVerdict, (accountId: str
   needs_relogin: accountId => `fy fleet login ${accountId}`,
 };
 
-function renderHealthRow(health: FleetAccountHealth, now: number, names: FleetAccountNames): string {
-  const checked = health.lastCheckedAt === null ? 'never checked' : renderRelativeInstant(health.lastCheckedAt, now);
-  // What it WAS, when staleness is the only reason it is unknown. A bare UNKNOWN there reads exactly
-  // like an account nobody has ever looked at, which is the opposite of what happened.
-  const was = health.staleVerdict === undefined ? '' : ` (was ${HEALTH_VERDICT_LABEL[health.staleVerdict]})`;
-  const inconclusive = health.lastCheckInconclusive ? '; last check was inconclusive' : '';
-  const row = `  ${accountSubject(health.accountId, names)}  ${HEALTH_VERDICT_LABEL[health.verdict]}${was}  checked ${checked} — ${HEALTH_REASON_LABEL[health.reason]}${inconclusive}`;
-  // The exact command, on its own line, for the one verdict a person can act on. "NEEDS LOGIN" with
-  // no way to act on it is the state this whole feature exists to stop producing — and the id the
-  // command needs is not something a reader could have derived from the name above it.
-  const remedy = HEALTH_REMEDY[health.verdict]?.(health.accountId);
-  return remedy === undefined ? row : `${row}\n${INDENT}${remedy}`;
+/** Where a row starts, where its own overflow goes, and where its command sits. Three depths, three meanings. */
+const HEALTH_ROW_INDENT = '  ';
+/** Under the account name, never at a row's own depth: a wrapped clause must not read as a new account. */
+const HEALTH_WRAP_INDENT = '    ';
+const HEALTH_REMEDY_INDENT = '      ';
+const HEALTH_GUTTER = '  ';
+/** A name past this stops widening the column for everybody; it overflows its own row instead. */
+const HEALTH_NAME_COLUMN_CAP = 32;
+/** Below this there is no room for a clause worth reading, so the reason takes its own line. */
+const HEALTH_MINIMUM_REASON_COLUMN = 24;
+
+/**
+ * Said every time, because the command this replaced spent real money and somebody who used it before
+ * has every reason to assume this one does too. Shortened, never dropped: it is the promise.
+ */
+const HEALTH_DISCLOSURE = 'Reads credentials and one free status endpoint — no model, no inference quota.';
+
+/** When the check ran, in the words the header and a row both use so they cannot disagree. */
+function healthCheckedLabel(health: FleetAccountHealth, now: number): string {
+  return health.lastCheckedAt === null
+    ? 'never checked'
+    : `checked ${renderRelativeInstant(health.lastCheckedAt, now)}`;
 }
 
 /**
- * The whole fleet's health.
+ * The instant every row shares, or nothing when they differ.
  *
- * The counts name the two verdicts somebody must act on and deliberately do not add "unknown" to
- * them. Unknown is not a fault: on Codex it is the correct published answer, and counting it beside
- * real rejections would send a person looking for a problem that is not there.
+ * `checked just now` on all four rows was four copies of one fact, in the widest column, pushing the
+ * reason off the edge of the terminal. It is hoisted into the header when it is the same everywhere
+ * and stays on the rows when it is not — because THEN it is per-row information, and a header that
+ * flattened two different instants into one would be reporting something nobody measured.
+ *
+ * Compared as RENDERED words rather than as instants: two checks a second apart are both "just now"
+ * to a reader, and that is the fact being deduplicated.
  */
-export function renderHealth(snapshot: FleetHealthSnapshot, names: FleetAccountNames = new Map()): string {
+function sharedHealthCheck(accounts: readonly FleetAccountHealth[], now: number): string | undefined {
+  const labels = new Set(accounts.map(account => healthCheckedLabel(account, now)));
+  return labels.size === 1 ? [...labels][0] : undefined;
+}
+
+/** Reasons that already say the check proved nothing; a second clause saying it is noise. */
+const HEALTH_SELF_EVIDENT_INCONCLUSIVE: ReadonlySet<FleetHealthReason> = new Set<FleetHealthReason>([
+  'codex_liveness_unproven',
+  'never_checked',
+  // "the check was refused, and this cannot say what it refused" IS the inconclusive result.
+  'oauth_rejection_unconfirmed',
+]);
+
+/**
+ * Everything after the verdict, as clauses a reader can stop after any one of.
+ *
+ * `was HEALTHY` travels HERE rather than beside the verdict, where it used to sit. In the verdict
+ * column it made one row wider than every other and broke the alignment the eye runs down — and what
+ * a stale verdict WAS is detail, while what it is now is the thing being triaged.
+ */
+function healthReasonTail(health: FleetAccountHealth, sharedCheck: string | undefined, now: number): string {
+  const clauses = [HEALTH_REASON_LABEL[health.reason]];
+  // What it WAS, when staleness is the only reason it is unknown. A bare UNKNOWN there reads exactly
+  // like an account nobody has ever looked at, which is the opposite of what happened.
+  if (health.staleVerdict !== undefined) clauses.push(`was ${HEALTH_VERDICT_LABEL[health.staleVerdict]}`);
+  if (health.lastCheckInconclusive && !HEALTH_SELF_EVIDENT_INCONCLUSIVE.has(health.reason)) {
+    clauses.push('last check inconclusive');
+  }
+  if (sharedCheck === undefined) clauses.push(healthCheckedLabel(health, now));
+  return clauses.join(' · ');
+}
+
+/** The two padded columns, measured once over the whole report so every row lines up under the last. */
+interface HealthColumns {
+  readonly name: number;
+  readonly verdict: number;
+}
+
+function healthColumns(accounts: readonly FleetAccountHealth[], names: FleetAccountNames): HealthColumns {
+  const widths = accounts.map(account => accountSubject(account.accountId, names).length);
+  return {
+    name: Math.min(Math.max(...widths), HEALTH_NAME_COLUMN_CAP),
+    verdict: Math.max(...accounts.map(account => HEALTH_VERDICT_LABEL[account.verdict].length)),
+  };
+}
+
+/** Padding is applied OUTSIDE the ink, so a column's width is never measured against escape codes. */
+function padding(text: string, column: number): string {
+  return ' '.repeat(Math.max(0, column - text.length));
+}
+
+/**
+ * One account, as the lines it occupies.
+ *
+ * A LIST OF LINES RATHER THAN A STRING WITH NEWLINES IN IT, because every one of them needs its own
+ * indent: a reason that overflows an 80-column terminal used to be wrapped by the terminal itself,
+ * with no indent at all, so the second half of a sentence started hard against the left margin and
+ * read as the next account. The structure survived only on a wide screen.
+ */
+function healthRowLines(
+  health: FleetAccountHealth,
+  names: FleetAccountNames,
+  columns: HealthColumns,
+  presentation: FleetPresentation,
+  sharedCheck: string | undefined,
+  now: number,
+): readonly string[] {
+  const { palette, width } = presentation;
+  const ink = healthInk(health.verdict, palette);
+  const subject = accountSubject(health.accountId, names);
+  const label = HEALTH_VERDICT_LABEL[health.verdict];
+  const head = `${HEALTH_ROW_INDENT}${ink(HEALTH_GLYPH[health.verdict])} ${subject}${padding(subject, columns.name)}${HEALTH_GUTTER}${ink(label)}${padding(label, columns.verdict)}${HEALTH_GUTTER}`;
+  const headWidth =
+    HEALTH_ROW_INDENT.length +
+    2 +
+    Math.max(subject.length, columns.name) +
+    HEALTH_GUTTER.length +
+    Math.max(label.length, columns.verdict) +
+    HEALTH_GUTTER.length;
+  const wrapped = width - HEALTH_WRAP_INDENT.length;
+  const tail = healthReasonTail(health, sharedCheck, now);
+  const inline = width - headWidth >= HEALTH_MINIMUM_REASON_COLUMN;
+  const segments = softWrap(tail, inline ? width - headWidth : wrapped, wrapped);
+  const lines = inline
+    ? [
+        `${head}${palette.muted(segments[0] ?? '')}`,
+        ...segments.slice(1).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`),
+      ]
+    : [head.trimEnd(), ...segments.map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`)];
+  // The exact command, on its own line, for the one verdict a person can act on. "NEEDS LOGIN" with
+  // no way to act on it is the state this whole feature exists to stop producing — and the id the
+  // command needs is not something a reader could have derived from the name above it. NEVER WRAPPED:
+  // this line exists to be selected, and a break inside the id produces something that looks copyable.
+  const remedy = HEALTH_REMEDY[health.verdict]?.(health.accountId);
+  return remedy === undefined ? lines : [...lines, `${HEALTH_REMEDY_INDENT}${palette.command(remedy)}`];
+}
+
+/** The summary, as fragments that keep their own colour so packing them cannot lose the paint. */
+function healthHeaderFragments(
+  accounts: readonly FleetAccountHealth[],
+  palette: FleetPalette,
+  sharedCheck: string | undefined,
+): readonly PaintedFragment[] {
+  const total = plural(accounts.length, 'account');
+  const fragments: PaintedFragment[] = [{ plain: total, painted: total }];
+  for (const verdict of HEALTH_VERDICT_ORDER) {
+    const count = accounts.filter(account => account.verdict === verdict).length;
+    if (count === 0) continue;
+    const text = HEALTH_COUNT_LABEL[verdict](count);
+    fragments.push({ plain: text, painted: healthInk(verdict, palette)(text) });
+  }
+  if (sharedCheck !== undefined) fragments.push({ plain: sharedCheck, painted: palette.muted(sharedCheck) });
+  return fragments;
+}
+
+/**
+ * The whole fleet's health, ordered and coloured so nobody has to read it to triage it.
+ *
+ * COLOUR IS THE SECOND CHANNEL AND NEVER THE ONLY ONE. It arrives as a palette rather than being
+ * decided here, so a pipe, a redirect and `NO_COLOR` all get the identity palette — and the glyph
+ * column, the verdict column and the worst-first order carry the same information without it.
+ */
+export function renderHealth(
+  snapshot: FleetHealthSnapshot,
+  names: FleetAccountNames,
+  presentation: FleetPresentation,
+): string {
   if (snapshot.accounts.length === 0) return 'No accounts to report health for.';
-  const counts = (verdict: FleetHealthVerdict): number =>
-    snapshot.accounts.filter(account => account.verdict === verdict).length;
-  const login = counts('needs_relogin');
-  const credential = counts('needs_credentials');
-  const suffix = [login === 0 ? '' : `${login} need sign-in`, credential === 0 ? '' : `${credential} need a credential`]
-    .filter(Boolean)
-    .join(', ');
+  const { palette, width } = presentation;
+  const sharedCheck = sharedHealthCheck(snapshot.accounts, snapshot.at);
+  const header = packFragments(
+    healthHeaderFragments(snapshot.accounts, palette, sharedCheck),
+    ' · ',
+    width,
+    width - HEALTH_ROW_INDENT.length,
+  );
+  const columns = healthColumns(snapshot.accounts, names);
+  const ordered = [...snapshot.accounts].sort(
+    (left, right) => HEALTH_VERDICT_ORDER.indexOf(left.verdict) - HEALTH_VERDICT_ORDER.indexOf(right.verdict),
+  );
   return [
-    `${snapshot.accounts.length} accounts${suffix === '' ? '' : `, ${suffix}`}`,
-    ...snapshot.accounts.map(account => renderHealthRow(account, snapshot.at, names)),
+    ...header.map((line, index) => (index === 0 ? line : `${HEALTH_ROW_INDENT}${line}`)),
     '',
-    // Said every time, because the command it replaces spent real money and somebody who used it
-    // before has every reason to assume this one does too.
-    'This reads credentials and one free provider status endpoint. It asks no model and uses no inference quota.',
+    ...ordered.flatMap(account => healthRowLines(account, names, columns, presentation, sharedCheck, snapshot.at)),
+    '',
+    ...softWrap(HEALTH_DISCLOSURE, width - HEALTH_ROW_INDENT.length, width - HEALTH_ROW_INDENT.length).map(
+      line => `${HEALTH_ROW_INDENT}${palette.muted(line)}`,
+    ),
   ].join('\n');
 }
 

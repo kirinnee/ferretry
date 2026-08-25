@@ -22,6 +22,14 @@ import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
  */
 export interface IFleetOutput {
   success(message: string): void;
+  /**
+   * stdout exactly as given, for a rendering that already carries its own colour.
+   *
+   * `success` paints its whole message one colour, which is right for "that worked" and wrong for a
+   * report whose colour means something per line — a green wrap over `fy fleet health` gave a
+   * rejected account and a healthy one the same paint.
+   */
+  report(message: string): void;
   warn(message: string): void;
 }
 

@@ -11,8 +11,8 @@ import {
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
-  fleetScaffoldIds,
   FleetTokenRefreshService,
+  fleetScaffoldIds,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
 import {
@@ -27,9 +27,9 @@ import {
   ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
   SpawnCredentialCommand,
+  StoreCredentialClassifier,
   spawnFleetLoginProcess,
   spawnFleetTokenRefreshProcess,
-  StoreCredentialClassifier,
   whichHarnessBinary,
 } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
@@ -72,6 +72,7 @@ import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-comm
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
+import { type TerminalSurface, terminalFleetPresentation } from '../src/adapters/terminal/palette';
 import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
@@ -204,6 +205,17 @@ export interface CliWorld {
   readonly homeDirectory: string;
   /** The process environment, injected so tests never depend on the ambient one. */
   readonly environment: Record<string, string | undefined>;
+  /**
+   * What stdout is: a terminal or not, and how wide.
+   *
+   * Captured here rather than read where a report is rendered, for the same reason `environment` is:
+   * an in-process journey must not inherit the ambient terminal, or the same command would produce a
+   * differently wrapped, differently coloured report on every developer's screen and in CI.
+   *
+   * NOT `interactive`, which is stdin AND stdout together — a report is written to stdout alone, and
+   * `fy fleet health < /dev/null` is still being read by somebody.
+   */
+  readonly stdout: TerminalSurface;
 }
 
 /** The real production world: the shipped IO adapters. */
@@ -217,6 +229,11 @@ export function buildWorld(): CliWorld {
     cwd: process.cwd(),
     homeDirectory: homedir(),
     environment: process.env,
+    stdout: {
+      terminal: Boolean(process.stdout.isTTY),
+      columns: process.stdout.columns,
+      noColor: process.env.NO_COLOR,
+    },
   };
 }
 
@@ -844,6 +861,9 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     // picks which local daemon, FY_URL plus FY_TOKEN picks a remote one, exactly as every other verb.
     sharing: new ProtocolFleetSharingGateway(client),
     out: world.io,
+    // `fy fleet health` colours by severity, and chalk decides per call whether this run may emit an
+    // escape code at all — so `NO_COLOR`, a pipe and a redirect get the identical plain report.
+    presentation: terminalFleetPresentation(world.stdout),
   });
 }
 

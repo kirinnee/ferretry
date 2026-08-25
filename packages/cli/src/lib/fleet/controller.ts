@@ -14,6 +14,7 @@ import type {
   IFleetUsageCollectorFactory,
   IRecommendationGateway,
 } from './ports.ts';
+import type { FleetPresentation } from './presentation.ts';
 import {
   fleetAccountNames,
   renderApplyPlan,
@@ -78,6 +79,14 @@ export interface FleetControllerDeps {
   /** Reading the sharing report the Fleet tab reads, from the one resolver that owns it. */
   readonly sharing: IFleetSharingGateway;
   readonly out: IFleetOutput;
+  /**
+   * What the attached terminal can do with a rendering — colour and width.
+   *
+   * Resolved by the composition root and injected, never discovered here: `NO_COLOR`, a pipe and a
+   * real terminal are three different answers, and a domain that read them itself would read them in
+   * a test too and report differently on every developer's machine.
+   */
+  readonly presentation: FleetPresentation;
 }
 
 /**
@@ -221,7 +230,11 @@ export class FleetController {
     const collector = this.deps.health.forConfig(await this.deps.config.load());
     const manifest = await this.#manifest();
     const snapshot = await collector.collect(manifest);
-    this.#report(snapshot, options, () => renderHealth(snapshot, fleetAccountNames(manifest)));
+    // The one report whose colour MEANS something per line, so it is the one that must reach stdout
+    // unrepainted. Everything else here says "that worked" in one colour, which `success` supplies.
+    this.#reportRendered(snapshot, options, () =>
+      renderHealth(snapshot, fleetAccountNames(manifest), this.deps.presentation),
+    );
   }
 
   /**
@@ -302,5 +315,19 @@ export class FleetController {
 
   #report(payload: unknown, options: FleetCommandOptions, human: () => string): void {
     this.deps.out.success(options.json === true ? JSON.stringify(payload, null, 2) : human());
+  }
+
+  /**
+   * `#report`, for a rendering that has already decided its own colours.
+   *
+   * `--json` is unchanged and deliberately still goes through `success`: a machine payload has no
+   * presentation to preserve, and routing it here would be inventing a difference nobody asked for.
+   */
+  #reportRendered(payload: unknown, options: FleetCommandOptions, human: () => string): void {
+    if (options.json === true) {
+      this.deps.out.success(JSON.stringify(payload, null, 2));
+      return;
+    }
+    this.deps.out.report(human());
   }
 }
