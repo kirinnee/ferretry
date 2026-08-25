@@ -404,6 +404,43 @@ const HARNESS_FLEET_ACCOUNTS = [
 ] satisfies readonly FleetManifestAccountView[];
 
 /**
+ * What the daemon last concluded about each of those accounts — for two of the three.
+ *
+ * The THIRD IS ABSENT on purpose. A roster row with no verdict is the ordinary case on a host nobody
+ * has signed into yet, and it is the case this frame exists to show: it renders no health line at
+ * all, so the account is the thing you see. A fixture that gave all three a verdict would review a
+ * screen that only exists after a check has run.
+ */
+const HARNESS_FLEET_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
+  [
+    '11111111-1111-4111-8111-111111111111',
+    {
+      accountId: '11111111-1111-4111-8111-111111111111',
+      kind: 'claude' as const,
+      verdict: 'healthy' as const,
+      reason: 'provider_accepted' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: Date.parse('2026-08-05T08:26:00.000Z'),
+      verdictAt: Date.parse('2026-08-05T08:26:00.000Z'),
+      lastCheckInconclusive: false,
+    },
+  ],
+  [
+    '22222222-2222-4222-8222-222222222222',
+    {
+      accountId: '22222222-2222-4222-8222-222222222222',
+      kind: 'claude' as const,
+      verdict: 'needs_relogin' as const,
+      reason: 'oauth_token_rejected' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: Date.parse('2026-08-05T08:28:00.000Z'),
+      verdictAt: Date.parse('2026-08-05T08:28:00.000Z'),
+      lastCheckInconclusive: false,
+    },
+  ],
+]);
+
+/**
  * The create form as a person actually meets it: prefilled from a host that HAS Claude Code, with the
  * provenance visible on every field detection filled in.
  *
@@ -426,7 +463,13 @@ const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
   layer: {
     ...emptyAccountDraft('claude').layer,
     instructions: {
-      path: 'instructions/claude-atelier.md',
+      // THE SHIPPED NAMING SCHEME, not a path this file made up. `instructionsPathFor` builds
+      // `instructions/CLAUDE-<middle>.md`, and `instructionsMiddleOf` returns `undefined` for
+      // anything else — so `instructions/claude-atelier.md` rendered the name box EMPTY and pinned a
+      // blocking "name this document" under a label that already said it, on the one frame anybody
+      // reviewing this flow opens. Production always derives the path, so the two could not diverge
+      // for a real person; the fixture was the only thing lying about it.
+      path: 'instructions/CLAUDE-atelier.md',
       text: '# Atelier\n\nBe exact. Prefer the smallest change that is provably correct.\n',
     },
   },
@@ -449,13 +492,13 @@ const HARNESS_FLEET_INSTRUCTIONS: FleetInstructionsControl = {
   choices: [
     {
       value: 'new-imported',
-      label: 'New — instructions/claude-atelier.md, imported',
+      label: 'New — instructions/CLAUDE-atelier.md, imported',
       detail:
         'Imported — /home/pilot/.claude/CLAUDE.md (86 bytes). Edit it here; nothing is written until you review and authorize the change.',
     },
     {
       value: 'new-blank',
-      label: 'New — instructions/claude-atelier.md, empty',
+      label: 'New — instructions/CLAUDE-atelier.md, empty',
       detail: 'A new, empty document written at that path.',
     },
     {
@@ -7101,9 +7144,18 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
     <div className="mx-auto w-full max-w-[1400px] space-y-panel self-start p-panel" id="harness-fleet-cockpit">
       {frame !== 'accounts' ? null : (
         <section aria-label="Fleet account list" id="harness-fleet-accounts-page">
+          {/* THE THREE HEALTH SHAPES IN ONE FRAME, because the change worth looking at here is which
+              rows speak. One healthy row (verdict and when, no reason — "Healthy" already said it),
+              one that needs a person (verdict, when, and the reason, because that is a second fact),
+              and one nothing has ever checked (SILENT — a roster whose every row said "Unknown ·
+              Never checked · Nothing has checked this account yet." was three of four lines per
+              account spent on nothing happening). `now` is fixed so the relative labels do not drift
+              between captures. */}
           <FleetLiveRoster
             accounts={HARNESS_FLEET_ACCOUNTS}
             generatedAt="2026-08-05T08:26:00.000Z"
+            health={HARNESS_FLEET_HEALTH}
+            now={Date.parse('2026-08-05T08:30:00.000Z')}
             onEdit={() => {}}
             editable={true}
           />

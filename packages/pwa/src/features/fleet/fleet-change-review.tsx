@@ -103,11 +103,16 @@ function AccountLine({ account }: { readonly account: FleetManifestAccountView }
  * table here is how the same account ends up described differently on two screens, so there is not
  * one — `accountHealthView` is the single owner and this component only positions its output.
  *
- * ABSENT IS NOT UNHEALTHY. An account with no published row renders through
- * `UNREAD_ACCOUNT_HEALTH` ("Never checked"), which is a different sentence from a row that SAYS
- * unknown — that one carries its own reason, such as a timeout or Codex having no free proof. And
- * when the whole health read failed, EVERY row lands here: this screen's job is configuration, so
- * missing health is a quiet "Unknown" rather than anything that stops the roster rendering.
+ * IT SAYS NOTHING WHEN THERE IS NOTHING TO SAY. This is a roster, and a roster whose every row read
+ * `Unknown · Never checked · Nothing has checked this account yet.` spent three of its four lines
+ * telling somebody that nothing had happened — on a phone that IS the row, and the account it
+ * describes is the thing they came for. So a `quiet` verdict renders no line at all, and a reason
+ * that only restates its own headline is dropped. Neither can hide a bad verdict: `quiet` is the
+ * one state where nobody has looked (which is also every row when the whole health read failed, and
+ * this screen's job is configuration, so that must cost the roster nothing).
+ *
+ * What survives is the pair that matters — "Healthy" beside "quota is not measurable" — because
+ * `detailIsImplied` is false for every reason that carries a fact of its own.
  */
 function LiveAccountHealth({
   health,
@@ -117,10 +122,11 @@ function LiveAccountHealth({
   readonly now: number;
 }) {
   const view = health === undefined ? UNREAD_ACCOUNT_HEALTH : accountHealthView(health, now);
+  if (view.quiet) return null;
   const instant = health?.lastCheckedAt ?? null;
   return (
     <p
-      className="m-0 mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 text-meta leading-base"
+      className="m-0 mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-2 text-meta leading-base"
       data-fleet-live-health={view.tone}
     >
       <span className={cn('shrink-0 font-semibold', HEALTH_TONE_CLASS[view.tone])} title={view.detail}>
@@ -136,11 +142,11 @@ function LiveAccountHealth({
           {view.checked}
         </time>
       )}
-      {/* THE REASON IS VISIBLE, not only a title. A `title` has no touch equivalent, and "Healthy"
-          beside "quota is not measurable" is the pair that stops somebody reading an unmeasurable
-          account as a broken one. It wraps rather than truncating: a clipped reason is the fact a
-          reader came for. */}
-      <span className="min-w-0 text-muted">{view.detail}</span>
+      {/* THE REASON IS VISIBLE, not only a title, wherever it is a second fact. A `title` has no
+          touch equivalent, and "Healthy" beside "quota is not measurable" is the pair that stops
+          somebody reading an unmeasurable account as a broken one. It wraps rather than truncating:
+          a clipped reason is the fact a reader came for. */}
+      {view.detailIsImplied ? null : <span className="min-w-0 text-muted">{view.detail}</span>}
       {view.secondary === undefined ? null : <span className="min-w-0 text-warn">{view.secondary}</span>}
     </p>
   );
@@ -176,7 +182,7 @@ export function FleetLiveRoster({
   /**
    * The daemon's stored verdicts, keyed by account id. OPTIONAL, and absent is a first-class case:
    * a daemon that can publish a manifest and cannot serve verdicts still has accounts, and this
-   * panel's job is configuration. Absent means every row reads "Never checked".
+   * panel's job is configuration. Absent means every row simply carries no health line.
    */
   readonly health?: ReadonlyMap<string, PickerAccountHealth>;
   /** The instant relative labels are measured against. Injected so a test asserts against a fixture. */
@@ -216,13 +222,17 @@ export function FleetLiveRoster({
                 <AccountLine account={account} />
                 <LiveAccountHealth health={health?.get(account.id)} now={now} />
               </div>
+              {/* "Edit", not "Edit layer". A layer is a composition slot in the configuration
+                  schema and nothing a person adding an account has a reason to learn; the row it
+                  sits on already names the account this edits. What opens is that account's own
+                  instructions, skills, settings and environment. */}
               <button
                 type="button"
                 className="kt-btn kt-btn--sm ml-auto shrink-0"
                 disabled={!editable}
                 onClick={() => onEdit(account)}
               >
-                Edit layer
+                Edit
               </button>
             </li>
           ))}

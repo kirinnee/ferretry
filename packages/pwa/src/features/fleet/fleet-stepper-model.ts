@@ -122,6 +122,11 @@ export const previousStep = (step: FleetStepId): FleetStepId =>
  * still shown, as the wrapper name it produces; it is simply no longer a word somebody has to know.
  * A fleet with lanes of its own keeps them: see {@link otherLanes}.
  *
+ * THE SENTENCE BELOW MAY NOT NAME THE LANE. It sits directly under the two cards that replaced the
+ * word, and the version that ended "this picks the lane and the wrapper name for each" reintroduced
+ * it in the one place a reader was guaranteed to look — which is what the owner meant by "what does
+ * lane means?". What a person needs from it is how many accounts ticking both boxes creates.
+ *
  * The answer is a SET rather than one value, and that is a widening of the question, not a collapse
  * of the two facts. "Both" is an ordinary answer — most people running an unattended agent want the
  * attended one on the same login — and it used to mean walking the whole sequence twice and typing
@@ -129,8 +134,8 @@ export const previousStep = (step: FleetStepId): FleetStepId =>
  * still derives its own lane through {@link laneForMode}, so a set of modes is still a set of
  * `{ variant, mode }` pairs and never one field pretending to be both.
  */
-export const LANE_EXPLANATION =
-  'Interactive accounts are the ones you drive. Auto accounts run unattended. Tick both to create one of each — one login, two wrappers. This picks the lane and the wrapper name for each.';
+export const MODE_EXPLANATION =
+  'Interactive accounts are the ones you drive. Auto accounts run unattended. Tick both to create one of each — one login, two accounts, each with its own wrapper name.';
 
 /** The fleet's lane for one mode, or the fallback the daemon itself would use. */
 export const DEFAULT_LANE = 'default';
@@ -652,7 +657,7 @@ const CONTROL_CHARACTER = /\p{Cc}/u;
 const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
   const problems: string[] = [];
   const name = draft.name.trim();
-  if (name === '') problems.push('name the provider account this lane belongs to');
+  if (name === '') problems.push('name the provider account');
   else if (name !== draft.name) problems.push('the account name must not start or end with whitespace');
   else if (name.length > 64) problems.push('the account name must be 64 characters or shorter');
   else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {

@@ -21,8 +21,6 @@ import {
   button,
   card,
   cardChosen,
-  choose,
-  chooser,
   click,
   config,
   confirmingPermissions,
@@ -208,9 +206,13 @@ describe('reading one daemon fleet', () => {
       }),
     });
 
-    // Assert
+    // Assert — the verdict and when it was established. Its REASON is not printed: "the provider
+    // accepted this credential" is what "Healthy" already says, and a roster row has one line to
+    // spend. A reason that carries a second fact still prints; `fleet-change-review.test.tsx` holds
+    // both halves of that rule.
     expect(surface.container.textContent).toContain('Healthy');
-    expect(surface.container.textContent).toContain('The provider accepted');
+    expect(surface.container.textContent).toContain('Checked ');
+    expect(surface.container.textContent).not.toContain('The provider accepted');
     // A GET on the snapshot, and NOTHING on the collecting route. A configuration screen has no
     // business collecting evidence, and this is the line that proves it does not.
     expect(surface.daemon.paths()).toContain('/v1/fleet/health');
@@ -223,8 +225,10 @@ describe('reading one daemon fleet', () => {
    *
    * Health is decoration on a panel whose job is configuration. A daemon too old to serve the route, a
    * credential that refused it, a transport that timed out, or a document this build cannot parse must
-   * all leave a WORKING panel: the accounts render, the layer edit works, and the rows say "Never
-   * checked". They must not blank the screen, and they must not read as an unreachable daemon.
+   * all leave a WORKING panel: the accounts render and the edit control works. The rows carry no
+   * health line at all, which is the honest shape — nothing was established, and a roster that said
+   * so once per account would spend the whole screen on it. They must not blank the screen, and they
+   * must not read as an unreachable daemon.
    *
    * Three failure shapes, because they fail in three different places: a rejection inside the request,
    * a response that parses to the wrong thing, and a response that does not parse at all.
@@ -251,10 +255,11 @@ describe('reading one daemon fleet', () => {
       // Assert — the inventory is intact and the rows are honest about knowing nothing.
       expect(surface.container.textContent, failure.what).toContain('claude-studio');
       expect(surface.container.textContent, failure.what).toContain('Last published manifest');
-      expect(surface.container.textContent, failure.what).toContain('Never checked');
+      expect(surface.container.textContent, failure.what).not.toContain('Never checked');
+      expect(absent(surface.container, '[data-fleet-live-health]'), failure.what).toBe(true);
       // Not an unreachable daemon, and not a refusal: the panel is fine, one read was not.
       expect(absent(surface.container, '[data-fleet-state]'), failure.what).toBe(true);
-      expect(button(surface.container, 'Edit layer').hasAttribute('disabled'), failure.what).toBe(false);
+      expect(button(surface.container, 'Edit').hasAttribute('disabled'), failure.what).toBe(false);
       await surface.unmount();
     }
   });
@@ -610,7 +615,7 @@ describe('a daemon this browser could not reach', () => {
         throw new Error(dead);
       },
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(surface.container, 'Preview this change'));
@@ -676,7 +681,10 @@ describe('creating an account', () => {
     await type(field(surface.container, '-name'), 'atelier');
     await walkTo(surface.container, 'models');
     expect(absent(surface.container, '[data-fleet-prefill="models"]')).toBe(true);
-    expect(chooser(surface.container, '-default-model').value).toBe('');
+    // With nothing ticked there is no default to offer, so the control is the sentence that says
+    // what to do first rather than a group with nothing chosen in it.
+    expect(absent(surface.container, '[data-fleet-choice-group="default-model"]')).toBe(true);
+    expect(pick(surface.container, '[data-fleet-default-model-empty]').textContent).toContain('Tick a model above');
     await surface.unmount();
   });
 
@@ -707,7 +715,7 @@ describe('creating an account', () => {
     await walkTo(surface.container, 'models');
     expect(cardChosen(surface.container, 'models', 'claude-opus-5')).toBe(true);
     expect(cardChosen(surface.container, 'models', 'claude-sonnet-5')).toBe(true);
-    expect(chooser(surface.container, '-default-model').value).toBe('claude-opus-5');
+    expect(cardChosen(surface.container, 'default-model', 'claude-opus-5')).toBe(true);
     expect(pick(surface.container, '[data-fleet-prefill="models"]').textContent).toContain(
       '/home/pilot/.claude/settings.json',
     );
@@ -807,9 +815,9 @@ describe('creating an account', () => {
     await surface.unmount();
   });
 
-  it('offers a lane control only when this fleet declares one no answer would derive', async () => {
+  it('offers a group control only when this fleet declares one no answer would derive', async () => {
     // A surface that cannot express what the configuration can is the reason somebody edits YAML by
-    // hand. A `review` lane is not derivable from "interactive or auto", so the escape appears.
+    // hand. A `review` slot is not derivable from "interactive or auto", so the escape appears.
     const surface = await open({ config: () => ({ variants: { default: {}, review: {} }, agents: [] }) });
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
@@ -817,8 +825,18 @@ describe('creating an account', () => {
     await type(field(surface.container, '-name'), 'atelier');
 
     expect(pick(surface.container, '[data-fleet-other-lanes]')).toBeDefined();
-    // Per ACCOUNT: with two of them in play a single lane control would have no answer to "which one".
-    await choose(chooser(surface.container, '-lane-auto'), 'review');
+    // CARDS, not a `<select>`. These were the last two native dropdowns in the sequence, and being
+    // conditional did not make them exempt from the complaint about dropdowns.
+    expect(absent(surface.container, '[data-fleet-other-lanes] select')).toBe(true);
+    expect(pick(surface.container, '[data-fleet-choice-group="group-auto"]').textContent).toContain(
+      'Which group does the auto account join?',
+    );
+    // Each card says what it would produce, so the fleet's own slot names are never bare identifiers.
+    expect(pick(surface.container, '[data-fleet-choice-group="group-auto"]').textContent).toContain(
+      'claude-review-atelier',
+    );
+    // Per ACCOUNT: with two of them in play a single control would have no answer to "which one".
+    await click(card(surface.container, 'group-auto', 'review'));
     expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-review-atelier');
     await surface.unmount();
   });
@@ -1159,7 +1177,7 @@ describe('creating an account', () => {
     // Assert — the default answer changes nothing, and there is no JSON box to be frightened by.
     expect(cardChosen(surface.container, 'settings', 'fleet')).toBe(true);
     expect(surface.container.querySelector('[id$="-settings"]')).toBeNull();
-    // Scoped to the sequence: the roster behind it still offers "Edit layer" for an account that exists,
+    // Scoped to the sequence: the roster behind it still offers "Edit" for an account that exists,
     // and that control is not what the owner objected to.
     expect(pick(surface.container, '[data-fleet-account-stepper]').textContent).not.toContain('layer');
 
@@ -1238,7 +1256,7 @@ describe('editing one account layer', () => {
       }),
       asset: path => ({ path, content: `text of ${path}`, bytes: 10 }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
 
     expect(area(surface.container, '-instructions-text').value).toBe('text of instructions/studio.md');
@@ -1268,7 +1286,7 @@ describe('editing one account layer', () => {
         throw refusal('fleet_asset_refused', 'asset "skills/studio/ok.md" is not editable text');
       },
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
 
     expect(surface.container.textContent).toContain('over the 65536-byte limit');
@@ -1291,7 +1309,7 @@ describe('editing one account layer', () => {
         throw refusal('fleet_asset_refused', `no asset at "${path}" in this daemon's asset tree`);
       },
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
 
     expect(surface.daemon.paths()).toContain('/v1/fleet/assets/instructions%2Fstudio.md');
@@ -1312,7 +1330,7 @@ describe('editing one account layer', () => {
         complete: true,
       }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
     expect(surface.container.textContent).toContain('over the 65536-byte limit');
@@ -1335,7 +1353,7 @@ describe('editing one account layer', () => {
       assets: () => ({ files: [{ path: 'skills/studio/one.md', bytes: 4, readable: true }], complete: false }),
       asset: path => ({ path, content: 'one', bytes: 3 }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     expect(surface.container.textContent).toContain('stopped walking the asset tree at a bound');
     expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
@@ -1354,7 +1372,7 @@ describe('editing one account layer', () => {
         throw refusal('fleet_asset_refused', 'the fleet asset directory is not readable');
       },
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     expect(surface.container.textContent).toContain('fleet/assets');
     expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
@@ -1378,7 +1396,7 @@ describe('editing one account layer', () => {
       asset: path => ({ path, content: 'AAA', bytes: 3 }),
       propose: () => proposal({ summary: 'change claude-studio' }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     expect(area(surface.container, '-instructions-text').value).toBe('AAA');
     expect(surface.daemon.paths()).not.toContain('/v1/fleet/assets/instructions%2Fb.md');
@@ -1412,7 +1430,7 @@ describe('editing one account layer', () => {
       }),
       asset: path => ({ path, content: 'one', bytes: 3 }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
 
     // Move the directory to one whose contents were never loaded, then name a document that is there.
@@ -1436,7 +1454,7 @@ describe('editing one account layer', () => {
       // for every layer. Only the per-document reads are scoped to what the layer declares.
       assets: () => ({ files: [{ path: 'instructions/there.md', bytes: 4, readable: true }], complete: true }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     expect(absent(surface.container, '[data-fleet-layer-loading]')).toBe(true);
     expect(surface.daemon.paths()).toContain('/v1/fleet/assets');
@@ -1467,7 +1485,7 @@ describe('editing one account layer', () => {
       // ZodError whose own message is a multi-line JSON dump of every issue.
       assets: () => ({ files: [{ path: 'skills/a/one.md', bytes: 'twelve', readable: true }], complete: true }),
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
 
     const problems = pick(surface.container, '[data-fleet-problems]');
@@ -1490,7 +1508,7 @@ describe('editing one account layer', () => {
         throw refusal('fleet_asset_refused', 'the fleet asset directory is not readable');
       },
     });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     expect(surface.container.textContent).toContain('the fleet asset directory is not readable');
     expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
@@ -1499,7 +1517,7 @@ describe('editing one account layer', () => {
 
   it('discards a draft without asking the daemon anything', async () => {
     const surface = await open({});
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     // Settled first: the form is disabled while the index is in flight, so a click before that proves
     // nothing about the button a person can actually press.
     await interact(() => undefined);
@@ -1512,7 +1530,7 @@ describe('editing one account layer', () => {
 describe('applying one exact proposal', () => {
   const staged = async (script: Script) => {
     const surface = await open({ propose: () => proposal(), ...script });
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     // The index listing is in flight until this settles, and the form is disabled while it is.
     await interact(() => undefined);
     await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
@@ -1672,7 +1690,7 @@ describe('applying one exact proposal', () => {
     expect(surface.daemon.paths().filter(path => path === '/v1/grants/unlock')).toHaveLength(1);
 
     // Act — a SECOND change, staged and applied with the same screen.
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await interact(() => undefined);
     await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(surface.container, 'Preview this change'));
@@ -1954,7 +1972,7 @@ describe('applying one exact proposal', () => {
 
   it('moves focus to a stable control when a draft is discarded', async () => {
     const surface = await open({});
-    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Edit'));
     await click(button(surface.container, 'Discard draft'));
     await interact(() => undefined);
     expect(document.activeElement).toBe(pick(surface.container, '[data-fleet-start-create]'));
@@ -2072,7 +2090,7 @@ describe('two daemons', () => {
       <FleetConfigurationSurface connection={laptop} createClient={clientFor} now={() => NOW} />,
     );
     await interact(() => undefined);
-    await click(button(mounted.container, 'Edit layer'));
+    await click(button(mounted.container, 'Edit'));
     await type(field(mounted.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(mounted.container, 'Preview this change'));
     // Unlock and apply against the LAPTOP, so a live token is genuinely held.
@@ -2100,7 +2118,7 @@ describe('two daemons', () => {
 
     // And the laptop's unlock did NOT come with it: the workstation is asked for the password again, and
     // when it is given one it mints its OWN token rather than presenting the other machine's.
-    await click(button(mounted.container, 'Edit layer'));
+    await click(button(mounted.container, 'Edit'));
     await interact(() => undefined);
     await type(field(mounted.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(mounted.container, 'Preview this change'));
@@ -2159,7 +2177,7 @@ describe('an equivalent connection object', () => {
     };
     const mounted = await mount(<FleetConfigurationSurface connection={laptop} createClient={clientFor} />);
     await interact(() => undefined);
-    await click(button(mounted.container, 'Edit layer'));
+    await click(button(mounted.container, 'Edit'));
     await type(field(mounted.container, '-instructions-path'), 'instructions/studio.md');
 
     // A caller that rebuilds an equal object each render has NOT re-paired. `sameDaemonConnection`

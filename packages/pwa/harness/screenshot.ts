@@ -2210,7 +2210,7 @@ try {
             // staging it is an interaction. Driving the real clicks is the only way to capture that
             // layout without inventing a state the surface cannot actually be in.
             if (frame === 'cockpit-staged') {
-              await page.getByRole('button', { name: 'Edit layer' }).first().click();
+              await page.getByRole('button', { name: 'Edit' }).first().click();
               await page.locator('[data-fleet-layer-form]').waitFor({ state: 'visible' });
               await page.getByRole('button', { name: 'Preview this change' }).click();
               const staged = page.locator('[data-fleet-proposal-id]');

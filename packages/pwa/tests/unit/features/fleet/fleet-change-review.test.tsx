@@ -105,7 +105,7 @@ describe('the live roster', () => {
     const mounted = await mount(
       <FleetLiveRoster accounts={accounts([account()])} generatedAt="now" onEdit={noop} editable={false} />,
     );
-    expect(button(mounted.container, 'Edit layer').hasAttribute('disabled')).toBe(true);
+    expect(button(mounted.container, 'Edit').hasAttribute('disabled')).toBe(true);
     await mounted.unmount();
   });
 
@@ -157,14 +157,22 @@ describe('the live roster', () => {
     expect(text).toContain('Checked 4m ago');
     expect(text).toContain('Needs re-login');
     expect(text).toContain('Checked 2m ago');
-    expect(text).toContain('Never checked');
+    // The rejected token's reason survives, because it is a second fact; the healthy one's does not,
+    // because "the provider accepted this credential" is what "Healthy" already said.
+    expect(text).toContain('The provider rejected this token.');
+    expect(text).not.toContain('The provider accepted');
+    // THE THIRD ACCOUNT SAYS NOTHING. It has no row, so nothing has been established about it, and a
+    // roster that spent a line per account announcing that is what the owner was looking at when
+    // they said the list owned the screen. Its wrapper is still there — the account is the point.
+    expect(text).toContain('claude-archive');
+    expect(text).not.toContain('Never checked');
     // The exact UTC instant is machine-readable, so the visible label can be relative.
     expect(pick(mounted.container, 'time').getAttribute('datetime')).toBe(new Date(now - 240_000).toISOString());
     expect(
       [...mounted.container.querySelectorAll('[data-fleet-live-health]')].map(node =>
         node.getAttribute('data-fleet-live-health'),
       ),
-    ).toEqual(['ok', 'bad', 'muted']);
+    ).toEqual(['ok', 'bad']);
     await mounted.unmount();
   });
 
@@ -204,12 +212,36 @@ describe('the live roster', () => {
     await mounted.unmount();
   });
 
+  it('still speaks for an account somebody looked at and could not conclude about', async () => {
+    // THE LINE THE SILENCE MUST NOT SWALLOW. `unknown` is two different rows: nobody has looked, and
+    // somebody looked and came back with nothing. Only the first is silent. Collapsing them would
+    // hide a check that timed out behind the same blank space as an account nothing has opened.
+    const now = Date.parse('2026-08-24T12:00:00.000Z');
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([account()])}
+        generatedAt="now"
+        health={new Map([[account().id, healthRow({ verdict: 'unknown', reason: 'check_timeout' })]])}
+        now={now}
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('Unknown');
+    expect(text).toContain('The last check timed out.');
+    expect(pick(mounted.container, '[data-fleet-live-health]').getAttribute('data-fleet-live-health')).toBe('warn');
+    await mounted.unmount();
+  });
+
   /**
    * HEALTH IS DECORATION ON A CONFIGURATION SCREEN, and this is the assertion that says so.
    *
    * A daemon that publishes a manifest and cannot serve verdicts still has accounts to configure. So
-   * an absent health map must cost the roster nothing: every row reads "Never checked", the wrapper
-   * names are still there, and the edit control still works.
+   * an absent health map must cost the roster nothing: the wrapper names are still there and the
+   * edit control still works. What it must NOT do is fill every row with three lines saying that
+   * nothing has been checked — the same nothing, once per account, is the wall the owner met.
    */
   it('renders the whole roster with no health at all', async () => {
     // Act
@@ -227,12 +259,10 @@ describe('the live roster', () => {
     expect(text).toContain('claude-studio');
     expect(text).toContain('claude-atelier');
     expect(text).toContain('2 published');
-    expect(button(mounted.container, 'Edit layer').hasAttribute('disabled')).toBe(false);
-    expect(
-      [...mounted.container.querySelectorAll('[data-fleet-live-health]')].map(node =>
-        node.getAttribute('data-fleet-live-health'),
-      ),
-    ).toEqual(['muted', 'muted']);
+    expect(button(mounted.container, 'Edit').hasAttribute('disabled')).toBe(false);
+    expect(text).not.toContain('Never checked');
+    expect(text).not.toContain('Nothing has checked');
+    expect(mounted.container.querySelectorAll('[data-fleet-live-health]')).toHaveLength(0);
     await mounted.unmount();
   });
 
@@ -251,12 +281,15 @@ describe('the live roster', () => {
       />,
     );
 
-    // Assert — the uncovered account does not inherit its sibling's verdict.
+    // Assert — the uncovered account does not inherit its sibling's verdict. It renders NO health
+    // line rather than a muted one, which is the same claim said with silence: exactly one row in
+    // this roster carries a verdict, and it is the one the snapshot covered.
     expect(
       [...mounted.container.querySelectorAll('[data-fleet-live-health]')].map(node =>
         node.getAttribute('data-fleet-live-health'),
       ),
-    ).toEqual(['ok', 'muted']);
+    ).toEqual(['ok']);
+    expect(mounted.container.textContent).toContain('claude-atelier');
     await mounted.unmount();
   });
 });

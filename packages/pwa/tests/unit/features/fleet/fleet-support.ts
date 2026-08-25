@@ -258,9 +258,6 @@ export const field = (container: HTMLElement, id: string): HTMLInputElement =>
 export const area = (container: HTMLElement, id: string): HTMLTextAreaElement =>
   must(container.querySelector<HTMLTextAreaElement>(suffix(id)), `the ${id} textarea`);
 
-export const chooser = (container: HTMLElement, id: string): HTMLSelectElement =>
-  must(container.querySelector<HTMLSelectElement>(suffix(id)), `the ${id} chooser`);
-
 export const type = async (node: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> => {
   await interact(() => {
     setValue(
@@ -269,13 +266,6 @@ export const type = async (node: HTMLInputElement | HTMLTextAreaElement, value: 
       value,
     );
     node.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
-export const choose = async (node: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    setValue(HTMLSelectElement.prototype, node, value);
-    node.dispatchEvent(new Event('change', { bubbles: true }));
   });
 };
 

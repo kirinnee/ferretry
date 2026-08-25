@@ -31,6 +31,16 @@
  * is healthy and the QUOTA is what goes unknown. A quota bar must not be drawn at
  * 0 % for it; `QuotaReadout`'s `showUnknown` is how the rows already avoid that.
  *
+ * ## What a surface with ONE line may leave out
+ *
+ * `quiet` and `detailIsImplied` are offers, not instructions. They exist because
+ * the fleet roster spent three of every row's four lines on `Unknown · Never
+ * checked · Nothing has checked this account yet.` — the same nothing, three
+ * times, on every account — which is what turned a list of accounts into a wall.
+ * Neither flag can hide a bad verdict: `quiet` is true only where nobody has
+ * looked, and `detailIsImplied` only where the reason repeats its own headline.
+ * Each surface decides for itself whether to take the offer.
+ *
  * Pure. No clock of its own: `now` is passed in, so a relative label is
  * deterministic in a test and can tick in the client without anything claiming a
  * fresh check happened.
@@ -53,6 +63,26 @@ export interface AccountHealthView {
   readonly tone: AccountHealthTone;
   /** Whether a sign-in control can possibly help. See the module note. */
   readonly offersSignIn: boolean;
+  /**
+   * Nothing has been established about this account at all, so a surface with one line to spend may
+   * spend it on something else.
+   *
+   * NOT a fifth verdict and not a licence to hide a bad one. It is true for exactly one state —
+   * nobody has looked — and that state's three sentences say the same nothing three times over.
+   * A surface that prints them is spending its whole row telling somebody that nothing happened,
+   * which is what the owner was looking at when they said the roster was the page. Whether to take
+   * the offer is the surface's own call: a chooser where "nobody checked this" changes which account
+   * you pick should still say so.
+   */
+  readonly quiet: boolean;
+  /**
+   * The reason says nothing the label has not already said, so a one-line surface may drop it.
+   *
+   * Per REASON rather than per verdict, because the pair that must survive is `Healthy` beside
+   * "quota is not measurable": those are two facts and dropping the second reads an unmeasurable
+   * account as a broken one. Only the reasons that RESTATE their own headline are implied.
+   */
+  readonly detailIsImplied: boolean;
 }
 
 const VERDICT_LABEL: Readonly<Record<PickerHealthVerdict, string>> = {
@@ -94,6 +124,35 @@ const REASON_DETAIL: Readonly<Record<PickerHealthReason, string>> = {
   credential_changed_during_check: 'The credential changed while the check was running, so its result was discarded.',
   account_unavailable: 'This account is published as unavailable, so nothing was checked.',
   stale: 'The last result is too old to trust.',
+};
+
+/**
+ * Which reasons only restate their own verdict.
+ *
+ * Annotated over every reason rather than derived from the words, so a reason added tomorrow is a
+ * compile error here instead of a sentence that silently stops being printed. Exactly two qualify:
+ * "the provider accepted this credential" IS `Healthy`, and "nothing has checked this account yet"
+ * IS `Unknown · Never checked`. Everything else — a 403 that cannot read usage, a Codex that has no
+ * free proof, a check that timed out — carries a fact the headline does not.
+ */
+const REASON_IS_IMPLIED: Readonly<Record<PickerHealthReason, boolean>> = {
+  provider_accepted: true,
+  never_checked: true,
+  usage_scope_unavailable: false,
+  oauth_credential_missing: false,
+  oauth_access_expired: false,
+  oauth_token_rejected: false,
+  static_credential_missing: false,
+  static_credential_rejected: false,
+  credential_unreadable: false,
+  oauth_refreshable: false,
+  codex_liveness_unproven: false,
+  check_timeout: false,
+  provider_unavailable: false,
+  provider_not_asked: false,
+  credential_changed_during_check: false,
+  account_unavailable: false,
+  stale: false,
 };
 
 /** Whole units, coarsest that fits. A reader wants "4m ago", never a millisecond count. */
@@ -149,6 +208,11 @@ export function accountHealthView(health: PickerAccountHealth, now: number): Acc
     ...(secondary === undefined ? {} : { secondary }),
     tone: VERDICT_TONE[health.verdict],
     offersSignIn: accountHealthOffersSignIn(health),
+    // A verdict AND its reason, both: `unknown` on its own is a real state somebody looked at and
+    // could not conclude, which is a different row from one nobody has opened yet.
+    quiet: health.verdict === 'unknown' && health.reason === 'never_checked',
+    // A row that went stale says WHAT went stale, so its detail is never the reason's own sentence.
+    detailIsImplied: health.staleVerdict === undefined && REASON_IS_IMPLIED[health.reason],
   };
 }
 
@@ -167,4 +231,6 @@ export const UNREAD_ACCOUNT_HEALTH: AccountHealthView = Object.freeze({
   detail: REASON_DETAIL.never_checked,
   tone: 'muted' as const,
   offersSignIn: false,
+  quiet: true,
+  detailIsImplied: true,
 });

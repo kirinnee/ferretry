@@ -1496,6 +1496,11 @@ export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblem
  * asked for, one wrapper name available. Nothing about either lane is invalid on its own, and the
  * daemon would refuse the pair — so the sentence has to arrive here, before somebody walks six steps
  * to be told.
+ *
+ * THE SENTENCES SAY "group", NOT "lane". A variant is a named composition slot and `lane` is what
+ * this codebase calls one; a person reading a blocker on the identity step has never met either
+ * word, and a sentence that refuses a change in vocabulary the screen never taught cannot be acted
+ * on. The type names stay — only what a person reads changes.
  */
 export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConfigView | null): readonly string[] => {
   if (lanes.length === 0) return ['pick at least one way this account runs; each one creates its own account'];
@@ -1504,14 +1509,16 @@ export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConf
   for (const lane of lanes) {
     const variant = lane.variant.trim();
     if (variant === '') {
-      problems.push('name the lane this account occupies');
+      problems.push('name the group this account joins');
       continue;
     }
     if (config !== null && config.variants[variant] === undefined) {
-      problems.push(`this fleet declares no "${variant}" lane; declare it on the host before adding an account to it`);
+      problems.push(`this fleet declares no "${variant}" group; declare it on the host before adding an account to it`);
     }
     if (seen.has(variant)) {
-      problems.push(`"${variant}" is the lane for two of these accounts; one lane is one account, so they must differ`);
+      problems.push(
+        `"${variant}" is the group for two of these accounts; one group holds one account, so they must differ`,
+      );
     }
     seen.add(variant);
   }
@@ -1521,7 +1528,7 @@ export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConf
 export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
   const problems: string[] = [];
   const name = draft.name.trim();
-  if (name === '') problems.push('name the provider account this lane belongs to');
+  if (name === '') problems.push('name the provider account');
   else if (name !== draft.name) problems.push('the account name must not start or end with whitespace');
   else if (name.length > 64) problems.push('the account name must be 64 characters or shorter');
   else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {

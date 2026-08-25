@@ -134,7 +134,7 @@ describe('ClaudeLoginPanel', () => {
     expect(texts(view)).toContain('No sibling wrapper needed a copy');
   });
 
-  it('names every lane that did not settle rather than claiming success', () => {
+  it('names every account that did not settle rather than claiming success', () => {
     const flow = claudeFlow('complete');
     const view = mount({
       flow: {
@@ -147,7 +147,7 @@ describe('ClaudeLoginPanel', () => {
       },
     });
 
-    expect(texts(view)).toContain('without settling every lane');
+    expect(texts(view)).toContain('without settling every account');
     expect(texts(view)).toContain('a locked keychain');
   });
 
