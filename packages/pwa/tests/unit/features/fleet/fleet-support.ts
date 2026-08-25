@@ -13,6 +13,7 @@ import type {
   FleetManifestAccountView,
   FleetManifestSummary,
   FleetPermissions,
+  FleetProfileCatalog,
   FleetProposalPreview,
   FleetProposalView,
   HarnessDiscovery,
@@ -381,3 +382,49 @@ export const walkTo = async (container: HTMLElement, step: string): Promise<void
   }
   throw new Error(`the stepper stopped at "${stepperStep(container)}" and never reached "${step}"`);
 };
+
+/**
+ * The profile catalog a browser reads, written out longhand for the reason every fixture here is.
+ *
+ * `work` authenticates Claude and one login already composes it; `gateway` sets only a base URL and
+ * authenticates nothing, which is the case that makes "no login" refusable rather than hopeful; `base`
+ * applies to every account and is therefore never a choice. A catalog where every profile looked the
+ * same could not fail on the one thing this surface does — tell them apart.
+ */
+export const profileCatalog = (overrides: Partial<FleetProfileCatalog> = {}): FleetProfileCatalog => ({
+  profiles: [
+    {
+      name: 'base',
+      appliesToEveryAccount: true,
+      variables: [{ variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } }],
+      accounts: ['claude-studio'],
+      authenticates: [],
+    },
+    {
+      name: 'gateway',
+      appliesToEveryAccount: false,
+      variables: [{ variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } }],
+      accounts: [],
+      authenticates: [],
+    },
+    {
+      name: 'work',
+      appliesToEveryAccount: false,
+      variables: [
+        { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } },
+        {
+          variable: 'HTTPS_PROXY',
+          shape: { shape: 'environment-reference', variable: 'OUTER_PROXY' },
+          harness: 'codex',
+        },
+      ],
+      accounts: ['claude-studio'],
+      authenticates: ['claude'],
+    },
+  ],
+  credentialVariables: {
+    claude: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    codex: ['OPENAI_API_KEY'],
+  },
+  ...overrides,
+});

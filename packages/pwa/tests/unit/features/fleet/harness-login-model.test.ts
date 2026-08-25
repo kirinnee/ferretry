@@ -54,6 +54,52 @@ describe('credentialSourceCopy', () => {
   it('says the harness writes it when the credential does come from a sign-in', () => {
     expect(credentialSourceCopy({ source: 'interactive-login' }).label).toBe('From signing in');
   });
+
+  it('names the secret store, and the secrets, when a profile authenticates this account', () => {
+    const copy = credentialSourceCopy({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] });
+
+    expect(copy.label).toBe('From the secret store');
+    expect(copy.detail).toContain('ANTHROPIC_API_KEY');
+    expect(copy.detail).toContain('secret WORK_KEY');
+    expect(copy.detail).toContain('no sign-in to run');
+  });
+
+  it('does not collapse the secret store into the environment, because they are two different places', () => {
+    // Both sentences would be TRUE of this account — the daemon does put the value into the
+    // environment the wrapper is launched with — but they send somebody to two different places and
+    // only one of them is somewhere they can act: `fy secret set` on this host. So the store answer
+    // must not read as the environment one, and it must name the secret rather than the variable
+    // alone, which is the only thing that tells somebody WHAT to set.
+    const store = credentialSourceCopy({
+      source: 'secret-store',
+      variable: 'ANTHROPIC_API_KEY',
+      secrets: ['WORK_KEY'],
+    });
+    const environment = credentialSourceCopy({ source: 'environment', variable: 'ANTHROPIC_API_KEY' });
+
+    expect(store.label).not.toBe(environment.label);
+    expect(store.detail).not.toBe(environment.detail);
+    expect(environment.detail).not.toContain('WORK_KEY');
+  });
+
+  it('says "secrets" when one variable is composed from more than one of them', () => {
+    const copy = credentialSourceCopy({
+      source: 'secret-store',
+      variable: 'AUTH_HEADER',
+      secrets: ['SCHEME', 'WORK_KEY'],
+    });
+
+    expect(copy.detail).toContain('secrets SCHEME, WORK_KEY');
+  });
+
+  it('names the secret and never a value, because no route in this product returns one', () => {
+    // The names are the whole point of saying it and they are safe to render: a person who cannot see
+    // which secret an account reaches for cannot fix one nobody has set. The sixty characters the
+    // store holds under that name reach one child's environment, and this shape has nowhere to put one.
+    const copy = credentialSourceCopy({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] });
+
+    expect(Object.keys(copy).toSorted()).toEqual(['detail', 'label']);
+  });
 });
 
 describe('credentialStateCopy', () => {
