@@ -99,8 +99,8 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * Forty-nine: twenty-six at `mobile` and twenty-three at `desktop`. Twenty-three at both viewports —
- * the sixteen below plus SEVEN for the new-account sequence, one per step. A sequence is not one
+ * Fifty-one: twenty-seven at `mobile` and twenty-four at `desktop`. Twenty-four at both viewports —
+ * the sixteen below plus EIGHT for the new-account sequence, one per step. A sequence is not one
  * surface: each step is a different layout, the model step is a card per model beside a custom-value
  * row, and the recap is a two-column definition list. Capturing only the first would have proved that
  * the harness question fits a phone and nothing at all about the six screens after it. The sixteen
@@ -123,7 +123,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 49;
+const SETTINGS_SIDEWAYS_CHECKS = 51;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -272,7 +272,16 @@ const TOUCH_TARGET_MINIMUM = 44;
  * The failed apply is in the list on purpose: a gallery of happy paths proves nothing about the one
  * screen a person actually reads while something is wrong.
  */
-const ACCOUNT_STEPS = ['harness', 'identity', 'models', 'instructions', 'skills', 'settings', 'review'] as const;
+const ACCOUNT_STEPS = [
+  'harness',
+  'identity',
+  'credential',
+  'models',
+  'instructions',
+  'skills',
+  'settings',
+  'review',
+] as const;
 
 const FLEET_FRAMES = [
   'cockpit',
