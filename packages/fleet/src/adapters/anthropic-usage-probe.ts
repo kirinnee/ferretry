@@ -31,15 +31,17 @@
  *
  * **It also reports what the answer said about the CREDENTIAL, and that is a second field on purpose.**
  * `credentialSignal` is set on every return path here, and it is the only place in the repository that
- * turns an Anthropic HTTP status into a health classification. Health is not derivable from `ok` or
- * from `authOk`: a `200` with an unreadable body is a failed quota reading and an accepted credential,
- * and a `503` leaves `authOk: true` for quota purposes while proving nothing whatever about a login.
- * The account-health verdict is nothing but those distinctions, so they are made once, here, where the
- * status actually is — see `lib/quota.ts`'s `usageEndpointCredentialSignal` for the table and
- * `lib/health.ts` for what each member becomes. **No additional request is made for health**: this is
- * the same single read-only GET, reported more completely.
+ * turns an Anthropic response into a health classification. Health is not derivable from `ok` or from
+ * `authOk`: a `200` with an unreadable body is a failed quota reading and an accepted credential, a
+ * JSON `403` is accepted-but-unmeasurable while an HTML `403` can be an edge challenge, and a bare
+ * control-plane `401` cannot distinguish the login from this HTTP client. Status, bounded header
+ * metadata, body length/hash and JSON key/type/error-code shape therefore travel as a strict
+ * secret-safe fingerprint. No body, token or authorization value has a field to survive in.
+ * **No additional request is made for health**: this is the same single read-only GET, reported more
+ * completely.
  */
 
+import { createHash } from 'node:crypto';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
 import {
@@ -48,7 +50,17 @@ import {
   usageEndpointCredentialSignal,
   usageEndpointHttpVerdict,
 } from '../lib/quota.ts';
-import type { FleetUsageProbe, FleetUsageProbeResult } from '../lib/usage.ts';
+import {
+  type FleetUsageProbe,
+  type FleetUsageProbeResult,
+  type ProviderAuthenticationShape,
+  type ProviderResponseFingerprint,
+  ProviderResponseFingerprintSchema,
+  type ProviderResponseHeaderValues,
+  type ProviderResponseJsonField,
+  type ProviderResponseJsonShape,
+  type ProviderResponseJsonType,
+} from '../lib/usage.ts';
 
 export const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 export const ANTHROPIC_VERSION = '2023-06-01';
@@ -58,13 +70,27 @@ export const ANTHROPIC_PROVIDER = 'anthropic';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const FORBIDDEN_STATUS = 403;
+export const MAX_RESPONSE_BODY_BYTES = 64 * 1024;
+const MAX_HEADER_NAMES = 128;
+const MAX_JSON_FIELDS = 64;
+const MAX_DIAGNOSTIC_TEXT = 256;
+const REDACTED = '[redacted]';
+
+const withoutControlCharacters = (value: string): string =>
+  [...value].map(character => (character < ' ' || character === '\u007f' ? ' ' : character)).join('');
 
 /** The slice of an HTTP response this probe reads. Narrow so a test never needs a real one. */
 export interface QuotaResponse {
   readonly status: number;
   readonly ok: boolean;
+  /** Normalized names only. Values remain behind the closed lookup below. */
+  readonly headerNames: readonly string[];
   header(name: string): string | null | undefined;
-  json(): Promise<unknown>;
+  /** A hard-capped prefix. `truncated` says the digest cannot describe the complete response. */
+  readonly body: {
+    readonly bytes: Uint8Array;
+    readonly truncated: boolean;
+  };
 }
 
 /**
@@ -126,11 +152,16 @@ function bearerToken(material: CredentialMaterial): string | undefined {
  * SUCCESSFUL credential check: the provider answered for this token. Deriving health from `ok` would
  * report an account as unproven purely because its usage JSON changed shape.
  */
-function fromReading(reading: QuotaReading, source: string): FleetUsageProbeResult {
+function fromReading(
+  reading: QuotaReading,
+  source: string,
+  responseFingerprint: ProviderResponseFingerprint,
+): FleetUsageProbeResult {
   if (!reading.hasQuotaSignal) {
     return failure(`${source} carried no readable quota measurement`, {
       authOk: true,
       credentialSignal: 'accepted',
+      responseFingerprint,
     });
   }
   return {
@@ -139,10 +170,198 @@ function fromReading(reading: QuotaReading, source: string): FleetUsageProbeResu
     ok: true,
     authOk: true,
     credentialSignal: 'accepted',
+    responseFingerprint,
     ...(reading.shortWindow === undefined ? {} : { shortWindow: reading.shortWindow }),
     ...(reading.longWindow === undefined ? {} : { longWindow: reading.longWindow }),
     atLimit: reading.providerAtLimit,
   };
+}
+
+const jsonType = (value: unknown): ProviderResponseJsonType => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'string') return 'string';
+  return 'object';
+};
+
+const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+
+/** Remove an exact credential and familiar authorization assignments from a retained diagnostic value. */
+function scrubDiagnosticValue(value: string | null | undefined, secrets: readonly string[]): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  let scrubbed = value.trim();
+  if (scrubbed.length === 0) return undefined;
+  for (const secret of secrets) if (secret.length > 0) scrubbed = scrubbed.replaceAll(secret, REDACTED);
+  scrubbed = scrubbed
+    .replace(/\bBearer\s+(?!(?:error|realm|scope)\s*=)[^\s,;]+/giu, `Bearer ${REDACTED}`)
+    .replace(
+      /\b(?:access[_-]?token|refresh[_-]?token|authorization|api[_-]?key)\s*[:=]\s*["']?[^\s,"']+/giu,
+      match => `${match.slice(0, Math.max(match.indexOf(':'), match.indexOf('=')) + 1)}${REDACTED}`,
+    )
+    .trim();
+  scrubbed = withoutControlCharacters(scrubbed).trim();
+  return scrubbed.length === 0 ? undefined : scrubbed.slice(0, MAX_DIAGNOSTIC_TEXT);
+}
+
+/** Key paths carry names, never values; only exact credential bytes and control characters are removed. */
+function scrubDiagnosticPath(value: string, secrets: readonly string[]): string {
+  let scrubbed = value;
+  for (const secret of secrets) if (secret.length > 0) scrubbed = scrubbed.replaceAll(secret, REDACTED);
+  scrubbed = withoutControlCharacters(scrubbed).trim();
+  return (scrubbed.length === 0 ? REDACTED : scrubbed).slice(0, MAX_DIAGNOSTIC_TEXT);
+}
+
+function authenticationShape(
+  value: string | null | undefined,
+  secrets: readonly string[],
+): ProviderAuthenticationShape | undefined {
+  const scrubbed = scrubDiagnosticValue(value, secrets);
+  if (scrubbed === undefined) return undefined;
+  const scheme = /^[A-Za-z][A-Za-z0-9+.-]*/u.exec(scrubbed)?.[0]?.toLowerCase();
+  if (scheme === undefined) return undefined;
+  const errorCode = /\berror\s*=\s*"?([A-Za-z0-9._:-]+)/iu.exec(scrubbed)?.[1];
+  return { scheme, ...(errorCode === undefined ? {} : { errorCode: errorCode.slice(0, MAX_DIAGNOSTIC_TEXT) }) };
+}
+
+function responseHeaderValues(
+  response: QuotaResponse,
+  secrets: readonly string[],
+): ProviderResponseHeaderValues | undefined {
+  const value = (name: string): string | undefined => scrubDiagnosticValue(response.header(name), secrets);
+  const headers: ProviderResponseHeaderValues = {
+    ...(value('anthropic-request-id') === undefined ? {} : { anthropicRequestId: value('anthropic-request-id') }),
+    ...(value('cf-mitigated') === undefined ? {} : { cfMitigated: value('cf-mitigated') }),
+    ...(value('cf-ray') === undefined ? {} : { cfRay: value('cf-ray') }),
+    ...(value('request-id') === undefined ? {} : { requestId: value('request-id') }),
+    ...(value('retry-after') === undefined ? {} : { retryAfter: value('retry-after') }),
+    ...(value('retry-after-ms') === undefined ? {} : { retryAfterMs: value('retry-after-ms') }),
+    ...(value('server') === undefined ? {} : { server: value('server') }),
+    ...(authenticationShape(response.header('www-authenticate'), secrets) === undefined
+      ? {}
+      : { wwwAuthenticate: authenticationShape(response.header('www-authenticate'), secrets) }),
+    ...(value('x-request-id') === undefined ? {} : { xRequestId: value('x-request-id') }),
+  };
+  return Object.keys(headers).length === 0 ? undefined : headers;
+}
+
+function jsonFields(
+  value: unknown,
+  secrets: readonly string[],
+): {
+  readonly fields: readonly ProviderResponseJsonField[];
+  readonly truncated: boolean;
+} {
+  const fields: ProviderResponseJsonField[] = [];
+  let truncated = false;
+  const visit = (current: unknown, prefix: string, depth: number): void => {
+    const record = asRecord(current);
+    if (record === undefined || depth > 1) return;
+    for (const key of Object.keys(record).sort()) {
+      if (fields.length >= MAX_JSON_FIELDS) {
+        truncated = true;
+        return;
+      }
+      const path = scrubDiagnosticPath(prefix.length === 0 ? key : `${prefix}.${key}`, secrets);
+      const child = record[key];
+      fields.push({ path, type: jsonType(child) });
+      if (depth < 1) visit(child, path, depth + 1);
+      if (truncated) return;
+    }
+  };
+  visit(value, '', 0);
+  return { fields, truncated };
+}
+
+function codeLike(value: unknown, secrets: readonly string[]): string | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const scrubbed = scrubDiagnosticValue(String(value), secrets);
+  if (scrubbed === undefined || !/^[A-Za-z0-9._:[\]-]+$/u.test(scrubbed)) return undefined;
+  return scrubbed;
+}
+
+function jsonShape(value: unknown, secrets: readonly string[]): ProviderResponseJsonShape {
+  const { fields, truncated } = jsonFields(value, secrets);
+  const root = asRecord(value);
+  const error = asRecord(root?.error);
+  const nestedType = codeLike(error?.type, secrets);
+  const rootType = codeLike(root?.type, secrets);
+  const errorCode =
+    codeLike(error?.code, secrets) ?? codeLike(root?.error_code, secrets) ?? codeLike(root?.code, secrets);
+  return {
+    type: jsonType(value),
+    fields: [...fields],
+    ...(truncated ? { fieldsTruncated: true as const } : {}),
+    ...(rootType === undefined ? {} : { envelopeType: rootType }),
+    ...(nestedType === undefined ? {} : { errorType: nestedType }),
+    ...(errorCode === undefined ? {} : { errorCode }),
+  };
+}
+
+interface InspectedQuotaResponse {
+  readonly fingerprint: ProviderResponseFingerprint;
+  readonly json?: unknown;
+}
+
+/** Read the response once, keeping only the evidence shape permitted by the public schema. */
+async function inspectResponse(response: QuotaResponse, secrets: readonly string[]): Promise<InspectedQuotaResponse> {
+  // Defend at both sides of the seam: the shipped fetch caps before returning, and inspection caps
+  // again so a custom transport cannot make this diagnostic path retain an arbitrary response.
+  const bodyTruncated = response.body.truncated || response.body.bytes.byteLength > MAX_RESPONSE_BODY_BYTES;
+  const bytes =
+    response.body.bytes.byteLength > MAX_RESPONSE_BODY_BYTES
+      ? response.body.bytes.slice(0, MAX_RESPONSE_BODY_BYTES)
+      : response.body.bytes;
+  let text: string | undefined;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    // Invalid UTF-8 is not JSON. The raw-byte length/hash still survives below.
+  }
+  let parsed: unknown;
+  let parsedJson = false;
+  if (!bodyTruncated && text !== undefined) {
+    try {
+      parsed = JSON.parse(text) as unknown;
+      parsedJson = true;
+    } catch {
+      // Invalid JSON is itself part of the fingerprint: the `json` outline is absent.
+    }
+  }
+
+  const normalizedSecrets = secrets.map(secret => secret.toLowerCase()).filter(secret => secret.length > 0);
+  const normalizedNames = [...new Set(response.headerNames.map(name => name.trim().toLowerCase()))]
+    .filter(name => /^[!#$%&'*+\-.^_`|~0-9a-z]+$/u.test(name))
+    .filter(name => !normalizedSecrets.some(secret => name.includes(secret)))
+    .sort();
+  const contentType = scrubDiagnosticValue(response.header('content-type')?.split(';', 1)[0], secrets)?.toLowerCase();
+  const headers = responseHeaderValues(response, secrets);
+  const fingerprint = ProviderResponseFingerprintSchema.parse({
+    status: response.status,
+    ...(contentType === undefined || contentType.length === 0
+      ? {}
+      : { contentType: contentType.slice(0, MAX_DIAGNOSTIC_TEXT) }),
+    headerNames: normalizedNames.slice(0, MAX_HEADER_NAMES),
+    ...(normalizedNames.length > MAX_HEADER_NAMES ? { headerNamesTruncated: true } : {}),
+    ...(headers === undefined ? {} : { headers }),
+    bodyLength: bytes.byteLength,
+    bodySha256: createHash('sha256').update(bytes).digest('hex'),
+    ...(bodyTruncated ? { bodyTruncated: true as const } : {}),
+    ...(parsedJson ? { json: jsonShape(parsed, secrets) } : {}),
+  });
+  return { fingerprint, ...(parsedJson ? { json: parsed } : {}) };
+}
+
+/** A 403 is accepted only for Anthropic's exact permission-error envelope, never an outline guess. */
+function acceptedScopeFailure(response: ProviderResponseFingerprint, body: unknown): boolean {
+  const jsonContent = response.contentType === 'application/json' || response.contentType?.endsWith('+json') === true;
+  const root = asRecord(body);
+  const error = asRecord(root?.error);
+  return jsonContent && root?.type === 'error' && error?.type === 'permission_error';
 }
 
 export class AnthropicUsageProbe implements FleetUsageProbe {
@@ -164,28 +383,11 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       return failure('no readable access token for this account', { authOk: false, credentialSignal: 'absent' });
     }
 
-    const stored = await this.#stored(token);
-    // A 403 from the read-only endpoint is permanent for an inference-scoped token, so this account
-    // will never report a number. IT IS REPORTED AS UNMEASURABLE, NOT PAID FOR. This used to fall back
-    // to `POST /v1/messages` — a real billable turn — and the daemon's unattended refresh reaches this
-    // probe on a fixed timer, so an account in that permanent-403 state billed on every tick forever.
-    // Spending money to read a usage number is never worth it, and an unattended pass may not spend at
-    // all. "Cannot be measured" is the honest answer and it costs nothing.
-    return (
-      stored ??
-      failure('this token cannot read usage; it lacks the user:profile scope', {
-        authOk: true,
-        // ACCEPTED, and merely unmeasurable. This is the single most consequential line in the file
-        // for the health verdict: a `403` here becomes `healthy/usage_scope_unavailable`, never a
-        // re-login. Reading it as a rejection would send somebody to sign in again, forever, on an
-        // account that is working perfectly.
-        credentialSignal: 'scope_unavailable',
-      })
-    );
+    return await this.#stored(token);
   }
 
-  /** The read-only usage endpoint. Returns nothing when the caller should fall back. */
-  async #stored(token: string): Promise<FleetUsageProbeResult | undefined> {
+  /** The read-only usage endpoint. Every completed response keeps its secret-safe fingerprint. */
+  async #stored(token: string): Promise<FleetUsageProbeResult> {
     let response: QuotaResponse;
     try {
       response = await this.deps.fetch({
@@ -198,33 +400,55 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       // A request that never completed proves nothing about the credential, and the two ways it can
       // fail are two different sentences a reader acts on differently: "it timed out" versus "the
       // provider could not be reached". Neither is ever a rejection.
-      return failure(requestFailure(error), { credentialSignal: abortedRequest(error) ? 'timeout' : 'inconclusive' });
+      return failure(requestFailure(error, [token]), {
+        credentialSignal: abortedRequest(error) ? 'timeout' : 'inconclusive',
+      });
     }
 
-    if (response.status === FORBIDDEN_STATUS) return undefined;
+    let inspected: InspectedQuotaResponse;
+    try {
+      inspected = await inspectResponse(response, [token]);
+    } catch (error) {
+      return failure(`the usage endpoint response could not be inspected: ${requestFailure(error, [token])}`, {
+        credentialSignal: 'inconclusive',
+      });
+    }
+
+    if (response.status === FORBIDDEN_STATUS) {
+      if (acceptedScopeFailure(inspected.fingerprint, inspected.json)) {
+        return failure('this token cannot read usage; it lacks the user:profile scope', {
+          authOk: true,
+          credentialSignal: usageEndpointCredentialSignal(response.status, { scopeUnavailableConfirmed: true }),
+          responseFingerprint: inspected.fingerprint,
+        });
+      }
+      return failure(`the usage endpoint answered HTTP ${response.status}`, {
+        credentialSignal: 'inconclusive',
+        responseFingerprint: inspected.fingerprint,
+      });
+    }
 
     if (!response.ok) {
       const verdict = usageEndpointHttpVerdict(response.status);
       return failure(`the usage endpoint answered HTTP ${response.status}`, {
         ...(verdict.authOk === undefined ? {} : { authOk: verdict.authOk }),
         credentialSignal: usageEndpointCredentialSignal(response.status),
+        responseFingerprint: inspected.fingerprint,
         ...(verdict.unavailable ? { unavailable: true, unavailableReason: 'this credential was rejected' } : {}),
       });
     }
 
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (error) {
+    if (inspected.json === undefined) {
       // The provider answered FOR THIS TOKEN and then handed back bytes this build cannot read. That
       // is a lost quota number and an accepted credential, so health stays positive while usage does
       // not — the whole reason the two facts travel in separate fields.
-      return failure(`the usage endpoint answered unreadable JSON: ${requestFailure(error)}`, {
+      return failure('the usage endpoint answered unreadable JSON', {
         authOk: true,
         credentialSignal: 'accepted',
+        responseFingerprint: inspected.fingerprint,
       });
     }
-    return fromReading(parseStoredUsageBody(body), 'the usage endpoint');
+    return fromReading(parseStoredUsageBody(inspected.json), 'the usage endpoint', inspected.fingerprint);
   }
 }
 
@@ -234,18 +458,19 @@ function abortedRequest(error: unknown): boolean {
 }
 
 /** A request failure's own message, never anything derived from the credential. */
-function requestFailure(error: unknown): string {
+function requestFailure(error: unknown, secrets: readonly string[] = []): string {
   if (abortedRequest(error)) return 'the request timed out';
-  return error instanceof Error && error.message.length > 0 ? error.message : 'the request failed';
+  if (!(error instanceof Error) || error.message.length === 0) return 'the request failed';
+  return scrubDiagnosticValue(error.message, secrets) ?? 'the request failed';
 }
 
 /**
  * The shipped fetch, bounded by a deadline.
  *
- * The response body is only read when a caller asks for JSON, and the response object handed back
- * exposes nothing but the status and header lookup — so a caller cannot accidentally hold a stream
- * open. Nothing is ever SENT: there is no request body here because {@link QuotaRequest} has no
- * field for one.
+ * Headers and at most {@link MAX_RESPONSE_BODY_BYTES} response bytes are read before this function
+ * returns. The same deadline covers headers AND body, and an oversized body is cancelled with an
+ * explicit truncation marker rather than buffered without limit. Nothing is ever SENT: there is no
+ * request body here because {@link QuotaRequest} has no field for one.
  */
 export const fetchQuota: QuotaFetch = async request => {
   const controller = new AbortController();
@@ -256,13 +481,60 @@ export const fetchQuota: QuotaFetch = async request => {
       headers: { ...request.headers },
       signal: controller.signal,
     });
+    const body = await readBoundedBody(response.body);
     return {
       status: response.status,
       ok: response.ok,
+      headerNames: [...response.headers.keys()].map(name => name.toLowerCase()).sort(),
       header: name => response.headers.get(name),
-      json: async () => await response.json(),
+      body,
     };
   } finally {
     clearTimeout(timer);
   }
 };
+
+/** Consume a response without letting an edge challenge allocate or retain an arbitrary body. */
+async function readBoundedBody(body: ReadableStream<Uint8Array> | null): Promise<QuotaResponse['body']> {
+  if (body === null) return { bytes: new Uint8Array(), truncated: false };
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const reading = await reader.read();
+      if (reading.done) break;
+      const chunk = reading.value;
+      if (chunk.byteLength === 0) continue;
+      const remaining = MAX_RESPONSE_BODY_BYTES - length;
+      if (remaining <= 0) {
+        truncated = true;
+      } else if (chunk.byteLength > remaining) {
+        chunks.push(chunk.slice(0, remaining));
+        length += remaining;
+        truncated = true;
+      } else {
+        chunks.push(chunk);
+        length += chunk.byteLength;
+      }
+      if (!truncated) continue;
+      try {
+        await reader.cancel('response body exceeded the diagnostic limit');
+      } catch {
+        // Cancellation races the request deadline. Either way no further bytes are retained.
+      }
+      break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, truncated };
+}

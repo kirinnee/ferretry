@@ -45,14 +45,23 @@ caller of that method is already a free read — the unattended quota pass, `GET
 the explicit check. **A health failure never fails the quota read it rode in on**, because the feed,
 the advisor and the warden are all waiting on that snapshot.
 
-## The rule that matters most
+## The rules that matter most
 
-**A `403` from the read-only usage endpoint is HEALTHY.**
+**A confirmed Anthropic JSON `403` from the read-only usage endpoint is HEALTHY.**
 
 It means the token lacks `user:profile`, which is permanent and expected for an inference-scoped
 token, and it says nothing whatever about whether the account works. Reading it as a rejection sends
 a person to re-login, forever, on a working account. So it is `healthy` / `usage_scope_unavailable`,
 and the **quota** is what goes missing — never a quota bar drawn at 0 %.
+
+The JSON qualification is load-bearing. A Cloudflare challenge can answer `403` with HTML, and that
+proves neither acceptance nor rejection. The probe retains content type and a bounded structural
+response fingerprint so equal statuses from the origin and the edge do not collapse into one claim.
+
+**A bare OAuth-control-plane `401` is not a re-login instruction.** This HTTP client cannot yet
+distinguish repudiation of the credential from refusal of the client itself, so the honest verdict is
+`unknown` / `oauth_rejection_unconfirmed`. A strict secret-safe response fingerprint preserves what
+the check saw for later diagnosis; it does not manufacture certainty the response did not carry.
 
 ## Verdicts
 
@@ -67,10 +76,11 @@ and the **quota** is what goes missing — never a quota bar drawn at 0 %.
 
 `fy fleet health` prints `fy fleet login <accountId>` beside every `needs_relogin` row, and for a
 while that command was the one thing guaranteed **not** to fix that account. A bare `fy fleet login`
-takes the cheapest route to a signed-in fleet, which means it reads what the homes hold — and the
-commonest cause of `needs_relogin` is `oauth_token_rejected`, a `401`, where the local credential
-still classifies as `valid` because it has an access token whose expiry is in the future. So the
-identity looked `complete`, every lane was reported `usable`, and nothing happened.
+takes the cheapest route to a signed-in fleet, which means it reads what the homes hold. The old
+status-only rule turned every control-plane `401` into `oauth_token_rejected` even when the local
+credential still classified as valid, so the identity looked `complete`, every lane was reported
+`usable`, and nothing happened. A bare `401` is now inconclusive; this reauthentication route remains
+for a rejection established by stronger evidence.
 
 Naming an account is therefore a statement that what it holds is not working, and it selects a
 different pass: see the `reauthenticate` mode in `packages/fleet/src/lib/login.ts`. It reaches the
@@ -93,31 +103,33 @@ Order is the design. First match wins.
 | --- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | 1   | manifest says unavailable                                                                    | `unknown` / `account_unavailable`                                                                                            | no         |
 | 2   | local credential positively dead                                                             | `needs_relogin` / `oauth_access_expired` \| `oauth_credential_missing`, or `needs_credentials` / `static_credential_missing` | **yes**    |
+| 3   | local access expired **with** a refresh token                                                | `unknown` / `oauth_refreshable`                                                                                              | no         |
 | —   | **Codex: the remote signal is BLANKED here**, so no row below can give it a provider verdict | (falls through)                                                                                                              | —          |
-| 3   | remote `200`                                                                                 | `healthy` / `provider_accepted`                                                                                              | **yes**    |
-| 3   | remote `403`                                                                                 | `healthy` / `usage_scope_unavailable`                                                                                        | **yes**    |
-| 3   | remote `401`                                                                                 | `needs_relogin` / `oauth_token_rejected`, or `needs_credentials` / `static_credential_rejected`                              | **yes**    |
-| 4   | credential unreadable, or nothing to ask with                                                | `unknown` / `credential_unreadable`                                                                                          | no         |
-| 5   | Codex                                                                                        | `unknown` / `codex_liveness_unproven`                                                                                        | no         |
-| 6   | remote timed out                                                                             | `unknown` / `check_timeout`                                                                                                  | no         |
-| 7   | remote `429` / `5xx` / other `4xx` / transport failure                                       | `unknown` / `provider_unavailable`                                                                                           | no         |
-| 8   | local expired **with** a refresh token                                                       | `unknown` / `oauth_refreshable`                                                                                              | no         |
-| 9   | local valid, provider never asked                                                            | `unknown` / `provider_not_asked`                                                                                             | no         |
-| 10  | nothing at all                                                                               | `unknown` / `never_checked`                                                                                                  | no         |
+| 4   | remote `200`                                                                                 | `healthy` / `provider_accepted`                                                                                              | **yes**    |
+| 4   | confirmed Anthropic JSON `403`                                                               | `healthy` / `usage_scope_unavailable`                                                                                        | **yes**    |
+| 4   | explicitly proven credential rejection (stronger than a bare status)                         | `needs_relogin` / `oauth_token_rejected`, or `needs_credentials` / `static_credential_rejected`                              | **yes**    |
+| 5   | remote bare `401`                                                                            | `unknown` / `oauth_rejection_unconfirmed`                                                                                    | no         |
+| 6   | credential unreadable, or nothing to ask with                                                | `unknown` / `credential_unreadable`                                                                                          | no         |
+| 7   | Codex                                                                                        | `unknown` / `codex_liveness_unproven`                                                                                        | no         |
+| 8   | remote timed out                                                                             | `unknown` / `check_timeout`                                                                                                  | no         |
+| 9   | remote HTML `403` / `429` / `5xx` / other `4xx` / transport failure                          | `unknown` / `provider_unavailable`                                                                                           | no         |
+| 10  | local valid, provider never asked                                                            | `unknown` / `provider_not_asked`                                                                                             | no         |
+| 11  | nothing at all                                                                               | `unknown` / `never_checked`                                                                                                  | no         |
 
 Three things that row order encodes:
 
 1. **An unavailable account is not checked.** A credential verdict about it would be a claim nothing
    measured.
-2. **A positively dead LOCAL credential outranks any remote answer.** The remote read was made
+2. **A decisive LOCAL expiry classification outranks any remote answer.** The remote read was made
    against the credential _group_'s shared login through one representative home; a sibling whose own
-   copy is absent does not become healthy because the representative answered. This is the only local
-   reading that is a hard negative, which is why it is the only one that wins.
+   copy is absent does not become healthy because the representative answered. An expired access token
+   with a refresh token is not dead either: a `401` against those stale bytes cannot condemn the
+   non-interactive recovery path beside them.
 3. **A locally valid token is not `healthy`.** It may have been revoked a minute ago. Local
    classification is structural evidence; only the provider can accept a credential.
-4. **Codex's signal is blanked between rows 2 and 3, not checked at row 5.** Row 5 is where a Codex
+4. **Codex's signal is blanked after local expiry, not checked at row 7.** Row 7 is where a Codex
    account _lands_; the blanking above is what makes it impossible for one to land anywhere else. It
-   is deliberately a suppression rather than an early return, so rows 4 and 8 stay reachable for
+   is deliberately a suppression rather than an early return, so the more specific unknown rows stay reachable for
    Codex — `credential_unreadable` is more useful than "Codex cannot be proved", and losing it would
    be paying for the safety with the diagnosis.
 
@@ -217,12 +229,16 @@ here" cannot compare equal to "there is something here".
 `$FY_HOME/fleet/account-health.json`, one head per published account:
 
 ```text
-{ accountId, kind, verdict, reason, evidence, lastCheckedAt, verdictAt, lastCheckInconclusive, fingerprint }
+{ accountId, kind, verdict, reason, evidence, lastCheckedAt, verdictAt, lastCheckInconclusive, fingerprint, responseFingerprint }
 ```
 
-Reason codes, verdicts, instants, and one opaque digest. **No tokens, no authorization headers, no
-provider bodies, no output from anything the fleet launches** — enforced by the schema rather than by
-convention: there is no field a secret could travel in.
+Reason codes, verdicts, instants, one opaque credential digest and a strict provider-response
+fingerprint. The latter contains status, normalized content type, header **names**, a closed allowlist
+of scrubbed non-secret header values, body byte length/SHA-256, and parsed JSON key/type/error-code
+shape. The body read is hard-capped at 64 KiB; an oversized response is cancelled and marked
+`bodyTruncated`, and its length/digest honestly describe only the retained prefix. **No token,
+authorization value, cookie, provider body, provider message, or harness output is stored** —
+enforced by strict schemas rather than convention: there is no free-text field for one to travel in.
 
 - `lastCheckedAt` is **nullable**, and that is load-bearing. The contract it replaces required a
   number, so an account nobody had checked was published with a fabricated "now" — the same shape on

@@ -10,6 +10,19 @@ import {
 } from '../../../src/lib/fleet-health/head.ts';
 
 const NOW = 1_786_000_000_000;
+const RESPONSE_FINGERPRINT = {
+  status: 401,
+  contentType: 'application/json',
+  headerNames: ['content-type', 'request-id'],
+  headers: { requestId: 'request-123' },
+  bodyLength: 73,
+  bodySha256: 'd'.repeat(64),
+  json: {
+    type: 'object' as const,
+    fields: [{ path: 'error.type', type: 'string' as const }],
+    errorType: 'authentication_error',
+  },
+};
 
 const observation = (patch: Partial<AccountHealthObservation> = {}): AccountHealthObservation => ({
   accountId: 'acct',
@@ -41,6 +54,7 @@ describe('neverCheckedHead', () => {
       verdictAt: null,
       lastCheckInconclusive: false,
       fingerprint: null,
+      responseFingerprint: null,
     });
   });
 });
@@ -61,6 +75,7 @@ describe('mergeAccountHealthHead', () => {
       verdictAt: NOW,
       lastCheckInconclusive: false,
       fingerprint: 'aaa',
+      responseFingerprint: null,
     });
   });
 
@@ -78,7 +93,13 @@ describe('mergeAccountHealthHead', () => {
     // Act
     const actual = mergeAccountHealthHead(
       stored,
-      observation({ verdict: 'unknown', reason: 'provider_unavailable', conclusive: false, fingerprint: 'aaa' }),
+      observation({
+        verdict: 'unknown',
+        reason: 'provider_unavailable',
+        conclusive: false,
+        fingerprint: 'aaa',
+        responseFingerprint: RESPONSE_FINGERPRINT,
+      } as Partial<AccountHealthObservation>),
     );
 
     // Assert — the conclusion stands with its OWN older date, and the failure is published rather than
@@ -87,6 +108,29 @@ describe('mergeAccountHealthHead', () => {
     should(actual.verdictAt).equal(NOW - 60_000);
     should(actual.lastCheckedAt).equal(NOW);
     should(actual.lastCheckInconclusive).be.true();
+    should((actual as unknown as { responseFingerprint?: unknown }).responseFingerprint).deepEqual(
+      RESPONSE_FINGERPRINT,
+    );
+  });
+
+  it('clears an old response fingerprint when the newest observation made no provider request', () => {
+    // Arrange — response evidence belongs to the newest actual check, never to a prior check whose
+    // status happens to remain the standing conclusion.
+    const stored = head({ responseFingerprint: RESPONSE_FINGERPRINT } as Partial<AccountHealthHead>);
+
+    // Act
+    const actual = mergeAccountHealthHead(
+      stored,
+      observation({
+        verdict: 'unknown',
+        reason: 'oauth_refreshable',
+        evidence: 'local_credential',
+        conclusive: false,
+      }),
+    );
+
+    // Assert
+    should((actual as unknown as { responseFingerprint?: unknown }).responseFingerprint).be.null();
   });
 
   it('refuses to condemn a credential that was REPLACED while the remote check ran', () => {
@@ -230,6 +274,25 @@ describe('mergeAccountHealthHead', () => {
 });
 
 describe('projectAccountHealth', () => {
+  it('publishes the response fingerprint stored with the newest check', () => {
+    // Arrange
+    const stored = head({
+      verdict: 'unknown',
+      reason: 'provider_unavailable',
+      evidence: 'anthropic_usage',
+      lastCheckedAt: NOW,
+      responseFingerprint: RESPONSE_FINGERPRINT,
+    } as Partial<AccountHealthHead>);
+
+    // Act
+    const actual = projectAccountHealth(stored, NOW);
+
+    // Assert
+    should((actual as unknown as { responseFingerprint?: unknown }).responseFingerprint).deepEqual(
+      RESPONSE_FINGERPRINT,
+    );
+  });
+
   it('publishes a fresh conclusion unchanged, with no stale marker', () => {
     // Arrange
     const stored = head({

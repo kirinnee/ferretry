@@ -5,19 +5,29 @@ import { ACCOUNT_HEALTH_FILE, FileSystemAccountHealthStore } from '../../../src/
 
 const NOW = 1_786_000_000_000;
 const FILE = `/state/fleet/${ACCOUNT_HEALTH_FILE}`;
+const RESPONSE_FINGERPRINT = {
+  status: 401,
+  contentType: 'application/json',
+  headerNames: ['content-type'],
+  bodyLength: 42,
+  bodySha256: 'e'.repeat(64),
+  json: { type: 'object' as const, fields: [{ path: 'error.type', type: 'string' as const }] },
+};
 
-const head = (patch: Partial<AccountHealthHead> = {}): AccountHealthHead => ({
-  accountId: 'acct',
-  kind: 'claude',
-  verdict: 'healthy',
-  reason: 'provider_accepted',
-  evidence: 'anthropic_usage',
-  lastCheckedAt: NOW,
-  verdictAt: NOW,
-  lastCheckInconclusive: false,
-  fingerprint: 'aaa',
-  ...patch,
-});
+const head = (patch: Partial<AccountHealthHead> = {}): AccountHealthHead =>
+  ({
+    accountId: 'acct',
+    kind: 'claude',
+    verdict: 'healthy',
+    reason: 'provider_accepted',
+    evidence: 'anthropic_usage',
+    lastCheckedAt: NOW,
+    verdictAt: NOW,
+    lastCheckInconclusive: false,
+    fingerprint: 'aaa',
+    responseFingerprint: RESPONSE_FINGERPRINT,
+    ...patch,
+  }) as AccountHealthHead;
 
 /** An in-memory filing surface satisfying exactly the two port methods the store consumes. */
 const files = (seed?: string) => {
@@ -90,7 +100,7 @@ describe('FileSystemAccountHealthStore', () => {
     await should(store.write([head()])).be.rejectedWith(/the disk is full/u);
   });
 
-  it('stores nothing but codes, instants and one opaque digest', async () => {
+  it('stores only codes, instants, the credential digest and the secret-safe response fingerprint', async () => {
     // Arrange
     const surface = files();
 
@@ -107,6 +117,7 @@ describe('FileSystemAccountHealthStore', () => {
       'lastCheckInconclusive',
       'lastCheckedAt',
       'reason',
+      'responseFingerprint',
       'verdict',
       'verdictAt',
     ]);

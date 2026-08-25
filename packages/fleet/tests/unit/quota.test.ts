@@ -248,8 +248,10 @@ describe('usageEndpointHttpVerdict', () => {
     should(inferenceHttpVerdict(FORBIDDEN).unavailable).be.true();
   });
 
-  it('should still let 401 condemn the credential', () => {
-    should(usageEndpointHttpVerdict(UNAUTHORIZED)).deepEqual({ authOk: false, unavailable: true });
+  it('should keep a bare control-plane 401 inconclusive for both auth and availability', () => {
+    // The endpoint can refuse this HTTP client independently of whether the credential works in the
+    // native harness. Status alone therefore cannot condemn the login or take the account out of use.
+    should(usageEndpointHttpVerdict(UNAUTHORIZED)).deepEqual({ unavailable: false });
   });
 
   it('should treat a success as conclusive', () => {
@@ -266,23 +268,28 @@ describe('usageEndpointHttpVerdict', () => {
  * accepted nothing. Reusing the quota reading would publish a healthy verdict for every outage.
  */
 describe('usageEndpointCredentialSignal', () => {
-  it('should classify a 403 as accepted-but-unmeasurable, never as a rejection', () => {
-    // The single most consequential row: this becomes `healthy/usage_scope_unavailable`, and reading
-    // it as a rejection sends somebody to re-login forever on an account that works.
-    should(usageEndpointCredentialSignal(FORBIDDEN)).equal('scope_unavailable');
+  it('should require confirmed Anthropic JSON before a 403 is accepted-but-unmeasurable', () => {
+    // The status alone can also be a Cloudflare HTML challenge. Only the inspected JSON response may
+    // become `healthy/usage_scope_unavailable`; a bare 403 stays inconclusive.
+    should(usageEndpointCredentialSignal(FORBIDDEN)).equal('inconclusive');
+    should(usageEndpointCredentialSignal(FORBIDDEN, { scopeUnavailableConfirmed: true })).equal('scope_unavailable');
   });
 
-  it('should let only 401 reject the credential', () => {
-    should(usageEndpointCredentialSignal(UNAUTHORIZED)).equal('rejected');
+  it('should classify a bare 401 as an unconfirmed rejection', () => {
+    should(usageEndpointCredentialSignal(UNAUTHORIZED)).equal('rejection_unconfirmed');
   });
 
   it('should classify every 2xx as accepted', () => {
-    should([200, 204, 299].map(usageEndpointCredentialSignal)).deepEqual(['accepted', 'accepted', 'accepted']);
+    should([200, 204, 299].map(status => usageEndpointCredentialSignal(status))).deepEqual([
+      'accepted',
+      'accepted',
+      'accepted',
+    ]);
   });
 
   it('should refuse to conclude anything from a rate limit, a server error or another 4xx', () => {
     // Arrange / Act
-    const actual = [TOO_MANY_REQUESTS, 500, 503, 418, 302].map(usageEndpointCredentialSignal);
+    const actual = [TOO_MANY_REQUESTS, 500, 503, 418, 302].map(status => usageEndpointCredentialSignal(status));
 
     // Assert — a rate-limited account is an AUTHENTICATED account, and certainly not one whose login
     // needs replacing. Note `usageEndpointHttpVerdict` reports `authOk: true` for these; health may

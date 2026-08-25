@@ -13,6 +13,7 @@ import {
   isCorroboratedAuthRejection,
   normalizeResetAt,
   normalizeUsageWindows,
+  type ProviderResponseFingerprint,
   renderFleetUsageJson,
   renderFleetUsageMetrics,
   usedPercentFromRemaining,
@@ -315,6 +316,44 @@ describe('FleetUsageCollector probing once per credential', () => {
     should(snapshot.accounts).have.length(3);
     should(snapshot.accounts.map(row => row.shortWindow?.usedPercent)).deepEqual([42, 42, 42]);
     should(snapshot.accounts.map(row => row.accountId)).deepEqual(['a', 'b', 'c']);
+  });
+
+  it('should carry the secret-safe provider response fingerprint to every account on the identity', async () => {
+    // Arrange — one remote request speaks for the declared credential group, so its diagnostic
+    // evidence must fan out beside the credential signal rather than disappear at the collector.
+    const responseFingerprint: ProviderResponseFingerprint = {
+      status: 401,
+      contentType: 'application/json',
+      headerNames: ['content-type', 'request-id'],
+      headers: { requestId: 'request-123' },
+      bodyLength: 73,
+      bodySha256: 'a'.repeat(64),
+      json: {
+        type: 'object',
+        fields: [{ path: 'error.type', type: 'string' }],
+        errorType: 'authentication_error',
+      },
+    };
+    const subject = new FleetUsageCollector(
+      probe(() =>
+        Promise.resolve({
+          usageBased: true,
+          ok: false,
+          credentialSignal: 'rejection_unconfirmed',
+          responseFingerprint,
+        }),
+      ),
+      clock,
+      { identityOf: () => 'claude:kirin' },
+    );
+
+    // Act
+    const snapshot = await subject.collect(manifest([account('a'), account('b')]));
+
+    // Assert
+    should(
+      snapshot.accounts.map(row => (row as unknown as { responseFingerprint?: unknown }).responseFingerprint),
+    ).deepEqual([responseFingerprint, responseFingerprint]);
   });
 
   it('should probe each identity separately', async () => {

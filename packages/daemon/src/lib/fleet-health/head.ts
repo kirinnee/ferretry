@@ -36,12 +36,13 @@
  */
 import {
   type AccountHealthObservation,
+  FLEET_HEALTH_FRESH_MS,
   type FleetAccountHealth,
   FleetAccountHealthSchema,
-  FLEET_HEALTH_FRESH_MS,
   FleetHealthEvidenceSchema,
   FleetHealthReasonSchema,
   FleetHealthVerdictSchema,
+  ProviderResponseFingerprintSchema,
 } from '@ferretry/fleet';
 import { z } from 'zod';
 
@@ -65,6 +66,8 @@ export const AccountHealthHeadSchema = z.strictObject({
   verdictAt: epochMilliseconds.nullable(),
   lastCheckInconclusive: z.boolean(),
   fingerprint: z.string().min(1).nullable(),
+  /** The newest completed provider response's secret-safe shape, or null when no request completed. */
+  responseFingerprint: ProviderResponseFingerprintSchema.nullable(),
 });
 export type AccountHealthHead = z.infer<typeof AccountHealthHeadSchema>;
 
@@ -94,6 +97,7 @@ export function neverCheckedHead(accountId: string, kind: string): AccountHealth
     verdictAt: null,
     lastCheckInconclusive: false,
     fingerprint: null,
+    responseFingerprint: null,
   };
 }
 
@@ -113,7 +117,8 @@ export function mergeAccountHealthHead(
 ): AccountHealthHead {
   const previous = head ?? neverCheckedHead(observation.accountId, observation.kind);
   const fingerprint = observation.fingerprint ?? null;
-  const checked = { ...previous, kind: observation.kind, lastCheckedAt: observation.at };
+  const responseFingerprint = observation.responseFingerprint ?? null;
+  const checked = { ...previous, kind: observation.kind, lastCheckedAt: observation.at, responseFingerprint };
 
   if (!observation.conclusive) {
     // Nothing conclusive was learned — but WHETHER there is a conclusion to protect decides what the
@@ -184,6 +189,7 @@ export function projectAccountHealth(head: AccountHealthHead, now: number): Flee
       lastCheckedAt: head.lastCheckedAt,
       verdictAt: head.verdictAt,
       lastCheckInconclusive: head.lastCheckInconclusive,
+      ...(head.responseFingerprint === null ? {} : { responseFingerprint: head.responseFingerprint }),
       // What it WAS, so a reader is told "this was healthy and is now too old to trust" rather than
       // being handed a bare unknown that looks like the account was never checked.
       staleVerdict: head.verdict,
@@ -198,5 +204,6 @@ export function projectAccountHealth(head: AccountHealthHead, now: number): Flee
     lastCheckedAt: head.lastCheckedAt,
     verdictAt: head.verdictAt,
     lastCheckInconclusive: head.lastCheckInconclusive,
+    ...(head.responseFingerprint === null ? {} : { responseFingerprint: head.responseFingerprint }),
   });
 }

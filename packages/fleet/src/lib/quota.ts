@@ -208,12 +208,16 @@ export function inferenceHttpVerdict(status: number): QuotaHttpVerdict {
 /**
  * The same two questions for the read-only usage endpoint, where `403` means something different.
  *
- * A `403` from `GET /api/oauth/usage` only means the token lacks the `user:profile` scope, which is
- * *expected* for an inference-scoped token. It says nothing about whether the account can serve work,
- * so unlike the inference case it must not mark the account unavailable.
+ * A confirmed Anthropic JSON `403` means the token lacks `user:profile`; an HTML `403` may be an edge
+ * challenge. Neither status-only response establishes that the account cannot serve inference, and a
+ * bare control-plane `401` cannot distinguish the credential from this HTTP client. Unlike the
+ * inference-call table, neither status therefore marks the account unavailable here.
  */
 export function usageEndpointHttpVerdict(status: number): QuotaHttpVerdict {
-  if (status === UNAUTHORIZED) return { authOk: false, unavailable: true };
+  // A bare control-plane 401 cannot distinguish a credential the provider repudiated from an HTTP
+  // client the control plane refused. It therefore cannot condemn the login or take the account out
+  // of routing; the response fingerprint retained by the adapter is what a later discriminator reads.
+  if (status === UNAUTHORIZED) return { unavailable: false };
   if (status === FORBIDDEN) return { unavailable: false };
   return { authOk: true, unavailable: false };
 }
@@ -221,26 +225,28 @@ export function usageEndpointHttpVerdict(status: number): QuotaHttpVerdict {
 /**
  * The same read-only usage status, as the credential classification a HEALTH verdict is built from.
  *
- * WHY THIS IS NOT `usageEndpointHttpVerdict`. That function answers "is the credential repudiated",
- * and for quota purposes anything that is not a `401` may safely be treated as "not repudiated" —
- * so it returns `authOk: true` for a `503`, and it is right to. Health asks a different question:
+ * WHY THIS IS NOT `usageEndpointHttpVerdict`. That function answers the quota path's narrower
+ * availability question and still returns `authOk: true` for a `503`. Health asks a different question:
  * was this credential ACCEPTED. A provider that never answered accepted nothing, and reusing the
  * quota reading here would publish a healthy verdict for every outage, timeout and rate limit.
  *
  * The three interesting rows:
  *
- * - `401` -> `rejected`. The one status that condemns a token.
- * - `403` -> `scope_unavailable`, which is a HEALTHY reading. The token lacks `user:profile`, which
- *   is permanent for an inference-scoped token and says nothing about whether the account works.
- *   `usage_scope_unavailable` is the reason a reader sees; "re-login" is never offered for it.
+ * - `401` -> `rejection_unconfirmed`. This control-plane client cannot yet distinguish a token
+ *   rejection from refusal of the client itself, so status alone must never instruct a re-login.
+ * - confirmed Anthropic JSON `403` -> `scope_unavailable`, which is a HEALTHY reading. A status-only
+ *   `403` is inconclusive because the same status can be an HTML edge challenge.
  * - everything else non-2xx -> `inconclusive`, including `429`. A rate-limited account is an
  *   authenticated account, and it is certainly not one whose login needs replacing.
  *
  * `timeout` and `absent` have no status to map from: they are decided by the caller, which is the
  * only place that knows a request was abandoned or never made.
  */
-export function usageEndpointCredentialSignal(status: number): FleetCredentialSignal {
-  if (status === UNAUTHORIZED) return 'rejected';
-  if (status === FORBIDDEN) return 'scope_unavailable';
+export function usageEndpointCredentialSignal(
+  status: number,
+  evidence: { readonly scopeUnavailableConfirmed?: boolean } = {},
+): FleetCredentialSignal {
+  if (status === UNAUTHORIZED) return 'rejection_unconfirmed';
+  if (status === FORBIDDEN) return evidence.scopeUnavailableConfirmed === true ? 'scope_unavailable' : 'inconclusive';
   return status >= 200 && status < 300 ? 'accepted' : 'inconclusive';
 }
