@@ -1627,7 +1627,7 @@ function createSessionControlSubsystem(
       // named after: a plan built on the requested name and a document recording the fallback would
       // disagree about who this session is.
       const teammate = await claimCallsign(callsigns, id, request);
-      const plan = planner.plan({
+      const planned = planner.plan({
         id,
         account,
         mode: request.mode,
@@ -1636,6 +1636,21 @@ function createSessionControlSubsystem(
         ...(request.model === undefined ? {} : { requestedModel: request.model }),
         ...(request.parent === undefined ? {} : { parent: request.parent }),
       });
+      // A REQUEST THIS ACCOUNT CANNOT MEET IS REFUSED, never quietly answered with something else.
+      // The planner used to drop an unservable model and hand back the account's default, which then
+      // went onto the launch argv and onto the document — so a caller who named a model got a session
+      // running a different one, at a different price and in a different context window, and was told
+      // nothing.
+      //
+      // THE CALLSIGN IS RELEASED FIRST. It is claimed before the plan because the plan is named after
+      // it, so this is the one refusal that happens with a pool name already reserved; nothing else
+      // has been written, so leaving it claimed would park a name for the whole resolution window on
+      // a session that never happens — the same reason the launch failure below releases it.
+      if (planned.kind === 'unservable-model') {
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+        throw new SessionControlError('unservable_model', planned.reason);
+      }
+      const plan = planned.plan;
       const startupRuntime: RuntimeControlRequest | undefined =
         request.effort === undefined
           ? undefined
@@ -2935,7 +2950,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     if (mismatch !== undefined) throw new SessionMigrateError('harness_mismatch', mismatch);
     // The same planner the start uses, so the model a migration records and the window it is measured
     // against come from the one decision rather than two that can disagree.
-    const plan = parts.planner.plan({
+    const planned = parts.planner.plan({
       id,
       account,
       mode: config.mode,
@@ -2944,6 +2959,13 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       ...(request.model === undefined ? {} : { requestedModel: request.model }),
       ...(config.parent === undefined ? {} : { parent: config.parent }),
     });
+    // A MIGRATION ONTO A MODEL THE TARGET DOES NOT SERVE IS REFUSED, for the same reason the start
+    // refuses it and with more at stake: a migration that quietly landed on the account's default
+    // would move a live conversation into a different model and a different context window while the
+    // report handed back named the one that was asked for. Refused at the same point the family
+    // mismatch is, so the refusal costs nothing and leaves the session exactly where it was.
+    if (planned.kind === 'unservable-model') throw new SessionMigrateError('unservable_model', planned.reason);
+    const plan = planned.plan;
     // Rebuilt rather than patched: the remote-control arguments are the TARGET harness's, and a
     // codex session inheriting a claude session's flags would relaunch into an argument error.
     //
@@ -3357,19 +3379,23 @@ export function createSessionHandoverSubsystem(
           const { account } = await resolveStartAccount(wiring.accounts, agent, wiring.executables);
           // The SAME planner the start and the migration use, so the model a handover records and the
           // window it is measured against come from one decision rather than two that can disagree.
-          const plan = wiring.planner.plan({
+          const planned = wiring.planner.plan({
             id: 'handover-probe',
             account,
             mode: 'interactive',
             ...(model === null ? {} : { requestedModel: model }),
           });
+          // A handover that named a model the replacement cannot serve is refused at RESOLUTION, which
+          // is before a receipt exists: seating a replacement on the account's default instead would
+          // retire the predecessor in favour of a session the requester never asked for.
+          if (planned.kind === 'unservable-model') throw new HandoverError('step_failed', planned.reason);
           return {
             accountId: account.id,
             agent: account.agent,
             harness: account.kind,
-            model: plan.model,
+            model: planned.plan.model,
             effort: null,
-            contextWindow: plan.contextWindow,
+            contextWindow: planned.plan.contextWindow,
           };
         },
       },

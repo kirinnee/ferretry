@@ -18,15 +18,21 @@ const LAYOUT: FleetLayout = {
   defaultHomeDirectories: { claude: '/home/tester/.claude', codex: '/home/tester/.codex' },
 };
 
-/** One identifier per (harness × lane), spelled out so every assertion can name the exact one. */
+/** Every identifier the starter prints, spelled out so every assertion can name the exact one. */
 const IDS = {
-  claude: {
-    default: '00000000-0000-4000-8000-00000000a001',
-    auto: '00000000-0000-4000-8000-00000000a002',
+  accounts: {
+    claude: {
+      default: '00000000-0000-4000-8000-00000000a001',
+      auto: '00000000-0000-4000-8000-00000000a002',
+    },
+    codex: {
+      default: '00000000-0000-4000-8000-00000000a003',
+      auto: '00000000-0000-4000-8000-00000000a004',
+    },
   },
-  codex: {
-    default: '00000000-0000-4000-8000-00000000a003',
-    auto: '00000000-0000-4000-8000-00000000a004',
+  example: {
+    default: '00000000-0000-4000-8000-00000000a005',
+    auto: '00000000-0000-4000-8000-00000000a006',
   },
 } as const;
 
@@ -52,9 +58,19 @@ describe('fleetScaffoldIds', () => {
     const ids = fleetScaffoldIds(() => `id-${String(++minted)}`);
 
     // Assert — an account id must never be shared: two lanes on one id are two accounts the manifest
-    // could not tell apart.
-    should(minted).equal(4);
-    should(new Set([ids.claude.default, ids.claude.auto, ids.codex.default, ids.codex.auto]).size).equal(4);
+    // could not tell apart. The example spends two of its own, because it is a thing somebody
+    // uncomments and it has to parse when they do.
+    should(minted).equal(6);
+    should(
+      new Set([
+        ids.accounts.claude.default,
+        ids.accounts.claude.auto,
+        ids.accounts.codex.default,
+        ids.accounts.codex.auto,
+        ids.example.default,
+        ids.example.auto,
+      ]).size,
+    ).equal(6);
   });
 });
 
@@ -146,6 +162,17 @@ describe('buildFleetScaffold', () => {
   });
 });
 
+/**
+ * The example's agent entry as a person uncomments it: every line of it carries `#   `, and the
+ * `agents:` line above it does not, so stripping two characters off those lines is exactly the edit.
+ */
+const uncommentedExample = (text: string): string =>
+  text
+    .split('\n')
+    .filter(line => line.startsWith('#   '))
+    .map(line => line.slice(2))
+    .join('\n');
+
 describe('the starter configuration', () => {
   const config = () => fileAt('/state/fleet/config.yaml')?.content ?? '';
 
@@ -178,14 +205,14 @@ describe('the starter configuration', () => {
       'claude-auto-default',
     ]);
     should(parsed.agents[0]?.routes.default).match({
-      id: IDS.claude.default,
+      id: IDS.accounts.claude.default,
       wrapper: 'claude-default',
       home: 'claude-default',
       defaultModel: 'claude-opus-5',
       models: [{ id: 'claude-opus-5', available: true }],
     });
     should(parsed.agents[0]?.routes.auto).match({
-      id: IDS.claude.auto,
+      id: IDS.accounts.claude.auto,
       wrapper: 'claude-auto-default',
       home: 'claude-auto-default',
     });
@@ -367,19 +394,61 @@ describe('the starter configuration', () => {
   });
 
   it('should carry the generated ids in its example, so nobody has to invent a UUID', () => {
-    // Assert — both are the CLAUDE agent's ids, because the example declares one Claude account with
-    // two lanes; spending the codex id on a claude route is the defect the shape now prevents.
-    should(config()).containEql(IDS.claude.default);
-    should(config()).containEql(IDS.claude.auto);
+    // Assert — the example's OWN two ids, spent nowhere else. Both lanes belong to one Claude
+    // account, because the example declares one account with two lanes.
+    should(config()).containEql(IDS.example.default);
+    should(config()).containEql(IDS.example.auto);
   });
 
   it('should keep the example commented out', () => {
     // Assert — every line mentioning an id is a comment, so the example cannot accidentally apply.
     const exampleLines = config()
       .split('\n')
-      .filter(line => line.includes(IDS.claude.default) || line.includes(IDS.claude.auto));
+      .filter(line => line.includes(IDS.example.default) || line.includes(IDS.example.auto));
     should(exampleLines).not.be.empty();
     for (const line of exampleLines) should(line.trimStart()).startWith('#');
+  });
+
+  /**
+   * THE ONE INSTRUCTION THE FILE GIVES, FOLLOWED.
+   *
+   * The example used to print the ids already spent on the declared Claude account above it, so
+   * uncommenting it produced a configuration that refused to parse on a duplicate account id — in the
+   * first file a new person opens, doing the only thing it tells them to do. Asserting that the ids
+   * merely APPEAR could not catch that; this parses the result.
+   */
+  it('should still parse once somebody uncomments the example beside a declared account', () => {
+    // Arrange — a starter that already declares an account, and the example's agent entry with its
+    // `# ` stripped, which is what uncommenting it in place amounts to. A YAML block sequence accepts
+    // a further item after the comments, so this is the text a person would end up with.
+    const starter = starterFor(['claude']).files.find(file => file.path === '/state/fleet/config.yaml')?.content ?? '';
+    const example = uncommentedExample(starter);
+
+    // Act
+    const parsed = FleetConfigSchema.safeParse(Bun.YAML.parse(`${starter}\n${example}\n`));
+
+    // Assert — the uncommenting is asserted to have FOUND something first. `uncommentedExample` matches
+    // on the template's exact indentation, so a re-indented example block would make it yield nothing,
+    // and this test would then re-parse the unchanged starter and pass while proving nothing at all.
+    should(example).not.be.empty();
+    should(parsed.error?.issues ?? []).be.empty();
+    should(parsed.success).be.true();
+  });
+
+  it('should show the long model form in the example, including one taken out of service', () => {
+    // Act — the only place a person is shown that a model may carry a display name, and that taking
+    // one out of service needs a reason. Every other example in the file is a bare identifier, which
+    // is what made the long form undiscoverable.
+    const parsed = FleetConfigSchema.parse(
+      Bun.YAML.parse(`variants:\n  default: {}\n  auto: {}\nagents:\n${uncommentedExample(config())}`),
+    );
+
+    // Assert
+    should(parsed.agents[0]?.routes.default?.models).deepEqual([
+      { id: 'claude-opus-4-5', available: true },
+      { id: 'claude-sonnet-4-5', available: true, displayName: 'Sonnet 4.5' },
+      { id: 'claude-haiku-4-5', available: false, unavailableReason: 'this subscription does not include Haiku' },
+    ]);
   });
 
   it('should keep the example commented out even when accounts were declared', () => {

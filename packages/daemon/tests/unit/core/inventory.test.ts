@@ -103,11 +103,12 @@ describe('resolveDisplayModel', () => {
   const primary = inventory[0] as CoreAccount;
 
   it('should trust what the harness reported about itself above everything', () => {
-    // Arrange / Act
-    const resolved = resolveDisplayModel(primary, 'steady', '  observed-1  ');
+    // Arrange / Act — an observed model is not a request, so it is never refused: it is what the pane
+    // is running, whatever the account's list says.
+    const resolved = resolveDisplayModel(primary, 'forge', '  observed-1  ');
 
     // Assert
-    should(resolved).deepEqual({ model: 'observed-1', source: 'harness' });
+    should(resolved).deepEqual({ kind: 'resolved', model: 'observed-1', source: 'harness' });
   });
 
   it('should report the requested model when the account can serve it', () => {
@@ -115,15 +116,42 @@ describe('resolveDisplayModel', () => {
     const resolved = resolveDisplayModel(primary, 'steady');
 
     // Assert
-    should(resolved).deepEqual({ model: 'steady', source: 'requested' });
+    should(resolved).deepEqual({ kind: 'resolved', model: 'steady', source: 'requested' });
   });
 
-  it('should report the default a request will really get when the model is not served here', () => {
-    // Arrange — the source reported the requested alias and listed panes as models they never ran
+  it('should REFUSE a model the account does not serve, naming what it does serve', () => {
+    // Arrange / Act — this used to answer with the account's default, so a caller who named `forge` got
+    // `apex` and was told nothing; the model then reached the launch argv and the session document.
     const resolved = resolveDisplayModel(primary, 'forge');
 
     // Assert
-    should(resolved).deepEqual({ model: 'apex', source: 'account-default' });
+    should(resolved.kind).equal('unservable');
+    should(resolved.kind === 'unservable' && resolved.requested).equal('forge');
+    should(resolved.kind === 'unservable' && resolved.reason).equal(
+      'account agent-primary does not serve model "forge". It serves apex, steady — name one of those, or declare "forge" on the account in the fleet configuration',
+    );
+  });
+
+  it('should REFUSE a model taken out of service with the reason the operator wrote', () => {
+    // Arrange — the reason is the most useful sentence this daemon will ever have about that model, and
+    // it is the operator's own; a generic "not served" would start an investigation instead of ending it.
+    const partial = account({
+      id: 'partial',
+      agent: 'agent-partial',
+      defaultModel: 'apex',
+      models: [
+        { id: 'apex', available: true },
+        { id: 'swift', available: false, unavailableReason: 'this subscription tier does not include Swift' },
+      ],
+    });
+
+    // Act
+    const resolved = resolveDisplayModel(partial, 'swift');
+
+    // Assert
+    should(resolved.kind === 'unservable' && resolved.reason).equal(
+      'account agent-partial cannot serve model "swift": this subscription tier does not include Swift. It serves apex — name one of those, or take "swift" back into service in the fleet configuration',
+    );
   });
 
   it('should fall back to the account default when nothing was requested', () => {
@@ -131,7 +159,7 @@ describe('resolveDisplayModel', () => {
     const resolved = resolveDisplayModel(primary, '   ');
 
     // Assert
-    should(resolved).deepEqual({ model: 'apex', source: 'account-default' });
+    should(resolved).deepEqual({ kind: 'resolved', model: 'apex', source: 'account-default' });
   });
 
   it('should claim nothing for an account that declares no default', () => {
@@ -139,7 +167,7 @@ describe('resolveDisplayModel', () => {
     const resolved = resolveDisplayModel(account({ id: 'bare' }));
 
     // Assert
-    should(resolved).deepEqual({ model: 'unknown', source: 'unknown' });
+    should(resolved).deepEqual({ kind: 'resolved', model: 'unknown', source: 'unknown' });
   });
 
   it('should claim nothing for an account that is down, whatever it declares', () => {
@@ -147,6 +175,26 @@ describe('resolveDisplayModel', () => {
     const down = account({
       id: 'down',
       available: false,
+      unavailableReason: 'every credential is rejected',
+      defaultModel: 'apex',
+      models: [{ id: 'apex', available: true }],
+    });
+
+    // Act
+    const resolved = resolveDisplayModel(down);
+
+    // Assert
+    should(resolved).deepEqual({ kind: 'resolved', model: 'unknown', source: 'unknown' });
+  });
+
+  it('should refuse every model for an account that is down, rather than reporting one it declares', () => {
+    // Arrange — an unavailable account serves NOTHING, whatever its model list says, so the sentence
+    // cannot offer alternatives and says so instead of printing an empty list.
+    const down = account({
+      id: 'down',
+      agent: 'agent-down',
+      available: false,
+      unavailableReason: 'every credential is rejected',
       defaultModel: 'apex',
       models: [{ id: 'apex', available: true }],
     });
@@ -155,7 +203,9 @@ describe('resolveDisplayModel', () => {
     const resolved = resolveDisplayModel(down, 'apex');
 
     // Assert
-    should(resolved).deepEqual({ model: 'unknown', source: 'unknown' });
+    should(resolved.kind === 'unservable' && resolved.reason).equal(
+      'account agent-down serves no model at all, so it cannot serve "apex"',
+    );
   });
 });
 

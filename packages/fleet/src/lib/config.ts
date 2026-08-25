@@ -21,7 +21,7 @@ import { z } from 'zod';
 import { malformedSecretReference } from '@ferretry/protocol';
 import type { AssetField } from './assets.ts';
 import { canonicalAssetReference } from './paths.ts';
-import { AccountIdSchema, AccountModeSchema, FleetManifestModelSchema, HarnessKindSchema } from './manifest.ts';
+import { AccountIdSchema, AccountModeSchema, type FleetManifestModel, HarnessKindSchema } from './manifest.ts';
 import type { SchemaCapabilityDeclaration } from './unimplemented.ts';
 
 const NonEmptyString = z.string().min(1);
@@ -212,10 +212,66 @@ export const VariantSchema = z.strictObject({
 });
 export type Variant = z.infer<typeof VariantSchema>;
 
-/** A model an account may serve. A bare string is shorthand for "available, no display name". */
-export const ModelDeclarationSchema = z
-  .union([NonEmptyString, FleetManifestModelSchema])
-  .transform(value => (typeof value === 'string' ? { id: value, available: true as const } : value));
+/**
+ * A model an account may serve, as somebody WRITES it. A bare string is shorthand for "available,
+ * no display name"; the long form adds a display name, or takes the model out of service with a
+ * reason.
+ *
+ * THE AUTHORING FORM IS NOT THE PUBLISHED FORM, and that is the point rather than a duplication. The
+ * manifest publishes a discriminated union in which `available` is mandatory and an unavailable
+ * entry cannot exist without its reason — exactly right for a consumer, and hostile to an author:
+ * writing `{ id: claude-sonnet-5, displayName: Sonnet 5 }` in `config.yaml` was refused with
+ * `✖ Invalid input → at models[1]`, because the union's `true` branch demanded a field nobody had
+ * any reason to type. A person who could not discover the long form could not declare an unavailable
+ * model at all, and so could never say why one was off.
+ *
+ * So authoring is flat and forgiving, each mistake earns a sentence naming the field it is about, and
+ * the transform is the ONE bridge to the published shape. Its return type is annotated
+ * {@link FleetManifestModel}, so the manifest stays the authority on what may be produced and any
+ * drift between the two is a compile error rather than a manifest nobody can parse.
+ *
+ * The transform switches on the REASON rather than on `available` because, once the checks below have
+ * passed, carrying a reason and being unavailable are the same fact — which makes it total without a
+ * fallback branch that could quietly publish an unavailable model as an available one.
+ */
+export const ModelDeclarationSchema = z.preprocess(
+  value => (typeof value === 'string' ? { id: value } : value),
+  z
+    .strictObject({
+      id: NonEmptyString,
+      /** What a person reads instead of the identifier. The identifier is still what a caller names. */
+      displayName: NonEmptyString.optional(),
+      /** Omitted means available: a model nobody said was down is up, exactly as for an account. */
+      available: z.boolean().default(true),
+      /** Required when `available` is false, and refused otherwise. */
+      unavailableReason: NonEmptyString.optional(),
+    })
+    .check(ctx => {
+      const model = ctx.value;
+      if (!model.available && model.unavailableReason === undefined) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `model "${model.id}" is declared unavailable but does not say why — add unavailableReason`,
+          input: model.unavailableReason,
+          path: ['unavailableReason'],
+        });
+      }
+      if (model.available && model.unavailableReason !== undefined) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `model "${model.id}" gives a reason it is unavailable but is still offered — add "available: false"`,
+          input: model.available,
+          path: ['available'],
+        });
+      }
+    })
+    .transform((model): FleetManifestModel => {
+      const named = model.displayName === undefined ? {} : { displayName: model.displayName };
+      return model.unavailableReason === undefined
+        ? { id: model.id, available: true, ...named }
+        : { id: model.id, available: false, unavailableReason: model.unavailableReason, ...named };
+    }),
+);
 
 /**
  * One account: an (agent × variant) pair the author opted into. Everything a consumer joins on is

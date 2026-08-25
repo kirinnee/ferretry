@@ -168,23 +168,29 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
   async resolve(command: Pick<SessionForkCommand, 'agent' | 'model' | 'effort'>): Promise<TransferTargetChoice> {
     const resolved = await resolveForkTargetAccount(this.ports.accounts, command.agent);
     const account = resolved.account;
-    // The planner owns both of these. A caller's model is a REQUEST: an account that cannot serve it
-    // resolves to the one it can, which is why the choice records what was decided rather than what
-    // was asked for.
+    // The planner owns both of these, AND IT MAY REFUSE. A caller's model used to be a request the
+    // resolver silently downgraded — "an account that cannot serve it resolves to the one it can" —
+    // which is the defect: the choice froze the substitute, so the binder's later drift comparison had
+    // nothing to disagree with, and the fork ran a model the caller never named at a different price
+    // and in a different context window. `agent_unavailable` is the wire's own word for "that agent
+    // exists and cannot serve this fork", which is exactly what happened; the account's own reason
+    // travels in the message.
     const planned = this.ports.planner.plan({
       id: RESOLUTION_PROBE_ID,
       account,
       mode: 'auto',
       ...(command.model === null ? {} : { requestedModel: command.model }),
     });
+    if (planned.kind === 'unservable-model')
+      throw new SessionForkTargetResolutionError('agent_unavailable', planned.reason);
     return {
       accountId: account.id,
       agent: account.agent,
       // The RESOLVED account's declared family, never a string the caller or this adapter chose.
       harness: account.kind,
-      model: planned.model,
+      model: planned.plan.model,
       effort: command.effort,
-      contextWindow: planned.contextWindow,
+      contextWindow: planned.plan.contextWindow,
     };
   }
 

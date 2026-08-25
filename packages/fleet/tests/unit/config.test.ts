@@ -295,6 +295,61 @@ describe('FleetConfigSchema', () => {
     should(parsed.data?.agents[0]?.routes.default?.models).deepEqual([{ id: 'model-one', available: true }]);
   });
 
+  /**
+   * A model entry used to be parsed against the manifest's PUBLISHED union, whose `true` branch
+   * demands `available` be written out. So `{ id, displayName }` — the obvious way to give a model a
+   * name a person reads — was refused with `✖ Invalid input`, and the only documented form anywhere
+   * was a bare string. An author who could not discover the long form could never declare a model
+   * unavailable, which is the one way to say WHY one is off.
+   */
+  it('should accept the long model form without making an author write "available: true"', () => {
+    // Act
+    const parsed = FleetConfigSchema.safeParse(
+      config({
+        agents: [
+          agent({
+            routes: {
+              default: route({
+                defaultModel: 'model-one',
+                models: [
+                  'model-one',
+                  { id: 'model-two', displayName: 'Model Two' },
+                  { id: 'model-down', available: false, unavailableReason: 'provider returns 429' },
+                ],
+              }),
+            },
+          }),
+        ],
+      }),
+    );
+
+    // Assert
+    should(parsed.data?.agents[0]?.routes.default?.models).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: true, displayName: 'Model Two' },
+      { id: 'model-down', available: false, unavailableReason: 'provider returns 429' },
+    ]);
+  });
+
+  it('should say which field is missing when a model is taken out of service without a reason', () => {
+    // Arrange — the two ways to get half of it right. A refusal has to name the field it wants,
+    // because "Invalid input" on a union sends an author to re-read a form nothing documents.
+    const silent = config({
+      agents: [agent({ routes: { default: route({ models: [{ id: 'model-one', available: false }] }) } })],
+    });
+    const reasonWithoutTheFlag = config({
+      agents: [
+        agent({
+          routes: { default: route({ models: [{ id: 'model-one', unavailableReason: 'provider returns 429' }] }) },
+        }),
+      ],
+    });
+
+    // Act + Assert
+    should(messagesOf(silent)).matchAny(/model "model-one" is declared unavailable but does not say why/);
+    should(messagesOf(reasonWithoutTheFlag)).matchAny(/gives a reason it is unavailable but is still offered/);
+  });
+
   it('should reject an unknown identity and accept one naming a declared agent', () => {
     // Arrange
     const unknown = config({ agents: [agent({ identity: 'ghost' })] });

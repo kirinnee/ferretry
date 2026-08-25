@@ -96,7 +96,7 @@ describe('harness discovery', () => {
     // parsers, and the parser is the shared one the provisioner already writes settings with.
     const files = {
       [CLAUDE.settingsPath]: text('{"model": "claude-opus-4-5", "theme": "dark"}'),
-      [CODEX.settingsPath]: text('model = "gpt-5.6-terra"\n\n[profiles.other]\nmodel = "ignored"\n'),
+      [CODEX.settingsPath]: text('model = "gpt-5.6-terra"\n'),
     };
 
     // Act
@@ -111,6 +111,84 @@ describe('harness discovery', () => {
     });
     should(report.harnesses[1]?.models.defaultModel).equal('gpt-5.6-terra');
     should(report.harnesses[1]?.models.origin).equal('detected');
+  });
+
+  it('should offer EVERY model the settings document names, with the harness own choice first', async () => {
+    // Arrange — a real Claude settings file with a small-fast model and a per-family default, and a real
+    // Codex config with two named profiles. Both are models somebody on this host has already declared,
+    // and before this the form offered one card and made them type the rest in as unverified.
+    const files = {
+      [CLAUDE.settingsPath]: text(
+        JSON.stringify({
+          model: 'claude-opus-4-5',
+          env: {
+            ANTHROPIC_SMALL_FAST_MODEL: 'claude-haiku-4-5',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-5',
+          },
+        }),
+      ),
+      [CODEX.settingsPath]: text(
+        'model = "gpt-5.6-terra"\n\n[profiles.fast]\nmodel = "gpt-5.6-sol"\n\n[profiles.other]\nmodel = "gpt-5.5"\n',
+      ),
+    };
+
+    // Act
+    const report = await discover({ files, resolve: onPath('claude', 'codex') });
+
+    // Assert — the harness's own `model` leads, because the default has to be one of the ids and its own
+    // choice is the honest one; the rest follow in the order the file names them.
+    should(report.harnesses[0]?.models).deepEqual({
+      origin: 'detected',
+      ids: ['claude-opus-4-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'],
+      defaultModel: 'claude-opus-4-5',
+      source: CLAUDE.settingsPath,
+    });
+    should(report.harnesses[1]?.models.ids).deepEqual(['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.5']);
+    should(report.harnesses[1]?.models.defaultModel).equal('gpt-5.6-terra');
+  });
+
+  it('should offer a model named ONLY in an env block or a profile, as a detection rather than a fallback', async () => {
+    // Arrange — a settings file with no top-level `model` at all. It still NAMES models, so answering
+    // "nothing detected" here would offer the starter model beside a file that says otherwise.
+    const files = {
+      [CLAUDE.settingsPath]: text('{"env": {"ANTHROPIC_MODEL": "claude-opus-4-5"}}'),
+      [CODEX.settingsPath]: text('[profiles.work]\nmodel = "gpt-5.6-sol"\n'),
+    };
+
+    // Act
+    const report = await discover({ files });
+
+    // Assert
+    should(report.harnesses[0]?.models.origin).equal('detected');
+    should(report.harnesses[0]?.models.defaultModel).equal('claude-opus-4-5');
+    should(report.harnesses[1]?.models.ids).deepEqual(['gpt-5.6-sol']);
+    should(report.harnesses[1]?.models.origin).equal('detected');
+  });
+
+  it('should offer a model named twice exactly once, and never offer an env value whose name is not a model', async () => {
+    // Arrange — the rule is a NAME rule, so it has to be shown refusing. `ANTHROPIC_BASE_URL` and
+    // `MODEL_TIMEOUT_MS` are values somebody wrote in this file that are not models, and offering either
+    // as a card would be this report inventing a model identifier.
+    const files = {
+      [CLAUDE.settingsPath]: text(
+        JSON.stringify({
+          model: 'claude-opus-4-5',
+          env: {
+            ANTHROPIC_MODEL: 'claude-opus-4-5',
+            ANTHROPIC_BASE_URL: 'https://example.invalid',
+            MODEL_TIMEOUT_MS: '600000',
+            ANTHROPIC_SMALL_FAST_MODEL: '   ',
+          },
+        }),
+      ),
+    };
+
+    // Act
+    const report = await discover({ files });
+
+    // Assert — one card, not four: the repeat collapses, the URL and the timeout are not named MODEL, and
+    // a declared value that names nothing is not a model either.
+    should(report.harnesses[0]?.models.ids).deepEqual(['claude-opus-4-5']);
   });
 
   it('should offer the product own starter model as a labelled fallback, naming why nothing was detected', async () => {
@@ -142,7 +220,7 @@ describe('harness discovery', () => {
     should(report.harnesses[0]?.models.source).match(/is not valid json/u);
   });
 
-  it('should fall back when the settings document parses and declares no usable model', async () => {
+  it('should fall back when the settings document parses and names no usable model', async () => {
     // Arrange — present, valid, and silent about the model; plus the whitespace-only case, which is a
     // declared value that could not name anything.
     const files = {
@@ -153,9 +231,11 @@ describe('harness discovery', () => {
     // Act
     const report = await discover({ files });
 
-    // Assert
-    should(report.harnesses[0]?.models.source).match(/declares no "model"/u);
-    should(report.harnesses[1]?.models.source).match(/declares no "model"/u);
+    // Assert — the sentence names EVERY place that was looked in, because the rule is otherwise invisible:
+    // a person who keeps their model in an env block needs to know that was searched too.
+    should(report.harnesses[0]?.models.source).match(/names no model in "model", an env name ending in MODEL/u);
+    should(report.harnesses[0]?.models.source).match(/or a profile's own "model"/u);
+    should(report.harnesses[1]?.models.source).match(/names no model in "model"/u);
   });
 
   it('should fall back when the settings document could not be read or was too large to read', async () => {
@@ -245,7 +325,10 @@ describe('harness discovery', () => {
     // Assert
     should(report.harnesses[0]?.absenceImpact).match(/no Claude session can start/u);
     should(report.harnesses[1]?.absenceImpact).match(/no Codex session can start/u);
-    // The limit travels with the evidence so no surface has to remember to say it.
+    // The limit travels with the evidence so no surface has to remember to say it — including the one
+    // this report is honest about NOT publishing: several models share one `source`, and which key named
+    // which is a wire field and a surface change rather than a read.
     should(report.limitation).match(/does not prove a harness is signed in/u);
+    should(report.limitation).match(/which key named which model is not said/u);
   });
 });
