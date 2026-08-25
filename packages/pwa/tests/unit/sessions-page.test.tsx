@@ -409,6 +409,7 @@ describe('SessionsPage', () => {
           NewSession: Empty,
           SessionChat: Session,
           Settings: Empty,
+          Accounts: Empty,
           Warden: Empty,
           Analytics: Empty,
           Learning: Empty,

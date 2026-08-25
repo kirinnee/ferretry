@@ -44,6 +44,7 @@ describe('destinationPaletteEntries', () => {
     expect(entries.map(entry => entry.id)).toEqual([
       'destination-sessions',
       'destination-projects',
+      'destination-accounts',
       'destination-analytics',
       'destination-warden',
       'destination-learning',
@@ -78,6 +79,21 @@ describe('destinationPaletteEntries', () => {
     expect(byLabel.map(entry => entry.id)).toEqual(['destination-analytics']);
     expect(byDescription.map(entry => entry.id)).toEqual(['destination-new-session']);
     expect(byKeyword.map(entry => entry.id)).toEqual(['destination-analytics']);
+  });
+
+  /**
+   * TWO DESTINATIONS GENUINELY ANSWER TO "accounts", and the order is the whole answer.
+   *
+   * Warden has always claimed the keyword, because its verdicts are about accounts. The Accounts page
+   * IS the accounts, so it must come first — and this module ranks nothing: it filters in navigation
+   * order, so "first" is decided entirely by where the entry sits in `APP_BAR_DESTINATIONS`. Reordering
+   * that array would silently send somebody typing the name of a page to a different page, which is why
+   * this is pinned here rather than left to the bar's own ordering test.
+   */
+  it('answers “accounts” with the Accounts page first, ahead of Warden’s claim on the word', () => {
+    const entries = destinationPaletteEntries('accounts', APP_BAR_DESTINATIONS, alpha);
+
+    expect(entries.map(entry => entry.id)).toEqual(['destination-accounts', 'destination-warden']);
   });
 
   it('returns nothing when the query matches no destination', () => {

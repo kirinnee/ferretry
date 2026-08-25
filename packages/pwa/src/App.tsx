@@ -27,8 +27,8 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { AccountsPage } from './features/fleet/accounts-page.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
-import { fleetSignInTab } from './features/fleet/fleet-sign-in-section.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
@@ -264,6 +264,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
+    case 'accounts':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Accounts' }];
     case 'warden':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Warden' }];
     case 'analytics':
@@ -977,8 +979,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       },
       pricingSettingsTab(createDaemonClient),
       fleetSettingsTab(async daemon => await store.clients.client(daemon)),
-      // Directly after Fleet: the accounts, then who is signed in to them.
-      fleetSignInTab(async daemon => await store.clients.client(daemon)),
     ],
     [createDaemonClient, store.clients],
   );
@@ -1163,6 +1163,28 @@ function WardenRoute({ connection }: DaemonPageProps) {
   return <WardenPage connection={connection} slots={WARDEN_SLOTS} />;
 }
 
+/**
+ * The accounts of one daemon, as a destination.
+ *
+ * The client factory is the app's own pool, so a fleet read travels the same carrier — direct first,
+ * the hosted relay as the automatic fallback — as every other daemon call on this page.
+ */
+function AccountsRoute({ connection }: DaemonPageProps) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  return (
+    <div className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-4">
+      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 py-2">
+        <AccountsPage
+          connection={connection}
+          createClient={async daemon => await store.clients.client(daemon)}
+          onNavigate={navigate}
+        />
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsRoute({ connection }: DaemonPageProps) {
   return <GlobalAnalyticsPage connection={connection} />;
 }
@@ -1199,6 +1221,7 @@ const PAGE_SLOTS: PageHostSlots = {
   ProjectDetail: ProjectDetailRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
+  Accounts: AccountsRoute,
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
