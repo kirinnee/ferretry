@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import type { FleetSeedResult } from '@ferretry/fleet';
 import should from 'should';
 import {
   decideFleetBootPreparation,
@@ -8,8 +9,9 @@ import {
   fleetPreparationFailure,
   fleetPreparationRefusal,
   fleetPreparedDisclosure,
+  fleetSeedSentences,
   type PreparableAccount,
-  preparationAdditions,
+  preparationAdded,
   preparationConflicts,
 } from '../../../src/lib/fleet/boot-preparation.ts';
 import type { HarnessLocation, HarnessPreflight, HarnessReadiness } from '../../../src/lib/core/harness-readiness.ts';
@@ -216,6 +218,7 @@ describe('fleetPreparedDisclosure', () => {
   const said = fleetPreparedDisclosure({
     wrappers: ['claude-default', 'claude-auto-default'],
     published: ['claude-default', 'claude-auto-default'],
+    seeded: [],
     locations: LOCATIONS,
     pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
     clientName: 'fy',
@@ -262,6 +265,7 @@ describe('fleetPreparedDisclosure', () => {
     const one = fleetPreparedDisclosure({
       wrappers: ['codex-default'],
       published: ['codex-default'],
+      seeded: [],
       locations: LOCATIONS,
       pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
       clientName: 'fy',
@@ -422,27 +426,29 @@ describe('preparationConflicts', () => {
   });
 });
 
-describe('preparationAdditions', () => {
+describe('preparationAdded', () => {
   it('should name only what would arrive, never what was already there', () => {
     // Act — "created 1 default account: claude-work" about an account that already existed is a false
     // sentence, and a roster-shaped report produced exactly that.
-    const additions = preparationAdditions(
+    const added = preparationAdded(
       [WORK],
       [WORK, account({ id: 'id-new', wrapper: '/state/fleet/bin/codex-default', home: 'codex-default' })],
     );
 
     // Assert
-    should(additions).deepEqual(['codex-default']);
+    should(added.map(entry => entry.id)).deepEqual(['id-new']);
   });
 
-  it('should treat every account as an addition on a host that published none', () => {
-    // Assert
-    should(preparationAdditions([], [WORK])).deepEqual(['claude-work']);
+  it('should return the accounts themselves, so the seed and the disclosure share one join', () => {
+    // Assert — the credential seed writes into the homes this returns; deriving "which are new" a
+    // second time beside the copy is how the two come to disagree on a host that published some.
+    should(preparationAdded([], [WORK])).deepEqual([WORK]);
+    should(preparationAdded([], [WORK])[0]?.home).equal('claude-work');
   });
 
   it('should be empty when the configuration adds nothing at all', () => {
     // Assert — this is what makes the "nothing was added" ending reachable rather than theoretical.
-    should(preparationAdditions([WORK], [WORK])).be.empty();
+    should(preparationAdded([WORK], [WORK])).be.empty();
   });
 });
 
@@ -495,6 +501,7 @@ describe('the whole-manifest disclosure', () => {
     const said = fleetPreparedDisclosure({
       wrappers: ['codex-default'],
       published: ['claude-work', 'codex-default'],
+      seeded: [],
       locations: LOCATIONS,
       pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
       clientName: 'fy',
@@ -514,10 +521,194 @@ describe('the whole-manifest disclosure', () => {
       fleetPreparedDisclosure({
         wrappers: ['claude-default'],
         published: ['claude-default'],
+        seeded: [],
         locations: LOCATIONS,
         pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
         clientName: 'fy',
       }),
     ).not.containEql('rewrote the whole manifest');
+  });
+});
+
+/**
+ * What a boot says about the credential it copied.
+ *
+ * This is the half of the first-run seed a person actually meets. The copy itself is proved in
+ * `packages/fleet/tests/unit/credential-seed.test.ts`; what is proved here is that every ending
+ * reaches a sentence, that the sentence names the directory somebody can go and check, and that the
+ * disclosure never claims a fleet is signed in when part of it is not.
+ */
+describe('fleetSeedSentences', () => {
+  const seeded = (account: string, kind: 'claude' | 'codex', donorHome: string): FleetSeedResult => ({
+    account,
+    kind,
+    outcome: { kind: 'seeded', donorHome },
+  });
+  const noDonor = (account: string, kind: 'claude' | 'codex', donorHome: string): FleetSeedResult => ({
+    account,
+    kind,
+    outcome: { kind: 'no-donor', donorHome },
+  });
+
+  it('should name the accounts it signed in, and the directory the login came from', () => {
+    // Act
+    const said = fleetSeedSentences(
+      [
+        seeded('claude-default', 'claude', '/home/me/.claude'),
+        seeded('claude-auto-default', 'claude', '/home/me/.claude'),
+      ],
+      'fy',
+    ).join(' ');
+
+    // Assert — one login covers both lanes, so it is said once, with the home a person can check.
+    should(said).containEql('Signed in without a browser: claude-default, claude-auto-default now hold');
+    should(said).containEql("a COPY of this host's own Claude login, taken once from /home/me/.claude");
+  });
+
+  it('should say the copies are independent, in the same breath as saying they were made', () => {
+    // Assert — somebody who assumes a copy tracks its donor finds out when it expires, which is the
+    // worst possible moment to learn it. It is not a footnote.
+    const said = fleetSeedSentences([seeded('codex-default', 'codex', '/home/me/.codex')], 'fy').join(' ');
+    should(said).containEql('codex-default now holds');
+    should(said).containEql('signing your own Codex out does not sign them out');
+    should(said).containEql('signing back in does not refresh them');
+  });
+
+  it('should explain what a copy means exactly once, however many harnesses it copied', () => {
+    // Act — the two-harness host is what caught this: the same two-sentence explanation appeared
+    // twice, and a paragraph somebody has already read is a paragraph they skip.
+    const said = fleetSeedSentences(
+      [
+        seeded('claude-default', 'claude', '/home/me/.claude'),
+        seeded('claude-auto-default', 'claude', '/home/me/.claude'),
+        seeded('codex-default', 'codex', '/home/me/.codex'),
+        seeded('codex-auto-default', 'codex', '/home/me/.codex'),
+      ],
+      'fy',
+    ).join(' ');
+
+    // Assert — each harness's import is named with its own donor home, and the consequence is said
+    // once, covering both.
+    should(said).containEql("this host's own Claude login, taken once from /home/me/.claude");
+    should(said).containEql("this host's own Codex login, taken once from /home/me/.codex");
+    should(said.split('Those copies are independent')).have.length(2);
+    should(said).containEql('signing your own Claude or Codex out does not sign them out');
+    should(said).containEql('`fy fleet login` re-signs any account whose copy expires');
+  });
+
+  it('should claim nothing more than a credential being in place once everything is seeded', () => {
+    // Assert — a credential on disk is not a promise the provider still honours it.
+    const said = fleetSeedSentences([seeded('claude-default', 'claude', '/home/me/.claude')], 'fy').join(' ');
+    should(said).containEql('Every one of them starts with a credential in place');
+    should(said).not.containEql('NOT that');
+  });
+
+  it('should name the harness and the directory it found nothing in', () => {
+    // Act
+    const said = fleetSeedSentences(
+      [noDonor('codex-default', 'codex', '/home/me/.codex'), noDonor('codex-auto-default', 'codex', '/home/me/.codex')],
+      'fy',
+    ).join(' ');
+
+    // Assert — "no login found" without a path is not something anybody can act on.
+    should(said).containEql('Nothing was copied for Codex: no usable Codex login was found in /home/me/.codex');
+    should(said).containEql('codex-default, codex-auto-default have a home and no credential');
+  });
+
+  it('should keep the original unsigned sentence when nothing at all gained a credential', () => {
+    // Assert — on a host with nothing to copy from, nothing about the situation has changed, so the
+    // sentence this disclosure has always said is the honest one.
+    const said = fleetSeedSentences([noDonor('claude-default', 'claude', '/home/me/.claude')], 'fy').join(' ');
+    should(said).containEql('NOT that they are signed in');
+    should(said).containEql('run `fy fleet login` for that');
+  });
+
+  it('should make the same claim when it is handed nothing at all', () => {
+    // Assert — an empty result set is "nothing is known about any credential", never "every one of
+    // them has one". The vacuous reading is the one that would tell somebody their fleet is ready.
+    const said = fleetSeedSentences([], 'fy').join(' ');
+    should(said).containEql('NOT that they are signed in');
+    should(said).not.containEql('Every one of them starts with a credential');
+    should(said).not.containEql('Signed in without a browser');
+  });
+
+  it('should name exactly the accounts that are still unsigned when some were seeded', () => {
+    // Act — the case a blanket claim gets wrong in both directions.
+    const said = fleetSeedSentences(
+      [seeded('claude-default', 'claude', '/home/me/.claude'), noDonor('codex-default', 'codex', '/home/me/.codex')],
+      'fy',
+    ).join(' ');
+
+    // Assert
+    should(said).containEql('NOT that codex-default is signed in');
+    should(said).containEql('run `fy fleet login` for it');
+    should(said).not.containEql('NOT that they are signed in');
+  });
+
+  it('should use plural words for two unsigned accounts beside a seeded one', () => {
+    // Act
+    const said = fleetSeedSentences(
+      [
+        seeded('claude-default', 'claude', '/home/me/.claude'),
+        noDonor('codex-default', 'codex', '/home/me/.codex'),
+        noDonor('codex-auto-default', 'codex', '/home/me/.codex'),
+      ],
+      'fy',
+    ).join(' ');
+
+    // Assert
+    should(said).containEql('NOT that codex-default, codex-auto-default are signed in');
+    should(said).containEql('run `fy fleet login` for those');
+  });
+
+  it('should count an account that already had a credential as signed in rather than as a gap', () => {
+    // Assert — seeding is an import, so an account that already had one is left alone; reporting it
+    // as unsigned would send somebody to log in to an account that is already logged in.
+    const said = fleetSeedSentences(
+      [{ account: 'claude-default', kind: 'claude', outcome: { kind: 'kept' } }],
+      'fy',
+    ).join(' ');
+    should(said).containEql('Every one of them starts with a credential in place');
+  });
+
+  it('should name every account whose copy could not be made, with the reason for each', () => {
+    // Act — three different failures, all of which leave the account exactly as it was.
+    const said = fleetSeedSentences(
+      [
+        {
+          account: 'claude-default',
+          kind: 'claude',
+          outcome: { kind: 'donor-unreadable', donorHome: '/home/me/.claude', reason: 'the keychain read failed' },
+        },
+        {
+          account: 'claude-auto-default',
+          kind: 'claude',
+          outcome: { kind: 'refused', reason: 'the credential has an access token but no readable expiry' },
+        },
+        { account: 'codex-default', kind: 'codex', outcome: { kind: 'failed', reason: 'ENOSPC: no space left' } },
+      ],
+      'fy',
+    ).join(' ');
+
+    // Assert
+    should(said).containEql('accounts are exactly as they were');
+    should(said).containEql('claude-default: /home/me/.claude could not be read (the keychain read failed)');
+    should(said).containEql('claude-auto-default: its own credential could not be read');
+    should(said).containEql('codex-default: ENOSPC: no space left');
+  });
+
+  it('should stay singular for one failed copy', () => {
+    // Assert
+    const said = fleetSeedSentences(
+      [{ account: 'codex-default', kind: 'codex', outcome: { kind: 'failed', reason: 'ENOSPC' } }],
+      'fy',
+    ).join(' ');
+    should(said).containEql('One credential copy did not happen and the account is exactly as it was');
+  });
+
+  it('should stay singular for one harness with a single unseeded account', () => {
+    // Assert
+    const said = fleetSeedSentences([noDonor('codex-default', 'codex', '/home/me/.codex')], 'fy').join(' ');
+    should(said).containEql('codex-default has a home and no credential');
   });
 });

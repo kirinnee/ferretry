@@ -25,6 +25,14 @@
  * have it. A first run that silently wrote files somebody did not ask for and could not find would be
  * the same class of defect as the refusal it replaces, pointing the other way.
  *
+ * THE SAME ARGUMENT IS MADE AGAIN, SEPARATELY, FOR THE CREDENTIAL SEED. A first run also copies this
+ * host's own harness login into the homes it just made, which is a larger act than writing a wrapper:
+ * it moves a credential the operator owns. It is defensible on exactly the same ground — on this host,
+ * at the operator's own command, reachable from no route — and it is disclosed harder for exactly that
+ * reason. {@link fleetSeedSentences} names the directory each login was read from, says that the
+ * copies stop tracking their donor the moment they land, and names every account that still has
+ * nothing. What it never does, and structurally cannot, is render a credential: it is handed verdicts.
+ *
  * ## WHAT IT REFUSES TO GUESS
  *
  * Four skips, and the third is the one that matters most. A manifest this daemon could not READ says
@@ -32,6 +40,7 @@
  * beside one that already exists, in a file the daemon cannot parse. Damage is not an empty fleet.
  */
 
+import { type FleetSeedResult, seedDonorGaps, seedFailures, seedImports, seedUnsigned } from '@ferretry/fleet';
 import type { HarnessPreflight } from '../core/harness-readiness.ts';
 import type { HarnessKind } from '../core/inventory.ts';
 
@@ -205,19 +214,28 @@ export function preparationConflicts(
 }
 
 /**
- * The accounts a preparation would ADD, as the wrapper names a person reads.
+ * The accounts a preparation would ADD.
  *
  * Reported instead of the whole roster, because "created 1 default account: claude-work" about an
  * account that already existed is a false sentence — and it was reachable: a configuration that
  * already declares agents cannot be extended, so a preparation triggered by the OTHER harness added
  * nothing and said it had created everything the manifest happened to publish.
+ *
+ * THE ACCOUNTS THEMSELVES rather than their names, because two callers now need this join and only one
+ * of them wants names: the disclosure prints them, and the first-run credential seed writes into
+ * exactly these homes. Re-deriving "which of these are new" beside the credential copy would be a
+ * second opinion about the one question this function answers, and the two would disagree first in the
+ * case that matters — a host that already published some of them.
+ *
+ * Generic over the candidate, so a caller holding whole manifest accounts gets whole manifest accounts
+ * back rather than the structural minimum this module compares on.
  */
-export function preparationAdditions(
+export function preparationAdded<T extends PreparableAccount>(
   published: readonly PreparableAccount[],
-  candidate: readonly PreparableAccount[],
-): readonly string[] {
+  candidate: readonly T[],
+): readonly T[] {
   const existing = new Set(published.map(account => account.id));
-  return candidate.filter(account => !existing.has(account.id)).map(account => wrapperName(account.wrapper));
+  return candidate.filter(account => !existing.has(account.id));
 }
 
 /** Where a preparation writes, so a disclosure names paths a person can actually go and look at. */
@@ -252,18 +270,19 @@ export function fleetPreparationDisclosure(
  *    want the files gone.
  *  - THE ABSOLUTE PATHS of both directories. Files were written into somebody's home and a person
  *    who cannot find them has been handed a mess rather than a fleet.
- *  - WHAT IT DOES NOT PROVE. A created account has a home and a wrapper and NO CREDENTIAL. A person
- *    told "your fleet is ready" who then watches a session die on "not signed in" was misled by a
- *    sentence that was technically true, so the same limit the preflight already states in its own
- *    words is stated here. And `PATH` is named for what it actually is: a convenience for typing a
- *    wrapper name in a terminal, NOT a precondition for a session — a start launches the absolute
- *    path the manifest publishes, so these accounts work the moment the apply lands.
+ *  - WHAT IT DOES NOT PROVE. A created account has a home, a wrapper, and whatever credential the
+ *    seed below could give it. A person told "your fleet is ready" who then watches a session die on
+ *    "not signed in" was misled by a sentence that was technically true, so this says per account
+ *    which of the two it is rather than making one claim about all of them. And `PATH` is named for
+ *    what it actually is: a convenience for typing a wrapper name in a terminal, NOT a precondition
+ *    for a session — a start launches the absolute path the manifest publishes, so these accounts
+ *    work the moment the apply lands.
  *  - HOW TO NOT HAVE IT: the key, and the fact that removing the accounts themselves is an edit to
  *    the fleet configuration followed by an apply, because turning the flag off later removes
  *    nothing that was already created.
  */
 export function fleetPreparedDisclosure(input: {
-  /** The accounts this preparation ADDED. Never the whole roster — see {@link preparationAdditions}. */
+  /** The accounts this preparation ADDED. Never the whole roster — see {@link preparationAdded}. */
   readonly wrappers: readonly string[];
   /**
    * Every account the manifest publishes now, so the disclosure is the whole truth rather than only
@@ -275,6 +294,15 @@ export function fleetPreparedDisclosure(input: {
    * saying so is what turns "we also rewrote your manifest" from a discovery into a disclosure.
    */
   readonly published: readonly string[];
+  /**
+   * What the first-run credential seed did, per account.
+   *
+   * EMPTY IS A REAL VALUE and it means "nothing was attempted", which is exactly what a preparation
+   * that added no account produces. The sentences below then fall back to the claim this disclosure
+   * has always made — that these are published and not signed in — rather than claiming a seed ran
+   * and found nothing, which is a different and false statement about somebody's host.
+   */
+  readonly seeded: readonly FleetSeedResult[];
   readonly locations: FleetPreparationLocations;
   readonly pathEntry: string;
   readonly clientName: string;
@@ -289,10 +317,83 @@ export function fleetPreparedDisclosure(input: {
           `Publishing them rewrote the whole manifest, and every account already on it came back unchanged — ${untouched.join(', ')}; preparation refuses outright rather than remove or redefine one.`,
         ]),
     'A session can use them now — a start launches the absolute wrapper path the manifest publishes, never a name off your PATH.',
-    `Verified only that these are published and this host can run them; NOT that they are signed in — run \`${input.clientName} fleet login\` for that.`,
+    ...fleetSeedSentences(input.seeded, input.clientName),
     `Add \`${input.pathEntry}\` to your shell profile if you also want to type these names in your own terminal.`,
     `To stop this happening on future starts set "${FLEET_PREPARATION_KEY}": false in ${input.locations.configPath}; to remove the accounts, delete them from ${input.locations.fleetDirectory}/config.yaml and run \`${input.clientName} fleet apply\`.`,
   ].join(' ');
+}
+
+/**
+ * What the first-run credential seed did, as the sentences a boot says about it.
+ *
+ * ## THIS IS THE HALF OF THE FEATURE A PERSON ACTUALLY MEETS
+ *
+ * Copying somebody's provider login from one directory on their machine into four others is not a
+ * detail. It is the difference between a fleet that works and one that asks for four browser
+ * approvals, and it is also a thing that happened to a credential they own. Silence about either half
+ * is what makes people think the tool is broken — so this says what was copied, WHERE FROM, what that
+ * does and does not mean afterwards, and which accounts still have nothing.
+ *
+ * ## FOUR SENTENCES, EACH REACHABLE ON ITS OWN
+ *
+ *  - **The import.** Named per harness with the donor home, because the home is the only thing a
+ *    person can go and check, and one login covers every lane of one harness.
+ *  - **The independence.** Said WITH the import and never as a footnote: a copy stops tracking its
+ *    donor the moment it lands, so signing your own harness out does not sign the fleet out, and
+ *    signing it back in does not refresh the fleet. Somebody who assumes the opposite finds out when
+ *    a copy expires, which is the worst possible moment to learn it.
+ *  - **The gap.** A harness whose own install held no usable login. It names the directory that was
+ *    read, because "no login found" without a path is not something anybody can act on.
+ *  - **What is still unsigned**, by name — never a count and never a blanket claim over accounts that
+ *    differ. The all-unsigned case keeps this disclosure's original sentence word for word, because on
+ *    a host with nothing to copy from nothing about the situation has changed.
+ *
+ * Pure, and it can hold no credential: {@link FleetSeedResult} carries a verdict, a home and a
+ * reason — the material never leaves the adapter that copied it.
+ */
+export function fleetSeedSentences(results: readonly FleetSeedResult[], clientName: string): readonly string[] {
+  const imported = seedImports(results);
+  const gaps = seedDonorGaps(results);
+  const failures = seedFailures(results);
+  const unsigned = seedUnsigned(results);
+  // An EMPTY result set is "nothing is known about any credential", which is the same claim this
+  // disclosure made before a seed existed — so it falls into the all-unsigned arm rather than the
+  // vacuously-true "every one of them has a credential" one.
+  const nothingSignedIn = unsigned.length === results.length;
+  return [
+    ...imported.map(
+      group =>
+        `Signed in without a browser: ${group.accounts.join(', ')} ${group.accounts.length === 1 ? 'now holds' : 'now hold'} a COPY of this host's own ${group.label} login, taken once from ${group.donorHome}.`,
+    ),
+    // SAID ONCE, however many harnesses were imported. Repeating a two-sentence explanation per
+    // harness is what a two-harness host actually produced, and a paragraph somebody has already read
+    // is a paragraph they skip — including the second time, when it is about the other harness.
+    ...(imported.length === 0
+      ? []
+      : [
+          `Those copies are independent from the moment they land — signing your own ${imported.map(group => group.label).join(' or ')} out does not sign them out, and signing back in does not refresh them; \`${clientName} fleet login\` re-signs any account whose copy expires.`,
+        ]),
+    ...gaps.map(
+      group =>
+        `Nothing was copied for ${group.label}: no usable ${group.label} login was found in ${group.donorHome}, so ${group.accounts.join(', ')} ${group.accounts.length === 1 ? 'has' : 'have'} a home and no credential.`,
+    ),
+    ...(failures.length === 0
+      ? []
+      : [
+          `One credential copy did not happen and the ${failures.length === 1 ? 'account is exactly as it was' : 'accounts are exactly as they were'} — ${failures.map(failure => `${failure.account}: ${failure.reason}`).join('; ')}.`,
+        ]),
+    ...(nothingSignedIn
+      ? [
+          `Verified only that these are published and this host can run them; NOT that they are signed in — run \`${clientName} fleet login\` for that.`,
+        ]
+      : unsigned.length === 0
+        ? [
+            'Every one of them starts with a credential in place; that is not a promise the provider still accepts it, so a first session is still the real test.',
+          ]
+        : [
+            `Verified only that these are published and this host can run them; NOT that ${unsigned.join(', ')} ${unsigned.length === 1 ? 'is' : 'are'} signed in — run \`${clientName} fleet login\` for ${unsigned.length === 1 ? 'it' : 'those'}.`,
+          ]),
+  ];
 }
 
 /**

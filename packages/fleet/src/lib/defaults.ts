@@ -141,8 +141,15 @@ export interface FleetDefaultAccount {
   readonly instructions: string;
 }
 
-/** What a harness is called where a person reads it, rather than where a schema does. */
-const HARNESS_LABEL: Readonly<Record<HarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };
+/**
+ * What a harness is called where a person reads it, rather than where a schema does.
+ *
+ * EXPORTED because three surfaces put it in front of somebody — a default account's display name, the
+ * starter instructions document's own first paragraph, and the boot line that says whose login was
+ * copied into which home. Three private copies of one label is how "Claude" and "Claude Code" end up
+ * on one screen describing the same thing.
+ */
+export const HARNESS_LABEL: Readonly<Record<HarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };
 
 /**
  * Every default account for the harnesses this host was found to have, in a stable order.

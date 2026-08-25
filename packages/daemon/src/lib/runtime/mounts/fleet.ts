@@ -10,6 +10,7 @@ import {
   type FleetConfig,
   FleetConfigSchema,
   type FleetDocumentWrite,
+  FleetFirstRunSeeder,
   type FleetHealthSnapshot,
   type FleetLayout,
   type FleetManifest,
@@ -20,6 +21,7 @@ import {
   type FleetScaffolder,
   fleetScaffoldIds,
   FleetScaffoldPartialError,
+  type FleetSeedResult,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
   type HarnessKind,
@@ -90,11 +92,7 @@ import {
   type FleetMutation,
   FleetMutationRefusal,
 } from '../../fleet/mutations.ts';
-import {
-  type FleetPreparationConflict,
-  preparationAdditions,
-  preparationConflicts,
-} from '../../fleet/boot-preparation.ts';
+import { type FleetPreparationConflict, preparationAdded, preparationConflicts } from '../../fleet/boot-preparation.ts';
 import { planSharedAssetUnlink, sharingSummary } from '../../fleet/sharing.ts';
 import {
   type FleetProposalProblem,
@@ -235,6 +233,14 @@ export type FleetDefaultsPreparation =
       readonly wrappers: readonly string[];
       /** Every account the manifest publishes now, so the disclosure can be the whole truth. */
       readonly published: readonly string[];
+      /**
+       * What the first-run credential seed did to each account this preparation ADDED.
+       *
+       * One entry per added account, always — including the ones nothing could be copied for. A
+       * result set that only listed successes would leave the boot unable to say which accounts still
+       * need a login, which is the half a person has to act on.
+       */
+      readonly seeded: readonly FleetSeedResult[];
       readonly created: readonly string[];
       readonly kept: readonly string[];
       readonly pathEntry: string;
@@ -1161,8 +1167,9 @@ class MountedFleet implements FleetSubsystem {
     }
     const conflicts = preparationConflicts(published, plan.manifest.accounts);
     if (conflicts.length > 0) return { kind: 'refused', conflicts };
-    const additions = preparationAdditions(published, plan.manifest.accounts);
-    if (additions.length === 0) return { kind: 'nothing-added' };
+    const added = preparationAdded(published, plan.manifest.accounts);
+    if (added.length === 0) return { kind: 'nothing-added' };
+    const additions = added.map(account => basename(account.wrapper));
 
     let scaffolded: FleetApplyOutcome;
     try {
@@ -1188,6 +1195,12 @@ class MountedFleet implements FleetSubsystem {
       return {
         kind: 'prepared',
         wrappers: additions,
+        // AFTER the apply, never before it: the apply is what creates each account's home, and a copy
+        // into a directory that does not exist yet fails for a reason that has nothing to do with the
+        // credential. Only the accounts this preparation ADDED are seeded — an account somebody else
+        // declared is theirs, and writing a credential into it would be this daemon deciding which
+        // provider login one of their accounts uses.
+        seeded: await this.seedFirstRunCredentials(added),
         // Read BACK from the manifest the apply just published rather than from the plan that
         // produced it: the names a boot puts in front of a person have to be ones a start could
         // resolve, and the manifest is the file a start reads.
@@ -1199,6 +1212,29 @@ class MountedFleet implements FleetSubsystem {
     } catch (error) {
       return { kind: 'failed', reason: errorMessage(error), created: scaffolded.created };
     }
+  }
+
+  /**
+   * Give the accounts this preparation just created the login this host already has.
+   *
+   * ## WHERE THE DONOR COMES FROM, AND WHY IT IS NOT A SECOND FACT
+   *
+   * `layout.defaultHomeDirectories` is the fleet's existing single owner of "where the bare upstream
+   * `claude` / `codex` reads its configuration from" — the plan already resolves an account declared
+   * `home: default` through it. Reading the donor from anywhere else would be a second opinion about
+   * one directory, and the two would disagree on the first host that moved theirs. The consequence is
+   * a declared gap rather than a hidden one: a person whose harness home is somewhere else is told
+   * that nothing was found in the directory this daemon looked in, by absolute path.
+   *
+   * ## A SEED NEVER FAILS A PREPARATION
+   *
+   * Every ending is a value — `FleetFirstRunSeeder` turns a throwing store into a `refused` or a
+   * `failed` for that one account — so a keychain nobody unlocked costs a boot one sentence rather
+   * than the fleet it had just published. The accounts exist and are runnable either way; a credential
+   * is the one thing `fy fleet login` can still supply afterwards.
+   */
+  private async seedFirstRunCredentials(added: readonly FleetManifestAccount[]): Promise<readonly FleetSeedResult[]> {
+    return await new FleetFirstRunSeeder(this.credentialStore()).seed(added, this.layout.defaultHomeDirectories);
   }
 
   private deriveCandidate(config: FleetConfig, mutation: FleetMutation): FleetConfig {

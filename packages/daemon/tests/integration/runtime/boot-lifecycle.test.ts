@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { buildFleetManifest, FleetHealthSnapshotSchema, FleetManifestSchema } from '@ferretry/fleet';
 import {
@@ -39,7 +39,7 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { z } from 'zod';
-import { buildWorld, checkConfiguration, type DaemonWorld, start } from '../../../bin/fyd.ts';
+import { buildWorld, checkConfiguration, type DaemonWorld, start, type WorldSeams } from '../../../bin/fyd.ts';
 import {
   type BrowserLoginChild,
   type BrowserLoginRuntime,
@@ -154,8 +154,8 @@ function hostWithoutHarnesses(executables: ExecutableResolverPort): ExecutableRe
   };
 }
 
-function buildIntegrationWorld(): DaemonWorld {
-  const world = buildWorld();
+function buildIntegrationWorld(seams: WorldSeams = {}): DaemonWorld {
+  const world = buildWorld({}, seams);
   return {
     ...world,
     harnesses: { ...world.harnesses, executables: hostWithoutHarnesses(world.harnesses.executables) },
@@ -4989,6 +4989,12 @@ describe('daemon boot lifecycle', () => {
      * developer's machine cannot decide what the rest of this file asserts — and `PATH` is REPLACED
      * rather than prepended, so a real Claude Code installation cannot leak into a case about a host
      * with exactly one harness.
+     *
+     * THE USER HOME IS REPLACED TOO, and that one is not cosmetic. A first run copies this host's own
+     * harness login into the accounts it creates, and the directories it reads are derived from the
+     * user home — so without this, every case below would read the credential of whoever ran the suite
+     * and write a copy of it into a temporary directory. `homedir()` ignores `HOME` under this runtime,
+     * which is why the composition root takes the value rather than the environment being set.
      */
     async function harnessOnPath(home: string, kinds: readonly string[]): Promise<DaemonWorld> {
       const binary = join(home, 'harness-bin');
@@ -4997,8 +5003,16 @@ describe('daemon boot lifecycle', () => {
         await writeFile(join(binary, kind), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       }
       process.env.PATH = binary;
-      const production = buildWorld();
-      return { ...buildIntegrationWorld(), harnesses: production.harnesses };
+      const seams = { userHome: join(home, 'user-home') };
+      const production = buildWorld({}, seams);
+      return { ...buildIntegrationWorld(seams), harnesses: production.harnesses };
+    }
+
+    /** A signed-in harness in the fixture's own user home. Never the machine's. */
+    async function hostLogin(home: string, kind: 'claude' | 'codex', blob: string): Promise<void> {
+      const harnessHome = join(home, 'user-home', kind === 'claude' ? '.claude' : '.codex');
+      await mkdir(harnessHome, { recursive: true });
+      await writeFile(join(harnessHome, kind === 'claude' ? '.credentials.json' : 'auth.json'), blob, { mode: 0o600 });
     }
 
     it('should create, publish and disclose the default accounts for the harness it found', async () => {
@@ -5188,6 +5202,105 @@ describe('daemon boot lifecycle', () => {
       // The trail's last word about the fleet is still the seeded account, because nothing moved.
       const checked = said.steps.filter(step => step.startsWith('harnesses checked'));
       should(checked.at(-1)).containEql(`claude: ${WRAPPER}`);
+    });
+
+    /**
+     * The fleet arrives signed in, proved on a real boot rather than on a mount.
+     *
+     * The copy itself and every ending it can reach are proved in
+     * `packages/daemon/tests/unit/runtime/mounts/fleet-defaults.test.ts`. What only this tier can show
+     * is that the seed sits INSIDE the boot correctly: it runs after the apply that creates the homes,
+     * it does not hang the start on any of the three exclusive claims already in play, and the
+     * sentences it produces reach the boot trail a person actually reads.
+     */
+    it('should copy this host own login into the accounts it just created, and say so', async () => {
+      // Arrange — a host whose own Claude Code is signed in and whose fleet does not exist yet.
+      const home = await tempDirectory('fyd-fleet-seed');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const found = await harnessOnPath(home, ['claude']);
+      const credential = JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'fixture-access-token',
+          refreshToken: 'fixture-refresh-token',
+          expiresAt: Date.now() + 86_400_000,
+        },
+      });
+      await hostLogin(home, 'claude', credential);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — the boot completed and both created homes hold the login, as their own private copy.
+      should(code).equal(0);
+      for (const wrapper of ['claude-default', 'claude-auto-default']) {
+        const copy = join(home, 'fleet', 'homes', wrapper, '.credentials.json');
+        should(await readFile(copy, 'utf8')).equal(credential);
+        should((await stat(copy)).mode & 0o777).equal(0o600);
+      }
+
+      // The disclosure says WHAT was copied, WHERE FROM, and what it means afterwards. Copying
+      // somebody's provider login is not a detail, and silence about it is what makes people think
+      // this is broken.
+      const disclosure = said.stated.join('\n');
+      should(disclosure).containEql('Signed in without a browser: claude-default, claude-auto-default');
+      should(disclosure).containEql(join(home, 'user-home', '.claude'));
+      should(disclosure).containEql('signing your own Claude out does not sign them out');
+      should(disclosure).containEql('Every one of them starts with a credential in place');
+      // And the sentence that was true before this feature is NOT said, because it no longer is.
+      should(disclosure).not.containEql('NOT that they are signed in');
+      // Not one credential value reaches the trail. The disclosure is built from verdicts.
+      should(disclosure).not.containEql('fixture-access-token');
+      should(disclosure).not.containEql('fixture-refresh-token');
+    });
+
+    it('should still start, and say what it found nothing to copy from, on a signed-out host', async () => {
+      // Arrange — a harness installed and never logged in. The accounts are still created.
+      const home = await tempDirectory('fyd-fleet-seed-none');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      const found = await harnessOnPath(home, ['claude']);
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...found, notices: said.port, untilShutdown: async () => await stopped };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — a seed never fails a preparation, and the boot names the directory it looked in.
+      should(code).equal(0);
+      const disclosure = said.stated.join('\n');
+      should(disclosure).containEql('created 2 default accounts: claude-default, claude-auto-default');
+      should(disclosure).containEql(
+        `Nothing was copied for Claude: no usable Claude login was found in ${join(home, 'user-home', '.claude')}`,
+      );
+      should(disclosure).containEql('NOT that they are signed in');
+      should(await Bun.file(join(home, 'fleet', 'homes', 'claude-default', '.credentials.json')).exists()).be.false();
     });
   });
 

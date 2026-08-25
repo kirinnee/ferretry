@@ -22,6 +22,7 @@ import {
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
 } from '../../src/adapters/credential-store.ts';
+import { FleetFirstRunSeeder, type FleetSeedTarget } from '../../src/lib/credential-seed.ts';
 import type { FleetIdentityMember } from '../../src/lib/identity.ts';
 
 const NOW = 1_800_000_000_000;
@@ -520,5 +521,130 @@ describe('PlatformFleetCredentialStore on macOS', () => {
 
     // Act / Assert
     should(await store.read('claude', member('/homes/one'))).deepEqual({ state: 'missing' });
+  });
+});
+
+/**
+ * The first run's seed against the store that actually writes, on both platform branches.
+ *
+ * THIS IS THE ONLY PLACE THE macOS SEED IS PROVED. A file-copy-only seed would pass every other test
+ * in this repository and silently do nothing on a Mac, because Claude Code keeps no credential file
+ * there — it keeps a keychain item whose NAME is derived from the home path, so copying a credential
+ * between two homes means reading one item and writing a different one. The seeder itself has no
+ * platform branch at all; it delegates to this store, which is exactly why composing the two here is
+ * what shows a Mac would work. `security` is scripted, so no real keychain is touched.
+ */
+describe('the first run seed through the platform store', () => {
+  const seedTarget = (kind: 'claude' | 'codex', home: string): FleetSeedTarget => ({
+    id: '00000000-0000-4000-8000-000000000001',
+    kind,
+    mode: 'interactive',
+    wrapper: path.join(home, 'wrapper'),
+    home,
+    displayName: 'Account One',
+    defaultModel: 'a-model',
+    models: [{ id: 'a-model', available: true }],
+    available: true,
+    unavailableReason: null,
+  });
+
+  it('should copy a Linux credential file into the account home, private, as a real file', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const donorHome = path.join(root, 'user', '.claude');
+    const targetHome = path.join(root, 'fleet', 'homes', 'claude-default');
+    await mkdir(donorHome, { recursive: true });
+    await mkdir(targetHome, { recursive: true });
+    const blob = claudeBlob(NOW + HOUR);
+    await writeFile(claudeFilePath(donorHome), blob, { mode: 0o600 });
+
+    // Act
+    const results = await new FleetFirstRunSeeder(fileStore()).seed([seedTarget('claude', targetHome)], {
+      claude: donorHome,
+      codex: path.join(root, 'user', '.codex'),
+    });
+
+    // Assert
+    should(results[0]?.outcome).deepEqual({ kind: 'seeded', donorHome });
+    should(await readFile(claudeFilePath(targetHome), 'utf8')).equal(blob);
+    should((await stat(claudeFilePath(targetHome))).mode & 0o777).equal(0o600);
+  });
+
+  it('should seed a macOS account by rewriting the keychain item derived from its home', async () => {
+    // Arrange — five scripted invocations, in this order: the target item (absent), the donor item,
+    // the donor item AGAIN because the store re-reads and re-classifies at copy time, the target's
+    // keychain attributes, and the write.
+    const donorHome = '/Users/operator/.claude';
+    const targetHome = '/Users/operator/.ferretry/fleet/homes/claude-default';
+    const command = new ScriptedCommand([
+      { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
+      { code: 0, stdout: claudeBlob(NOW + HOUR) },
+      { code: 0, stdout: claudeBlob(NOW + HOUR) },
+      { code: 0, stdout: '"acct"<blob>="operator"' },
+      { code: 0, stdout: '' },
+    ]);
+    const store = new PlatformFleetCredentialStore({
+      platform: 'darwin',
+      command,
+      now: () => NOW,
+      keychainAccount: 'placeholder-user',
+    });
+
+    // Act
+    const results = await new FleetFirstRunSeeder(store).seed([seedTarget('claude', targetHome)], {
+      claude: donorHome,
+      codex: '/Users/operator/.codex',
+    });
+
+    // Assert — a keychain read of the DONOR's item and a write to the TARGET's, which are different
+    // names because the name is derived from the home. A file copy would have done nothing here.
+    should(results[0]?.outcome).deepEqual({ kind: 'seeded', donorHome });
+    should(command.calls[0]).deepEqual(['security', 'find-generic-password', '-s', keychainService(targetHome), '-w']);
+    should(command.calls[1]).deepEqual(['security', 'find-generic-password', '-s', keychainService(donorHome), '-w']);
+    should(command.calls[4]?.slice(0, 6)).deepEqual(['security', 'add-generic-password', '-U', '-a', 'operator', '-s']);
+    should(command.calls[4]?.[6]).equal(keychainService(targetHome));
+    should(keychainService(donorHome)).not.equal(keychainService(targetHome));
+  });
+
+  it('should carry the displayed account identity across with the macOS credential', async () => {
+    // Arrange — a donor whose `.claude.json` names the signed-in account. Without this the seeded
+    // homes show somebody a `/status` that names no account at all.
+    const root = await temporaryDirectory();
+    const donorHome = path.join(root, 'user', '.claude');
+    const targetHome = path.join(root, 'fleet', 'homes', 'claude-default');
+    await mkdir(donorHome, { recursive: true });
+    await mkdir(targetHome, { recursive: true });
+    await writeFile(claudeFilePath(donorHome), claudeBlob(NOW + HOUR), { mode: 0o600 });
+    await writeFile(claudeConfigPath(donorHome), JSON.stringify({ oauthAccount: { emailAddress: 'a@example.com' } }));
+
+    // Act
+    await new FleetFirstRunSeeder(fileStore()).seed([seedTarget('claude', targetHome)], {
+      claude: donorHome,
+      codex: path.join(root, 'user', '.codex'),
+    });
+
+    // Assert
+    should(JSON.parse(await readFile(claudeConfigPath(targetHome), 'utf8'))).deepEqual({
+      oauthAccount: { emailAddress: 'a@example.com' },
+    });
+  });
+
+  it('should report a home whose harness was never signed in, having written nothing', async () => {
+    // Arrange — an empty donor directory, which is what a freshly installed harness looks like.
+    const root = await temporaryDirectory();
+    const donorHome = path.join(root, 'user', '.codex');
+    const targetHome = path.join(root, 'fleet', 'homes', 'codex-default');
+    await mkdir(donorHome, { recursive: true });
+    await mkdir(targetHome, { recursive: true });
+
+    // Act
+    const results = await new FleetFirstRunSeeder(fileStore()).seed([seedTarget('codex', targetHome)], {
+      claude: path.join(root, 'user', '.claude'),
+      codex: donorHome,
+    });
+
+    // Assert
+    should(results[0]?.outcome).deepEqual({ kind: 'no-donor', donorHome });
+    should(await Bun.file(codexPath(targetHome)).exists()).be.false();
   });
 });
