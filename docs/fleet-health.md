@@ -121,6 +121,28 @@ Three things that row order encodes:
    Codex — `credential_unreadable` is more useful than "Codex cannot be proved", and losing it would
    be paying for the safety with the diagnosis.
 
+### `oauth_rejection_unconfirmed` — declared, and not yet produced
+
+`oauth_rejection_unconfirmed` is a member of `FleetHealthReasonSchema` that **no row above emits
+yet**. The decision that emits it — splitting a `401` that cannot be attributed out of row 3 — lands
+separately. It is declared first because the terminal and the browser both render an **exhaustive**
+map over this enum, so the code has to exist before either surface can be taught the words, and
+before the branch that produces it can typecheck.
+
+Everything about how it is PUBLISHED and RENDERED is settled here and does not move when the decision
+lands:
+
+- Its verdict is **`unknown`**, its evidence is `anthropic_usage`, and the check is **inconclusive**.
+- **No surface offers a sign-in for it.** The terminal prints no `fy fleet login` line and the browser
+  offers no control, both because `offersSignIn` and the terminal's remedy are keyed on
+  `needs_relogin` and this is not that.
+- It is rendered in the same visual class as every other `unknown` — muted, never a warning colour.
+
+The reason the split exists: a `401` from that endpoint cannot distinguish a repudiated LOGIN from a
+CLIENT the provider does not accept. Both arrive as the same status. Reading one as the other tells
+somebody to sign in again over a login that is fine, which costs a browser approval and fixes
+nothing — the worst outcome available here, and worse than saying plainly that it could not tell.
+
 ### `429` is deliberately not "authenticated, just throttled"
 
 Tempting and wrong. `usageEndpointHttpVerdict` — the **quota** reading — reports `authOk: true` for a

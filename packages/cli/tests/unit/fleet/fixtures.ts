@@ -1,11 +1,11 @@
 import type {
+  FleetAccountHealth,
   FleetApplyCommittedState,
   FleetApplyFailure,
   FleetApplyPlan,
   FleetApplyPreview,
   FleetApplyResult,
   FleetConfig,
-  FleetAccountHealth,
   FleetHealthSnapshot,
   FleetIdentity,
   FleetIdentityStatus,
@@ -42,13 +42,25 @@ export const ACCOUNT_ID = '00000000-0000-4000-8000-00000000c1a0';
 export const IDENTITY_KEY = 'claude:Claude (work)';
 export const GENERATED_AT = '2026-07-31T09:00:00.000Z';
 
-/** Captures what a controller printed, keeping stdout and warnings apart. */
+/**
+ * Captures what a controller printed, keeping stdout and warnings apart.
+ *
+ * `reports` records only what came through the UNPAINTED channel, so a test can assert that a
+ * rendering carrying its own colour was not handed to the one that repaints everything green. Both
+ * channels still land in `lines`, because to a reader they are the same stdout in the same order.
+ */
 export class CapturingOutput implements IFleetOutput {
   readonly lines: string[] = [];
+  readonly reports: string[] = [];
   readonly warnings: string[] = [];
 
   success(message: string): void {
     this.lines.push(message);
+  }
+
+  report(message: string): void {
+    this.lines.push(message);
+    this.reports.push(message);
   }
 
   warn(message: string): void {
