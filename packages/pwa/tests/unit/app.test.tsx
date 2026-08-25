@@ -1856,6 +1856,7 @@ describe('AppShell', () => {
     for (const [path, expected] of [
       ['/d/alpha/new', 'Sessions, New'],
       ['/d/alpha/settings', 'Sessions, Settings'],
+      ['/d/alpha/accounts', 'Sessions, Accounts'],
       ['/d/alpha/warden', 'Sessions, Warden'],
       ['/d/alpha/analytics', 'Sessions, Analytics'],
       ['/d/alpha/learning', 'Sessions, Learning'],
