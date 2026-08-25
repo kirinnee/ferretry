@@ -257,11 +257,11 @@ const unknown = (reason: FleetHealthReason, evidence: FleetHealthEvidence = 'non
  *
  * 1. **An unavailable account is not checked.** The manifest already said it cannot serve work, and a
  *    credential verdict about it would be a claim nothing measured.
- * 2. **A positively dead LOCAL credential outranks any remote answer.** The remote read was made
- *    against the credential GROUP's shared login, through one representative home; a sibling whose
- *    own copy is absent or expired-with-no-refresh does not become healthy because the representative
- *    answered. This is the one place local evidence wins, and it wins because it is the only local
- *    reading that is a hard negative.
+ * 2. **A decisive LOCAL expiry classification outranks any remote answer.** The credential classifier
+ *    applies the shared 60-second expiry skew before this table runs. `missing` is a hard negative;
+ *    `refreshable` is an expired access token with a way back. A remote probe made with that stale
+ *    access token may reject it, but that says nothing about whether the refresh token can renew the
+ *    login and must never turn the account into `needs_relogin`.
  * 3. **Then the remote answer, which is the only thing that can produce `healthy`.** A locally valid
  *    token is structural evidence, not acceptance: it may have been revoked a minute ago.
  * 4. **Then the most specific inconclusive reason available.** Each of these is a different sentence
@@ -281,6 +281,13 @@ export function decideAccountHealth(input: AccountHealthInput): AccountHealthCon
     return input.loginApplies
       ? conclusion('needs_relogin', reason, 'local_credential', true)
       : conclusion('needs_credentials', 'static_credential_missing', 'local_credential', true);
+  }
+  if (local?.state === 'refreshable') {
+    // The access token is already expired for practical purposes: identity.ts classifies it with the
+    // same 60-second skew as the reference implementation. A remote rejection therefore condemns only
+    // the stale access token the probe tried, not the refresh token beside it. Refresh first; never ask
+    // a person to sign in again while the credential still has a non-interactive recovery path.
+    return unknown('oauth_refreshable', 'local_credential');
   }
 
   /**
@@ -323,7 +330,6 @@ export function decideAccountHealth(input: AccountHealthInput): AccountHealthCon
   if (input.kind === 'codex') return unknown('codex_liveness_unproven');
   if (remote === 'timeout') return unknown('check_timeout', 'anthropic_usage');
   if (remote === 'inconclusive') return unknown('provider_unavailable', 'anthropic_usage');
-  if (local?.state === 'refreshable') return unknown('oauth_refreshable', 'local_credential');
   if (local?.state === 'valid') return unknown('provider_not_asked', 'local_credential');
   return unknown('never_checked');
 }
