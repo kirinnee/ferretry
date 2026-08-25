@@ -5495,7 +5495,7 @@ function Shell() {
     {
       label: 'Accounts page preview',
       render: () => (
-        <Card id="harness-fleet-inventory" aria-label="Accounts page preview">
+        <Card id="harness-accounts-page" aria-label="Accounts page preview">
           <PanelBody>
             <AccountsSurface
               daemonId={daemon.daemonId}
