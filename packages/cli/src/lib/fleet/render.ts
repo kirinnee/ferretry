@@ -388,15 +388,48 @@ export function renderFleetApplyFailure(failure: FleetApplyFailure, lockResidue?
   ].join('\n');
 }
 
-/** One account row: what it is, and whether it can be used. */
+/**
+ * One model in the list an account's row leads with: its identifier, and what is true about it.
+ *
+ * The IDENTIFIER is the subject and the rest is annotation, because the id is what a person types
+ * into `--model` and what the provider answers to. A display name is a nicety and the default is a
+ * property, so both are annotations on the one string that matters rather than a second column.
+ */
+function modelEntry(account: FleetManifestAccount, model: FleetManifestAccount['models'][number]): string {
+  const notes = [
+    ...(model.displayName === undefined ? [] : [model.displayName]),
+    ...(account.defaultModel === model.id ? ['default'] : []),
+  ];
+  return notes.length === 0 ? model.id : `${model.id} (${notes.join(', ')})`;
+}
+
+/**
+ * One account row: what it is, which models it serves, and whether it can be used.
+ *
+ * EVERY DECLARED MODEL IS NAMED, and an unavailable one is named WITH ITS REASON on its own line.
+ * The row used to filter the list to available models, so an account declaring
+ * `available: false, unavailableReason: …` on one model printed a shorter list and nothing else — the
+ * declaration a person had written, and the reason they had written it for, were both invisible in
+ * the one command that exists to say what this host publishes. A reason nobody can read is a reason
+ * nobody acts on, and the account went on reading `available` underneath it.
+ *
+ * THE VERB CHANGES WITH THE ACCOUNT, because the model list means something different either side of
+ * it. Nothing routes to an unavailable account — `selectableModelIds` empties for one whatever its
+ * models say — so a row that claimed such an account `serves` them would be stating a capability the
+ * fleet would refuse to use. It `declares` them instead, and the account's own line says why not.
+ */
 export function renderAccount(account: FleetManifestAccount): string {
-  const models = account.models.filter(model => model.available).map(model => model.id);
-  const state = account.available ? 'available' : `unavailable — ${account.unavailableReason}`;
+  const entries = account.models.filter(model => model.available).map(model => modelEntry(account, model));
+  const verb = account.available ? 'serves' : 'declares';
+  const unavailable = account.models.flatMap(model =>
+    model.available ? [] : [`${INDENT}model ${model.id} is unavailable — ${model.unavailableReason}`],
+  );
   return [
     `  ${account.id}  [${account.kind}/${account.mode}]  ${account.displayName}`,
     `${INDENT}wrapper ${account.wrapper} · home ${account.home}`,
-    `${INDENT}default ${account.defaultModel ?? 'none'} · models ${models.length === 0 ? 'none available' : models.join(', ')}`,
-    `${INDENT}${state}`,
+    `${INDENT}${entries.length === 0 ? `${verb} no models` : `${verb} ${entries.join(', ')}`}`,
+    ...unavailable,
+    `${INDENT}${account.available ? 'available' : `unavailable — ${account.unavailableReason}`}`,
   ].join('\n');
 }
 
