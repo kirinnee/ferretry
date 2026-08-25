@@ -13,9 +13,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import {
-  accountSecretNames,
   describeCompositionOrigin,
-  describeEnvBinding,
   envComposition,
   envValueShape,
   fleetSecretReferences,
@@ -113,16 +111,6 @@ describe('secretEnvBindings', () => {
 
     // Assert
     should(actual).deepEqual([]);
-  });
-});
-
-describe('accountSecretNames', () => {
-  it('should collapse one secret named by two variables into one name', () => {
-    // Act
-    const actual = accountSecretNames({ A_KEY: '${secret:WORK_KEY}', B_KEY: 'Bearer ${secret:WORK_KEY}' });
-
-    // Assert
-    should(actual).deepEqual(['WORK_KEY']);
   });
 });
 
@@ -357,66 +345,6 @@ describe('describeCompositionOrigin', () => {
   });
 });
 
-describe('describeEnvBinding', () => {
-  it('should name the store and the secret, and what the winning slot beat', () => {
-    // Act
-    const actual = describeEnvBinding({
-      variable: 'ANTHROPIC_API_KEY',
-      shape: { shape: 'secret', secrets: ['WORK_KEY'] },
-      from: { kind: 'account' },
-      overrode: [
-        { kind: 'base-profile', name: 'base' },
-        { kind: 'agent-profile', name: 'work' },
-      ],
-    });
-
-    // Assert
-    should(actual).equal(
-      `ANTHROPIC_API_KEY comes from this daemon's secret store (secret WORK_KEY), set by this account, overriding the base profile and the profile "work"`,
-    );
-  });
-
-  it('should pluralise when one variable names two secrets', () => {
-    // Act
-    const actual = describeEnvBinding({
-      variable: 'AUTH_HEADER',
-      shape: { shape: 'secret', secrets: ['SCHEME', 'WORK_KEY'] },
-      from: { kind: 'agent', name: 'kirin' },
-      overrode: [],
-    });
-
-    // Assert
-    should(actual).match(/secrets SCHEME, WORK_KEY/u);
-    should(actual).not.match(/overriding/u);
-  });
-
-  it('should send a reader to the environment for an environment reference', () => {
-    // Act
-    const actual = describeEnvBinding({
-      variable: 'TOKEN',
-      shape: { shape: 'environment-reference', variable: 'OUTER' },
-      from: { kind: 'variant', name: 'auto' },
-      overrode: [],
-    });
-
-    // Assert
-    should(actual).equal('TOKEN comes from $OUTER in the environment that launches it, set by the variant "auto"');
-  });
-
-  it('should say the configuration for a literal, without quoting the literal', () => {
-    // Act
-    const actual = describeEnvBinding({
-      variable: 'ANTHROPIC_BASE_URL',
-      shape: { shape: 'literal' },
-      from: { kind: 'base-profile', name: 'base' },
-      overrode: [],
-    });
-
-    // Assert
-    should(actual).equal('ANTHROPIC_BASE_URL comes from the fleet configuration, set by the base profile');
-  });
-});
-
 describe('fleetSecretReferences', () => {
   it('should name every account that reaches for a secret, with the profile that set it', () => {
     // Arrange
@@ -456,6 +384,46 @@ describe('fleetSecretReferences', () => {
         account: 'claude-hadi',
         variable: 'ANTHROPIC_API_KEY',
         origin: 'fleet account claude-hadi → ANTHROPIC_API_KEY, set by the profile "work"',
+      },
+    ]);
+  });
+
+  it('should say what the winning slot beat, so one variable bound in three places is explainable', () => {
+    // Arrange — the base profile, a named profile and the account itself all bind the credential.
+    const config = parse({
+      profiles: {
+        base: { env: { ANTHROPIC_API_KEY: '${secret:SHARED_KEY}' } },
+        work: { env: { ANTHROPIC_API_KEY: '${secret:TEAM_KEY}' } },
+      },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          auth: 'api-key',
+          profiles: ['work'],
+          routes: {
+            default: {
+              ...route(ID_ONE, 'claude-kirin'),
+              layer: { env: { ANTHROPIC_API_KEY: '${secret:MINE_KEY}' } },
+            },
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = fleetSecretReferences(config);
+
+    // Assert — the winner AND what it overrode. Told only the winner, a person cannot tell a
+    // deliberate override from the same variable typed into two profiles by mistake, and the listing
+    // is the only place this fleet's composition is visible.
+    should(actual).deepEqual([
+      {
+        name: 'MINE_KEY',
+        account: 'claude-kirin',
+        variable: 'ANTHROPIC_API_KEY',
+        origin:
+          'fleet account claude-kirin → ANTHROPIC_API_KEY, set by this account, overriding the base profile and the profile "work"',
       },
     ]);
   });

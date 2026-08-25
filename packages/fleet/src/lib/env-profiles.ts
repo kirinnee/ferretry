@@ -38,21 +38,18 @@
  * slots it overrode. It reports the SHAPE — literal, or backed by these named secrets — and never
  * the value, so it is safe to render anywhere a name is safe to render.
  *
+ * That report reaches a person through {@link fleetSecretReferences}: every secret an account reaches
+ * for is a row in the daemon's secret listing whose origin names the account, the variable, the slot
+ * that set it and the slots it beat. There is deliberately no per-variable composition surface beyond
+ * that — see `docs/fleet-env-profiles.md`, which declares its absence rather than shipping a report
+ * nothing renders.
+ *
  * Pure throughout: no filesystem, no environment, no clock, no store.
  */
 import { secretReferencesIn, SECRET_REFERENCE_SOURCE, type SecretName } from '@ferretry/protocol';
 import type { AccountRoute, Agent, EnvMap, FleetConfig } from './config.ts';
 import { compositionSlots, flattenForKind, type CompositionOrigin, type ResolvedAccount } from './profiles.ts';
 import { envReferenceName } from './wrappers.ts';
-
-/** Every secret an account's composed environment names, in variable order then reference order. */
-export function accountSecretNames(env: Readonly<EnvMap>): readonly SecretName[] {
-  const names: SecretName[] = [];
-  for (const value of Object.values(env)) {
-    for (const name of secretReferencesIn(value)) if (!names.includes(name)) names.push(name);
-  }
-  return names;
-}
 
 /** One composed variable whose value the secret store has to supply before the account can run. */
 export interface SecretEnvBinding {
@@ -230,24 +227,18 @@ export function describeCompositionOrigin(origin: CompositionOrigin): string {
 }
 
 /**
- * One binding as a sentence, for a listing an operator reads.
+ * Which slot won this variable and — when it was contested — what it beat, as one clause.
  *
- * Says where the value came from and — when it was contested — what it beat, because "which profile
- * set my API key" is the question this whole report exists to answer and a reader who is only told
- * the winner cannot tell a deliberate override from a name they typed twice.
+ * The second half is not decoration. "Which profile set my API key" is the question this whole report
+ * exists to answer, and a reader told only the winner cannot tell a deliberate override from a name
+ * they typed into two profiles by mistake.
  */
-export function describeEnvBinding(binding: EnvBinding): string {
-  const source =
-    binding.shape.shape === 'secret'
-      ? `this daemon's secret store (${binding.shape.secrets.length === 1 ? 'secret' : 'secrets'} ${binding.shape.secrets.join(', ')})`
-      : binding.shape.shape === 'environment-reference'
-        ? `$${binding.shape.variable} in the environment that launches it`
-        : 'the fleet configuration';
+function describeContest(binding: EnvBinding): string {
   const overridden =
     binding.overrode.length === 0
       ? ''
       : `, overriding ${binding.overrode.map(describeCompositionOrigin).join(' and ')}`;
-  return `${binding.variable} comes from ${source}, set by ${describeCompositionOrigin(binding.from)}${overridden}`;
+  return `set by ${describeCompositionOrigin(binding.from)}${overridden}`;
 }
 
 /** One account's secret-backed variables with the slot each was set by, for a management listing. */
@@ -282,7 +273,7 @@ export function fleetSecretReferences(config: FleetConfig): readonly FleetSecret
             name,
             account: route.wrapper,
             variable: binding.variable,
-            origin: `fleet account ${route.wrapper} → ${binding.variable}, set by ${describeCompositionOrigin(binding.from)}`,
+            origin: `fleet account ${route.wrapper} → ${binding.variable}, ${describeContest(binding)}`,
           });
         }
       }
