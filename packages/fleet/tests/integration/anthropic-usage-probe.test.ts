@@ -23,6 +23,7 @@ import type { FleetManifestAccount, HarnessKind } from '../../src/lib/manifest.t
 const TOKEN = 'placeholder-access-token';
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
+  secretEnv: {},
   id: '00000000-0000-4000-8000-000000000001',
   kind: 'claude',
   mode: 'interactive',

@@ -27,6 +27,7 @@ const manifest = (): FleetManifest => ({
   generatedAt: '2027-01-15T08:00:00.000Z',
   accounts: [
     {
+      secretEnv: {},
       id: ACCOUNT_ID,
       kind: 'claude',
       mode: 'auto',

@@ -94,6 +94,7 @@ describe('the recommender mount', () => {
     const accounts = [
       {
         id: 'account-ghost',
+        secretEnv: {},
         agent: 'agent-ghost',
         wrapper: '/state/fleet/bin/agent-ghost',
         home: '/state/fleet/homes/ghost',

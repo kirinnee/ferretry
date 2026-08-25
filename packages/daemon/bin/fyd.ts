@@ -445,7 +445,10 @@ import {
   renderHarnessPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
+  FleetLaunchEnvironment,
+  FleetSecretReferences,
   type ScratchReclamation,
+  combinedReferences,
   SecretDirectory,
   SecretRedactor,
   type SecretSubsystem,
@@ -558,7 +561,12 @@ import {
 } from '../src/lib/fleet/boot-preparation.ts';
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
-import { PlatformFleetCredentialStore, readFleetWrapperScript, SpawnCredentialCommand } from '@ferretry/fleet/adapters';
+import {
+  FileFleetConfigSource,
+  PlatformFleetCredentialStore,
+  readFleetWrapperScript,
+  SpawnCredentialCommand,
+} from '@ferretry/fleet/adapters';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import { daemonVersion } from '../src/lib/version.ts';
@@ -4349,7 +4357,19 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
   const secretVault = new SecretVault(secretDocuments, secretCipher);
   const secrets: SecretSubsystem = {
     directory: new SecretDirectory(secretDocuments, secretCipher, clock),
-    references: secretRecipes,
+    // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
+    // authenticates. Both are listed, so an account whose credential is missing from the store is a
+    // line on a screen before it is a session that dies at start.
+    references: combinedReferences(
+      secretRecipes,
+      new FleetSecretReferences(async () => {
+        const configPath = join(paths.fleet, 'config.yaml');
+        // Absent is a host with no fleet, which names nothing. Anything else — unreadable, a typo in
+        // the YAML — raises, because a reference list quietly missing half its entries is how
+        // somebody deletes a secret their fleet still wants.
+        return (await Bun.file(configPath).exists()) ? await new FileFleetConfigSource(configPath).load() : undefined;
+      }),
+    ),
     uses: new SecretUseService(secretVault, new BunSecretChildRunner(), secretRecipes),
   };
   // Everything an operator reads back is scrubbed of every value this daemon holds, so a secret a
@@ -4422,6 +4442,14 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
   /** The published fleet, read fresh on every call. ONE inventory for the whole process: the
    *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
   const accounts = new ManifestAccountInventory(stateFiles, paths.fleetManifest);
+  /**
+   * What an account's own profile supplies at launch, when the profile authenticates it instead of a
+   * login. The THIRD thing in this daemon holding a vault, and the reasoning for that — plus why it
+   * reads the published manifest rather than the fleet configuration — is in
+   * `lib/fleet/launch-environment.ts`. Both launch paths get the same one, because a revived pane
+   * that came back without its credential is a working agent destroyed by its own recovery.
+   */
+  const accountLaunchEnvironment = new FleetLaunchEnvironment(accounts, secretVault);
   /**
    * What this host can actually run: a published wrapper by its path, a harness command by name.
    *
@@ -4802,6 +4830,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
           // replacement pane must carry the session's CURRENT environment. Read here rather than
           // captured at construction, and merged with the derived session id by the launcher.
           env: await sessionEnvironments.read(id),
+          // The executable, so a revive can resolve the same profile the first launch did. Without
+          // it a profile-authenticated account would come back with no credential at all.
+          agent: config.agent,
         };
       },
       new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
@@ -4810,6 +4841,10 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       // the configuration saved immediately before it, without restarting this daemon.
       cgroupLaunchPlanner,
       registrar,
+      undefined,
+      // The SAME resolver the first launch used, for the same reason the environment above is
+      // re-read: a revive must hand the replacement the credential the account has NOW.
+      accountLaunchEnvironment,
     );
   };
   /**
@@ -4968,6 +5003,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       // scope. Supervision and this daemon are never wrapped — see `lib/cgroups/exemption.ts` and
       // the planner's header — and a launch with limits off is byte-for-byte what it always was.
       cgroupLaunchPlanner,
+      // Resolved per launch against the store, so a rotated credential reaches the next pane with no
+      // apply in between, and a missing one refuses the start naming the secret.
+      accountLaunchEnvironment,
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {

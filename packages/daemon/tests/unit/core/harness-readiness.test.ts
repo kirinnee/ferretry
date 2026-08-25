@@ -22,6 +22,7 @@ import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
 function account(patch: Partial<CoreAccount> = {}): CoreAccount {
   const agent = patch.agent ?? 'claude-auto-one';
   return {
+    secretEnv: {},
     id: 'account-1',
     agent,
     // The manifest publishes the ABSOLUTE path; the daemon derives the name from it.

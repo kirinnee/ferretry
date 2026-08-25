@@ -19,6 +19,7 @@ const ID_TWO = '00000000-0000-4000-8000-000000000002';
 const GENERATED_AT = '2027-01-15T08:00:00.000Z';
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
+  secretEnv: {},
   id: ID_ONE,
   kind: 'claude',
   mode: 'auto',
