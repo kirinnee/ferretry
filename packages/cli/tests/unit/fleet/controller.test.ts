@@ -170,6 +170,35 @@ describe('reporting quota', () => {
     should(out.text).containEql('short 42%');
   });
 
+  it('should name each account from the manifest it already loaded, not print its id', async () => {
+    // Arrange — the collector answers about the account the manifest declares, which is the join the
+    // report needs: a row reading `00000000-0000-4000-8000-00000000c1a0  short 42%` tells a person how
+    // many of their accounts are busy and never which one.
+    const usage = new RecordingUsageCollector();
+    const { subject, out } = controller({ usage });
+
+    // Act
+    await subject.usage({});
+
+    // Assert — no second read: the manifest was already loaded to tell the collector what to probe.
+    should(out.text).containEql('Claude (work)  short 42%');
+    should(out.text).not.containEql(ACCOUNT_ID);
+  });
+
+  it('should keep the id on the wire even though the row prints a name', async () => {
+    // Arrange — naming the row is a TERMINAL rendering. `--json` is what a machine reads and the
+    // browser joins by id against the roster it already holds, so the payload must not lose it.
+    const usage = new RecordingUsageCollector();
+    const { subject, out } = controller({ usage });
+
+    // Act
+    await subject.usage({ json: true });
+
+    // Assert
+    const payload = JSON.parse(out.text) as { accounts: readonly { accountId: string }[] };
+    should(payload.accounts[0]?.accountId).equal(ACCOUNT_ID);
+  });
+
   it('should refuse to report usage before the fleet has ever been applied', async () => {
     // Arrange
     const { subject } = controller({ manifests: new StubManifestSource(null) });
