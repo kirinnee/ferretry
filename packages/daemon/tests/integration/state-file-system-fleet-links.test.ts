@@ -26,6 +26,82 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
+describe('StateFileSystem fleet asset links', () => {
+  it('should read through a provisioned account link into this fleet asset tree', async () => {
+    // Arrange — exactly what `fy fleet apply` now writes: the account's instructions file IS the shared
+    // document in the asset tree.
+    const subject = await fixture();
+    const document = join(subject.paths.fleet, 'assets', 'CLAUDE.md');
+    const linked = join(subject.paths.fleet, 'homes', 'claude-work', 'CLAUDE.md');
+    await mkdir(join(subject.paths.fleet, 'assets'), { recursive: true });
+    await mkdir(join(subject.paths.fleet, 'homes', 'claude-work'), { recursive: true });
+    await writeFile(document, '# Shared\n');
+    await symlink(document, linked);
+
+    // Act
+    const actual = await subject.files.readText(linked);
+
+    // Assert — without this the shared-asset link would be unreadable through the state filesystem, so
+    // every daemon read of an account's own instructions would fail on a link Ferretry itself created.
+    should(actual).equal('# Shared\n');
+  });
+
+  it('should refuse an account-home link into the asset tree of somewhere else', async () => {
+    // Arrange — a link whose target merely LOOKS like an asset tree. The exemption is about this
+    // daemon's own directories, not about a path shape.
+    const subject = await fixture();
+    const elsewhere = join(subject.root, 'other-home', 'fleet', 'assets');
+    const linked = join(subject.paths.fleet, 'homes', 'claude-work', 'CLAUDE.md');
+    await mkdir(elsewhere, { recursive: true });
+    await mkdir(join(subject.paths.fleet, 'homes', 'claude-work'), { recursive: true });
+    await writeFile(join(elsewhere, 'CLAUDE.md'), 'not ours\n');
+    await symlink(join(elsewhere, 'CLAUDE.md'), linked);
+
+    // Act
+    const error = await subject.files.readText(linked).catch(value => value);
+
+    // Assert
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it('should keep refusing an asset-tree link everywhere outside fleet homes', async () => {
+    // Arrange — the target is admissible; the SOURCE is not. Only `fleet/homes` may hold one.
+    const subject = await fixture();
+    const document = join(subject.paths.fleet, 'assets', 'CLAUDE.md');
+    const linked = join(subject.paths.index, 'CLAUDE.md');
+    await mkdir(join(subject.paths.fleet, 'assets'), { recursive: true });
+    await mkdir(subject.paths.index, { recursive: true });
+    await writeFile(document, '# Shared\n');
+    await symlink(document, linked);
+
+    // Act
+    const error = await subject.files.readText(linked).catch(value => value);
+
+    // Assert — a link into the asset tree is not a licence to plant one anywhere in the state home.
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+
+  it('should reject an escaping link nested behind an allowed fleet-asset link', async () => {
+    // Arrange — a link into the asset tree, with an escape planted inside the asset tree itself.
+    const subject = await fixture();
+    const assets = join(subject.paths.fleet, 'assets', 'skills');
+    const linked = join(subject.paths.fleet, 'homes', 'claude-work', 'skills', 'review');
+    const outside = join(subject.root, 'outside');
+    await mkdir(join(assets, 'review'), { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await mkdir(join(subject.paths.fleet, 'homes', 'claude-work', 'skills'), { recursive: true });
+    await writeFile(join(outside, 'secret'), 'not fleet state\n');
+    await symlink(outside, join(assets, 'review', 'escape'));
+    await symlink(join(assets, 'review'), linked);
+
+    // Act
+    const error = await subject.files.readText(join(linked, 'escape', 'secret')).catch(value => value);
+
+    // Assert — the whole chain is resolved, so an intermediate link cannot use the exemption to leave.
+    should(String(error)).match(/symbolic links are not allowed inside the state home/u);
+  });
+});
+
 describe('StateFileSystem fleet history links', () => {
   it('should read through a provisioner-owned account link into this daemon shared pool', async () => {
     const subject = await fixture();

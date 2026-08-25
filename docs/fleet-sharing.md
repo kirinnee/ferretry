@@ -11,8 +11,10 @@ sharing does, because it is narrower and more boring than the phrase suggests �
 ## The model
 
 A fleet asset is a document in the fleet's **asset tree** (`<FY_HOME>/fleet/assets`). An account uses
-one by referencing it somewhere in its composition chain, and `fy fleet apply` **copies** the
-referenced source into that account's home.
+one by referencing it somewhere in its composition chain, and `fy fleet apply` **links** the
+referenced source into that account's home — a real symlink, so the file in the home and the shared
+document are one file. Two accounts referencing one path do not have equal copies of it; they have it.
+Editing it changes both, immediately, because there is nothing else to change.
 
 Sharing is therefore already what happens when two accounts reference one path. The starter
 configuration does exactly this: `profiles.base.claude.memory` and `profiles.base.codex.memory` point
@@ -119,6 +121,67 @@ sharing without having said so**. That is a state to offer to fix, not one to hi
 
 `linkable` per account excludes any field its harness has no destination for, so a surface never
 offers a control whose apply would be refused — `mcp` on Codex, `hooks` on Claude.
+
+Every non-absent state also carries **`materialization`** — see the next section for what the three
+values mean. It is absent for exactly the fields missing from `linkable`: a harness with no destination
+for a field materializes nothing there, and naming a mechanism would describe a write that never
+happens.
+
+## How a value reaches a home
+
+Three mechanisms, and **which one is in play is said wherever a person can see the field**, because the
+three differ in the only way that matters to somebody editing a file: whether their edit survives, and
+whether it reaches anybody else. `packages/fleet/src/lib/assets.ts` is the single owner —
+`HARNESS_ASSETS` declares the ceiling per harness and field, and `resolveAssetMaterialization` is the
+one function that resolves it, read by the plan builder AND by the sharing report so the two cannot
+disagree.
+
+| mechanism   | the destination is                           | an edit to the source              | an edit to the destination                      |
+| ----------- | -------------------------------------------- | ---------------------------------- | ----------------------------------------------- |
+| `link`      | the source. One inode, two names             | already every account's            | is an edit to the shared document               |
+| `copy`      | the source's bytes as of the last apply      | reaches accounts on the next apply | replaced on the next apply                      |
+| `generated` | a merge of a layer stack, composed in memory | reaches accounts on the next apply | folded in once, then replaced by the next merge |
+
+**`link` is the default and every single-pick field has it**: `memory`, each selected `skills` item,
+`hooks`, `hooksDir`, `mcp`. This is what "so they Actually are the same thing" means, and it is not a
+figure of speech — `readlink` on an account's `CLAUDE.md` names the document in the asset tree.
+
+**`generated` is `settings`, and only `settings`.** A stack of layers deep-merged left to right cannot
+be a link to any one of them, so the merge is computed in memory and written as one file. There is a
+second, independent reason it must be a real file: each harness rewrites its own settings while it runs
+(`/effort` persists into Claude's `settings.json`), so the destination is also an input, which is what
+`preserveExisting` folds back in. Both reasons point the same way, which is why there is no argument to
+have about it.
+
+**`copy` is the one downgrade, and it is a safety property rather than a preference.** A link inside an
+account home may only ever resolve into the fleet's own asset tree, so a reference beginning `/`, `~` or
+`$HOME` — or a relative one that climbs out with `..` — is copied instead. The predicate is
+`isAssetTreeReference`, decided from the REFERENCE rather than from an expanded path, so a pure report
+and a real host give the same answer and a surface can never promise a live link the apply then turns
+into a copy.
+
+### Why the symlink ban had to be extended, and how narrowly
+
+`StateFileSystem` refuses to traverse a symlink component anywhere inside `FY_HOME`, so that no
+operation can follow one out of the state home. Before this, the single exemption admitted a link under
+`fleet/homes` whose whole chain resolved inside `fleet/shared` — the history pool. It now admits
+`fleet/assets` as well, and nothing else:
+
+- the **source** must be under `fleet/homes`;
+- the resolved **target** must be inside `fleet/shared` or `fleet/assets`;
+- the **complete chain** is resolved, so a planted intermediate link cannot use the exemption to escape
+  either directory;
+- anything dangling, cyclic or unreadable fails closed.
+
+A link pointing anywhere else keeps the blanket refusal, including one pointing elsewhere inside the
+state home. The two destinations are two different contracts and are worth keeping distinct: the pool is
+state the harness owns and Ferretry never writes, while the asset tree is state Ferretry owns and every
+apply writes. Extending the hole rather than widening the rule is what keeps that distinction legible.
+
+**A credential is never linked, at any layer.** Auth is not an asset field, so no mechanism here can
+reach one — and it could not work if it did: a harness rewrites its credential by temp-file-and-rename,
+which replaces a link with a regular file, and on macOS Claude keys its keychain item to the home path.
+`docs/fleet-defaults.md` owns that argument for the seeding path.
 
 ## What is shared, and what can never be
 
@@ -238,12 +301,19 @@ These are declared, not hidden. Each is a thing a reader might reasonably assume
   something still in use is rejected with the account ids on it rather than leaving them pointing at a
   path the store no longer names. There is no verb that deletes a store item yet; the guard sits on the
   mutation path so the verb that does cannot arrive without it.
-- **Account homes get copies, not symlinks — for now.** An edit to a store item therefore reaches every
-  account that selected it on the **next apply**, not immediately. Real symlinks would make it
-  immediate, and the exemption in `StateFileSystem` admits a link under `fleet/homes` only when it
-  resolves inside `fleet/shared`; the asset store is `fleet/assets`, so the flip waits on relocating the
-  store. It is one line per entry in `HARNESS_ASSETS` once it can be made, and nothing above depends on
-  which of the two it is.
+- **A write that REPLACES a linked document, rather than editing it, ends the sharing until the next
+  apply — and is then discarded.** A save done as temp-file-and-rename, which is how most editors and
+  Claude's `#` memory shortcut write, replaces the link with a regular file holding the new text: the
+  shared document keeps its old bytes, that one account keeps the new ones, and nothing announces the
+  split. The next apply puts the link back and removes the replacement, exactly as it previously
+  overwrote an edited copy — so this is not a regression from copying, but it is not fixed by linking
+  either. An in-place edit through the link is shared; a replace-by-rename is lost. This is precisely why
+  `settings` is generated rather than linked (that file is _known_ to be rewritten at runtime, and the
+  merge folds it back in) and why nothing here links a credential.
+- **A source outside the asset tree is copied, not linked.** `~/dotfiles/CLAUDE.md` reaches an account on
+  the next apply rather than immediately. The report says `copy` for it, so the difference is visible
+  before somebody relies on the other behaviour, and the remedy is to keep the document in the asset
+  tree.
 - **A settings layer cannot be linked or unlinked**, for the reason above. It is reported.
 - **Renaming a shared document does not follow.** Accounts reference the path, so changing
   `shared.memory.claude` to a different path leaves referrers on the old one, and the next apply fails
@@ -255,8 +325,8 @@ These are declared, not hidden. Each is a thing a reader might reasonably assume
   into homes by an apply, but its text cannot be read through the pinned asset store, so unlink refuses
   with that reason rather than failing later on a path the person did not name.
 - **The report describes the configuration, not the disk.** It says what the _next_ apply will
-  materialize. An account home whose copy was edited by hand still reports as sharing the document it
-  references, because that is what apply will put back.
+  materialize, including which mechanism it will use. An account home whose entry was replaced by hand
+  still reports as sharing the document it references, because that is what apply will put back.
 
 ## Surfaces
 

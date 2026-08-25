@@ -14,20 +14,24 @@
  *
  * So this module adds a **declaration and a report**, not a second mechanism. `config.shared` names
  * documents; an account uses one by naming it in the composition chain exactly as before; and
- * {@link resolveFleetSharing} answers, per account and per field, which of the two it is and where
- * the value came from. Nothing here materializes anything: the plan builder still emits the same copy
- * operations, so a link takes effect on the next reviewed apply like every other change.
+ * {@link resolveFleetSharing} answers, per account and per field, which of the two it is, where the
+ * value came from, and HOW it reaches the home. Nothing here materializes anything: the plan builder
+ * emits the writes, and this module reports them by reading the same
+ * {@link resolveAssetMaterialization} the plan builder does, so a surface can never tell somebody a
+ * field is a live link while the apply takes a copy of it.
  *
  * ## Why this is not the shared-history pool
  *
  * `shared-history.ts` pools one harness-owned directory per account home and replaces each with a
- * symlink into it. That is right for state the harness writes and Ferretry never does — transcripts,
- * prompt history, todos. It is wrong for assets, and not by a little: every asset path is a
+ * symlink into it. Assets are symlinked too, so the difference is not the mechanism — it is WHOSE
+ * state sits at the other end. The pool is right for state the harness writes and Ferretry never does
+ * — transcripts, prompt history, todos — and it is wrong for assets, because every asset path is a
  * destination the fleet plan **writes on every apply**. Pooling one would give a single inode two
  * owners, and the pool's own rename-based migration would move the fleet's copy into the pool where
  * the next apply overwrites it — so one account's instructions would silently become everyone's, or
  * the shared default would silently become one account's. The pool's contract ("Ferretry never writes
  * this") and the asset contract ("the fleet writes this every apply") cannot both hold for one path.
+ * Which is why the asset link points at `fleet/assets` and never at `fleet/shared`.
  *
  * The property the pool exists to protect is preserved rather than abandoned. A pooled rename must
  * never cross a filesystem device because a copy would hand every reader a new inode; here there is
@@ -49,7 +53,9 @@
 import {
   ASSET_FIELD_SHAPES,
   type AssetField,
+  type AssetMaterialization,
   HARNESS_ASSETS,
+  resolveAssetMaterialization,
   skillItemName,
   unsupportedAssetFields,
 } from './assets.ts';
@@ -141,6 +147,13 @@ export interface SelectedAssetItem {
   readonly sharedName: string | undefined;
   /** How many accounts in the fleet select this same item. */
   readonly referrers: number;
+  /**
+   * How this item reaches the home. `link` means the account's entry IS the store's item, so an edit to
+   * it is already every selecting account's; `copy` means the bytes as of the last apply. `undefined`
+   * carries the same meaning it does on a scalar field: this harness has no destination for `skills`, so
+   * nothing is materialized at all.
+   */
+  readonly materialization: AssetMaterialization | undefined;
 }
 
 /**
@@ -150,6 +163,11 @@ export interface SelectedAssetItem {
  * account uses it". `referrers` is how many accounts in the fleet resolve this field to this same
  * path, so `local` with more than one referrer is a document a fleet is already sharing without
  * having said so, and exactly the thing "declare this as the shared default" would fix.
+ *
+ * `materialization` says HOW the value reaches the home, which is the fact that decides whether an edit
+ * to the shared document is already this account's or waits for the next apply. It is `undefined` when
+ * this harness has no destination for the field — exactly the fields missing from `linkable` — because
+ * naming a mechanism for a write that never happens would be a sentence about nothing.
  *
  * `selection` is the state of a field that holds ITEMS rather than one document, and `skills` is the
  * only such field: it is either `absent` or a `selection`, never `shared` or `local`. That asymmetry is
@@ -165,12 +183,14 @@ export type AssetSharing =
       readonly path: string;
       readonly origin: CompositionOrigin;
       readonly referrers: number;
+      readonly materialization: AssetMaterialization | undefined;
     }
   | {
       readonly state: 'local';
       readonly path: string;
       readonly origin: CompositionOrigin;
       readonly referrers: number;
+      readonly materialization: AssetMaterialization | undefined;
     }
   | {
       readonly state: 'selection';
@@ -184,7 +204,13 @@ export type AssetSharing =
       readonly items: readonly SelectedAssetItem[];
     };
 
-/** One layer of an account's settings stack, in stack order. Reported, never linkable. */
+/**
+ * One layer of an account's settings stack, in stack order. Reported, never linkable.
+ *
+ * No layer carries a materialization, and the omission is the statement: a stack is `generated` as a
+ * whole — merged in memory and written as ONE file — so the mechanism belongs to the destination rather
+ * than to any layer of it. There is no inode a layer could be the same thing as.
+ */
 export type SettingsLayerSharing =
   | { readonly position: number; readonly kind: 'inline'; readonly origin: CompositionOrigin }
   | {
@@ -380,9 +406,10 @@ export function resolveFleetSharing(config: FleetConfig): FleetSharing {
       if (resolved === undefined) return { state: 'absent' };
       const name = sharedAssetNameOf(config, field, resolved.value);
       const referrers = referrersOf(counts, field, resolved.value);
+      const materialization = resolveAssetMaterialization(HARNESS_ASSETS, source.kind, field, resolved.value);
       return name === undefined
-        ? { state: 'local', path: resolved.value, origin: resolved.origin, referrers }
-        : { state: 'shared', name, path: resolved.value, origin: resolved.origin, referrers };
+        ? { state: 'local', path: resolved.value, origin: resolved.origin, referrers, materialization }
+        : { state: 'shared', name, path: resolved.value, origin: resolved.origin, referrers, materialization };
     };
     const selectionSharing = (): AssetSharing => {
       if (source.skills === undefined) return { state: 'absent' };
@@ -399,6 +426,7 @@ export function resolveFleetSharing(config: FleetConfig): FleetSharing {
           path,
           sharedName: sharedAssetNameOf(config, 'skills', path),
           referrers: referrersOf(counts, 'skills', path),
+          materialization: resolveAssetMaterialization(HARNESS_ASSETS, source.kind, 'skills', path),
         });
       }
       return { state: 'selection', origin: source.skills.origin, items };

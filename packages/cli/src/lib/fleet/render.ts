@@ -20,7 +20,12 @@ import type {
   SharedHistoryChange,
   SharedHistoryPreview,
 } from '@ferretry/fleet';
-import type { FleetAssetSharing, FleetCompositionOrigin, FleetSharing } from '@ferretry/protocol';
+import type {
+  FleetAssetMaterialization,
+  FleetAssetSharing,
+  FleetCompositionOrigin,
+  FleetSharing,
+} from '@ferretry/protocol';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
 const INDENT = '    ';
@@ -197,6 +202,20 @@ function sharedHistoryDetail(preview: SharedHistoryPreview): string[] {
 }
 
 /**
+ * What a `symlink` line in a plan means for the person approving it.
+ *
+ * Shown only when the plan has one, and worth its three lines because the word is the one operation in
+ * the list whose effect keeps going after the apply finishes: every other line writes bytes once, and
+ * this one makes two names into one file. Somebody who reads `symlink` as "copy, but cleverer" will be
+ * surprised the first time an edit to one account's instructions turns up in another's.
+ */
+const SYMLINK_NOTE: readonly string[] = [
+  '  ! a symlink line makes the destination the SAME FILE as the source, which is the point: editing',
+  `${INDENT}the shared document is already every account that references it, with no apply in between.`,
+  `${INDENT}A source outside this fleet’s asset tree is copied instead, and says "copy" above.`,
+];
+
+/**
  * Every write a plan would perform, in order.
  *
  * `--dry-run` prints exactly this and stops, so what a human reviews is the same value the applier
@@ -212,7 +231,8 @@ export function renderApplyPlan(plan: FleetApplyPreview): string {
     ...sharedHistoryDetail(preview),
   ]);
   const caveat = sharesCodexHistory(plan.sharedHistory) ? CODEX_HISTORY_CAVEAT : [];
-  return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`, ...caveat].join('\n');
+  const linking = plan.operations.some(operation => operation.kind === 'symlink') ? SYMLINK_NOTE : [];
+  return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`, ...linking, ...caveat].join('\n');
 }
 
 /** What an apply actually did, including anything it swept away. */
@@ -715,6 +735,36 @@ function originLabel(origin: FleetCompositionOrigin): string {
 }
 
 /**
+ * What each mechanism means for the person doing the editing.
+ *
+ * Three sentences rather than a table, and each one is about the EDIT rather than about the filesystem:
+ * "symlink" tells somebody nothing about whether their change survives, which is the only thing they
+ * came here to find out.
+ */
+const MECHANISM_LEGEND: readonly string[] = [
+  'linked = one file. Editing it edits every account that references it, with no apply in between.',
+  'copied at apply = the bytes as of the last apply, because the source is outside this fleet’s asset tree.',
+  'generated = composed from its layers on every apply. Edit a layer, never the file in the home.',
+  '',
+];
+
+/**
+ * How the value actually reaches the home, in the words that tell a person what an edit does.
+ *
+ * Said on every line that names a path, because it is the difference between "editing this changes
+ * every account" and "editing this is overwritten by the next apply" — and somebody who is not told
+ * which one they have will eventually find out the expensive way. An absent mechanism is a field this
+ * harness has no destination for, and those are already filtered out of `linkable` before this is
+ * reached, so there is nothing to say for it.
+ */
+function mechanismLabel(materialization: FleetAssetMaterialization | undefined): string {
+  if (materialization === 'link') return ' · linked';
+  if (materialization === 'copy') return ' · copied at apply';
+  if (materialization === 'generated') return ' · merged into a generated file';
+  return '';
+}
+
+/**
  * One selection, said as one line per item.
  *
  * Per item rather than summarized, because the account's selection IS the list and a count of it
@@ -730,7 +780,9 @@ function selectionLines(field: string, sharing: Extract<FleetAssetSharing, { sta
     const others = item.referrers - 1;
     const shared = item.sharedName === undefined ? 'own' : `SHARED "${item.sharedName}"`;
     const also = others === 0 ? 'only this account' : `with ${plural(others, 'other account')}`;
-    lines.push(`  ${' '.repeat(9)}${item.name}  ${shared} · ${also} · ${item.path}`);
+    lines.push(
+      `  ${' '.repeat(9)}${item.name}  ${shared} · ${also} · ${item.path}${mechanismLabel(item.materialization)}`,
+    );
   }
   return lines;
 }
@@ -745,7 +797,7 @@ function sharingLine(field: string, sharing: Exclude<FleetAssetSharing, { state:
       : // A private copy several accounts happen to use is a fleet sharing something it never declared,
         // and saying so is the offer to fix it. One account using its own document needs no adjective.
         `own copy${others === 0 ? '' : ` · also used by ${plural(others, 'other account')}, undeclared`}`;
-  return `  ${field.padEnd(9)}${state}\n  ${' '.repeat(9)}${sharing.path} · from ${originLabel(sharing.origin)}`;
+  return `  ${field.padEnd(9)}${state}\n  ${' '.repeat(9)}${sharing.path} · from ${originLabel(sharing.origin)}${mechanismLabel(sharing.materialization)}`;
 }
 
 /**
@@ -782,8 +834,15 @@ export function renderFleetSharing(sharing: FleetSharing): string {
           : `  settings  [${layer.position}] ${layer.name === undefined ? 'own' : `SHARED "${layer.name}"`} · ${layer.path} · from ${originLabel(layer.origin)}`,
       );
     }
+    // Said per account rather than only in the legend, because a stack is the one field where the
+    // destination is not any of the things listed above it: the layers are merged in memory and written
+    // as one file, so editing that file in the home is an edit the next apply discards.
+    if (account.settings.length > 0) {
+      lines.push(`  settings  ${plural(account.settings.length, 'layer')} merged in order into one generated file`);
+    }
     lines.push('');
   }
+  lines.push(...MECHANISM_LEGEND);
   lines.push('Link one to a shared document, or give it its own copy, from the Fleet tab.');
   return lines.join('\n');
 }

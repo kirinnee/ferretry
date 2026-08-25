@@ -264,10 +264,15 @@ default set — but none of the content that executes code.**
   destination table — "a declared `memory:` lands at `CLAUDE.md`, a declared `settings:` lands at
   `settings.json`". Entirely about _where a declared asset goes_; it answers nothing about _what
   assets exist_ or _where they come from_.
-- **Everything landing in a generated home is a copy, not a symlink** (`assets.ts:22,37-49`) — the
-  state home's filesystem invariant rejects symlink components, so `link` survives only for plans
-  outside an account home. Earlier drafts of this survey said `memory:` was symlinked and live; it is
-  not. A source edit reaches the home on the next `fy fleet apply` and not before.
+- **Every single-pick asset landing in a generated home is now a real symlink** — `memory`, each
+  selected `skills` item, `hooks`, `hooksDir`, `mcp`. The state home's filesystem invariant still
+  rejects symlink components in general; the narrow `fleet/homes` exemption was extended from
+  `fleet/shared` to `fleet/assets` so that this one class of link is admitted and nothing else is. A
+  source edit is therefore live: the home's file IS the asset-tree document. `settings` remains
+  generated — a merge of layers cannot be a link to any of them, and each harness rewrites its own
+  settings at runtime. A source outside the asset tree is still copied. `docs/fleet-sharing.md` owns
+  the mechanism table; earlier drafts of this survey recorded the copy-only behaviour, which was
+  accurate when written.
 - `expandAssetPath` (`paths.ts:40`) resolves a relative reference against `layout.assetsDirectory`,
   which is `<FY_HOME>/fleet/assets`. So the reference mechanism is carried in full.
 - **`fy fleet init` creates that directory and its `templates/` tree; `fy fleet apply` still does
@@ -378,8 +383,9 @@ otherwise a filesystem API with extra steps:
   same rollback boundary as the fleet it belongs to, because a saved instruction file with no account
   to copy it into is exactly the half-state that boundary exists to prevent.
 
-The copy-not-symlink consequence recorded above still holds and is the thing to tell a person: an
-edited instruction file reaches an account home on the **next apply** and not before.
+The linked-asset consequence recorded above is the thing to tell a person: an edited instruction file
+in the asset tree is already every account that references it, because the home's entry is that file.
+Only a source outside the asset tree, and `settings`, wait for the next apply.
 
 ---
 

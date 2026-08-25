@@ -22,6 +22,7 @@ import {
   type HarnessAssetTable,
   harnessAsset,
   isUsableSkillItemName,
+  resolveAssetMaterialization,
   skillItemName,
   unsupportedAssetFields,
 } from './assets.ts';
@@ -330,7 +331,11 @@ export class FleetPlan implements FleetPlanBuilder {
         format: settings.format,
         layers,
         mode: SETTINGS_MODE,
-        preserveExisting: settings.mode === 'copy',
+        // A generated file is also an INPUT: the harness writes its own runtime keys into it, so the
+        // merge folds the destination in as the base layer. Derived from the materialization rather
+        // than hard-coded true, so a settings field that ever became a link stops claiming to preserve
+        // keys a link cannot hold.
+        preserveExisting: settings.materialization === 'generated',
       });
     }
 
@@ -340,9 +345,7 @@ export class FleetPlan implements FleetPlanBuilder {
       const asset = harnessAsset(this.assets, account.kind, field);
       // unsupportedAssetFields already refused a field with no destination for this harness.
       if (asset === undefined) continue;
-      const source = expandAssetPath(reference, layout.userHome, layout.assetsDirectory);
-      const path = joinPath(directory, asset.dest);
-      operations.push(asset.mode === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path });
+      operations.push(this.materializeAsset(account.kind, field, reference, joinPath(directory, asset.dest), layout));
     }
 
     operations.push(...this.skillOperations(account, directory, layout));
@@ -377,11 +380,33 @@ export class FleetPlan implements FleetPlanBuilder {
       { kind: 'directory', path: container, mode: DIRECTORY_MODE },
     ];
     for (const item of items) {
-      const source = expandAssetPath(item.reference, layout.userHome, layout.assetsDirectory);
-      const path = joinPath(container, item.name);
-      operations.push(asset.mode === 'link' ? { kind: 'symlink', source, path } : { kind: 'copy', source, path });
+      operations.push(
+        this.materializeAsset(account.kind, 'skills', item.reference, joinPath(container, item.name), layout),
+      );
     }
     operations.push({ kind: 'prune-directory', path: container, keep: items.map(item => item.name) });
     return operations;
+  }
+
+  /**
+   * One asset reference, as the write that actually puts it in a home.
+   *
+   * A `link` field becomes a real symlink — the destination and the shared document are one inode, so
+   * an edit to the document is already every account's without an apply. A source the fleet may not
+   * link to becomes a copy instead, and {@link resolveAssetMaterialization} is what decides which,
+   * because the sharing report reads the same function: a surface that told somebody a field was live
+   * while the apply took a copy would be the whole defect this change exists to remove.
+   */
+  private materializeAsset(
+    kind: HarnessKind,
+    field: AssetField,
+    reference: string,
+    path: string,
+    layout: FleetLayout,
+  ): FleetWriteOperation {
+    const source = expandAssetPath(reference, layout.userHome, layout.assetsDirectory);
+    return resolveAssetMaterialization(this.assets, kind, field, reference) === 'link'
+      ? { kind: 'symlink', source, path }
+      : { kind: 'copy', source, path };
   }
 }

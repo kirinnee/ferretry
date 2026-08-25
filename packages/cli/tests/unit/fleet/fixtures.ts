@@ -385,6 +385,7 @@ export function sharingAccount(overrides: Partial<FleetAccountSharing> = {}): Fl
         path: './CLAUDE.md',
         origin: { kind: 'base-profile', name: 'base' },
         referrers: 1,
+        materialization: 'link',
       },
       skills: { state: 'absent' },
       hooks: { state: 'absent' },

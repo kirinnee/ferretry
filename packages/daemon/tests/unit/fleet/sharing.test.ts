@@ -99,12 +99,14 @@ describe('the sharing wire projection', () => {
       path: './CLAUDE.md',
       origin: { kind: 'base-profile', name: 'base' },
       referrers: 1,
+      materialization: 'link',
     });
     should(summary.accounts[1]?.fields.memory).deepEqual({
       state: 'local',
       path: './own.md',
       origin: { kind: 'account' },
       referrers: 1,
+      materialization: 'link',
     });
     should(summary.accounts[0]?.fields.skills).deepEqual({ state: 'absent' });
     should(summary.accounts[0]?.settings).deepEqual([
@@ -456,8 +458,8 @@ describe('projecting a per-item selection onto the wire', () => {
       state: 'selection',
       origin: { kind: 'account' },
       items: [
-        { name: 'review', path: './skills/review', sharedName: 'review', referrers: 2 },
-        { name: 'mine', path: './skills/mine', referrers: 1 },
+        { name: 'review', path: './skills/review', sharedName: 'review', referrers: 2, materialization: 'link' },
+        { name: 'mine', path: './skills/mine', referrers: 1, materialization: 'link' },
       ],
     });
   });

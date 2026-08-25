@@ -2,14 +2,19 @@
  * Shared documents from the scaffold through a real apply, on a real filesystem.
  *
  * The unit tier proves what the report says. This proves the part only a filesystem can: that an
- * account which references a shared document ends up with that document's bytes in its home, and that
- * moving an account onto a shared document preserves the copy it was using rather than deleting it.
+ * account which references a shared document ends up holding THAT DOCUMENT in its home — same device,
+ * same inode — rather than a copy of it, and that moving an account onto a shared document preserves
+ * the copy it was using rather than deleting it.
+ *
+ * The inode assertion is the one that matters and the one a copy cannot fake. Comparing bytes proves
+ * only that two files were equal at that instant, which was true of the copy this replaced; the edit
+ * made with no apply in between is what distinguishes the two mechanisms, so it is the test written.
  *
  * Nothing here is a fixture configuration. The starting document is the one `fy fleet init` writes, so
  * a change that made the shipped scaffold's registry disagree with the files it writes fails here.
  */
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -23,6 +28,7 @@ import { accountSharing, resolveFleetSharing } from '../../src/lib/sharing.ts';
 
 const CLAUDE_ID = '00000000-0000-4000-8000-00000000e1a1';
 const CODEX_ID = '00000000-0000-4000-8000-00000000e0de';
+const SECOND_CLAUDE_ID = '00000000-0000-4000-8000-00000000e1a2';
 /** Counted rather than random, so the starter this host is given is byte-identical across runs. */
 let minted = 0;
 const SCAFFOLD_IDS = fleetScaffoldIds(() => `00000000-0000-4000-8000-0000000e${String(++minted).padStart(4, '0')}`);
@@ -234,6 +240,156 @@ describe('shared fleet assets on a real host', () => {
         ).be.true();
       }
       should(await Bun.file(path.join(host.layout.fleetDirectory, 'shared', 'claude')).exists()).be.false();
+    } finally {
+      await rm(host.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should give a member that chose nothing a working home from the starter defaults alone', async () => {
+    // Arrange — one account of each harness, declaring no memory, no settings, no skills, no hooks.
+    // Everything it gets has to come from the `base` profile the shipped starter writes.
+    const host = await prepared();
+    try {
+      const config = FleetConfigSchema.parse({
+        ...host.starter,
+        agents: [account('claude', CLAUDE_ID), account('codex', CODEX_ID)],
+      });
+
+      // Act
+      await applied(host, config);
+
+      // Assert — instructions arrive as a LINK to the registered shared document, so the default is
+      // also the thing an operator edits once for the whole fleet.
+      for (const [home, document] of [
+        ['claude-shared/CLAUDE.md', 'CLAUDE.md'],
+        ['codex-shared/AGENTS.md', 'AGENTS.md'],
+      ] as const) {
+        const entry = path.join(host.layout.homesDirectory, ...home.split('/'));
+        should((await lstat(entry)).isSymbolicLink()).be.true();
+        should(await realpath(entry)).equal(await realpath(path.join(host.layout.assetsDirectory, document)));
+      }
+
+      // Settings arrive as a generated file carrying the shipped base layer, so a harness that reads
+      // its own settings on start finds a valid document rather than nothing.
+      const claudeSettings = path.join(host.layout.homesDirectory, 'claude-shared', 'settings.json');
+      should((await lstat(claudeSettings)).isSymbolicLink()).be.false();
+      should(JSON.parse(await readFile(claudeSettings, 'utf8'))).have.property('$schema');
+      const codexSettings = path.join(host.layout.homesDirectory, 'codex-shared', 'config.toml');
+      should((await lstat(codexSettings)).isSymbolicLink()).be.false();
+      should(typeof (await readFile(codexSettings, 'utf8'))).equal('string');
+
+      // And nothing that executes code is installed by default: a skill or a hook is a choice, so an
+      // account that chose none has none rather than a directory somebody has to audit.
+      should(await Bun.file(path.join(host.layout.homesDirectory, 'claude-shared', 'skills')).exists()).be.false();
+      should(await Bun.file(path.join(host.layout.homesDirectory, 'codex-shared', 'hooks.json')).exists()).be.false();
+    } finally {
+      await rm(host.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should carry one edit to a shared document into every account, with no apply in between', async () => {
+    // Arrange — two Claude accounts, both on the one document the starter registers as `claude`. This
+    // is the whole claim: not that they hold equal copies, but that they hold the document.
+    const host = await prepared();
+    try {
+      const config = FleetConfigSchema.parse({
+        ...host.starter,
+        agents: [
+          account('claude', CLAUDE_ID),
+          {
+            name: 'second',
+            kind: 'claude',
+            routes: {
+              default: {
+                id: SECOND_CLAUDE_ID,
+                wrapper: 'claude-second',
+                home: 'claude-second',
+                defaultModel: 'claude-test-model',
+                models: ['claude-test-model'],
+              },
+            },
+          },
+        ],
+      });
+      await applied(host, config);
+      const shared = path.join(host.layout.assetsDirectory, 'CLAUDE.md');
+      const first = path.join(host.layout.homesDirectory, 'claude-shared', 'CLAUDE.md');
+      const second = path.join(host.layout.homesDirectory, 'claude-second', 'CLAUDE.md');
+
+      // Act — one edit, to the shared document, and nothing else. No second apply.
+      await writeFile(shared, '# Edited once\n\nThis reached both accounts without an apply.\n', 'utf8');
+
+      // Assert — both homes read the new text, because both entries ARE that file. Same device and
+      // inode as the source, which is the assertion a copy that happens to be equal cannot pass.
+      should(await readFile(first, 'utf8')).equal('# Edited once\n\nThis reached both accounts without an apply.\n');
+      should(await readFile(second, 'utf8')).equal(await readFile(shared, 'utf8'));
+      const source = await stat(shared);
+      for (const home of [first, second]) {
+        should((await lstat(home)).isSymbolicLink()).be.true();
+        should(await realpath(home)).equal(await realpath(shared));
+        const linked = await stat(home);
+        should([linked.dev, linked.ino]).deepEqual([source.dev, source.ino]);
+      }
+    } finally {
+      await rm(host.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should copy rather than link a shared document kept outside the asset tree', async () => {
+    // Arrange — the same fleet, but the document lives in the operator's own home. A link there would
+    // put a symlink escaping the state home under `fleet/homes`, which the state filesystem exists to
+    // refuse, so this one is copied and the report says so.
+    const host = await prepared();
+    try {
+      const outside = path.join(host.layout.userHome, 'dotfiles');
+      await mkdir(outside, { recursive: true });
+      await writeFile(path.join(outside, 'CLAUDE.md'), 'From my dotfiles.\n', 'utf8');
+      const config = FleetConfigSchema.parse({
+        ...host.starter,
+        agents: [account('claude', CLAUDE_ID, { memory: '~/dotfiles/CLAUDE.md' })],
+      });
+
+      // Act
+      await applied(host, config);
+      const home = path.join(host.layout.homesDirectory, 'claude-shared', 'CLAUDE.md');
+
+      // Assert — the bytes arrived, as a regular file rather than a link, and the report agrees with
+      // the disk about which of the two happened.
+      should(await readFile(home, 'utf8')).equal('From my dotfiles.\n');
+      should((await lstat(home)).isSymbolicLink()).be.false();
+      should(accountSharing(resolveFleetSharing(config), CLAUDE_ID)?.fields.memory).match({
+        state: 'local',
+        materialization: 'copy',
+      });
+
+      // And an edit to that source does NOT reach the account until the next apply, which is exactly
+      // the difference the two mechanisms are named for.
+      await writeFile(path.join(outside, 'CLAUDE.md'), 'Changed.\n', 'utf8');
+      should(await readFile(home, 'utf8')).equal('From my dotfiles.\n');
+    } finally {
+      await rm(host.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should keep settings a generated merge of its layers rather than a link to any of them', async () => {
+    // Arrange — the shipped Claude template as the base layer, plus one inline override.
+    const host = await prepared();
+    try {
+      const config = FleetConfigSchema.parse({
+        ...host.starter,
+        agents: [account('claude', CLAUDE_ID, { settings: [{ includeCoAuthoredBy: true }] })],
+      });
+
+      // Act
+      await applied(host, config);
+      const settings = path.join(host.layout.homesDirectory, 'claude-shared', 'settings.json');
+
+      // Assert — a real file, not a link, holding the MERGE: the template's `$schema` survives and the
+      // account's own later layer wins on the key both of them set. A link could express neither.
+      should((await lstat(settings)).isSymbolicLink()).be.false();
+      const merged = JSON.parse(await readFile(settings, 'utf8')) as Record<string, unknown>;
+      should(merged.$schema).equal('https://json.schemastore.org/claude-code-settings.json');
+      should(merged.includeCoAuthoredBy).be.true();
     } finally {
       await rm(host.root, { recursive: true, force: true });
     }

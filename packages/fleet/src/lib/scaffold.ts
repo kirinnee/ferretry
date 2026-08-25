@@ -213,6 +213,11 @@ const configTemplate = (
 # accounts use it, and switch one account between the shared document and its own
 # copy. There are four, because each harness reads a document named after itself and
 # an unattended lane needs different guidance from an attended one.
+#
+# An account that references one of these gets the SAME FILE in its home, not a copy
+# of it: editing the document below changes every account that references it, with no
+# apply in between. "settings" is the exception — a stack of layers is merged into one
+# generated file, because a merge cannot be the same file as any of its sources.
 shared:
   memory:
 ${sharedInstructions()}
@@ -419,16 +424,32 @@ an override has to be able to remove from it.
 
 Every other asset field is a single path, and the last writer in that chain wins.
 
+## Editing one document, for every account that uses it
+
+A file here is not copied into the homes that reference it — it **is** the file in
+each of those homes, because \`fy fleet apply\` links it. Two accounts pointing at
+\`./CLAUDE.md\` share one file on disk, so editing it changes both immediately, with
+no apply in between. That is the whole reason to share a document rather than keep
+four near-identical ones.
+
+Two exceptions, both stated where you can see them (\`fy fleet sharing\` says which
+one each field has, and \`fy fleet apply --dry-run\` names the operation):
+
+- **\`settings\` is generated, never linked.** It is a stack of layers merged into one
+  file, and a merge of several sources cannot be the same file as any of them. Each
+  harness also rewrites its own settings while it runs, so the destination has to be
+  a real file. Edit a layer here; an edit made directly in an account's home is
+  folded in once and then replaced by the merge.
+- **A source outside this directory is copied.** A reference beginning \`/\`, \`~\` or
+  \`$HOME\` — or one that climbs out with \`..\` — is copied at apply time instead, and
+  reaches the account on the next apply rather than immediately. Keep shared
+  documents in here to get a real link.
+
 ## What is safe to edit
 
 All of it. \`fy fleet init\` only ever creates what is missing, so nothing here is
 overwritten by re-running it or by upgrading — including this file. If you want a
 newer default, delete your copy and run \`fy fleet init\` again.
-
-Files are materialized into each account's home when you run \`fy fleet apply\`.
-Account-home assets are copies, not symlinks: editing a source here takes effect on
-the next apply. Settings are merged into a real file because each harness may also
-rewrite its settings at runtime.
 `;
 
 export interface FleetScaffoldInput {
