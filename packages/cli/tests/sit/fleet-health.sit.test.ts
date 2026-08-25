@@ -80,10 +80,20 @@ describe(`fleet account health (SIT, ${useInProcess ? 'in-process' : 'compiled b
     should(health.out).containEql('no credential in this account home');
     should(health.out).containEql('2 accounts');
 
+    // NO ESCAPE CODES ON A SURFACE THAT IS NOT A TERMINAL. Both drivers are one: the compiled binary
+    // is spawned with `NO_COLOR=1` and piped, and the in-process driver captures into a string and
+    // declares no width. Colour is the second channel here and the layout has to survive without it,
+    // so the glyph and the aligned verdict column are asserted on the SAME plain output.
+    should(health.out).not.containEql(`${String.fromCodePoint(0x1b)}[`);
+    should(health.out).containEql('✗ ');
+    // The whole account id, because `fy fleet login` matches on exactly it: a report that named the
+    // account and nothing else would be readable and unactionable.
+    should(health.out).match(/fy fleet login [0-9a-f-]{36}/u);
+
     // The disclosure, printed every time. The command this replaced launched every account's wrapper
     // and asked a model for a sentinel, so somebody who used it before has every reason to assume
     // this one still bills them.
-    should(health.out).containEql('uses no inference quota');
+    should(health.out).containEql('no inference quota');
 
     // NOTHING WAS LAUNCHED, stated as the absence of the words a sentinel turn would have produced.
     // The strong form of this claim — a real `fyd`, a recorder wrapper, and a scheduled tick — is

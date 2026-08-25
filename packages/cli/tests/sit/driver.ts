@@ -45,6 +45,9 @@ export class InProcessCliDriver implements CliDriver {
       success: message => {
         out += `${message}\n`;
       },
+      report: message => {
+        out += `${message}\n`;
+      },
       warn: message => {
         out += `${message}\n`;
       },
@@ -99,6 +102,9 @@ export class InProcessCliDriver implements CliDriver {
       // Hermetic: an in-process journey receives only its explicit FY_* environment. With no token
       // the shared client refuses before it opens a socket, so no journey reaches a live daemon.
       environment,
+      // Captured output is not a terminal, exactly as a piped run is not: the report is unpainted,
+      // wraps at the fallback width, and no assertion here depends on the developer's window.
+      stdout: { terminal: false, columns: undefined, noColor: undefined },
     });
 
     const previousExitCode = process.exitCode;

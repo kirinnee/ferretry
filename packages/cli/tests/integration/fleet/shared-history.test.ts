@@ -7,14 +7,15 @@ import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fle
 import should from 'should';
 import { FleetController } from '../../../src/lib/fleet/controller.ts';
 import { resolveFleetLayout } from '../../../src/lib/fleet/layout.ts';
+import { PLAIN_FLEET_PRESENTATION } from '../../../src/lib/fleet/presentation.ts';
 import {
   CapturingOutput,
   FrozenClock,
   RecordingIdentitySource,
   RecordingLoginService,
-  RecordingSharingGateway,
   RecordingRecommendationGateway,
   RecordingScaffolder,
+  RecordingSharingGateway,
   RecordingUsageCollector,
   StubManifestSource,
 } from '../../unit/fleet/fixtures.ts';
@@ -95,6 +96,7 @@ describe('CLI shared-history apply', () => {
       clock: new FrozenClock('2027-01-15T08:00:00.000Z'),
       recommendations: new RecordingRecommendationGateway(),
       out: output,
+      presentation: PLAIN_FLEET_PRESENTATION,
     });
     const pool = path.join(layout.fleetDirectory, 'shared', 'claude');
     const pooledFile = path.join(pool, 'projects', 'project', 'conversation.jsonl');

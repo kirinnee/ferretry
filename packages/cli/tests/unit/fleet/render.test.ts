@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import type { FleetAccountHealth, FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
 import should from 'should';
+import type { FleetPalette, FleetPresentation } from '../../../src/lib/fleet/presentation';
+import { PLAIN_FLEET_PRESENTATION } from '../../../src/lib/fleet/presentation';
 import {
   fleetAccountNames,
   renderAccount,
@@ -887,35 +889,168 @@ describe('relative instant rendering', () => {
 /** The manifest join the controller supplies, so a verdict names something a person can act on. */
 const names = new Map([['a', 'claude-default']]);
 
-describe('health rendering', () => {
-  it('should name the verdict, when it was checked, and why', () => {
-    // Act
-    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] }, names);
+/**
+ * A palette that names the ROLE that painted each span.
+ *
+ * Asserting on an escape code would test chalk, and asserting on the plain text would test nothing:
+ * these tests are about which MEANING reached which span, so the palette writes the meaning down.
+ * `chalkFleetPalette` is the only thing that turns one of these into a colour, and it is proved in
+ * `tests/integration/terminal-adapters.test.ts` where the terminal dependency is allowed to live.
+ */
+const LABELLED_PALETTE: FleetPalette = {
+  danger: text => `<danger>${text}</danger>`,
+  good: text => `<good>${text}</good>`,
+  muted: text => `<muted>${text}</muted>`,
+  command: text => `<command>${text}</command>`,
+};
 
-    // Assert — the time is part of the verdict, not decoration: "HEALTHY" with no instant is a claim
-    // with no expiry, and the evidence behind it has a fifteen-minute horizon.
-    should(rendered).containEql('claude-default  HEALTHY  checked 4m ago — the provider accepted this credential');
+const plainAt = (width: number): FleetPresentation => ({ ...PLAIN_FLEET_PRESENTATION, width });
+const labelled = (width = 120): FleetPresentation => ({ palette: LABELLED_PALETTE, width });
+/** Wide enough that nothing wraps, so a test about WHAT is printed is not also a test about where. */
+const WIDE = plainAt(120);
+
+/** One of every verdict, all checked at the same instant, in deliberately unhelpful manifest order. */
+const oneOfEach: FleetAccountHealth[] = [
+  healthRow({ accountId: 'h' }),
+  healthRow({ accountId: 'u', verdict: 'unknown', reason: 'codex_liveness_unproven', kind: 'codex' }),
+  healthRow({ accountId: 'c', verdict: 'needs_credentials', reason: 'static_credential_missing' }),
+  healthRow({ accountId: 'r', verdict: 'needs_relogin', reason: 'oauth_token_rejected' }),
+];
+const everyName = new Map([
+  ['h', 'Claude (research)'],
+  ['u', 'Codex (default)'],
+  ['c', 'Claude (bulk)'],
+  ['r', 'Claude (default)'],
+]);
+
+describe('health rendering', () => {
+  it('should account for EVERY account in one header line, not only the actionable ones', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+
+    // Assert — "4 accounts, 2 need sign-in" said nothing about the other two and read as a promise
+    // that they were fine. They were UNKNOWN. Every verdict present is now named and counted.
+    should(rendered.split('\n')[0]).equal(
+      '4 accounts · 1 needs sign-in · 1 needs a credential · 1 unknown · 1 healthy · checked 4m ago',
+    );
   });
 
-  /**
-   * THE ROW NAMES THE ACCOUNT, not its id.
-   *
-   * It used to print the account UUID. That answered "how many accounts need a login" and never
-   * "which" — and "NEEDS LOGIN" beside an id a person cannot resolve, and cannot type into
-   * `fy fleet login`, is an instruction that cannot be followed.
-   */
-  it('should name the account AND give the exact command, because the id is what the command takes', () => {
+  it('should fold the header at the terminal width rather than off the edge of it', () => {
+    // Act — the same five counts on a terminal too narrow to hold them.
+    const lines = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, plainAt(80)).split('\n');
+
+    // Assert — it breaks between counts, never inside one, and the fold is indented so it cannot be
+    // mistaken for the first row.
+    should(lines[0]).equal('4 accounts · 1 needs sign-in · 1 needs a credential · 1 unknown · 1 healthy');
+    should(lines[1]).equal('  checked 4m ago');
+  });
+
+  it('should say a check time the whole fleet shares ONCE, in the header', () => {
     // Act
-    const rendered = renderHealth(
-      { at: NOW, accounts: [healthRow({ verdict: 'needs_relogin', reason: 'oauth_token_rejected' })] },
-      names,
+    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const rows = rendered.split('\n').filter(line => /(NEEDS|UNKNOWN|HEALTHY)/u.test(line));
+
+    // Assert — four copies of one fact used to sit in the widest column of every row, pushing the
+    // reason off the edge of an 80-column terminal.
+    should(rendered).containEql('· checked 4m ago');
+    should(rows.filter(line => line.includes('checked 4m ago'))).be.empty();
+  });
+
+  it('should keep the check time on the ROWS when the rows disagree about it', () => {
+    // Arrange — a header that flattened two different instants into one would report something
+    // nobody measured, so the deduplication only applies when there is one instant to state.
+    const accounts = [
+      healthRow({ accountId: 'r', verdict: 'needs_relogin', reason: 'oauth_token_rejected' }),
+      healthRow({ accountId: 'h', lastCheckedAt: NOW - 7_200_000 }),
+    ];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, new Map(), PLAIN_FLEET_PRESENTATION);
+
+    // Assert
+    should(rendered.split('\n')[0]).equal('2 accounts · 1 needs sign-in · 1 healthy');
+    should(rendered).containEql('· checked 4m ago');
+    should(rendered).containEql('· checked 2h ago');
+  });
+
+  it('should order the rows worst first rather than in manifest order', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const verdicts = rendered
+      .split('\n')
+      .flatMap(line => ['NEEDS LOGIN', 'NEEDS CREDENTIAL', 'UNKNOWN', 'HEALTHY'].filter(word => line.includes(word)));
+
+    // Assert — manifest order mixed the actionable with the non-actionable, so the whole report had
+    // to be read before anything could be triaged. The header counts in this same order.
+    should(verdicts).eql(['NEEDS LOGIN', 'NEEDS CREDENTIAL', 'UNKNOWN', 'HEALTHY']);
+  });
+
+  it('should line the verdicts up in one column whatever the names are', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, WIDE);
+    const columns = new Set(
+      rendered
+        .split('\n')
+        .filter(line => /(NEEDS|UNKNOWN|HEALTHY)/u.test(line) && line.startsWith('  '))
+        .map(line => line.search(/(NEEDS|UNKNOWN|HEALTHY)/u)),
     );
 
-    // Assert — BOTH halves. The name answers "which account", and `fy fleet login` matches on the
-    // ACCOUNT ID (see `selectIdentities`), so a row carrying only a name would be readable and
-    // unactionable — the opposite of the failure this replaced.
-    should(rendered).containEql('claude-default  NEEDS LOGIN');
-    should(rendered).containEql('fy fleet login a');
+    // Assert — the verdict used to start wherever the account name happened to end, so there was no
+    // column for the eye to run down and every row had to be read individually.
+    should(columns).have.size(1);
+  });
+
+  it('should carry severity in colour AND in a glyph, so a pipe loses nothing', () => {
+    // Arrange / Act
+    const painted = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, labelled());
+    const bare = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, PLAIN_FLEET_PRESENTATION);
+
+    // Assert — colour is the SECOND channel and never the only one. `NO_COLOR`, a redirect and a
+    // reader who cannot separate red from grey all keep the glyph, the column and the order.
+    should(painted).containEql('<danger>✗</danger> Claude (default)   <danger>NEEDS LOGIN</danger>');
+    should(painted).containEql('<danger>✗</danger> Claude (bulk)      <danger>NEEDS CREDENTIAL</danger>');
+    should(painted).containEql('<good>✓</good> Claude (research)  <good>HEALTHY</good>');
+    should(bare).containEql('✗ Claude (default)   NEEDS LOGIN');
+    should(bare).containEql('✓ Claude (research)  HEALTHY');
+    should(bare).not.containEql('<danger>');
+  });
+
+  it('should mute UNKNOWN rather than paint it as a warning', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: oneOfEach }, everyName, labelled());
+
+    // Assert — unknown is an honest absence of evidence, not a fault: it is what Codex correctly
+    // publishes about itself, and a fleet whose every Codex row glowed amber would teach its owner
+    // to look past amber, which is the one place a real warning has to work.
+    should(rendered).containEql('<muted>?</muted> Codex (default)    <muted>UNKNOWN</muted>');
+    should(rendered).not.containEql('<danger>UNKNOWN');
+    should(rendered).not.containEql('<good>UNKNOWN');
+  });
+
+  it('should offer the exact command as a copy-paste target, carrying the whole account id', () => {
+    // Arrange — `fy fleet login` matches on exactly this id (see `selectIdentities`), so a shortened
+    // one would produce a line that looks copyable and is not.
+    const accountId = '34ffb79f-786c-4179-a8aa-f2180a76252a';
+    const accounts = [healthRow({ accountId, verdict: 'needs_relogin', reason: 'oauth_token_rejected' })];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
+
+    // Assert
+    should(rendered).containEql(`<command>fy fleet login ${accountId}</command>`);
+  });
+
+  it('should never break the remedy across lines, however narrow the terminal is', () => {
+    // Arrange — the command is meant to be SELECTED rather than read, and a break inside the id
+    // produces two lines neither of which works when pasted.
+    const accountId = '34ffb79f-786c-4179-a8aa-f2180a76252a';
+    const accounts = [healthRow({ accountId, verdict: 'needs_relogin', reason: 'oauth_token_rejected' })];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, new Map(), plainAt(40));
+
+    // Assert
+    should(rendered.split('\n')).containEql(`      fy fleet login ${accountId}`);
   });
 
   it('should offer no command for a verdict a command cannot fix', () => {
@@ -929,43 +1064,135 @@ describe('health rendering', () => {
 
     // Act / Assert
     for (const account of cases) {
-      should(renderHealth({ at: NOW, accounts: [account] }, names)).not.containEql('fy fleet login');
+      should(renderHealth({ at: NOW, accounts: [account] }, names, PLAIN_FLEET_PRESENTATION)).not.containEql(
+        'fy fleet login',
+      );
     }
+  });
+
+  it('should indent a wrapped clause UNDER its row, so half a sentence cannot read as a new account', () => {
+    // Arrange — the terminal used to do this wrapping, and a terminal indents nothing: the second
+    // half of a reason started hard against the left margin and read as the next top-level row.
+    const accounts = [healthRow({ accountId: 'r', verdict: 'needs_relogin', reason: 'oauth_access_expired' })];
+
+    // Act
+    const lines = renderHealth({ at: NOW, accounts }, new Map(), plainAt(48)).split('\n');
+    const wrapped = lines.filter(line => line.startsWith('    ') && !line.trimStart().startsWith('fy '));
+
+    // Assert — every continuation sits deeper than the two spaces a row starts at, and no line is
+    // longer than the terminal is wide.
+    should(wrapped).not.be.empty();
+    should(lines.filter(line => line.length > 48)).be.empty();
+    should(lines.some(line => line.startsWith('  ✗'))).be.true();
+  });
+
+  it('should drop the reason onto its own line when the columns leave no room for it', () => {
+    // Arrange — a name plus a verdict can consume the whole width on a narrow terminal, and a
+    // one-word-per-line reason squeezed into what is left is not an improvement on wrapping.
+    const accounts = [healthRow({ accountId: 'r', verdict: 'needs_credentials', reason: 'static_credential_missing' })];
+
+    // Act
+    const lines = renderHealth({ at: NOW, accounts }, new Map([['r', 'Claude (bulk, api key)']]), plainAt(44)).split(
+      '\n',
+    );
+
+    // Assert — the row ends at its verdict, and the reason follows at the continuation indent.
+    should(lines).containEql('  ✗ Claude (bulk, api key)  NEEDS CREDENTIAL');
+    should(lines).containEql('    the configured credential is absent');
+  });
+
+  it('should say the Codex answer once, in one clause', () => {
+    // Arrange — it used to be three clauses saying one thing: "Codex has no free way to prove a
+    // login; nothing here is a verdict; last check was inconclusive", on the only row that repeats
+    // identically down the whole report.
+    const accounts = [
+      healthRow({
+        verdict: 'unknown',
+        reason: 'codex_liveness_unproven',
+        kind: 'codex',
+        lastCheckInconclusive: true,
+      }),
+    ];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, names, WIDE);
+
+    // Assert
+    should(rendered).containEql('UNKNOWN  Codex offers no free check');
+    should(rendered).not.containEql('nothing here is a verdict');
+    should(rendered).not.containEql('inconclusive');
+  });
+
+  it('should still say a check was inconclusive when the reason does not already say so', () => {
+    // Arrange / Act — hiding a failed attempt is how a fleet reads healthy while every provider call
+    // is failing, so the clause is suppressed only where it would be the same fact twice.
+    const rendered = renderHealth({ at: NOW, accounts: [healthRow({ lastCheckInconclusive: true })] }, names, WIDE);
+
+    // Assert
+    should(rendered).containEql('· last check inconclusive');
+  });
+
+  it('should report what a stale verdict WAS without widening the verdict column', () => {
+    // Arrange — a bare UNKNOWN reads exactly like an account nobody has ever looked at, which is the
+    // opposite of what happened. It travels as a clause because in the verdict column it made one
+    // row wider than every other and broke the alignment the eye runs down.
+    const accounts = [
+      healthRow({ accountId: 'y', verdict: 'unknown', reason: 'stale', staleVerdict: 'healthy' }),
+      healthRow({ accountId: 'h' }),
+    ];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, new Map(), PLAIN_FLEET_PRESENTATION);
+
+    // Assert
+    should(rendered).containEql('? y  UNKNOWN  the last result is too old to trust · was HEALTHY');
+    should(rendered).containEql('✓ h  HEALTHY  the provider accepted this credential');
   });
 
   it('should fall back to the id when the manifest cannot name the account', () => {
     // Arrange — a stored head can outlive the account it is about: the manifest moved, or somebody
     // removed the account. A verdict about something the manifest cannot name is STILL a true verdict,
     // so the row is printed with the id rather than hidden or given an invented name.
-    const rendered = renderHealth({ at: NOW, accounts: [healthRow({ accountId: 'departed' })] }, names);
+    const rendered = renderHealth(
+      { at: NOW, accounts: [healthRow({ accountId: 'departed' })] },
+      names,
+      PLAIN_FLEET_PRESENTATION,
+    );
 
     // Assert
-    should(rendered).containEql('departed  HEALTHY');
+    should(rendered).containEql('✓ departed  HEALTHY');
   });
 
-  it('should count the two verdicts somebody must ACT on, and not count unknown among them', () => {
-    // Arrange
-    const rows = [
-      healthRow({ accountId: 'a', verdict: 'needs_relogin', reason: 'oauth_token_rejected' }),
-      healthRow({ accountId: 'b', verdict: 'needs_credentials', reason: 'static_credential_missing' }),
-      healthRow({ accountId: 'c', verdict: 'unknown', reason: 'codex_liveness_unproven', kind: 'codex' }),
-    ];
+  it('should stop one very long name from widening the column for everybody', () => {
+    // Arrange — padding every row out to the longest name would spend most of a terminal on
+    // whitespace. The long name overflows its own row instead, and is never truncated: it is the
+    // only thing on the row that says WHICH account this is.
+    const long = 'Claude (an extravagantly over-described account)';
+    const accounts = [healthRow({ accountId: 'long' }), healthRow({ accountId: 'h' })];
 
     // Act
-    const rendered = renderHealth({ at: NOW, accounts: rows });
+    const rendered = renderHealth(
+      { at: NOW, accounts },
+      new Map([
+        ['long', long],
+        ['h', 'Claude (research)'],
+      ]),
+      plainAt(120),
+    );
 
-    // Assert — unknown is not a fault. On Codex it is the CORRECT published answer, and counting it
-    // beside real rejections would send a person hunting a problem that is not there.
-    should(rendered.split('\n')[0]).equal('3 accounts, 1 need sign-in, 1 need a credential');
+    // Assert
+    should(rendered).containEql(`✓ ${long}  HEALTHY`);
+    should(rendered).containEql('✓ Claude (research)                 HEALTHY');
   });
 
   it('should offer a CREDENTIAL, not a login, for an account no login can fix', () => {
     // Arrange / Act — the harness reads an environment variable and never consults its own credential
     // store, so telling somebody to sign in sends them to do something that cannot work.
-    const rendered = renderHealth({
-      at: NOW,
-      accounts: [healthRow({ verdict: 'needs_credentials', reason: 'static_credential_rejected' })],
-    });
+    const rendered = renderHealth(
+      { at: NOW, accounts: [healthRow({ verdict: 'needs_credentials', reason: 'static_credential_rejected' })] },
+      names,
+      PLAIN_FLEET_PRESENTATION,
+    );
 
     // Assert
     should(rendered).containEql('NEEDS CREDENTIAL');
@@ -974,10 +1201,11 @@ describe('health rendering', () => {
 
   it('should call a 403 healthy and say the quota is what is unknown', () => {
     // Arrange / Act — the rule the whole feature turns on.
-    const rendered = renderHealth({
-      at: NOW,
-      accounts: [healthRow({ reason: 'usage_scope_unavailable' })],
-    });
+    const rendered = renderHealth(
+      { at: NOW, accounts: [healthRow({ reason: 'usage_scope_unavailable' })] },
+      names,
+      WIDE,
+    );
 
     // Assert
     should(rendered).containEql('HEALTHY');
@@ -985,48 +1213,38 @@ describe('health rendering', () => {
     should(rendered).not.containEql('NEEDS LOGIN');
   });
 
-  it('should say NEVER CHECKED rather than inventing an instant', () => {
+  it('should say a check has never run rather than inventing an instant', () => {
     // Arrange / Act
-    const rendered = renderHealth({
-      at: NOW,
-      accounts: [healthRow({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null })],
-    });
+    const rendered = renderHealth(
+      {
+        at: NOW,
+        accounts: [healthRow({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null })],
+      },
+      names,
+      PLAIN_FLEET_PRESENTATION,
+    );
 
-    // Assert — a fabricated "now" here would be indistinguishable from a check that just succeeded.
-    should(rendered).containEql('checked never checked — never checked');
+    // Assert — a fabricated "now" here would be indistinguishable from a check that just succeeded,
+    // and the inconclusive clause is suppressed because "no check has run" already said it.
+    should(rendered.split('\n')[0]).equal('1 account · 1 unknown · never checked');
+    should(rendered).containEql('UNKNOWN  no check has run for this account');
   });
 
-  it('should report what a stale verdict WAS, and that the last check was inconclusive', () => {
-    // Arrange
-    const rows = [
-      healthRow({
-        accountId: 'a',
-        verdict: 'unknown',
-        reason: 'stale',
-        staleVerdict: 'healthy',
-        lastCheckedAt: NOW - 60_000,
-      }),
-      healthRow({ accountId: 'b', lastCheckInconclusive: true, lastCheckedAt: NOW - 60_000 }),
-    ];
-
-    // Act
-    const rendered = renderHealth({ at: NOW, accounts: rows });
-
-    // Assert — a bare UNKNOWN reads exactly like an account nobody ever checked, and hiding a failed
-    // attempt is how a fleet reads healthy while every provider call is failing.
-    should(rendered).containEql('a  UNKNOWN (was HEALTHY)');
-    should(rendered).containEql('b  HEALTHY');
-    should(rendered).containEql('last check was inconclusive');
-  });
-
-  it('should state that it spends nothing, every time', () => {
+  it('should state that it spends nothing, every time, as an aside rather than as a heading', () => {
     // The command this replaced launched every account's wrapper and asked a model for a sentinel.
     // Somebody who used it before has every reason to assume this one still bills them.
-    should(renderHealth({ at: NOW, accounts: [healthRow()] })).containEql('uses no inference quota');
+    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] }, names, labelled());
+
+    // Assert
+    should(rendered).containEql(
+      '<muted>Reads credentials and one free status endpoint — no model, no inference quota.',
+    );
   });
 
   it('should explain an empty health snapshot without pretending a check ran', () => {
-    should(renderHealth({ at: NOW, accounts: [] })).equal('No accounts to report health for.');
+    should(renderHealth({ at: NOW, accounts: [] }, names, PLAIN_FLEET_PRESENTATION)).equal(
+      'No accounts to report health for.',
+    );
   });
 });
 

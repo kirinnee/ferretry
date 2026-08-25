@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerFleetCommands } from '../../../src/lib/fleet/commands';
 import { FleetController } from '../../../src/lib/fleet/controller';
+import { PLAIN_FLEET_PRESENTATION } from '../../../src/lib/fleet/presentation';
 import {
   CapturingOutput,
   FrozenClock,
@@ -10,10 +11,10 @@ import {
   RecordingHealthCollector,
   RecordingIdentitySource,
   RecordingLoginService,
-  RecordingSharingGateway,
   RecordingPlanner,
   RecordingRecommendationGateway,
   RecordingScaffolder,
+  RecordingSharingGateway,
   RecordingUsageCollector,
   StubConfigSource,
   StubManifestSource,
@@ -47,6 +48,7 @@ function run(argv: string[]) {
       clock: new FrozenClock(),
       recommendations,
       out,
+      presentation: PLAIN_FLEET_PRESENTATION,
     }),
   );
   return {
