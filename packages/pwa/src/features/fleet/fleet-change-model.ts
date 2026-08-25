@@ -1056,8 +1056,26 @@ const modelNote = (models: HarnessDiscovery['models']): string =>
 const instructionsTextNote = (source: string, bytes: number): string =>
   `Imported — ${source} (${String(bytes)} bytes). Edit it here; nothing is written until you review and authorize the change.`;
 
-const DERIVED_PATH_NOTE =
-  'Derived — from the account and lane above. Rename it, or point at a document already in the store.';
+/**
+ * The note under the derived document name — and it says WHAT it was derived from, in plain words.
+ *
+ * It used to read "from the account and **lane** above", which is a prefill note rather than a
+ * comment: it is assigned to `instructionsPath` and rendered by `PrefillNote` on the instructions
+ * step. So a person met the word this whole pass exists to remove, on a screen, four steps after the
+ * two cards that replaced it — and no test caught it, because the drafts those tests mount carry no
+ * prefill notes at all. {@link derivedInstructionsPath} builds the name from the wrapper, and the
+ * wrapper is the account name plus how it runs, so those are the two facts said as such.
+ *
+ * "above" is dropped as well, and separately: the wrapper preview is on the identity step, so nothing
+ * it referred to is on the screen this sentence appears on.
+ *
+ * EXPORTED so the design harness renders THIS sentence rather than one of its own. The harness fixture
+ * had invented "Derived — from the wrapper name above", which is why a 390px capture of that step
+ * looked clean while production said "lane" — the same class of lie as the fixture's instructions path,
+ * and the reason a screenshot of a fixture is only evidence about the fixture.
+ */
+export const DERIVED_PATH_NOTE =
+  'Derived — from the account name and how it runs. Rename it, or point at a document already in the store.';
 
 /**
  * Does the person own this field now?

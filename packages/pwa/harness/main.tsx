@@ -125,6 +125,7 @@ import type {
 } from '../src/features/fleet/fleet-api.ts';
 import { FleetLayerForm } from '../src/features/fleet/fleet-change-forms.tsx';
 import {
+  DERIVED_PATH_NOTE,
   emptyAccountDraft,
   type FleetAccountDraft,
   type FleetHarnessDetection,
@@ -476,7 +477,10 @@ const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
   prefilled: {
     models: 'Detected — read from /home/pilot/.claude/settings.json.',
     defaultModel: 'Detected — read from /home/pilot/.claude/settings.json.',
-    instructionsPath: 'Derived — from the wrapper name above. Choose another document, or edit the path.',
+    // THE PRODUCTION SENTENCE, not one written here. A fixture that invents a provenance note makes a
+    // capture of this step evidence about the fixture and nothing else — which is exactly how
+    // "Derived — from the account and lane above" survived a 390px review of this very frame.
+    instructionsPath: DERIVED_PATH_NOTE,
     instructionsText:
       'Imported — /home/pilot/.claude/CLAUDE.md (86 bytes). Edit it here; nothing is written until you review and authorize the change.',
   },

@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import { FleetAccountStepper } from '../../../../src/features/fleet/fleet-account-stepper.tsx';
 import {
+  detectedAccountDraft,
   emptyAccountDraft,
   type FleetAccountDraft,
   type FleetHarnessDetection,
+  reconcileAccountDraft,
 } from '../../../../src/features/fleet/fleet-change-model.ts';
 import {
   FLEET_STEP_IDS,
@@ -13,7 +15,7 @@ import {
   type FleetStepId,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { type Mounted, mount } from '../../../support/dom.ts';
-import { area, button, card, cardChosen, click, field, pick, type } from './fleet-support.ts';
+import { area, button, card, cardChosen, click, discovery, field, pick, type } from './fleet-support.ts';
 
 /**
  * Every mount this file makes, unmounted whether or not its test got as far as saying so.
@@ -376,8 +378,19 @@ describe('the whole sequence', () => {
     // run?" and derives both, so nothing on screen may reintroduce them — including the sentence
     // under the two cards that replaced the word, which used to end "this picks the lane and the
     // wrapper name for each".
+    //
+    // THE DRAFT CARRIES ITS PREFILL NOTES, and that is the whole reason this loop is not enough on
+    // its own. The first version mounted a bare draft, whose `prefilled` is empty — so every
+    // provenance note went unrendered, and `DERIVED_PATH_NOTE` kept saying "from the account and
+    // lane above" through a green suite until somebody opened the screen. The notes are built by the
+    // production functions the surface itself calls, not written out here, so a note added tomorrow
+    // is covered by this walk rather than by a fixture somebody forgot to extend.
+    const detected = detectedAccountDraft(DETECTION, discovery());
+    const named = reconcileAccountDraft(detected, { ...detected, name: 'atelier' }, discovery());
+    expect(Object.keys(named.prefilled).length).toBeGreaterThan(0);
+
     for (const step of FLEET_STEP_IDS) {
-      const surface = await stepper({ step, variants: ['default', 'auto', 'review'] });
+      const surface = await stepper({ step, variants: ['default', 'auto', 'review'], draft: named });
       const text = surface.container.textContent ?? '';
       expect(text.toLowerCase(), step).not.toContain('lane');
       expect(text.toLowerCase(), step).not.toContain('layer');
