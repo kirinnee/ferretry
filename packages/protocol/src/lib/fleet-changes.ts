@@ -17,6 +17,7 @@
  */
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
+import { FleetProfileDeclarationSchema } from './fleet-profiles.ts';
 import { GrantRefusalSchema, OperatorPasswordSchema } from './grants.ts';
 
 /**
@@ -541,6 +542,36 @@ export const FleetMutationSchema = z.discriminatedUnion('kind', [
     available: z.boolean().optional(),
     unavailableReason: NonEmpty.optional(),
     layer: AccountLayerSchema.optional(),
+    /**
+     * The profiles this account's provider login composes, in the order they apply.
+     *
+     * A LOGIN'S list, not a lane's: `AccountRoute` has no `profiles` field, so this is the agent's,
+     * and one create that ticks both modes puts both of its accounts on the same profiles — which is
+     * the same property that makes one sign-in reach both. A create that names a login this fleet
+     * ALREADY has therefore changes what every account on that login composes, and the daemon says so
+     * in the plan a person approves rather than letting them find out from the next launch.
+     *
+     * Order is precedence: a variable a later profile sets replaces an earlier one's. There is no
+     * second rule — it is the composition `compositionSlots` has always owned, and
+     * `docs/fleet-env-profiles.md` is where it is written down.
+     *
+     * Absent leaves the login's profiles exactly as they are; an empty list is a declared "none",
+     * which is how a login stops using one.
+     */
+    profiles: z.array(NonEmpty).readonly().optional(),
+    /**
+     * Profiles this change DECLARES, which the accounts it creates may then name.
+     *
+     * The "add a new one and it joins the collection" half: a profile written here lands in the fleet
+     * configuration on the same reviewed apply, so the next account created can simply pick it. It is
+     * one change rather than two because the alternative is a person composing an account, leaving to
+     * declare a profile, and coming back to a draft that no longer exists.
+     *
+     * A name this fleet already declares is refused by the daemon rather than merged into: merging
+     * would edit a document every account naming it composes, from a change whose summary says it adds
+     * an account.
+     */
+    declareProfiles: z.array(FleetProfileDeclarationSchema).readonly().optional(),
   }),
   /**
    * Point one account's asset field at a declared shared document, by name.

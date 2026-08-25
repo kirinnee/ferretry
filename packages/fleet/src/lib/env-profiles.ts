@@ -46,9 +46,23 @@
  *
  * Pure throughout: no filesystem, no environment, no clock, no store.
  */
-import { secretReferencesIn, SECRET_REFERENCE_SOURCE, type SecretName } from '@ferretry/protocol';
+import {
+  type FleetProfileDeclaration,
+  secretReference,
+  secretReferencesIn,
+  SECRET_REFERENCE_SOURCE,
+  type SecretName,
+} from '@ferretry/protocol';
 import type { AccountRoute, Agent, EnvMap, FleetConfig } from './config.ts';
-import { compositionSlots, flattenForKind, type CompositionOrigin, type ResolvedAccount } from './profiles.ts';
+import { HARNESS_CREDENTIAL_ENV } from './credential-source.ts';
+import type { HarnessKind } from './manifest.ts';
+import {
+  BASE_PROFILE_NAME,
+  compositionSlots,
+  flattenForKind,
+  type CompositionOrigin,
+  type ResolvedAccount,
+} from './profiles.ts';
 import { envReferenceName } from './wrappers.ts';
 
 /** One composed variable whose value the secret store has to supply before the account can run. */
@@ -239,6 +253,128 @@ function describeContest(binding: EnvBinding): string {
       ? ''
       : `, overriding ${binding.overrode.map(describeCompositionOrigin).join(' and ')}`;
   return `set by ${describeCompositionOrigin(binding.from)}${overridden}`;
+}
+
+// ─── the profiles this fleet declares, as a surface has to offer them ──────────────────────────
+
+/** The harness kinds, annotated so a new one is a compile error here rather than a silent omission. */
+const HARNESS_KINDS: readonly HarnessKind[] = ['claude', 'codex'];
+
+/** One variable a profile sets: flat when `harness` is absent, from that harness's overlay when it is. */
+export interface ProfileVariableEntry {
+  readonly variable: string;
+  readonly shape: EnvValueShape;
+  readonly harness?: HarnessKind;
+}
+
+/**
+ * One declared profile, in the facts a surface that OFFERS it needs and none it does not.
+ *
+ * Shapes rather than values, for the reason this whole module carries: see {@link envValueShape}. The
+ * two derived fields are the ones a browser cannot answer for itself — which accounts already compose
+ * this profile, and whether it can authenticate an account of a given harness with no login at all.
+ */
+export interface ProfileCatalogEntry {
+  readonly name: string;
+  /** True for `base`, the profile every account composes first. Not a choice anybody makes. */
+  readonly appliesToEveryAccount: boolean;
+  readonly variables: readonly ProfileVariableEntry[];
+  /** Wrappers whose account composes this profile, in fleet order. */
+  readonly accounts: readonly string[];
+  /** Harnesses whose credential variable this profile sets. Empty means it authenticates nothing. */
+  readonly authenticates: readonly HarnessKind[];
+}
+
+/** Every variable one profile sets, flat entries first and each harness's overlay after them. */
+function profileVariables(config: FleetConfig, name: string): readonly ProfileVariableEntry[] {
+  const profile = config.profiles[name];
+  if (profile === undefined) return [];
+  const sorted = (env: Readonly<EnvMap> | undefined): readonly (readonly [string, string])[] =>
+    Object.entries(env ?? {}).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return [
+    ...sorted(profile.env).map(([variable, value]) => ({ variable, shape: envValueShape(value) })),
+    ...HARNESS_KINDS.flatMap(harness =>
+      sorted((harness === 'claude' ? profile.claude : profile.codex)?.env).map(([variable, value]) => ({
+        variable,
+        shape: envValueShape(value),
+        harness,
+      })),
+    ),
+  ];
+}
+
+/**
+ * Which harnesses this profile can authenticate an account of, with no login at all.
+ *
+ * The question a surface has to answer before it offers "no login": a profile that sets
+ * `ANTHROPIC_API_KEY` authenticates a Claude account, and one that sets only a base URL authenticates
+ * nothing — an account bound to it still needs its sign-in, and a screen that said otherwise would be
+ * sending somebody to an account that cannot start. Asked per harness through {@link flattenForKind},
+ * because the overlay is exactly where a cross-harness profile puts the key that differs.
+ *
+ * `HARNESS_CREDENTIAL_ENV` is read rather than restated: it is `./credential-source.ts`'s list of the
+ * variables that stand in for a login, and a second copy would be the one that missed a variable.
+ */
+function profileAuthenticates(config: FleetConfig, name: string): readonly HarnessKind[] {
+  const profile = config.profiles[name];
+  if (profile === undefined) return [];
+  return HARNESS_KINDS.filter(harness => {
+    const env = flattenForKind(profile, harness).env ?? {};
+    return HARNESS_CREDENTIAL_ENV[harness].some(variable => env[variable] !== undefined);
+  });
+}
+
+/**
+ * Every profile this fleet declares, with the accounts already composing each one.
+ *
+ * The membership half reads {@link compositionSlots} rather than the `profiles:` arrays directly, so
+ * "which accounts compose this" cannot come to disagree with what those accounts actually resolve —
+ * an agent's list and a variant's list are two ways in, and a report that read one of them would
+ * quietly omit the other.
+ */
+export function profileCatalog(config: FleetConfig): readonly ProfileCatalogEntry[] {
+  const members = new Map<string, string[]>();
+  for (const agent of config.agents) {
+    for (const [variantName, route] of Object.entries(agent.routes)) {
+      for (const slot of compositionSlots(config, agent, variantName, route)) {
+        if (slot.origin.kind === 'variant' || slot.origin.kind === 'agent' || slot.origin.kind === 'account') continue;
+        const held = members.get(slot.origin.name);
+        if (held === undefined) members.set(slot.origin.name, [route.wrapper]);
+        else if (!held.includes(route.wrapper)) held.push(route.wrapper);
+      }
+    }
+  }
+  return Object.keys(config.profiles)
+    .sort()
+    .map(name => ({
+      name,
+      appliesToEveryAccount: name === BASE_PROFILE_NAME,
+      variables: profileVariables(config, name),
+      accounts: members.get(name) ?? [],
+      authenticates: profileAuthenticates(config, name),
+    }));
+}
+
+/**
+ * The environment map one DECLARED profile carries, composed from the three spellings a caller may ask
+ * for.
+ *
+ * The single producer of `${secret:NAME}` on the write path, through `secretReference`, which is the
+ * whole reason a caller declares a secret by name rather than sending text: a near miss like
+ * `${secret:work_key}` matches nothing, stays a literal, and authenticates a child with the eighteen
+ * characters of the reference itself. A shape that cannot say it cannot make that mistake.
+ *
+ * It composes an ordinary `env` map and nothing else, so a declared profile is byte-for-byte the kind
+ * of document somebody could have written by hand — there is no second kind of profile.
+ */
+export function declaredProfileEnv(declaration: FleetProfileDeclaration): EnvMap {
+  const env: Record<string, string> = {};
+  for (const entry of declaration.variables) {
+    if (entry.from === 'secret') env[entry.variable] = secretReference(entry.secret);
+    else if (entry.from === 'environment') env[entry.variable] = `$${entry.source}`;
+    else env[entry.variable] = entry.value;
+  }
+  return env;
 }
 
 /** One account's secret-backed variables with the slot each was set by, for a management listing. */

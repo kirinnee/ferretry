@@ -14,6 +14,7 @@ export * from './client.ts';
 export * from './common.ts';
 export * from './doctor.ts';
 export * from './fleet-changes.ts';
+export * from './fleet-profiles.ts';
 export * from './foreign-history.ts';
 export * from './grants.ts';
 export * from './handover.ts';
