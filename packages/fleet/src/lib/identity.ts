@@ -211,7 +211,14 @@ export class MixedIdentityAuthError extends Error {
   }
 }
 
-const memberOf = (account: FleetManifestAccount): FleetIdentityMember => ({
+/**
+ * One published account, as the shape a credential store reads and writes.
+ *
+ * EXPORTED because the first-run seed needs the same mapping. Two spellings of it would eventually
+ * disagree about which field carries the home, and the one that drifted would read or write a
+ * credential in the wrong directory — which is the one mistake here with no visible symptom.
+ */
+export const fleetIdentityMemberOf = (account: FleetManifestAccount): FleetIdentityMember => ({
   accountId: account.id,
   wrapper: account.wrapper,
   home: account.home,
@@ -262,7 +269,7 @@ export function buildFleetIdentities(config: FleetConfig, manifest: FleetManifes
       identity: first.resolved.identity,
       auth: first.resolved.auth,
       declared: true,
-      members: matched.map(({ account }) => memberOf(account)),
+      members: matched.map(({ account }) => fleetIdentityMemberOf(account)),
     });
   }
 
@@ -274,7 +281,7 @@ export function buildFleetIdentities(config: FleetConfig, manifest: FleetManifes
       identity: account.id,
       auth: 'oauth',
       declared: false,
-      members: [memberOf(account)],
+      members: [fleetIdentityMemberOf(account)],
     });
   }
 

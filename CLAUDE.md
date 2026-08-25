@@ -235,8 +235,18 @@ home, so the boot says what it created, where, and the key that switches it off*
 replaced, because scaffolding stays create-if-absent and a host that already has a fleet keeps it byte
 for byte. Detection is `locateHarnessCommand`'s and there is no second detector, an unreadable manifest
 prepares nothing rather than guessing, and a preparation that fails is a loud notice and never a refused
-boot. An account created this way is **published and runnable, not signed in** — that is a different
-fact and the boot says which it is claiming.
+boot. **An account created this way also arrives SIGNED IN** where there was a login to copy: the first
+run seeds each new home from this host's own harness install, which is an **import and never a sync** —
+a harness rewrites its credential by temp-file-and-rename, so a synchroniser would race that forever and
+lose silently, and a symlink would be replaced by the first refresh. **macOS is a keychain
+read-and-rewrite, not a file copy**, because the item name derives from the home path; a file-copy-only
+seed passes every other test and does nothing on a Mac. Only a **`missing`** credential is written —
+`unreadable` is refused and named, never overwritten — the donor is read once per harness, the target is
+read first so a re-run is silent, and **nothing this preparation did not add is ever touched**. Every
+ending is a value, so a locked keychain costs one sentence rather than the fleet, and the boot says per
+account which are signed in, which are not, and the absolute directory each login was read from. **No
+credential value can reach a boot line**: the sentences are built from verdicts and the material never
+leaves the adapter that copied it.
 
 ## Migration context
 

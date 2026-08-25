@@ -40,6 +40,7 @@ import {
   FLEET_DEFAULT_LANES,
   type FleetDefaultAccount,
   type FleetDefaultLane,
+  HARNESS_LABEL,
 } from './defaults.ts';
 import type { HarnessKind } from './manifest.ts';
 import { canonicalAssetReference } from './paths.ts';
@@ -308,9 +309,6 @@ ${firstAccounts.length === 0 ? 'agents: []' : starterAgents(firstAccounts, ids)}
 # # The harness home the bare "claude" / "codex" command reads, named by account id.
 # defaultHomes: {}
 `;
-
-/** What a harness is called where a person reads it. Kept beside the text that spells it. */
-const HARNESS_LABEL: Readonly<Record<HarnessKind, string>> = { claude: 'Claude', codex: 'Codex' };
 
 const attendedInstructions = (kind: HarnessKind): string => `# Ferretry starter instructions
 

@@ -10,7 +10,7 @@
  * Nothing here is served. `prepareDefaults` is the boot's own step and has no route.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildFleetManifest, DEFAULT_INSTRUCTIONS, FleetConfigSchema, resolveAccounts } from '@ferretry/fleet';
@@ -33,6 +33,8 @@ let minted = 1;
 interface Fixture {
   readonly paths: ReturnType<typeof createFoundationPaths>;
   readonly configPath: string;
+  /** This fixture's OWN user home. The harness homes a first-run seed reads derive from it. */
+  readonly userHome: string;
   readonly subsystem: FleetSubsystem;
 }
 
@@ -56,7 +58,7 @@ async function fixture(): Promise<Fixture> {
     clientName: 'fy',
     harnesses: harnessDiscoveryReader(),
   });
-  return { paths, configPath: join(paths.fleet, 'config.yaml'), subsystem };
+  return { paths, configPath: join(paths.fleet, 'config.yaml'), userHome, subsystem };
 }
 
 afterEach(async () => {
@@ -377,5 +379,174 @@ agents:
     should(outcome.kind).equal('failed');
     should(outcome.kind === 'failed' && outcome.reason).containEql('unreadable or invalid');
     should(await Bun.file(subject.configPath).exists()).be.false();
+  });
+});
+
+/**
+ * The first run's credential seed, through the real mount and a real filesystem.
+ *
+ * Every donor here is a FIXTURE directory under a temporary user home — this suite never reads,
+ * writes or looks at the machine's own `~/.claude` or `~/.codex`. That is what `fixture()` giving the
+ * mount its own `userHome` is for: the fleet layout derives both donor directories from it, so the
+ * only harness homes any case below can reach are the ones it wrote itself.
+ *
+ * The decision half is proved in `packages/fleet/tests/unit/credential-seed.test.ts`. What is proved
+ * HERE is the part only a filesystem answers: that the bytes arrive, that they arrive private, and
+ * that the accounts a preparation did NOT add are never written into.
+ */
+const CLAUDE_CREDENTIAL = JSON.stringify({
+  claudeAiOauth: {
+    accessToken: 'fixture-access-token',
+    refreshToken: 'fixture-refresh-token',
+    // Comfortably past the fixture clock, so the donor classifies as `valid` rather than as expired.
+    expiresAt: GENERATED_AT_MS + 86_400_000,
+  },
+});
+
+/** Refresh-only on purpose: a `refreshable` donor is usable, and it needs no hand-built JWT. */
+const CODEX_CREDENTIAL = JSON.stringify({ tokens: { refresh_token: 'fixture-refresh-token' } });
+
+/** This host's own harness install, as the fleet layout derives it from the user home. */
+async function hostLogin(subject: Fixture, kind: 'claude' | 'codex', blob: string): Promise<string> {
+  const home = join(subject.userHome, kind === 'claude' ? '.claude' : '.codex');
+  await mkdir(home, { recursive: true });
+  const file = join(home, kind === 'claude' ? '.credentials.json' : 'auth.json');
+  await writeFile(file, blob, { mode: 0o600 });
+  return file;
+}
+
+const seedOf = (outcome: FleetDefaultsPreparation): readonly string[] =>
+  outcome.kind === 'prepared' ? outcome.seeded.map(result => `${result.account}:${result.outcome.kind}`) : [];
+
+describe('the first run credential seed', () => {
+  it('should sign every account it created in from this host own Claude login', async () => {
+    // Arrange — a host whose own Claude Code is signed in. This is the whole point: the person
+    // already logged in once, and being asked to do it twice more is the defect.
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+
+    // Act
+    const outcome = await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert — both lanes carry the login, as their own copy in their own home.
+    should(seedOf(outcome)).deepEqual(['claude-default:seeded', 'claude-auto-default:seeded']);
+    const homes = join(subject.paths.fleet, 'homes');
+    for (const wrapper of ['claude-default', 'claude-auto-default']) {
+      const copy = join(homes, wrapper, '.credentials.json');
+      should(await readFile(copy, 'utf8')).equal(CLAUDE_CREDENTIAL);
+      // Private, and a REGULAR FILE rather than a link to the donor: a harness rewrites its own
+      // credential by temp-file-and-rename, which silently replaces a symlink with a real file — so
+      // a linked account would quietly stop tracking anything on its first token refresh.
+      const stats = await stat(copy);
+      should(stats.mode & 0o777).equal(0o600);
+      should(stats.isSymbolicLink()).be.false();
+    }
+  });
+
+  it('should seed a Codex account from its own harness home, not from the Claude one', async () => {
+    // Arrange — two harnesses, two donors, two credential shapes.
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+    await hostLogin(subject, 'codex', CODEX_CREDENTIAL);
+
+    // Act
+    const outcome = await subject.subsystem.prepareDefaults(['claude', 'codex']);
+
+    // Assert — each harness keeps its credential under its own name, and nothing crossed over.
+    should(seedOf(outcome)).deepEqual([
+      'claude-default:seeded',
+      'claude-auto-default:seeded',
+      'codex-default:seeded',
+      'codex-auto-default:seeded',
+    ]);
+    const homes = join(subject.paths.fleet, 'homes');
+    should(await readFile(join(homes, 'codex-default', 'auth.json'), 'utf8')).equal(CODEX_CREDENTIAL);
+    should(await Bun.file(join(homes, 'codex-default', '.credentials.json')).exists()).be.false();
+    should(await Bun.file(join(homes, 'claude-default', 'auth.json')).exists()).be.false();
+  });
+
+  it('should leave the donor untouched', async () => {
+    // Arrange — this is a copy out of somebody's own harness home, so it had better be a copy.
+    const subject = await fixture();
+    const donor = await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+
+    // Act
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert
+    should(await readFile(donor, 'utf8')).equal(CLAUDE_CREDENTIAL);
+    should((await stat(donor)).mode & 0o777).equal(0o600);
+  });
+
+  it('should say there was nothing to copy on a host whose own harness is not signed in', async () => {
+    // Arrange — no donor at all. The accounts are still created, published and runnable.
+    const subject = await fixture();
+
+    // Act
+    const outcome = await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert — a seed never fails a preparation, and silence here is what makes people think the
+    // tool is broken.
+    should(outcome.kind).equal('prepared');
+    should(seedOf(outcome)).deepEqual(['claude-default:no-donor', 'claude-auto-default:no-donor']);
+    should((await subject.subsystem.accounts()).accounts).have.length(2);
+  });
+
+  it('should refuse to read a donor it cannot classify as an empty one', async () => {
+    // Arrange — bytes that are not the JSON this build expects. A newer harness's credential is still
+    // a credential, and treating it as an absence is how a working login gets lost.
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', 'not json at all');
+
+    // Act
+    const outcome = await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert
+    should(seedOf(outcome)).deepEqual(['claude-default:donor-unreadable', 'claude-auto-default:donor-unreadable']);
+    should(
+      await Bun.file(join(subject.paths.fleet, 'homes', 'claude-default', '.credentials.json')).exists(),
+    ).be.false();
+  });
+
+  it('should never write a credential into an account this preparation did not add', async () => {
+    // Arrange — a host with an applied Claude fleet that is NOT signed in, and Codex newly installed.
+    // The Claude accounts are somebody else's; deciding which provider login one of them uses is not
+    // a boot's business.
+    const subject = await fixture();
+    should((await subject.subsystem.prepareDefaults(['claude'])).kind).equal('prepared');
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+    await hostLogin(subject, 'codex', CODEX_CREDENTIAL);
+
+    // Act — the configuration already declares agents, so nothing at all can be added.
+    const outcome = await subject.subsystem.prepareDefaults(['codex']);
+
+    // Assert
+    should(outcome.kind).equal('nothing-added');
+    const homes = join(subject.paths.fleet, 'homes');
+    should(await Bun.file(join(homes, 'claude-default', '.credentials.json')).exists()).be.false();
+  });
+
+  it('should leave an account that already has a credential exactly as it was', async () => {
+    // Arrange — seeding is an import, not a sync. A host that is prepared twice must not have the
+    // second pass overwrite what the first one, or the harness itself, put there.
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+    should((await subject.subsystem.prepareDefaults(['claude'])).kind).equal('prepared');
+    const copy = join(subject.paths.fleet, 'homes', 'claude-default', '.credentials.json');
+    const refreshed = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'the-token-the-harness-refreshed',
+        refreshToken: 'fixture-refresh-token',
+        expiresAt: GENERATED_AT_MS + 86_400_000,
+      },
+    });
+    await writeFile(copy, refreshed, { mode: 0o600 });
+
+    // Act — a second start, with the donor still holding its original token.
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert — an ongoing sync would have raced the harness's own refresh here and lost silently,
+    // replacing a token that was just renewed with the one it replaced.
+    should(await readFile(copy, 'utf8')).equal(refreshed);
   });
 });

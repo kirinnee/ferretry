@@ -4231,8 +4231,25 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
   );
 }
 
+/**
+ * The one fact about this machine a test must be able to replace.
+ *
+ * `homedir()` is not overridable by any environment this runtime honours — Bun resolves it from the
+ * passwd entry and ignores `HOME` — so a test that drives this composition root reaches the developer's
+ * real `~/.claude` and `~/.codex` whatever it does to the environment first. That was harmless while
+ * nothing read them. It stopped being harmless when a first run started COPYING a credential out of
+ * them: an integration boot would read the credential of whoever ran the suite and write it into a
+ * throwaway directory under the temporary directory. So the seam is here, it is one field wide, and
+ * production never passes it.
+ */
+export interface WorldSeams {
+  /** This machine's user home. Both harness home directories are derived from it. */
+  readonly userHome?: string;
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
-export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
+export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {}): DaemonWorld {
+  const userHome = seams.userHome ?? homedir();
   // Pairing opens before any subsystem. Keep its validated daemon identity in
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
@@ -4446,7 +4463,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    */
   const fleet = createDaemonFleetSubsystem({
     paths,
-    userHome: homedir(),
+    userHome,
     clock: millisecondClock,
     files: stateFiles,
     platform: process.platform,
@@ -4477,7 +4494,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     harnesses: {
       report: async () =>
         await readHarnessDiscovery({
-          layouts: harnessHomeLayouts(homedir()),
+          layouts: harnessHomeLayouts(userHome),
           executables,
           documents: new NodeHarnessHomeDocuments(),
           maxDocumentBytes: MAX_ASSET_FILE_BYTES,
@@ -6232,6 +6249,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
         fleetPreparedDisclosure({
           wrappers: prepared.wrappers,
           published: prepared.published,
+          // What the first-run credential seed did, per account. Passed through rather than summarised
+          // here: the sentences belong to `src/lib`, which is the layer that may decide what is said.
+          seeded: prepared.seeded,
           locations: fleetLocations,
           pathEntry: prepared.pathEntry,
           clientName: CLIENT_NAME,

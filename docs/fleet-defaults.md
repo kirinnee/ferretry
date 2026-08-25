@@ -112,13 +112,104 @@ log level can filter (`packages/daemon/src/lib/fleet/boot-preparation.ts` owns e
 
 Two more sentences are there because their absence would be a lie of omission:
 
-- **A new account is not a signed-in account.** It has a home and a wrapper and no credential. The
-  disclosure carries the same limit the preflight already states in its own words — verified only that
-  these are published and this host can run them, NOT that they are signed in — and names
-  `fy fleet login`.
+- **Which accounts are signed in, by name.** A default account is seeded from this host's own harness
+  login where there is one to copy (below), so this is no longer one claim about all of them: the
+  disclosure names the accounts that carry a credential and the accounts that do not, and only says
+  "NOT that they are signed in" about accounts for which it is true.
 - **`PATH` is not a precondition.** An account is launched by the absolute path the manifest publishes,
   so a session works the moment the apply lands. The `PATH` line is for a person who wants to type
   `claude-default` in their own terminal, and it says so.
+
+## The fleet arrives signed in
+
+The accounts a first run creates are given **a copy of the login this host already has**. A person who
+installed Claude Code, signed in, and started a daemon is not asked to sign in three more times to
+accounts that were made for them.
+
+`packages/fleet/src/lib/credential-seed.ts` owns it and
+`packages/fleet/src/adapters/credential-store.ts` performs the copy.
+
+### It is an import, not a sync
+
+A seeded account's credential is **its own from the moment it lands**. Nothing watches the donor,
+re-reads it, or repairs a copy that has since expired.
+
+That is not a simplification, it is the only shape that works. A harness rewrites its own credential
+whenever it refreshes a token, by writing a temporary file and renaming it over the old one. A
+synchroniser would race that rename forever, would lose, and would lose **silently** — replacing a
+token the harness had just refreshed with the one it had just replaced. For the same reason the copy is
+a **copy and never a symlink**: a rename over a symlink replaces the link with a regular file, so a
+linked account would quietly stop tracking anything on its first token refresh.
+
+So the consequence is said out loud on every boot that seeds:
+
+> Those copies are independent from the moment they land — signing your own Claude out does not sign
+> them out, and signing back in does not refresh them; `fy fleet login` re-signs any account whose copy
+> expires.
+
+### Two platforms, two implementations
+
+| harness | platform | what a seed does                                                                          |
+| ------- | -------- | ----------------------------------------------------------------------------------------- |
+| claude  | macOS    | reads keychain item `Claude Code-credentials-<sha256(home)[0:8]>` and writes the target's |
+| claude  | other    | copies `<home>/.credentials.json`, mode `0600`                                            |
+| codex   | any      | copies `<home>/auth.json`, mode `0600`                                                    |
+
+**macOS is not a file copy and a file-copy-only seed would silently do nothing there**, because Claude
+Code keeps no credential file on a Mac — it keeps a keychain item whose NAME is derived from the config
+directory. The seeder has no platform branch of its own; the store owns both, which is what makes
+`packages/fleet/tests/integration/credential-store.test.ts` able to prove the macOS path from Linux by
+scripting `security` and asserting that the DONOR's item was read and the TARGET's different item was
+written. The displayed account identity (`.claude.json`'s `oauthAccount`) travels with it, so `/status`
+in a seeded home names the account the credential belongs to.
+
+### What it will not overwrite
+
+Only a **`missing`** credential is seeded, and `missing` means positively absent or positively dead.
+
+`unreadable` is a separate state and it is load-bearing here exactly as it is in `identity.ts`: a locked
+keychain, a timed-out read and a credential written by a newer harness all produce bytes this build
+cannot classify, and treating "I could not tell" as "there is nothing there" is how a working login gets
+destroyed by a convenience. An account whose own credential could not be read is **refused and named**,
+never written over. A donor that could not be read is reported as unreadable, never as an absence.
+
+The **target is read first**, which also makes a re-run cheap: a host that has already been seeded asks
+its donor nothing at all, so a second start raises no keychain prompt for a copy it was never going to
+make. One donor is read **once per harness** however many accounts share it.
+
+### What it says, per account
+
+Four endings and each is a different thing to do next:
+
+| Ending           | What the boot says                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| seeded           | which accounts, which harness's login, and the absolute directory it was read from        |
+| kept             | nothing — it already had one, and this is an import                                       |
+| no donor         | the harness, the directory that was read, and which accounts therefore have no credential |
+| refused / failed | the account and the one sentence saying why; the account is exactly as it was             |
+
+`fleetSeedSentences` in `packages/daemon/src/lib/fleet/boot-preparation.ts` owns every sentence and is
+pure. **No credential value can reach it**: it is handed verdicts, homes and reasons, and the material
+never leaves the adapter that copied it. There is no accessor above the adapter layer to misuse.
+
+### It never fails a boot, and never fails a preparation
+
+Every ending is a value. A keychain nobody unlocked costs a start one sentence, not the fleet it had
+just published — the accounts exist, are published and are runnable either way, and `fy fleet login` is
+still there.
+
+### It only ever touches what this preparation added
+
+An account somebody else declared is theirs. Deciding which provider login one of their accounts uses is
+not a boot's business, so the seed is handed exactly the accounts `preparationAdded` named and nothing
+else.
+
+### Where the donor comes from
+
+`FleetLayout.defaultHomeDirectories` — the fleet's existing single owner of "where the bare upstream
+`claude` / `codex` reads its configuration from", which is already how an account declared
+`home: default` resolves. Reading it from anywhere else would be a second opinion about one directory,
+and the two would disagree on the first host that moved theirs.
 
 ## The opt-out
 
@@ -183,8 +274,10 @@ A refusal is cheap and correct. The operator is told that their configuration an
 manifest disagree, which is a fact they need anyway, and `fy fleet apply` is still there to resolve it
 deliberately. `fyd` starts either way.
 
-`preparationConflicts` and `preparationAdditions` in
-`packages/daemon/src/lib/fleet/boot-preparation.ts` own both halves and are pure.
+`preparationConflicts` and `preparationAdded` in
+`packages/daemon/src/lib/fleet/boot-preparation.ts` own both halves and are pure. `preparationAdded`
+returns the accounts rather than their names because two things read that join — the disclosure prints
+them, and the credential seed below writes into exactly those homes.
 
 ### What it reports, and why the roster is not the report
 
@@ -279,8 +372,19 @@ launch evidence and narrows to one harness through `defaultFleetHarness`.
   subsequent start until the operator runs `fy fleet apply` or edits their configuration. That is the
   intended behaviour — the alternative is a daemon that eventually publishes an unreviewed document —
   but it does mean a host in that state never gains the missing harness's accounts on its own.
-- **Nothing signs the new accounts in.** `fy fleet login` is a separate, human step, and the boot says
-  so rather than implying otherwise.
+- **A harness home somewhere else is not found.** The donor is `defaultHomeDirectories` — `~/.claude`
+  and `~/.codex` — so an operator who moved theirs (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) gets "no usable
+  login was found in `<path>`" naming the directory this daemon actually read. That is a stated miss
+  rather than a silent one, and closing it means moving the fact itself, not adding a second reader.
+- **A host that is not signed in still gets no credential.** Seeding copies what is there; on a machine
+  whose own harness has never been logged in, `fy fleet login` is still the human step, and the boot
+  names the accounts it applies to.
+- **The macOS seed is not proved on a Mac.** It is proved from Linux by scripting `security` and
+  asserting the exact keychain items read and written. That covers the shape of the calls and cannot
+  cover a real keychain's behaviour under a locked login or an entitlement prompt.
+- **`fy fleet init --first-account` does not seed.** The CLI writes the same scaffold and stops there;
+  the boot is the surface this feature is about, and a second seeding path would be a second owner of
+  when a credential gets copied.
 - **`fyd --check` does not say whether starting would prepare a fleet.** It reports the harness
   preflight and the grant posture; the preparation posture is disclosed only at boot. A person asking
   "would this daemon start" is arguably the person who should be told.
