@@ -1080,7 +1080,9 @@ describe('creating an account', () => {
       harness: 'claude',
       name: 'atelier',
       lanes: [{ variant: 'default', mode: 'auto' }],
-      models: ['claude-opus-5', 'claude-sonnet-5'],
+      // A declaration each, not a bare identifier: the wire carries whether a model is in service and
+      // why it is not, and this form has no opinion about either — so each entry says its id and stops.
+      models: [{ id: 'claude-opus-5' }, { id: 'claude-sonnet-5' }],
       defaultModel: 'claude-opus-5',
       layer: { memory: 'instructions/CLAUDE-atelier.md' },
     });

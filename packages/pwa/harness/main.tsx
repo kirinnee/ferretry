@@ -874,7 +874,7 @@ const HARNESS_FLEET_PROPOSAL = {
       { variant: 'default', mode: 'interactive' },
       { variant: 'auto', mode: 'auto' },
     ],
-    models: ['claude-opus-5'],
+    models: [{ id: 'claude-opus-5' }],
     defaultModel: 'claude-opus-5',
   },
   summary: 'add claude-atelier, claude-auto-atelier',

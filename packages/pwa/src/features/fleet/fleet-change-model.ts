@@ -2149,7 +2149,11 @@ export const createAccountProposal = (draft: FleetAccountDraft): FleetProposalRe
       harness: draft.harness,
       name: draft.name.trim(),
       lanes: draft.lanes.map(lane => ({ variant: lane.variant.trim(), mode: lane.mode })),
-      models: draftModels(draft.modelsText),
+      // A DECLARATION PER MODEL, not a bare identifier. The wire carries availability and the reason a
+      // model is out of service, and this form offers neither — so each entry says its id and stops
+      // there, which on a create is an available model because the account has no prior answer to
+      // leave alone. Sending strings is what deleted an out-of-service model on the way through.
+      models: draftModels(draft.modelsText).map(id => ({ id })),
       defaultModel: draft.defaultModel.trim(),
       ...(displayName === '' ? {} : { displayName }),
       ...(layer === undefined ? {} : { layer }),

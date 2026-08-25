@@ -159,7 +159,9 @@ const CREATE = {
     harness: 'claude',
     name: 'atomi',
     lanes: [{ variant: 'default' }],
-    models: ['opus'],
+    // A declaration per model rather than a bare identifier: the wire carries whether a model is in
+    // service and the reason it is not, so a change can no longer delete either by omission.
+    models: [{ id: 'opus' }],
     defaultModel: 'opus',
   },
 } as const;

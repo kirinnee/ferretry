@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { z } from 'zod';
 import {
   FleetApplyOutcomeSchema,
   FleetAssetListingSchema,
@@ -8,6 +9,7 @@ import {
   FleetShareableFieldSchema,
   FleetSharingSchema,
   FleetManifestSummarySchema,
+  FleetModelDeclarationSchema,
   FleetMutationSchema,
   FleetProposalApplyRequestSchema,
   FleetProposalRequestSchema,
@@ -176,9 +178,72 @@ describe('FleetProposalApplyRequestSchema', () => {
   });
 });
 
+/**
+ * The shape that replaced a bare identifier, and the reason it had to.
+ *
+ * A list of strings could not say a model is out of service or why, so a change carrying the ids a
+ * form could see replaced the account's list with them and deleted both facts — silently, because the
+ * shorter list is a legal configuration.
+ */
+describe('FleetModelDeclarationSchema', () => {
+  it('should accept an identifier and nothing else, which says nothing about availability', () => {
+    // Act
+    const actual = FleetModelDeclarationSchema.safeParse({ id: 'opus' });
+
+    // Assert — `available` stays ABSENT rather than defaulting to true. A create reads that as an
+    // available model and an edit reads it as "leave this alone"; a default here would erase the
+    // difference and re-open the same deletion inside one entry.
+    should(actual.success && actual.data).deepEqual({ id: 'opus' });
+  });
+
+  it('should carry a model taken out of service, with the reason somebody wrote', () => {
+    // Act
+    const actual = FleetModelDeclarationSchema.safeParse({
+      id: 'haiku',
+      available: false,
+      unavailableReason: 'this subscription tier does not include Haiku',
+      displayName: 'Haiku 4.5',
+    });
+
+    // Assert — the whole point: both facts survive a round trip through the wire.
+    should(actual.success && actual.data).deepEqual({
+      id: 'haiku',
+      available: false,
+      unavailableReason: 'this subscription tier does not include Haiku',
+      displayName: 'Haiku 4.5',
+    });
+  });
+
+  it('should accept an explicit null display name, which takes the name away', () => {
+    // Act + Assert — `null` removes, the grammar every other field of an edit already uses.
+    should(FleetModelDeclarationSchema.safeParse({ id: 'opus', displayName: null }).success).be.true();
+  });
+
+  it('should refuse a model put into service that still gives a reason it is unavailable', () => {
+    // Act — incoherent in every context, which is why this one rule is the schema's rather than the
+    // daemon's: it needs nothing the account already says.
+    const actual = FleetModelDeclarationSchema.safeParse({ id: 'opus', available: true, unavailableReason: 'x' });
+
+    // Assert
+    should(actual.success).be.false();
+    should(actual.success ? '' : z.prettifyError(actual.error)).match(/still gives a reason it is unavailable/u);
+  });
+
+  it('should refuse a bare identifier, because that is the spelling this replaced', () => {
+    // Act + Assert — accepting the string alongside the object would leave the silent form available
+    // to every sender that has not been changed, which is exactly what went wrong.
+    should(FleetModelDeclarationSchema.safeParse('opus').success).be.false();
+  });
+
+  it('should refuse a field it does not declare', () => {
+    // Act + Assert — strict, so a client inventing a spelling is told rather than quietly ignored.
+    should(FleetModelDeclarationSchema.safeParse({ id: 'opus', unavailable: true }).success).be.false();
+  });
+});
+
 describe('FleetMutationSchema', () => {
   /** Everything a create needs beyond the lanes it names. */
-  const CREATE = { kind: 'create-account', harness: 'claude', name: 'atelier', models: ['opus'] } as const;
+  const CREATE = { kind: 'create-account', harness: 'claude', name: 'atelier', models: [{ id: 'opus' }] } as const;
 
   it('should carry the SET of lanes one create produces, each with its own mode', () => {
     // Act — ticking both modes is one decision a person made once, so it travels as one intent.

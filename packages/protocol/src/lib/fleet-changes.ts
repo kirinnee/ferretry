@@ -509,6 +509,47 @@ export type FleetAccountLayerPatch = z.infer<typeof FleetAccountLayerPatchSchema
 const AccountLayerSchema = FleetAccountLayerPatchSchema;
 
 /**
+ * One model a change declares, with everything the fleet lets an author say about one.
+ *
+ * IT REPLACES A BARE IDENTIFIER, and the identifier is why this exists. A model taken out of service
+ * carries a written reason, and a list of strings can express neither — so a change that sent the ids
+ * a form could see replaced the account's list with them and deleted both facts. Nothing complained,
+ * because the shorter list is a perfectly legal configuration; the reason was simply gone and the
+ * model was quietly back in service.
+ *
+ * EVERY FIELD BUT THE ID MEANS "LEAVE THIS ALONE" WHEN OMITTED, which is the grammar the rest of an
+ * edit already uses, one level further down. `available` is therefore not defaulted here: `{ id }` on
+ * a create is an available model because the account has no prior answer, and `{ id }` on an edit is
+ * whatever that model already was. Defaulting it to `true` in this schema would make those two
+ * indistinguishable and re-open the same silent deletion inside a single entry.
+ *
+ * The one rule it does enforce is the incoherent pair, because it is incoherent in every context: a
+ * model cannot be put into service and still say why it is out of it. The other direction — declared
+ * unavailable with no reason anywhere — depends on what the account already says, so the daemon owns
+ * it and refuses in the operator's own vocabulary.
+ */
+export const FleetModelDeclarationSchema = z
+  .strictObject({
+    id: NonEmpty,
+    /** What a person reads instead of the identifier; `null` takes that name away again. */
+    displayName: NonEmpty.nullable().optional(),
+    available: z.boolean().optional(),
+    unavailableReason: NonEmpty.optional(),
+  })
+  .check(context => {
+    const model = context.value;
+    if (model.available === true && model.unavailableReason !== undefined) {
+      context.issues.push({
+        code: 'custom',
+        message: `model "${model.id}" is put into service but still gives a reason it is unavailable`,
+        input: model.unavailableReason,
+        path: ['unavailableReason'],
+      });
+    }
+  });
+export type FleetModelDeclaration = z.infer<typeof FleetModelDeclarationSchema>;
+
+/**
  * The one named intent a caller may send.
  *
  * Editing is a patch: an omitted field is left alone and an explicit `null` removes it. Both are
@@ -537,7 +578,8 @@ export const FleetMutationSchema = z.discriminatedUnion('kind', [
      */
     lanes: z.array(FleetAccountLaneSchema).min(1).readonly(),
     displayName: NonEmpty.optional(),
-    models: z.array(NonEmpty).readonly(),
+    /** Every model this account declares. A create has no prior list, so this one is all of it. */
+    models: z.array(FleetModelDeclarationSchema).readonly(),
     defaultModel: NonEmpty.optional(),
     available: z.boolean().optional(),
     unavailableReason: NonEmpty.optional(),
@@ -604,7 +646,19 @@ export const FleetMutationSchema = z.discriminatedUnion('kind', [
     accountId: z.uuid(),
     displayName: NonEmpty.nullable().optional(),
     mode: AccountModeSchema.nullable().optional(),
-    models: z.array(NonEmpty).readonly().optional(),
+    /**
+     * The models this edit has something to say about — NOT the account's whole list.
+     *
+     * A named model is merged over what the account already declared. An unnamed one is kept when it
+     * is out of service and dropped when it is in service, because the surface sending this list is a
+     * set of ticked cards and a card is never offered for a model the account cannot serve. Reading
+     * that absence as a deletion is what removed a model and the reason somebody wrote for it.
+     *
+     * So taking an out-of-service model off an account is two changes rather than none: put it back
+     * into service, then leave it out. That is the price of the rule and it is the right way round —
+     * one request cannot both fail to mention a model and mean to delete it.
+     */
+    models: z.array(FleetModelDeclarationSchema).readonly().optional(),
     defaultModel: NonEmpty.nullable().optional(),
     available: z.boolean().optional(),
     unavailableReason: NonEmpty.nullable().optional(),

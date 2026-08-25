@@ -16,10 +16,11 @@ import {
   derivedWrapperName,
   type FleetConfig,
   FleetConfigSchema,
+  type FleetManifestModel,
   orphanedSharedDocuments,
   SafeNameSchema,
 } from '@ferretry/fleet';
-import { type FleetMutation, FleetMutationSchema } from '@ferretry/protocol';
+import { type FleetModelDeclaration, type FleetMutation, FleetMutationSchema } from '@ferretry/protocol';
 import { planSharedAssetUnlink, sharedAssetLinkPath } from './sharing.ts';
 
 /**
@@ -72,6 +73,77 @@ const availabilityOf = (mutation: Extract<FleetMutation, { kind: 'create-account
   mutation.available ?? true;
 
 /**
+ * One model declaration, from what the account already says about it and what this change says.
+ *
+ * ABSENT MEANS "LEAVE IT ALONE" ONE LEVEL BELOW THE FIELD. A surface that lists a model without an
+ * opinion about its availability is the ordinary case — a ticked card knows an identifier and nothing
+ * else — and reading that silence as "available" is what put a model back into service and threw away
+ * the reason somebody wrote for taking it out.
+ *
+ * The refusal at the end is the one rule the wire schema cannot check, because it depends on what the
+ * account already declares: a model may be taken out of service without repeating a reason it already
+ * carries, but one that has never had a reason must be given one here.
+ */
+function declaredModel(existing: FleetManifestModel | undefined, change: FleetModelDeclaration): FleetManifestModel {
+  const displayName = change.displayName === null ? undefined : (change.displayName ?? existing?.displayName);
+  const named = displayName === undefined ? {} : { displayName };
+  if (change.available ?? existing?.available ?? true) return { id: change.id, available: true, ...named };
+  const carried = existing?.available === false ? existing.unavailableReason : undefined;
+  const unavailableReason = change.unavailableReason ?? carried;
+  if (unavailableReason === undefined) {
+    throw new FleetMutationRefusal(
+      `model "${change.id}" is declared unavailable but does not say why — give it an unavailableReason`,
+    );
+  }
+  return { id: change.id, available: false, unavailableReason, ...named };
+}
+
+/** A change that names one model twice has two answers for it and no way to say which won. */
+function assertModelsNamedOnce(changes: readonly FleetModelDeclaration[]): void {
+  const seen = new Set<string>();
+  for (const change of changes) {
+    if (seen.has(change.id)) {
+      throw new FleetMutationRefusal(`this change names the model "${change.id}" twice`);
+    }
+    seen.add(change.id);
+  }
+}
+
+/**
+ * The model list an account has after a change that names some of them.
+ *
+ * A NAMED MODEL IS MERGED over what the account already declared. An UNNAMED one is kept when it is
+ * out of service and dropped when it is in service, and that asymmetry is the whole fix: the surface
+ * sending the list is a set of ticked cards, and by design a card is never offered for a model the
+ * account cannot serve, so the list arrives already missing every unavailable entry. Replacing the
+ * list with it deleted those entries and the reasons written on them, and the result was a legal
+ * configuration, so nothing anywhere complained.
+ *
+ * Removing an out-of-service model is therefore two changes rather than none — put it back into
+ * service, then leave it out — which is the right way round: one request cannot both fail to mention a
+ * model and mean to delete it.
+ *
+ * Order is the account's, not the change's. An existing model keeps its position and only genuinely
+ * new ones are appended, so a change that alters one entry does not read as a reordering of the rest
+ * in the roster diff a person approves.
+ */
+function mergedModels(
+  existing: readonly FleetManifestModel[],
+  changes: readonly FleetModelDeclaration[],
+): readonly FleetManifestModel[] {
+  assertModelsNamedOnce(changes);
+  const named = new Map(changes.map(change => [change.id, change]));
+  const kept = existing.flatMap(model => {
+    const change = named.get(model.id);
+    if (change !== undefined) return [declaredModel(model, change)];
+    return model.available ? [] : [model];
+  });
+  const before = new Set(existing.map(model => model.id));
+  const added = changes.filter(change => !before.has(change.id)).map(change => declaredModel(undefined, change));
+  return [...kept, ...added];
+}
+
+/**
  * The fields every route this create produces carries, plus the one that is the LANE's.
  *
  * Everything but the mode is shared: one provider account, one model list, one overlay, one display
@@ -83,7 +155,9 @@ const createFields = (
   mutation: Extract<FleetMutation, { kind: 'create-account' }>,
   lane: CreateLane,
 ): Record<string, unknown> => ({
-  models: [...mutation.models],
+  // Through the same merge an edit uses, against nothing: a create has no prior list, so every
+  // declaration is new and the normalization is all that is left of it.
+  models: mergedModels([], mutation.models),
   available: availabilityOf(mutation),
   ...(mutation.displayName === undefined ? {} : { displayName: mutation.displayName }),
   ...(lane.mode === undefined ? {} : { mode: lane.mode }),
@@ -134,16 +208,25 @@ function assertServable(mutation: Extract<FleetMutation, { kind: 'create-account
     }
     return;
   }
-  if (mutation.models.length === 0) {
+  // What it can SERVE, not what it lists. A create may declare a model already out of service — that
+  // is the whole point of the declaration — and an account whose every model is down can serve
+  // nothing, however long its list is.
+  const servable = mutation.models.filter(model => model.available !== false).map(model => model.id);
+  if (servable.length === 0) {
     throw new FleetMutationRefusal('an available account must list at least one model it can serve');
   }
   if (mutation.defaultModel === undefined) {
     throw new FleetMutationRefusal('an available account must name the default model it serves');
   }
-  if (!mutation.models.includes(mutation.defaultModel)) {
-    throw new FleetMutationRefusal(
-      `the default model "${mutation.defaultModel}" is not one of the models this account lists`,
-    );
+  if (!servable.includes(mutation.defaultModel)) {
+    // The two are a different mistake with a different remedy: one model is missing from the list and
+    // the other is in it and declared down, so a single sentence for both would send half the readers
+    // to fix the wrong thing. The choice is a value rather than an argument spanning lines, because a
+    // `throw new X(\n <ternary> \n)` leaves its own closing line unreachable and the ledger says so.
+    const remedy = mutation.models.some(model => model.id === mutation.defaultModel)
+      ? 'is one this account declares unavailable'
+      : 'is not one of the models this account lists';
+    throw new FleetMutationRefusal(`the default model "${mutation.defaultModel}" ${remedy}`);
   }
 }
 
@@ -367,7 +450,13 @@ function editAccount(config: FleetConfig, mutation: Extract<FleetMutation, { kin
     patched(next, {
       displayName: mutation.displayName,
       mode: mutation.mode,
-      models: mutation.models === undefined ? undefined : [...mutation.models],
+      // Merged rather than replaced, for the same reason the layer below is: an editor showing some
+      // of what an account declares must not delete the rest. `mergedModels` owns which of the
+      // unnamed entries survive and why.
+      models:
+        mutation.models === undefined
+          ? undefined
+          : mergedModels((next.models ?? []) as readonly FleetManifestModel[], mutation.models),
       defaultModel: mutation.defaultModel,
       available: mutation.available,
       unavailableReason: mutation.unavailableReason,

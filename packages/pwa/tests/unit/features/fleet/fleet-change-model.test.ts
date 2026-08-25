@@ -1736,7 +1736,7 @@ describe('drafts become one named mutation', () => {
       harness: 'claude',
       name: 'studio',
       lanes: [{ variant: 'default', mode: 'auto' }],
-      models: ['opus', 'sonnet'],
+      models: [{ id: 'opus' }, { id: 'sonnet' }],
       defaultModel: 'opus',
       displayName: 'Studio Claude',
       layer: {
@@ -1764,7 +1764,7 @@ describe('drafts become one named mutation', () => {
       harness: 'codex',
       name: 'solo',
       lanes: [{ variant: 'default', mode: 'auto' }],
-      models: ['gpt'],
+      models: [{ id: 'gpt' }],
       defaultModel: 'gpt',
     });
     expect(request.assetEdits).toHaveLength(0);

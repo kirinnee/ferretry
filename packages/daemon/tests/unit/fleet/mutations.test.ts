@@ -80,7 +80,7 @@ describe('createdWrapperNames', () => {
       harness: 'claude',
       name: 'kirin',
       lanes: [{ variant: 'default' }, { variant: 'auto' }],
-      models: ['model-one'],
+      models: [{ id: 'model-one' }],
       defaultModel: 'model-one',
     });
 
@@ -97,7 +97,7 @@ describe('createdWrapperNames', () => {
       harness: 'codex',
       name: 'atomi',
       lanes: [{}],
-      models: ['model-one'],
+      models: [{ id: 'model-one' }],
       defaultModel: 'model-one',
     });
 
@@ -118,7 +118,7 @@ describe('applyFleetMutation creating an account', () => {
         harness: 'codex',
         name: 'atomi',
         ...oneLane(),
-        models: ['model-one'],
+        models: [{ id: 'model-one' }],
         defaultModel: 'model-one',
       }),
       mintId,
@@ -137,7 +137,7 @@ describe('applyFleetMutation creating an account', () => {
         harness: 'claude',
         name: 'kirin',
         ...oneLane('auto'),
-        models: ['model-one'],
+        models: [{ id: 'model-one' }],
         defaultModel: 'model-one',
       }),
       mintId,
@@ -159,7 +159,7 @@ describe('applyFleetMutation creating an account', () => {
           harness: 'claude',
           name: 'kirin',
           ...oneLane('turbo'),
-          models: ['model-one'],
+          models: [{ id: 'model-one' }],
           defaultModel: 'model-one',
         }),
         mintId,
@@ -180,7 +180,7 @@ describe('applyFleetMutation creating an account', () => {
           harness: 'claude',
           name: 'kirin',
           ...oneLane(),
-          models: ['model-one'],
+          models: [{ id: 'model-one' }],
           defaultModel: 'model-one',
         }),
         mintId,
@@ -193,8 +193,8 @@ describe('applyFleetMutation creating an account', () => {
 
   it.each([
     [{ models: [] }, /at least one model/u],
-    [{ models: ['model-one'], defaultModel: undefined }, /name the default model/u],
-    [{ models: ['model-one'], defaultModel: 'model-nine' }, /not one of the models/u],
+    [{ models: [{ id: 'model-one' }], defaultModel: undefined }, /name the default model/u],
+    [{ models: [{ id: 'model-one' }], defaultModel: 'model-nine' }, /not one of the models/u],
     [{ models: [], available: false }, /say why it is unavailable/u],
   ])('should refuse an incoherent availability declaration %j', (overrides, expected) => {
     // Act
@@ -251,7 +251,7 @@ describe('applyFleetMutation creating several lanes at once', () => {
         { variant: 'default', mode: 'interactive' },
         { variant: 'auto', mode: 'auto' },
       ],
-      models: ['model-one'],
+      models: [{ id: 'model-one' }],
       defaultModel: 'model-one',
       ...overrides,
     });
@@ -298,7 +298,7 @@ describe('applyFleetMutation creating several lanes at once', () => {
         harness: 'claude',
         name: 'kirin',
         lanes: [{ variant: 'auto', mode: 'auto' }],
-        models: ['model-one'],
+        models: [{ id: 'model-one' }],
         defaultModel: 'model-one',
       }),
       mintSequence(),
@@ -328,7 +328,7 @@ describe('applyFleetMutation creating several lanes at once', () => {
           harness: 'claude',
           name: 'kirin',
           lanes: [{ mode: 'interactive' }, { mode: 'auto' }],
-          models: ['model-one'],
+          models: [{ id: 'model-one' }],
           defaultModel: 'model-one',
         }),
         mintSequence(),
@@ -570,6 +570,231 @@ describe('applyFleetMutation editing an account', () => {
   });
 });
 
+/**
+ * The model list an edit names is a PATCH, and these are the cases that decide what that means.
+ *
+ * The first one is the defect: a form's ticked cards never include a model the account cannot serve,
+ * so the list arrives already missing every unavailable entry, and replacing the list with it deleted
+ * both the model and the reason somebody wrote. The result was a legal configuration, so nothing
+ * refused and nothing said anything.
+ */
+describe('applyFleetMutation editing the models an account declares', () => {
+  /** An account that has taken one model out of service, in writing, and given another a name. */
+  const withdrawn = (): FleetConfig =>
+    configOf({
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-kirin',
+              home: 'claude-kirin',
+              defaultModel: 'model-one',
+              models: [
+                'model-one',
+                { id: 'model-two', displayName: 'Model Two' },
+                { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+  const modelsAfter = (mutation: Record<string, unknown>, config: FleetConfig = withdrawn()): unknown =>
+    routeOf(
+      applyFleetMutation(config, mutationOf({ kind: 'edit-account', accountId: ID_ONE, ...mutation }), mintId),
+      ID_ONE,
+    ).models;
+
+  it('should keep a model taken out of service, and its reason, when the edit does not name it', () => {
+    // Act — exactly what a ticked-card form sends: the two it can see, and nothing about the third.
+    const actual = modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-two' }] });
+
+    // Assert — the reason is the fact that was being lost, so it is asserted rather than the entry alone.
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: true, displayName: 'Model Two' },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+
+  it('should still remove a model that was in service and the edit does not name', () => {
+    // Act — the asymmetry is the rule: silence about a servable model is a removal, because the form
+    // that sent the list could see it and left it out.
+    const actual = modelsAfter({ models: [{ id: 'model-one' }] });
+
+    // Assert
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+
+  it('should leave a named model’s own facts alone when the edit has no opinion about them', () => {
+    // Act — `{ id }` is a surface that knows an identifier and nothing else. Reading that as
+    // "available, with no display name" is the same silent deletion one level down.
+    const actual = modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-two' }, { id: 'model-down' }] });
+
+    // Assert — naming the withdrawn model changes nothing about it either; it is still out of service
+    // and still says why.
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: true, displayName: 'Model Two' },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+
+  it('should take a model out of service with the reason the edit gives', () => {
+    // Act
+    const actual = modelsAfter({
+      models: [{ id: 'model-one' }, { id: 'model-two', available: false, unavailableReason: 'rate limited here' }],
+    });
+
+    // Assert — the display name survives the withdrawal; it is a different fact from availability.
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: false, unavailableReason: 'rate limited here', displayName: 'Model Two' },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+
+  it('should put a model back into service and drop the reason it is no longer out of it', () => {
+    // Act
+    const actual = modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-down', available: true }] });
+
+    // Assert — the reason is gone rather than carried, because a model in service has none.
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-down', available: true },
+    ]);
+  });
+
+  it('should let a withdrawal repeat nothing, because the account already says why', () => {
+    // Act — a surface re-sending what it read must not have to echo a reason back to keep it.
+    const actual = modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-down', available: false }] });
+
+    // Assert
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+
+  it('should add a model the account has never declared, at the end of the list', () => {
+    // Act
+    const actual = modelsAfter({
+      models: [{ id: 'model-one' }, { id: 'model-two' }, { id: 'model-new', displayName: 'New' }],
+    });
+
+    // Assert — existing entries keep their positions, so a roster diff shows one addition and not a
+    // reordering of everything beside it.
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: true, displayName: 'Model Two' },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+      { id: 'model-new', available: true, displayName: 'New' },
+    ]);
+  });
+
+  it('should take a display name away when the edit explicitly nulls it', () => {
+    // Act — `null` removes, which is the grammar every other field of an edit already uses.
+    const actual = modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-two', displayName: null }] });
+
+    // Assert
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: true },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+
+  it('should refuse a model declared unavailable that no reason anywhere accounts for', () => {
+    // Act — new to this account, so there is no earlier reason for the merge to carry.
+    const actual = refusalOf(() =>
+      modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-new', available: false }] }),
+    );
+
+    // Assert
+    should(actual).match(/model "model-new" is declared unavailable but does not say why/u);
+  });
+
+  it('should refuse a change that names one model twice, because one name is one model', () => {
+    // Act
+    const actual = refusalOf(() =>
+      modelsAfter({ models: [{ id: 'model-one' }, { id: 'model-one', displayName: 'Again' }] }),
+    );
+
+    // Assert
+    should(actual).match(/names the model "model-one" twice/u);
+  });
+
+  it('should leave the whole list alone when an edit names no models at all', () => {
+    // Act — the ordinary layer-only edit, which must not touch what the account serves.
+    const actual = modelsAfter({ displayName: 'Renamed' });
+
+    // Assert
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-two', available: true, displayName: 'Model Two' },
+      { id: 'model-down', available: false, unavailableReason: 'this tier does not include it' },
+    ]);
+  });
+});
+
+describe('applyFleetMutation declaring models on a create', () => {
+  const created = (models: readonly unknown[], defaultModel = 'model-one'): unknown =>
+    routeOf(
+      applyFleetMutation(
+        configOf(),
+        mutationOf({
+          kind: 'create-account',
+          harness: 'claude',
+          name: 'kirin',
+          lanes: [{ variant: 'default' }],
+          models,
+          defaultModel,
+        }),
+        mintId,
+      ),
+      ID_MINTED,
+    ).models;
+
+  it('should carry a model declared out of service, with its reason, onto the new account', () => {
+    // Act — a create could not express this at all while the wire carried identifiers.
+    const actual = created([
+      { id: 'model-one' },
+      { id: 'model-down', available: false, unavailableReason: 'not on this plan' },
+    ]);
+
+    // Assert
+    should(actual).deepEqual([
+      { id: 'model-one', available: true },
+      { id: 'model-down', available: false, unavailableReason: 'not on this plan' },
+    ]);
+  });
+
+  it('should refuse an account whose every declared model is out of service', () => {
+    // Act — the list is not empty, and the account can still serve nothing.
+    const actual = refusalOf(() => created([{ id: 'model-down', available: false, unavailableReason: 'no' }]));
+
+    // Assert
+    should(actual).match(/must list at least one model it can serve/u);
+  });
+
+  it('should refuse a default the account itself declares unavailable, saying which mistake it is', () => {
+    // Act — a different mistake from "not in the list", with a different remedy, so a different sentence.
+    const actual = refusalOf(() =>
+      created([{ id: 'model-one' }, { id: 'model-down', available: false, unavailableReason: 'no' }], 'model-down'),
+    );
+
+    // Assert
+    should(actual).match(/"model-down" is one this account declares unavailable/u);
+  });
+});
+
 describe('applyFleetMutation initializing', () => {
   it('should refuse to derive a configuration, because initialization scaffolds one', () => {
     // Act
@@ -747,7 +972,7 @@ const createWithProfiles = (overrides: Record<string, unknown>): FleetMutation =
     harness: 'claude',
     name: 'kirin',
     ...oneLane('auto'),
-    models: ['model-one'],
+    models: [{ id: 'model-one' }],
     defaultModel: 'model-one',
     ...overrides,
   });
