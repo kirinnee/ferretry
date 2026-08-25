@@ -22,6 +22,7 @@ import {
   ListOrdered,
   Lock,
   ServerCog,
+  Sparkles,
   TriangleAlert,
 } from 'lucide-react';
 import { useId, useState } from 'react';
@@ -51,10 +52,12 @@ import {
   type FleetRosterChange,
   type FleetRosterRow,
   type FleetUnreachableDiagnosis,
+  harnessEvidence,
   operationLedger,
   outcomeSummary,
   rosterDiff,
 } from './fleet-change-model.ts';
+import { defaultFleetHarness, fleetHarnessLabel } from './fleet-model.ts';
 
 /**
  * The verdict's tone, as the SHARED badge's own vocabulary.
@@ -161,6 +164,121 @@ const HEALTH_TONE_CLASS: Readonly<Record<AccountHealthTone, string>> = {
 };
 
 /**
+ * How many wrappers a harness has, and how it is said.
+ *
+ * IT DOES NOT SAY "found on PATH", and that wording is the whole reason this helper exists rather than
+ * a template at the call site. The surface this replaced printed `N wrappers found on PATH` — but the
+ * evidence reaching it here is `harnessEvidence`, which reads the PUBLISHED MANIFEST, and a manifest
+ * account's `available` is a field its owner WROTE (`packages/fleet/src/lib/config.ts:290` →
+ * `packages/fleet/src/lib/profiles.ts:262`). Nothing on this path probes `PATH` at all. The host lookup
+ * that genuinely does is `harnessPathEvidence`, which reads the discovery report and is what the new
+ * account form consumes; printing its sentence over this evidence would send somebody to check their
+ * `PATH` for a wrapper their own `config.yaml` had switched off.
+ *
+ * So the words are the ones the accounts page already uses for the same field — "this fleet publishes
+ * this account as unable to run" (`accounts-model.ts`) — because a second vocabulary for one fact is
+ * how the same wrapper ends up described two ways on two screens.
+ */
+const launchableSentence = (count: number): string =>
+  count === 0
+    ? 'No wrapper here is published as able to run.'
+    : `${String(count)} wrapper${count === 1 ? '' : 's'} published as able to run.`;
+
+/**
+ * WHAT EACH HARNESS IN THIS MANIFEST HAS, on the screen a person actually opens.
+ *
+ * These three facts had a renderer and lost it. `fleet-surface.tsx` printed the per-harness wrapper
+ * count, the `Default` badge and every blocked wrapper's reason, and it was harness-only in practice —
+ * reachable from the visual gallery and from nothing a person navigates to. It was deleted in `#388`,
+ * which left `FleetHarnessView.blocked` projected by `harnessEvidence` and read by nobody. This is that
+ * renderer, on the roster the settings Fleet tab mounts.
+ *
+ * THE EVIDENCE IS `harnessEvidence`, NOT A SECOND DERIVATION. It is already the shape
+ * `defaultFleetHarness` consumes, so the default rule is not restated here either — the badge asks the
+ * one owner of that policy which harness wins and renders its answer. A second walk over `accounts`
+ * would be a second opinion about the same manifest.
+ *
+ * THE BLOCKED LIST IS NOT THE SAME AS THE ROW'S REASON, though both come from `unavailableReason`. A
+ * row answers "what about THIS account", and you only meet it by scrolling to it; this answers "what
+ * can this harness run", which on a fleet of a dozen accounts is not obtainable by reading rows at all.
+ * The count and the list are the fact somebody came for; the row keeps its own reason beside the
+ * account it is about.
+ */
+function LiveHarnessFacts({ accounts }: { readonly accounts: readonly FleetManifestAccountView[] }) {
+  const evidence = harnessEvidence(accounts);
+  // A manifest with no accounts produces no evidence, and the panel already has a sentence for that
+  // state. An eyebrow over nothing would be a heading for an absence.
+  if (evidence.length === 0) return null;
+  const preferred = defaultFleetHarness(evidence);
+  return (
+    <div className="border-b border-border-soft px-panel py-3" data-fleet-harness-facts="">
+      <p className={EYEBROW}>Harnesses in this manifest</p>
+      <ul className="m-0 mt-2 list-none p-0">
+        {evidence.map(harness => {
+          const label = fleetHarnessLabel(harness.kind);
+          return (
+            <li key={harness.kind} className="mt-2 min-w-0 first:mt-0" data-fleet-harness={harness.kind}>
+              {/* TWO LINES, ALWAYS, rather than one that wraps when a badge is present. Flowing the
+                  sentence in beside the name put it on its own line for the default harness and inline
+                  for the other, so two rows of the same list were laid out differently — which reads as
+                  the second one saying something of a different kind. */}
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-ui font-semibold text-fg">{label}</span>
+                {/* THE BADGE IS ON THE HARNESS IT DESCRIBES rather than in a sentence of its own, so a
+                    reader does not have to hold "Claude is the default" in their head while looking at
+                    two harnesses. The `title` says what being the default DOES; the word alone reads as
+                    a rank. */}
+                {preferred === harness.kind ? (
+                  <span
+                    className="kt-badge"
+                    data-tone="accent"
+                    data-fleet-harness-default=""
+                    title="Ferretry uses this harness when a caller does not name one."
+                  >
+                    <Sparkles size={12} aria-hidden="true" />
+                    Default
+                  </span>
+                ) : null}
+              </div>
+              <p
+                className="m-0 text-meta leading-base text-muted"
+                data-fleet-harness-launchable={String(harness.launchable.length)}
+              >
+                {launchableSentence(harness.launchable.length)}
+              </p>
+              {harness.blocked.length === 0 ? null : (
+                <ul className="m-0 mt-1 list-none p-0" aria-label={`${label} wrappers that cannot run`}>
+                  {harness.blocked.map(reason => (
+                    // The daemon's own clause, WHOLE and wrapping rather than truncated: it is prefixed
+                    // with the wrapper it is about, and a clipped reason is the fact somebody came for.
+                    <li
+                      key={reason}
+                      className="mt-1 flex min-w-0 gap-2 text-meta leading-base text-warn first:mt-0"
+                      data-fleet-harness-blocked=""
+                    >
+                      <CircleAlert size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span className="min-w-0 break-words">{reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {/* NO DEFAULT IS ITS OWN STATE, not a missing badge. A manifest whose every account is published
+          as unable to run has nothing to start, and the absence of an accent chip somewhere above is
+          not something a reader can be expected to notice. */}
+      {preferred === undefined ? (
+        <p className="m-0 mt-2 text-meta leading-base text-warn" data-fleet-harness-no-default="">
+          Nothing here is the default: this manifest publishes no wrapper it can run.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * The accounts this daemon POSITIVELY published.
  *
  * An empty list here is a fleet observed to be empty. Every other reason a roster could be empty —
@@ -207,6 +325,9 @@ export function FleetLiveRoster({
         </div>
         <p className="m-0 mt-1 text-meta text-muted">Last published manifest, generated {absoluteTime(generatedAt)}.</p>
       </header>
+      {/* BEFORE THE ROWS, because it is what the rows are grouped under: which harnesses this manifest
+          has, which one answers when nobody names one, and what cannot run. */}
+      <LiveHarnessFacts accounts={accounts} />
       {accounts.length === 0 ? (
         <p className="m-0 px-panel py-3 text-ui leading-base text-muted" data-fleet-live-empty="">
           This daemon published a manifest with no accounts in it. That is an observed empty fleet, not a failed read.

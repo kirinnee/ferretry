@@ -26,6 +26,7 @@ import type { PickerAccountHealth } from '../../../../src/lib/account-picker-cat
 import { absoluteTime } from '../../../../src/lib/session-screens.ts';
 import { mount } from '../../../support/dom.ts';
 import {
+  absent,
   account,
   accountId,
   button,
@@ -290,6 +291,135 @@ describe('the live roster', () => {
       ),
     ).toEqual(['ok']);
     expect(mounted.container.textContent).toContain('claude-atelier');
+    await mounted.unmount();
+  });
+
+  /**
+   * THE THREE FACTS THAT LOST THEIR RENDERER.
+   *
+   * `fleet-surface.tsx` printed the per-harness wrapper count, the `Default` badge and every blocked
+   * wrapper's reason, and it was harness-only in practice; `#388` deleted it, which left
+   * `FleetHarnessView.blocked` projected by `harnessEvidence` and read by nobody. These cases pin all
+   * three onto the roster the settings Fleet tab actually mounts.
+   */
+  it('says what each harness in the manifest has, and which one answers by default', async () => {
+    // Arrange — both harnesses present, one blocked wrapper each, so the count, the badge and the
+    // blocked list are all exercised by one manifest.
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([
+          account(),
+          account({ id: accountId(2), wrapper: 'claude-atelier' }),
+          account({
+            id: accountId(3),
+            wrapper: 'claude-archive',
+            available: false,
+            unavailableReason: 'the home /home/pilot/.claude-archive could not be read',
+          }),
+          account({
+            id: accountId(4),
+            kind: 'codex',
+            wrapper: 'codex-solo',
+            available: false,
+            unavailableReason: 'no codex command resolved on this host',
+          }),
+        ])}
+        generatedAt="2026-08-05T06:00:00.000Z"
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    // Assert — the count is per harness and counts only what the manifest publishes as able to run.
+    const facts = pick(mounted.container, '[data-fleet-harness-facts]');
+    const counts = [...facts.querySelectorAll('[data-fleet-harness-launchable]')];
+    expect(counts.map(node => node.getAttribute('data-fleet-harness-launchable'))).toEqual(['2', '0']);
+    expect(counts[0]?.textContent).toBe('2 wrappers published as able to run.');
+    expect(counts[1]?.textContent).toBe('No wrapper here is published as able to run.');
+
+    // The badge is on Claude and on nothing else: `defaultFleetHarness` prefers Claude when both have
+    // a launchable wrapper, and a second badge would be two harnesses claiming one answer.
+    const badges = [...facts.querySelectorAll('[data-fleet-harness-default]')];
+    expect(badges).toHaveLength(1);
+    expect(pick(facts, '[data-fleet-harness="claude"] [data-fleet-harness-default]').textContent).toContain('Default');
+    expect(absent(facts, '[data-fleet-harness="codex"] [data-fleet-harness-default]')).toBe(true);
+    expect(facts.textContent).not.toContain('Nothing here is the default');
+
+    // Every blocked wrapper is named WITH the daemon's own reason, under the harness it belongs to —
+    // which is the fact a row cannot give you, because you only meet a row by scrolling to it.
+    expect(pick(facts, '[data-fleet-harness="claude"] [data-fleet-harness-blocked]').textContent).toBe(
+      'claude-archive: the home /home/pilot/.claude-archive could not be read',
+    );
+    expect(pick(facts, '[data-fleet-harness="codex"] [data-fleet-harness-blocked]').textContent).toBe(
+      'codex-solo: no codex command resolved on this host',
+    );
+    await mounted.unmount();
+  });
+
+  /**
+   * IT DOES NOT SAY "found on PATH", and that is the point of this case rather than a wording quibble.
+   *
+   * The surface this replaced printed `N wrappers found on PATH`, but the evidence here is
+   * `harnessEvidence` — which reads the published manifest, whose `available` is a field the fleet's
+   * owner WROTE in `config.yaml`. Nothing on this path probes `PATH`, so that sentence would send
+   * somebody to check their `PATH` for a wrapper their own configuration had switched off.
+   */
+  it('never claims a PATH lookup it did not make', async () => {
+    const mounted = await mount(
+      <FleetLiveRoster accounts={accounts([account()])} generatedAt="now" onEdit={noop} editable={true} />,
+    );
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).not.toContain('PATH');
+    expect(text).not.toContain('found on');
+    // Singular, because "1 wrappers" is how a reader learns the number is generated and the sentence
+    // is not.
+    expect(pick(mounted.container, '[data-fleet-harness-launchable]').textContent).toBe(
+      '1 wrapper published as able to run.',
+    );
+    // One harness only: `harnessEvidence` emits no entry for a harness the manifest has no account
+    // for, so an unread Codex can never be suggested here.
+    expect(absent(mounted.container, '[data-fleet-harness="codex"]')).toBe(true);
+    expect(absent(mounted.container, '[data-fleet-harness-blocked]')).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('says NO harness is the default when nothing published can run', async () => {
+    // Arrange — every account unavailable. `defaultFleetHarness` returns nothing, and the absence of
+    // an accent badge somewhere above is not something a reader can be expected to notice.
+    const mounted = await mount(
+      <FleetLiveRoster
+        accounts={accounts([
+          account({ available: false, unavailableReason: 'the wrapper is not executable' }),
+          account({
+            id: accountId(2),
+            kind: 'codex',
+            wrapper: 'codex-solo',
+            available: false,
+            unavailableReason: 'no codex command resolved on this host',
+          }),
+        ])}
+        generatedAt="now"
+        onEdit={noop}
+        editable={true}
+      />,
+    );
+
+    // Assert
+    expect(pick(mounted.container, '[data-fleet-harness-no-default]').textContent).toContain(
+      'Nothing here is the default',
+    );
+    expect(mounted.container.querySelectorAll('[data-fleet-harness-default]')).toHaveLength(0);
+    expect(mounted.container.querySelectorAll('[data-fleet-harness-blocked]')).toHaveLength(2);
+    await mounted.unmount();
+  });
+
+  it('puts no harness heading over an observed empty fleet', async () => {
+    // A manifest with no accounts yields no evidence, and the panel already has a sentence for that
+    // state. An eyebrow over nothing would be a heading for an absence.
+    const mounted = await mount(<FleetLiveRoster accounts={[]} generatedAt="now" onEdit={noop} editable={false} />);
+    expect(absent(mounted.container, '[data-fleet-harness-facts]')).toBe(true);
+    expect(mounted.container.textContent).not.toContain('Harnesses in this manifest');
     await mounted.unmount();
   });
 });
