@@ -4,9 +4,11 @@
  *
  * WHY IT LIVES UNDER `tests/fixtures/` AND NOT UNDER `harness/`. Both coverage
  * ledgers ignore every `packages/<name>/tests` tree, so a driver that imports it adds
- * nothing to either LCOV population; `harness/**` is ignored by neither, and one
- * int-tier test importing a harness module would fail the int gate on a PATH
- * rather than on a test. The Safari driver is a Bun program under `harness/`, and
+ * nothing to either LCOV population. `harness/**` is ignored by the unit ledger only:
+ * `bunfig.int.toml` names it so that `tests/integration/gallery-capture.visual.test.ts`
+ * can import the one harness module a test has to hold a property over, and a UNIT
+ * test importing a harness module would still fail the unit gate on a PATH rather
+ * than on a test. The Safari driver is a Bun program under `harness/`, and
  * an eventual Chromium driver is an int-tier test — this file is the only place
  * they may both reach.
  *

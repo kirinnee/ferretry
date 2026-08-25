@@ -18,6 +18,14 @@
  * leaves the loopback origin — a shell harness has no business reaching the
  * network.
  *
+ * EVERY ELEMENT CAPTURE GOES THROUGH `captureElement`, and no call here may reach for
+ * `locator.screenshot()` again. This page is one document tens of thousands of pixels
+ * tall, and a plain element screenshot low in it returns the WRONG CARD'S PIXELS
+ * silently — which means the reviews of those cards were never reviews at all. See
+ * `gallery-capture.ts` for what was measured and what the replacement guarantees.
+ * `page.screenshot()` is a different mechanism and is untouched: it captures the
+ * viewport, which is the one thing Chromium has really painted.
+ *
  *   bun harness/screenshot.ts            # writes harness/out/*.png
  *   bun harness/screenshot.ts --serve    # leave it running to look at by hand
  *   bun harness/screenshot.ts --files-only   # just the Files/reload/preview frames
@@ -31,6 +39,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
+import { captureElement } from './gallery-capture.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -136,7 +145,7 @@ const SETTINGS_SIDEWAYS_CHECKS = 51;
 const captureFiles = async (page: Page, viewportName: string): Promise<void> => {
   const filesTarget = join(outDir, `files-${viewportName}.png`);
   await page.locator('#harness-files').scrollIntoViewIfNeeded();
-  await page.getByLabel('Files browser').screenshot({ path: filesTarget });
+  await captureElement(page, page.getByLabel('Files browser'), filesTarget);
   process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
 
   // The body behind ONE file tab (#35), not the picker: its own path in the
@@ -176,7 +185,7 @@ const captureFiles = async (page: Page, viewportName: string): Promise<void> => 
     const body = page.locator(`[data-harness="${slot}"]`);
     await body.scrollIntoViewIfNeeded();
     const target = join(outDir, `${slug}-${viewportName}.png`);
-    await body.screenshot({ path: target });
+    await captureElement(page, body, target);
     process.stdout.write(`📸 File tab body ${slug} -> ${target}\n`);
   }
 
@@ -189,7 +198,7 @@ const captureFiles = async (page: Page, viewportName: string): Promise<void> => 
   await failed.locator('.kt-fs-stale-text').click({ timeout: 5_000 });
   await failed.locator('.kt-fs-stale-text[data-expanded="true"]').waitFor({ state: 'visible', timeout: 5_000 });
   const expandedTarget = join(outDir, `file-reload-expanded-${viewportName}.png`);
-  await failed.screenshot({ path: expandedTarget });
+  await captureElement(page, failed, expandedTarget);
   process.stdout.write(`📸 File tab body file-reload-expanded -> ${expandedTarget}\n`);
 };
 
@@ -1032,7 +1041,7 @@ try {
             const target = join(outDir, `task-board-${viewport.name}.png`);
             const taskBoard = page.locator('#harness-task-board');
             await taskBoard.scrollIntoViewIfNeeded();
-            await taskBoard.screenshot({ path: target });
+            await captureElement(page, taskBoard, target);
             process.stdout.write(`📸 task board ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
             continue;
           }
@@ -1174,12 +1183,12 @@ try {
             // available update). It complements the at-rest workspace bar below
             // and proves that 390px gets a breathing row instead of dropped state.
             const statusTopBarTarget = join(outDir, `top-bar-status-${viewport.name}.png`);
-            await page.locator('[data-density-region="app-bar"]').first().screenshot({ path: statusTopBarTarget });
+            await captureElement(page, page.locator('[data-density-region="app-bar"]').first(), statusTopBarTarget);
             process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
 
             if (viewport.name === 'desktop') {
               const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
-              await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
+              await captureElement(page, page.getByLabel('Fleet navigation rail preview'), fleetRailTarget);
               process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
             }
 
@@ -1189,12 +1198,12 @@ try {
             const remoteBrowserCard = page.locator('[data-harness="remote-browser"]');
             const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
             await remoteBrowserCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
-            await remoteBrowserCard.getByLabel('Remote browser display').screenshot({ path: browserTarget });
+            await captureElement(page, remoteBrowserCard.getByLabel('Remote browser display'), browserTarget);
             process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
             // The whole pane, not just the display: the tab strip, address bar and
             // lifecycle controls are the part that has to match the original.
             const browserPaneTarget = join(outDir, `remote-browser-pane-${viewport.name}.png`);
-            await remoteBrowserCard.screenshot({ path: browserPaneTarget });
+            await captureElement(page, remoteBrowserCard, browserPaneTarget);
             process.stdout.write(`📸 remote browser pane -> ${browserPaneTarget}\n`);
 
             // The unified surface is captured HERE, beside the standalone pane it
@@ -1203,13 +1212,13 @@ try {
             // the honest "stream stalled" state instead of the composition under
             // review.
             const unifiedPreviewTarget = join(outDir, `unified-browser-preview-${viewport.name}.png`);
-            await page.locator('[data-harness="unified-browser-preview"]').screenshot({ path: unifiedPreviewTarget });
+            await captureElement(page, page.locator('[data-harness="unified-browser-preview"]'), unifiedPreviewTarget);
             process.stdout.write(`📸 Unified browser preview -> ${unifiedPreviewTarget}\n`);
 
             const unifiedRealCard = page.locator('[data-harness="unified-browser-real"]');
             const unifiedRealTarget = join(outDir, `unified-browser-real-${viewport.name}.png`);
             await unifiedRealCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
-            await unifiedRealCard.screenshot({ path: unifiedRealTarget });
+            await captureElement(page, unifiedRealCard, unifiedRealTarget);
             process.stdout.write(`📸 Unified browser real engine -> ${unifiedRealTarget}\n`);
 
             // The engine selector and the escape actions live behind the one ⋯
@@ -1219,7 +1228,7 @@ try {
             const unifiedMenuTarget = join(outDir, `unified-browser-menu-${viewport.name}.png`);
             await unifiedRealCard.getByLabel('Browser controls').click();
             await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'visible' });
-            await unifiedRealCard.screenshot({ path: unifiedMenuTarget });
+            await captureElement(page, unifiedRealCard, unifiedMenuTarget);
             await page.keyboard.press('Escape');
             await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
             process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
@@ -1235,19 +1244,19 @@ try {
             await remoteLogin.getByText('Paste the code Claude showed you').waitFor({ state: 'visible' });
             await remoteLogin.locator('[data-codex-login-user-code]').waitFor({ state: 'visible' });
             const loginTarget = join(outDir, `harness-login-${viewport.name}.png`);
-            await remoteLogin.screenshot({ path: loginTarget });
+            await captureElement(page, remoteLogin, loginTarget);
             process.stdout.write(`📸 harness login -> ${loginTarget}\n`);
             const learningTarget = join(outDir, `learning-${viewport.name}.png`);
-            await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
+            await captureElement(page, page.getByLabel('Learning proposals'), learningTarget);
             process.stdout.write(`📸 learning -> ${learningTarget}\n`);
             const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
-            await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
+            await captureElement(page, page.getByLabel('Analytics cost ledger'), analyticsTarget);
             process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
             const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
-            await page.getByLabel('Analytics raw query result').screenshot({ path: analyticsResponseTarget });
+            await captureElement(page, page.getByLabel('Analytics raw query result'), analyticsResponseTarget);
             process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
             const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
-            await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
+            await captureElement(page, page.getByLabel('Analytics time series'), analyticsSeriesTarget);
             process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
             const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
             const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
@@ -1265,7 +1274,7 @@ try {
               document.body.style.overflow = 'auto';
               document.body.replaceChildren(element.cloneNode(true));
             });
-            await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
+            await captureElement(page, page.getByRole('main', { name: 'Global analytics' }), globalAnalyticsTarget);
             process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
             // Restore the live React fixture after the static clone; later shots
             // still exercise their real components, refs and async state.
@@ -1273,28 +1282,25 @@ try {
             const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
             const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
             await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
-            await sessionAnalytics.screenshot({ path: sessionAnalyticsTarget });
+            await captureElement(page, sessionAnalytics, sessionAnalyticsTarget);
             process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
             const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
-            await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
+            await captureElement(page, page.getByLabel('Markdown composer settings'), composerSettingsTarget);
             process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
             const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
-            await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
+            await captureElement(page, page.getByLabel('Dictation shortcut settings'), dictationShortcutTarget);
             process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
             const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
-            await page.locator('#harness-dictation-panel').screenshot({ path: dictationPanelTarget });
+            await captureElement(page, page.locator('#harness-dictation-panel'), dictationPanelTarget);
             process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
-            // The dictation settings surface is several viewports tall. Chrome culls
-            // painting outside the viewport while an element screenshot scrolls, so
-            // the capture is taken against a temporarily tall viewport and the real
-            // one is restored immediately — otherwise most of the image is black.
+            // The dictation settings surface is several viewports tall; growing the
+            // viewport to fit it is `captureElement`'s job now, and it measures the
+            // card rather than guessing a number.
             const dictationSettingsTarget = join(outDir, `dictation-settings-${viewport.name}.png`);
-            await page.setViewportSize({ width: viewport.width, height: 3_000 });
-            await page.locator('#harness-dictation-settings').screenshot({ path: dictationSettingsTarget });
-            await page.setViewportSize({ width: viewport.width, height: viewport.height });
+            await captureElement(page, page.locator('#harness-dictation-settings'), dictationSettingsTarget);
             process.stdout.write(`📸 Dictation settings -> ${dictationSettingsTarget}\n`);
             const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
-            await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
+            await captureElement(page, page.locator('#harness-dictation-mic'), dictationMicTarget);
             process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
             // The live recognition states. Each card opens its own flow at mount
             // against a scripted recognition object, so there is nothing to click
@@ -1311,7 +1317,7 @@ try {
               process.stdout.write(`📸 ${name} -> ${target}\n`);
             }
             const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
-            await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
+            await captureElement(page, page.getByLabel('Notification settings').first(), notificationSettingsTarget);
             process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
           }
 
@@ -1338,7 +1344,7 @@ try {
           for (const family of ['phosphor', 'blueprint', 'broadsheet', 'wayfinding', 'ledger', 'ma']) {
             const card = settingsPage.locator(`[data-family-card="${family}"]`);
             const target = join(outDir, `theme-${family}-${viewport.name}.png`);
-            await card.screenshot({ path: target });
+            await captureElement(page, card, target);
             process.stdout.write(`📸 Theme ${family} ${viewport.name} -> ${target}\n`);
           }
 
@@ -1392,7 +1398,7 @@ try {
           process.stdout.write(`📸 Settings Behaviour ${viewport.name} -> ${behaviourTarget}\n`);
 
           const composerEnterTarget = join(outDir, `settings-composer-enter-key-${viewport.name}.png`);
-          await settingsPage.locator('#settings-composer-enter-key').screenshot({ path: composerEnterTarget });
+          await captureElement(page, settingsPage.locator('#settings-composer-enter-key'), composerEnterTarget);
           process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
 
           await selectSettingsSection('daemons');
@@ -1683,11 +1689,11 @@ try {
           // The rest of this pass still belongs to the full gallery.
           await page.goto(server.url.toString());
           const accountsPageTarget = join(outDir, `accounts-page-${viewport.name}.png`);
-          await page.getByLabel('Accounts page preview').screenshot({ path: accountsPageTarget });
+          await captureElement(page, page.getByLabel('Accounts page preview'), accountsPageTarget);
           process.stdout.write(`📸 Accounts page -> ${accountsPageTarget}\n`);
           if (SETTINGS_ONLY) continue;
           const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
-          await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
+          await captureElement(page, page.getByLabel('Learning header'), learningHeaderTarget);
           process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
           // A four-kind ledger is taller than a phone viewport. Chrome may cull
           // unpainted rows during an element screenshot, so temporarily borrow
@@ -1696,14 +1702,14 @@ try {
           await page.setViewportSize({ width: viewport.width, height: 2_400 });
           const attention = page.getByLabel('Attention ledger');
           await attention.locator('summary').filter({ hasText: 'Resolution audit' }).click();
-          await attention.screenshot({ path: attentionTarget });
+          await captureElement(page, attention, attentionTarget);
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
           const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
-          await page.getByLabel('Pins trigger').screenshot({ path: pinsTriggerTarget });
+          await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
           process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
           const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
-          await page.getByLabel('Pins ledger').screenshot({ path: pinsTarget });
+          await captureElement(page, page.getByLabel('Pins ledger'), pinsTarget);
           process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
           // Three pairing screens, because they are three different screens: the
           // cold open a first-timer sees, the confirmation a scanned QR lands
@@ -1714,7 +1720,7 @@ try {
             ['Paired daemon list', 'pairing-list'],
           ] as const) {
             const pairingTarget = join(outDir, `${slug}-${viewport.name}.png`);
-            await page.getByLabel(label, { exact: true }).screenshot({ path: pairingTarget });
+            await captureElement(page, page.getByLabel(label, { exact: true }), pairingTarget);
             process.stdout.write(`📸 ${label} ${viewport.name} -> ${pairingTarget}\n`);
           }
 
@@ -1730,19 +1736,21 @@ try {
             ['Paired daemon list', 'pairing-list'],
           ] as const) {
             const lightTarget = join(outDir, `${slug}-light-${viewport.name}.png`);
-            await page.getByLabel(label, { exact: true }).screenshot({ path: lightTarget });
+            await captureElement(page, page.getByLabel(label, { exact: true }), lightTarget);
             process.stdout.write(`📸 ${label} light ${viewport.name} -> ${lightTarget}\n`);
           }
           await page.evaluate(() => {
             document.documentElement.dataset.theme = 'studio-dark';
           });
           const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
-          await page
-            .locator('[aria-labelledby="warden-attention-heading"]')
-            .screenshot({ path: wardenAttentionTarget });
+          await captureElement(
+            page,
+            page.locator('[aria-labelledby="warden-attention-heading"]'),
+            wardenAttentionTarget,
+          );
           process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
           const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
-          await page.locator('[data-harness="warden-strip"]').screenshot({ path: wardenStripTarget });
+          await captureElement(page, page.locator('[data-harness="warden-strip"]'), wardenStripTarget);
           process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
           // The secret store, in the three states a person actually meets: one that exists
           // (masked, with a configured reference that does not resolve), a damaged store that says
@@ -1753,7 +1761,7 @@ try {
             [`secrets-unreachable`, `[data-harness="secrets-unreachable"]`],
           ] as const) {
             const target = join(outDir, `${name}-${viewport.name}.png`);
-            await page.locator(selector).screenshot({ path: target });
+            await captureElement(page, page.locator(selector), target);
             process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
           }
           // The operator's limits, in the five states a paired browser actually meets. Every one of
@@ -1795,7 +1803,7 @@ try {
               .first()
               .waitFor({ state: 'visible' });
             const target = join(outDir, `${name}-${viewport.name}.png`);
-            await frame.screenshot({ path: target });
+            await captureElement(page, frame, target);
             process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
           }
           // AND THE PASSWORD FRAMES IN LIGHT. This panel is the one control on the screen that can lock
@@ -1809,7 +1817,7 @@ try {
             const frame = page.locator(`[data-harness="${name}"]`);
             await frame.scrollIntoViewIfNeeded();
             const target = join(outDir, `${name}-light-${viewport.name}.png`);
-            await frame.screenshot({ path: target });
+            await captureElement(page, frame, target);
             process.stdout.write(`📸 Capability limits ${name} light ${viewport.name} -> ${target}\n`);
           }
           await page.evaluate(() => {
@@ -1842,23 +1850,23 @@ try {
               .first()
               .waitFor({ state: 'visible' });
             const target = join(outDir, `${name}-${viewport.name}.png`);
-            await frame.screenshot({ path: target });
+            await captureElement(page, frame, target);
             process.stdout.write(`📸 Add a device ${name} ${viewport.name} -> ${target}\n`);
           }
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
-          await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
+          await captureElement(page, page.locator('[data-task-graph]'), taskDagTarget);
           process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
           const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
-          await page.getByLabel('Session task board').screenshot({ path: sessionTasksTarget });
+          await captureElement(page, page.getByLabel('Session task board'), sessionTasksTarget);
           process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
           const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
-          await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
+          await captureElement(page, page.getByLabel('Task name'), taskNameTarget);
           process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
 
           const inAppTarget = join(outDir, `in-app-browser-${viewport.name}.png`);
           await page.locator('#harness-in-app-browser').scrollIntoViewIfNeeded();
-          await page.getByLabel('In-app link preview').screenshot({ path: inAppTarget });
+          await captureElement(page, page.getByLabel('In-app link preview'), inAppTarget);
           process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
 
           await captureFiles(page, viewport.name);
@@ -1870,14 +1878,14 @@ try {
           // screenshot that is silently missing its image.
           await page.locator('#harness-attachments').scrollIntoViewIfNeeded();
           await page.getByAltText('Coverage by tier').waitFor({ state: 'visible' });
-          await page.getByLabel('Transcript attachments').screenshot({ path: attachmentsTarget });
+          await captureElement(page, page.getByLabel('Transcript attachments'), attachmentsTarget);
           process.stdout.write(`📸 Transcript attachments -> ${attachmentsTarget}\n`);
           const terminalTarget = join(outDir, `terminal-snapshot-${viewport.name}.png`);
-          await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
+          await captureElement(page, page.getByLabel('Terminal snapshot'), terminalTarget);
           process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
 
           const sidePaneTabsTarget = join(outDir, `side-pane-tabs-${viewport.name}.png`);
-          await page.locator('[data-harness="side-pane-tabs"]').screenshot({ path: sidePaneTabsTarget });
+          await captureElement(page, page.locator('[data-harness="side-pane-tabs"]'), sidePaneTabsTarget);
           process.stdout.write(`📸 Side pane tabs -> ${sidePaneTabsTarget}\n`);
 
           for (const [label, slug] of [
@@ -1890,25 +1898,25 @@ try {
             ['Sessions page connected', 'sessions-page-connected'],
           ] as const) {
             const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
-            await page.getByLabel(label, { exact: true }).screenshot({ path: dashboardTarget });
+            await captureElement(page, page.getByLabel(label, { exact: true }), dashboardTarget);
             process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
           }
 
-          // Four stacked dashboards are taller than a phone viewport, and Chrome
-          // culls painting outside the viewport while an element screenshot scrolls
-          // — the same reason the dictation settings shot below borrows a tall
-          // viewport. Without this most of the image comes back black.
+          // Four stacked dashboards are taller than a phone viewport. `captureElement`
+          // grows the viewport to fit them and puts it back, so the hand-rolled
+          // borrow that used to live here — and the identical one at the dictation
+          // settings card — is gone rather than duplicated.
           const dashboardStatesTarget = join(outDir, `session-dashboard-states-${viewport.name}.png`);
-          await page.setViewportSize({ width: viewport.width, height: 2_000 });
-          await page
-            .getByLabel('Session dashboard states', { exact: true })
-            .screenshot({ path: dashboardStatesTarget });
-          await page.setViewportSize({ width: viewport.width, height: viewport.height });
+          await captureElement(
+            page,
+            page.getByLabel('Session dashboard states', { exact: true }),
+            dashboardStatesTarget,
+          );
           process.stdout.write(`📸 Session dashboard states -> ${dashboardStatesTarget}\n`);
 
           const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
           await page.goto(`${server.url}?attachment-unlock`);
-          await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });
+          await captureElement(page, page.getByRole('dialog', { name: 'Unlock encrypted PDF' }), unlockTarget);
           process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
           await page.goto(server.url.toString());
 
@@ -1922,7 +1930,7 @@ try {
             const element = page.locator(`#${section}`);
             await element.scrollIntoViewIfNeeded();
             const sectionTarget = join(outDir, `${viewport.name}-${section}.png`);
-            await element.screenshot({ path: sectionTarget });
+            await captureElement(page, element, sectionTarget);
             process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
           }
 
@@ -1938,11 +1946,11 @@ try {
             .first()
             .click();
           const skillsDetailTarget = join(outDir, `${viewport.name}-harness-skills-detail.png`);
-          await skills.screenshot({ path: skillsDetailTarget });
+          await captureElement(page, skills, skillsDetailTarget);
           process.stdout.write(`📸 ${viewport.name} skills detail -> ${skillsDetailTarget}\n`);
 
           const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
-          await page.getByLabel('Send ledger rows').screenshot({ path: ledgerTarget });
+          await captureElement(page, page.getByLabel('Send ledger rows'), ledgerTarget);
           process.stdout.write(`📸 send ledger -> ${ledgerTarget}
     `);
 
@@ -1954,7 +1962,7 @@ try {
           await toolGroup.getByRole('button').first().click();
           await toolGroup.getByRole('button').nth(1).click();
           const toolGroupTarget = join(outDir, `tool-group-${viewport.name}.png`);
-          await toolGroup.screenshot({ path: toolGroupTarget });
+          await captureElement(page, toolGroup, toolGroupTarget);
           process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
 
           // The context menu is anchored and `fixed`, which is exactly what a
@@ -2055,7 +2063,7 @@ try {
           // open component in the harness.
           const topBar = page.locator('[data-density-region="app-bar"]');
           const topBarTarget = join(outDir, `top-bar-${viewport.name}.png`);
-          await topBar.screenshot({ path: topBarTarget });
+          await captureElement(page, topBar, topBarTarget);
           process.stdout.write(`📸 top bar ${viewport.name} -> ${topBarTarget}\n`);
           const topBarGeometry = await page.evaluate(() => {
             const header = document.querySelector<HTMLElement>('[data-density-region="app-bar"]');
@@ -2106,7 +2114,7 @@ try {
             await destinationDialog.getByRole('button', { name: 'Dismiss', exact: true }).click();
             await destinationDialog.waitFor({ state: 'hidden' });
             const dismissedTarget = join(outDir, 'top-bar-picker-dismissed-mobile.png');
-            await topBar.screenshot({ path: dismissedTarget });
+            await captureElement(page, topBar, dismissedTarget);
             process.stdout.write(`📸 top bar picker dismissed mobile -> ${dismissedTarget}\n`);
           }
 
