@@ -215,7 +215,9 @@ export function ClaudeLoginPanel({
                 </>
               ) : (
                 <>
-                  <p className="m-0 font-semibold">This sign-in finished without settling every lane</p>
+                  {/* "account", not "lane": the list under it is wrapper names, which is what a
+                      person calls these, and `lane` is a word only the configuration schema has. */}
+                  <p className="m-0 font-semibold">This sign-in finished without settling every account</p>
                   <ul className="m-0 mt-1 list-none space-y-1 p-0 text-muted">
                     {failed(flow.accounts).map(account => (
                       <li key={account.accountId} className="m-0">

@@ -1056,8 +1056,26 @@ const modelNote = (models: HarnessDiscovery['models']): string =>
 const instructionsTextNote = (source: string, bytes: number): string =>
   `Imported — ${source} (${String(bytes)} bytes). Edit it here; nothing is written until you review and authorize the change.`;
 
-const DERIVED_PATH_NOTE =
-  'Derived — from the account and lane above. Rename it, or point at a document already in the store.';
+/**
+ * The note under the derived document name — and it says WHAT it was derived from, in plain words.
+ *
+ * It used to read "from the account and **lane** above", which is a prefill note rather than a
+ * comment: it is assigned to `instructionsPath` and rendered by `PrefillNote` on the instructions
+ * step. So a person met the word this whole pass exists to remove, on a screen, four steps after the
+ * two cards that replaced it — and no test caught it, because the drafts those tests mount carry no
+ * prefill notes at all. {@link derivedInstructionsPath} builds the name from the wrapper, and the
+ * wrapper is the account name plus how it runs, so those are the two facts said as such.
+ *
+ * "above" is dropped as well, and separately: the wrapper preview is on the identity step, so nothing
+ * it referred to is on the screen this sentence appears on.
+ *
+ * EXPORTED so the design harness renders THIS sentence rather than one of its own. The harness fixture
+ * had invented "Derived — from the wrapper name above", which is why a 390px capture of that step
+ * looked clean while production said "lane" — the same class of lie as the fixture's instructions path,
+ * and the reason a screenshot of a fixture is only evidence about the fixture.
+ */
+export const DERIVED_PATH_NOTE =
+  'Derived — from the account name and how it runs. Rename it, or point at a document already in the store.';
 
 /**
  * Does the person own this field now?
@@ -1496,6 +1514,11 @@ export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblem
  * asked for, one wrapper name available. Nothing about either lane is invalid on its own, and the
  * daemon would refuse the pair — so the sentence has to arrive here, before somebody walks six steps
  * to be told.
+ *
+ * THE SENTENCES SAY "group", NOT "lane". A variant is a named composition slot and `lane` is what
+ * this codebase calls one; a person reading a blocker on the identity step has never met either
+ * word, and a sentence that refuses a change in vocabulary the screen never taught cannot be acted
+ * on. The type names stay — only what a person reads changes.
  */
 export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConfigView | null): readonly string[] => {
   if (lanes.length === 0) return ['pick at least one way this account runs; each one creates its own account'];
@@ -1504,14 +1527,16 @@ export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConf
   for (const lane of lanes) {
     const variant = lane.variant.trim();
     if (variant === '') {
-      problems.push('name the lane this account occupies');
+      problems.push('name the group this account joins');
       continue;
     }
     if (config !== null && config.variants[variant] === undefined) {
-      problems.push(`this fleet declares no "${variant}" lane; declare it on the host before adding an account to it`);
+      problems.push(`this fleet declares no "${variant}" group; declare it on the host before adding an account to it`);
     }
     if (seen.has(variant)) {
-      problems.push(`"${variant}" is the lane for two of these accounts; one lane is one account, so they must differ`);
+      problems.push(
+        `"${variant}" is the group for two of these accounts; one group holds one account, so they must differ`,
+      );
     }
     seen.add(variant);
   }
@@ -1521,7 +1546,7 @@ export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConf
 export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
   const problems: string[] = [];
   const name = draft.name.trim();
-  if (name === '') problems.push('name the provider account this lane belongs to');
+  if (name === '') problems.push('name the provider account');
   else if (name !== draft.name) problems.push('the account name must not start or end with whitespace');
   else if (name.length > 64) problems.push('the account name must be 64 characters or shorter');
   else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {

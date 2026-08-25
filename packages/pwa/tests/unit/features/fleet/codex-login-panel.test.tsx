@@ -116,7 +116,7 @@ describe('CodexLoginPanel', () => {
     expect(texts(mount({ flow: codexFlow('complete') }))).toContain('No sibling wrapper needed a copy');
   });
 
-  it('names every lane that did not settle rather than claiming success', () => {
+  it('names every account that did not settle rather than claiming success', () => {
     const flow = codexFlow('complete');
     const view = mount({
       flow: {
@@ -126,7 +126,7 @@ describe('CodexLoginPanel', () => {
       },
     });
 
-    expect(texts(view)).toContain('without settling every lane');
+    expect(texts(view)).toContain('without settling every account');
     expect(texts(view)).toContain('exited with code 1');
   });
 

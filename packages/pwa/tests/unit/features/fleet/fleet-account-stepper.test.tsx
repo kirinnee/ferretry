@@ -2,17 +2,20 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import { FleetAccountStepper } from '../../../../src/features/fleet/fleet-account-stepper.tsx';
 import {
+  detectedAccountDraft,
   emptyAccountDraft,
   type FleetAccountDraft,
   type FleetHarnessDetection,
+  reconcileAccountDraft,
 } from '../../../../src/features/fleet/fleet-change-model.ts';
-import type {
-  FleetInstructionsControl,
-  FleetInstructionsSource,
-  FleetStepId,
+import {
+  FLEET_STEP_IDS,
+  type FleetInstructionsControl,
+  type FleetInstructionsSource,
+  type FleetStepId,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { type Mounted, mount } from '../../../support/dom.ts';
-import { area, button, click, field, pick, type } from './fleet-support.ts';
+import { area, button, card, cardChosen, click, discovery, field, pick, type } from './fleet-support.ts';
 
 /**
  * Every mount this file makes, unmounted whether or not its test got as far as saying so.
@@ -63,6 +66,8 @@ const stepper = async (options: {
   readonly assets?: readonly string[];
   readonly loading?: boolean;
   readonly instructions?: Partial<FleetInstructionsControl>;
+  /** What this fleet declares. Only a fleet with a slot no mode derives gets the group control. */
+  readonly variants?: readonly string[];
 }) => {
   let current: FleetAccountDraft = {
     ...emptyAccountDraft('claude'),
@@ -97,7 +102,7 @@ const stepper = async (options: {
       instructions={instructions}
       instructionsSource={options.source ?? 'new'}
       onInstructionsSource={() => {}}
-      variants={['default']}
+      variants={options.variants ?? ['default']}
       config={null}
       discovery={null}
       published={[]}
@@ -201,6 +206,73 @@ describe('the instructions step', () => {
   });
 });
 
+describe('the models step', () => {
+  it('picks the default from cards rather than the last dropdown in the sequence', async () => {
+    // RED: "Default model" was a native `<select>` sitting directly under the two tick-cards its two
+    // entries came from — the owner's "the model list is pretty bad", surviving in the one control on
+    // the step that still hid its options behind a tap.
+    const surface = await stepper({
+      step: 'models',
+      draft: { modelsText: 'claude-opus-5\nclaude-sonnet-5', defaultModel: 'claude-opus-5' },
+    });
+
+    expect(surface.container.querySelector('[data-fleet-choice-group="default-model"] select')).toBeNull();
+    expect(cardChosen(surface.container, 'default-model', 'claude-opus-5')).toBe(true);
+    // The cards are the TICKED models and nothing else, so this control cannot name a model the
+    // account does not serve.
+    expect(
+      surface.container.querySelectorAll('[data-fleet-choice-group="default-model"] [data-fleet-choice]'),
+    ).toHaveLength(2);
+
+    // Act
+    await click(card(surface.container, 'default-model', 'claude-sonnet-5'));
+
+    // Assert
+    expect(surface.latest().defaultModel).toBe('claude-sonnet-5');
+    await surface.unmount();
+  });
+
+  it('offers no default to choose from when nothing is ticked, and says what to do first', async () => {
+    const surface = await stepper({ step: 'models', draft: { modelsText: '', defaultModel: '' } });
+    expect(surface.container.querySelector('[data-fleet-choice-group="default-model"]')).toBeNull();
+    expect(pick(surface.container, '[data-fleet-default-model-empty]').textContent).toContain('Tick a model above');
+    await surface.unmount();
+  });
+});
+
+describe('the identity step', () => {
+  it('picks a fleet-declared group from cards, each naming the wrapper it would produce', async () => {
+    // The last two `<select>`s in the sequence. They only appear for a fleet that declares a slot no
+    // mode derives — which did not make them exempt from the complaint about dropdowns, and this is
+    // also the only place a person meets the fleet's own slot names, so a bare identifier list would
+    // have been the worst of both.
+    const surface = await stepper({
+      step: 'identity',
+      variants: ['default', 'auto', 'review'],
+      draft: { lanes: [{ mode: 'interactive', variant: 'default' }] },
+    });
+
+    expect(surface.container.querySelector('[data-fleet-other-lanes] select')).toBeNull();
+    const group = pick(surface.container, '[data-fleet-choice-group="group-interactive"]');
+    expect(group.textContent).toContain('Picked from how this account runs.');
+    expect(group.textContent).toContain('Declared by this fleet.');
+    expect(group.textContent).toContain('claude-review-atelier');
+
+    // Act
+    await click(card(surface.container, 'group-interactive', 'review'));
+
+    // Assert
+    expect(surface.latest().lanes).toEqual([{ mode: 'interactive', variant: 'review' }]);
+    await surface.unmount();
+  });
+
+  it('offers no group control at all when every slot follows from how the account runs', async () => {
+    const surface = await stepper({ step: 'identity', variants: ['default', 'auto'] });
+    expect(surface.container.querySelector('[data-fleet-other-lanes]')).toBeNull();
+    await surface.unmount();
+  });
+});
+
 describe('the settings step', () => {
   it('adds an environment variable and edits both halves of it', async () => {
     // Environment is not settings and does not go through the two-answer control: it is a table, folded
@@ -275,6 +347,57 @@ describe('the whole sequence', () => {
     await surface.unmount();
   });
 
+  it('does not shout the steps already behind you', async () => {
+    // A completed step used to be `kt-btn`, and that class carries the theme's `--label-transform` —
+    // so the strip read `✓ 1. HARNESS ✓ 2. ACCOUNT ✓ 3. MODELS 4. Instructions`, with the loudest
+    // text on a progress indicator being what you had already finished.
+    //
+    // Asserted on the CLASS rather than on rendered casing, because the casing is applied by CSS this
+    // renderer does not run and by a custom property whose value differs per theme — a text assertion
+    // would pass in every theme that resolves it to `none`. The fix stays local for the same reason:
+    // that one property drives buttons, badges, tabs and section labels, so the strip stops borrowing
+    // the button role rather than switching the property off for all of them.
+    const surface = await stepper({ step: 'models' });
+    const jumped = pick(surface.container, '[data-fleet-step-jump="harness"]');
+    const here = pick(surface.container, '[data-fleet-step-marker="models"]');
+    expect(jumped.className).not.toContain('kt-btn');
+    // Both markers paint from one class list, so the only difference a person sees is where they are.
+    for (const shared of ['rounded-control', 'px-2', 'text-meta']) {
+      expect(jumped.className).toContain(shared);
+      expect(here.className).toContain(shared);
+    }
+    // The tap floor a `kt-btn--sm` used to supply is kept as the same pointer-derived token rather
+    // than a hardcoded 44px, which would have cleared the floor by deleting the desktop density.
+    expect(jumped.className).toContain('min-h-[var(--control-h-sm)]');
+    await surface.unmount();
+  });
+
+  it('never says "lane" or "layer" on any step a person walks', async () => {
+    // The two words the owner asked about, on the seven screens they would meet them. They are the
+    // configuration schema's names for composition slots; the sequence asks "how does this account
+    // run?" and derives both, so nothing on screen may reintroduce them — including the sentence
+    // under the two cards that replaced the word, which used to end "this picks the lane and the
+    // wrapper name for each".
+    //
+    // THE DRAFT CARRIES ITS PREFILL NOTES, and that is the whole reason this loop is not enough on
+    // its own. The first version mounted a bare draft, whose `prefilled` is empty — so every
+    // provenance note went unrendered, and `DERIVED_PATH_NOTE` kept saying "from the account and
+    // lane above" through a green suite until somebody opened the screen. The notes are built by the
+    // production functions the surface itself calls, not written out here, so a note added tomorrow
+    // is covered by this walk rather than by a fixture somebody forgot to extend.
+    const detected = detectedAccountDraft(DETECTION, discovery());
+    const named = reconcileAccountDraft(detected, { ...detected, name: 'atelier' }, discovery());
+    expect(Object.keys(named.prefilled).length).toBeGreaterThan(0);
+
+    for (const step of FLEET_STEP_IDS) {
+      const surface = await stepper({ step, variants: ['default', 'auto', 'review'], draft: named });
+      const text = surface.container.textContent ?? '';
+      expect(text.toLowerCase(), step).not.toContain('lane');
+      expect(text.toLowerCase(), step).not.toContain('layer');
+      await surface.unmount();
+    }
+  });
+
   it('recaps an account that has answered nothing without inventing values for it', async () => {
     const surface = await stepper({
       step: 'review',
@@ -305,9 +428,15 @@ describe('the whole sequence', () => {
     await driven.unmount();
   });
 
-  it('recaps BOTH accounts by name when both modes are ticked', async () => {
+  it('recaps BOTH accounts by name when both modes are ticked, and names no lane', async () => {
     // A recap that said "2 accounts" would be the last place a person could still be surprised by
-    // the second one. Wrapper AND home, because they are the two things they will go looking for.
+    // the second one, so both wrapper names are still here.
+    //
+    // What is GONE is "· lane default · home claude-atelier". The home IS the wrapper name — the row
+    // printed the same string twice — and between the two copies sat a word the sequence spends
+    // seven steps never teaching. On this fleet the variant is derived from the mode the label
+    // already gives in words, so it added nothing but the vocabulary. The case where it is NOT
+    // derived is the test below.
     const surface = await stepper({
       step: 'review',
       draft: {
@@ -319,8 +448,23 @@ describe('the whole sequence', () => {
     });
 
     const recap = pick(surface.container, '[data-fleet-recap]').textContent ?? '';
-    expect(recap).toContain('claude-atelier · lane default · home claude-atelier');
-    expect(recap).toContain('claude-auto-atelier · lane auto · home claude-auto-atelier');
+    expect(recap).toContain('claude-atelier');
+    expect(recap).toContain('claude-auto-atelier');
+    expect(recap).not.toContain('lane');
+    expect(recap).not.toContain('group');
+    await surface.unmount();
+  });
+
+  it('recaps the group when the fleet declares one no mode would derive', async () => {
+    // The escape hatch is a CHOICE a person made two steps back, so dropping it from the recap would
+    // be recapping a different change from the one that would be applied.
+    const surface = await stepper({
+      step: 'review',
+      variants: ['default', 'auto', 'review'],
+      draft: { lanes: [{ mode: 'interactive', variant: 'review' }] },
+    });
+
+    expect(pick(surface.container, '[data-fleet-recap]').textContent).toContain('group review');
     await surface.unmount();
   });
 

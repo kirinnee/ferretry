@@ -1580,10 +1580,11 @@ try {
                 if (step === 'identity') {
                   await sequence.getByRole('textbox', { name: 'Provider account name' }).fill('atelier');
                   // BOTH modes, because that is the WIDEST this sequence ever gets: the mode question
-                  // is a multi-select, so ticking the second one adds a second lane control, a second
-                  // derived wrapper line, a second recap row and the shared-document warning on the
-                  // instructions step. A walk that only ever saw one account would measure the narrow
-                  // half of the control and report it as the whole thing.
+                  // is a multi-select, so ticking the second one adds a second group control (on a
+                  // fleet that declares a slot no mode derives), a second derived wrapper line, a
+                  // second recap row and the shared-document warning on the instructions step. A walk
+                  // that only ever saw one account would measure the narrow half of the control and
+                  // report it as the whole thing.
                   await sequence.locator('[data-fleet-check="interactive"]').click();
                 }
                 await assertNoSidewaysScroll(page, `the new-account "${step}" step at ${viewport.name}`);
@@ -2210,7 +2211,7 @@ try {
             // staging it is an interaction. Driving the real clicks is the only way to capture that
             // layout without inventing a state the surface cannot actually be in.
             if (frame === 'cockpit-staged') {
-              await page.getByRole('button', { name: 'Edit layer' }).first().click();
+              await page.getByRole('button', { name: 'Edit' }).first().click();
               await page.locator('[data-fleet-layer-form]').waitFor({ state: 'visible' });
               await page.getByRole('button', { name: 'Preview this change' }).click();
               const staged = page.locator('[data-fleet-proposal-id]');

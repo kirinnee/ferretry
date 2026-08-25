@@ -190,7 +190,51 @@ describe('accountHealthView', () => {
       const view = accountHealthView(health({ reason }), NOW);
       expect(view.detail.length).toBeGreaterThan(0);
       expect(view.detail).not.toContain('undefined');
+      // And a decision about that sentence, for every reason. `detailIsImplied` is annotated over the
+      // same enum, so a reason added without one would be `undefined` here — silently falsy, which
+      // means "print it", which is the safe direction but not a decision anybody made.
+      expect(typeof view.detailIsImplied, reason).toBe('boolean');
     }
+  });
+
+  /**
+   * WHAT A SURFACE WITH ONE LINE MAY LEAVE OUT — and, far more importantly, what it may not.
+   *
+   * The fleet roster spent three of every row's four lines on `Unknown · Never checked · Nothing has
+   * checked this account yet.`, once per account, which is what made a list of accounts a wall. These
+   * two flags are the offer that lets a surface stop doing that. Each assertion below is one thing
+   * the offer must NOT cover.
+   */
+  it('is quiet only where nobody has looked, and never over a verdict', () => {
+    // Nobody looked: three sentences saying the same nothing.
+    expect(
+      accountHealthView(
+        health({ verdict: 'unknown', reason: 'never_checked', lastCheckedAt: null, verdictAt: null }),
+        NOW,
+      ).quiet,
+    ).toBeTrue();
+    // Somebody looked and could not conclude. SAME verdict, different row, and it must still speak.
+    expect(accountHealthView(health({ verdict: 'unknown', reason: 'check_timeout' }), NOW).quiet).toBeFalse();
+    expect(accountHealthView(health({ verdict: 'unknown', reason: 'codex_liveness_unproven' }), NOW).quiet).toBeFalse();
+    // No verdict a person has to act on is ever silent.
+    for (const verdict of ['healthy', 'needs_relogin', 'needs_credentials'] as const) {
+      expect(accountHealthView(health({ verdict }), NOW).quiet, verdict).toBeFalse();
+    }
+  });
+
+  it('implies only the reasons that restate their own headline', () => {
+    // "The provider accepted this credential" IS `Healthy`, so a one-line surface may drop it.
+    expect(accountHealthView(health(), NOW).detailIsImplied).toBeTrue();
+    // THE PAIR THAT MUST SURVIVE. `Healthy` beside "quota is not measurable" is two facts, and a row
+    // that dropped the second reads an unmeasurable account as a broken one.
+    expect(accountHealthView(health({ reason: 'usage_scope_unavailable' }), NOW).detailIsImplied).toBeFalse();
+    expect(
+      accountHealthView(health({ verdict: 'needs_relogin', reason: 'oauth_token_rejected' }), NOW).detailIsImplied,
+    ).toBeFalse();
+    // A stale row's detail says WHAT went stale, so it is never the reason's own sentence.
+    expect(
+      accountHealthView(health({ verdict: 'unknown', reason: 'stale', staleVerdict: 'healthy' }), NOW).detailIsImplied,
+    ).toBeFalse();
   });
 
   it('separates an expired-but-renewable credential from a signed-out one', () => {
@@ -212,6 +256,10 @@ describe('UNREAD_ACCOUNT_HEALTH', () => {
       checked: 'Never checked',
       tone: 'muted',
       offersSignIn: false,
+      // The same absence the computed view reports, so a surface that takes the offer treats "no row
+      // published for this account" and "a row that says nobody has looked" identically.
+      quiet: true,
+      detailIsImplied: true,
     });
   });
 

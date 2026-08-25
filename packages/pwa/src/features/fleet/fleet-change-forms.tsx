@@ -8,7 +8,8 @@
  *
  * The layer is per-ROUTE. Two lanes of one provider account can carry different instructions, skills,
  * settings and environment, and the fields below edit exactly one lane's overlay rather than anything
- * shared.
+ * shared. Those are the SCHEMA's words and they stay in this file's types; neither reaches the
+ * screen, where one route is one account and what this edits is that account's own documents.
  *
  * **Creating an account is no longer done here.** That flow is `fleet-account-stepper.tsx`, which asks
  * one question at a time; what is left in this file is the form for changing a lane that already
@@ -103,7 +104,7 @@ export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFields
           <div className="flex min-w-0 items-start gap-2 rounded-control border-l-2 border-l-border-strong bg-surface-2 p-3">
             <Lock size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden="true" />
             <p className="m-0 text-meta leading-base text-muted">
-              This lane also declares{' '}
+              This account also declares{' '}
               {preserved.map((field, index) => (
                 <span key={field}>
                   {index === 0 ? '' : ', '}
@@ -396,17 +397,22 @@ export function FleetLayerForm({
       }}
     >
       <div className="border-b border-border-soft bg-surface-2 px-panel py-3">
+        {/* NEITHER "layer" NOR "lane" reaches this screen. Both are names the configuration schema
+            has for composition slots, and this is the first panel a person opens from the roster —
+            the owner's words were "what is a layer? that's way too complicated". The two facts the
+            old subtitle carried are both still here: this is applied ON TOP of whatever the fleet
+            shares, and it reaches this account and no other. */}
         <h3 id={id('-layer-form-heading')} className="m-0 text-title font-semibold text-fg">
-          Layer for <code className="font-mono text-title text-accent">{wrapper}</code>
+          Edit <code className="font-mono text-title text-accent">{wrapper}</code>
         </h3>
         <p className="m-0 text-meta leading-base text-muted">
-          This lane's own overlay, applied after every shared profile and variant. It cannot leak onto another lane of
-          the same account.
+          Instructions, skills, settings and environment for this account only. Everything the fleet shares still
+          applies underneath, and nothing here reaches another account.
         </p>
       </div>
       {loading ? (
         <p className="m-0 px-panel py-3 text-ui text-faint" data-fleet-layer-loading="">
-          Reading the assets this layer references…
+          Reading the documents this account references…
         </p>
       ) : null}
       <FleetLayerFields layer={layer} onChange={onChange} disabled={disabled} />

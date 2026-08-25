@@ -1099,7 +1099,7 @@ describe('account problems', () => {
   });
 
   it('refuses a name that would escape a directory or corrupt a wrapper', () => {
-    expect(accountProblems(draft({ name: '' }), declared)).toContain('name the provider account this lane belongs to');
+    expect(accountProblems(draft({ name: '' }), declared)).toContain('name the provider account');
     expect(accountProblems(draft({ name: ' studio' }), declared)).toContain(
       'the account name must not start or end with whitespace',
     );
@@ -1115,8 +1115,8 @@ describe('account problems', () => {
 
   it('will not put an account in a lane this fleet does not declare', () => {
     const lane = (variant: string) => ({ lanes: [{ mode: 'auto' as const, variant }] });
-    expect(accountProblems(draft(lane('')), declared)).toContain('name the lane this account occupies');
-    expect(accountProblems(draft(lane('ghost')), declared)[0]).toContain('declares no "ghost" lane');
+    expect(accountProblems(draft(lane('')), declared)).toContain('name the group this account joins');
+    expect(accountProblems(draft(lane('ghost')), declared)[0]).toContain('declares no "ghost" group');
     // With no configuration read there is nothing to check the lane against, so it is not invented.
     expect(accountProblems(draft(lane('ghost')), null)).toHaveLength(0);
   });
@@ -1137,7 +1137,7 @@ describe('account problems', () => {
         }),
         declared,
       ),
-    ).toContain('"default" is the lane for two of these accounts; one lane is one account, so they must differ');
+    ).toContain('"default" is the group for two of these accounts; one group holds one account, so they must differ');
   });
 
   it('requires an account that claims to be available to be able to serve something', () => {
@@ -1258,7 +1258,7 @@ describe('the account form fills itself in from what the host has', () => {
     const draft = opened();
 
     // Assert — one cause, one sentence.
-    expect(accountProblems(draft, declared)).toEqual(['name the provider account this lane belongs to']);
+    expect(accountProblems(draft, declared)).toEqual(['name the provider account']);
     // The rule is about the DERIVED path only. A layer editor, where the path IS typed, still says so.
     expect(layerProblems({ ...draft.layer, instructions: { path: '', text: 'body' } })).toEqual([
       'name the file the instructions are written to',

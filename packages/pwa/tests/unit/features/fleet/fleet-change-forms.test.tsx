@@ -129,7 +129,7 @@ describe('the layer fields', () => {
     });
     expect(pick(harness.container, '[data-fleet-preserved]').getAttribute('data-fleet-preserved')).toBe('2');
     // The FIELD NAMES are named, not their values: a value is what the operator wrote on the host.
-    expect(harness.container.textContent).toContain('This lane also declares flags, mcp');
+    expect(harness.container.textContent).toContain('This account also declares flags, mcp');
     expect(harness.container.textContent).toContain('carried through this change exactly as they are');
     expect(harness.container.textContent).not.toContain('mcp/studio.json');
     await harness.unmount();
@@ -252,12 +252,23 @@ describe('the layer form', () => {
     return { ...mounted, counts: () => ({ submitted, cancelled }) };
   };
 
-  it('names the exact wrapper whose layer is being edited', async () => {
+  it('names the exact account being edited, in words nothing had to teach', async () => {
+    // "Layer for claude-studio", subtitled "this lane's own overlay… cannot leak onto another lane of
+    // the same account", was the first panel a person reached from the roster. `layer` and `lane` are
+    // names the CONFIGURATION SCHEMA has for composition slots; the owner's words were "what is a
+    // layer? that's way too complicated". The two facts that subtitle carried are still asserted
+    // below — this is applied on top of what the fleet shares, and it reaches nothing else.
     const harness = await layerFormHarness();
     expect(pick(harness.container, '[data-fleet-layer-form]').getAttribute('data-fleet-layer-form')).toBe(
       'claude-studio',
     );
-    expect(harness.container.textContent).toContain('cannot leak onto another lane');
+    const text = harness.container.textContent ?? '';
+    expect(text).toContain('Edit');
+    expect(text).toContain('claude-studio');
+    expect(text).toContain('Everything the fleet shares still applies underneath');
+    expect(text).toContain('nothing here reaches another account');
+    expect(text).not.toContain('lane');
+    expect(text).not.toContain('Layer');
     await harness.unmount();
   });
 

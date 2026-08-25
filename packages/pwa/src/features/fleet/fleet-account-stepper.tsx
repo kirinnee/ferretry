@@ -69,7 +69,8 @@ import {
   type FleetStepId,
   instructionsMiddle,
   instructionsNameProblem,
-  LANE_EXPLANATION,
+  laneForMode,
+  MODE_EXPLANATION,
   modelOptions,
   nextStep,
   otherLanes,
@@ -121,6 +122,24 @@ function PrefillNote({ field, notes }: { readonly field: FleetPrefilledField; re
 }
 
 /**
+ * Every marker in the strip, in one shape, so the loudest thing on it is where you ARE.
+ *
+ * Completed steps used to be `kt-btn`, and `kt-btn` carries the theme's `--label-transform` — so the
+ * strip read `✓ 1. HARNESS ✓ 2. ACCOUNT ✓ 3. MODELS 4. Instructions`, shouting the past and
+ * whispering the present. The fix stays LOCAL to this nav: that one custom property drives several
+ * other roles (buttons, badges, tabs, section labels) and turning it off centrally would flatten all
+ * of them. So the strip stops borrowing the button role rather than restyling it — a completed step
+ * is a `<button>` because it is pressable, a current step is a `<span>` because it is not, and both
+ * paint from the same class list.
+ *
+ * The height is the SAME token `kt-btn--sm` resolved to rather than a number, because that token is
+ * pointer-derived — `max(24px, --target-floor)`, so it is a dense 24-30px under a mouse and the full
+ * touch floor on a phone. Writing 44px here would have cleared the floor by deleting the density.
+ */
+const STEP_MARKER =
+  'inline-flex min-h-[var(--control-h-sm)] min-w-0 items-center gap-1 rounded-control px-2 py-1 text-meta';
+
+/**
  * Where in the sequence somebody is, and how to get back.
  *
  * An ordered list, because it is one: assistive technology gets the position and the total from the
@@ -150,21 +169,20 @@ function StepperProgress({
               {done ? (
                 <button
                   type="button"
-                  className="kt-btn kt-btn--sm"
-                  data-variant="ghost"
+                  className={cn(
+                    STEP_MARKER,
+                    'text-muted transition-colors hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none',
+                  )}
                   data-fleet-step-jump={step.id}
                   disabled={disabled}
                   onClick={() => onJump(step.id)}
                 >
-                  <Check size={12} aria-hidden="true" />
+                  <Check size={12} className="shrink-0" aria-hidden="true" />
                   {label}
                 </button>
               ) : (
                 <span
-                  className={cn(
-                    'inline-flex items-center rounded-control px-2 py-1 text-meta',
-                    here ? 'bg-accent-soft font-semibold text-accent' : 'text-faint',
-                  )}
+                  className={cn(STEP_MARKER, here ? 'bg-accent-soft font-semibold text-accent' : 'text-faint')}
                   data-fleet-step-marker={step.id}
                   {...(here ? { 'aria-current': 'step' as const } : {})}
                 >
@@ -379,7 +397,7 @@ export function FleetAccountStepper({
           <SkillsStep layer={draft.layer} onChange={setLayer} disabled={disabled} store={skillsStore} />
         ) : null}
         {step === 'settings' ? <SettingsStep layer={draft.layer} onChange={setLayer} disabled={disabled} /> : null}
-        {step === 'review' ? <ReviewStep draft={draft} /> : null}
+        {step === 'review' ? <ReviewStep draft={draft} variants={variants} /> : null}
       </div>
 
       <div className="border-t border-border-soft px-panel py-3">
@@ -534,44 +552,54 @@ function IdentityStep({
         onToggle={mode => onChange(toggleMode(draft, mode === 'auto' ? 'auto' : 'interactive', variants))}
         empty="No mode is offered, which should not be possible."
       />
-      <p className="m-0 text-meta leading-base text-muted">{LANE_EXPLANATION}</p>
+      <p className="m-0 text-meta leading-base text-muted">{MODE_EXPLANATION}</p>
 
-      {/* Offered ONLY because this fleet declares lanes no mode would derive, and offered PER
-          ACCOUNT: with two of them in play a single lane control would have no answer to "which
-          one". A surface that cannot express what the configuration can is the reason somebody edits
-          YAML by hand. */}
+      {/* Offered ONLY because this fleet declares slots no mode would derive, and offered PER
+          ACCOUNT: with two of them in play a single control would have no answer to "which one". A
+          surface that cannot express what the configuration can is the reason somebody edits YAML by
+          hand.
+
+          CARDS, NOT A `<select>`. These were the last two native dropdowns in the sequence, three
+          screens from an instructions step that already does this properly, and the owner's
+          complaint about dropdowns did not stop applying because this control is conditional.
+
+          "GROUP", NOT "LANE" OR "VARIANT". This is the only place a person meets the fleet's own
+          slot names, and they are names somebody on this machine chose — so the cards say where each
+          one came from and what it would produce, and no sentence underneath repeats it. A separate
+          paragraph explaining that the offered one follows from how the account runs was three more
+          lines saying exactly what every card already says on itself. */}
       {spare.length === 0
         ? null
         : draft.lanes.map(lane => (
             <div key={lane.mode} data-fleet-other-lanes={String(spare.length)} data-fleet-lane-mode={lane.mode}>
-              <label className={FIELD_LABEL} htmlFor={id(`-lane-${lane.mode}`)}>
-                Lane for the {MODE_LABEL[lane.mode]} account
-              </label>
-              <select
-                id={id(`-lane-${lane.mode}`)}
-                className="kt-input"
+              <FleetChoiceGroup
+                legend={`Which group does the ${MODE_LABEL[lane.mode]} account join?`}
+                name={`group-${lane.mode}`}
+                columns={1}
                 value={lane.variant}
                 disabled={disabled}
-                onChange={event => onChange(withLaneVariant(draft, lane.mode, event.target.value))}
-              >
-                {variants.map(variant => (
-                  <option key={variant} value={variant}>
-                    {variant}
-                  </option>
-                ))}
-              </select>
+                onChoose={variant => onChange(withLaneVariant(draft, lane.mode, variant))}
+                options={variants.map(variant => ({
+                  id: variant,
+                  label: variant,
+                  detail: `${
+                    variant === laneForMode(lane.mode, variants)
+                      ? 'Picked from how this account runs.'
+                      : 'Declared by this fleet.'
+                  } Its wrapper would be ${derivedWrapper(draft, { mode: lane.mode, variant })}.`,
+                }))}
+              />
             </div>
           ))}
-      {spare.length === 0 ? null : (
-        <p className="m-0 text-meta leading-base text-muted">
-          This fleet declares lanes of its own. Each lane above is picked from how that account runs; change it here if
-          you meant another.
-        </p>
-      )}
-
       {/* Every wrapper, before they leave the step. Ticking a second box creates a second account
           with its own wrapper and its own home, and a person who is not shown both finds that out
-          from the recap at the earliest and from `fy fleet ls` at the latest. */}
+          from the recap at the earliest and from `fy fleet ls` at the latest.
+
+          It names the MODE and stops there. "· interactive, lane default" spent its second half on a
+          word this step exists to have removed, and on a fleet with no slots of its own the variant
+          is derived from the mode it sits beside — so it said the same thing twice, in vocabulary
+          nobody was taught. Where the fleet DOES declare its own, the cards above carry the name and
+          the wrapper it produces. */}
       <div className="grid gap-1" data-fleet-derived-wrappers={String(draft.lanes.length)}>
         <p className="m-0 text-meta text-muted">
           {draft.lanes.length === 1
@@ -587,9 +615,7 @@ function IdentityStep({
                 label={`Derived wrapper for the ${MODE_LABEL[lane.mode]} account`}
               />
             </span>
-            <span>
-              · {MODE_LABEL[lane.mode]}, lane {lane.variant}
-            </span>
+            <span>· {MODE_LABEL[lane.mode]}</span>
           </p>
         ))}
       </div>
@@ -692,27 +718,42 @@ function ModelsStep({
         </p>
       )}
 
+      {/* THE LAST `<select>` IN THE SEQUENCE, now the same cards as everything above it.
+          It was a dropdown of two entries sitting directly beneath the two tick-cards those entries
+          came from — the owner's "the model list is pretty bad" survived in the one control on the
+          step that still hid its options behind a tap.
+
+          The cards are the TICKED models and nothing else, so this list cannot name something the
+          account does not serve, and each says what choosing it does rather than repeating where
+          the model was found — that sentence is already on its tick-card a few rows up. With nothing
+          ticked there is no choice to offer, so the group is replaced by the sentence that says what
+          to do first. */}
       <div>
-        <label className={FIELD_LABEL} htmlFor={id('-default-model')}>
-          Default model
-        </label>
-        <select
-          id={id('-default-model')}
-          className="kt-input"
-          value={draft.defaultModel}
-          disabled={disabled || chosen.length === 0}
-          onChange={event => onChange({ ...draft, defaultModel: event.target.value })}
-        >
-          <option value="">Choose a model</option>
-          {chosen.map(model => (
-            <option key={model} value={model}>
-              {model}
-            </option>
-          ))}
-        </select>
-        <p className="m-0 mt-1 text-meta text-muted">
-          Served when a caller names none. Picked for you when you choose the first model.
-        </p>
+        {chosen.length === 0 ? (
+          <>
+            <p className="m-0 mb-1 text-cell font-medium text-fg">Default model</p>
+            <p className="m-0 text-meta leading-base text-muted" data-fleet-default-model-empty="">
+              Tick a model above and it becomes the default.
+            </p>
+          </>
+        ) : (
+          <FleetChoiceGroup
+            legend="Default model"
+            name="default-model"
+            columns={1}
+            value={draft.defaultModel}
+            disabled={disabled}
+            onChoose={defaultModel => onChange({ ...draft, defaultModel })}
+            options={chosen.map(model => ({
+              id: model,
+              label: model,
+              detail: `A session that names no model runs on ${model}.`,
+            }))}
+          />
+        )}
+        {/* "Served when a caller names none" is on every card now, so the note keeps only the part
+            the cards cannot say: why one is already chosen. */}
+        <p className="m-0 mt-1 text-meta leading-base text-muted">Picked for you when you choose the first model.</p>
       </div>
     </div>
   );
@@ -1071,9 +1112,19 @@ function RecapRow({ label, value }: { readonly label: string; readonly value: st
  * for one: the answers they gave, in the order they gave them, so a wrong turn six steps back is
  * visible before a round trip rather than after it.
  */
-function ReviewStep({ draft }: { readonly draft: FleetAccountDraft }) {
+function ReviewStep({ draft, variants }: { readonly draft: FleetAccountDraft; readonly variants: readonly string[] }) {
   const models = selectedModels(draft);
   const skills = skillsSelection(draft.layer).selected;
+  /**
+   * Whether the fleet's own slot names are worth recapping at all.
+   *
+   * The row used to read `claude-auto-atelier · lane auto · home claude-auto-atelier` — the wrapper
+   * twice, and between the two copies a word the sequence never taught. The home IS the wrapper
+   * name, so printing both said nothing; and on a fleet with no slots of its own the variant is
+   * derived from the mode the label already names. Where the fleet DOES declare its own, the person
+   * picked one two steps back and a recap that dropped it would be recapping a different change.
+   */
+  const groups = otherLanes(variants).length > 0;
   return (
     <div className={SECTION}>
       <dl className="m-0" data-fleet-recap="">
@@ -1093,7 +1144,7 @@ function ReviewStep({ draft }: { readonly draft: FleetAccountDraft }) {
             <RecapRow
               key={lane.mode}
               label={lane.mode === 'auto' ? 'Account (unattended)' : 'Account (driven by a person)'}
-              value={`${derivedWrapper(draft, lane)} · lane ${lane.variant} · home ${derivedWrapper(draft, lane)}`}
+              value={`${derivedWrapper(draft, lane)}${groups ? ` · group ${lane.variant}` : ''}`}
             />
           ))
         )}
