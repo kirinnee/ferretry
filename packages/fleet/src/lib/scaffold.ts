@@ -115,10 +115,22 @@ export interface FleetScaffold {
  * Supplied rather than generated, because an account id is a UUID this module has no business
  * inventing — and because a scaffold has to be a value a test can assert on.
  */
-export type FleetScaffoldIds = Readonly<Record<HarnessKind, Readonly<Record<FleetDefaultLane, string>>>>;
+export interface FleetScaffoldIds {
+  /** One per (harness × lane), for the accounts this scaffold actually declares. */
+  readonly accounts: Readonly<Record<HarnessKind, Readonly<Record<FleetDefaultLane, string>>>>;
+  /**
+   * Two more, for the commented example, because an example is a thing somebody UNCOMMENTS.
+   *
+   * It used to print the ids already spent on the declared Claude account above it, so following the
+   * one instruction the file gives — "uncomment this to declare one" — produced a configuration that
+   * refused to parse on a duplicate id, in the first file a new person opens. The example is not a
+   * decoration; it has to be valid the moment the `#` comes off.
+   */
+  readonly example: Readonly<Record<FleetDefaultLane, string>>;
+}
 
 /**
- * One identifier per (harness × lane), from one mint.
+ * Every identifier a starter configuration prints, from one mint.
  *
  * Declared here so no caller hand-builds the nested shape: four call sites each spelling the same
  * two-level literal is four chances to reuse an id across lanes, and a reused account id is the one
@@ -127,7 +139,7 @@ export type FleetScaffoldIds = Readonly<Record<HarnessKind, Readonly<Record<Flee
 export function fleetScaffoldIds(mint: () => string): FleetScaffoldIds {
   const lanes = (): Readonly<Record<FleetDefaultLane, string>> =>
     Object.fromEntries(FLEET_DEFAULT_LANES.map(lane => [lane, mint()])) as Record<FleetDefaultLane, string>;
-  return { claude: lanes(), codex: lanes() };
+  return { accounts: { claude: lanes(), codex: lanes() }, example: lanes() };
 }
 
 /** One declared lane of a starter account, at the indentation a route sits under `routes:`. */
@@ -170,7 +182,7 @@ const starterAgents = (
     routes:
 ${accounts
   .filter(account => account.kind === kind)
-  .map(account => starterRoute(account, ids[kind][account.lane]))
+  .map(account => starterRoute(account, ids.accounts[kind][account.lane]))
   .join('\n')}`;
   return `agents:\n${kinds.map(agent).join('\n')}`;
 };
@@ -278,8 +290,15 @@ ${firstAccounts.length === 0 ? 'agents: []' : starterAgents(firstAccounts, ids)}
     ? 'Delete the "agents: []" line above and uncomment this to declare one Claude'
     : 'This is a second Claude account with an interactive lane and an automation lane.'
 }
-# The ids below were generated for you; every account needs its own, and it must
+# The ids below were generated for you and are used nowhere else in this file, so
+# uncommenting it as it stands is valid. Every account needs its own, and an id must
 # never change once anything has referenced it.
+#
+# An account may serve SEVERAL models and names one of them as its default. Write a
+# model as a bare identifier, or as an entry when you want to give it a name a person
+# reads — or to take it out of service, which needs a reason nobody has to guess at.
+# An unavailable model is never offered and never routed to, and "fy fleet ls" prints
+# it with the reason you gave.
 #
 # agents:
 #   - name: work
@@ -288,16 +307,20 @@ ${firstAccounts.length === 0 ? 'agents: []' : starterAgents(firstAccounts, ids)}
 #     auth: oauth
 #     routes:
 #       default:
-#         id: ${ids.claude.default}
+#         id: ${ids.example.default}
 #         wrapper: claude-work
 #         home: claude-work
 #         displayName: Claude (work)
 #         defaultModel: claude-opus-4-5
 #         models:
 #           - claude-opus-4-5
-#           - claude-sonnet-4-5
+#           - id: claude-sonnet-4-5
+#             displayName: Sonnet 4.5
+#           - id: claude-haiku-4-5
+#             available: false
+#             unavailableReason: this subscription does not include Haiku
 #       auto:
-#         id: ${ids.claude.auto}
+#         id: ${ids.example.auto}
 #         wrapper: claude-auto-work
 #         home: claude-auto-work
 #         displayName: Claude (work, automation)
