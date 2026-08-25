@@ -758,6 +758,10 @@ describe('creating an account', () => {
     // Assert
     expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(false);
     await next(surface.container);
+    // The sign-in step, whose answer opens on the ordinary one — an account signs in unless somebody
+    // says otherwise — so it advances without an answer being typed.
+    expect(stepperStep(surface.container)).toBe('credential');
+    await next(surface.container);
     expect(stepperStep(surface.container)).toBe('models');
     await surface.unmount();
   });
@@ -774,7 +778,8 @@ describe('creating an account', () => {
     await walkTo(surface.container, 'instructions');
     await type(field(surface.container, '-middle'), 'house');
 
-    // Act — back, twice.
+    // Act — back, three times: instructions, models, sign-in, and then the account step.
+    await click(button(surface.container, 'Back'));
     await click(button(surface.container, 'Back'));
     await click(button(surface.container, 'Back'));
 

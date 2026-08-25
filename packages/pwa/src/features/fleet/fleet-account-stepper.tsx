@@ -25,7 +25,7 @@
  * are many a filter appears above them.
  */
 
-import type { HarnessDiscoveryReport } from '@ferretry/protocol';
+import type { FleetProfileCatalog, HarnessDiscoveryReport } from '@ferretry/protocol';
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,6 +34,7 @@ import {
   KeyRound,
   Plus,
   Sparkles,
+  Trash2,
   TriangleAlert,
   Users,
   Wand2,
@@ -48,16 +49,22 @@ import type { FleetConfigView, FleetManifestAccountView } from './fleet-api.ts';
 import { FleetProblems } from './fleet-change-forms.tsx';
 import {
   derivedWrapper,
+  draftProfiles,
   existingAccounts,
   type FleetAccountDraft,
   type FleetAccountMode,
+  type FleetCredentialChoice,
   type FleetHarnessDetection,
   type FleetLayerDraft,
   type FleetPrefilledField,
   type FleetPrefillNotes,
+  type FleetProfileDraft,
+  type FleetProfileVariableDraft,
   type FleetUnreadableAsset,
   IMPORTED_INSTRUCTIONS_CHOICE,
   INSTRUCTIONS_PREFIX,
+  newProfileProblems,
+  profileVariableSourceLabel,
   unreadableAssetProblems,
 } from './fleet-change-model.ts';
 import { FleetCheckChoice, type FleetChoice, FleetChoiceGroup, FleetPickOrAdd } from './fleet-choice-group.tsx';
@@ -66,7 +73,10 @@ import { FleetSettingsOrder } from './fleet-settings-stack.tsx';
 import {
   assetProblemStep,
   authoredSkill,
+  composedProfileEnv,
+  CREDENTIAL_CHOICE_COPY,
   customModelProblem,
+  describeEnvShape,
   FLEET_ACCOUNT_MODES,
   FLEET_STEPS,
   type FleetInstructionsControl,
@@ -79,12 +89,16 @@ import {
   laneForMode,
   MODE_EXPLANATION,
   modelOptions,
+  newProfileDraft,
   newSettingsProblem,
   newSkillProblem,
   nextStep,
   otherLanes,
   OWN_DOCUMENT_CONSEQUENCE,
   previousStep,
+  profileChoices,
+  profilesAlreadyBound,
+  profileVariablesFor,
   SETTINGS_DOCUMENT,
   SETTINGS_PREFIX,
   SHARED_DOCUMENT_CONSEQUENCE,
@@ -103,13 +117,18 @@ import {
   stepProblems,
   toggleMode,
   toggleModel,
+  toggleProfile,
   unverifiedModels,
   withAuthoredSkillText,
   withInstructionsMiddle,
   withLaneVariant,
   withModels,
+  withNewProfile,
   withNewSettings,
   withNewSkill,
+  withProfileVariable,
+  withProfileVariableAdded,
+  withProfileVariableRemoved,
   withSkillsSelection,
   withStoreSettings,
 } from './fleet-stepper-model.ts';
@@ -332,6 +351,15 @@ export interface FleetAccountStepperProps {
   readonly storeDocuments: readonly string[];
   /** Documents the daemon could not hand over, routed to the step whose field names each path. */
   readonly assetBlockers: readonly FleetUnreadableAsset[];
+  /**
+   * The profiles this fleet declares, in shapes. `null` until the read lands.
+   *
+   * Nullable rather than defaulted to an empty catalog, because the two states say different things: an
+   * empty catalog is a fleet with no profiles, and `null` is a browser that has not asked yet. The
+   * sign-in step blocks on two rules it cannot judge without one — see `credentialProblems` — and
+   * pretending an unread catalog is an empty fleet would refuse a profile that is really there.
+   */
+  readonly profiles: FleetProfileCatalog | null;
 }
 
 export function FleetAccountStepper({
@@ -358,6 +386,7 @@ export function FleetAccountStepper({
   skillsStore,
   storeDocuments,
   assetBlockers,
+  profiles,
 }: FleetAccountStepperProps) {
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
@@ -365,9 +394,9 @@ export function FleetAccountStepper({
 
   const blockersFor = (which: FleetStepId): readonly string[] =>
     unreadableAssetProblems(assetBlockers.filter(entry => assetProblemStep(entry, draft.layer) === which));
-  const problemsHere = [...stepProblems(step, draft, config), ...blockersFor(step)];
+  const problemsHere = [...stepProblems(step, draft, config, profiles), ...blockersFor(step)];
   const everyProblem = FLEET_STEPS.flatMap(entry => [
-    ...stepProblems(entry.id, draft, config),
+    ...stepProblems(entry.id, draft, config, profiles),
     ...blockersFor(entry.id),
   ]);
   const last = step === 'review';
@@ -426,6 +455,9 @@ export function FleetAccountStepper({
             accountsHref={accountsHref}
             {...(onNavigate === undefined ? {} : { onNavigate })}
           />
+        ) : null}
+        {step === 'credential' ? (
+          <CredentialStep draft={draft} onChange={onChange} disabled={disabled} catalog={profiles} config={config} />
         ) : null}
         {step === 'models' ? (
           <ModelsStep
@@ -828,6 +860,372 @@ function IdentityStep({
     </div>
   );
 }
+
+/**
+ * Whether this account signs in, or a profile authenticates it instead.
+ *
+ * THE OWNER'S QUESTION, ASKED. "If no login is wanted, then we can opt for no login and use env var
+ * profiles" — so the two answers are offered side by side, and the second is a real choice on the screen
+ * rather than something a person discovers by finding a YAML document. Everything under it follows the
+ * same rule every other step follows: pick from what this fleet already has, stack several, or add one
+ * that joins the collection for the next account.
+ *
+ * ## Values never appear here, in either direction
+ *
+ * The cards say what each profile SETS — a variable name, and whether the value comes from this daemon's
+ * store, from the environment the wrapper runs in, or from the configuration. They never say what any of
+ * it holds, because the daemon has no route that answers one: `docs/secrets.md` is the contract and a
+ * getter added so this screen could show a value would delete the property it exists for. Writing a new
+ * profile is the same discipline read backwards — a credential is named, never typed, so the thing this
+ * form puts in the fleet configuration is the NAME of a secret and the value stays in the store.
+ *
+ * ## Precedence is on the screen, not in a document
+ *
+ * {@link composedProfileEnv} says, per variable, which slot supplied the value that won and which slots
+ * it beat. A composed value whose origin cannot be explained is worse than no composition, and the
+ * moment somebody needs the answer is while they are ticking the second profile — not after a round
+ * trip. It is a projection of the one precedence chain the fleet package owns; the module comment on
+ * that function says exactly which slots a new account has and why the rest are absent.
+ */
+function CredentialStep({
+  draft,
+  onChange,
+  disabled,
+  catalog,
+  config,
+}: {
+  readonly draft: FleetAccountDraft;
+  readonly onChange: (next: FleetAccountDraft) => void;
+  readonly disabled: boolean;
+  readonly catalog: FleetProfileCatalog | null;
+  readonly config: FleetConfigView | null;
+}) {
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
+  const offered = profileChoices(catalog);
+  const chosen = draftProfiles(draft);
+  const authored = draft.newProfile;
+  const bound = profilesAlreadyBound(catalog, draft, config);
+  const composed = composedProfileEnv(catalog, draft);
+
+  const cards: readonly FleetChoice<string>[] = [
+    ...offered.map(profile => {
+      const variables = profileVariablesFor(profile, draft.harness);
+      const signsIn = profile.authenticates.includes(draft.harness);
+      const sets =
+        variables.length === 0
+          ? 'Sets nothing for this harness.'
+          : `Sets ${variables.map(entry => entry.variable).join(', ')}.`;
+      const used =
+        profile.accounts.length === 0
+          ? 'Nothing uses it yet.'
+          : `Also used by ${profile.accounts.join(', ')} — editing it reaches them too.`;
+      return {
+        id: profile.name,
+        label: profile.name,
+        detail: `${sets} ${used}`,
+        ...(signsIn ? { badge: 'no login needed' } : {}),
+      };
+    }),
+    // The profile being WRITTEN is a card too, so the order a person reads is the whole order rather
+    // than a list plus a hidden extra — the same reason the skills step offers its authored skill.
+    ...(authored === undefined
+      ? []
+      : [
+          {
+            id: authored.name.trim() === '' ? '' : authored.name.trim(),
+            label: authored.name.trim() === '' ? 'This new profile' : authored.name.trim(),
+            detail: 'Written below and declared by this change. The next account you add can pick it.',
+            badge: 'new',
+          },
+        ]),
+  ];
+
+  return (
+    <div className={cn(SECTION, 'grid gap-3')}>
+      <FleetChoiceGroup
+        legend="How does this account authenticate?"
+        name="credential"
+        columns={1}
+        value={draft.credential}
+        disabled={disabled}
+        onChoose={(credential: FleetCredentialChoice) => onChange({ ...draft, credential })}
+        options={(['login', 'profile'] as const).map(choice => ({
+          id: choice,
+          label: CREDENTIAL_CHOICE_COPY[choice].label,
+          detail: CREDENTIAL_CHOICE_COPY[choice].detail,
+        }))}
+      />
+
+      {draft.credential === 'login' ? (
+        <p className="m-0 text-meta leading-base text-muted" data-fleet-credential-login="">
+          {bound.length === 0
+            ? 'Signing in happens on the Accounts screen, once, for this login — every account on it is then usable.'
+            : `This login already uses ${bound.join(', ')}, and leaving this answer alone keeps it that way.`}
+        </p>
+      ) : (
+        <>
+          {/* WHAT TICKING THESE REACHES. Profiles belong to a provider LOGIN, so a login serving two
+              accounts composes one list for both — which is the same property that makes signing in
+              once enough for both. Somebody adding a second account to an existing login has to be
+              told that before they tick, not after the plan says so. */}
+          {bound.length === 0 ? null : (
+            <div
+              className="flex min-w-0 items-start gap-2 rounded-control bg-surface-2 p-3"
+              data-fleet-profiles-bound={String(bound.length)}
+            >
+              <Users size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+              <p className="m-0 min-w-0 break-words text-meta leading-base text-muted">
+                <span className="font-semibold text-fg">
+                  “{draft.name.trim()}” already uses {bound.join(', ')}.
+                </span>{' '}
+                Profiles belong to the login rather than to one account, so what you tick here applies to every account
+                on it.
+              </p>
+            </div>
+          )}
+
+          <FleetCheckChoice
+            legend="Profiles this fleet already has"
+            name="profiles"
+            options={cards}
+            selected={chosen}
+            disabled={disabled}
+            empty="This fleet declares no profiles yet. Write the first one below — the next account you add can pick it."
+            onToggle={name => onChange(toggleProfile(draft, name))}
+          />
+
+          {authored === undefined ? (
+            <div>
+              <button
+                type="button"
+                className="kt-btn"
+                data-fleet-add-profile=""
+                disabled={disabled}
+                onClick={() => onChange(withNewProfile(draft, newProfileDraft(draft, catalog, crypto.randomUUID())))}
+              >
+                <Plus size={14} aria-hidden="true" />
+                Add a new profile
+              </button>
+              <p className="m-0 mt-1 text-meta leading-base text-muted">
+                Declared by this change and added to this fleet, so every later account can pick it.
+              </p>
+            </div>
+          ) : (
+            <NewProfileForm
+              draft={draft}
+              profile={authored}
+              onChange={onChange}
+              disabled={disabled}
+              catalog={catalog}
+            />
+          )}
+
+          {/* WHICH VALUE WINS, before the round trip rather than after it. The vocabulary is the
+              daemon's own — "the base profile", "the profile X", "this account" — because a sentence
+              explaining where somebody's API key came from is the last place to introduce a second one. */}
+          {composed.length === 0 ? null : (
+            <div>
+              <p className="m-0 mb-1 text-cell font-medium text-fg">These apply in order</p>
+              <ul className="m-0 list-none space-y-1 p-0" data-fleet-composed-env={String(composed.length)}>
+                {composed.map(row => (
+                  <li
+                    key={row.variable}
+                    className="min-w-0 rounded-control bg-surface-2 px-3 py-2"
+                    data-fleet-composed-variable={row.variable}
+                  >
+                    <p className="m-0 min-w-0 break-words font-mono text-meta text-fg">{row.variable}</p>
+                    <p className="m-0 min-w-0 break-words text-meta leading-base text-muted">
+                      {describeEnvShape(row.shape)} · set by {row.from}
+                      {row.overrode.length === 0 ? '' : `, overriding ${row.overrode.join(' and ')}`}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <p className="m-0 mt-1 text-meta leading-base text-muted" data-fleet-composed-note="">
+                A variable set by more than one of these takes the value of the last one. Nothing on this screen can
+                show you a value: a credential lives in this daemon’s secret store and reaches only the account’s own
+                session.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+      <p className="sr-only" id={id('-credential-help')}>
+        A profile authenticates this account instead of a sign-in.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Writing a profile, which is the "add a new one" half of the owner's rule.
+ *
+ * A CREDENTIAL IS NAMED, NEVER TYPED. The secret answer takes the NAME of a secret in this daemon's
+ * store — the value is set once with `fy secret set`, on the host, and no screen in this product has a
+ * box for it. The plain-value answer exists because a gateway profile is a base URL as well as a key,
+ * and it carries the consequence on the control: what is typed there goes into the fleet configuration
+ * as text, which is exactly where a credential must not be.
+ *
+ * The three answers are the three spellings the daemon accepts and nothing else, which is what stops
+ * somebody typing `${secret:work_key}` into a value box — a near miss the grammar does not match, that
+ * would stay a literal and authenticate the harness with the reference itself.
+ */
+function NewProfileForm({
+  draft,
+  profile,
+  onChange,
+  disabled,
+  catalog,
+}: {
+  readonly draft: FleetAccountDraft;
+  readonly profile: FleetProfileDraft;
+  readonly onChange: (next: FleetAccountDraft) => void;
+  readonly disabled: boolean;
+  readonly catalog: FleetProfileCatalog | null;
+}) {
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
+  const set = (next: FleetProfileDraft): void => onChange(withNewProfile(draft, next));
+  const problems = newProfileProblems(
+    profile,
+    (catalog?.profiles ?? []).map(entry => entry.name),
+  );
+  return (
+    <div className="grid min-w-0 gap-3 rounded-control border border-border p-3" data-fleet-new-profile="">
+      <div className="flex min-w-0 flex-wrap items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <label className={FIELD_LABEL} htmlFor={id('-profile-name')}>
+            Name this profile
+          </label>
+          <input
+            id={id('-profile-name')}
+            className="kt-input font-mono"
+            value={profile.name}
+            disabled={disabled}
+            placeholder="work"
+            data-fleet-profile-name=""
+            onChange={event => set({ ...profile, name: event.target.value })}
+          />
+        </div>
+        <button
+          type="button"
+          className="kt-btn"
+          data-variant="ghost"
+          data-fleet-discard-profile=""
+          disabled={disabled}
+          onClick={() => onChange(withNewProfile(draft, undefined))}
+        >
+          Discard
+        </button>
+      </div>
+
+      <ul className="m-0 list-none space-y-3 p-0" aria-label="Variables this profile sets">
+        {profile.variables.map((row, index) => (
+          <li key={row.id} className="grid min-w-0 gap-2 border-t border-border-soft pt-3 first:border-t-0 first:pt-0">
+            <div className="flex min-w-0 flex-wrap items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <label className={FIELD_LABEL} htmlFor={id(`-profile-variable-${String(index)}`)}>
+                  Variable
+                </label>
+                <input
+                  id={id(`-profile-variable-${String(index)}`)}
+                  className="kt-input font-mono"
+                  value={row.variable}
+                  disabled={disabled}
+                  placeholder="ANTHROPIC_API_KEY"
+                  data-fleet-profile-variable={String(index)}
+                  onChange={event => set(withProfileVariable(profile, row.id, { variable: event.target.value }))}
+                />
+              </div>
+              {profile.variables.length === 1 ? null : (
+                <button
+                  type="button"
+                  className="kt-btn"
+                  data-variant="ghost"
+                  data-fleet-remove-profile-variable={String(index)}
+                  disabled={disabled}
+                  onClick={() => set(withProfileVariableRemoved(profile, row.id))}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Remove
+                </button>
+              )}
+            </div>
+            <FleetChoiceGroup
+              legend="Where does its value come from?"
+              name={`profile-source-${String(index)}`}
+              columns={1}
+              value={row.from}
+              disabled={disabled}
+              onChoose={(from: FleetProfileVariableDraft['from']) =>
+                set(withProfileVariable(profile, row.id, { from }))
+              }
+              options={PROFILE_SOURCE_ANSWERS.map(answer => ({
+                id: answer,
+                label: profileVariableSourceLabel(answer),
+                detail: PROFILE_SOURCE_DETAIL[answer],
+              }))}
+            />
+            <div>
+              <label className={FIELD_LABEL} htmlFor={id(`-profile-detail-${String(index)}`)}>
+                {PROFILE_SOURCE_FIELD[row.from]}
+              </label>
+              <input
+                id={id(`-profile-detail-${String(index)}`)}
+                className="kt-input font-mono"
+                value={row.detail}
+                disabled={disabled}
+                placeholder={PROFILE_SOURCE_PLACEHOLDER[row.from]}
+                data-fleet-profile-detail={String(index)}
+                onChange={event => set(withProfileVariable(profile, row.id, { detail: event.target.value }))}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <div>
+        <button
+          type="button"
+          className="kt-btn kt-btn--sm"
+          data-fleet-add-profile-variable=""
+          disabled={disabled}
+          onClick={() => set(withProfileVariableAdded(profile, crypto.randomUUID()))}
+        >
+          <Plus size={14} aria-hidden="true" />
+          Add another variable
+        </button>
+      </div>
+
+      {/* The problems are shown HERE as well as under the step, because this form is the only place
+          they can be acted on and a person scrolled into it should not have to find them below. */}
+      <FleetProblems problems={problems} />
+    </div>
+  );
+}
+
+/** The three spellings, in the order the form offers them: the credential first, because that is why. */
+const PROFILE_SOURCE_ANSWERS: readonly FleetProfileVariableDraft['from'][] = ['secret', 'environment', 'value'];
+
+const PROFILE_SOURCE_DETAIL: Readonly<Record<FleetProfileVariableDraft['from'], string>> = {
+  secret:
+    'Named here, set once on the host with fy secret set. The value never reaches this browser or the fleet file.',
+  environment: 'Read from whatever launches the wrapper. Nothing on this host has to hold it.',
+  value: 'Written into the fleet configuration as text and exported by the wrapper. Never a credential.',
+};
+
+const PROFILE_SOURCE_FIELD: Readonly<Record<FleetProfileVariableDraft['from'], string>> = {
+  secret: 'Secret name',
+  environment: 'Variable to read',
+  value: 'Value',
+};
+
+const PROFILE_SOURCE_PLACEHOLDER: Readonly<Record<FleetProfileVariableDraft['from'], string>> = {
+  secret: 'WORK_KEY',
+  environment: 'WORK_KEY',
+  value: 'https://gateway.example.internal',
+};
 
 function ModelsStep({
   draft,
@@ -1520,6 +1918,7 @@ function RecapRow({ label, value }: { readonly label: string; readonly value: st
 function ReviewStep({ draft, variants }: { readonly draft: FleetAccountDraft; readonly variants: readonly string[] }) {
   const models = selectedModels(draft);
   const skills = skillsSelection(draft.layer).selected;
+  const profiles = draftProfiles(draft);
   /**
    * Whether the fleet's own slot names are worth recapping at all.
    *
@@ -1553,6 +1952,17 @@ function ReviewStep({ draft, variants }: { readonly draft: FleetAccountDraft; re
             />
           ))
         )}
+        {/* The sign-in answer, named rather than implied. An account authenticated by a profile is the
+            one thing on this recap somebody might not expect to have chosen, and the order matters as
+            much as the set — so the row prints the profiles in the order they apply. */}
+        <RecapRow
+          label="Sign-in"
+          value={
+            draft.credential === 'login'
+              ? 'the harness’s own, on the Accounts screen'
+              : `no login · ${profiles.length === 0 ? 'no profile picked' : profiles.join(' → ')}`
+          }
+        />
         <RecapRow label="Models" value={models.length === 0 ? '—' : models.join(', ')} />
         <RecapRow label="Default model" value={draft.defaultModel.trim() === '' ? '—' : draft.defaultModel.trim()} />
         <RecapRow

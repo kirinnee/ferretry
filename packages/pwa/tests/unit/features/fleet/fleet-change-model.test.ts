@@ -1725,6 +1725,11 @@ describe('drafts become one named mutation', () => {
         preserved: {},
       },
       prefilled: {},
+      // The ordinary account: it signs in, so the mutation names no profile at all — see the cases in
+      // `fleet-profiles.test.ts` for what a profiled one sends and why absent is not the same as empty.
+      credential: 'login',
+      profiles: [],
+      newProfile: undefined,
     });
     expect(request.mutation).toEqual({
       kind: 'create-account',

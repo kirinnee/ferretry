@@ -661,19 +661,30 @@ describe('an account whose credential is not a login', () => {
   });
 
   /**
-   * The wire union has no `secret-store` member, so the row a browser receives narrows to
-   * `environment` — true of it, because the daemon does put the value into the environment the
-   * wrapper is launched in, and the verdict it carries is identical. What the browser loses is the
-   * sentence naming Ferretry's own store, and that arrives with the PWA half.
+   * The wire says `secret-store` and NAMES the secret, because the PWA half this narrowing was
+   * waiting for has arrived.
+   *
+   * This assertion used to expect `environment`, and its comment said so: the wire union had no
+   * `secret-store` member, so the row narrowed to something true but less useful, and "the sentence
+   * naming Ferretry's own store … arrives with the PWA half". It has. A browser can now say which
+   * store holds the credential and under which name, which is what makes the refusal actionable
+   * rather than merely correct.
+   *
+   * **A NAME, NEVER A VALUE.** `secrets` carries `WORK_KEY` — the identifier a person typed — and no
+   * route, command or error may ever carry what it resolves to. That is the use-never-read contract
+   * in `docs/secrets.md`, and it is why this assertion is `deepEqual` on the whole object rather than
+   * a membership check: a value appearing here would be a new field, and a whole-object comparison
+   * is the only shape that fails when one shows up.
    */
-  it('should narrow a stored credential to the environment on the wire, keeping the variable', async () => {
+  it('should say a stored credential comes from the secret store, naming the secret but never its value', async () => {
     // Act
     const actual = await sources().service.readiness();
 
-    // Assert
+    // Assert — the WHOLE object, so an added field (a value) fails rather than passing unnoticed.
     should(accountOf(actual, STORE_ID).source).deepEqual({
-      source: 'environment',
+      source: 'secret-store',
       variable: 'ANTHROPIC_API_KEY',
+      secrets: ['WORK_KEY'],
     });
     should(accountOf(actual, STORE_ID).login).have.property('applies', false);
   });

@@ -47,6 +47,7 @@ import {
   type FleetConfigView,
   type FleetManifestAccountView,
   type FleetPermissions,
+  type FleetProfileCatalog,
   type FleetProposalRequest,
   type FleetProposalView,
   type FleetRefusalView,
@@ -57,6 +58,7 @@ import {
   readFleetAsset,
   readFleetConfig,
   readFleetHarnesses,
+  readFleetProfiles,
   readFleetManifest,
   readFleetPermissions,
   readFleetProposal,
@@ -209,6 +211,15 @@ interface FleetSession {
    */
   readonly discovery: HarnessDiscoveryReport | null;
   /**
+   * The profiles this fleet declares, in shapes, or `null` when the read did not land.
+   *
+   * `null` is a first-class state for the same reason `discovery` is: the sign-in step blocks on two
+   * rules it cannot judge without one, and an unread catalog rendered as an empty fleet would refuse a
+   * profile that is really there. A daemon too old to serve the route leaves a working panel whose
+   * sign-in step offers writing the first profile.
+   */
+  readonly profiles: FleetProfileCatalog | null;
+  /**
    * The daemon-'s stored health verdicts, keyed by account id, or `null` when the read did not land.
    *
    * DECORATION ON A CONFIGURATION SCREEN, and the null is the whole reason it is a separate field: a
@@ -248,6 +259,7 @@ const freshSession = (generation: string): FleetSession => ({
   config: null,
   permissions: null,
   discovery: null,
+  profiles: null,
   health: null,
   mode: { kind: 'idle' },
   proposal: null,
@@ -486,6 +498,10 @@ export function FleetConfigurationSurface({
       // refused it, must still produce a working fleet panel. A failure here means "nothing was
       // detected", which the form states, rather than a panel that will not load.
       const discovery = await probe(() => readFleetHarnesses(client));
+      // A SEPARATE PROBE, exactly like the harness read above: a daemon too old to serve the profile
+      // catalog must still produce a working panel. A failure means "this browser has not read them",
+      // which the sign-in step treats as not-known rather than as a fleet with no profiles.
+      const profiles = await probe(() => readFleetProfiles(client));
       // A SEPARATE PROBE, for the same reason the harness read above is one, and it matters more here:
       // health is decoration on a screen whose job is configuration. A daemon too old to serve the
       // route, a credential that refused it, or a damaged health document must all leave a working
@@ -497,6 +513,7 @@ export function FleetConfigurationSurface({
         client,
         permissions: permissions.ok ? permissions.value : null,
         discovery: discovery.ok ? discovery.value : null,
+        profiles: profiles.ok ? profiles.value : null,
         health: health.ok ? health.value.health : null,
         ...evidence,
       });
@@ -1141,6 +1158,7 @@ export function FleetConfigurationSurface({
         {session.proposal === null && mode.kind === 'create' ? (
           <section className="kt-panel overflow-hidden" ref={createRef} tabIndex={-1} aria-label="New account">
             <FleetAccountStepper
+              profiles={session.profiles}
               draft={mode.draft}
               step={mode.step}
               onStep={step => patch(generation, { mode: { ...mode, step } })}

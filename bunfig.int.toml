@@ -45,4 +45,13 @@ coveragePathIgnorePatterns = [
   # awk gate refuses it as "coverage path outside src/adapters", and the tier fails on a PATH rather
   # than on a test — which looks like nothing to do with the file that caused it.
   "packages/pwa/scripts/**",
+  # THE SCREENSHOT HARNESS, for the same reason and with the same consequence. It is
+  # tooling — it belongs to no ledger, because neither `src/lib` nor `src/adapters`
+  # claims it — but `harness/gallery-capture.ts` decides whether a visual review is
+  # looking at the element it names, and that is a property a test has to hold.
+  # `tests/integration/gallery-capture.visual.test.ts` imports it, so without this
+  # line the int ledger records a `packages/pwa/harness/…` path and the awk gate in
+  # `scripts/ci/test.sh` refuses the whole tier as "coverage path outside
+  # src/adapters" — a failure with no visible connection to the file that caused it.
+  "packages/pwa/harness/**",
 ]

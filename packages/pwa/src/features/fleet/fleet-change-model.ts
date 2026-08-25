@@ -21,6 +21,7 @@
 
 import {
   fleetAssetRefProblem,
+  type FleetProfileDeclaration,
   type GrantRefusal,
   type HarnessDiscovery,
   type HarnessDiscoveryReport,
@@ -34,6 +35,7 @@ import type {
   FleetManifestAccountView,
   FleetManifestSummary,
   FleetPermissions,
+  FleetProfileCatalog,
   FleetProposalRequest,
   FleetRefusalView,
   FleetWriteOperation,
@@ -971,6 +973,48 @@ export interface FleetLaneDraft {
 }
 
 /**
+ * Where this account's credential comes from, as the two answers a person actually has.
+ *
+ * `login` is the harness's own sign-in, which is what an ordinary account does. `profile` is the
+ * owner's "if no login is wanted": a named set of environment variables authenticates the account
+ * instead, with the credential itself held in this daemon's secret store and never in the profile, the
+ * generated wrapper or the fleet configuration. `docs/fleet-env-profiles.md` is the contract for the
+ * second and this module adds nothing to it.
+ *
+ * TWO ANSWERS AND NOT THREE. "No credential at all" is not an answer somebody chooses; it is what an
+ * unfinished configuration looks like, and the daemon reports it as `undeclared` rather than offering
+ * it as a choice.
+ */
+export type FleetCredentialChoice = 'login' | 'profile';
+
+/**
+ * One variable a new profile will set, and WHICH OF THE THREE SPELLINGS it means.
+ *
+ * `from` is asked rather than parsed out of what somebody typed, and that is the whole design. A single
+ * value box would let a person write `${secret:work_key}` — a near miss of the reference grammar, which
+ * matches nothing, stays a literal, and authenticates a child with the eighteen characters of the
+ * reference itself. Every failure after that names a remote service and nothing on this machine. Naming
+ * the secret in its own answer makes that unsayable.
+ *
+ * `detail` carries the one thing the chosen answer needs: the secret's name, the variable to read, or
+ * the literal text. One field for three meanings, because a person switching answers mid-thought should
+ * not lose what they typed and the three are never wanted at once.
+ */
+export interface FleetProfileVariableDraft {
+  /** A DOM identity, not fleet data: two empty rows keyed by their contents would be one row. */
+  readonly id: string;
+  readonly from: 'secret' | 'environment' | 'value';
+  readonly variable: string;
+  readonly detail: string;
+}
+
+/** A profile this change will declare, which the account it creates then composes. */
+export interface FleetProfileDraft {
+  readonly name: string;
+  readonly variables: readonly FleetProfileVariableDraft[];
+}
+
+/**
  * One provider account, and every lane this pass will create on it.
  *
  * `lanes` is a LIST because the mode question is multi-select: ticking both "interactive" and "auto"
@@ -990,6 +1034,27 @@ export interface FleetAccountDraft {
   readonly defaultModel: string;
   readonly layer: FleetLayerDraft;
   readonly prefilled: FleetPrefillNotes;
+  /**
+   * How this account gets its credential: by signing in, or from a profile.
+   *
+   * HELD IN THE DRAFT rather than beside it, unlike the instructions and account answers, and the
+   * reason is that it is not derivable EITHER WAY. `profiles` being empty is not "signing in" — it is
+   * somebody who chose a profile and has not picked one yet, which is a blocker the step owns and shows
+   * where the cards are. A field that flipped back to "signing in" whenever the last tick came off
+   * would clear that blocker by silently changing the answer.
+   */
+  readonly credential: FleetCredentialChoice;
+  /**
+   * The profiles this account's provider login composes, in the order they apply.
+   *
+   * Order is precedence, left to right, so the last one to set a variable is the one whose value the
+   * launch uses. It is the same composition `compositionSlots` has always owned and
+   * `docs/fleet-env-profiles.md` writes down — see {@link composedProfileEnv} for the projection this
+   * browser makes of it, and why a projection is honest here.
+   */
+  readonly profiles: readonly string[];
+  /** The profile this draft is WRITING, which its account also composes. `undefined` means none. */
+  readonly newProfile: FleetProfileDraft | undefined;
 }
 
 export const emptyAccountDraft = (harness: FleetHarnessKind): FleetAccountDraft => ({
@@ -1001,6 +1066,11 @@ export const emptyAccountDraft = (harness: FleetHarnessKind): FleetAccountDraft 
   defaultModel: '',
   layer: emptyLayerDraft(),
   prefilled: {},
+  // An ordinary account signs in, and a profile is opt-in. Opening on the profile answer would put a
+  // question in front of every person adding their first account that most of them do not have.
+  credential: 'login',
+  profiles: [],
+  newProfile: undefined,
 });
 
 export const draftModels = (modelsText: string): readonly string[] =>
@@ -1794,9 +1864,125 @@ export const laneProblems = (draft: FleetAccountDraft, config: FleetConfigView |
   return problems;
 };
 
-export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
+// ─── the credential: signing in, or a profile ──────────────────────────────────────────────────
+
+/** An environment variable name, in the same shape the wire schema and every shell agree on. */
+const ENV_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+/** A secret's name, which is a POSIX variable name in upper case — the shape the store enforces. */
+const SECRET_NAME = /^[A-Z][A-Z0-9_]*$/u;
+
+/** What each answer needs, and what to call the box that supplies it. */
+const VARIABLE_SOURCE_COPY: Readonly<
+  Record<FleetProfileVariableDraft['from'], { readonly label: string; readonly missing: string }>
+> = {
+  secret: { label: 'Secret in this daemon’s store', missing: 'name the secret this variable takes its value from' },
+  environment: { label: 'Read from another variable', missing: 'name the variable this one is read from' },
+  value: { label: 'A plain value, not a credential', missing: 'type the value this variable is set to' },
+};
+
+/** The label each answer's box carries, exported so a refusal and the control cannot word it twice. */
+export const profileVariableSourceLabel = (from: FleetProfileVariableDraft['from']): string =>
+  VARIABLE_SOURCE_COPY[from].label;
+
+/**
+ * Why the profile being written cannot be declared yet, or an empty list when it can.
+ *
+ * `declared` is every profile name this fleet already has. A collision is REFUSED rather than merged
+ * into, in the daemon and here for the same reason: writing over a profile other accounts compose would
+ * re-credential them from a change that says it adds an account. The sentence sends somebody to the
+ * control that does what they meant.
+ */
+export const newProfileProblems = (profile: FleetProfileDraft, declared: readonly string[]): readonly string[] => {
+  const problems: string[] = [];
+  const name = profile.name.trim();
+  if (name === '') problems.push('name this profile');
+  else if (name !== profile.name) problems.push('a profile name must not start or end with a space');
+  else if (/[/\\]/u.test(name) || name.includes('..')) {
+    problems.push('a profile name must not contain a path separator or ".."');
+  } else if (declared.includes(name)) {
+    problems.push(`this fleet already declares a profile named "${name}" — tick it above instead of writing a second`);
+  }
+  if (profile.variables.length === 0) problems.push('a profile has to set at least one variable');
+  const seen = new Set<string>();
+  for (const row of profile.variables) {
+    const variable = row.variable.trim();
+    const detail = row.detail.trim();
+    if (variable === '') problems.push('name the variable this profile sets');
+    else if (!ENV_VARIABLE.test(variable)) {
+      problems.push(`"${variable}" is not an environment variable name — letters, digits and underscores`);
+    } else if (seen.has(variable))
+      problems.push(`this profile sets "${variable}" twice; one variable carries one value`);
+    if (variable !== '') seen.add(variable);
+    if (detail === '') {
+      problems.push(VARIABLE_SOURCE_COPY[row.from].missing);
+      continue;
+    }
+    if (row.from === 'secret' && !SECRET_NAME.test(detail)) {
+      problems.push(`"${detail}" is not a secret name — uppercase letters, digits and underscores`);
+    }
+    if (row.from === 'environment' && !ENV_VARIABLE.test(detail)) {
+      problems.push(`"${detail}" is not an environment variable name — letters, digits and underscores`);
+    }
+  }
+  return problems;
+};
+
+/**
+ * Why this account's credential answer is not finished, or an empty list when it is.
+ *
+ * The second sentence is the one that matters and it is the reason this is a BLOCKER rather than a
+ * note. Somebody who chose "no login" and ticked a profile that sets only a base URL would get an
+ * account that still needs a sign-in — the exact dead end the whole surface exists to remove — so it is
+ * refused here, where the cards are, naming what would have to be true instead.
+ *
+ * A `null` catalog is "this browser has not read the profiles yet", and the two rules that need it are
+ * skipped rather than guessed: an unread catalog cannot tell a profile that authenticates from one that
+ * does not, and refusing on the strength of not knowing would block a step nobody could clear.
+ */
+export const credentialProblems = (
+  draft: FleetAccountDraft,
+  catalog: FleetProfileCatalog | null,
+): readonly string[] => {
+  if (draft.credential === 'login') return [];
+  const chosen = draftProfiles(draft);
+  const problems: string[] = [];
+  if (chosen.length === 0) {
+    problems.push('pick a profile to authenticate this account, add one, or choose signing in instead');
+  }
+  if (draft.newProfile !== undefined) {
+    problems.push(
+      ...newProfileProblems(
+        draft.newProfile,
+        (catalog?.profiles ?? []).map(profile => profile.name),
+      ),
+    );
+  }
+  if (catalog === null || chosen.length === 0) return problems;
+  const authenticating = new Set(
+    catalog.profiles.filter(profile => profile.authenticates.includes(draft.harness)).map(profile => profile.name),
+  );
+  const writes = draft.newProfile === undefined ? [] : draft.newProfile.variables.map(row => row.variable.trim());
+  const credentialVariables = catalog.credentialVariables[draft.harness];
+  const written = writes.some(variable => credentialVariables.includes(variable));
+  if (!written && !chosen.some(name => authenticating.has(name))) {
+    problems.push(
+      `none of these profiles sets a credential for ${draft.harness === 'claude' ? 'Claude' : 'Codex'} (${credentialVariables.join(' or ')}), so this account would still need a sign-in`,
+    );
+  }
+  return problems;
+};
+
+export const accountProblems = (
+  draft: FleetAccountDraft,
+  config: FleetConfigView | null,
+  catalog: FleetProfileCatalog | null = null,
+): readonly string[] => {
   const name = draft.name.trim();
-  const problems: string[] = [...accountNameProblems(draft), ...laneProblems(draft, config)];
+  const problems: string[] = [
+    ...accountNameProblems(draft),
+    ...laneProblems(draft, config),
+    ...credentialProblems(draft, catalog),
+  ];
 
   const models = draftModels(draft.modelsText);
   const defaultModel = draft.defaultModel.trim();
@@ -1905,6 +2091,46 @@ const assetEdits = (layer: FleetLayerDraft): { path: string; content: string }[]
 };
 
 /**
+ * The profiles this draft's login will compose, in the order they apply.
+ *
+ * The profile being WRITTEN comes last, and that is not an accident of concatenation: it is the one
+ * somebody is composing right now, so it is the one whose values they expect to see take effect. Every
+ * name before it is a profile this fleet already declared, in the order they were ticked.
+ *
+ * EMPTY WHEN THE ANSWER IS "SIGN IN", which is what makes the field absent from the mutation — and
+ * absent means "leave this login's profiles exactly as they are". A create that sent an empty list
+ * would REMOVE the profiles from a login somebody picked in order to add a second account to it, which
+ * is a change to accounts they never named.
+ */
+export const draftProfiles = (draft: FleetAccountDraft): readonly string[] =>
+  draft.credential === 'login'
+    ? []
+    : [
+        ...draft.profiles,
+        ...(draft.newProfile === undefined || draft.newProfile.name.trim() === ''
+          ? []
+          : [draft.newProfile.name.trim()]),
+      ];
+
+/** The rows of the profile being written, as the declaration the daemon composes an `env` map from. */
+const profileDeclarations = (draft: FleetAccountDraft): readonly FleetProfileDeclaration[] => {
+  const profile = draft.newProfile;
+  if (draft.credential === 'login' || profile === undefined) return [];
+  return [
+    {
+      name: profile.name.trim(),
+      variables: profile.variables.map(row => {
+        const variable = row.variable.trim();
+        const detail = row.detail.trim();
+        if (row.from === 'secret') return { from: 'secret' as const, variable, secret: detail };
+        if (row.from === 'environment') return { from: 'environment' as const, variable, source: detail };
+        return { from: 'value' as const, variable, value: detail };
+      }),
+    },
+  ];
+};
+
+/**
  * ONE proposal, however many lanes were ticked.
  *
  * Two requests would mean two previews, two reviews and — for a caller this host's grants govern —
@@ -1915,6 +2141,8 @@ const assetEdits = (layer: FleetLayerDraft): { path: string; content: string }[]
 export const createAccountProposal = (draft: FleetAccountDraft): FleetProposalRequest => {
   const layer = createLayer(draft.layer);
   const displayName = draft.displayName.trim();
+  const profiles = draftProfiles(draft);
+  const declareProfiles = profileDeclarations(draft);
   return {
     mutation: {
       kind: 'create-account',
@@ -1925,6 +2153,10 @@ export const createAccountProposal = (draft: FleetAccountDraft): FleetProposalRe
       defaultModel: draft.defaultModel.trim(),
       ...(displayName === '' ? {} : { displayName }),
       ...(layer === undefined ? {} : { layer }),
+      // Absent rather than empty when the answer is "sign in" — see `draftProfiles` for why the two
+      // are not interchangeable on a login this fleet already has.
+      ...(profiles.length === 0 ? {} : { profiles }),
+      ...(declareProfiles.length === 0 ? {} : { declareProfiles }),
     },
     assetEdits: assetEdits(draft.layer),
   };

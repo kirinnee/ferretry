@@ -26,7 +26,13 @@
  * Pure throughout: no React, no client, no clock.
  */
 
-import type { HarnessDiscoveryReport } from '@ferretry/protocol';
+import type {
+  FleetEnvValueShape,
+  FleetProfileCatalog,
+  FleetProfileVariable,
+  FleetProfileView,
+  HarnessDiscoveryReport,
+} from '@ferretry/protocol';
 import type { FleetConfigView, FleetManifestAccountView } from './fleet-api.ts';
 import {
   accountNameProblems,
@@ -34,13 +40,18 @@ import {
   assetPathProblem,
   BLANK_INSTRUCTIONS_CHOICE,
   canonicalAssetPath,
+  credentialProblems,
   discoveredHarness,
   draftModels,
+  draftProfiles,
   existingAccounts,
   type FleetAccountDraft,
   type FleetAccountMode,
+  type FleetCredentialChoice,
   type FleetLaneDraft,
   type FleetLayerDraft,
+  type FleetProfileDraft,
+  type FleetProfileVariableDraft,
   type FleetSettingsDraft,
   type FleetSkillDraft,
   type FleetUnreadableAsset,
@@ -58,6 +69,7 @@ import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
 export const FLEET_STEP_IDS = [
   'harness',
   'identity',
+  'credential',
   'models',
   'instructions',
   'skills',
@@ -81,6 +93,10 @@ export interface FleetStep {
 const STEP_COPY: Readonly<Record<FleetStepId, Omit<FleetStep, 'id'>>> = {
   harness: { title: 'Harness', question: 'Which agent does this account run?' },
   identity: { title: 'Account', question: 'What is this account called, and how does it run?' },
+  // "Sign-in" rather than "Credential" or "Profiles", because the question is the one the owner asked:
+  // do you want a login here or not. A title naming the mechanism would be the third step in a row
+  // teaching a word before asking a question.
+  credential: { title: 'Sign-in', question: 'How does this account sign in — or does it need to?' },
   models: { title: 'Models', question: 'Which models may this account serve?' },
   instructions: { title: 'Instructions', question: 'Which instructions does it read?' },
   skills: { title: 'Skills', question: 'Which skills does it get?' },
@@ -706,6 +722,253 @@ export const withAuthoredSkillText = (layer: FleetLayerDraft, text: string): Fle
   return authored === undefined ? layer : { ...layer, skills: [{ ...authored, text }] };
 };
 
+// ─── the credential: signing in, or a profile that composes one ────────────────────────────────
+
+/**
+ * What each answer to the sign-in question DOES, said on the card rather than after the choice.
+ *
+ * Annotated over the union so a third answer is a compile error here rather than a card with no
+ * sentence on it. The second one is the owner's "if no login is wanted", and it says where the value
+ * lives, because "no login" on its own sounds like an account with no credential at all.
+ */
+export const CREDENTIAL_CHOICE_COPY: Readonly<
+  Record<FleetCredentialChoice, { readonly label: string; readonly detail: string }>
+> = {
+  login: {
+    label: 'Sign in with the harness',
+    detail: 'The harness writes this account’s credential into its own store when somebody signs in.',
+  },
+  profile: {
+    label: 'No login — use a profile',
+    detail:
+      'A profile sets the account’s environment, and this daemon supplies the credential from its own secret store at launch. Nothing to sign in to.',
+  },
+};
+
+/**
+ * The profiles this step OFFERS, which is not every profile the fleet declares.
+ *
+ * `base` is excluded because it is not a choice: every account composes it before its own, and a tick
+ * box that could not be unticked is a control that lies about what it does. It is still SHOWN — see
+ * {@link composedProfileEnv}, which puts it first in the order — because the point of showing the order
+ * is that a person can predict which value wins.
+ */
+export const profileChoices = (catalog: FleetProfileCatalog | null): readonly FleetProfileView[] =>
+  (catalog?.profiles ?? []).filter(profile => !profile.appliesToEveryAccount);
+
+/** The one profile every account composes first, when this fleet declares one. */
+export const everyAccountProfile = (catalog: FleetProfileCatalog | null): FleetProfileView | undefined =>
+  (catalog?.profiles ?? []).find(profile => profile.appliesToEveryAccount);
+
+/**
+ * The variables one profile sets that apply to THIS harness, in the order they apply within it.
+ *
+ * A profile may set a variable flatly and again in its `claude:` / `codex:` overlay, and within one
+ * slot the overlay beats the flat field — which is the rule `docs/fleet-env-profiles.md` states and the
+ * reason the catalog carries both entries rather than choosing for a reader. The overlay entries come
+ * after the flat ones in the catalog, so "later wins" reproduces that rule without restating it.
+ */
+export const profileVariablesFor = (
+  profile: FleetProfileView,
+  harness: FleetHarnessKind,
+): readonly FleetProfileVariable[] =>
+  profile.variables.filter(entry => entry.harness === undefined || entry.harness === harness);
+
+/**
+ * What one variable's SHAPE says, in words, and never what it holds.
+ *
+ * The `literal` arm says "set by this profile" and stops. It is the one arm with nothing to name, and
+ * that is deliberate rather than an omission: most literals are harmless, some are not, and there is no
+ * rule deciding which that stays right — so the wire carries no text for it and neither does this.
+ */
+export const describeEnvShape = (shape: FleetEnvValueShape): string => {
+  if (shape.shape === 'secret') {
+    return `from this daemon’s secret store — ${shape.secrets.length === 1 ? 'secret' : 'secrets'} ${shape.secrets.join(', ')}`;
+  }
+  if (shape.shape === 'environment-reference') return `read from $${shape.variable} where the wrapper runs`;
+  return 'a plain value this profile sets';
+};
+
+/** One composed variable, the profile that supplied the value that won, and what it beat. */
+export interface ComposedEnvRow {
+  readonly variable: string;
+  readonly shape: FleetEnvValueShape;
+  /** The slot that supplied the winning value, in the words a person reads. */
+  readonly from: string;
+  /** Earlier slots that set the same variable, in the order they applied. */
+  readonly overrode: readonly string[];
+}
+
+/**
+ * WHICH VALUE WINS, for the account this draft would create.
+ *
+ * A composed value whose origin cannot be explained is worse than no composition, so this answers per
+ * variable: which slot supplied the value that won, and which slots it overrode. It never answers what
+ * any of them holds.
+ *
+ * ## It is a PROJECTION of one chain, not a second chain
+ *
+ * `compositionSlots` in the fleet package is the single owner of the precedence order, and the daemon's
+ * own `envComposition` reads it. This is the same order narrowed to the slots a NEW account has: there
+ * is no variant of its own and no agent-inline fields yet, so what remains is the base profile, then the
+ * profiles its login composes in the order they are named, then the account's own environment last.
+ * Every slot omitted here is one this draft cannot produce, which is why the narrowing is a projection
+ * rather than a disagreement.
+ *
+ * The authoritative report is still the host's: the daemon derives the candidate configuration and its
+ * secret listing names the slot that set each credential. This exists because a person picking profiles
+ * needs the answer BEFORE the round trip, not after it — and the vocabulary is deliberately the same one
+ * `describeCompositionOrigin` uses, so the two never read as two different features.
+ */
+export const composedProfileEnv = (
+  catalog: FleetProfileCatalog | null,
+  draft: FleetAccountDraft,
+): readonly ComposedEnvRow[] => {
+  const declared = new Map((catalog?.profiles ?? []).map(profile => [profile.name, profile]));
+  const base = everyAccountProfile(catalog);
+  const slots: { readonly origin: string; readonly entries: readonly FleetProfileVariable[] }[] = [
+    ...(base === undefined ? [] : [{ origin: 'the base profile', entries: profileVariablesFor(base, draft.harness) }]),
+    ...draftProfiles(draft).map(name => {
+      const profile = declared.get(name);
+      return {
+        origin: `the profile “${name}”`,
+        // A name with no profile behind it is the one this change is WRITING: its rows are the entries,
+        // and they are read from the draft rather than from a catalog that cannot know them yet.
+        entries: profile === undefined ? newProfileEntries(draft, name) : profileVariablesFor(profile, draft.harness),
+      };
+    }),
+    {
+      origin: 'this account',
+      entries: draft.layer.env
+        .filter(entry => entry.name.trim() !== '')
+        .map(entry => ({ variable: entry.name.trim(), shape: { shape: 'literal' as const } })),
+    },
+  ];
+  const contributions = new Map<string, { shape: FleetEnvValueShape; origins: string[] }>();
+  for (const slot of slots) {
+    for (const entry of slot.entries) {
+      const held = contributions.get(entry.variable);
+      if (held === undefined) contributions.set(entry.variable, { shape: entry.shape, origins: [slot.origin] });
+      else {
+        held.shape = entry.shape;
+        held.origins.push(slot.origin);
+      }
+    }
+  }
+  return [...contributions.entries()]
+    .map(
+      ([variable, { shape, origins }]): ComposedEnvRow => ({
+        variable,
+        shape,
+        // The last contributor won; everything before it was overridden, in the order it was applied.
+        from: origins[origins.length - 1] ?? 'this account',
+        overrode: origins.slice(0, -1),
+      }),
+    )
+    .sort((left, right) => (left.variable < right.variable ? -1 : left.variable > right.variable ? 1 : 0));
+};
+
+/** The rows of the profile being written, as catalog entries, so one composition reads both kinds. */
+const newProfileEntries = (draft: FleetAccountDraft, name: string): readonly FleetProfileVariable[] => {
+  const profile = draft.newProfile;
+  if (profile === undefined || profile.name.trim() !== name) return [];
+  return profile.variables
+    .filter(row => row.variable.trim() !== '')
+    .map(row => ({
+      variable: row.variable.trim(),
+      shape:
+        row.from === 'secret'
+          ? { shape: 'secret' as const, secrets: [row.detail.trim()] }
+          : row.from === 'environment'
+            ? { shape: 'environment-reference' as const, variable: row.detail.trim() }
+            : { shape: 'literal' as const },
+    }));
+};
+
+/**
+ * The profiles the picked login ALREADY composes, which this draft would replace.
+ *
+ * The fact a person has to be told before they tick anything: profiles belong to a provider login, so
+ * changing them changes every account on it. It is derived from the catalog's own membership rather than
+ * from the configuration, because the catalog is what knows which accounts compose which profile — and
+ * joined on the wrapper names the identity step already reads.
+ */
+export const profilesAlreadyBound = (
+  catalog: FleetProfileCatalog | null,
+  draft: FleetAccountDraft,
+  config: FleetConfigView | null,
+): readonly string[] => {
+  const held = existingAccounts(draft.harness, config).find(account => account.name === draft.name.trim());
+  if (held === undefined) return [];
+  const wrappers = new Set(held.taken.map(entry => entry.wrapper));
+  return profileChoices(catalog)
+    .filter(profile => profile.accounts.some(wrapper => wrappers.has(wrapper)))
+    .map(profile => profile.name);
+};
+
+/** Add or remove one profile from the order, keeping every other tick exactly where it was. */
+export const toggleProfile = (draft: FleetAccountDraft, name: string): FleetAccountDraft => ({
+  ...draft,
+  profiles: draft.profiles.includes(name)
+    ? draft.profiles.filter(profile => profile !== name)
+    : // Appended rather than inserted: the order is the precedence, so a newly ticked profile beats the
+      // ones already there, which is what somebody ticking it is asking for.
+      [...draft.profiles, name],
+});
+
+/**
+ * A new profile, seeded with the variable that would actually authenticate this harness.
+ *
+ * The seed is the HOST's list — `credentialVariables`, which is `HARNESS_CREDENTIAL_ENV` as the daemon
+ * declares it — rather than a name this module knows. A browser that hard-coded `ANTHROPIC_API_KEY`
+ * would be a second copy of that table, and the way a second copy fails is by seeding a form whose
+ * result the host does not consider a credential at all.
+ *
+ * The `id` is passed in because it is a DOM identity a component mints, and this module holds no
+ * randomness.
+ */
+export const newProfileDraft = (
+  draft: FleetAccountDraft,
+  catalog: FleetProfileCatalog | null,
+  id: string,
+): FleetProfileDraft => {
+  const variable = catalog?.credentialVariables[draft.harness][0];
+  return {
+    name: '',
+    variables: [{ id, from: 'secret', variable: variable ?? '', detail: '' }],
+  };
+};
+
+/** The draft carrying this profile, or none at all. `undefined` is how the writing is abandoned. */
+export const withNewProfile = (
+  draft: FleetAccountDraft,
+  profile: FleetProfileDraft | undefined,
+): FleetAccountDraft => ({
+  ...draft,
+  newProfile: profile,
+});
+
+/** One row of the profile being written, replaced in place. Nothing to write means nothing changes. */
+export const withProfileVariable = (
+  profile: FleetProfileDraft,
+  id: string,
+  change: Partial<Omit<FleetProfileVariableDraft, 'id'>>,
+): FleetProfileDraft => ({
+  ...profile,
+  variables: profile.variables.map(row => (row.id === id ? { ...row, ...change } : row)),
+});
+
+/** The profile with one more empty row, or one fewer. A profile with no rows is a blocker, not a state. */
+export const withProfileVariableAdded = (profile: FleetProfileDraft, id: string): FleetProfileDraft => ({
+  ...profile,
+  variables: [...profile.variables, { id, from: 'value', variable: '', detail: '' }],
+});
+
+export const withProfileVariableRemoved = (profile: FleetProfileDraft, id: string): FleetProfileDraft => ({
+  ...profile,
+  variables: profile.variables.filter(row => row.id !== id),
+});
+
 // ─── settings: several apply, and you can see the order ────────────────────────────────────────
 
 /**
@@ -1091,11 +1354,15 @@ export const unreadSettings = (layer: FleetLayerDraft, harness: FleetHarnessKind
  * for a reason no earlier step would show.
  */
 const ownedProblems: Readonly<
-  Record<FleetStepId, (draft: FleetAccountDraft, config: FleetConfigView | null) => readonly string[]>
+  Record<
+    FleetStepId,
+    (draft: FleetAccountDraft, config: FleetConfigView | null, catalog: FleetProfileCatalog | null) => readonly string[]
+  >
 > = {
   // Nothing about the harness can be wrong: it is a closed choice with a preselected answer.
   harness: () => [],
   identity: (draft, config) => identityProblems(draft, config),
+  credential: (draft, _config, catalog) => credentialProblems(draft, catalog),
   models: draft => modelProblems(draft),
   instructions: draft => instructionsProblems(draft),
   skills: draft => skillsProblems(draft),
@@ -1184,12 +1451,20 @@ const settingsProblems = (draft: FleetAccountDraft): readonly string[] => {
   );
 };
 
-/** The blockers this one step owns, in the order the draft produced them. */
+/**
+ * The blockers this one step owns, in the order the draft produced them.
+ *
+ * The catalog is optional and `null` means "not read yet", which is a state the surface really is in
+ * for one frame. It is threaded rather than looked up because this module is pure: see
+ * {@link credentialProblems} for the two rules it changes and why not knowing is skipped rather than
+ * guessed at.
+ */
 export const stepProblems = (
   step: FleetStepId,
   draft: FleetAccountDraft,
   config: FleetConfigView | null,
-): readonly string[] => ownedProblems[step](draft, config);
+  catalog: FleetProfileCatalog | null = null,
+): readonly string[] => ownedProblems[step](draft, config, catalog);
 
 /**
  * Every step's problems, unioned.
@@ -1197,12 +1472,18 @@ export const stepProblems = (
  * Exported so a test can assert it equals {@link accountProblems} for any draft: that assertion is
  * what makes the partition a partition rather than six lists that happen to look right today.
  */
-export const ALL_STEP_PROBLEMS = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] =>
-  FLEET_STEP_IDS.flatMap(step => stepProblems(step, draft, config));
+export const ALL_STEP_PROBLEMS = (
+  draft: FleetAccountDraft,
+  config: FleetConfigView | null,
+  catalog: FleetProfileCatalog | null = null,
+): readonly string[] => FLEET_STEP_IDS.flatMap(step => stepProblems(step, draft, config, catalog));
 
 /** Whether the whole draft is composable. The recap's own gate, and the surface's. */
-export const draftIsComplete = (draft: FleetAccountDraft, config: FleetConfigView | null): boolean =>
-  accountProblems(draft, config).length === 0;
+export const draftIsComplete = (
+  draft: FleetAccountDraft,
+  config: FleetConfigView | null,
+  catalog: FleetProfileCatalog | null = null,
+): boolean => accountProblems(draft, config, catalog).length === 0;
 
 /**
  * The step an asset-read blocker belongs on: the one whose field names that path.
@@ -1228,4 +1509,5 @@ export const mayAdvance = (
   draft: FleetAccountDraft,
   config: FleetConfigView | null,
   assetProblems: readonly string[] = [],
-): boolean => stepProblems(step, draft, config).length === 0 && assetProblems.length === 0;
+  catalog: FleetProfileCatalog | null = null,
+): boolean => stepProblems(step, draft, config, catalog).length === 0 && assetProblems.length === 0;

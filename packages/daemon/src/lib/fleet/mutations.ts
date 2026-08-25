@@ -12,6 +12,7 @@
  * configuration schema before it can be previewed.
  */
 import {
+  declaredProfileEnv,
   derivedWrapperName,
   type FleetConfig,
   FleetConfigSchema,
@@ -185,11 +186,78 @@ function assertLanesAddable(
 }
 
 /**
+ * The profiles a create DECLARES, folded into the configuration before anything names them.
+ *
+ * A name this fleet already declares is REFUSED rather than merged into, and the refusal is the point
+ * of the function. Merging would rewrite a document every account naming that profile composes — so a
+ * change whose one-line summary says it adds an account would silently re-credential accounts nobody
+ * mentioned. The remedy is in the sentence: pick the profile that is already there.
+ *
+ * `declaredProfileEnv` composes the env map, so `${secret:NAME}` has exactly one producer and a
+ * caller cannot spell a near miss of the reference grammar.
+ */
+function withDeclaredProfiles(
+  config: FleetConfig,
+  mutation: Extract<FleetMutation, { kind: 'create-account' }>,
+): FleetConfig {
+  const declarations = mutation.declareProfiles ?? [];
+  if (declarations.length === 0) return config;
+  const profiles: Record<string, unknown> = { ...config.profiles };
+  const declared = new Set<string>();
+  for (const declaration of declarations) {
+    const name = SafeNameSchema.parse(declaration.name);
+    if (config.profiles[name] !== undefined) {
+      throw new FleetMutationRefusal(
+        `this fleet already declares a profile named "${name}"; name the existing one instead of declaring a second`,
+      );
+    }
+    if (declared.has(name)) {
+      throw new FleetMutationRefusal(`this change declares the profile "${name}" twice; one name is one profile`);
+    }
+    declared.add(name);
+    profiles[name] = { env: declaredProfileEnv(declaration) };
+  }
+  return { ...config, profiles } as FleetConfig;
+}
+
+/**
+ * The profiles list a created account's login composes, refused before it can become a schema error.
+ *
+ * The configuration schema already cross-checks an unknown profile name, but its message names a path
+ * in a document the caller never wrote. This names the profile and says what to do, which is the
+ * difference between a person fixing their own typo and a person reading `agents.0.profiles.1`.
+ */
+function assertProfilesDeclared(config: FleetConfig, profiles: readonly string[]): void {
+  const seen = new Set<string>();
+  for (const name of profiles) {
+    if (config.profiles[name] === undefined) {
+      throw new FleetMutationRefusal(
+        `this fleet declares no profile named "${name}"; declare it with this change, or name one it has`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new FleetMutationRefusal(
+        `this change names the profile "${name}" twice; a profile applies once, wherever it sits in the order`,
+      );
+    }
+    seen.add(name);
+  }
+}
+
+/**
  * One provider account, one route per named lane, derived in a single pass.
  *
  * ONE AGENT AND NOT N. The lanes are two homes for one provider login, which is what makes ticking
  * both modes worth doing at all: signing in once makes both usable. Two agents would be two logins
  * for one account.
+ *
+ * The profiles a create names are the AGENT's, because `AccountRoute` has no `profiles` field and
+ * inventing one would be a new slot in a precedence chain that has exactly one owner. So both lanes of
+ * one create compose the same profiles — the same property that makes one sign-in reach both — and a
+ * create naming a login this fleet already has REPLACES that login's list, which changes what every
+ * account on it composes. That is a real consequence of a real request rather than a mistake to be
+ * guarded against: the surface says so before it is sent, and the plan the operator approves shows the
+ * accounts it changes.
  */
 function createAccount(
   config: FleetConfig,
@@ -200,12 +268,19 @@ function createAccount(
   // configuration schema applies rather than only to the wire schema's "non-empty".
   const name = SafeNameSchema.parse(mutation.name);
   assertServable(mutation);
+  // Declared first, so a list naming a profile this same change adds is an ordinary list rather than
+  // an unknown name — which is what makes "add one and use it" a single reviewed change.
+  const declared = withDeclaredProfiles(config, mutation);
+  if (mutation.profiles !== undefined) assertProfilesDeclared(declared, mutation.profiles);
+  // An absent list leaves a login's profiles alone; an empty one is a declared "none", which is how a
+  // login stops composing one. `undefined` and `[]` are therefore not interchangeable here.
+  const bound = mutation.profiles === undefined ? {} : { profiles: [...mutation.profiles] };
 
-  const agents = config.agents as unknown as Record<string, unknown>[];
+  const agents = declared.agents as unknown as Record<string, unknown>[];
   const index = agents.findIndex(agent => agent.name === name && agent.kind === mutation.harness);
   const agent = index < 0 ? undefined : (agents[index] as { routes: Record<string, unknown> });
   const lanes = lanesOf(mutation);
-  assertLanesAddable(config, name, lanes, agent?.routes ?? {});
+  assertLanesAddable(declared, name, lanes, agent?.routes ?? {});
 
   const added = Object.fromEntries(
     lanes.map(lane => {
@@ -215,10 +290,10 @@ function createAccount(
   );
 
   if (agent === undefined) {
-    return { ...config, agents: [...agents, { name, kind: mutation.harness, routes: added }] };
+    return { ...declared, agents: [...agents, { name, kind: mutation.harness, ...bound, routes: added }] };
   }
-  const next = { ...agent, routes: { ...agent.routes, ...added } };
-  return { ...config, agents: agents.map((existing, at) => (at === index ? next : existing)) };
+  const next = { ...agent, ...bound, routes: { ...agent.routes, ...added } };
+  return { ...declared, agents: agents.map((existing, at) => (at === index ? next : existing)) };
 }
 
 /**

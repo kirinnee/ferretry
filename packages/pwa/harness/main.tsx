@@ -18,6 +18,7 @@ import type {
   DaemonCapability,
   DoctorReport,
   FleetLoginReadiness,
+  FleetProfileCatalog,
   GrantRefusal,
   GrantsView,
   HarnessDiscoveryReport,
@@ -760,6 +761,52 @@ const HARNESS_FLEET_STORE_DOCUMENTS: readonly string[] = [
   'instructions/CLAUDE-house-rules.md',
   'instructions/CLAUDE-studio.md',
 ];
+
+/**
+ * Three declared profiles: the base one every account composes, one that authenticates, one that does not.
+ *
+ * NO REAL CREDENTIAL AND NO PLACE TO PUT ONE. Every entry is a SHAPE — the secret's name, the variable
+ * an `$NAME` reads, or a literal with no text at all — because that is the whole wire contract, and a
+ * fixture that carried a value would be a fixture of something this product cannot produce.
+ *
+ * `gateway` sets only a base URL on purpose: it is the case that makes the sign-in step's blocker
+ * visible, because an account authenticated by it would still need a login.
+ */
+const HARNESS_FLEET_PROFILES: FleetProfileCatalog = {
+  profiles: [
+    {
+      name: 'base',
+      appliesToEveryAccount: true,
+      variables: [{ variable: 'FY_FLEET', shape: { shape: 'literal' } }],
+      accounts: ['claude-studio', 'claude-auto-studio'],
+      authenticates: [],
+    },
+    {
+      name: 'work',
+      appliesToEveryAccount: false,
+      variables: [
+        { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } },
+        { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
+      ],
+      accounts: ['claude-studio'],
+      authenticates: ['claude'],
+    },
+    {
+      name: 'gateway',
+      appliesToEveryAccount: false,
+      variables: [
+        { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
+        { variable: 'HTTPS_PROXY', shape: { shape: 'environment-reference', variable: 'HOUSE_PROXY' } },
+      ],
+      accounts: [],
+      authenticates: [],
+    },
+  ],
+  credentialVariables: {
+    claude: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    codex: ['OPENAI_API_KEY'],
+  },
+};
 
 /** Two store directories, one of them linked by two accounts and one linked by nothing yet. */
 const HARNESS_FLEET_SKILLS_STORE: readonly FleetSkillsStoreItem[] = [
@@ -5600,6 +5647,7 @@ function Shell() {
                     skillsStore={HARNESS_FLEET_SKILLS_STORE}
                     storeDocuments={HARNESS_FLEET_STORE_DOCUMENTS}
                     assetBlockers={[]}
+                    profiles={HARNESS_FLEET_PROFILES}
                   />
                 </div>
               ))}
@@ -7436,6 +7484,7 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
                 skillsStore={HARNESS_FLEET_SKILLS_STORE}
                 storeDocuments={HARNESS_FLEET_STORE_DOCUMENTS}
                 assetBlockers={[]}
+                profiles={HARNESS_FLEET_PROFILES}
               />
             </div>
           ))}

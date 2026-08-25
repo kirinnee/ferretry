@@ -40,6 +40,7 @@
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';
 import { OperatorPasswordSchema } from './grants.ts';
+import { SecretNameSchema } from './secrets.ts';
 
 const AccountIdSchema = z.uuid();
 const HarnessKindSchema = z.enum(['claude', 'codex']);
@@ -92,9 +93,21 @@ export const HarnessLoginUserCodeSchema = z
  * `undeclared` is the fail-closed member: the account authenticates with a key and its configuration
  * says nowhere the key comes from. It is not `interactive-login` (which would offer a login for an
  * API-key account) and not `environment` (which would name a variable nobody declared).
+ *
+ * `secret-store` is the "no login wanted" answer and it is NOT `environment`, which is what it used to
+ * be narrowed to. Both are true of a profiled account — the daemon does put the value into the
+ * environment the wrapper is launched with — but they send a reader to two different places: one to a
+ * variable they are supposed to set themselves, the other to `fy secret set` and Ferretry's own store.
+ * It carries the secret NAMES because a person whose account cannot start needs to know which secret
+ * is missing, and a name is not a value: no schema in this package has anywhere to put one.
  */
 export const FleetCredentialSourceSchema = z.discriminatedUnion('source', [
   z.strictObject({ source: z.literal('interactive-login') }),
+  z.strictObject({
+    source: z.literal('secret-store'),
+    variable: NonEmptyStringSchema,
+    secrets: z.array(SecretNameSchema).min(1).readonly(),
+  }),
   z.strictObject({
     source: z.literal('token-file'),
     variable: NonEmptyStringSchema,

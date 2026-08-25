@@ -107,6 +107,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     config: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    profiles: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     environment: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -443,10 +446,10 @@ describe('the mounted daemon surface', () => {
     // a census of today's table — but a table that used it exactly once, for a mechanism the
     // capability model already answered, is worth reading as evidence rather than as trivia.
     // 129 fleet-and-session routes, plus the five that drive a harness sign-in, plus the one free
-    // account-health re-check. Written as a sum so that two changes landing together cannot silently
+    // account-health re-check, plus the profile catalog the account stepper reads. Written as a sum so that two changes landing together cannot silently
     // agree on one total — two independent `+ 1` edits produce the same number and git merges them
     // without a conflict, which is exactly how a route can go missing with this test green.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 + 5 + 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 + 5 + 1 + 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -493,6 +496,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/accounts',
       'GET /v1/fleet/harnesses',
       'GET /v1/fleet/config',
+      // Shapes, never values: the profiles a fleet declares, for the step that offers one.
+      'GET /v1/fleet/profiles',
       'GET /v1/fleet/environment',
       'PUT /v1/fleet/environment',
       'GET /v1/fleet/plan',

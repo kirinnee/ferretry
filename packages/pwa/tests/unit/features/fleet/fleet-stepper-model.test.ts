@@ -6,6 +6,7 @@ import {
   emptyLayerDraft,
   type FleetAccountDraft,
   type FleetLayerDraft,
+  type FleetProfileVariableDraft,
   INSTRUCTIONS_PREFIX,
   instructionsMiddleOf,
   instructionsPathFor,
@@ -14,9 +15,12 @@ import {
   ALL_STEP_PROBLEMS,
   assetProblemStep,
   authoredSkill,
+  composedProfileEnv,
   customModelProblem,
   DEFAULT_LANE,
+  describeEnvShape,
   draftIsComplete,
+  everyAccountProfile,
   FLEET_STEP_IDS,
   FLEET_STEPS,
   instructionsChoiceFor,
@@ -25,48 +29,57 @@ import {
   laneForMode,
   mayAdvance,
   modelOptions,
+  newProfileDraft,
   newSkillProblem,
   nextStep,
   openingInstructionsSource,
-  PICK_OR_ADD_LABEL,
   otherLanes,
+  PICK_OR_ADD_LABEL,
   previousStep,
-  selectedModels,
   authoredSettings,
   inlineSettings,
   newSettingsProblem,
+  profileChoices,
+  profilesAlreadyBound,
+  profileVariablesFor,
+  SKILL_DOCUMENT,
+  SKILLS_PREFIX,
+  selectedModels,
+  selectedModes,
   settingsFormatNote,
   settingsOrigins,
   settingsPathFor,
   settingsPaths,
   settingsStoreItems,
-  unreadSettings,
-  SKILL_DOCUMENT,
   skillsSelection,
-  SKILLS_PREFIX,
   skillsStoreItems,
   stepCopy,
   stepIndex,
   stepProblems,
+  toggleMode,
   toggleModel,
+  toggleProfile,
+  unreadSettings,
   unverifiedModels,
   withAuthoredSkillText,
   withInstructionsMiddle,
-  withNewSkill,
-  selectedModes,
-  toggleMode,
   withLaneVariant,
-  withModes,
   withModels,
   withInlineSettings,
+  withModes,
+  withNewProfile,
   withNewSettings,
+  withNewSkill,
   withoutSettings,
+  withProfileVariable,
+  withProfileVariableAdded,
+  withProfileVariableRemoved,
   withSettingsMoved,
   withSettingsText,
-  withStoreSettings,
   withSkillsSelection,
+  withStoreSettings,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
-import { absentCodex, account, config, discovery, harness } from './fleet-support.ts';
+import { absentCodex, account, config, discovery, harness, profileCatalog } from './fleet-support.ts';
 
 /** A draft with nothing outstanding, so a test can put back exactly the one thing it is about. */
 const complete = (overrides: Partial<FleetAccountDraft> = {}): FleetAccountDraft => ({
@@ -98,8 +111,9 @@ describe('the sequence', () => {
     expect(nextStep('review')).toBe('review');
     expect(previousStep('harness')).toBe('harness');
     expect(nextStep('harness')).toBe('identity');
-    expect(previousStep('models')).toBe('identity');
-    expect(stepIndex('models')).toBe(2);
+    expect(nextStep('identity')).toBe('credential');
+    expect(previousStep('models')).toBe('credential');
+    expect(stepIndex('models')).toBe(3);
   });
 });
 
@@ -766,5 +780,359 @@ describe('the harness that answers nothing', () => {
     expect(modelOptions('codex', discovery([harness(), absentCodex()]), []).map(option => option.id)).toEqual([
       'gpt-5.6',
     ]);
+  });
+});
+
+/** A draft that has chosen a profile rather than a sign-in, which is what the profile rules read. */
+const profiled = (overrides: Partial<FleetAccountDraft> = {}): FleetAccountDraft =>
+  complete({ credential: 'profile', ...overrides });
+
+const profileRow = (
+  overrides: Partial<FleetProfileVariableDraft> = {},
+): FleetProfileVariableDraft & Record<string, unknown> => ({
+  id: 'row-one',
+  from: 'secret',
+  variable: 'ANTHROPIC_API_KEY',
+  detail: 'WORK_KEY',
+  ...overrides,
+});
+
+describe('profileChoices and everyAccountProfile', () => {
+  it('should offer every profile except the one every account already composes', () => {
+    // Arrange — `base` is not a choice. A tick box that could not be unticked is a control that lies
+    // about what it does, so it is reported separately and shown in the ORDER rather than offered.
+    const catalog = profileCatalog();
+
+    // Act & Assert
+    expect(profileChoices(catalog).map(profile => profile.name)).toEqual(['gateway', 'work']);
+    expect(everyAccountProfile(catalog)?.name).toBe('base');
+  });
+
+  it('should offer nothing at all before this browser has read the catalog', () => {
+    expect(profileChoices(null)).toEqual([]);
+    expect(everyAccountProfile(null)).toBeUndefined();
+  });
+});
+
+describe('profileVariablesFor', () => {
+  it('should keep a flat variable and the overlay for THIS harness, in the order they apply', () => {
+    // Arrange — within one slot the overlay beats the flat field, and the catalog puts overlay entries
+    // after flat ones. So "later wins" reproduces the rule without this module restating it.
+    const profile = {
+      name: 'work',
+      appliesToEveryAccount: false,
+      accounts: [],
+      authenticates: [] as const,
+      variables: [
+        { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret' as const, secrets: ['SHARED'] } },
+        {
+          variable: 'ANTHROPIC_API_KEY',
+          shape: { shape: 'secret' as const, secrets: ['CLAUDE'] },
+          harness: 'claude' as const,
+        },
+        {
+          variable: 'OPENAI_API_KEY',
+          shape: { shape: 'secret' as const, secrets: ['CODEX'] },
+          harness: 'codex' as const,
+        },
+      ],
+    };
+
+    // Act & Assert — the other harness's overlay is absent rather than last, so it cannot win here.
+    expect(profileVariablesFor(profile, 'claude').map(entry => entry.shape)).toEqual([
+      { shape: 'secret', secrets: ['SHARED'] },
+      { shape: 'secret', secrets: ['CLAUDE'] },
+    ]);
+    expect(profileVariablesFor(profile, 'codex').map(entry => entry.variable)).toEqual([
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+    ]);
+  });
+});
+
+describe('describeEnvShape', () => {
+  it('should name the secrets a variable takes its value from, so somebody knows what to set', () => {
+    expect(describeEnvShape({ shape: 'secret', secrets: ['WORK_KEY'] })).toContain('secret WORK_KEY');
+    expect(describeEnvShape({ shape: 'secret', secrets: ['SCHEME', 'WORK_KEY'] })).toContain(
+      'secrets SCHEME, WORK_KEY',
+    );
+  });
+
+  it('should name the variable an environment reference is read from', () => {
+    expect(describeEnvShape({ shape: 'environment-reference', variable: 'OUTER_PROXY' })).toContain('$OUTER_PROXY');
+  });
+
+  it('should say a literal is set and stop, because there is no rule for which literals are safe', () => {
+    // Most literals are harmless, some are not, and no rule deciding which stays right — so the wire
+    // carries no text for one and this sentence has none to say.
+    const copy = describeEnvShape({ shape: 'literal' });
+
+    expect(copy).toBe('a plain value this profile sets');
+  });
+});
+
+describe('composedProfileEnv', () => {
+  it('should say which slot supplied each value and which slots it beat, in the daemon’s own words', () => {
+    // Arrange — `base` sets a URL, `work` sets the key and the same URL, and the account sets the URL
+    // again. So one variable is contested by all three and the account is last.
+    const catalog = profileCatalog({
+      profiles: [
+        {
+          name: 'base',
+          appliesToEveryAccount: true,
+          variables: [{ variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } }],
+          accounts: [],
+          authenticates: [],
+        },
+        {
+          name: 'work',
+          appliesToEveryAccount: false,
+          variables: [
+            { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } },
+            { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
+          ],
+          accounts: [],
+          authenticates: ['claude'],
+        },
+      ],
+    });
+    const draft = profiled({
+      profiles: ['work'],
+      layer: layerWith({ env: [{ id: 'one', name: 'ANTHROPIC_BASE_URL', value: 'https://mine.invalid' }] }),
+    });
+
+    // Act
+    const actual = composedProfileEnv(catalog, draft);
+
+    // Assert — sorted by variable, and `overrode` is in the order the slots applied.
+    expect(actual).toEqual([
+      {
+        variable: 'ANTHROPIC_API_KEY',
+        shape: { shape: 'secret', secrets: ['WORK_KEY'] },
+        from: 'the profile “work”',
+        overrode: [],
+      },
+      {
+        variable: 'ANTHROPIC_BASE_URL',
+        shape: { shape: 'literal' },
+        from: 'this account',
+        overrode: ['the base profile', 'the profile “work”'],
+      },
+    ]);
+  });
+
+  it('should apply ticked profiles in the order they were ticked, because the order is the precedence', () => {
+    // Arrange — both set the same variable, and only the order decides which value a launch uses.
+    const catalog = profileCatalog({
+      profiles: [
+        {
+          name: 'first',
+          appliesToEveryAccount: false,
+          variables: [{ variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['FIRST'] } }],
+          accounts: [],
+          authenticates: ['claude'],
+        },
+        {
+          name: 'second',
+          appliesToEveryAccount: false,
+          variables: [{ variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['SECOND'] } }],
+          accounts: [],
+          authenticates: ['claude'],
+        },
+      ],
+    });
+
+    // Act
+    const forward = composedProfileEnv(catalog, profiled({ profiles: ['first', 'second'] }));
+    const reversed = composedProfileEnv(catalog, profiled({ profiles: ['second', 'first'] }));
+
+    // Assert
+    expect(forward[0]).toMatchObject({ shape: { shape: 'secret', secrets: ['SECOND'] }, from: 'the profile “second”' });
+    expect(reversed[0]).toMatchObject({ shape: { shape: 'secret', secrets: ['FIRST'] }, from: 'the profile “first”' });
+  });
+
+  it('should read the rows of the profile being WRITTEN from the draft, because no catalog knows them', () => {
+    // Arrange — a name with no profile behind it is the one this change is declaring, and it comes last
+    // in the order: it is the one somebody is composing right now.
+    const draft = profiled({
+      newProfile: {
+        name: 'mine',
+        variables: [
+          profileRow({ id: 'a', from: 'secret', variable: 'ANTHROPIC_API_KEY', detail: 'NEW_KEY' }),
+          profileRow({ id: 'b', from: 'environment', variable: 'HTTPS_PROXY', detail: 'OUTER_PROXY' }),
+          profileRow({ id: 'c', from: 'value', variable: 'ANTHROPIC_BASE_URL', detail: 'https://gateway.invalid' }),
+          // A row nobody has named yet contributes nothing rather than an empty variable.
+          profileRow({ id: 'd', from: 'value', variable: '   ', detail: 'stray' }),
+        ],
+      },
+    });
+
+    // Act
+    const actual = composedProfileEnv(profileCatalog({ profiles: [] }), draft);
+
+    // Assert
+    expect(actual).toEqual([
+      {
+        variable: 'ANTHROPIC_API_KEY',
+        shape: { shape: 'secret', secrets: ['NEW_KEY'] },
+        from: 'the profile “mine”',
+        overrode: [],
+      },
+      {
+        variable: 'ANTHROPIC_BASE_URL',
+        shape: { shape: 'literal' },
+        from: 'the profile “mine”',
+        overrode: [],
+      },
+      {
+        variable: 'HTTPS_PROXY',
+        shape: { shape: 'environment-reference', variable: 'OUTER_PROXY' },
+        from: 'the profile “mine”',
+        overrode: [],
+      },
+    ]);
+  });
+
+  it('should contribute nothing for a name that is neither declared nor the one being written', () => {
+    // Arrange — the ticked name belongs to no catalog entry and the authored profile is called
+    // something else, so there are no rows to read and inventing one would be a value nobody set.
+    const draft = profiled({
+      profiles: ['ghost'],
+      newProfile: { name: 'mine', variables: [profileRow({ variable: 'ANTHROPIC_API_KEY', detail: 'NEW_KEY' })] },
+    });
+
+    // Act
+    const actual = composedProfileEnv(profileCatalog({ profiles: [] }), draft);
+
+    // Assert — only the authored profile's own row, under its own name.
+    expect(actual.map(row => `${row.variable} ${row.from}`)).toEqual(['ANTHROPIC_API_KEY the profile “mine”']);
+  });
+
+  it('should still show the base profile for a draft that signs in, and none of its ticks', () => {
+    // Arrange — `base` is composed by every account whether it signs in or not, so hiding it would be
+    // showing a composition with its first slot missing. The ticks are a different matter: `profiles`
+    // holds what somebody chose before switching back to signing in, and `draftProfiles` answers
+    // empty for a login — so the profile they had ticked composes nothing.
+    const draft = complete({ profiles: ['work'] });
+
+    // Act
+    const actual = composedProfileEnv(profileCatalog(), draft);
+
+    // Assert
+    expect(actual).toEqual([
+      { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' }, from: 'the base profile', overrode: [] },
+    ]);
+  });
+
+  it('should show the base profile even before a browser has read anything else', () => {
+    // Arrange — an unread catalog cannot name a slot, so the account's own environment is all there is.
+    const draft = profiled({ layer: layerWith({ env: [{ id: 'one', name: 'A_KEY', value: 'x' }] }) });
+
+    // Act & Assert
+    expect(composedProfileEnv(null, draft)).toEqual([
+      { variable: 'A_KEY', shape: { shape: 'literal' }, from: 'this account', overrode: [] },
+    ]);
+  });
+});
+
+describe('profilesAlreadyBound', () => {
+  it('should name the profiles the picked login already composes, so a tick’s reach is known first', () => {
+    // Arrange — profiles belong to a provider LOGIN, so what somebody ticks here applies to every
+    // account on it. `claude-studio` is the wrapper the fixture's login publishes.
+    const draft = profiled({ name: 'studio' });
+
+    // Act
+    const actual = profilesAlreadyBound(profileCatalog(), draft, config());
+
+    // Assert — `base` is absent: it is composed by every account and is not something a tick reaches.
+    expect(actual).toEqual(['work']);
+  });
+
+  it('should name nothing for a login this fleet does not have yet', () => {
+    expect(profilesAlreadyBound(profileCatalog(), profiled({ name: 'brand-new' }), config())).toEqual([]);
+  });
+
+  it('should name nothing when the configuration could not be read', () => {
+    expect(profilesAlreadyBound(profileCatalog(), profiled({ name: 'studio' }), null)).toEqual([]);
+  });
+});
+
+describe('toggleProfile', () => {
+  it('should append a newly ticked profile, because a person ticking one wants it to win', () => {
+    // Arrange & Act
+    const actual = toggleProfile(profiled({ profiles: ['first'] }), 'second');
+
+    // Assert — appended rather than inserted: the order IS the precedence.
+    expect(actual.profiles).toEqual(['first', 'second']);
+  });
+
+  it('should remove a ticked profile and leave every other tick exactly where it was', () => {
+    // Act
+    const actual = toggleProfile(profiled({ profiles: ['first', 'second', 'third'] }), 'second');
+
+    // Assert
+    expect(actual.profiles).toEqual(['first', 'third']);
+  });
+});
+
+describe('newProfileDraft', () => {
+  it('should seed the row with the HOST’s credential variable for this harness', () => {
+    // Arrange — the seed is `credentialVariables` travelling from the daemon. A browser hard-coding
+    // ANTHROPIC_API_KEY would be a second copy of that table, and a second copy seeds a form whose
+    // result the host does not consider a credential at all.
+    const catalog = profileCatalog();
+
+    // Act
+    const claude = newProfileDraft(profiled(), catalog, 'row-id');
+    const codex = newProfileDraft(profiled({ harness: 'codex' }), catalog, 'row-id');
+
+    // Assert
+    expect(claude.variables).toEqual([{ id: 'row-id', from: 'secret', variable: 'ANTHROPIC_API_KEY', detail: '' }]);
+    expect(codex.variables[0]?.variable).toBe('OPENAI_API_KEY');
+    expect(claude.name).toBe('');
+  });
+
+  it('should leave the variable box empty rather than guess one before the catalog is read', () => {
+    expect(newProfileDraft(profiled(), null, 'row-id').variables[0]?.variable).toBe('');
+  });
+});
+
+describe('the profile being written', () => {
+  it('should carry it on the draft, and abandon it when there is none', () => {
+    // Arrange
+    const profile = { name: 'mine', variables: [profileRow()] };
+
+    // Act & Assert — `undefined` is how the writing is abandoned, which is a different answer from a
+    // profile with no rows: that one is a blocker somebody can still fix.
+    expect(withNewProfile(profiled(), profile).newProfile).toEqual(profile);
+    expect(withNewProfile(profiled({ newProfile: profile }), undefined).newProfile).toBeUndefined();
+  });
+
+  it('should replace one row in place and leave the others untouched', () => {
+    // Arrange
+    const profile = { name: 'mine', variables: [profileRow({ id: 'a' }), profileRow({ id: 'b', detail: 'B_KEY' })] };
+
+    // Act
+    const actual = withProfileVariable(profile, 'b', { from: 'value', detail: 'https://gateway.invalid' });
+
+    // Assert — the id is a DOM identity and is never rewritten, or the row would lose its focus.
+    expect(actual.variables).toEqual([
+      { id: 'a', from: 'secret', variable: 'ANTHROPIC_API_KEY', detail: 'WORK_KEY' },
+      { id: 'b', from: 'value', variable: 'ANTHROPIC_API_KEY', detail: 'https://gateway.invalid' },
+    ]);
+  });
+
+  it('should add an empty row as a plain value, and remove the row it is asked for', () => {
+    // Arrange — a new row is `value` rather than `secret`: the seeded first row is the credential, and
+    // a second row is usually the base URL beside it.
+    const profile = { name: 'mine', variables: [profileRow({ id: 'a' })] };
+
+    // Act
+    const added = withProfileVariableAdded(profile, 'b');
+    const removed = withProfileVariableRemoved(added, 'a');
+
+    // Assert
+    expect(added.variables[1]).toEqual({ id: 'b', from: 'value', variable: '', detail: '' });
+    expect(removed.variables.map(row => row.id)).toEqual(['b']);
   });
 });
