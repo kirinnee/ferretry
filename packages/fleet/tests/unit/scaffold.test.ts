@@ -422,11 +422,15 @@ describe('the starter configuration', () => {
     // `# ` stripped, which is what uncommenting it in place amounts to. A YAML block sequence accepts
     // a further item after the comments, so this is the text a person would end up with.
     const starter = starterFor(['claude']).files.find(file => file.path === '/state/fleet/config.yaml')?.content ?? '';
+    const example = uncommentedExample(starter);
 
     // Act
-    const parsed = FleetConfigSchema.safeParse(Bun.YAML.parse(`${starter}\n${uncommentedExample(starter)}\n`));
+    const parsed = FleetConfigSchema.safeParse(Bun.YAML.parse(`${starter}\n${example}\n`));
 
-    // Assert
+    // Assert — the uncommenting is asserted to have FOUND something first. `uncommentedExample` matches
+    // on the template's exact indentation, so a re-indented example block would make it yield nothing,
+    // and this test would then re-parse the unchanged starter and pass while proving nothing at all.
+    should(example).not.be.empty();
     should(parsed.error?.issues ?? []).be.empty();
     should(parsed.success).be.true();
   });
