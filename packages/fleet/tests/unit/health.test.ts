@@ -513,8 +513,8 @@ describe('healthSnapshotFromObservations', () => {
         conclusive: true,
         responseFingerprint: {
           status: 200,
-          contentType: 'application/json',
-          headerNames: ['content-type'],
+          contentType: 'application/json' as const,
+          headerNames: ['content-type' as const],
           bodyLength: 2,
           bodySha256: 'c'.repeat(64),
           json: { type: 'object' as const, fields: [] },

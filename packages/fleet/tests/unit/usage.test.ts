@@ -14,6 +14,7 @@ import {
   normalizeResetAt,
   normalizeUsageWindows,
   type ProviderResponseFingerprint,
+  ProviderResponseFingerprintSchema,
   renderFleetUsageJson,
   renderFleetUsageMetrics,
   usedPercentFromRemaining,
@@ -292,6 +293,30 @@ describe('fleet usage normalization', () => {
     should(parseProbe).throw();
     should(parseSnapshot).throw();
   });
+
+  it('keeps provider-controlled response text outside the public fingerprint schema', () => {
+    // Arrange — persistence validates this schema, so accepting one arbitrary value here would give
+    // an edge response a durable free-text channel despite the producer's own categorization.
+    const fingerprint = {
+      status: 401,
+      contentType: 'application/json',
+      headerNames: ['content-type'],
+      bodyLength: 2,
+      bodySha256: 'a'.repeat(64),
+      json: { type: 'object', fields: [{ path: 'error.type', type: 'string' }] },
+    };
+    const parse =
+      (patch: Record<string, unknown>): (() => unknown) =>
+      () =>
+        ProviderResponseFingerprintSchema.parse({ ...fingerprint, ...patch });
+
+    // Act / Assert
+    should(parse({ contentType: 'application/opaque-secret' })).throw();
+    should(parse({ headerNames: ['x-opaque-secret'] })).throw();
+    should(parse({ headers: { server: 'opaque-secret' } })).throw();
+    should(parse({ json: { type: 'object', fields: [{ path: 'opaque-secret', type: 'string' }] } })).throw();
+    should(parse({ json: { type: 'object', fields: [], errorCode: 'opaque-secret' } })).throw();
+  });
 });
 
 describe('FleetUsageCollector probing once per credential', () => {
@@ -324,8 +349,8 @@ describe('FleetUsageCollector probing once per credential', () => {
     const responseFingerprint: ProviderResponseFingerprint = {
       status: 401,
       contentType: 'application/json',
-      headerNames: ['content-type', 'request-id'],
-      headers: { requestId: 'request-123' },
+      headerNames: ['content-type', 'request-id', 'server'],
+      headers: { server: 'cloudflare' },
       bodyLength: 73,
       bodySha256: 'a'.repeat(64),
       json: {

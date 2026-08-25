@@ -54,8 +54,12 @@ import {
   type FleetUsageProbe,
   type FleetUsageProbeResult,
   type ProviderAuthenticationShape,
+  type ProviderResponseCode,
+  ProviderResponseCodeSchema,
+  type ProviderResponseContentType,
   type ProviderResponseFingerprint,
   ProviderResponseFingerprintSchema,
+  ProviderResponseHeaderNameSchema,
   type ProviderResponseHeaderValues,
   type ProviderResponseJsonField,
   type ProviderResponseJsonShape,
@@ -73,8 +77,19 @@ const FORBIDDEN_STATUS = 403;
 export const MAX_RESPONSE_BODY_BYTES = 64 * 1024;
 const MAX_HEADER_NAMES = 128;
 const MAX_JSON_FIELDS = 64;
-const MAX_DIAGNOSTIC_TEXT = 256;
 const REDACTED = '[redacted]';
+
+const RETAINED_JSON_KEYS = new Set([
+  'code',
+  'error',
+  'error_code',
+  'five_hour',
+  'message',
+  'resets_at',
+  'seven_day',
+  'type',
+  'utilization',
+]);
 
 const withoutControlCharacters = (value: string): string =>
   [...value].map(character => (character < ' ' || character === '\u007f' ? ' ' : character)).join('');
@@ -205,15 +220,7 @@ function scrubDiagnosticValue(value: string | null | undefined, secrets: readonl
     )
     .trim();
   scrubbed = withoutControlCharacters(scrubbed).trim();
-  return scrubbed.length === 0 ? undefined : scrubbed.slice(0, MAX_DIAGNOSTIC_TEXT);
-}
-
-/** Key paths carry names, never values; only exact credential bytes and control characters are removed. */
-function scrubDiagnosticPath(value: string, secrets: readonly string[]): string {
-  let scrubbed = value;
-  for (const secret of secrets) if (secret.length > 0) scrubbed = scrubbed.replaceAll(secret, REDACTED);
-  scrubbed = withoutControlCharacters(scrubbed).trim();
-  return (scrubbed.length === 0 ? REDACTED : scrubbed).slice(0, MAX_DIAGNOSTIC_TEXT);
+  return scrubbed.length === 0 ? undefined : scrubbed.slice(0, 256);
 }
 
 function authenticationShape(
@@ -222,37 +229,60 @@ function authenticationShape(
 ): ProviderAuthenticationShape | undefined {
   const scrubbed = scrubDiagnosticValue(value, secrets);
   if (scrubbed === undefined) return undefined;
-  const scheme = /^[A-Za-z][A-Za-z0-9+.-]*/u.exec(scrubbed)?.[0]?.toLowerCase();
-  if (scheme === undefined) return undefined;
-  const errorCode = /\berror\s*=\s*"?([A-Za-z0-9._:-]+)/iu.exec(scrubbed)?.[1];
-  return { scheme, ...(errorCode === undefined ? {} : { errorCode: errorCode.slice(0, MAX_DIAGNOSTIC_TEXT) }) };
+  const rawScheme = /^[A-Za-z][A-Za-z0-9+.-]*/u.exec(scrubbed)?.[0]?.toLowerCase();
+  if (rawScheme === undefined) return undefined;
+  const scheme = rawScheme === 'bearer' ? 'bearer' : 'other';
+  const rawErrorCode = /\berror\s*=\s*"?([A-Za-z0-9._:-]+)/iu.exec(scrubbed)?.[1]?.toLowerCase();
+  const errorCode =
+    rawErrorCode === undefined
+      ? undefined
+      : rawErrorCode === 'insufficient_scope' || rawErrorCode === 'invalid_request' || rawErrorCode === 'invalid_token'
+        ? rawErrorCode
+        : 'other';
+  return { scheme, ...(errorCode === undefined ? {} : { errorCode }) };
 }
 
 function responseHeaderValues(
   response: QuotaResponse,
   secrets: readonly string[],
 ): ProviderResponseHeaderValues | undefined {
-  const value = (name: string): string | undefined => scrubDiagnosticValue(response.header(name), secrets);
+  const value = (name: string): string | undefined =>
+    scrubDiagnosticValue(response.header(name), secrets)?.toLowerCase();
+  const cfMitigated = value('cf-mitigated');
+  const retryAfter = value('retry-after');
+  const retryAfterMs = value('retry-after-ms');
+  const server = value('server');
+  const retryAfterShape =
+    retryAfter === undefined
+      ? undefined
+      : /^\d+$/u.test(retryAfter)
+        ? 'seconds'
+        : Number.isFinite(Date.parse(retryAfter))
+          ? 'http-date'
+          : 'other';
   const headers: ProviderResponseHeaderValues = {
-    ...(value('anthropic-request-id') === undefined ? {} : { anthropicRequestId: value('anthropic-request-id') }),
-    ...(value('cf-mitigated') === undefined ? {} : { cfMitigated: value('cf-mitigated') }),
-    ...(value('cf-ray') === undefined ? {} : { cfRay: value('cf-ray') }),
-    ...(value('request-id') === undefined ? {} : { requestId: value('request-id') }),
-    ...(value('retry-after') === undefined ? {} : { retryAfter: value('retry-after') }),
-    ...(value('retry-after-ms') === undefined ? {} : { retryAfterMs: value('retry-after-ms') }),
-    ...(value('server') === undefined ? {} : { server: value('server') }),
+    ...(cfMitigated === undefined ? {} : { cfMitigated: cfMitigated === 'challenge' ? 'challenge' : 'other' }),
+    ...(retryAfterShape === undefined ? {} : { retryAfter: retryAfterShape }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs: /^\d+$/u.test(retryAfterMs) ? 'milliseconds' : 'other' }),
+    ...(server === undefined
+      ? {}
+      : { server: server.includes('cloudflare') ? 'cloudflare' : server.includes('envoy') ? 'envoy' : 'other' }),
     ...(authenticationShape(response.header('www-authenticate'), secrets) === undefined
       ? {}
       : { wwwAuthenticate: authenticationShape(response.header('www-authenticate'), secrets) }),
-    ...(value('x-request-id') === undefined ? {} : { xRequestId: value('x-request-id') }),
   };
   return Object.keys(headers).length === 0 ? undefined : headers;
 }
 
-function jsonFields(
-  value: unknown,
-  secrets: readonly string[],
-): {
+function diagnosticJsonKey(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (/(?:access|refresh)?[_-]?token|api[_-]?key|authorization|credential|secret/u.test(normalized)) {
+    return 'credential';
+  }
+  return RETAINED_JSON_KEYS.has(normalized) ? normalized : 'other';
+}
+
+function jsonFields(value: unknown): {
   readonly fields: readonly ProviderResponseJsonField[];
   readonly truncated: boolean;
 } {
@@ -266,7 +296,8 @@ function jsonFields(
         truncated = true;
         return;
       }
-      const path = scrubDiagnosticPath(prefix.length === 0 ? key : `${prefix}.${key}`, secrets);
+      const safeKey = diagnosticJsonKey(key);
+      const path = prefix.length === 0 ? safeKey : `${prefix}.${safeKey}`;
       const child = record[key];
       fields.push({ path, type: jsonType(child) });
       if (depth < 1) visit(child, path, depth + 1);
@@ -277,21 +308,21 @@ function jsonFields(
   return { fields, truncated };
 }
 
-function codeLike(value: unknown, secrets: readonly string[]): string | undefined {
+function codeLike(value: unknown): ProviderResponseCode | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-  const scrubbed = scrubDiagnosticValue(String(value), secrets);
-  if (scrubbed === undefined || !/^[A-Za-z0-9._:[\]-]+$/u.test(scrubbed)) return undefined;
-  return scrubbed;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized.length === 0) return undefined;
+  const retained = ProviderResponseCodeSchema.safeParse(normalized);
+  return retained.success ? retained.data : 'other';
 }
 
-function jsonShape(value: unknown, secrets: readonly string[]): ProviderResponseJsonShape {
-  const { fields, truncated } = jsonFields(value, secrets);
+function jsonShape(value: unknown): ProviderResponseJsonShape {
+  const { fields, truncated } = jsonFields(value);
   const root = asRecord(value);
   const error = asRecord(root?.error);
-  const nestedType = codeLike(error?.type, secrets);
-  const rootType = codeLike(root?.type, secrets);
-  const errorCode =
-    codeLike(error?.code, secrets) ?? codeLike(root?.error_code, secrets) ?? codeLike(root?.code, secrets);
+  const nestedType = codeLike(error?.type);
+  const rootType = codeLike(root?.type);
+  const errorCode = codeLike(error?.code) ?? codeLike(root?.error_code) ?? codeLike(root?.code);
   return {
     type: jsonType(value),
     fields: [...fields],
@@ -300,6 +331,17 @@ function jsonShape(value: unknown, secrets: readonly string[]): ProviderResponse
     ...(nestedType === undefined ? {} : { errorType: nestedType }),
     ...(errorCode === undefined ? {} : { errorCode }),
   };
+}
+
+function contentTypeShape(value: string | null | undefined): ProviderResponseContentType | undefined {
+  const mediaType = value?.split(';', 1)[0]?.trim().toLowerCase();
+  if (mediaType === undefined || mediaType.length === 0) return undefined;
+  if (mediaType === 'application/json') return 'application/json';
+  if (mediaType.startsWith('application/') && mediaType.endsWith('+json')) return 'application/*+json';
+  if (mediaType === 'application/octet-stream') return 'application/octet-stream';
+  if (mediaType === 'text/html') return 'text/html';
+  if (mediaType === 'text/plain') return 'text/plain';
+  return 'other';
 }
 
 interface InspectedQuotaResponse {
@@ -334,24 +376,24 @@ async function inspectResponse(response: QuotaResponse, secrets: readonly string
   }
 
   const normalizedSecrets = secrets.map(secret => secret.toLowerCase()).filter(secret => secret.length > 0);
-  const normalizedNames = [...new Set(response.headerNames.map(name => name.trim().toLowerCase()))]
+  const rawNames = [...new Set(response.headerNames.map(name => name.trim().toLowerCase()))]
     .filter(name => /^[!#$%&'*+\-.^_`|~0-9a-z]+$/u.test(name))
-    .filter(name => !normalizedSecrets.some(secret => name.includes(secret)))
-    .sort();
-  const contentType = scrubDiagnosticValue(response.header('content-type')?.split(';', 1)[0], secrets)?.toLowerCase();
+    .filter(name => !normalizedSecrets.some(secret => name.includes(secret)));
+  const normalizedNames = [
+    ...new Set(rawNames.map(name => (ProviderResponseHeaderNameSchema.safeParse(name).success ? name : 'other'))),
+  ].sort();
+  const contentType = contentTypeShape(response.header('content-type'));
   const headers = responseHeaderValues(response, secrets);
   const fingerprint = ProviderResponseFingerprintSchema.parse({
     status: response.status,
-    ...(contentType === undefined || contentType.length === 0
-      ? {}
-      : { contentType: contentType.slice(0, MAX_DIAGNOSTIC_TEXT) }),
+    ...(contentType === undefined ? {} : { contentType }),
     headerNames: normalizedNames.slice(0, MAX_HEADER_NAMES),
-    ...(normalizedNames.length > MAX_HEADER_NAMES ? { headerNamesTruncated: true } : {}),
+    ...(rawNames.length > MAX_HEADER_NAMES ? { headerNamesTruncated: true } : {}),
     ...(headers === undefined ? {} : { headers }),
     bodyLength: bytes.byteLength,
     bodySha256: createHash('sha256').update(bytes).digest('hex'),
     ...(bodyTruncated ? { bodyTruncated: true as const } : {}),
-    ...(parsedJson ? { json: jsonShape(parsed, secrets) } : {}),
+    ...(parsedJson ? { json: jsonShape(parsed) } : {}),
   });
   return { fingerprint, ...(parsedJson ? { json: parsed } : {}) };
 }

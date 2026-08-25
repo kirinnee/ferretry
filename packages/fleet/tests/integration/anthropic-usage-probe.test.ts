@@ -148,12 +148,14 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
         headers: {
           authorization: `Bearer ${TOKEN}`,
           'cf-ray': 'edge-ray-123',
-          'content-type': 'application/json; charset=utf-8',
-          'request-id': 'request-123',
+          'content-type': 'application/not-a-secret-id',
+          'request-id': 'session=other-user-secret',
           'retry-after': '60',
+          server: 'other-user-secret',
           'set-cookie': 'session=must-never-be-stored',
           'www-authenticate': 'Bearer error="invalid_token", error_description="do not persist this message"',
-          'x-request-id': TOKEN,
+          'x-request-id': 'session=other-user-secret',
+          'x-other-user-secret': 'present',
           [TOKEN]: 'a secret may not survive as a header name either',
         },
         body: {
@@ -161,9 +163,10 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
           access_token: 'must-never-be-stored',
           error: {
             type: 'authentication_error',
-            code: 'invalid_token',
+            code: 'other-user-secret',
             message: `Bearer ${TOKEN} was rejected`,
           },
+          'opaque-7f3a91': true,
         },
       },
     });
@@ -183,37 +186,38 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const { bodyLength, bodySha256, ...shape } = fingerprint ?? {};
     should(shape).deepEqual({
       status: 401,
-      contentType: 'application/json',
+      contentType: 'other',
       headerNames: [
         'authorization',
         'cf-ray',
         'content-type',
+        'other',
         'request-id',
         'retry-after',
+        'server',
         'set-cookie',
         'www-authenticate',
         'x-request-id',
       ],
       headers: {
-        cfRay: 'edge-ray-123',
-        requestId: 'request-123',
-        retryAfter: '60',
+        retryAfter: 'seconds',
+        server: 'other',
         wwwAuthenticate: { scheme: 'bearer', errorCode: 'invalid_token' },
-        xRequestId: '[redacted]',
       },
       json: {
         type: 'object',
         fields: [
-          { path: 'access_token', type: 'string' },
+          { path: 'credential', type: 'string' },
           { path: 'error', type: 'object' },
           { path: 'error.code', type: 'string' },
           { path: 'error.message', type: 'string' },
           { path: 'error.type', type: 'string' },
+          { path: 'other', type: 'boolean' },
           { path: 'type', type: 'string' },
         ],
         envelopeType: 'error',
         errorType: 'authentication_error',
-        errorCode: 'invalid_token',
+        errorCode: 'other',
       },
     });
     should(bodyLength).be.a.Number().and.be.above(0);
@@ -224,6 +228,8 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     should(serialized).not.containEql(TOKEN);
     should(serialized).not.containEql('must-never-be-stored');
     should(serialized).not.containEql('do not persist this message');
+    should(serialized).not.containEql('other-user-secret');
+    should(serialized).not.containEql('opaque-7f3a91');
   });
 
   it('should cap oversized body evidence and never trust a truncated JSON shape', async () => {
@@ -425,6 +431,26 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
       headers: { cfMitigated: 'challenge' },
     });
     should(fingerprint).not.have.property('json');
+  });
+
+  it('should not trust a non-application structured suffix as provider JSON', async () => {
+    // Arrange — RFC 6839 structured suffixes can appear outside application media types. An edge or
+    // proxy response such as text/html+json is not the provider JSON contract, even when its body
+    // happens to copy the exact error envelope that confirms a scope-limited credential.
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'text/html+json' },
+        body: { type: 'error', error: { type: 'permission_error' } },
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.credentialSignal).equal('inconclusive');
+    should(actual.responseFingerprint).containDeep({ status: 403, contentType: 'other' });
   });
 
   it('should not mistake an Anthropic-shaped authentication 403 for a scope failure', async () => {
