@@ -35,6 +35,7 @@ import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
 import { type LocalNetworkAccess, readLocalNetworkAccess } from '../../lib/local-network-access.ts';
+import { daemonAccountsPath } from '../../lib/pages/routes.ts';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import { unlockGrants } from '../settings/grants-api.ts';
 import { FleetAccountStepper } from './fleet-account-stepper.tsx';
@@ -105,9 +106,10 @@ import {
   FleetUnreachableNotice,
 } from './fleet-change-review.tsx';
 import {
-  type FleetInstructionsSource,
+  type FleetPickOrAddSource,
   type FleetStepId,
   instructionsChoiceFor,
+  openingAccountSource,
   openingInstructionsSource,
   selectedModes,
   skillsStoreItems,
@@ -136,7 +138,15 @@ type FleetComposeMode =
        * HELD rather than re-derived from the draft's path: naming a new document the store already has
        * would otherwise silently become "point at that one" instead of refusing the collision.
        */
-      readonly instructionsSource: FleetInstructionsSource;
+      readonly instructionsSource: FleetPickOrAddSource;
+      /**
+       * Which of the two answers the account step is on.
+       *
+       * HELD for the same reason, and the hazard is sharper: both answers produce a NAME, so nothing in
+       * the draft tells them apart. Deriving it would hide the box mid-keystroke the moment somebody
+       * typed a login this fleet already has.
+       */
+      readonly accountSource: FleetPickOrAddSource;
       /**
        * A new account writes asset text too, so it needs the same knowledge an edit does. Nothing is ever
        * READ here — a new account has no declared layer to load — so `loaded` stays empty and every
@@ -390,6 +400,15 @@ export interface FleetConfigurationSurfaceProps {
    * from being made would be a worse defect than the wrong sentence it exists to replace.
    */
   readonly readLocalNetwork?: () => Promise<LocalNetworkAccess>;
+  /**
+   * How this panel hands a route change to the router, or `undefined` when nobody wired one.
+   *
+   * The account step links out to the accounts page, and `RouteLink` cancels the browser's own
+   * navigation — so without this the link would be inert. Optional rather than required because this
+   * surface is mounted from a settings-tab seam that carries only a connection: a caller that supplies
+   * no navigator gets a link that goes nowhere rather than a panel that will not compile.
+   */
+  readonly onNavigate?: (to: string) => void;
 }
 
 export function FleetConfigurationSurface({
@@ -398,6 +417,7 @@ export function FleetConfigurationSurface({
   now = Date.now,
   pageScheme = window.location.protocol,
   readLocalNetwork = readLocalNetworkAccess,
+  onNavigate,
 }: FleetConfigurationSurfaceProps) {
   // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
   // four. Module-global ids there left three sections labelled by another daemon's heading and put four
@@ -835,6 +855,9 @@ export function FleetConfigurationSurface({
         draft: withModes(detected, selectedModes(detected), variants),
         step: 'harness',
         instructionsSource: openingInstructionsSource(detected),
+        // ASK FIRST: a fleet that already has a login of this harness opens the account step on the
+        // list of them, and only a fleet with none opens on a name box.
+        accountSource: openingAccountSource(detected.harness, session.config),
         unreadable: [],
         assets: { listed: [], loaded: [] },
         loading: client !== null,
@@ -872,7 +895,7 @@ export function FleetConfigurationSurface({
   const chooseInstructions = (
     create: Extract<FleetComposeMode, { readonly kind: 'create' }>,
     value: string,
-    source: FleetInstructionsSource = create.instructionsSource,
+    source: FleetPickOrAddSource = create.instructionsSource,
   ): void => {
     const chosen = applyInstructionsChoice(create.draft, value, session.discovery);
     const path = chosen.load;
@@ -1129,6 +1152,21 @@ export function FleetConfigurationSurface({
                   source,
                 )
               }
+              accountSource={mode.accountSource}
+              // Switching to "add a new one" CLEARS the name, because the name currently in the draft is
+              // the login they picked. Leaving it would put somebody else's account name in a box
+              // labelled "name the new account" and quietly merge into it.
+              onAccountSource={accountSource =>
+                patch(generation, {
+                  mode: {
+                    ...mode,
+                    accountSource,
+                    draft: accountSource === 'new' ? { ...mode.draft, name: '' } : mode.draft,
+                  },
+                })
+              }
+              accountsHref={daemonAccountsPath(connection.daemonId)}
+              {...(onNavigate === undefined ? {} : { onNavigate })}
               // Every edit goes through ONE reconciliation: the field they touched stops claiming to be
               // detected, a harness change refills what the old harness was speaking for, and the
               // derived document name keeps up with the account until they name their own.
@@ -1250,12 +1288,16 @@ export function FleetConfigurationSurface({
  * Exported as a definition rather than mounted here, because the tab list lives in `App.tsx` and this
  * unit does not own that file. One line there mounts exactly this.
  */
-export const fleetSettingsTab = (createClient: FleetClientFactory) =>
+export const fleetSettingsTab = (createClient: FleetClientFactory, navigate?: (to: string) => void) =>
   ({
     id: 'fleet',
     label: 'Fleet',
     description: 'Accounts on this daemon host, and the exact change any edit would make.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <FleetConfigurationSurface connection={connection} createClient={createClient} />
+      <FleetConfigurationSurface
+        connection={connection}
+        createClient={createClient}
+        {...(navigate === undefined ? {} : { onNavigate: navigate })}
+      />
     ),
   }) as const;

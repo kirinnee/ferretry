@@ -35,16 +35,20 @@ import {
   Plus,
   Sparkles,
   TriangleAlert,
+  Users,
   Wand2,
   Wrench,
 } from 'lucide-react';
 import { useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
+import { RouteLink } from '../../shell/route-link.tsx';
+import { HARNESS_SHARING } from './accounts-model.ts';
 import type { FleetConfigView, FleetManifestAccountView } from './fleet-api.ts';
 import { FleetProblems } from './fleet-change-forms.tsx';
 import {
   derivedWrapper,
+  existingAccounts,
   type FleetAccountDraft,
   type FleetAccountMode,
   type FleetHarnessDetection,
@@ -56,14 +60,15 @@ import {
   INSTRUCTIONS_PREFIX,
   unreadableAssetProblems,
 } from './fleet-change-model.ts';
-import { FleetCheckChoice, type FleetChoice, FleetChoiceGroup } from './fleet-choice-group.tsx';
+import { FleetCheckChoice, type FleetChoice, FleetChoiceGroup, FleetPickOrAdd } from './fleet-choice-group.tsx';
 import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
 import {
   assetProblemStep,
   customModelProblem,
+  FLEET_ACCOUNT_MODES,
   FLEET_STEPS,
   type FleetInstructionsControl,
-  type FleetInstructionsSource,
+  type FleetPickOrAddSource,
   type FleetSettingsChoice,
   type FleetSkillsStoreItem,
   type FleetStepId,
@@ -101,10 +106,16 @@ const SECTION = 'px-panel py-3';
 /**
  * What each mode is called where a person reads it, rather than where a schema does.
  *
- * Annotated over the modes so a third one would be a compile error here rather than a control with a
- * blank label beside it.
+ * ONE table for all three of its jobs — the tick-card's title, the word that goes inside a sentence,
+ * and what choosing it does — because they are one fact about one mode. Annotated over the modes so a
+ * third one would be a compile error here rather than a control with a blank label beside it.
  */
-const MODE_LABEL: Readonly<Record<FleetAccountMode, string>> = { interactive: 'interactive', auto: 'auto' };
+const MODE_CARD: Readonly<
+  Record<FleetAccountMode, { readonly label: string; readonly word: string; readonly detail: string }>
+> = {
+  interactive: { label: 'Interactive', word: 'interactive', detail: 'You drive it. Sessions wait for you.' },
+  auto: { label: 'Auto', word: 'auto', detail: 'It runs unattended, without waiting for a person.' },
+};
 
 /** The provenance line a prefilled field carries, so a filled box is never mistaken for a typed one. */
 function PrefillNote({ field, notes }: { readonly field: FleetPrefilledField; readonly notes: FleetPrefillNotes }) {
@@ -278,8 +289,21 @@ export interface FleetAccountStepperProps {
   readonly detection: FleetHarnessDetection;
   readonly instructions: FleetInstructionsControl;
   /** Which of the three answers the instructions step is on, held by the surface beside the draft. */
-  readonly instructionsSource: FleetInstructionsSource;
-  readonly onInstructionsSource: (next: FleetInstructionsSource) => void;
+  readonly instructionsSource: FleetPickOrAddSource;
+  readonly onInstructionsSource: (next: FleetPickOrAddSource) => void;
+  /**
+   * Whether the account step is picking an existing login or adding one, held for the SAME reason.
+   *
+   * The two answers are indistinguishable in the draft — both produce a name, and the daemon merges on
+   * the name whichever way it got there — so it cannot be re-derived. Deriving it would flip the answer
+   * to "use that one" the moment somebody typed a name the fleet already has, hiding the box they are
+   * typing into mid-keystroke; an answer a person gave is a fact about them, so it is kept.
+   */
+  readonly accountSource: FleetPickOrAddSource;
+  readonly onAccountSource: (next: FleetPickOrAddSource) => void;
+  /** Where the accounts page is, as a pathname the router built. Never a literal. */
+  readonly accountsHref: string;
+  readonly onNavigate?: (to: string) => void;
   /** Lanes this fleet declares. An account can only be added to one that exists. */
   readonly variants: readonly string[];
   readonly config: FleetConfigView | null;
@@ -307,6 +331,10 @@ export function FleetAccountStepper({
   instructions,
   instructionsSource,
   onInstructionsSource,
+  accountSource,
+  onAccountSource,
+  accountsHref,
+  onNavigate,
   variants,
   config,
   discovery,
@@ -371,7 +399,17 @@ export function FleetAccountStepper({
           <HarnessStep draft={draft} onChange={onChange} disabled={disabled} detection={detection} />
         ) : null}
         {step === 'identity' ? (
-          <IdentityStep draft={draft} onChange={onChange} disabled={disabled} variants={variants} />
+          <IdentityStep
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+            variants={variants}
+            config={config}
+            source={accountSource}
+            onSource={onAccountSource}
+            accountsHref={accountsHref}
+            {...(onNavigate === undefined ? {} : { onNavigate })}
+          />
         ) : null}
         {step === 'models' ? (
           <ModelsStep
@@ -488,38 +526,168 @@ function HarnessStep({
   );
 }
 
+/**
+ * Which provider login this signs in as — picked from the ones this fleet has, or a new one.
+ *
+ * THE FREE-TEXT BOX WAS THE WHOLE GAP. Every other question on this screen was already a set of cards
+ * over what exists; this one asked a person to retype the name of a login they already had, and got
+ * nothing right that a picker gets right for free:
+ *
+ * - **It never checked.** The daemon merges a create into an agent with the same name and harness and
+ *   refuses a slot that login already holds (`daemon/src/lib/fleet/mutations.ts`), and the browser
+ *   compared nothing — so a typed name plus a mode that account already had walked all seven steps to
+ *   a refusal knowable here. {@link laneProblems} now says it, and the cards below grey out the mode
+ *   that earned it.
+ * - **It hid the reason to reuse one.** One provider login serving several accounts is the reason
+ *   ticking both modes exists at all, and a box asking for a name says nothing about it.
+ * - **It could not say what the harnesses differ on.** {@link HARNESS_SHARING} already words that, and
+ *   it is shown exactly where somebody is about to pick an existing Codex login for a second account.
+ *
+ * The link out is the OTHER half of the owner's rule — "an option to jump to the entity type" — and it
+ * is deliberately not the add-new path. The accounts page signs an account in and says what its
+ * provider last answered; it cannot mint a provider login, and its own "Add account" control links
+ * back to this panel. So adding one is inline, and the link is for managing what is already there.
+ */
 function IdentityStep({
   draft,
   onChange,
   disabled,
   variants,
+  config,
+  source,
+  onSource,
+  accountsHref,
+  onNavigate,
 }: {
   readonly draft: FleetAccountDraft;
   readonly onChange: (next: FleetAccountDraft) => void;
   readonly disabled: boolean;
   readonly variants: readonly string[];
+  readonly config: FleetConfigView | null;
+  readonly source: FleetPickOrAddSource;
+  readonly onSource: (next: FleetPickOrAddSource) => void;
+  readonly accountsHref: string;
+  readonly onNavigate?: (to: string) => void;
 }) {
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
   const spare = otherLanes(variants);
-  return (
-    <div className={cn(SECTION, 'grid gap-3')}>
-      <div>
-        <label className={FIELD_LABEL} htmlFor={id('-name')}>
-          Provider account name
-        </label>
-        <input
-          id={id('-name')}
-          className="kt-input font-mono"
-          value={draft.name}
-          disabled={disabled}
-          placeholder="studio"
-          onChange={event => onChange({ ...draft, name: event.target.value })}
-        />
-        <p className="m-0 mt-1 text-meta text-muted">
-          The account you sign in as. It becomes part of the wrapper name.
+  const existing = existingAccounts(draft.harness, config);
+  const held = existing.find(account => account.name === draft.name.trim());
+  /**
+   * The slot one mode would land in — the one it ALREADY holds where it is ticked, and the derived one
+   * where it is not.
+   *
+   * Both cases are real. A person who moved the interactive account into this fleet's own `review` slot
+   * and is now looking at the auto card must be told about `review`'s occupant, not about the slot the
+   * mode would have derived; and an unticked card has no lane of its own to read.
+   */
+  const slotFor = (mode: FleetAccountMode): string =>
+    draft.lanes.find(lane => lane.mode === mode)?.variant ?? laneForMode(mode, variants);
+  const occupant = (mode: FleetAccountMode): string | undefined =>
+    held?.taken.find(entry => entry.variant === slotFor(mode))?.wrapper;
+
+  const nameBox = (
+    <div>
+      <label className={FIELD_LABEL} htmlFor={id('-account-name')}>
+        {existing.length === 0 ? 'Provider account name' : 'Name the new account'}
+      </label>
+      <input
+        id={id('-account-name')}
+        className="kt-input font-mono"
+        value={draft.name}
+        disabled={disabled}
+        placeholder="studio"
+        onChange={event => onChange({ ...draft, name: event.target.value })}
+      />
+      {/* A name that is ALREADY a login on this fleet is not refused — the daemon merges into it, and
+          that is a useful thing to do. It is simply not what "add a new one" says, so the note says
+          which of the two this would actually be rather than letting somebody find out from the recap. */}
+      <p className="m-0 mt-1 text-meta leading-base text-muted" data-fleet-account-name-note="">
+        {held === undefined
+          ? 'The account you sign in as. It becomes part of the wrapper name.'
+          : `“${held.name}” is already on this fleet — this would add to that sign-in rather than making a new one.`}
+      </p>
+    </div>
+  );
+
+  const picker = (
+    <div className="grid min-w-0 gap-2">
+      {/* WHAT ONE SIGN-IN REACHES, per harness, in the words the accounts page already uses. This is
+          the one place somebody is about to pick an existing Codex login for a second account, which
+          is the case the two sentences exist to warn about. Read rather than reworded: a third set of
+          words for a fact the fleet already states is how two screens come to disagree. */}
+      <div
+        className="flex min-w-0 items-start gap-2 rounded-control bg-surface-2 p-3"
+        data-fleet-account-sharing={draft.harness}
+      >
+        <Users size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+        <p className="m-0 min-w-0 break-words text-meta leading-base text-muted">
+          <span className="font-semibold text-fg">{HARNESS_SHARING[draft.harness].headline}</span>{' '}
+          {HARNESS_SHARING[draft.harness].detail}
         </p>
       </div>
+      <FleetChoiceGroup
+        legend="Which one?"
+        name="account"
+        columns={1}
+        value={draft.name.trim()}
+        disabled={disabled}
+        onChoose={name => onChange({ ...draft, name })}
+        options={existing.map(account => ({
+          id: account.name,
+          label: account.name,
+          detail:
+            account.taken.length === 0
+              ? 'Declared on this fleet with nothing running on it yet.'
+              : `Already runs ${account.taken.map(entry => entry.wrapper).join(', ')}.`,
+        }))}
+      />
+    </div>
+  );
+
+  return (
+    <div className={cn(SECTION, 'grid gap-3')}>
+      {existing.length === 0 ? (
+        <>
+          <p className="m-0 text-meta leading-base text-muted" data-fleet-account-none={draft.harness}>
+            This fleet has no {fleetHarnessLabel(draft.harness)} account yet, so this is the first one.
+          </p>
+          {nameBox}
+        </>
+      ) : (
+        <FleetPickOrAdd
+          legend="Which account does this sign in as?"
+          name="account"
+          value={source}
+          disabled={disabled}
+          onChoose={onSource}
+          answers={[
+            {
+              id: 'existing',
+              detail: `${String(existing.length)} on this fleet. ${HARNESS_SHARING[draft.harness].headline}`,
+            },
+            { id: 'new', detail: 'A login this fleet does not have yet, named below and created with this account.' },
+          ]}
+          under={{ existing: picker, new: nameBox }}
+        />
+      )}
+
+      {/* THE JUMP, and what it costs. A draft lives in this panel, so leaving for the accounts page
+          discards it — a link that did not say so would be the one control on the screen that loses
+          somebody's answers without warning. */}
+      <p className="m-0 text-meta leading-base text-muted">
+        <RouteLink
+          to={accountsHref}
+          {...(onNavigate === undefined ? {} : { onNavigate })}
+          className="text-accent underline"
+          data-fleet-accounts-link=""
+        >
+          Accounts
+        </RouteLink>{' '}
+        is where these are signed in and where what each provider last said is shown. Opening it leaves this draft
+        behind.
+      </p>
 
       <div>
         <label className={FIELD_LABEL} htmlFor={id('-display-name')}>
@@ -538,15 +706,29 @@ function IdentityStep({
       {/* ONE control where there used to be two, and now a MULTI-SELECT where there used to be one.
           `lane` and `mode` are still not the same field — the comment on `laneForMode` says what each
           one really is — but "both" is an ordinary answer, and it used to mean walking the whole
-          sequence twice and retyping every other answer. Each ticked mode derives its own lane. */}
+          sequence twice and retyping every other answer. Each ticked mode derives its own lane.
+
+          A card whose slot the picked login ALREADY holds says so and is not offered, because the
+          daemon would refuse it. Not offered only while it is UNTICKED, though: disabling a ticked one
+          would leave somebody unable to untick their way out of a blocker they can read. */}
       <FleetCheckChoice
         legend="How does this account run?"
         name="mode"
         mono={false}
-        options={[
-          { id: 'interactive', label: 'Interactive', detail: 'You drive it. Sessions wait for you.' },
-          { id: 'auto', label: 'Auto', detail: 'It runs unattended, without waiting for a person.' },
-        ]}
+        options={FLEET_ACCOUNT_MODES.map(mode => {
+          const wrapper = occupant(mode);
+          const selected = selectedModes(draft).includes(mode);
+          return {
+            id: mode,
+            label: MODE_CARD[mode].label,
+            detail:
+              wrapper === undefined
+                ? MODE_CARD[mode].detail
+                : `${MODE_CARD[mode].detail} This account already has one: ${wrapper}.`,
+            ...(wrapper === undefined ? {} : { badge: 'already added' }),
+            ...(wrapper !== undefined && !selected ? { disabled: true } : {}),
+          };
+        })}
         selected={selectedModes(draft)}
         disabled={disabled}
         onToggle={mode => onChange(toggleMode(draft, mode === 'auto' ? 'auto' : 'interactive', variants))}
@@ -573,7 +755,7 @@ function IdentityStep({
         : draft.lanes.map(lane => (
             <div key={lane.mode} data-fleet-other-lanes={String(spare.length)} data-fleet-lane-mode={lane.mode}>
               <FleetChoiceGroup
-                legend={`Which group does the ${MODE_LABEL[lane.mode]} account join?`}
+                legend={`Which group does the ${MODE_CARD[lane.mode].word} account join?`}
                 name={`group-${lane.mode}`}
                 columns={1}
                 value={lane.variant}
@@ -612,10 +794,10 @@ function IdentityStep({
               <PanelPath
                 value={derivedWrapper(draft, lane)}
                 className="text-meta text-fg"
-                label={`Derived wrapper for the ${MODE_LABEL[lane.mode]} account`}
+                label={`Derived wrapper for the ${MODE_CARD[lane.mode].word} account`}
               />
             </span>
-            <span>· {MODE_LABEL[lane.mode]}</span>
+            <span>· {MODE_CARD[lane.mode].word}</span>
           </p>
         ))}
       </div>
@@ -784,8 +966,8 @@ function InstructionsStep({
   readonly onChange: (next: FleetAccountDraft) => void;
   readonly disabled: boolean;
   readonly instructions: FleetInstructionsControl;
-  readonly source: FleetInstructionsSource;
-  readonly onSource: (next: FleetInstructionsSource) => void;
+  readonly source: FleetPickOrAddSource;
+  readonly onSource: (next: FleetPickOrAddSource) => void;
   /** Documents already in the store that an account could point at. */
   readonly assets: readonly string[];
 }) {
@@ -802,6 +984,48 @@ function InstructionsStep({
     label: path,
     detail: SHARED_DOCUMENT_CONSEQUENCE,
   }));
+  /**
+   * ONE name box, shared by both add-new answers.
+   *
+   * Import and write-new differ only in where the first draft of the text comes from, so they are the
+   * same naming question — which is why this is a value handed to two slots rather than two controls.
+   */
+  const nameBox = (
+    <div>
+      <label className={FIELD_LABEL} htmlFor={id('-middle')}>
+        Name this document
+      </label>
+      {/* The prefix is rendered as part of the control rather than typed, so what a person reads
+          is the whole filename and what they edit is only the part that is theirs. */}
+      <div className="flex min-w-0 items-stretch">
+        <span
+          className="inline-flex shrink-0 items-center rounded-l-control border border-r-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
+          data-fleet-instructions-prefix=""
+        >
+          {INSTRUCTIONS_PREFIX[draft.harness]}
+        </span>
+        <input
+          id={id('-middle')}
+          className="kt-input min-w-0 flex-1 rounded-l-none font-mono"
+          value={middle}
+          disabled={disabled}
+          placeholder="auto"
+          data-fleet-instructions-middle=""
+          onChange={event => onChange(withInstructionsMiddle(draft, event.target.value))}
+        />
+        <span
+          className="inline-flex shrink-0 items-center rounded-r-control border border-l-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
+          aria-hidden="true"
+        >
+          .md
+        </span>
+      </div>
+      <p className="m-0 mt-1 break-words text-meta leading-base text-muted" data-fleet-instructions-name-note="">
+        {nameProblem ?? `Added to the store as ${draft.layer.instructions.path.trim()}.`}
+      </p>
+      <PrefillNote field="instructionsPath" notes={draft.prefilled} />
+    </div>
+  );
   return (
     <div className={cn(SECTION, 'grid gap-3')}>
       <div className="flex min-w-0 items-start gap-2">
@@ -823,17 +1047,15 @@ function InstructionsStep({
         </p>
       )}
 
-      <FleetChoiceGroup
+      <FleetPickOrAdd
         legend="Where do its instructions come from?"
-        name="instructions-source"
-        columns={1}
+        name="instructions"
         value={source}
         disabled={disabled}
         onChoose={onSource}
-        options={[
+        answers={[
           {
             id: 'existing',
-            label: 'Use one already in the store',
             detail:
               assets.length === 0
                 ? 'Nothing in the store yet — import or write one below.'
@@ -842,60 +1064,27 @@ function InstructionsStep({
           },
           {
             id: 'import',
-            label: 'Import this host’s own',
             detail: importDetail,
             disabled: !importable,
             ...(importable ? { badge: 'detected' } : {}),
           },
-          { id: 'new', label: 'Write a new one', detail: 'An empty document, named below, added to the store.' },
+          { id: 'new', detail: 'An empty document, named below, added to the store.' },
         ]}
-      />
-
-      {source === 'existing' ? (
-        <FilteredChoices
-          legend="Which document?"
-          name="instructions"
-          options={existingCards}
-          value={draft.layer.instructions.path.trim()}
-          disabled={disabled}
-          onChoose={path => instructions.onChoose(`asset:${path}`)}
-        />
-      ) : (
-        <div>
-          <label className={FIELD_LABEL} htmlFor={id('-middle')}>
-            Name this document
-          </label>
-          {/* The prefix is rendered as part of the control rather than typed, so what a person reads
-              is the whole filename and what they edit is only the part that is theirs. */}
-          <div className="flex min-w-0 items-stretch">
-            <span
-              className="inline-flex shrink-0 items-center rounded-l-control border border-r-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
-              data-fleet-instructions-prefix=""
-            >
-              {INSTRUCTIONS_PREFIX[draft.harness]}
-            </span>
-            <input
-              id={id('-middle')}
-              className="kt-input min-w-0 flex-1 rounded-l-none font-mono"
-              value={middle}
+        under={{
+          existing: (
+            <FilteredChoices
+              legend="Which document?"
+              name="instructions"
+              options={existingCards}
+              value={draft.layer.instructions.path.trim()}
               disabled={disabled}
-              placeholder="auto"
-              data-fleet-instructions-middle=""
-              onChange={event => onChange(withInstructionsMiddle(draft, event.target.value))}
+              onChoose={path => instructions.onChoose(`asset:${path}`)}
             />
-            <span
-              className="inline-flex shrink-0 items-center rounded-r-control border border-l-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
-              aria-hidden="true"
-            >
-              .md
-            </span>
-          </div>
-          <p className="m-0 mt-1 break-words text-meta leading-base text-muted" data-fleet-instructions-name-note="">
-            {nameProblem ?? `Added to the store as ${draft.layer.instructions.path.trim()}.`}
-          </p>
-          <PrefillNote field="instructionsPath" notes={draft.prefilled} />
-        </div>
-      )}
+          ),
+          import: nameBox,
+          new: nameBox,
+        }}
+      />
 
       {instructions.loading ? (
         <p className="m-0 text-meta text-faint" data-fleet-instructions-reading="">

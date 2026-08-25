@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { FleetAccountStepper } from '../../../../src/features/fleet/fleet-account-stepper.tsx';
+import type { FleetConfigView } from '../../../../src/features/fleet/fleet-api.ts';
 import {
   detectedAccountDraft,
   emptyAccountDraft,
@@ -11,7 +12,7 @@ import {
 import {
   FLEET_STEP_IDS,
   type FleetInstructionsControl,
-  type FleetInstructionsSource,
+  type FleetPickOrAddSource,
   type FleetStepId,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { type Mounted, mount } from '../../../support/dom.ts';
@@ -62,12 +63,22 @@ const MANY = [
 const stepper = async (options: {
   readonly step: FleetStepId;
   readonly draft?: Partial<FleetAccountDraft>;
-  readonly source?: FleetInstructionsSource;
+  readonly source?: FleetPickOrAddSource;
   readonly assets?: readonly string[];
   readonly loading?: boolean;
   readonly instructions?: Partial<FleetInstructionsControl>;
   /** What this fleet declares. Only a fleet with a slot no mode derives gets the group control. */
   readonly variants?: readonly string[];
+  /**
+   * The declared configuration, which is where the accounts a new member could sign in as come from.
+   *
+   * `null` by default, so a suite that is about some other step gets the first-account shape: no picker
+   * at all, one name box, exactly as a fleet with nothing in it renders.
+   */
+  readonly config?: FleetConfigView | null;
+  /** Which answer the account step is on. Held by the surface in production, a prop here. */
+  readonly accountSource?: FleetPickOrAddSource;
+  readonly onNavigate?: (to: string) => void;
 }) => {
   let current: FleetAccountDraft = {
     ...emptyAccountDraft('claude'),
@@ -77,6 +88,7 @@ const stepper = async (options: {
     ...options.draft,
   };
   let chosen: string | null = null;
+  let accountSource: FleetPickOrAddSource = options.accountSource ?? 'existing';
   const instructions: FleetInstructionsControl = {
     choices: [{ value: 'new-blank', label: 'New — empty', detail: 'A new, empty document.' }],
     value: 'new-blank',
@@ -102,8 +114,15 @@ const stepper = async (options: {
       instructions={instructions}
       instructionsSource={options.source ?? 'new'}
       onInstructionsSource={() => {}}
+      accountSource={accountSource}
+      onAccountSource={next => {
+        accountSource = next;
+        if (next === 'new') current = { ...current, name: '' };
+      }}
+      accountsHref="/d/9f1c/accounts"
+      {...(options.onNavigate === undefined ? {} : { onNavigate: options.onNavigate })}
       variants={options.variants ?? ['default']}
-      config={null}
+      config={options.config ?? null}
       discovery={null}
       published={[]}
       skillsStore={[]}
@@ -117,6 +136,7 @@ const stepper = async (options: {
     rerender: async () => await mounted.render(element()),
     latest: () => current,
     chosen: () => chosen,
+    source: () => accountSource,
   };
 };
 

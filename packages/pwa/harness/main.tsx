@@ -5563,6 +5563,9 @@ function Shell() {
                     instructions={HARNESS_FLEET_INSTRUCTIONS}
                     instructionsSource="import"
                     onInstructionsSource={() => {}}
+                    accountSource="existing"
+                    onAccountSource={() => {}}
+                    accountsHref="/d/9f1c/accounts"
                     variants={['default', 'auto', 'review']}
                     config={HARNESS_FLEET_CONFIG}
                     discovery={HARNESS_FLEET_DISCOVERY}
@@ -7388,6 +7391,9 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
                 instructions={HARNESS_FLEET_INSTRUCTIONS}
                 instructionsSource="import"
                 onInstructionsSource={() => {}}
+                accountSource="existing"
+                onAccountSource={() => {}}
+                accountsHref="/d/9f1c/accounts"
                 variants={['default', 'auto', 'review']}
                 config={HARNESS_FLEET_CONFIG}
                 discovery={HARNESS_FLEET_DISCOVERY}

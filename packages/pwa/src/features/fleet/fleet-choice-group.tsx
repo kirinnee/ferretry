@@ -16,8 +16,9 @@
  */
 
 import { Check } from 'lucide-react';
-import { useId } from 'react';
+import { type ReactNode, useId } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import type { FleetPickOrAddSource } from './fleet-stepper-model.ts';
 
 export interface FleetChoice<T extends string> {
   readonly id: T;
@@ -104,6 +105,97 @@ export function FleetChoiceGroup<T extends string>({
         );
       })}
     </fieldset>
+  );
+}
+
+/**
+ * PICK FROM WHAT EXISTS, OR ADD A NEW ONE — the one shape every question in this feature uses.
+ *
+ * The owner's rule is that a screen should "always ask to select from existing, then have an option to
+ * jump to the entity type to add a new one there, or allow new, and auto add it to the entity type".
+ * The instructions step had already grown into exactly that — three answers, a sub-control under
+ * whichever was picked, and both add-new answers writing into the store so the next member can pick
+ * them — and every other step was that shape with pieces missing.
+ *
+ * So it is HERE rather than hand-rolled three times, and what it owns is the two things that must not
+ * drift: the WORDS on the answers, and the rule that the sub-control belongs under the answer it
+ * belongs to. The details stay with the caller because they are facts about the thing being picked —
+ * how many there are, what editing a shared one costs, why an import is unavailable — and a shared
+ * sentence for those would either be vague or wrong.
+ *
+ * The union itself is `fleet-stepper-model.ts`', because which answers exist is a fact about the
+ * question rather than about this control, and that module is where the pure half of every step's
+ * answer already lives.
+ *
+ * ONE SET OF WORDS, annotated over the whole union so a fourth answer is a compile error here rather
+ * than a card with a blank label.
+ *
+ * "Use one this fleet already has" rather than "…already in the store", because the accounts step picks
+ * a provider login and there is no store of those — and one label that reads correctly for a document,
+ * a skill and a login is the whole point of a person learning this control once.
+ */
+const SOURCE_LABEL: Readonly<Record<FleetPickOrAddSource, string>> = {
+  existing: 'Use one this fleet already has',
+  import: 'Import this host’s own',
+  new: 'Add a new one',
+};
+
+/** One answer offered, carrying the facts about it this control cannot know. */
+export interface FleetPickOrAddAnswer {
+  readonly id: FleetPickOrAddSource;
+  /** What choosing this one DOES, in the vocabulary of the thing being picked. */
+  readonly detail: string;
+  readonly disabled?: boolean;
+  readonly badge?: string;
+}
+
+export interface FleetPickOrAddProps {
+  /** The one question, asked as a person would ask it about this particular thing. */
+  readonly legend: string;
+  /** Marks this control in the DOM. The answer group is `<name>-source`. */
+  readonly name: string;
+  readonly answers: readonly FleetPickOrAddAnswer[];
+  readonly value: FleetPickOrAddSource;
+  readonly onChoose: (next: FleetPickOrAddSource) => void;
+  readonly disabled?: boolean;
+  /**
+   * The control that appears under each answer.
+   *
+   * A map rather than a `children` slot, because "the sub-control follows the answer" is the rule being
+   * extracted: with children, every caller re-decides it, and the one that gets it wrong renders a name
+   * box under "use the one you already have".
+   */
+  readonly under: Readonly<Partial<Record<FleetPickOrAddSource, ReactNode>>>;
+}
+
+export function FleetPickOrAdd({
+  legend,
+  name,
+  answers,
+  value,
+  onChoose,
+  disabled = false,
+  under,
+}: FleetPickOrAddProps) {
+  return (
+    <div className="grid min-w-0 gap-3" data-fleet-pick-or-add={name}>
+      <FleetChoiceGroup
+        legend={legend}
+        name={`${name}-source`}
+        columns={1}
+        value={value}
+        disabled={disabled}
+        onChoose={onChoose}
+        options={answers.map(answer => ({
+          id: answer.id,
+          label: SOURCE_LABEL[answer.id],
+          detail: answer.detail,
+          ...(answer.disabled === true ? { disabled: true } : {}),
+          ...(answer.badge === undefined ? {} : { badge: answer.badge }),
+        }))}
+      />
+      {under[value]}
+    </div>
   );
 }
 

@@ -35,6 +35,7 @@ import {
   BLANK_INSTRUCTIONS_CHOICE,
   discoveredHarness,
   draftModels,
+  existingAccounts,
   type FleetAccountDraft,
   type FleetAccountMode,
   type FleetLaneDraft,
@@ -409,13 +410,18 @@ export interface FleetInstructionsControl {
 }
 
 /**
- * Where an account's instructions come from. THREE answers, and all three end the same way.
+ * WHERE THE ANSWER TO A STEP COMES FROM. Three answers, and all of them end the same way.
  *
- * The account POINTS AT a named document in the fleet's store. That is the whole model, and it is
- * why these are not four unrelated buttons: `existing` points at an item that is already there,
- * `import` puts this host's real `CLAUDE.md` / `AGENTS.md` into the store under a name the person
- * chooses and then points at it, and `new` creates an empty item under a chosen name and points at
- * it. Import and new-document differ only in where the first draft of the text comes from.
+ * One union for every step that asks it, because it is one question: the account POINTS AT something
+ * that exists. `existing` points at an item that is already there; `new` creates one under a chosen
+ * name and points at that; `import` — offered only where this host has something to copy — puts the
+ * host's real file into the store under a chosen name and then points at that. Import and new differ
+ * only in where the first draft of the text comes from, which is why they are two answers to one
+ * question rather than two flows.
+ *
+ * It lives HERE rather than beside the control that renders it, because which answers exist is a fact
+ * about the question. `FleetPickOrAdd` annotates its labels over this union, so an answer added here
+ * is a compile error there rather than a card with no label.
  *
  * A POSIX symlink is deliberately not part of this. The pointer IS the link: `config.shared` is a
  * registry of named documents and an account references one by name, so an edit to that document
@@ -423,7 +429,23 @@ export interface FleetInstructionsControl {
  * rather than on the next apply — which is an optimisation of a mechanism that already works, and
  * not something a person composing an account has to be asked about.
  */
-export type FleetInstructionsSource = 'existing' | 'import' | 'new';
+export type FleetPickOrAddSource = 'existing' | 'import' | 'new';
+
+/**
+ * Which answer the ACCOUNT step opens on: pick one, wherever there is one to pick.
+ *
+ * ASK FIRST, which is the owner's rule and the opposite of what the free-text box did. A fleet with a
+ * login of this harness opens on the list of them; a fleet with none opens on the box, because "pick or
+ * add" is not a question when there is exactly one answer.
+ *
+ * It is only the OPENING value, for the same reason the instructions one is. Once a person has answered,
+ * the answer is theirs — see {@link FleetAccountStepperProps.accountSource} for what re-deriving it
+ * would do to somebody halfway through typing a name.
+ */
+export const openingAccountSource = (
+  harness: FleetHarnessKind,
+  config: FleetConfigView | null,
+): FleetPickOrAddSource => (existingAccounts(harness, config).length === 0 ? 'new' : 'existing');
 
 /** The store item the draft points at, when it points at one that is already there. */
 const EXISTING_PREFIX = 'asset:';
@@ -437,11 +459,11 @@ const EXISTING_PREFIX = 'asset:';
  * and pointed the account at somebody else's document instead of refusing the collision. An answer a
  * person gave is a fact about them, so it is kept rather than guessed at every render.
  */
-export const openingInstructionsSource = (draft: FleetAccountDraft): FleetInstructionsSource =>
+export const openingInstructionsSource = (draft: FleetAccountDraft): FleetPickOrAddSource =>
   draft.prefilled.instructionsText === undefined ? 'new' : 'import';
 
 /** The opaque value {@link FleetInstructionsControl.onChoose} takes for each source. */
-export const instructionsChoiceFor = (source: FleetInstructionsSource, firstExisting: string | undefined): string => {
+export const instructionsChoiceFor = (source: FleetPickOrAddSource, firstExisting: string | undefined): string => {
   if (source === 'import') return IMPORTED_INSTRUCTIONS_CHOICE;
   if (source === 'new') return BLANK_INSTRUCTIONS_CHOICE;
   // Choosing "an existing one" with nothing chosen yet lands on the first document rather than on a
