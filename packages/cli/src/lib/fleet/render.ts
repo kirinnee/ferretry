@@ -531,6 +531,13 @@ const HEALTH_VERDICT_LABEL: Readonly<Record<FleetHealthVerdict, string>> = {
  * login; nothing here is a verdict" and then had "; last check was inconclusive" appended to it — the
  * same fact three times, on the row where the reader has least reason to keep reading, on the only
  * verdict that repeats identically down the whole report.
+ *
+ * `oauth_rejection_unconfirmed` is TRIMMED FROM ITS AGREED WORDING and the trim is the point of this
+ * file: a row has roughly forty columns for a clause on an eighty-column terminal, and the agreed
+ * sentence is a hundred. The browser keeps it whole in `account-health-view.ts`, where nothing is
+ * competing for the width. All three meanings survive the trim — refused, cause unattributed, and NO
+ * instruction to sign in — and the last of those is also carried structurally, because the verdict is
+ * `unknown`, the row is muted and `HEALTH_REMEDY` offers nothing for it.
  */
 const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   provider_accepted: 'the provider accepted this credential',
@@ -542,7 +549,8 @@ const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   static_credential_rejected: 'the provider rejected the configured credential',
   never_checked: 'no check has run for this account',
   credential_unreadable: 'the credential could not be read',
-  oauth_refreshable: 'expired, but renewable — not signed out',
+  oauth_refreshable: 'signed in, but this copy needs refreshing',
+  oauth_rejection_unconfirmed: 'the check was refused — possibly this client, not the login',
   codex_liveness_unproven: 'Codex offers no free check',
   check_timeout: 'the check timed out',
   provider_unavailable: 'the provider could not be reached',
@@ -683,6 +691,8 @@ function sharedHealthCheck(accounts: readonly FleetAccountHealth[], now: number)
 const HEALTH_SELF_EVIDENT_INCONCLUSIVE: ReadonlySet<FleetHealthReason> = new Set<FleetHealthReason>([
   'codex_liveness_unproven',
   'never_checked',
+  // "the check was refused, and this cannot say what it refused" IS the inconclusive result.
+  'oauth_rejection_unconfirmed',
 ]);
 
 /**

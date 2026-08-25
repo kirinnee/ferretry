@@ -66,6 +66,7 @@ export type PickerHealthReason =
   | 'never_checked'
   | 'credential_unreadable'
   | 'oauth_refreshable'
+  | 'oauth_rejection_unconfirmed'
   | 'codex_liveness_unproven'
   | 'check_timeout'
   | 'provider_unavailable'
@@ -127,6 +128,7 @@ const PickerAccountHealthSchema = z.strictObject({
     'never_checked',
     'credential_unreadable',
     'oauth_refreshable',
+    'oauth_rejection_unconfirmed',
     'codex_liveness_unproven',
     'check_timeout',
     'provider_unavailable',

@@ -1123,6 +1123,49 @@ describe('health rendering', () => {
     should(rendered).not.containEql('inconclusive');
   });
 
+  it('should never tell somebody to sign in over a rejection it could not attribute', () => {
+    // Arrange — a `401` from that endpoint cannot tell a dead login from a client the provider does
+    // not accept. It used to be read as "the provider rejected this token" with `fy fleet login <id>`
+    // printed beside it, and wrongly sending somebody to re-authenticate a login that is FINE is the
+    // worst outcome available: it costs a browser approval and fixes nothing.
+    const accounts = [
+      healthRow({
+        accountId: 'r',
+        verdict: 'unknown',
+        reason: 'oauth_rejection_unconfirmed',
+        lastCheckInconclusive: true,
+      }),
+    ];
+
+    // Act
+    const painted = renderHealth({ at: NOW, accounts }, new Map([['r', 'Claude (default)']]), labelled());
+
+    // Assert — no command, and the SAME muted class as every other unknown rather than the red one a
+    // reader has learned means "act on this". The clause keeps all three meanings the wording agreed:
+    // refused, cause unattributed, and no instruction to sign in.
+    should(painted).not.containEql('fy fleet login');
+    should(painted).not.containEql('<danger>');
+    should(painted).containEql('<muted>?</muted> Claude (default)  <muted>UNKNOWN</muted>');
+    should(painted).containEql('the check was refused — possibly this client, not the login');
+    // And no fourth clause: "it could not tell what was refused" IS the inconclusive result.
+    should(painted).not.containEql('inconclusive');
+  });
+
+  it('should call a renewable token signed in, because that is what it is', () => {
+    // Arrange / Act — the old wording, "expired, but renewable — not signed out", led with a problem
+    // and then took it back. The login is fine; the access token merely aged out with a refresh token
+    // sitting beside it.
+    const rendered = renderHealth(
+      { at: NOW, accounts: [healthRow({ verdict: 'unknown', reason: 'oauth_refreshable' })] },
+      names,
+      WIDE,
+    );
+
+    // Assert
+    should(rendered).containEql('UNKNOWN  signed in, but this copy needs refreshing');
+    should(rendered).not.containEql('fy fleet login');
+  });
+
   it('should still say a check was inconclusive when the reason does not already say so', () => {
     // Arrange / Act — hiding a failed attempt is how a fleet reads healthy while every provider call
     // is failing, so the clause is suppressed only where it would be the same fact twice.

@@ -127,6 +127,19 @@ export const FleetHealthReasonSchema = z.enum([
   'credential_unreadable',
   /** Expired access WITH a refresh token. Not signed out — unproven until something renews it. */
   'oauth_refreshable',
+  /**
+   * `401` that cannot be attributed: the provider refused, and this cannot tell WHICH it refused.
+   *
+   * A rejection of the login and a rejection of the client this request came from arrive as the same
+   * status, so reading one as the other sends somebody to sign in again over a login that is fine —
+   * the worst outcome available here, because it costs a browser approval and fixes nothing. So the
+   * verdict is `unknown` and no surface offers a sign-in for it; see `docs/fleet-health.md`.
+   *
+   * THE DECISION THAT EMITS THIS LANDS SEPARATELY. It is declared here first because the terminal and
+   * the browser both render an exhaustive map over this enum: without the code, the two surfaces
+   * cannot be taught the words, and the branch that produces it cannot typecheck.
+   */
+  'oauth_rejection_unconfirmed',
   /** Codex: no non-mutating liveness signal exists. See the module note. */
   'codex_liveness_unproven',
   /** The free read did not finish inside its deadline. */

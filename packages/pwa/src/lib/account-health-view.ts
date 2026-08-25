@@ -116,7 +116,9 @@ const REASON_DETAIL: Readonly<Record<PickerHealthReason, string>> = {
   static_credential_rejected: 'The provider rejected the credential this account is configured to use.',
   never_checked: 'Nothing has checked this account yet.',
   credential_unreadable: 'The credential could not be read, so nothing is known either way.',
-  oauth_refreshable: 'Expired but renewable. This is not signed out.',
+  oauth_refreshable: 'Signed in, but this copy needs refreshing.',
+  oauth_rejection_unconfirmed:
+    'The OAuth check was refused, but Ferretry could not tell whether the provider rejected this login or this client. This result does not mean you need to sign in again.',
   codex_liveness_unproven: 'Codex has no free way to prove a sign-in, so this is not a verdict about it.',
   check_timeout: 'The last check timed out.',
   provider_unavailable: 'The provider could not be reached.',
@@ -146,6 +148,7 @@ const REASON_IS_IMPLIED: Readonly<Record<PickerHealthReason, boolean>> = {
   static_credential_rejected: false,
   credential_unreadable: false,
   oauth_refreshable: false,
+  oauth_rejection_unconfirmed: false,
   codex_liveness_unproven: false,
   check_timeout: false,
   provider_unavailable: false,

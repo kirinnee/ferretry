@@ -176,6 +176,7 @@ describe('accountHealthView', () => {
       'never_checked',
       'credential_unreadable',
       'oauth_refreshable',
+      'oauth_rejection_unconfirmed',
       'codex_liveness_unproven',
       'check_timeout',
       'provider_unavailable',
@@ -242,10 +243,26 @@ describe('accountHealthView', () => {
     const renewable = accountHealthView(health({ verdict: 'unknown', reason: 'oauth_refreshable' }), NOW);
     const dead = accountHealthView(health({ verdict: 'needs_relogin', reason: 'oauth_access_expired' }), NOW);
 
-    // Assert — one needs nothing from a person and the other needs a browser.
-    expect(renewable.detail).toContain('not signed out');
+    // Assert — one needs nothing from a person and the other needs a browser. It LEADS with being
+    // signed in, because that is the true and reassuring half: the previous wording, "Expired but
+    // renewable. This is not signed out.", opened with a problem and then took it back.
+    expect(renewable.detail).toBe('Signed in, but this copy needs refreshing.');
     expect(renewable.offersSignIn).toBeFalse();
     expect(dead.offersSignIn).toBeTrue();
+  });
+
+  it('offers no sign-in for a rejection it could not attribute, and says so in the detail', () => {
+    // Arrange / Act — a `401` from that endpoint cannot tell a dead login from a client the provider
+    // does not accept, so reading it as a rejected login sends somebody to re-authenticate a login
+    // that is fine. That costs a browser approval and fixes nothing, which is the worst outcome here.
+    const view = accountHealthView(health({ verdict: 'unknown', reason: 'oauth_rejection_unconfirmed' }), NOW);
+
+    // Assert — the sentence states the limit AND rules out the wrong action, because a reader who
+    // sees "refused" will otherwise supply that action themselves.
+    expect(view.offersSignIn).toBeFalse();
+    expect(view.detail).toContain('could not tell whether the provider rejected this login or this client');
+    expect(view.detail).toContain('does not mean you need to sign in again');
+    expect(view.detailIsImplied).toBeFalse();
   });
 });
 
