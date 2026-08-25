@@ -26,8 +26,8 @@
  *
  * HOW IT GETS THERE. The element is hoisted to the top of the document by hiding
  * every element that is not it or one of its ancestors, and rewinding every
- * scroller above it; the viewport is then grown if the element is taller than it
- * is. Both steps are checked rather than trusted — the element's own width and
+ * scroller above it; the viewport is then grown, on either axis, until the element
+ * fits inside it. Both steps are checked rather than trusted — the element's own width and
  * height must survive isolation unchanged, and it must end up wholly inside the
  * viewport — so a layout that isolation would distort is refused instead of
  * photographed. Everything is put back before the function returns.
@@ -62,10 +62,11 @@ const ISOLATION = {
 type IsolationNames = typeof ISOLATION;
 
 /**
- * THE TALLEST ELEMENT THIS WILL CAPTURE, and it is a refusal rather than a clamp.
+ * THE BIGGEST ELEMENT THIS WILL CAPTURE, on either axis, and it is a refusal rather
+ * than a clamp.
  *
- * The mechanism grows the viewport to the element's height, so this number is really
- * "how tall a viewport has this harness MEASURED Chromium painting in one frame".
+ * The mechanism grows the viewport to the element, so this number is really "how big a
+ * viewport has this harness MEASURED Chromium painting in one frame".
  * Measured rather than guessed: a flat-coloured block isolated out of a 60,000px
  * document came back one uniform colour at 2,000, 4,000, 6,000, 8,000, 10,000 and
  * 11,900 px, and `tests/integration/gallery-capture.visual.test.ts` keeps the top of
@@ -75,7 +76,7 @@ type IsolationNames = typeof ISOLATION;
  * A card past it is not silently cropped and not captured at a viewport that cannot
  * hold it — it is named and refused.
  */
-const MAXIMUM_ELEMENT_HEIGHT = 12_000;
+const MAXIMUM_ELEMENT_EXTENT = 12_000;
 
 /** A slack of half a pixel, because a rect is fractional and a viewport is not. */
 const TOLERANCE = 0.5;
@@ -94,15 +95,22 @@ type Hoisted = { readonly refused: string } | { readonly before: Box; readonly a
  * isolated: the release below runs on the main frame, so isolating inside an iframe
  * would leave that frame permanently disfigured.
  *
- * THE ELEMENT'S OWN WIDTH IS PINNED FIRST, and that is not a nicety. Hiding an
- * element's siblings takes back the space they were sharing with it: the Settings
- * theme cards sit in a track-based grid, and isolating one turned a 1,070x100 card
- * into a 186x135 one — a real capture of a layout no reader will ever see. Pinning
- * the width the browser had already given it makes removing the siblings a
- * no-op for the element itself. It is pinned to the measured value, so it changes
- * nothing on an element that was not sharing anything, and the HEIGHT is deliberately
- * left free: it is the check. A height that does not come back is the signal that
- * this element cannot be isolated honestly, and the capture is refused.
+ * WIDTHS ARE PINNED FIRST, ALL THE WAY UP, and that is not a nicety. Hiding an
+ * element's siblings takes back the space they were sharing with it, and it does so
+ * at every level: the Settings theme cards sit in a track-based grid, and isolating
+ * one turned a 1,070x100 card into a 186x135 one; a transcript tool group kept its
+ * own box but watched the two-column shell ABOVE it fall from 676px to 386px. Both
+ * are faithful captures of a layout no reader will ever see.
+ *
+ * The element itself is pinned EXACTLY — it must come out the size the gallery gave
+ * it — while every ancestor gets only a `min-width` FLOOR. That asymmetry is what
+ * lets the two repairs coexist: a floor stops hiding from collapsing the chain, and
+ * still lets `captureElement` grow the viewport to reveal a card that is wider than
+ * the review, which a maximum would have made impossible.
+ *
+ * The HEIGHT is deliberately left free on all of them: it is the check. A height that
+ * does not come back is the signal that this element cannot be isolated honestly, and
+ * the capture is refused.
  */
 const hoist = (node: Element, names: IsolationNames): Hoisted => {
   const owner = node.ownerDocument;
@@ -114,12 +122,16 @@ const hoist = (node: Element, names: IsolationNames): Hoisted => {
   };
   const before = read();
 
-  const styled = node.getAttribute('style');
-  node.setAttribute(names.pinned, '');
-  if (styled !== null) node.setAttribute(names.restyle, styled);
-  const styleable = node as Element & { readonly style?: CSSStyleDeclaration };
-  for (const property of ['width', 'min-width', 'max-width'])
-    styleable.style?.setProperty(property, `${before.width}px`, 'important');
+  const pin = (target: Element, properties: readonly string[], px: number): void => {
+    const styled = target.getAttribute('style');
+    target.setAttribute(names.pinned, '');
+    if (styled !== null) target.setAttribute(names.restyle, styled);
+    const styleable = target as Element & { readonly style?: CSSStyleDeclaration };
+    for (const property of properties) styleable.style?.setProperty(property, `${px}px`, 'important');
+  };
+  pin(node, ['width', 'min-width', 'max-width'], before.width);
+  for (let step: Element | null = node.parentElement; step !== null && step !== owner.body; step = step.parentElement)
+    pin(step, ['min-width'], step.getBoundingClientRect().width);
 
   const sheet = owner.createElement('style');
   sheet.id = names.sheet;
@@ -141,10 +153,32 @@ const hoist = (node: Element, names: IsolationNames): Hoisted => {
   return { before, after: read() };
 };
 
-/** The element's box now, whatever has happened to the page since. */
-const measure = (node: Element): Box => {
+/**
+ * The element's box now, and the first ancestor that is cutting a piece off it.
+ *
+ * FITTING INSIDE THE VIEWPORT IS NOT THE WHOLE OF BEING PAINTED. A card 1,400px wide
+ * inside a 900px scrollport is entirely within a viewport grown to 1,408 and still
+ * comes back with 500px of black, because the scrollport never painted that part. So
+ * every clipping ancestor is measured too, and a card any of them cuts is refused —
+ * that black band is precisely the sort of thing a reviewer reads past.
+ */
+const measure = (node: Element): { readonly box: Box; readonly clippedBy: string | null } => {
   const rect = node.getBoundingClientRect();
-  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  const box = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  const view = node.ownerDocument.defaultView;
+  for (let step: Element | null = node.parentElement; step !== null && view !== null; step = step.parentElement) {
+    const style = view.getComputedStyle(step);
+    const clipsX = /^(auto|scroll|hidden|clip)$/u.test(style.overflowX);
+    const clipsY = /^(auto|scroll|hidden|clip)$/u.test(style.overflowY);
+    if (!clipsX && !clipsY) continue;
+    const bounds = step.getBoundingClientRect();
+    if (
+      (clipsX && (rect.left < bounds.left - 0.5 || rect.right > bounds.right + 0.5)) ||
+      (clipsY && (rect.top < bounds.top - 0.5 || rect.bottom > bounds.bottom + 0.5))
+    )
+      return { box, clippedBy: `${step.tagName.toLocaleLowerCase()}${step.id === '' ? '' : `#${step.id}`}` };
+  }
+  return { box, clippedBy: null };
 };
 
 /**
@@ -201,36 +235,52 @@ export const captureElement = async (page: Page, element: Locator, path: string)
           `${describe(hoisted.after)} even with its width held still, so the capture would not be the ` +
           'element the gallery lays out',
       );
-    if (hoisted.after.height > MAXIMUM_ELEMENT_HEIGHT)
+    if (hoisted.after.height > MAXIMUM_ELEMENT_EXTENT)
       throw new Error(
         `refusing to capture ${label}: it is ${hoisted.after.height.toFixed(0)}px tall, past the ` +
-          `${MAXIMUM_ELEMENT_HEIGHT}px this harness will claim Chromium paints in one frame`,
+          `${MAXIMUM_ELEMENT_EXTENT}px this harness will claim Chromium paints in one frame`,
+      );
+    if (hoisted.after.width > MAXIMUM_ELEMENT_EXTENT)
+      throw new Error(
+        `refusing to capture ${label}: it is ${hoisted.after.width.toFixed(0)}px wide, past the ` +
+          `${MAXIMUM_ELEMENT_EXTENT}px this harness will claim Chromium paints in one frame`,
       );
 
-    const needed = Math.ceil(hoisted.after.y + hoisted.after.height) + 8;
-    const height = Math.max(viewport.height, needed);
-    if (height > viewport.height) {
-      await page.setViewportSize({ width: viewport.width, height });
+    // BOTH AXES, because a card can outgrow the viewport sideways too: the session
+    // task board is 1,596px wide inside a 1,440px review, sitting in a container that
+    // scrolls horizontally. Widening is the same bargain as heightening — it reveals
+    // more of the card without moving it — and the size check below is what holds
+    // the browser to that: a card whose own layout answers to the wider viewport
+    // changes size, and is refused rather than captured in a shape nobody reviews.
+    const width = Math.max(viewport.width, Math.ceil(hoisted.after.x + hoisted.after.width) + 8);
+    const height = Math.max(viewport.height, Math.ceil(hoisted.after.y + hoisted.after.height) + 8);
+    if (width > viewport.width || height > viewport.height) {
+      await page.setViewportSize({ width, height });
       grown = true;
     }
 
     // Growing the viewport is itself a layout change, so the element is measured
     // AGAIN rather than assumed to have stayed where isolation left it.
     const framed = await element.evaluate(measure);
-    if (resized(hoisted.after, framed))
+    if (resized(hoisted.after, framed.box))
       throw new Error(
-        `refusing to capture ${label}: growing the viewport to ${viewport.width}x${height} changed its size ` +
-          `from ${describe(hoisted.after)} to ${describe(framed)}`,
+        `refusing to capture ${label}: growing the viewport to ${width}x${height} changed its size ` +
+          `from ${describe(hoisted.after)} to ${describe(framed.box)}`,
       );
     if (
-      framed.x < -TOLERANCE ||
-      framed.y < -TOLERANCE ||
-      framed.x + framed.width > viewport.width + TOLERANCE ||
-      framed.y + framed.height > height + TOLERANCE
+      framed.box.x < -TOLERANCE ||
+      framed.box.y < -TOLERANCE ||
+      framed.box.x + framed.box.width > width + TOLERANCE ||
+      framed.box.y + framed.box.height > height + TOLERANCE
     )
       throw new Error(
-        `refusing to capture ${label}: ${describe(framed)} is not wholly inside the ` +
-          `${viewport.width}x${height} viewport, so the capture would be of pixels Chromium never painted`,
+        `refusing to capture ${label}: ${describe(framed.box)} is not wholly inside the ` +
+          `${width}x${height} viewport, so the capture would be of pixels Chromium never painted`,
+      );
+    if (framed.clippedBy !== null)
+      throw new Error(
+        `refusing to capture ${label}: ${describe(framed.box)} is cut off by ${framed.clippedBy}, ` +
+          'so the capture would carry a band Chromium never painted',
       );
 
     await element.screenshot({ path });

@@ -242,6 +242,57 @@ describe('capturing one element of a very tall gallery', () => {
     }
   });
 
+  test('takes the whole of a card that outgrows the viewport sideways', async () => {
+    // The real one is the session task board: 1,596px wide inside a 1,440px review,
+    // in a container that scrolls horizontally. A capture that stopped at the viewport
+    // edge would be a review of two thirds of a board, with nothing saying so.
+    const page = await subject(
+      `<!doctype html><html lang="en"><head><title>wide card</title><style>
+        html,body{height:100%;overflow:hidden;margin:0;background:#000}
+      </style></head><body>
+        <div style="height:40000px;background:#111"></div>
+        <div style="overflow-x:auto;width:100%">
+          <div id="wide" style="width:1400px;height:200px;background:rgb(200, 90, 10)"></div>
+        </div>
+      </body></html>`,
+    );
+    try {
+      const target = join(directory, 'wide.png');
+      await captureElement(page, page.locator('#wide'), target);
+      const taken = await census(page, Buffer.from(await Bun.file(target).arrayBuffer()));
+      should([taken.width, taken.height]).eql([1_400, 200]);
+      should(taken.colours.map(([colour]) => colour)).eql(['200,90,10']);
+      should(page.viewportSize()).eql({ ...VIEWPORT });
+    } finally {
+      await page.close();
+    }
+  });
+
+  test('refuses a card its own scrollport is still cutting off', async () => {
+    // FITTING IN THE VIEWPORT IS NOT BEING PAINTED. This card is 1,400px wide in a
+    // scrollport pinned to 900px, so widening the viewport reveals nothing: the
+    // capture came back 1,400px wide with 500px of black down the side, and nothing
+    // about the PNG said which half was real.
+    const page = await subject(
+      `<!doctype html><html lang="en"><head><title>cut off</title><style>
+        html,body{height:100%;overflow:hidden;margin:0;background:#000}
+      </style></head><body>
+        <div style="height:40000px;background:#111"></div>
+        <div id="port" style="overflow-x:auto;width:900px">
+          <div id="cut" style="width:1400px;height:200px;background:rgb(200, 90, 10)"></div>
+        </div>
+      </body></html>`,
+    );
+    try {
+      const refusal = await refusalOf(captureElement(page, page.locator('#cut'), join(directory, 'cut.png')));
+      should(refusal).match(/refusing to capture cut\.png: 1400x200 at 0,\d+ is cut off by div#port/u);
+      should(await residue(page)).containDeep({ hidden: 0, pinned: 0, restyled: 0, sheets: 0 });
+      should(page.viewportSize()).eql({ ...VIEWPORT });
+    } finally {
+      await page.close();
+    }
+  });
+
   test('paints a card right up to the ceiling it claims', async () => {
     // The ceiling is a number this harness ASSERTS Chromium can paint in one frame,
     // so a card just under it has to come back whole. Without this the refusal above
