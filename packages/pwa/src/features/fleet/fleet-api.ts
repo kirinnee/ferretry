@@ -86,6 +86,18 @@ export type FleetManifestAccountView = FleetManifestSummary['accounts'][number];
 const NonEmpty = z.string().min(1);
 const FleetConfigViewSchema = z.object({
   variants: z.record(z.string(), z.unknown()),
+  /**
+   * The documents this fleet has NAMED, per asset field — `config.shared` from `#387`.
+   *
+   * Narrowed to `settings`, because that is the field this browser offers a pick from. It is the
+   * registry that makes "use one this fleet already has" answerable at all: a scaffolded fleet
+   * declares its settings templates here and applies them through the `base` profile, so an editor
+   * reading only per-account overlays would offer an empty store on every host `fy fleet init` made.
+   *
+   * Optional, and optional per field, because a configuration written before the registry existed has
+   * neither — and a missing registry is a store with nothing named in it, never a parse failure.
+   */
+  shared: z.object({ settings: z.record(z.string(), NonEmpty).optional() }).optional(),
   agents: z
     .array(
       z.object({

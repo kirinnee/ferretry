@@ -401,7 +401,7 @@ describe('the operation ledger', () => {
     expect(ledger[3]?.details).toEqual([
       'mode 0600',
       'format json',
-      '3 settings layers',
+      '3 settings documents, applied in order',
       'folds in the file already there',
     ]);
     expect(ledger[4]?.details).toEqual([
@@ -424,7 +424,7 @@ describe('the operation ledger', () => {
     expect(ledger[0]?.details).toEqual([
       'mode 0600',
       'format toml',
-      '1 settings layer',
+      '1 settings document',
       'replaces the file already there',
     ]);
     expect(ledger[1]?.details).toEqual(['removes only files carrying Ferretry’s marker', 'keeps nothing']);
@@ -604,7 +604,7 @@ describe('drafts', () => {
       instructions: { path: '', text: '' },
       skillsDirectory: '',
       skills: [],
-      settingsText: '',
+      settings: [],
       env: [],
       preserved: {},
     });
@@ -641,7 +641,9 @@ describe('drafts', () => {
     });
     expect(draft.instructions).toEqual({ path: 'instructions/studio.md', text: '' });
     expect(draft.skillsDirectory).toBe('skills/studio');
-    expect(JSON.parse(draft.settingsText)).toEqual({ model: 'opus' });
+    expect(draft.settings).toHaveLength(1);
+    expect(draft.settings[0]?.source).toBe('inline');
+    expect(JSON.parse(draft.settings[0]?.text ?? '')).toEqual({ model: 'opus' });
     expect(draft.env).toEqual([
       { id: 'FY_LANE', name: 'FY_LANE', value: 'studio' },
       { id: 'FY_COUNT', name: 'FY_COUNT', value: '3' },
@@ -682,11 +684,55 @@ describe('drafts', () => {
     expect(edited.assetEdits).toEqual([{ path: 'instructions/studio.md', content: '# new' }]);
   });
 
-  it('never sends an opinion about a settings FILE REFERENCE it could not show', () => {
-    const draft = layerDraftFrom({ settings: 'settings/shared.json', memory: 'instructions/a.md' });
-    expect(draft.settingsText).toBe('');
-    expect(draft.preserved).toEqual({ settings: 'settings/shared.json' });
-    // `settings` is absent from the patch — not null — so the operator's reference survives.
+  it('shows a settings FILE REFERENCE as the entry it is, and sends it back unchanged', () => {
+    const draft = layerDraftFrom({ settings: 'templates/claude/settings.json', memory: 'instructions/a.md' });
+    expect(draft.settings).toEqual([
+      { id: 'settings-0', source: 'store', path: 'templates/claude/settings.json', text: '' },
+    ]);
+    expect(draft.preserved).toEqual({});
+    // A reference is no longer preserved-and-untouchable: it round-trips as itself, bare rather than
+    // as a one-element list, and carries NO asset edit — nothing here read that document.
+    const proposal = editAccountProposal('abc', draft);
+    expect(proposal.mutation).toEqual({
+      kind: 'edit-account',
+      accountId: 'abc',
+      layer: {
+        memory: 'instructions/a.md',
+        skills: null,
+        settings: 'templates/claude/settings.json',
+        env: null,
+      },
+    });
+    expect(proposal.assetEdits).toEqual([{ path: 'instructions/a.md', content: '' }]);
+  });
+
+  it('canonicalises the ./ spelling the configuration uses, because the wire refuses a "." segment', () => {
+    const draft = layerDraftFrom({ settings: ['./templates/claude/settings.json', { model: 'opus' }] });
+    expect(draft.settings.map(entry => ({ source: entry.source, path: entry.path }))).toEqual([
+      { source: 'store', path: 'templates/claude/settings.json' },
+      { source: 'inline', path: '' },
+    ]);
+    // Two entries go out as a LIST, in the order they apply.
+    expect(editAccountProposal('abc', draft).mutation).toEqual({
+      kind: 'edit-account',
+      accountId: 'abc',
+      layer: {
+        memory: null,
+        skills: null,
+        settings: ['templates/claude/settings.json', { model: 'opus' }],
+        env: null,
+      },
+    });
+  });
+
+  it('preserves a settings reference this browser could never send, rather than blocking on it', () => {
+    // An operator may legitimately write a home-relative path in config.yaml. A browser may not send
+    // one, so the whole field stays preserved and the patch omits it — which is what stops the editor
+    // reporting a blocker about a value nobody typed here and nobody can fix from here.
+    const draft = layerDraftFrom({ settings: ['~/settings.json'], memory: 'instructions/a.md' });
+    expect(draft.settings).toHaveLength(0);
+    expect(draft.preserved).toEqual({ settings: ['~/settings.json'] });
+    expect(layerProblems(draft)).toHaveLength(0);
     expect(editAccountProposal('abc', draft).mutation).toEqual({
       kind: 'edit-account',
       accountId: 'abc',
@@ -724,7 +770,7 @@ describe('drafts', () => {
       ...draft,
       instructions: { path: '', text: '' },
       skillsDirectory: '',
-      settingsText: '',
+      settings: [],
       env: [],
     });
     expect(cleared.mutation).toEqual({
@@ -735,11 +781,19 @@ describe('drafts', () => {
     });
   });
 
-  it('leaves a settings FILE REFERENCE alone rather than turning it into a literal', () => {
-    const draft = layerDraftFrom({ settings: 'settings/shared.json', memory: 42, skills: ['not a path'] });
-    expect(draft.settingsText).toBe('');
+  it('takes the settings reference and leaves the two fields whose shape it cannot hold', () => {
+    const draft = layerDraftFrom({ settings: 'templates/claude/settings.json', memory: 42, skills: ['not a path'] });
+    expect(draft.settings).toHaveLength(1);
     expect(draft.instructions.path).toBe('');
     expect(draft.skillsDirectory).toBe('');
+    // `memory` and `skills` are the ones this editor cannot speak for here; `settings` is not.
+    expect(Object.keys(draft.preserved).sort()).toEqual(['memory', 'skills']);
+  });
+
+  it('preserves a settings stack with an entry that is neither a reference nor an object', () => {
+    const draft = layerDraftFrom({ settings: ['templates/claude/settings.json', 7] });
+    expect(draft.settings).toHaveLength(0);
+    expect(draft.preserved).toEqual({ settings: ['templates/claude/settings.json', 7] });
   });
 
   it('finds the declared layer of one exact route and nothing else', () => {
@@ -965,7 +1019,7 @@ describe('layer problems', () => {
           instructions: { path: 'instructions/a.md', text: '# hi' },
           skillsDirectory: 'skills/a',
           skills: [{ id: '1', path: 'skills/a/one.md', text: 'x' }],
-          settingsText: '{"model":"opus"}',
+          settings: [{ id: '1', source: 'inline', path: '', text: '{"model":"opus"}' }],
           env: [{ id: '1', name: 'FY_LANE', value: 'studio' }],
         }),
       ),
@@ -1060,10 +1114,45 @@ describe('layer problems', () => {
     ).toEqual(['every skill document needs a path', 'every skill document needs a path']);
   });
 
-  it('refuses settings that are not a JSON object', () => {
-    expect(layerProblems(layer({ settingsText: '{' }))).toEqual(['settings must be valid JSON']);
-    expect(layerProblems(layer({ settingsText: '[1,2]' }))).toEqual(['settings must be a JSON object']);
-    expect(layerProblems(layer({ settingsText: '   ' }))).toHaveLength(0);
+  it('refuses settings typed here that are not a JSON object', () => {
+    const typed = (text: string) => layer({ settings: [{ id: '1', source: 'inline' as const, path: '', text }] });
+    expect(layerProblems(typed('{'))).toEqual(['settings must be valid JSON']);
+    expect(layerProblems(typed('[1,2]'))).toEqual(['settings must be a JSON object']);
+    // An EMPTY typed entry is now a blocker rather than silence. The box used to double as the way to
+    // say "nothing of my own"; the way to say that is an empty stack, so a blank one is unfinished.
+    expect(layerProblems(typed('   '))).toEqual([
+      'the settings typed here are empty; write a JSON object or remove them',
+    ]);
+    expect(layerProblems(layer({ settings: [] }))).toHaveLength(0);
+  });
+
+  it('refuses a settings document with a bad path, and one applied twice, naming which', () => {
+    const applies = (...paths: string[]) =>
+      layer({
+        settings: paths.map((path, index) => ({ id: String(index), source: 'store' as const, path, text: '' })),
+      });
+    expect(layerProblems(applies('/etc/settings.json'))).toEqual([
+      'the settings path "/etc/settings.json" must be relative to the asset directory',
+    ]);
+    expect(layerProblems(applies('templates/claude/a.json', 'templates/claude/a.json'))).toEqual([
+      '"templates/claude/a.json" is applied twice by this account; one document applies once',
+    ]);
+    expect(layerProblems(applies(''))).toEqual(['every settings document needs a path']);
+    // Two DIFFERENT documents are the ordinary case and not a problem at all.
+    expect(layerProblems(applies('templates/claude/a.json', 'templates/claude/b.json'))).toHaveLength(0);
+  });
+
+  it('refuses a settings document this change would write over another row, and only an authored one', () => {
+    const written = (source: 'new' | 'store') =>
+      layer({
+        instructions: { path: 'instructions/a.md', text: '# hi' },
+        settings: [{ id: '1', source, path: 'instructions/a.md', text: '{}' }],
+      });
+    expect(layerProblems(written('new'))).toEqual([
+      '"instructions/a.md" is written twice by this change; one path carries one text',
+    ]);
+    // A REFERENCE writes nothing, so naming a path another row writes is not a conflict.
+    expect(layerProblems(written('store'))).toHaveLength(0);
   });
 
   it('refuses an unusable, unnamed or repeated environment variable', () => {
@@ -1197,9 +1286,12 @@ describe('account problems', () => {
   });
 
   it('carries the layer problems too, so one list is the whole answer', () => {
-    expect(accountProblems(draft({ layer: { ...emptyLayerDraft(), settingsText: '{' } }), declared)).toEqual([
-      'settings must be valid JSON',
-    ]);
+    expect(
+      accountProblems(
+        draft({ layer: { ...emptyLayerDraft(), settings: [{ id: '1', source: 'inline', path: '', text: '{' }] } }),
+        declared,
+      ),
+    ).toEqual(['settings must be valid JSON']);
   });
 });
 
@@ -1628,7 +1720,7 @@ describe('drafts become one named mutation', () => {
         instructions: { path: 'instructions/studio.md', text: '# be careful' },
         skillsDirectory: 'skills/studio',
         skills: [{ id: '1', path: ' skills/studio/one.md ', text: 'x' }],
-        settingsText: '{"model":"opus"}',
+        settings: [{ id: '1', source: 'inline', path: '', text: '{"model":"opus"}' }],
         env: [{ id: '1', name: ' FY_LANE ', value: 'studio' }],
         preserved: {},
       },

@@ -73,6 +73,7 @@ export * from '../features/fleet/fleet-change-review.tsx';
 export * from '../features/fleet/fleet-choice-group.tsx';
 export * from '../features/fleet/fleet-configuration-surface.tsx';
 export * from '../features/fleet/fleet-model.ts';
+export * from '../features/fleet/fleet-settings-stack.tsx';
 export * from '../features/fleet/fleet-stepper-model.ts';
 export * from '../features/fleet/claude-login-panel.tsx';
 export * from '../features/fleet/codex-login-panel.tsx';
