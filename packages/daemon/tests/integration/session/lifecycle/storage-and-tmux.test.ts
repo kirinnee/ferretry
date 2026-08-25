@@ -45,6 +45,7 @@ import { fsyncEnvironmentDirectory } from '../../../../src/adapters/session/life
 import { fsyncTaskDirectory } from '../../../../src/adapters/session/lifecycle/file-session-task-store.ts';
 import { fsyncReservedDirectory } from '../../../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import {
+  type AccountLaunchEnvironment,
   createSessionPaths,
   createSessionRecord,
   defaultSessionLifecycleSettings,
@@ -1157,4 +1158,98 @@ describe('lifecycle directory durability', () => {
       await fsyncDirectory(home);
     });
   }
+});
+
+/**
+ * The launch path and an account a profile authenticates.
+ *
+ * The profile is resolved PER LAUNCH, against the account this session actually runs, so a rotated
+ * credential reaches the next pane without an apply and a missing one refuses here rather than
+ * letting the harness fail against a remote service minutes later.
+ */
+describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () => {
+  const profiled = (
+    port: TmuxCommandPort,
+    accountEnvironment: AccountLaunchEnvironment,
+    environment?: SessionEnvironmentStore,
+  ) => {
+    const controller = new TmuxController(port);
+    return new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async () => {}),
+      environment,
+      undefined,
+      undefined,
+      undefined,
+      accountEnvironment,
+    );
+  };
+
+  it('should ask about the executable this session runs, and hand the pane what it answers', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const asked: string[] = [];
+    const subject = profiled(port, {
+      forWrapper: async wrapper => {
+        asked.push(wrapper);
+        return { ANTHROPIC_API_KEY: 'fixture-value' };
+      },
+    });
+
+    // Act
+    await subject.launch(record('profiled-session'));
+
+    // Assert
+    should(asked).deepEqual([AGENT]);
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', 'ANTHROPIC_API_KEY=fixture-value']);
+    should(launch).containDeep(['-e', 'FY_SESSION_ID=profiled-session']);
+  });
+
+  it('should let the session keep its own variable when a profile names the same one', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const stored: SessionEnvironmentStore = {
+      write: async () => undefined,
+      read: async () => ({ FY_SESSION_BOARD_CAPABILITY: 'this-session-only' }),
+    };
+    const subject = profiled(port, { forWrapper: async () => ({ FY_SESSION_BOARD_CAPABILITY: 'shared' }) }, stored);
+
+    // Act
+    await subject.launch(record('contested-session'));
+
+    // Assert
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=this-session-only']);
+    should(launch).not.containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=shared']);
+  });
+
+  it('should refuse the launch when the profile cannot be resolved, rather than start without it', async () => {
+    // Arrange — an empty credential is a 401 from a remote service with nothing to point at.
+    const port = new RecordingTmuxPort();
+    const subject = profiled(port, {
+      forWrapper: async () => {
+        throw new Error('this daemon holds no secret named WORK_KEY');
+      },
+    });
+
+    // Act & Assert
+    await should(subject.launch(record('missing-secret-session'))).be.rejectedWith(/no secret named WORK_KEY/u);
+    should(port.calls.filter(call => call[0] === 'new-session')).be.empty();
+  });
+
+  it('should launch exactly as it always did when no resolver is wired at all', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+
+    // Act
+    await subject.launch(record('plain-session'));
+
+    // Assert
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', 'FY_SESSION_ID=plain-session']);
+    should(launch?.filter(word => word === '-e')).have.length(1);
+  });
 });
