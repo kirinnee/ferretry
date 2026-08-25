@@ -22,7 +22,7 @@ export interface SessionPlanRequest {
   readonly teammate?: string;
   /** The human-facing task title. */
   readonly name?: string;
-  /** The model the caller asked for; ignored when the account cannot serve it. */
+  /** The model the caller asked for. An account that cannot serve it refuses the plan; see {@link SessionPlanOutcome}. */
   readonly requestedModel?: string;
   /** An explicit parent session, which always wins over an inherited one. */
   readonly parent?: string;
@@ -47,6 +47,26 @@ export interface SessionPlan {
   readonly extraArgs: readonly string[];
 }
 
+/**
+ * What planning one session came to.
+ *
+ * A REFUSAL IS A PLANNING OUTCOME, not an exception, because every caller of this planner is already
+ * a place that refuses things for its own reasons and in its own vocabulary — a start, a migration, a
+ * fork binding and a handover resolution each answer with a different failure taxonomy. Returning the
+ * refusal lets each of them say it in its own words, and the union is what makes it impossible for a
+ * caller to receive a model it did not ask for without noticing: before this the planner simply
+ * dropped an unservable request and answered with the account's default.
+ */
+export type SessionPlanOutcome =
+  | { readonly kind: 'planned'; readonly plan: SessionPlan }
+  | {
+      readonly kind: 'unservable-model';
+      /** What the caller asked for, quoted back rather than paraphrased. */
+      readonly requested: string;
+      /** Why this account cannot serve it, what it does serve, and what to do about it. */
+      readonly reason: string;
+    };
+
 export interface SessionPlannerPolicy {
   readonly startWait: StartWaitPolicy;
   /** Real windows for models whose id says nothing about their size, matched by substring. */
@@ -60,29 +80,38 @@ export interface SessionPlannerPolicy {
 export class SessionPlanner {
   constructor(private readonly policy: SessionPlannerPolicy) {}
 
-  plan(request: SessionPlanRequest): SessionPlan {
+  plan(request: SessionPlanRequest): SessionPlanOutcome {
     const display = resolveDisplayModel(request.account, request.requestedModel);
+    // FIRST, and before anything is derived from a model. Everything below — the context window, the
+    // `--model` argument, the document every surface reads — describes the model this session runs,
+    // so a request the account cannot meet has to stop here rather than be answered with a plan for
+    // a session nobody asked for.
+    if (display.kind === 'unservable')
+      return { kind: 'unservable-model', requested: display.requested, reason: display.reason };
     const evidence: ContextWindowEvidence = {
       configuredModel: display.model,
       overrides: this.policy.contextWindowOverrides,
       ...(request.reportedWindow === undefined ? {} : { reportedWindow: request.reportedWindow }),
     };
     return {
-      tmuxName: shellSafeSessionName(this.policy.namePrefix, request.id, request.account.agent),
-      title: harnessDisplayName(request),
-      parent: resolveParent(request),
-      model: display.model,
-      modelSource: display.source,
-      contextWindow: contextWindowFor(evidence),
-      startWaitMs: startWaitMs(this.policy.startWait, request.account.id),
-      extraArgs: remoteControlArgs(
-        {
-          harness: request.account.kind,
-          id: request.id,
-          ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
-        },
-        this.policy.remoteControlPrefix,
-      ),
+      kind: 'planned',
+      plan: {
+        tmuxName: shellSafeSessionName(this.policy.namePrefix, request.id, request.account.agent),
+        title: harnessDisplayName(request),
+        parent: resolveParent(request),
+        model: display.model,
+        modelSource: display.source,
+        contextWindow: contextWindowFor(evidence),
+        startWaitMs: startWaitMs(this.policy.startWait, request.account.id),
+        extraArgs: remoteControlArgs(
+          {
+            harness: request.account.kind,
+            id: request.id,
+            ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
+          },
+          this.policy.remoteControlPrefix,
+        ),
+      },
     };
   }
 

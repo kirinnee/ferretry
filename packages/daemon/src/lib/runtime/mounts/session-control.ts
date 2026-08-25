@@ -74,6 +74,15 @@ export type SessionControlFailure =
   | 'unknown_agent'
   /** The account exists and cannot serve a session right now, or this host cannot run its wrapper. */
   | 'unavailable'
+  /**
+   * The caller named a model this account does not serve.
+   *
+   * SEPARATE FROM `unavailable`, because the two have opposite remedies. An unavailable account is
+   * something to wait for or repair; an account that does not serve the named model is working
+   * perfectly and would start a session for any model it does declare. Folding this into
+   * `unavailable` would answer `503` and invite a retry that can only fail again.
+   */
+  | 'unservable_model'
   /** The session does not exist. */
   | 'not_found'
   /** The same request id was already spent on a different start. */
@@ -134,6 +143,10 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   invalid: { status: 400, code: 'invalid_request' },
   unknown_agent: { status: 404, code: 'unknown_agent' },
   unavailable: { status: 503, code: 'agent_unavailable' },
+  // 409 rather than 503 or 400: the request is well formed and the account is a perfectly good
+  // target — it is this MODEL that it does not serve. The remedy is to name one it does, or to
+  // declare this one on the account, and neither is a retry of the same request.
+  unservable_model: { status: 409, code: 'unservable_model' },
   not_found: { status: 404, code: 'not-found' },
   conflict: { status: 409, code: 'request_id_reused' },
   callsign_taken: { status: 409, code: 'callsign_taken' },

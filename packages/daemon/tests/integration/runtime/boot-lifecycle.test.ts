@@ -1480,6 +1480,113 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * A start naming a model the account cannot serve, through the real composition root.
+   *
+   * WHY THIS TIER. The refusal is decided in `bin/fyd.ts`, which is excluded from BOTH coverage
+   * ledgers, so the unit suite can prove the planner REFUSES and nothing above this proves the
+   * assembled daemon answers with it. Delete the check and every gate in the repository stays green
+   * while the daemon goes back to launching a model nobody asked for.
+   *
+   * AND THE CALLSIGN. The name is claimed before the plan, because the plan is named after it, so this
+   * is the one refusal that happens with a pool name already reserved. All three starts here ask for
+   * the SAME callsign and the third succeeds — which is the only way to prove the two refusals released
+   * it rather than parking it for the whole resolution window.
+   */
+  it('should refuse a start naming a model the account cannot serve, and free the callsign it claimed', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-model-refusal');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    const executable = await seedFleet(home);
+    // Republished over the seed with a second model the operator has taken OUT of service, carrying
+    // their own reason. That sentence is the most useful thing this daemon will ever have to say about
+    // that model, and a generic "not served" would throw it away.
+    await publishManifest(home, [
+      {
+        id: BOOT_ACCOUNT,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper: executable,
+        home: join(home, 'harness'),
+        displayName: 'Boot',
+        defaultModel: 'claude-opus-5',
+        models: [
+          { id: 'claude-opus-5', available: true },
+          {
+            id: 'claude-haiku-4-5',
+            available: false,
+            unavailableReason: 'this subscription tier does not include Haiku',
+          },
+        ],
+        available: true,
+        unavailableReason: null,
+      },
+    ]);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startCall = async (requestId: string, model?: string): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': requestId },
+        body: JSON.stringify({
+          agent: WRAPPER,
+          mode: 'auto',
+          prompt: 'name a model this account cannot serve',
+          teammate: SEEDED_CALLSIGN,
+          cwd: home,
+          ...(model === undefined ? {} : { model }),
+        }),
+      });
+
+    // Act
+    const unknownModel = await startCall('req-model-1', 'gpt-5.6-terra');
+    const unknownBody = (await unknownModel.json()) as { readonly code: string; readonly error: string };
+    const withdrawnModel = await startCall('req-model-2', 'claude-haiku-4-5');
+    const withdrawnBody = (await withdrawnModel.json()) as { readonly code: string; readonly error: string };
+    // No model at all, asking for the very callsign both refusals claimed.
+    const reclaimed = await startCall('req-model-3');
+    const reclaimedBody = SessionViewSchema.parse(await reclaimed.json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // 409, not 503: the account is a perfectly good target and would start a session for any model it
+    // declares, so a retry of this request cannot succeed and must not be invited.
+    should(unknownModel.status).equal(409);
+    should(unknownBody.code).equal('unservable_model');
+    should(unknownBody.error).match(/does not serve model "gpt-5\.6-terra"/u);
+    // What it DOES serve, so the refusal ends the question instead of starting one.
+    should(unknownBody.error).match(/It serves claude-opus-5/u);
+    should(withdrawnModel.status).equal(409);
+    should(withdrawnBody.error).match(/cannot serve model "claude-haiku-4-5": this subscription tier/u);
+    // NOTHING was launched for either refusal: the substitution used to happen after this point, so a
+    // launch count of one is the difference between refusing and quietly running something else.
+    should(launcher.launched).have.length(1);
+    should(reclaimed.status).equal(201);
+    should(reclaimedBody.config.model).equal('claude-opus-5');
+    // The callsign both refusals asked for, held by the start that actually happened.
+    should(reclaimedBody.config.teammate).equal(SEEDED_CALLSIGN);
+  });
+
+  /**
    * Spawn ancestry cannot come from the mounted fleet list, even though both project the same four
    * configuration fields. That list deliberately omits an unusable session so one damaged record
    * does not take `fy ps` down; lineage needs the opposite answer, because omitting a damaged parent

@@ -509,9 +509,12 @@ describe('SessionForkTargetBinder', () => {
     // Act
     const refused = await refusal(subject.bind().lifecycle.create(subject.plan));
 
-    // Assert: never silently launch a session at a model the caller was not shown.
-    should(refused.message).match(/no longer serves the target plan/u);
-    should(refused.message).match(/its model is "claude-sonnet-5" rather than "claude-opus-5"/u);
+    // Assert: never silently launch a session at a model the caller was not shown — and say WHY rather
+    // than merely that two identifiers differ. "Expected opus, got sonnet" is true and starts an
+    // investigation; the account's own answer to "can you serve opus" ends one.
+    should(refused.message).match(/was prepared for a model this account cannot serve/u);
+    should(refused.message).match(/does not serve model "claude-opus-5"/u);
+    should(refused.message).match(/It serves claude-sonnet-5/u);
     should(subject.counts().creates).equal(0);
   });
 

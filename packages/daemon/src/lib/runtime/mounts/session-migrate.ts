@@ -55,6 +55,14 @@ export type SessionMigrateFailure =
   | 'unknown_agent'
   /** The account cannot serve a session right now, or this host cannot run its wrapper. */
   | 'unavailable'
+  /**
+   * The caller named a model the target account does not serve.
+   *
+   * Separate from `unavailable` for the reason the start's own taxonomy separates them: the account
+   * is fine and would take this session for any model it declares, so answering `503` would invite a
+   * retry of a request that cannot succeed.
+   */
+  | 'unservable_model'
   /** The preflight found in-flight work it will not destroy, or could not rule some out. */
   | 'refused'
   /**
@@ -101,6 +109,9 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
   unusable: { status: 409, code: 'session_unusable' },
   unknown_agent: { status: 404, code: 'unknown_agent' },
   unavailable: { status: 503, code: 'agent_unavailable' },
+  // 409 for the same reason as `harness_mismatch` below: the account is a good target and this
+  // particular pairing is not, so the remedy is a different request rather than the same one later.
+  unservable_model: { status: 409, code: 'unservable_model' },
   // 409 rather than 403: the session's own condition refuses this, and it is answerable — the
   // caller waits for the work to finish, or stops it deliberately, and asks again.
   refused: { status: 409, code: 'migration_refused' },
