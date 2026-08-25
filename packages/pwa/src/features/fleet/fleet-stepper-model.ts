@@ -52,7 +52,7 @@ import {
   parsedSettingsObject,
   pathsWrittenTwice,
 } from './fleet-change-model.ts';
-import type { FleetHarnessKind } from './fleet-model.ts';
+import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
 
 /** The steps, in the order they are walked. `review` is the recap, not a seventh question. */
 export const FLEET_STEP_IDS = [
@@ -750,9 +750,16 @@ export const SETTINGS_PREFIX: Readonly<Record<FleetHarnessKind, string>> = {
  * The extension and the format name, per harness, and they are ONE fact rather than two.
  *
  * A harness's settings destination decides how every document in its stack is parsed —
- * `settings.json` is read as JSON and `config.toml` as TOML (`packages/fleet/src/lib/assets.ts`) — so
- * the extension a new document gets is not decoration: a `.json` document handed to a Codex account is
- * parsed as TOML and fails the apply. Deriving it is what stops a person having to know that.
+ * `settings.json` is read as JSON and `config.toml` as TOML — so the extension a new document gets is
+ * not decoration: a `.json` document handed to a Codex account is parsed as TOML and fails the apply.
+ * Deriving it is what stops a person having to know that.
+ *
+ * A DECLARED RESTATEMENT, and the alternative is worse. `HARNESS_ASSETS` in
+ * `packages/fleet/src/lib/assets.ts` owns this fact; a browser bundle cannot import the fleet package,
+ * and the daemon publishes no route that carries a harness's settings destination — `/v1/fleet/harnesses`
+ * carries the command, the models and the instructions document, and nothing about settings. So this is
+ * the same kind of restatement `INSTRUCTIONS_PREFIX` already is, kept to two values a new harness would
+ * add here as a compile error. If a route ever publishes the destination table, read it instead.
  */
 export const SETTINGS_DOCUMENT: Readonly<
   Record<FleetHarnessKind, { readonly extension: string; readonly format: string }>
@@ -816,7 +823,7 @@ export const settingsStoreItems = (config: FleetConfigView | null): readonly Fle
   for (const path of [...named.keys(), ...linkers.keys()]) {
     if (items.has(path)) continue;
     const name = named.get(path);
-    const problem = assetPathProblem(path, 'it');
+    const problem = assetPathProblem(path, 'This fleet declared it, but a browser cannot use it: the path');
     items.set(path, {
       path,
       ...(name === undefined ? {} : { name }),
@@ -848,7 +855,7 @@ export const settingsFormatNote = (path: string, harness: FleetHarnessKind): str
   // is no name to quote, and slicing at a dot that is not there would quote its last character.
   const dot = path.lastIndexOf('.');
   const named = dot === -1 || dot < path.lastIndexOf('/') ? 'Named with no extension' : `Named ${path.slice(dot)}`;
-  return `${named}, and a ${harness} account reads its settings as ${format}.`;
+  return `${named}, and a ${fleetHarnessLabel(harness)} account reads its settings as ${format}.`;
 };
 
 /** Every document path one route's declared `settings` references, canonical, in declared order. */

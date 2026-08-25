@@ -102,8 +102,11 @@ export function FleetSettingsOrder({ layer, onChange, disabled, harness, name }:
     <div className="grid min-w-0 gap-3" data-fleet-settings-stack={name}>
       {entries.length === 0 ? (
         <p className="m-0 text-meta leading-base text-muted" data-fleet-settings-empty="">
+          {/* "Nothing here is required", not "everything below is optional": this control sits under
+              the picker on one surface and is the whole section on the other, so "below" names a
+              different set of controls depending on which screen you are reading it on. */}
           This account adds no settings of its own, so it gets whatever this fleet already composes for its accounts.
-          That is a working account — everything below is optional.
+          That is a working account — nothing here is required.
         </p>
       ) : (
         <>

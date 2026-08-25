@@ -465,19 +465,19 @@ describe('the settings this fleet has', () => {
     // The trap is the DEFAULT one: `fy fleet init` registers one document per harness and this step
     // offers both, so a Claude account is offered a `config.toml` that would be parsed as JSON.
     expect(settingsFormatNote('templates/codex/config.toml', 'claude')).toBe(
-      'Named .toml, and a claude account reads its settings as JSON.',
+      'Named .toml, and a Claude account reads its settings as JSON.',
     );
     expect(settingsFormatNote('templates/claude/settings.json', 'codex')).toBe(
-      'Named .json, and a codex account reads its settings as TOML.',
+      'Named .json, and a Codex account reads its settings as TOML.',
     );
     expect(settingsFormatNote('templates/claude/settings.json', 'claude')).toBeNull();
     expect(settingsFormatNote('templates/codex/config.toml', 'codex')).toBeNull();
     // A path with no extension has no name to quote, and a dot in a DIRECTORY is not an extension.
     expect(settingsFormatNote('templates/claude/settings', 'claude')).toBe(
-      'Named with no extension, and a claude account reads its settings as JSON.',
+      'Named with no extension, and a Claude account reads its settings as JSON.',
     );
     expect(settingsFormatNote('templates/v1.2/settings', 'claude')).toBe(
-      'Named with no extension, and a claude account reads its settings as JSON.',
+      'Named with no extension, and a Claude account reads its settings as JSON.',
     );
   });
 });
