@@ -1,0 +1,379 @@
+/**
+ * THE ACCOUNTS PAGE, wired. A first-class destination rather than a settings sub-tab.
+ *
+ * ## WHAT IT REPLACES
+ *
+ * `fleet-sign-in-section.tsx` — a tab inside Settings, grouped by provider login, with one control per
+ * group. It is deleted rather than deprecated, and this page keeps every guarantee it had: the shared
+ * operator prompt, the poll of a live sign-in, the credential-source sentence where a sign-in cannot
+ * help, the usage line that says "unknown" and never "0%", and a refusal in the daemon's own words.
+ *
+ * Two things are new, and both come from the owner's own words — an accounts page they can add to, and
+ * "on the account page, we should be able to see when it was last check":
+ *
+ * 1. **A verdict and its instant, per account.** From `GET /v1/fleet/health`, which is a STORED
+ *    snapshot: the daemon reads its own file and checks nothing, so opening this page cannot cost a
+ *    provider call, let alone start an agent.
+ * 2. **The account you click is the account that gets signed in.** One row, one `accountId`, one
+ *    `POST /v1/fleet/login`.
+ *
+ * ## WHAT IT WILL NEVER DO
+ *
+ * No timer, no poll of health, no check on mount, and nothing launched to find anything out. The only
+ * collecting call is `POST /v1/fleet/health/check`, from the button and nowhere else — and that call
+ * is free by construction: one read-only provider status GET per credential, no model asked anything.
+ * `boot-lifecycle.test.ts`'s "what an unattended fleet pass may spend" journey is the guard, and this
+ * page adds nothing it has to forgive.
+ *
+ * The sign-in poll IS a timer, and it is a different thing: it exists only while a flow this reader
+ * started is still live, it reads that flow's own state, and it stops the moment the flow settles.
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { FleetLoginReadiness, FleetPermissions, HarnessLoginFlow, UsageAccountView } from '@ferretry/protocol';
+
+import type { PickerAccountHealth } from '../../lib/account-picker-catalog.ts';
+import { checkAccountPickerHealth } from '../../lib/account-picker-catalog.ts';
+import type { AccountPickerLoadStatus } from '../../lib/account-picker-store.ts';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
+import { unlockGrants } from '../settings/grants-api.ts';
+import { OperatorUnlockDialog } from '../settings/operator-unlock-dialog.tsx';
+import { type AccountRowView, accountsRoster } from './accounts-model.ts';
+import { type AccountsReadState, AccountsSurface } from './accounts-surface.tsx';
+import { type FleetClient, fleetRefusal, readFleetAccountHealth, readFleetPermissions } from './fleet-api.ts';
+import { fleetApplyAuthority, fleetApplyNeedsPassword } from './fleet-change-model.ts';
+import type { FleetClientFactory } from './fleet-configuration-surface.tsx';
+import {
+  cancelHarnessLogin,
+  readDaemonUsageFeed,
+  readFleetLoginReadiness,
+  readHarnessLoginFlow,
+  startHarnessLogin,
+  submitHarnessLoginCode,
+  usageByWrapper,
+} from './harness-login-api.ts';
+
+/** How often a live sign-in is re-read. The person is acting somewhere this browser cannot see. */
+const POLL_MS = 2_000;
+
+export interface AccountsPageProps {
+  readonly connection: DaemonConnection;
+  /** The connection-bound client. A fleet belongs to a machine, so nothing is cached at module scope. */
+  readonly createClient: FleetClientFactory;
+  readonly now?: () => number;
+  /** Injected so a test asserts against a fixture rather than against whenever the suite ran. */
+  readonly usage?: ReadonlyMap<string, UsageAccountView>;
+  readonly pollMs?: number;
+  readonly onNavigate?: (to: string) => void;
+  className?: string;
+}
+
+/** Live sign-ins, keyed by the ACCOUNT whose wrapper is showing the browser. */
+type FlowsByAccount = Readonly<Record<string, HarnessLoginFlow>>;
+
+const terminal = (flow: HarnessLoginFlow): boolean => flow.state === 'complete' || flow.state === 'failed';
+
+/**
+ * The accounts read, or the reason there is none.
+ *
+ * `unavailable` is a state and never an empty roster: a daemon that could not answer still has
+ * whatever accounts it has, and rendering zero of them is a claim nothing established.
+ */
+type ReadinessState =
+  | { readonly kind: 'reading' }
+  | { readonly kind: 'unavailable'; readonly reason: string }
+  | { readonly kind: 'ready'; readonly readiness: FleetLoginReadiness };
+
+/** What was read, held raw: the projection happens at render, against one instant. */
+interface AccountsRead {
+  readonly readiness: ReadinessState;
+  readonly health: ReadonlyMap<string, PickerAccountHealth>;
+  readonly feed: ReadonlyMap<string, UsageAccountView>;
+}
+
+const EMPTY_READ: AccountsRead = { readiness: { kind: 'reading' }, health: new Map(), feed: new Map() };
+
+export function AccountsPage({
+  connection,
+  createClient,
+  now = Date.now,
+  usage,
+  pollMs = POLL_MS,
+  onNavigate,
+  className,
+}: AccountsPageProps) {
+  const [client, setClient] = useState<FleetClient | null>(null);
+  const [read, setRead] = useState<AccountsRead>(EMPTY_READ);
+  const [permissions, setPermissions] = useState<FleetPermissions | null>(null);
+  const [flows, setFlows] = useState<FlowsByAccount>({});
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [held, setHeld] = useState<HeldUnlock | null>(null);
+  const [pending, setPending] = useState<AccountRowView | null>(null);
+  const [unlockFailure, setUnlockFailure] = useState<OperatorUnlockFailure | null>(null);
+  const [healthStatus, setHealthStatus] = useState<AccountPickerLoadStatus>('idle');
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [checked, setChecked] = useState(0);
+  /** Read inside the poll so a tick never closes over a stale client. */
+  const clientRef = useRef<FleetClient | null>(null);
+  clientRef.current = client;
+
+  const authority = fleetApplyAuthority(permissions);
+  const unlock = usableUnlock(held, connection.daemonId, now());
+
+  const load = useCallback(async (bound: FleetClient, token: string | undefined): Promise<void> => {
+    try {
+      const [readiness, allowed] = await Promise.all([
+        readFleetLoginReadiness(bound, token),
+        readFleetPermissions(bound, token),
+      ]);
+      setPermissions(allowed);
+      setRefusal(null);
+      // Two reads that must not take the roster down with them. A health snapshot this daemon could
+      // not serve leaves every row UNREAD — which has its own sentence — and a usage scrape that
+      // missed leaves the last feed alone, because a quota column that emptied reads as "nothing is
+      // using anything", the exact opposite of what a failed probe means.
+      const [health, feed] = await Promise.all([
+        readFleetAccountHealth(bound).then(
+          catalog => catalog,
+          (error: unknown) => ({ health: new Map<string, PickerAccountHealth>(), error: fleetRefusal(error).detail }),
+        ),
+        readDaemonUsageFeed(bound).then(usageByWrapper, () => undefined),
+      ]);
+      // A snapshot that arrived ambiguous — or did not arrive — is reported through the check
+      // control's own error slot rather than as a page refusal: the roster is fine, and what is
+      // damaged is the evidence beside it. The status is `error` and never `ready`, so nothing on
+      // screen claims a check just ran.
+      setHealthStatus(health.error === null ? 'idle' : 'error');
+      setHealthError(health.error);
+      setRead(current => ({
+        readiness: { kind: 'ready', readiness },
+        health: health.health,
+        feed: feed ?? current.feed,
+      }));
+    } catch (error) {
+      setRead(current => ({ ...current, readiness: { kind: 'unavailable', reason: fleetRefusal(error).detail } }));
+    }
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    setRead(EMPTY_READ);
+    setPermissions(null);
+    setFlows({});
+    setHeld(null);
+    setHealthStatus('idle');
+    void createClient(connection).then(
+      async bound => {
+        if (!live) return;
+        setClient(bound);
+        await load(bound, undefined);
+      },
+      (error: unknown) => {
+        if (!live) return;
+        setRead({ ...EMPTY_READ, readiness: { kind: 'unavailable', reason: fleetRefusal(error).detail } });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [connection, createClient, load]);
+
+  /** Re-read every live sign-in until it settles. */
+  useEffect(() => {
+    const alive = Object.values(flows).filter(flow => !terminal(flow));
+    if (alive.length === 0) return undefined;
+    const handle = setInterval(() => {
+      const bound = clientRef.current;
+      if (bound === null) return;
+      for (const flow of alive) {
+        void readHarnessLoginFlow(bound, flow.flowId, unlock).then(
+          next => setFlows(current => ({ ...current, [next.accountId]: next })),
+          () => undefined,
+        );
+      }
+    }, pollMs);
+    return () => clearInterval(handle);
+  }, [flows, pollMs, unlock]);
+
+  /**
+   * Start one account's sign-in, spending the typed password on every step that needs it.
+   *
+   * `locked` and `confirm` are not alternatives: a remote caller on a machine with an operator password
+   * is locked AND owes a per-sign-in confirmation, so the value arrives once and is used twice.
+   */
+  const run = useCallback(
+    async (row: AccountRowView, password: string | undefined): Promise<void> => {
+      const bound = clientRef.current;
+      if (bound === null) return;
+      setBusy(true);
+      setRefusal(null);
+      setUnlockFailure(null);
+      let token = usableUnlock(held, connection.daemonId, now());
+      // Tracked rather than inferred afterwards: a throw from the MINT is a password problem and a
+      // throw from the START is a sign-in problem, and the two are shown in two different places.
+      let minting = authority.kind === 'locked' && token === undefined && password !== undefined;
+      try {
+        if (minting) {
+          const minted = await unlockGrants(bound, String(password));
+          setHeld({ daemonId: connection.daemonId, token: minted.token, expiresAtMs: Date.parse(minted.expiresAt) });
+          token = minted.token;
+          minting = false;
+        }
+        const flow = await startHarnessLogin(
+          bound,
+          {
+            // THE ROW'S OWN ACCOUNT. Not its login's first applicable member, which is what the
+            // surface this replaced sent — see `chooseLoginDriver`.
+            accountId: row.accountId,
+            // Sent only where the daemon SAID it would be asked for. A password on a request that does
+            // not need one is a secret spent for nothing.
+            ...(password === undefined || !fleetApplyNeedsPassword(authority) ? {} : { operatorPassword: password }),
+          },
+          token,
+        );
+        setFlows(current => ({ ...current, [flow.accountId]: flow }));
+        setPending(null);
+      } catch (error) {
+        const refused = fleetRefusal(error);
+        // In the dialog when the password is what was rejected — the mint, or a start the daemon
+        // refused as unauthorized — so it can be retyped where it was typed. On the page otherwise,
+        // and the prompt closes: a dialog left open over a refusal a password cannot fix is theatre.
+        if (password !== undefined && (minting || refused.code === 'fleet_login_unauthorized')) {
+          setUnlockFailure(operatorUnlockFailure(error));
+        } else {
+          setRefusal(refused.detail);
+          setPending(null);
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [authority, connection.daemonId, held, now],
+  );
+
+  const begin = useCallback(
+    (row: AccountRowView): void => {
+      if (fleetApplyNeedsPassword(authority) && usableUnlock(held, connection.daemonId, now()) === undefined) {
+        setPending(row);
+        setUnlockFailure(null);
+        return;
+      }
+      void run(row, undefined);
+    },
+    [authority, connection.daemonId, held, now, run],
+  );
+
+  const submit = useCallback(
+    (flow: HarnessLoginFlow, code: string): void => {
+      const bound = clientRef.current;
+      if (bound === null) return;
+      setBusy(true);
+      void submitHarnessLoginCode(bound, flow.flowId, code, unlock)
+        .then(
+          outcome => {
+            if (outcome.outcome === 'accepted')
+              setFlows(current => ({ ...current, [outcome.flow.accountId]: outcome.flow }));
+            else setRefusal(outcome.reason);
+          },
+          (error: unknown) => setRefusal(fleetRefusal(error).detail),
+        )
+        .finally(() => setBusy(false));
+    },
+    [unlock],
+  );
+
+  const cancel = useCallback(
+    (flow: HarnessLoginFlow): void => {
+      const bound = clientRef.current;
+      if (bound === null) return;
+      setBusy(true);
+      void cancelHarnessLogin(bound, flow.flowId, unlock)
+        .then(
+          next => setFlows(current => ({ ...current, [next.accountId]: next })),
+          (error: unknown) => setRefusal(fleetRefusal(error).detail),
+        )
+        .finally(() => setBusy(false));
+    },
+    [unlock],
+  );
+
+  const reRead = useCallback((): void => {
+    const bound = clientRef.current;
+    if (bound === null) return;
+    void load(bound, unlock);
+  }, [load, unlock]);
+
+  /**
+   * Ask the host to collect the free evidence NOW.
+   *
+   * The only collecting call on this page, and it is behind this one control. It spends nothing: one
+   * read-only provider status GET per credential on the host, which is the same request that host's
+   * quota pass already makes every minute. No agent is started and no model is asked anything.
+   */
+  const check = useCallback((): void => {
+    const bound = clientRef.current;
+    if (bound === null) return;
+    setHealthStatus('loading');
+    setHealthError(null);
+    void checkAccountPickerHealth(bound).then(
+      catalog => {
+        setRead(current => ({ ...current, health: catalog.health }));
+        setChecked(catalog.health.size);
+        setHealthStatus(catalog.error === null ? 'ready' : 'error');
+        setHealthError(catalog.error);
+      },
+      (error: unknown) => {
+        setHealthStatus('error');
+        setHealthError(fleetRefusal(error).detail);
+      },
+    );
+  }, []);
+
+  const instant = now();
+  const state: AccountsReadState =
+    read.readiness.kind === 'ready'
+      ? { kind: 'ready', roster: accountsRoster(read.readiness.readiness, read.health, usage ?? read.feed, instant) }
+      : read.readiness;
+
+  return (
+    <div className={className}>
+      <AccountsSurface
+        daemonId={connection.daemonId}
+        state={state}
+        flows={flows}
+        refusal={refusal}
+        busy={busy}
+        mayStart={authority.kind !== 'refused' && authority.kind !== 'unreadable'}
+        healthCheck={{ status: healthStatus, error: healthError, checked, onCheck: check }}
+        addAccountHref={`${daemonSettingsPath(connection.daemonId)}#daemons`}
+        {...(onNavigate === undefined ? {} : { onNavigate })}
+        onReRead={reRead}
+        onStart={begin}
+        onSubmitCode={submit}
+        onCancel={cancel}
+      />
+      <OperatorUnlockDialog
+        open={pending !== null}
+        holding={authority.kind === 'locked'}
+        busy={busy}
+        failure={unlockFailure}
+        submitLabel="Start sign-in"
+        purpose={
+          pending === null
+            ? ''
+            : `Signing “${pending.label}” in re-points every agent that runs on this account, so this machine asks for its operator password once, against this one sign-in.`
+        }
+        onSubmit={password => {
+          if (pending !== null) void run(pending, password);
+        }}
+        onClose={() => {
+          setPending(null);
+          setUnlockFailure(null);
+        }}
+      />
+    </div>
+  );
+}

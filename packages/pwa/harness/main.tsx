@@ -17,6 +17,7 @@ import type {
   CgroupConfigView,
   DaemonCapability,
   DoctorReport,
+  FleetLoginReadiness,
   GrantRefusal,
   GrantsView,
   HarnessDiscoveryReport,
@@ -33,6 +34,7 @@ import type {
   TaskStatus,
   TaskSummary,
   TerminalListView,
+  UsageAccountView,
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
@@ -137,14 +139,14 @@ import {
   FleetFirstRunPlan,
   FleetLiveRoster,
 } from '../src/features/fleet/fleet-change-review.tsx';
+import { accountsRoster } from '../src/features/fleet/accounts-model.ts';
+import { type AccountsReadState, AccountsSurface } from '../src/features/fleet/accounts-surface.tsx';
 import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
-import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import {
   FLEET_STEP_IDS,
   type FleetInstructionsControl,
   type FleetSkillsStoreItem,
 } from '../src/features/fleet/fleet-stepper-model.ts';
-import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
 import { ClaudeLoginPanel } from '../src/features/fleet/claude-login-panel.tsx';
 import { CodexLoginPanel } from '../src/features/fleet/codex-login-panel.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
@@ -323,41 +325,189 @@ const HARNESS_REFERENCE_PROSE = [
 ].join('\n');
 const settingsControls = new DaemonControlsStore();
 
-/** Positive fixture evidence: this is not a claim that either account is signed in. */
-const HARNESS_FLEET: FleetReadState = {
-  kind: 'available',
-  harnesses: [
-    { kind: 'claude', launchable: ['claude-auto-studio'], blocked: [] },
+/**
+ * THE ACCOUNTS PAGE, at a fixed instant, with four health states on screen at once.
+ *
+ * One account per state a verdict can be in — healthy, a 403 whose quota is unreadable and whose
+ * account is FINE, one that needs a re-login, and Codex's honest `unknown` — plus an account whose
+ * credential comes from a file, so the "there is nothing to press here" arm is visible too. Written
+ * out longhand: a fixture derived from the schema the surface parses with proves nothing about it.
+ *
+ * The roster is built with the page's own `accountsRoster`, deliberately, so this card shows the
+ * projection the live page shows rather than a hand-shaped lookalike of it.
+ */
+const HARNESS_ACCOUNTS_NOW = Date.parse('2026-08-25T09:00:00.000Z');
+
+const HARNESS_ACCOUNTS_READINESS = {
+  identities: [
     {
+      identity: 'claude:studio',
+      kind: 'claude',
+      verdict: 'complete',
+      accounts: [
+        {
+          accountId: '11111111-1111-4111-8111-111111111111',
+          kind: 'claude',
+          displayName: 'Studio Claude',
+          wrapper: 'claude-studio',
+          mode: 'interactive',
+          available: true,
+          credential: { state: 'valid', expiresAt: '2026-08-25T17:00:00.000Z' },
+          source: { source: 'interactive-login' },
+          login: { applies: true },
+        },
+        {
+          accountId: '22222222-2222-4222-8222-222222222222',
+          kind: 'claude',
+          displayName: 'Studio Claude, unattended',
+          wrapper: 'claude-auto-studio',
+          mode: 'auto',
+          available: true,
+          credential: { state: 'refreshable' },
+          source: { source: 'interactive-login' },
+          login: { applies: true },
+        },
+      ],
+    },
+    {
+      identity: 'claude:atelier',
+      kind: 'claude',
+      verdict: 'login',
+      reason: 'no member of this login holds a usable credential.',
+      accounts: [
+        {
+          accountId: '33333333-3333-4333-8333-333333333333',
+          kind: 'claude',
+          displayName: 'Atelier Claude',
+          wrapper: 'claude-atelier',
+          mode: 'interactive',
+          available: true,
+          credential: { state: 'missing' },
+          source: { source: 'interactive-login' },
+          login: { applies: true },
+        },
+      ],
+    },
+    {
+      identity: 'claude:proxy',
+      kind: 'claude',
+      verdict: 'no-login',
+      accounts: [
+        {
+          accountId: '44444444-4444-4444-8444-444444444444',
+          kind: 'claude',
+          displayName: 'Proxy Claude',
+          wrapper: 'claude-proxy',
+          mode: 'auto',
+          available: true,
+          credential: { state: 'not-read' },
+          source: { source: 'token-file', variable: 'ANTHROPIC_API_KEY', path: '/etc/ferretry/secrets.sh' },
+          login: { applies: false, because: 'credential-is-not-a-login' },
+        },
+      ],
+    },
+    {
+      identity: 'codex:archive',
       kind: 'codex',
-      launchable: ['codex-auto-studio'],
-      blocked: ['the fleet publishes codex-auto-archive but this host has no such executable on its PATH'],
+      verdict: 'complete',
+      accounts: [
+        {
+          accountId: '55555555-5555-4555-8555-555555555555',
+          kind: 'codex',
+          displayName: 'Archive Codex',
+          wrapper: 'codex-archive',
+          mode: 'auto',
+          available: false,
+          credential: { state: 'valid' },
+          source: { source: 'interactive-login' },
+          login: { applies: true },
+        },
+      ],
     },
   ],
-  accounts: [
+} satisfies FleetLoginReadiness;
+
+const HARNESS_ACCOUNTS_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
+  [
+    '11111111-1111-4111-8111-111111111111',
     {
-      id: 'studio-claude-auto',
-      wrapper: 'claude-auto-studio',
-      harness: 'claude',
-      label: 'Studio Claude',
-      available: true,
-    },
-    {
-      id: 'studio-codex-auto',
-      wrapper: 'codex-auto-studio',
-      harness: 'codex',
-      label: 'Studio Codex',
-      available: true,
-    },
-    {
-      id: 'archive-codex-auto',
-      wrapper: 'codex-auto-archive',
-      harness: 'codex',
-      label: 'Archive Codex',
-      available: false,
-      unavailableReason: 'The archive account is disabled while its provider is unavailable.',
+      accountId: '11111111-1111-4111-8111-111111111111',
+      kind: 'claude',
+      verdict: 'healthy' as const,
+      reason: 'provider_accepted' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 240_000,
+      verdictAt: HARNESS_ACCOUNTS_NOW - 240_000,
+      lastCheckInconclusive: false,
     },
   ],
+  [
+    '22222222-2222-4222-8222-222222222222',
+    {
+      accountId: '22222222-2222-4222-8222-222222222222',
+      kind: 'claude',
+      // The 403 row: the token WORKS and only its quota cannot be read. A surface that painted this
+      // as a problem sends somebody to re-login forever on a working account.
+      verdict: 'healthy' as const,
+      reason: 'usage_scope_unavailable' as const,
+      evidence: 'anthropic_usage' as const,
+      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 60_000,
+      verdictAt: HARNESS_ACCOUNTS_NOW - 60_000,
+      lastCheckInconclusive: false,
+    },
+  ],
+  [
+    '33333333-3333-4333-8333-333333333333',
+    {
+      accountId: '33333333-3333-4333-8333-333333333333',
+      kind: 'claude',
+      verdict: 'needs_relogin' as const,
+      reason: 'oauth_credential_missing' as const,
+      evidence: 'local_credential' as const,
+      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 3_600_000,
+      verdictAt: HARNESS_ACCOUNTS_NOW - 3_600_000,
+      lastCheckInconclusive: false,
+    },
+  ],
+  [
+    '55555555-5555-4555-8555-555555555555',
+    {
+      accountId: '55555555-5555-4555-8555-555555555555',
+      kind: 'codex',
+      // Codex is honestly `unknown`: its usage endpoint answers 200 for a stale token, so nothing
+      // free proves a sign-in. That is the finished answer, not a hole in this fixture.
+      verdict: 'unknown' as const,
+      reason: 'codex_liveness_unproven' as const,
+      evidence: 'none' as const,
+      lastCheckedAt: HARNESS_ACCOUNTS_NOW - 120_000,
+      verdictAt: null,
+      lastCheckInconclusive: false,
+    },
+  ],
+]);
+
+const HARNESS_ACCOUNTS_USAGE: ReadonlyMap<string, UsageAccountView> = new Map([
+  [
+    'claude-studio',
+    {
+      agent: 'claude-studio',
+      usageBased: true,
+      fiveHourPercent: 42,
+      weeklyPercent: 17,
+      fiveHourResetAt: HARNESS_ACCOUNTS_NOW + 5_400_000,
+    },
+  ],
+  ['claude-proxy', { agent: 'claude-proxy', usageBased: false }],
+]);
+
+const HARNESS_ACCOUNTS_STATE: AccountsReadState = {
+  kind: 'ready',
+  roster: accountsRoster(
+    HARNESS_ACCOUNTS_READINESS,
+    HARNESS_ACCOUNTS_HEALTH,
+    HARNESS_ACCOUNTS_USAGE,
+    HARNESS_ACCOUNTS_NOW,
+  ),
 };
 
 /**
@@ -5343,11 +5493,24 @@ function Shell() {
       render: () => <SettingsPageHarness />,
     },
     {
-      label: 'Fleet inventory preview',
+      label: 'Accounts page preview',
       render: () => (
-        <Card id="harness-fleet-inventory" aria-label="Fleet inventory preview">
+        <Card id="harness-fleet-inventory" aria-label="Accounts page preview">
           <PanelBody>
-            <FleetSurface daemonId={daemon.daemonId} state={HARNESS_FLEET} />
+            <AccountsSurface
+              daemonId={daemon.daemonId}
+              state={HARNESS_ACCOUNTS_STATE}
+              flows={{}}
+              refusal={null}
+              busy={false}
+              mayStart={true}
+              healthCheck={{ status: 'ready', error: null, checked: 4, onCheck: () => {} }}
+              addAccountHref="/d/harness/settings#daemons"
+              onReRead={() => {}}
+              onStart={() => {}}
+              onSubmitCode={() => {}}
+              onCancel={() => {}}
+            />
           </PanelBody>
         </Card>
       ),

@@ -27,6 +27,7 @@ export interface PageHostSlots {
   readonly ProjectDetail?: ComponentType<ProjectDetailPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
   readonly Settings: ComponentType<DaemonPageProps>;
+  readonly Accounts: ComponentType<DaemonPageProps>;
   readonly Warden: ComponentType<DaemonPageProps>;
   readonly Analytics: ComponentType<DaemonPageProps>;
   readonly Learning: ComponentType<DaemonPageProps>;
@@ -78,6 +79,8 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
       );
     case 'settings':
       return <slots.Settings connection={matchedConnection} />;
+    case 'accounts':
+      return <slots.Accounts connection={matchedConnection} />;
     case 'warden':
       return <slots.Warden connection={matchedConnection} />;
     case 'analytics':

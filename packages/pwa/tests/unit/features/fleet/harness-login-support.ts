@@ -15,11 +15,12 @@ import type {
   FleetLoginReadiness,
   UsageAccountView,
 } from '@ferretry/protocol';
+import type { PickerAccountHealth } from '../../../../src/lib/account-picker-catalog.ts';
 
 export const CLAUDE_ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
-const CLAUDE_SIBLING_ID = '22222222-2222-4222-8222-222222222222';
-const CODEX_ACCOUNT_ID = '33333333-3333-4333-8333-333333333333';
-const KEYED_ACCOUNT_ID = '44444444-4444-4444-8444-444444444444';
+export const CLAUDE_SIBLING_ID = '22222222-2222-4222-8222-222222222222';
+export const CODEX_ACCOUNT_ID = '33333333-3333-4333-8333-333333333333';
+export const KEYED_ACCOUNT_ID = '44444444-4444-4444-8444-444444444444';
 
 /** Observed at claude-code 2.1.220. The PKCE query is part of the fixture on purpose. */
 export const CLAUDE_URL = 'https://claude.com/cai/oauth/authorize?code=true&code_challenge_method=S256&state=fixture';
@@ -126,3 +127,31 @@ export const usageRow = (overrides: Partial<UsageAccountView> = {}): UsageAccoun
   agent: 'claude-studio',
   ...overrides,
 });
+
+/**
+ * One stored health row as `GET /v1/fleet/health` publishes it.
+ *
+ * The default is the plainest useful case — healthy, dated four minutes ago — so a test that is about
+ * something else does not have to spell out seven fields, and a test that IS about a verdict overrides
+ * exactly the fields it is pinning.
+ */
+export const healthRow = (overrides: Partial<PickerAccountHealth> = {}): PickerAccountHealth => ({
+  accountId: CLAUDE_ACCOUNT_ID,
+  kind: 'claude',
+  verdict: 'healthy',
+  reason: 'provider_accepted',
+  evidence: 'anthropic_usage',
+  lastCheckedAt: NOW - 240_000,
+  verdictAt: NOW - 240_000,
+  lastCheckInconclusive: false,
+  ...overrides,
+});
+
+/** A health snapshot as the route sends one: an instant, and a row per account. */
+export const healthSnapshot = (accounts: readonly PickerAccountHealth[] = [healthRow()]) => ({
+  at: NOW,
+  accounts,
+});
+
+export const healthMap = (accounts: readonly PickerAccountHealth[] = [healthRow()]): Map<string, PickerAccountHealth> =>
+  new Map(accounts.map(account => [account.accountId, account] as const));

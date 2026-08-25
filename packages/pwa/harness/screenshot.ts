@@ -1673,9 +1673,9 @@ try {
 
           // The rest of this pass still belongs to the full gallery.
           await page.goto(server.url.toString());
-          const fleetInventoryTarget = join(outDir, `fleet-inventory-${viewport.name}.png`);
-          await page.getByLabel('Fleet inventory preview').screenshot({ path: fleetInventoryTarget });
-          process.stdout.write(`📸 Fleet inventory -> ${fleetInventoryTarget}\n`);
+          const accountsPageTarget = join(outDir, `accounts-page-${viewport.name}.png`);
+          await page.getByLabel('Accounts page preview').screenshot({ path: accountsPageTarget });
+          process.stdout.write(`📸 Accounts page -> ${accountsPageTarget}\n`);
           if (SETTINGS_ONLY) continue;
           const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
           await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
