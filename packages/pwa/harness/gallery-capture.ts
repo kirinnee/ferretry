@@ -6,9 +6,9 @@
  * PNG of the right SIZE holding pixels of an entirely different card. Measured on
  * Chrome 141 headless, `#harness-fleet-preview` (a 1,420x1,095 card at y≈37,400)
  * came back as the device-pairing panel followed by the two picker cards that live
- * near y≈75,600 — 26.5% of its pixels differing from what the browser actually
- * paints for that element. `#harness-dictation-settings` differed by 31.6%,
- * `#harness-fleet-layer` by 20.4%. Nothing threw, nothing warned, and every one of
+ * near y≈75,600 — 29.97% of its pixels differing from what the browser actually
+ * paints for that element. `#harness-dictation-settings` differed by 51.57%,
+ * `#harness-fleet-layer` by 46.68%. Nothing threw, nothing warned, and every one of
  * those PNGs was reviewed and approved as if it showed the card it is named after.
  *
  * WHY THAT IS WORSE THAN A CRASH. A capture is the whole of the visual review: the
@@ -32,13 +32,17 @@
  * viewport — so a layout that isolation would distort is refused instead of
  * photographed. Everything is put back before the function returns.
  *
- * MEASURED ALTERNATIVES, and why they are not what this does. Scrolling the card to
- * the top of the viewport and growing the viewport WITHOUT isolating it — the least
- * invasive repair — still returned 4.8% wrong pixels for `#harness-dictation-settings`
- * at `desktop` and 5.2% at `mobile`. Trusting `locator.screenshot()` to scroll for
- * itself is the defect. Only isolation agreed, pixel for pixel, with a plain
- * full-viewport `page.screenshot()` of the same element — the one capture Chromium
- * takes of pixels it has really put on a screen.
+ * HOW EVERY NUMBER HERE WAS JUDGED, because a yardstick that shares a bias with the
+ * thing it measures decides nothing: each strategy is compared against a plain
+ * full-viewport `page.screenshot()` of ITS OWN page state — the one capture Chromium
+ * takes of pixels it has really put on a screen — and never against another
+ * strategy's layout.
+ *
+ * MEASURED ALTERNATIVES. Scrolling the card to the top and growing the viewport
+ * WITHOUT isolating it — the least invasive repair — still disagreed with the screen
+ * by 6.37% for `#harness-dictation-settings` at `desktop` and 8.97% at `mobile`.
+ * Trusting `locator.screenshot()` to place the element for itself is the defect. Only
+ * isolation agreed pixel for pixel, on every card measured, at both viewports.
  */
 
 import type { Locator, Page } from 'playwright-core';
@@ -47,10 +51,10 @@ import type { Locator, Page } from 'playwright-core';
  * The four names isolation writes into the document, and every one of them is
  * removed again by `release`.
  *
- * `hidden` is what the isolation sheet hides. `pinned` marks the one element whose
- * own width was held still, and `restyle` carries the inline style it had before —
- * absent on an element that had none, which is how the release tells "put this back"
- * from "there was nothing here".
+ * `hidden` is what the isolation sheet hides. `pinned` marks every element whose width
+ * was held still — the card and each of its ancestors — and `restyle` carries the
+ * inline style that element had before, absent on one that had none, which is how the
+ * release tells "put this back" from "there was nothing here".
  */
 const ISOLATION = {
   attribute: 'data-harness-capture-hidden',
