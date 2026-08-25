@@ -2191,4 +2191,5 @@ export const CHANGE_LIMITS: readonly string[] = [
   'Applying rewrites fleet config.yaml from the parsed document: YAML comments, anchors and key order in that file are not preserved.',
   'Settings are MERGED, in order, over what the harness already wrote. A key cannot be deleted from here — a later document can only give it another value.',
   'Only text assets can be edited here. Executable hooks, per-skill selection and home pruning are not offered.',
+  'A model taken out of service in config.yaml is kept exactly as it is. This form cannot declare one, and no change sent from here removes one or the reason written on it.',
 ];
