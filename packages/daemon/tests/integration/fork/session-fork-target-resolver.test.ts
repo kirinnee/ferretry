@@ -173,17 +173,18 @@ describe('SessionForkTargetResolver', () => {
     should(decided.harness).equal('codex');
   });
 
-  it('should let the planner decide a model the account cannot serve, without a second rule here', async () => {
-    // Act
-    const decided = await resolver(served(CLAUDE)).resolve({
-      agent: 'claude-auto-zelda',
-      model: 'sonnet-3',
-      effort: null,
-    });
+  it('should refuse a model the account cannot serve, rather than freezing its default instead', async () => {
+    // Act — the planner still owns the decision and there is still no second rule here; what changed
+    // is that its decision may be a REFUSAL, and this resolver answers with it.
+    const refused = await refusal(
+      resolver(served(CLAUDE)).resolve({ agent: 'claude-auto-zelda', model: 'sonnet-3', effort: null }),
+    );
 
-    // Assert: the account's own default, reported as the decision rather than the request.
-    should(decided.model).equal('claude-opus-5');
-    should(decided.effort).equal(null);
+    // Assert: the substitution was invisible because the choice FROZE the substitute, so the binder's
+    // later drift comparison had nothing to disagree with and the fork ran a model nobody named.
+    should(refused.failure).equal('agent_unavailable');
+    should(refused.message).match(/does not serve model "sonnet-3"/u);
+    should(refused.message).match(/It serves claude-opus-5/u);
   });
 
   it('should probe no catalogue while resolving, because the target directory is not known yet', async () => {

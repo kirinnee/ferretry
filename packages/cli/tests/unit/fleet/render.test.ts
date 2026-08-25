@@ -631,7 +631,7 @@ describe('manifest rendering', () => {
     // Assert
     should(rendered).containEql(`${ACCOUNT_ID}  [claude/auto]  Claude (work)`);
     should(rendered).containEql('wrapper fy-claude-work · home /state/fleet/homes/work');
-    should(rendered).containEql('default opus · models opus');
+    should(rendered).containEql('serves opus (default)');
     should(rendered).containEql('available');
   });
 
@@ -643,10 +643,45 @@ describe('manifest rendering', () => {
 
     // Assert
     should(rendered).containEql('unavailable — not logged in');
-    should(rendered).containEql('default none · models none available');
+    should(rendered).containEql('declares no models');
   });
 
-  it('should not count a model the account cannot actually serve', () => {
+  it('should say every model it serves, naming the default among them', () => {
+    // Act
+    const rendered = renderAccount(
+      account({
+        models: [
+          { id: 'opus', available: true },
+          { id: 'sonnet', available: true, displayName: 'Sonnet 5' },
+        ],
+      }),
+    );
+
+    // Assert
+    should(rendered).containEql('serves opus (default), sonnet (Sonnet 5)');
+  });
+
+  it('should annotate a default that also carries a display name with both', () => {
+    // Act
+    const rendered = renderAccount(
+      account({ defaultModel: 'opus', models: [{ id: 'opus', available: true, displayName: 'Opus 5' }] }),
+    );
+
+    // Assert
+    should(rendered).containEql('serves opus (Opus 5, default)');
+  });
+
+  /**
+   * REPLACES "should not count a model the account cannot actually serve".
+   *
+   * That assertion guaranteed one thing worth keeping — an unavailable model must never appear in the
+   * list of what an account SERVES — and enforced it with `not.containEql('haiku')`, which also
+   * guaranteed the reason was nowhere on the row. The first half still matters and is asserted here
+   * against the `serves` line specifically. The second half was the defect: an account declaring a
+   * model unavailable WITH a reason printed neither, so `fy fleet ls` was the one command that exists
+   * to say what this host publishes and it silently dropped part of it.
+   */
+  it('should name an unavailable model and why, without offering it as one it serves', () => {
     // Act
     const rendered = renderAccount(
       account({
@@ -658,8 +693,28 @@ describe('manifest rendering', () => {
     );
 
     // Assert
-    should(rendered).containEql('models opus');
-    should(rendered).not.containEql('haiku');
+    should(rendered).containEql('serves opus (default)\n');
+    should(rendered).containEql('model haiku is unavailable — retired');
+    should(rendered.split('\n').find(line => line.includes('serves')) ?? '').not.containEql('haiku');
+  });
+
+  it('should not claim an unavailable account serves the models it declares', () => {
+    // Act
+    const rendered = renderAccount(
+      account({
+        available: false,
+        unavailableReason: 'not logged in',
+        models: [
+          { id: 'opus', available: true },
+          { id: 'haiku', available: false, unavailableReason: 'retired' },
+        ],
+      }),
+    );
+
+    // Assert
+    should(rendered).containEql('declares opus (default)');
+    should(rendered).not.containEql('serves');
+    should(rendered).containEql('model haiku is unavailable — retired');
   });
 
   it('should say plainly when the manifest declares nothing', () => {

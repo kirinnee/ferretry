@@ -46,7 +46,7 @@ const CONFIG = (kind: string, ids: FleetScaffoldIds): string => `agents:
     auth: oauth
     routes:
       default:
-        id: ${kind === 'claude' ? ids.claude.default : ids.codex.default}
+        id: ${kind === 'claude' ? ids.accounts.claude.default : ids.accounts.codex.default}
         wrapper: ${kind}-primary
         home: ${kind}-primary
         displayName: ${kind} (primary)

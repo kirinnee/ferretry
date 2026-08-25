@@ -463,18 +463,29 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
     const opening = forkOpeningTurnRefusal(plan);
     if (opening !== undefined) throw new SessionForkTargetBindingError(opening);
     const resolved = await this.account(plan);
-    const planned = this.ports.planner.plan({
+    const outcome = this.ports.planner.plan({
       id,
       account: resolved.account,
       mode: plan.durable.mode,
       ...(plan.target.model === null ? {} : { requestedModel: plan.target.model }),
     });
-    const drifted = [
-      // A plan that named no model promised none, so there is nothing to re-prove; every plan this
-      // daemon's own resolver produces names one.
-      plan.target.model === null ? undefined : agree('model', planned.model, plan.target.model),
-      agree('context window', planned.contextWindow, plan.target.contextWindow),
-    ].filter((complaint): complaint is string => complaint !== undefined);
+    // THE PLANNER'S OWN REASON, ahead of the drift comparison below. This case used to surface as a
+    // drift complaint — "expected haiku, got opus" — which is true and says nothing about WHY, while
+    // the account has the operator's own sentence for it. A fork prepared against a model that has
+    // since been taken out of service is exactly when that sentence is worth reading.
+    if (outcome.kind === 'unservable-model')
+      throw new SessionForkTargetBindingError(
+        `the target plan ${plan.planId} was prepared for a model this account cannot serve: ${outcome.reason}`,
+      );
+    const planned = outcome.plan;
+    // THE MODEL NEEDS NO COMPARISON ANY MORE, and leaving one would be a branch nothing can reach: a
+    // resolution that returns a plan at all has answered with the model the target named, and the only
+    // way it can now answer with a different one is the refusal above. The WINDOW still drifts on its
+    // own — a context-window override this daemon carries can change under a frozen plan without the
+    // account's model list changing at all — so that comparison stays.
+    const drifted = [agree('context window', planned.contextWindow, plan.target.contextWindow)].filter(
+      (complaint): complaint is string => complaint !== undefined,
+    );
     if (drifted.length > 0)
       throw new SessionForkTargetBindingError(
         `account ${resolved.account.agent} no longer serves the target plan ${plan.planId} was prepared for: ` +
