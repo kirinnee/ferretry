@@ -64,13 +64,16 @@ type IsolationNames = typeof ISOLATION;
 /**
  * THE TALLEST ELEMENT THIS WILL CAPTURE, and it is a refusal rather than a clamp.
  *
- * The mechanism grows the viewport to the element's height, so the ceiling is
- * really "how tall a viewport is this harness willing to claim Chromium paints in
- * one frame". The tallest card the gallery captures today is the new-account
- * stepper at about 5,600 px on a phone. A card past this is not silently cropped or
- * captured at a viewport that cannot hold it — it is named and refused, because a
- * cropped card is exactly the kind of quietly-wrong image this module exists to
- * make impossible.
+ * The mechanism grows the viewport to the element's height, so this number is really
+ * "how tall a viewport has this harness MEASURED Chromium painting in one frame".
+ * Measured rather than guessed: a flat-coloured block isolated out of a 60,000px
+ * document came back one uniform colour at 2,000, 4,000, 6,000, 8,000, 10,000 and
+ * 11,900 px, and `tests/integration/gallery-capture.visual.test.ts` keeps the top of
+ * that range honest. A ceiling nobody had run to would be the same kind of claim this
+ * module exists to delete.
+ *
+ * A card past it is not silently cropped and not captured at a viewport that cannot
+ * hold it — it is named and refused.
  */
 const MAXIMUM_ELEMENT_HEIGHT = 12_000;
 

@@ -242,6 +242,30 @@ describe('capturing one element of a very tall gallery', () => {
     }
   });
 
+  test('paints a card right up to the ceiling it claims', async () => {
+    // The ceiling is a number this harness ASSERTS Chromium can paint in one frame,
+    // so a card just under it has to come back whole. Without this the refusal above
+    // could be hiding a range that was never painted correctly in the first place.
+    const page = await subject(
+      `<!doctype html><html lang="en"><head><title>almost too tall</title><style>
+        html,body{height:100%;overflow:hidden;margin:0;background:#000}
+      </style></head><body>
+        <div style="height:40000px;background:#111"></div>
+        <div id="ceiling" style="width:300px;height:11900px;background:rgb(10, 200, 90)"></div>
+        <div style="height:20000px;background:#222"></div>
+      </body></html>`,
+    );
+    try {
+      const target = join(directory, 'ceiling.png');
+      await captureElement(page, page.locator('#ceiling'), target);
+      const taken = await census(page, Buffer.from(await Bun.file(target).arrayBuffer()));
+      should([taken.width, taken.height]).eql([300, 11_900]);
+      should(taken.colours.map(([colour]) => colour)).eql(['10,200,90']);
+    } finally {
+      await page.close();
+    }
+  });
+
   test('refuses an element taller than one painted frame', async () => {
     const page = await subject(
       `<!doctype html><html lang="en"><head><title>too tall</title></head><body style="margin:0">
