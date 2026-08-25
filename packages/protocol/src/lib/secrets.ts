@@ -178,6 +178,26 @@ export function secretReferencesIn(value: string): readonly SecretName[] {
   return seen;
 }
 
+/**
+ * A `${secret:` opener in `value` that is NOT a well-formed reference, or `undefined` when every
+ * opener is well formed.
+ *
+ * The grammar's whole promise is that a reference is never mistaken for a literal, and the way that
+ * promise breaks is from the other side: `${secret:work_key}` matches nothing, so it stays a literal,
+ * gets exported into a child verbatim, and the child authenticates with the eighteen characters of
+ * the reference itself. Every failure after that names a remote service and nothing an operator
+ * could have looked at. So a configuration boundary that accepts this grammar refuses a near miss
+ * with the text of it, and the near miss lives here beside the grammar it is a near miss of.
+ *
+ * Well-formed references are stripped before the search rather than matched around: one value may
+ * carry several, and `Bearer ${secret:GOOD} ${secret:bad}` must report the second rather than be
+ * excused by the first.
+ */
+export function malformedSecretReference(value: string): string | undefined {
+  const remainder = value.replace(secretReferencePattern(), '');
+  return /\$\{secret:[^}]*\}?/u.exec(remainder)?.[0];
+}
+
 /** What a redacted value is replaced with. Naming the secret is deliberate: the NAME is not secret,
  *  and a bare `***` leaves a reader unable to tell which credential the tool was reaching for. */
 export function secretMask(name: SecretName): string {

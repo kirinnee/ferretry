@@ -72,11 +72,23 @@ export function sanitizeHarnessEnv(
 const EXPORTED_REFERENCE = /^\s*export\s+[A-Za-z_][A-Za-z0-9_]*="\$\{([A-Za-z_][A-Za-z0-9_]*)\}"\s*$/;
 
 /**
+ * A `: "${NAME:?…}"` requirement line, capturing `NAME`.
+ *
+ * A wrapper whose account takes a variable from Ferretry's secret store emits one of these and NO
+ * export, because there is no value in the script to export — the daemon puts it into the launch
+ * environment. So the requirement line is the only place that dependency is written down, and a
+ * reader of the script that ignored it would report the account as needing nothing while the guard
+ * it just skipped is the thing that will stop the launch.
+ */
+const REQUIRED_VARIABLE = /^\s*:\s*"\$\{([A-Za-z_][A-Za-z0-9_]*):\?/;
+
+/**
  * The variables a rendered wrapper reads out of its surrounding environment, in first-seen order.
  *
- * This is the inverse of the one rendering rule that lets a secret stay out of a generated file: a
- * configured value of exactly `$NAME` is emitted as `"${NAME}"`, so the wrapper resolves it at run
- * time. Those are precisely the names {@link sanitizeHarnessEnv} must be told to preserve.
+ * Two rendering rules put a variable here, and both exist so that a credential stays out of a
+ * generated file: a configured value of exactly `$NAME` is emitted as `"${NAME}"` and resolved at run
+ * time, and a value naming `${secret:…}` is emitted as a requirement the daemon satisfies at launch.
+ * Those are precisely the names {@link sanitizeHarnessEnv} must be told to preserve.
  *
  * A literal export is ignored: it needs nothing from the caller. Parsing the script rather than
  * re-deriving the list from configuration is deliberate — the script on disk is what will actually
@@ -85,7 +97,7 @@ const EXPORTED_REFERENCE = /^\s*export\s+[A-Za-z_][A-Za-z0-9_]*="\$\{([A-Za-z_][
 export function referencedEnvNames(script: string): readonly string[] {
   const names: string[] = [];
   for (const line of script.split('\n')) {
-    const name = EXPORTED_REFERENCE.exec(line)?.[1];
+    const name = EXPORTED_REFERENCE.exec(line)?.[1] ?? REQUIRED_VARIABLE.exec(line)?.[1];
     if (name !== undefined && !names.includes(name)) names.push(name);
   }
   return names;

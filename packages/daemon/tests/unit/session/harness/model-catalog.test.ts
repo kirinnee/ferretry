@@ -17,6 +17,7 @@ import {
  */
 
 const account = (overrides: Partial<CoreAccount> = {}): CoreAccount => ({
+  secretEnv: {},
   id: 'acct-1',
   kind: 'claude',
   mode: 'auto',

@@ -9,6 +9,7 @@ const ACCOUNT_ID = '4c0f3b6e-7a91-4a2f-9a7f-2b1d0f5c8e31';
 const manifest = (...accounts: readonly CoreAccount[]): AccountInventoryPort => ({ accounts: async () => accounts });
 
 const account: CoreAccount = {
+  secretEnv: {},
   id: ACCOUNT_ID,
   agent: 'claude-writer',
   wrapper: '/state/fleet/bin/claude-writer',

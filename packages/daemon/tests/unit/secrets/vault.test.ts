@@ -2,7 +2,9 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   NO_REDACTION,
+  combinedReferences,
   NO_REFERENCES,
+  type SecretReferenceSource,
   SecretDirectory,
   SecretRedactor,
   SecretStoreError,
@@ -249,5 +251,60 @@ describe('the management view', () => {
       () => should.fail('', '', 'a TypeError must not be reported as a damaged store'),
       (error: unknown) => should(error).be.instanceof(TypeError),
     );
+  });
+});
+
+/**
+ * A daemon has more than one place that names secrets now: the operator's own recipes, and the fleet
+ * accounts a profile authenticates. The listing must show all of them, because a person deciding
+ * whether a secret is still wanted is reading exactly this.
+ */
+describe('several places that name secrets, as one source', () => {
+  const source = (...references: readonly { name: string; origin: string }[]): SecretReferenceSource => ({
+    references: async () => references,
+  });
+
+  it('should concatenate every source in order', async () => {
+    // Act
+    const actual = await combinedReferences(
+      source({ name: 'RECIPE_KEY', origin: 'config/daemon.json → secretEnvironment.AUTH' }),
+      source({ name: 'WORK_KEY', origin: 'fleet account claude-kirin → ANTHROPIC_API_KEY' }),
+    ).references();
+
+    // Assert
+    should(actual.map(reference => reference.name)).deepEqual(['RECIPE_KEY', 'WORK_KEY']);
+  });
+
+  it('should keep one secret named twice as two facts, because deleting it breaks both', async () => {
+    // Act
+    const actual = await combinedReferences(
+      source({ name: 'WORK_KEY', origin: 'fleet account claude-kirin → ANTHROPIC_API_KEY' }),
+      source({ name: 'WORK_KEY', origin: 'fleet account claude-hadi → ANTHROPIC_API_KEY' }),
+    ).references();
+
+    // Assert
+    should(actual).have.length(2);
+  });
+
+  it('should answer nothing when it is given nothing', async () => {
+    // Act & Assert
+    should(await combinedReferences().references()).deepEqual([]);
+  });
+
+  it('should let a source that cannot answer take the read down with it', async () => {
+    // Arrange — a half-read list shows a complete-looking screen with somebody's account missing.
+    const broken: SecretReferenceSource = {
+      references: async () => {
+        throw new Error('fleet config at /state/fleet/config.yaml is unreadable');
+      },
+    };
+
+    // Act
+    const raised = await combinedReferences(source({ name: 'A', origin: 'x' }), broken)
+      .references()
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((raised as Error).message).match(/config\.yaml/u);
   });
 });

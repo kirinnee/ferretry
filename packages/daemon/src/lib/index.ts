@@ -17,6 +17,8 @@ export * from './browser/runtime/index.ts';
 export * from './browser/transport/index.ts';
 export * from './cgroups/index.ts';
 export * from './core/index.ts';
+export * from './fleet/launch-environment.ts';
+export * from './fleet/secret-references.ts';
 export * from './fleet-health/index.ts';
 export * from './fleet-refresh/index.ts';
 export * from './grants/index.ts';

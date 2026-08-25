@@ -19,6 +19,7 @@ const ID_TWO = '00000000-0000-4000-8000-000000000002';
 const GENERATED_AT = '2027-01-15T08:00:00.000Z';
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
+  secretEnv: {},
   id: ID_ONE,
   kind: 'claude',
   mode: 'auto',
@@ -299,5 +300,60 @@ describe('wrapperName', () => {
   it('should answer the whole value when the manifest publishes a bare name', () => {
     // Arrange / Act / Assert — nothing here reassembles a path, so a bare wrapper is its own name
     should(wrapperName(account({ wrapper: 'crc-auto-atomi' }))).equal('crc-auto-atomi');
+  });
+});
+
+/**
+ * `secretEnv` is published in a file that travels with a host's fleet, so the load-bearing rule is
+ * what it may NOT hold: a literal accepted here would be a credential in a published document.
+ */
+describe('the secret bindings a manifest publishes', () => {
+  it('should default to none, which is what every account that authenticates otherwise publishes', () => {
+    // Act
+    const parsed = FleetManifestAccountSchema.parse({
+      id: ID_ONE,
+      kind: 'claude',
+      mode: 'auto',
+      wrapper: '/state/fleet/bin/claude-kirin',
+      home: '/state/fleet/homes/kirin',
+      displayName: 'Kirin',
+      defaultModel: 'model-one',
+      models: [{ id: 'model-one', available: true }],
+      available: true,
+      unavailableReason: null,
+    });
+
+    // Assert
+    should(parsed.secretEnv).deepEqual({});
+  });
+
+  it('should carry a reference, and a value composed around one', () => {
+    // Act
+    const parsed = FleetManifestAccountSchema.parse(
+      account({ secretEnv: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', AUTH: 'Bearer ${secret:WORK_KEY}' } }),
+    );
+
+    // Assert
+    should(parsed.secretEnv).deepEqual({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}', AUTH: 'Bearer ${secret:WORK_KEY}' });
+  });
+
+  it('should refuse an entry that names no secret, because that entry would be a credential', () => {
+    // Act
+    const parsed = FleetManifestAccountSchema.safeParse(account({ secretEnv: { ANTHROPIC_API_KEY: 'sk-fixture' } }));
+
+    // Assert
+    should(parsed.success).be.false();
+    should(JSON.stringify(parsed.error?.issues)).match(/never carry a value/u);
+  });
+
+  it('should refuse an entry that only looks like a reference, rather than treat it as a literal', () => {
+    // Act
+    const parsed = FleetManifestAccountSchema.safeParse(
+      account({ secretEnv: { ANTHROPIC_API_KEY: '${secret:work_key}' } }),
+    );
+
+    // Assert
+    should(parsed.success).be.false();
+    should(JSON.stringify(parsed.error?.issues)).match(/is not a secret reference/u);
   });
 });

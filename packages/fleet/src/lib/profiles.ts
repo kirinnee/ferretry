@@ -23,6 +23,7 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
+import { secretReferencesIn } from '@ferretry/protocol';
 import type { AccountRoute, Agent, BaseProfile, EnvMap, FleetConfig, Profile, SettingsLayer } from './config.ts';
 import type { AccountMode, FleetManifestAccount, FleetManifestModel, HarnessKind } from './manifest.ts';
 
@@ -356,6 +357,15 @@ export function toManifestAccounts(
 ): readonly FleetManifestAccount[] {
   const separator = binDirectory.endsWith('/') ? '' : '/';
   return accounts.map(account => ({
+    // Sorted, so a re-generated manifest is byte-identical for an unchanged account. Only the entries
+    // that NAME a secret travel: a literal is already in the account's own wrapper, and publishing it
+    // a second time would give one fact two places to disagree — with the manifest, which no wrapper
+    // reads, being the one nobody would think to check.
+    secretEnv: Object.fromEntries(
+      Object.entries(account.env)
+        .filter(([, value]) => secretReferencesIn(value).length > 0)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+    ),
     id: account.id,
     kind: account.kind,
     mode: account.mode,

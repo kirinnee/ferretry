@@ -70,6 +70,7 @@ import {
   FleetSharingSchema,
   type HarnessDiscoveryReport,
   HarnessDiscoveryReportSchema,
+  secretReferencesIn,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { MAX_TEXT_BODY_BYTES, parseBody, parseOptionalBody } from '../../api/body.ts';
@@ -396,13 +397,20 @@ const MACHINE_ENVIRONMENT_VALUE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~]|[A-Za-z]:[\\/
 
 /** Environment values are configuration only when they can travel safely. Credentials, local
  * paths, addresses and ports must stay on the machine that owns them. Refusing the entire profile
- * is intentional: presenting a redacted value as a copyable one invites an accidental deletion. */
+ * is intentional: presenting a redacted value as a copyable one invites an accidental deletion.
+ *
+ * A `${secret:NAME}` value is the ONE credential-named entry that travels, because it is not a
+ * credential: it names one, and the value stays in the daemon's own store on whichever host resolves
+ * it. That is the whole point of a profile authenticating an account — before it, a fleet could not
+ * express an API key at all through this surface, and the refusal below was the reason. It is a
+ * narrowing of what may travel and never a widening of what may be READ: no route here has ever
+ * returned a secret value and none does now. */
 function portableEnvironment(environment: Readonly<Record<string, string>>, profile: string): Record<string, string> {
   for (const [name, value] of Object.entries(environment)) {
-    if (SENSITIVE_ENVIRONMENT_NAME.test(name))
+    if (SENSITIVE_ENVIRONMENT_NAME.test(name) && secretReferencesIn(value).length === 0)
       throw new FleetRefusal(
         'fleet_environment_refused',
-        `profile ${profile} contains credential-like ${name}; it is not remotely editable or copyable`,
+        `profile ${profile} contains credential-like ${name}; it is not remotely editable or copyable unless its value names a stored secret, as in \${secret:WORK_KEY}`,
       );
     if (MACHINE_ENVIRONMENT_NAME.test(name) || MACHINE_ENVIRONMENT_VALUE.test(value))
       throw new FleetRefusal(

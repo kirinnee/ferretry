@@ -20,7 +20,12 @@ import {
   TmuxPaneDelivery,
   TmuxResumeLauncher,
 } from '../../../../src/adapters/index.ts';
-import { parseSessionId, type TmuxCommandPort, TmuxController } from '../../../../src/lib/index.ts';
+import {
+  type AccountLaunchEnvironment,
+  parseSessionId,
+  type TmuxCommandPort,
+  TmuxController,
+} from '../../../../src/lib/index.ts';
 import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 
 const homes = new Set<string>();
@@ -555,5 +560,140 @@ describe('unmounted monitor supervision', () => {
     // Act / Assert
     await should(monitors.stop()).be.fulfilled();
     await should(monitors.start()).be.fulfilled();
+  });
+});
+
+/**
+ * A revive of an account a profile authenticates.
+ *
+ * The launch path resolves the profile per launch; so must this one. A replacement pane that came
+ * back with no credential is a working agent destroyed by its own recovery — the harsher form of the
+ * board-capability loss the case above exists for.
+ */
+describe('the resume launcher and a profile-authenticated account', () => {
+  const profile = (env: Readonly<Record<string, string>>): AccountLaunchEnvironment => ({
+    forWrapper: async () => env,
+  });
+
+  it('should hand the replacement the credential the account has now', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+        env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' },
+        agent: '/opt/fleet/bin/agent',
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      profile({ ANTHROPIC_API_KEY: 'fixture-value' }),
+    );
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert — both halves, and the session's own still there.
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', 'ANTHROPIC_API_KEY=fixture-value']);
+    should(launch).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=stored-secret']);
+    should(launch).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
+  });
+
+  it('should let the session keep its own variable when a profile names the same one', async () => {
+    // Arrange — a profile is shared by every account that lists it; a board capability is not.
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+        env: { FY_SESSION_BOARD_CAPABILITY: 'this-session-only' },
+        agent: '/opt/fleet/bin/agent',
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      profile({ FY_SESSION_BOARD_CAPABILITY: 'from-the-profile' }),
+    );
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=this-session-only']);
+    should(launch).not.containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=from-the-profile']);
+  });
+
+  it('should ask for nothing when the spec cannot name the executable', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    let asked = 0;
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        forWrapper: async () => {
+          asked += 1;
+          return {};
+        },
+      },
+    );
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert
+    should(asked).equal(0);
+  });
+
+  it('should let a refused profile take the revive down rather than revive without a credential', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+        agent: '/opt/fleet/bin/agent',
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        forWrapper: async () => {
+          throw new Error('this daemon holds no secret named WORK_KEY');
+        },
+      },
+    );
+
+    // Act & Assert
+    port.alive = false;
+    await should(subject.relaunch(ID)).be.rejectedWith(/no secret named WORK_KEY/u);
+    should(port.calls.filter(call => call[0] === 'new-session')).be.empty();
   });
 });

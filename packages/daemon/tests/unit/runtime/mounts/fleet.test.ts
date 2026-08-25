@@ -214,6 +214,61 @@ describe('the daemon fleet mount', () => {
     should(JSON.parse(path.body)).have.property('code', 'fleet_environment_refused');
   });
 
+  /**
+   * The one credential-named entry that travels, and the reason it is not a contradiction: it names a
+   * secret rather than carrying one, and the value stays in whichever daemon's store resolves it.
+   * Before this, the refusal above meant a fleet could not express an API key through this surface at
+   * all — which is exactly what a profile authenticating an account is for.
+   */
+  it('should let a credential-named variable travel when its value names a stored secret', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const stored = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: human,
+        body: JSON.stringify({
+          profile: 'portable',
+          mode: 'merge',
+          environment: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' },
+        }),
+      }),
+    );
+    const read = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/environment', headers: human }));
+
+    // Assert — a reference, on the way in and on the way back out. Never a value.
+    should(stored.status).equal(200);
+    should(jsonBody(read)).match({ profiles: { portable: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } } });
+  });
+
+  it('should still refuse a credential-named variable whose value only looks like a reference', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const response = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: human,
+        body: JSON.stringify({
+          profile: 'portable',
+          mode: 'merge',
+          environment: { ANTHROPIC_API_KEY: '${secret:work_key}' },
+        }),
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(409);
+    should(JSON.parse(response.body)).have.property('code', 'fleet_environment_refused');
+  });
+
   it('should refuse a configure-axis change through the grant rather than through the token class', async () => {
     // THE SAME REQUEST, TWO GUARDS. It used to be refused by an inline `tokenClass === 'device'` in
     // the handler, which meant the refusal was invisible to the route table and to `GrantsView` and
