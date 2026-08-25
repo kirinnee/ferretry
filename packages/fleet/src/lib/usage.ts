@@ -49,37 +49,97 @@ export type FleetCredentialSignal = z.infer<typeof FleetCredentialSignalSchema>;
 export const ProviderResponseJsonTypeSchema = z.enum(['null', 'boolean', 'number', 'string', 'array', 'object']);
 export type ProviderResponseJsonType = z.infer<typeof ProviderResponseJsonTypeSchema>;
 
-const diagnosticText = z.string().min(1).max(256);
-const responseHeaderName = z
+export const ProviderResponseHeaderNameSchema = z.enum([
+  'age',
+  'anthropic-organization-id',
+  'anthropic-ratelimit-unified-5h-reset',
+  'anthropic-ratelimit-unified-5h-status',
+  'anthropic-ratelimit-unified-5h-utilization',
+  'anthropic-ratelimit-unified-7d-reset',
+  'anthropic-ratelimit-unified-7d-status',
+  'anthropic-ratelimit-unified-7d-utilization',
+  'anthropic-request-id',
+  'authorization',
+  'cache-control',
+  'cf-cache-status',
+  'cf-mitigated',
+  'cf-ray',
+  'connection',
+  'content-encoding',
+  'content-length',
+  'content-type',
+  'date',
+  'etag',
+  'expires',
+  'other',
+  'pragma',
+  'request-id',
+  'retry-after',
+  'retry-after-ms',
+  'server',
+  'set-cookie',
+  'transfer-encoding',
+  'vary',
+  'via',
+  'www-authenticate',
+  'x-cache',
+  'x-envoy-upstream-service-time',
+  'x-request-id',
+]);
+export type ProviderResponseHeaderName = z.infer<typeof ProviderResponseHeaderNameSchema>;
+
+export const ProviderResponseContentTypeSchema = z.enum([
+  'application/json',
+  'application/*+json',
+  'application/octet-stream',
+  'text/html',
+  'text/plain',
+  'other',
+]);
+export type ProviderResponseContentType = z.infer<typeof ProviderResponseContentTypeSchema>;
+
+export const ProviderResponseCodeSchema = z.enum([
+  'api_error',
+  'authentication_error',
+  'error',
+  'insufficient_scope',
+  'invalid_request',
+  'invalid_request_error',
+  'invalid_token',
+  'not_found_error',
+  'overloaded_error',
+  'permission_error',
+  'rate_limit_error',
+  'other',
+]);
+export type ProviderResponseCode = z.infer<typeof ProviderResponseCodeSchema>;
+
+const responseJsonPathSegment =
+  '(?:code|credential|error|error_code|five_hour|message|other|resets_at|seven_day|type|utilization)';
+const responseJsonPath = z
   .string()
-  .min(1)
-  .max(128)
-  .regex(/^[!#$%&'*+\-.^_`|~0-9a-z]+$/u, 'expected a normalized HTTP header name');
+  .regex(new RegExp(`^${responseJsonPathSegment}(?:\\.${responseJsonPathSegment})?$`, 'u'));
 
 /** A header's authentication challenge, reduced to non-secret protocol words. */
 export const ProviderAuthenticationShapeSchema = z.strictObject({
-  scheme: diagnosticText,
-  errorCode: diagnosticText.optional(),
+  scheme: z.enum(['bearer', 'other']),
+  errorCode: z.enum(['insufficient_scope', 'invalid_request', 'invalid_token', 'other']).optional(),
 });
 export type ProviderAuthenticationShape = z.infer<typeof ProviderAuthenticationShapeSchema>;
 
 /** The only response header VALUES permitted to survive. Every other header contributes its name only. */
 export const ProviderResponseHeaderValuesSchema = z.strictObject({
-  anthropicRequestId: diagnosticText.optional(),
-  cfMitigated: diagnosticText.optional(),
-  cfRay: diagnosticText.optional(),
-  requestId: diagnosticText.optional(),
-  retryAfter: diagnosticText.optional(),
-  retryAfterMs: diagnosticText.optional(),
-  server: diagnosticText.optional(),
+  cfMitigated: z.enum(['challenge', 'other']).optional(),
+  retryAfter: z.enum(['seconds', 'http-date', 'other']).optional(),
+  retryAfterMs: z.enum(['milliseconds', 'other']).optional(),
+  server: z.enum(['cloudflare', 'envoy', 'other']).optional(),
   wwwAuthenticate: ProviderAuthenticationShapeSchema.optional(),
-  xRequestId: diagnosticText.optional(),
 });
 export type ProviderResponseHeaderValues = z.infer<typeof ProviderResponseHeaderValuesSchema>;
 
 /** One key path and only the kind of value behind it — never the value. */
 export const ProviderResponseJsonFieldSchema = z.strictObject({
-  path: diagnosticText,
+  path: responseJsonPath,
   type: ProviderResponseJsonTypeSchema,
 });
 export type ProviderResponseJsonField = z.infer<typeof ProviderResponseJsonFieldSchema>;
@@ -89,25 +149,25 @@ export const ProviderResponseJsonShapeSchema = z.strictObject({
   type: ProviderResponseJsonTypeSchema,
   fields: z.array(ProviderResponseJsonFieldSchema).max(64),
   fieldsTruncated: z.literal(true).optional(),
-  envelopeType: diagnosticText.optional(),
-  errorType: diagnosticText.optional(),
-  errorCode: diagnosticText.optional(),
+  envelopeType: ProviderResponseCodeSchema.optional(),
+  errorType: ProviderResponseCodeSchema.optional(),
+  errorCode: ProviderResponseCodeSchema.optional(),
 });
 export type ProviderResponseJsonShape = z.infer<typeof ProviderResponseJsonShapeSchema>;
 
 /**
  * A secret-safe description of one provider response.
  *
- * The body contributes only its byte length, SHA-256 digest, key/type outline and code-like error
- * labels. A normal response is described in full; `bodyTruncated` says an oversized response was
- * cancelled and the length/digest cover only the hard-capped prefix. Header NAMES are safe to
- * enumerate; values survive only through the closed allowlist above. There is deliberately no
- * free-form string or provider body field for a token to travel in.
+ * The body contributes only its byte length, SHA-256 digest, categorized key/type outline and fixed
+ * error labels. A normal response is described in full; `bodyTruncated` says an oversized response
+ * was cancelled and the length/digest cover only the hard-capped prefix. Header names and values are
+ * reduced to the closed categories above, including `other` for anything unrecognized. There is
+ * deliberately no free-form string or provider body field for a token to travel in.
  */
 export const ProviderResponseFingerprintSchema = z.strictObject({
   status: z.number().int().min(100).max(599),
-  contentType: diagnosticText.optional(),
-  headerNames: z.array(responseHeaderName).max(128),
+  contentType: ProviderResponseContentTypeSchema.optional(),
+  headerNames: z.array(ProviderResponseHeaderNameSchema).max(128),
   headerNamesTruncated: z.literal(true).optional(),
   headers: ProviderResponseHeaderValuesSchema.optional(),
   bodyLength: z.number().int().nonnegative().refine(Number.isFinite, 'expected a finite body length'),

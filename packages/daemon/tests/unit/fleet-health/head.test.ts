@@ -13,8 +13,8 @@ const NOW = 1_786_000_000_000;
 const RESPONSE_FINGERPRINT = {
   status: 401,
   contentType: 'application/json',
-  headerNames: ['content-type', 'request-id'],
-  headers: { requestId: 'request-123' },
+  headerNames: ['content-type', 'request-id', 'server'],
+  headers: { server: 'cloudflare' },
   bodyLength: 73,
   bodySha256: 'd'.repeat(64),
   json: {

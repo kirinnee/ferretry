@@ -133,16 +133,13 @@ Three things that row order encodes:
    Codex — `credential_unreadable` is more useful than "Codex cannot be proved", and losing it would
    be paying for the safety with the diagnosis.
 
-### `oauth_rejection_unconfirmed` — declared, and not yet produced
+### `oauth_rejection_unconfirmed` — the live bare-`401` verdict
 
-`oauth_rejection_unconfirmed` is a member of `FleetHealthReasonSchema` that **no row above emits
-yet**. The decision that emits it — splitting a `401` that cannot be attributed out of row 3 — lands
-separately. It is declared first because the terminal and the browser both render an **exhaustive**
-map over this enum, so the code has to exist before either surface can be taught the words, and
-before the branch that produces it can typecheck.
+`oauth_rejection_unconfirmed` is the reason row 5 emits when the OAuth control plane returns a bare
+`401`. The terminal and browser both render an **exhaustive** map over the reason enum, so this member
+and its presentation landed before the adapter began producing it; all three layers now agree.
 
-Everything about how it is PUBLISHED and RENDERED is settled here and does not move when the decision
-lands:
+Its publication and rendering rules are:
 
 - Its verdict is **`unknown`**, its evidence is `anthropic_usage`, and the check is **inconclusive**.
 - **No surface offers a sign-in for it.** The terminal prints no `fy fleet login` line and the browser
@@ -233,9 +230,10 @@ here" cannot compare equal to "there is something here".
 ```
 
 Reason codes, verdicts, instants, one opaque credential digest and a strict provider-response
-fingerprint. The latter contains status, normalized content type, header **names**, a closed allowlist
-of scrubbed non-secret header values, body byte length/SHA-256, and parsed JSON key/type/error-code
-shape. The body read is hard-capped at 64 KiB; an oversized response is cancelled and marked
+fingerprint. The latter contains status, categorized content type, closed categories for header
+**names** and selected header values, body byte length/SHA-256, and categorized JSON key/type/error-code
+shape. Unknown provider-controlled text becomes the fixed word `other`; it is never retained after
+best-effort scrubbing. The body read is hard-capped at 64 KiB; an oversized response is cancelled and marked
 `bodyTruncated`, and its length/digest honestly describe only the retained prefix. **No token,
 authorization value, cookie, provider body, provider message, or harness output is stored** —
 enforced by strict schemas rather than convention: there is no free-text field for one to travel in.
