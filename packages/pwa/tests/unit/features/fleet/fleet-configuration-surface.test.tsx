@@ -1166,29 +1166,45 @@ describe('creating an account', () => {
     await surface.unmount();
   });
 
-  it('asks whether to change settings at all, rather than showing a layer', async () => {
-    // `layer` is a real mechanism and the wrong thing to put in front of a person. Two answers, and the
-    // stack stays underneath both of them.
-    const surface = await open({});
+  it('offers this fleet’s own settings documents, stacks what is ticked, and never says "layer"', async () => {
+    // `layer` is a real mechanism and the wrong thing to put in front of a person. What replaced the
+    // two-way question is the rule every other step follows — pick what this fleet has, or add one —
+    // plus the ORDER, because a stack is nothing but order.
+    const surface = await open({
+      config: () => ({
+        ...config({ default: { id: account().id, wrapper: 'claude-studio' } }),
+        // The `./` spelling `fy fleet init` scaffolds. If the store did not canonicalise it, ticking
+        // this card would compose a reference the wire refuses for containing a traversal segment.
+        shared: { settings: { claude: './templates/claude/settings.json' } },
+      }),
+    });
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
     await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'settings');
 
-    // Assert — the default answer changes nothing, and there is no JSON box to be frightened by.
-    expect(cardChosen(surface.container, 'settings', 'fleet')).toBe(true);
-    expect(surface.container.querySelector('[id$="-settings"]')).toBeNull();
-    // Scoped to the sequence: the roster behind it still offers "Edit" for an account that exists,
-    // and that control is not what the owner objected to.
+    // Assert — nothing is applied yet, which is a working account, and no box demands anything.
+    expect(pick(surface.container, '[data-fleet-settings-empty]').textContent).toContain('adds no settings of its own');
     expect(pick(surface.container, '[data-fleet-account-stepper]').textContent).not.toContain('layer');
 
-    // Act
-    await click(card(surface.container, 'settings', 'own'));
+    // Act — tick this fleet's own document, then add a block typed here on top of it.
+    await click(pick(surface.container, '[data-fleet-check="templates/claude/settings.json"]'));
+    await interact(() => undefined);
+    await click(pick(surface.container, '[data-fleet-settings-add-inline]'));
+    await interact(() => undefined);
 
-    // Assert — the box appears, seeded with something that parses.
-    expect(area(surface.container, '-settings').value).toBe('{}');
-    await type(area(surface.container, '-settings'), '{ not json');
+    // Assert — two entries, in the order they were chosen, numbered where a person can see them.
+    expect(
+      [...surface.container.querySelectorAll('[data-fleet-settings-entry]')].map(node =>
+        node.getAttribute('data-fleet-settings-entry'),
+      ),
+    ).toEqual(['templates/claude/settings.json', 'typed here']);
+
+    // Act — break the typed block.
+    await type(pick(surface.container, '[data-fleet-settings-text="typed here"]') as HTMLTextAreaElement, '{ not json');
+
+    // Assert — the blocker lands on THIS step, where the box is.
     expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('settings must be valid JSON');
     expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
     await surface.unmount();
@@ -1264,7 +1280,9 @@ describe('editing one account layer', () => {
     expect(area(surface.container, '-instructions-text').value).toBe('text of instructions/studio.md');
     expect(field(surface.container, '-skill-path-0').value).toBe('skills/studio/review.md');
     expect(area(surface.container, '-skill-text-0').value).toBe('text of skills/studio/review.md');
-    expect(JSON.parse(area(surface.container, '-settings-text').value)).toEqual({ model: 'opus' });
+    expect(
+      JSON.parse((pick(surface.container, '[data-fleet-settings-text="typed here"]') as HTMLTextAreaElement).value),
+    ).toEqual({ model: 'opus' });
     expect(field(surface.container, '-env-name-0').value).toBe('FY_LANE');
     // A file in the tree that this layer does not reference is not pulled in.
     expect(absent(surface.container, '[id$="-skill-path-1"]')).toBe(true);

@@ -100,10 +100,62 @@ describe('the layer fields', () => {
     await harness.unmount();
   });
 
-  it('edits inline settings as text, leaving the parsing to the model', async () => {
+  it('adds one block of settings typed here and edits it, leaving the parsing to the model', async () => {
     const harness = await layerHarness();
-    await type(area(harness.container, '-settings-text'), '{"model":"opus"}');
-    expect(harness.latest().settingsText).toBe('{"model":"opus"}');
+    // The stack starts EMPTY, so there is no box until a person asks for one — which is what says
+    // "this account adds nothing of its own" rather than an empty box that looks like a required field.
+    expect(harness.container.querySelector('[data-fleet-settings-empty]')).not.toBeNull();
+    await click(pick(harness.container, '[data-fleet-settings-add-inline]'));
+    await harness.rerender();
+    expect(harness.latest().settings.map(entry => entry.source)).toEqual(['inline']);
+    await type(pick(harness.container, '[data-fleet-settings-text]') as HTMLTextAreaElement, '{"model":"opus"}');
+    expect(harness.latest().settings[0]?.text).toBe('{"model":"opus"}');
+    await harness.unmount();
+  });
+
+  it('shows the order, moves an entry and drops one, without a store or a harness to be told about', async () => {
+    const harness = await layerHarness({
+      ...emptyLayerDraft(),
+      settings: [
+        { id: 'a', source: 'store', path: 'templates/claude/base.json', text: '' },
+        { id: 'b', source: 'inline', path: '', text: '{"model":"opus"}' },
+      ],
+    });
+    expect(
+      [...harness.container.querySelectorAll('[data-fleet-settings-entry]')].map(node =>
+        node.getAttribute('data-fleet-settings-entry'),
+      ),
+    ).toEqual(['templates/claude/base.json', 'typed here']);
+    // A reference gets NO box: this form has not read that document, and an empty box beside it would
+    // read as its contents.
+    expect([...harness.container.querySelectorAll('[data-fleet-settings-text]')]).toHaveLength(1);
+
+    await click(pick(harness.container, '[data-fleet-settings-up="typed here"]'));
+    await harness.rerender();
+    expect(harness.latest().settings.map(entry => entry.id)).toEqual(['b', 'a']);
+
+    await click(pick(harness.container, '[data-fleet-settings-remove="typed here"]'));
+    await harness.rerender();
+    expect(harness.latest().settings.map(entry => entry.id)).toEqual(['a']);
+    await harness.unmount();
+  });
+
+  it('will not claim to have read a document when it was not told which harness reads it', async () => {
+    const harness = await layerHarness({
+      ...emptyLayerDraft(),
+      settings: [
+        { id: 'a', source: 'new', path: 'templates/claude/base.json', text: '{"model":"opus"}' },
+        { id: 'b', source: 'inline', path: '', text: '{"effort":"high"}' },
+      ],
+    });
+    // The inline entry's key IS listed — an inline entry is JSON whichever harness reads it. The
+    // authored document's is not: without the harness, this form cannot say which parser would read it.
+    expect(
+      [...harness.container.querySelectorAll('[data-fleet-settings-origin]')].map(node =>
+        node.getAttribute('data-fleet-settings-origin'),
+      ),
+    ).toEqual(['effort']);
+    expect(pick(harness.container, '[data-fleet-settings-unread]').textContent).toContain('templates/claude/base.json');
     await harness.unmount();
   });
 

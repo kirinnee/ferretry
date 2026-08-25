@@ -32,7 +32,14 @@ import {
   otherLanes,
   previousStep,
   selectedModels,
-  settingsChoice,
+  authoredSettings,
+  inlineSettings,
+  newSettingsProblem,
+  settingsOrigins,
+  settingsPathFor,
+  settingsPaths,
+  settingsStoreItems,
+  unreadSettings,
   SKILL_DOCUMENT,
   skillsSelection,
   SKILLS_PREFIX,
@@ -50,7 +57,12 @@ import {
   withLaneVariant,
   withModes,
   withModels,
-  withSettingsChoice,
+  withInlineSettings,
+  withNewSettings,
+  withoutSettings,
+  withSettingsMoved,
+  withSettingsText,
+  withStoreSettings,
   withSkillsSelection,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { absentCodex, account, config, discovery, harness } from './fleet-support.ts';
@@ -398,20 +410,179 @@ describe('the skill this draft is writing', () => {
   });
 });
 
-describe('the settings answer', () => {
-  it('reads an empty box as leaving the fleet settings alone', () => {
-    expect(settingsChoice(layerWith())).toBe('fleet');
-    expect(settingsChoice(layerWith({ settingsText: '{"model":"opus"}' }))).toBe('own');
+describe('the settings this fleet has', () => {
+  it('offers the registry AND what accounts already apply, canonicalising the ./ spelling', () => {
+    const items = settingsStoreItems({
+      variants: {},
+      // The `./` spelling `fy fleet init` scaffolds. One name is registered and never applied; one
+      // document is applied by an account and never registered; one is both.
+      shared: { settings: { claude: './templates/claude/settings.json', spare: './templates/claude/spare.json' } },
+      agents: [
+        {
+          name: 'studio',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: 'a',
+              wrapper: 'claude-studio',
+              layer: { settings: ['./templates/claude/settings.json', 'templates/claude/strict.json'] },
+            },
+            auto: { id: 'b', wrapper: 'claude-auto-studio', layer: { settings: 'templates/claude/strict.json' } },
+          },
+        },
+      ],
+    });
+    expect(items).toEqual([
+      {
+        path: 'templates/claude/settings.json',
+        name: 'claude',
+        accounts: ['claude-studio'],
+      },
+      { path: 'templates/claude/spare.json', name: 'spare', accounts: [] },
+      { path: 'templates/claude/strict.json', accounts: ['claude-studio', 'claude-auto-studio'] },
+    ]);
   });
 
-  it('seeds something that parses when a person asks to set some, and clears it on the way back', () => {
-    const own = withSettingsChoice(layerWith(), 'own');
-    expect(own.settingsText).toBe('{}');
-    // Choosing "own" again must not throw away what they typed.
-    expect(withSettingsChoice(own, 'own').settingsText).toBe('{}');
-    const typed = layerWith({ settingsText: '{"model":"opus"}' });
-    expect(withSettingsChoice(typed, 'own')).toBe(typed);
-    expect(withSettingsChoice(typed, 'fleet').settingsText).toBe('');
+  it('offers a declared document a browser could never send as refused, rather than dropping it', () => {
+    const items = settingsStoreItems({
+      variants: {},
+      shared: { settings: { odd: '~/settings.json' } },
+      agents: [],
+    });
+    // Listed, disabled, and the reason is on it. Dropping it would tell somebody their fleet names no
+    // settings documents while its configuration names one.
+    expect(items).toHaveLength(1);
+    expect(items[0]?.refusal).toContain('must be relative to the asset directory');
+  });
+
+  it('reads no store at all from a fleet whose configuration could not be read', () => {
+    expect(settingsStoreItems(null)).toHaveLength(0);
+    expect(settingsStoreItems({ variants: {}, agents: [] })).toHaveLength(0);
+  });
+});
+
+describe('the settings a person composes', () => {
+  it('appends what is ticked, so selection order IS the order that applies', () => {
+    const one = withStoreSettings(layerWith(), 'templates/claude/a.json', '1');
+    const two = withStoreSettings(one, 'templates/claude/b.json', '2');
+    expect(settingsPaths(two)).toEqual(['templates/claude/a.json', 'templates/claude/b.json']);
+    // Unticking removes that one and leaves every other entry where it was.
+    expect(settingsPaths(withStoreSettings(two, 'templates/claude/a.json', '3'))).toEqual(['templates/claude/b.json']);
+  });
+
+  it('derives a new document path from the harness, because the extension decides the parser', () => {
+    expect(settingsPathFor('claude', 'strict')).toBe('templates/claude/strict.json');
+    expect(settingsPathFor('codex', 'strict')).toBe('templates/codex/strict.toml');
+    expect(settingsPathFor('claude', '  ')).toBe('');
+    const added = withNewSettings(layerWith(), 'claude', 'strict', '1');
+    expect(added.settings).toEqual([{ id: '1', source: 'new', path: 'templates/claude/strict.json', text: '{}\n' }]);
+    // A Codex document is TOML, so it is NOT seeded with an empty JSON object.
+    expect(withNewSettings(layerWith(), 'codex', 'strict', '1').settings[0]?.text).toBe('');
+  });
+
+  it('takes exactly one block of settings typed here', () => {
+    const one = withInlineSettings(layerWith(), '1');
+    expect(one.settings).toEqual([{ id: '1', source: 'inline', path: '', text: '{}' }]);
+    // A second is refused by returning the same layer: two anonymous entries are indistinguishable in
+    // the list a person reorders, and whatever the second would say goes in the first.
+    expect(withInlineSettings(one, '2')).toBe(one);
+    expect(inlineSettings(one)?.id).toBe('1');
+    expect(inlineSettings(layerWith())).toBeUndefined();
+  });
+
+  it('moves one entry a place at a time and stops at either end', () => {
+    const stack = layerWith({
+      settings: [
+        { id: 'a', source: 'store', path: 'templates/claude/a.json', text: '' },
+        { id: 'b', source: 'store', path: 'templates/claude/b.json', text: '' },
+        { id: 'c', source: 'inline', path: '', text: '{}' },
+      ],
+    });
+    expect(withSettingsMoved(stack, 'c', -1).settings.map(entry => entry.id)).toEqual(['a', 'c', 'b']);
+    expect(withSettingsMoved(stack, 'a', -1)).toBe(stack);
+    expect(withSettingsMoved(stack, 'c', 1)).toBe(stack);
+    expect(withSettingsMoved(stack, 'nope', 1)).toBe(stack);
+    expect(withoutSettings(stack, 'b').settings.map(entry => entry.id)).toEqual(['a', 'c']);
+    expect(withSettingsText(stack, 'c', '{"model":"opus"}').settings[2]?.text).toBe('{"model":"opus"}');
+    expect(withSettingsText(stack, 'nope', 'x').settings).toEqual(stack.settings);
+    expect(authoredSettings(stack)).toHaveLength(0);
+  });
+
+  it('refuses a new name that collides, and redirects the one that is already in the store', () => {
+    const store = settingsStoreItems({
+      variants: {},
+      shared: { settings: { claude: 'templates/claude/settings.json' } },
+      agents: [],
+    });
+    const held = withNewSettings(layerWith(), 'claude', 'strict', '1');
+    expect(newSettingsProblem('', 'claude', store, held)).toBe('name this document');
+    expect(newSettingsProblem(' strict ', 'claude', store, held)).toContain('must not start or end with a space');
+    expect(newSettingsProblem('a/b', 'claude', store, held)).toContain('path separator');
+    expect(newSettingsProblem('settings', 'claude', store, held)).toContain('tick it above to apply it');
+    expect(newSettingsProblem('strict', 'claude', store, held)).toBe(
+      '"templates/claude/strict.json" is already listed',
+    );
+    expect(
+      newSettingsProblem('own', 'claude', store, {
+        ...layerWith(),
+        instructions: { path: 'templates/claude/own.json', text: '# hi' },
+      }),
+    ).toContain('is already written by this change');
+    expect(newSettingsProblem('strict', 'claude', store, layerWith())).toBeNull();
+  });
+});
+
+describe('which entry decided each key', () => {
+  const stacked = (...entries: readonly { source: 'store' | 'new' | 'inline'; path: string; text: string }[]) =>
+    layerWith({ settings: entries.map((entry, index) => ({ id: String(index), ...entry })) });
+
+  it('folds the known entries by the rule the daemon merges them by, and a later one wins', () => {
+    const layer = stacked(
+      { source: 'new', path: 'templates/claude/base.json', text: '{"model":"sonnet","permissions":{"allow":["a"]}}' },
+      { source: 'inline', path: '', text: '{"model":"opus","permissions":{"deny":["b"]}}' },
+    );
+    expect(settingsOrigins(layer, 'claude')).toEqual([
+      { key: 'model', from: 'typed here' },
+      // A nested object MERGES key by key, so both survive and each names the entry that set it.
+      { key: 'permissions.allow', from: 'templates/claude/base.json' },
+      { key: 'permissions.deny', from: 'typed here' },
+    ]);
+  });
+
+  it('lets a scalar replace a whole subtree, because that is what the merge does', () => {
+    const layer = stacked(
+      { source: 'inline', path: '', text: '{"permissions":{"allow":["a"]}}' },
+      { source: 'new', path: 'templates/claude/late.json', text: '{"permissions":"off"}' },
+    );
+    expect(settingsOrigins(layer, 'claude')).toEqual([{ key: 'permissions', from: 'templates/claude/late.json' }]);
+  });
+
+  it('lets an object replace a scalar the other way round', () => {
+    const layer = stacked(
+      { source: 'inline', path: '', text: '{"permissions":"off"}' },
+      { source: 'new', path: 'templates/claude/late.json', text: '{"permissions":{"allow":["a"]}}' },
+    );
+    expect(settingsOrigins(layer, 'claude')).toEqual([
+      { key: 'permissions.allow', from: 'templates/claude/late.json' },
+    ]);
+  });
+
+  it('says which entries it has not read rather than passing a short key list off as the answer', () => {
+    const layer = stacked(
+      { source: 'store', path: 'templates/claude/shared.json', text: '' },
+      { source: 'inline', path: '', text: '{"model":"opus"}' },
+      { source: 'new', path: 'templates/codex/late.toml', text: 'model = "gpt-5.6"' },
+    );
+    // For CODEX the authored document is TOML, which this browser has no parser for.
+    expect(settingsOrigins(layer, 'codex').map(origin => origin.key)).toEqual(['model']);
+    expect(unreadSettings(layer, 'codex')).toEqual(['templates/claude/shared.json', 'templates/codex/late.toml']);
+    // Told no harness at all, an authored document is unread for the same reason — there is no parser
+    // to name. The entry TYPED HERE still reads, because an inline entry is JSON whichever harness
+    // ends up reading it: the daemon serialises it into that harness's own format.
+    expect(unreadSettings(layer, null)).toEqual(['templates/claude/shared.json', 'templates/codex/late.toml']);
+    expect(settingsOrigins(layer, null).map(origin => origin.key)).toEqual(['model']);
+    // An entry a person is still typing into contributes nothing and is not an error.
+    expect(settingsOrigins(stacked({ source: 'inline', path: '', text: '{ not json' }), 'claude')).toHaveLength(0);
   });
 });
 
@@ -438,8 +609,27 @@ describe('which step owns which blocker', () => {
           { mode: 'auto', variant: 'default' },
         ],
       }),
-      complete({ layer: layerWith({ settingsText: '{ not json' }) }),
-      complete({ layer: layerWith({ settingsText: '[1]' }) }),
+      complete({ layer: layerWith({ settings: [{ id: '1', source: 'inline', path: '', text: '{ not json' }] }) }),
+      complete({ layer: layerWith({ settings: [{ id: '1', source: 'inline', path: '', text: '[1]' }] }) }),
+      complete({ layer: layerWith({ settings: [{ id: '1', source: 'inline', path: '', text: '  ' }] }) }),
+      complete({ layer: layerWith({ settings: [{ id: '1', source: 'store', path: '/etc/x.json', text: '' }] }) }),
+      complete({ layer: layerWith({ settings: [{ id: '1', source: 'store', path: '', text: '' }] }) }),
+      complete({
+        layer: layerWith({
+          settings: [
+            { id: '1', source: 'store', path: 'templates/claude/a.json', text: '' },
+            { id: '2', source: 'store', path: 'templates/claude/a.json', text: '' },
+          ],
+        }),
+      }),
+      // A settings document this change WRITES over the instructions file. The sentence is claimed by
+      // the instructions step, which is the one whose field a person most likely mistyped.
+      complete({
+        layer: layerWith({
+          instructions: { path: 'instructions/CLAUDE-x.md', text: '# hi' },
+          settings: [{ id: '1', source: 'new', path: 'instructions/CLAUDE-x.md', text: '{}' }],
+        }),
+      }),
       complete({ layer: layerWith({ env: [{ id: '1', name: '', value: 'x' }] }) }),
       complete({ layer: layerWith({ env: [{ id: '1', name: '1bad', value: 'x' }] }) }),
       complete({
