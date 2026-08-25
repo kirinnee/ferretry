@@ -15,6 +15,7 @@ import type {
   IRecommendationGateway,
 } from './ports.ts';
 import {
+  fleetAccountNames,
   renderApplyPlan,
   renderApplyResult,
   renderFleetApplyFailure,
@@ -186,15 +187,20 @@ export class FleetController {
    * The manifest is the source of accounts, never the wrappers on disk: kteam discovered accounts by
    * globbing the bin directory, so a stale executable produced a usage row for an account that no
    * longer existed.
+   *
+   * It is loaded for TWO reasons, exactly as `health` loads it: the collector needs the accounts, and
+   * the renderer needs their names. A quota addressed to an opaque account id answers "how many
+   * accounts are at their limit" and never "which".
    */
   async usage(options: FleetCommandOptions): Promise<void> {
     const collector = this.deps.usage.forConfig(await this.deps.config.load());
-    const snapshot = await collector.collect(await this.#manifest());
+    const manifest = await this.#manifest();
+    const snapshot = await collector.collect(manifest);
     const exhausted = snapshot.accounts.filter(account => account.atLimit);
     if (options.json !== true && exhausted.length === snapshot.accounts.length && exhausted.length > 0) {
       this.deps.out.warn('Every account is at its limit — nothing can be launched until a window resets.');
     }
-    this.#report(snapshot, options, () => renderUsage(snapshot));
+    this.#report(snapshot, options, () => renderUsage(snapshot, fleetAccountNames(manifest)));
   }
 
   /**
@@ -215,8 +221,7 @@ export class FleetController {
     const collector = this.deps.health.forConfig(await this.deps.config.load());
     const manifest = await this.#manifest();
     const snapshot = await collector.collect(manifest);
-    const names = new Map(manifest.accounts.map(account => [account.id, account.displayName]));
-    this.#report(snapshot, options, () => renderHealth(snapshot, names));
+    this.#report(snapshot, options, () => renderHealth(snapshot, fleetAccountNames(manifest)));
   }
 
   /**

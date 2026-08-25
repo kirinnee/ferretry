@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { FleetAccountHealth, FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
 import should from 'should';
 import {
+  fleetAccountNames,
   renderAccount,
   renderApplyPlan,
   renderApplyResult,
@@ -656,7 +657,70 @@ describe('manifest rendering', () => {
   });
 });
 
+/** The manifest join the controller supplies, so a row names something a person recognises. */
+const usageNames = new Map([[ACCOUNT_ID, 'Claude (work)']]);
+
+describe('the manifest name join', () => {
+  it('should map each account id to the display name a person recognises', () => {
+    // ONE join for both terminal reports, so `fy fleet usage` and `fy fleet health` cannot end up
+    // naming the same account differently. `displayName` rather than `wrapper`, which is an absolute
+    // path — naming a row after one puts `/state/fleet/bin/fy-claude-work` in it.
+    should(fleetAccountNames(manifest()).get(ACCOUNT_ID)).equal('Claude (work)');
+  });
+});
+
 describe('usage rendering', () => {
+  /**
+   * THE ROW NAMES THE ACCOUNT, not its id.
+   *
+   * It used to print the account UUID, so `8d071755-…  short 12% · long 4%` told a reader how many of
+   * their accounts were busy and never which one. Unlike a health row this carries the name ALONE:
+   * `fy fleet health` prints `fy fleet login <accountId>` because a login repairs that account, and
+   * there is no command that repairs a quota number.
+   */
+  it('should name the account rather than printing its opaque id', () => {
+    // Act
+    const rendered = renderUsageRow(usageRow(), usageNames);
+
+    // Assert
+    should(rendered).equal('  Claude (work)  short 42% · long 11%');
+    should(rendered).not.containEql(ACCOUNT_ID);
+  });
+
+  it('should name the account in every outcome, not only the one that reports a quota', () => {
+    // Arrange — a row is unreadable in exactly the same way whichever branch produced it, and a fix
+    // applied to the reporting branch alone leaves a UUID on precisely the rows something went wrong.
+    const cases = [
+      usageRow({ atLimit: true }),
+      usageRow({ unavailable: true, ok: false, unavailableReason: 'no probe' }),
+      usageRow({ ok: false, error: 'timeout' }),
+      usageRow({ usageBased: false }),
+    ];
+
+    // Act + Assert
+    for (const usage of cases) {
+      should(renderUsageRow(usage, usageNames)).startWith('  Claude (work)  ');
+    }
+  });
+
+  it('should fall back to the id when the manifest cannot name the account', () => {
+    // Arrange — a snapshot can outlive the account it is about: the manifest moved, or somebody
+    // removed the account. A quota about something the manifest cannot name is STILL a true quota, so
+    // the row is printed with the id rather than hidden or given an invented name.
+    // Act + Assert
+    should(renderUsageRow(usageRow({ accountId: 'departed' }), usageNames)).containEql('departed  short 42%');
+  });
+
+  it('should offer no remedy line, because no command resets a quota window', () => {
+    // A window resets on the provider's clock. `fy fleet health` prints a command beside an account a
+    // login repairs; an instruction printed here would be the same unactionable row in a new costume.
+    const rendered = renderUsageRow(usageRow({ atLimit: true }), usageNames);
+
+    // Act + Assert
+    should(rendered).not.containEql('\n');
+    should(rendered).not.containEql('fy fleet');
+  });
+
   it('should show both quota windows', () => {
     // Act + Assert
     should(renderUsageRow(usageRow())).equal(`  ${ACCOUNT_ID}  short 42% · long 11%`);
@@ -698,6 +762,15 @@ describe('usage rendering', () => {
     should(renderUsage(usageSnapshot()).split('\n')[0]).equal('1 account');
     should(renderUsage(usageSnapshot([usageRow({ atLimit: true })])).split('\n')[0]).equal('1 account, 1 at limit');
     should(renderUsage(usageSnapshot([]))).equal('No accounts to report usage for.');
+  });
+
+  it('should carry the names down to every row of the report', () => {
+    // Act — the snapshot is what the collector returns; the names are the controller's join onto it.
+    const rendered = renderUsage(usageSnapshot([usageRow(), usageRow({ accountId: 'departed' })]), usageNames);
+
+    // Assert
+    should(rendered).containEql('  Claude (work)  short 42%');
+    should(rendered).containEql('  departed  short 42%');
   });
 });
 
