@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { FleetAccountStepper } from '../../../../src/features/fleet/fleet-account-stepper.tsx';
-import type { FleetConfigView } from '../../../../src/features/fleet/fleet-api.ts';
+import type { FleetConfigView, FleetProfileCatalog } from '../../../../src/features/fleet/fleet-api.ts';
 import {
   detectedAccountDraft,
   emptyAccountDraft,
@@ -83,6 +83,11 @@ const stepper = async (options: {
   readonly skillsStore?: readonly FleetSkillsStoreItem[];
   /** Which answer the account step is on. Held by the surface in production, a prop here. */
   readonly accountSource?: FleetPickOrAddSource;
+  /**
+   * The profiles this fleet declares. `null` by default, which is the state before the read lands —
+   * and the state most of these cases want, because the sign-in step is not what they are about.
+   */
+  readonly profiles?: FleetProfileCatalog | null;
   readonly onNavigate?: (to: string) => void;
 }) => {
   let current: FleetAccountDraft = {
@@ -133,6 +138,7 @@ const stepper = async (options: {
       skillsStore={options.skillsStore ?? []}
       storeDocuments={options.assets ?? []}
       assetBlockers={[]}
+      profiles={options.profiles ?? null}
     />
   );
   const mounted = tracked(await mount(element()));

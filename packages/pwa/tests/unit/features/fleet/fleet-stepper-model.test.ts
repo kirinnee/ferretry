@@ -85,8 +85,9 @@ describe('the sequence', () => {
     expect(nextStep('review')).toBe('review');
     expect(previousStep('harness')).toBe('harness');
     expect(nextStep('harness')).toBe('identity');
-    expect(previousStep('models')).toBe('identity');
-    expect(stepIndex('models')).toBe(2);
+    expect(nextStep('identity')).toBe('credential');
+    expect(previousStep('models')).toBe('credential');
+    expect(stepIndex('models')).toBe(3);
   });
 });
 
