@@ -1201,12 +1201,60 @@ describe('creating an account', () => {
       ),
     ).toEqual(['templates/claude/settings.json', 'typed here']);
 
+    // Act — write a NEW document here, which is the half that joins the collection.
+    await type(field(surface.container, '-new-settings'), 'strict');
+    await interact(() => undefined);
+    expect(pick(surface.container, '[data-fleet-new-settings-note]').textContent).toContain(
+      'templates/claude/strict.json',
+    );
+    await click(pick(surface.container, '[data-fleet-add-settings]'));
+    await interact(() => undefined);
+
+    // Assert — three entries, the authored one last, and the recap names them in the order they apply.
+    expect(
+      [...surface.container.querySelectorAll('[data-fleet-settings-entry]')].map(node =>
+        node.getAttribute('data-fleet-settings-entry'),
+      ),
+    ).toEqual(['templates/claude/settings.json', 'typed here', 'templates/claude/strict.json']);
+
     // Act — break the typed block.
     await type(pick(surface.container, '[data-fleet-settings-text="typed here"]') as HTMLTextAreaElement, '{ not json');
 
     // Assert — the blocker lands on THIS step, where the box is.
     expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('settings must be valid JSON');
     expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
+
+    // Act — put it back, and walk to the recap.
+    await type(pick(surface.container, '[data-fleet-settings-text="typed here"]') as HTMLTextAreaElement, '{}');
+    await interact(() => undefined);
+    await walkTo(surface.container, 'review');
+
+    // Assert — the recap NAMES them in the order they apply rather than counting them, because a count
+    // is the one thing a person cannot check against the plan they are about to approve.
+    expect(pick(surface.container, '[data-fleet-recap]').textContent).toContain(
+      'templates/claude/settings.json → typed here → templates/claude/strict.json',
+    );
+    await surface.unmount();
+  });
+
+  it('offers a document this fleet declared but a browser could never send as refused, not hidden', async () => {
+    const surface = await open({
+      config: () => ({
+        ...config({ default: { id: account().id, wrapper: 'claude-studio' } }),
+        // An operator may legitimately write a home-relative path in config.yaml. Hiding it would tell
+        // somebody their fleet names no settings documents while its configuration names one.
+        shared: { settings: { odd: '~/settings.json' } },
+      }),
+    });
+    await click(pick(surface.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(surface.container, 'identity');
+    await nameNewAccount(surface.container, 'atelier');
+    await walkTo(surface.container, 'settings');
+
+    const offered = pick(surface.container, '[data-fleet-check="~/settings.json"]');
+    expect(offered.textContent).toContain('must be relative to the asset directory');
+    expect(pick(offered, 'input')).toHaveProperty('disabled', true);
     await surface.unmount();
   });
 
