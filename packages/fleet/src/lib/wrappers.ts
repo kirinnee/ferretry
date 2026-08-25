@@ -6,6 +6,10 @@
  * - A configured environment value of exactly `$NAME` or `${NAME}` is an **indirect reference**. It
  *   is emitted as a reference, so the secret lives in the configured secrets file and never in a
  *   generated script, a repository, or a test fixture.
+ * - A value naming `${secret:NAME}` is **never emitted at all**. Ferretry's secret store holds it and
+ *   the daemon puts it into the launch environment, so the script carries a REQUIREMENT — a guard
+ *   naming the variable, the secret behind it, and what to do — and no value. See `./env-profiles.ts`
+ *   for why a profile that authenticates an account is built this way.
  * - Every other value is a **literal**, emitted single-quoted so that no `$`, backtick or `$( )`
  *   inside it is ever interpreted. Configuration is trusted input, but a literal that silently
  *   became a command substitution would be a surprising way to find that out.
@@ -15,6 +19,7 @@
  *
  * Pure: every function here is string in, string out.
  */
+import { secretReferencesIn, type SecretName } from '@ferretry/protocol';
 import type { HarnessKind } from './manifest.ts';
 import type { ResolvedAccount, ResolvedCommand } from './profiles.ts';
 
@@ -89,6 +94,24 @@ const sourceSecretsLines = (secretsFile: string | undefined): readonly string[] 
 const guardLine = (name: string, secretsFile: string | undefined): string => {
   const origin = secretsFile === undefined ? 'the environment' : secretsFile;
   return `: "\${${name}:?ferretry: ${name} is not set — expected it from ${origin}}"`;
+};
+
+/**
+ * The guard for a variable this daemon's secret store supplies.
+ *
+ * It is a REQUIREMENT and never an export, because there is nothing here to export: the value is in
+ * the store, the daemon puts it into the launch environment, and a generated script that could
+ * produce it would be a generated script holding a credential. What the script can do is refuse
+ * clearly, so somebody running the wrapper straight from a shell — where nothing injected anything —
+ * is told which secret is missing instead of watching the harness fail to authenticate.
+ *
+ * The secrets are named. A NAME IS NOT A SECRET, and a guard that said only "a credential is
+ * missing" would leave a reader unable to tell which of an account's two references was the one to
+ * go and set.
+ */
+const secretGuardLine = (name: string, secrets: readonly SecretName[]): string => {
+  const which = `${secrets.length === 1 ? 'secret' : 'secrets'} ${secrets.join(', ')}`;
+  return `: "\${${name}:?ferretry: ${name} is not set — this account takes it from Ferretry's secret store (${which}). Launch it through the daemon, or run: fy secret set ${secrets[0] ?? name}}"`;
 };
 
 /** Set to `0` in the environment to launch without seeding the harness's first-run state. */
@@ -230,11 +253,22 @@ export function renderWrapperScript(account: ResolvedAccount, options: WrapperRe
   const guard = options.guardEnvReferences ?? true;
   const entries = Object.entries(account.env).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
 
+  // A value naming a secret is neither a literal nor an environment reference: nothing in this script
+  // may produce it, so it is separated out here and reaches only the guard block below.
+  const storeBacked = entries.flatMap(([name, value]) => {
+    const secrets = secretReferencesIn(value);
+    return secrets.length === 0 ? [] : [[name, secrets] as const];
+  });
   const referenced = entries.flatMap(([, value]) => {
+    if (secretReferencesIn(value).length > 0) return [];
     const name = envReferenceName(value);
     return name === undefined ? [] : [name];
   });
   const uniqueReferenced = [...new Set(referenced)];
+  const guards = [
+    ...uniqueReferenced.map(name => guardLine(name, secretsFile)),
+    ...storeBacked.map(([name, secrets]) => secretGuardLine(name, secrets)),
+  ];
 
   const lines: string[] = [
     '#!/bin/sh',
@@ -242,13 +276,13 @@ export function renderWrapperScript(account: ResolvedAccount, options: WrapperRe
     `# account ${account.id} (${account.kind}, ${account.mode})`,
     '',
     ...sourceSecretsLines(secretsFile),
-    ...(guard && uniqueReferenced.length > 0
-      ? [...uniqueReferenced.map(name => guardLine(name, secretsFile)), '']
-      : []),
+    ...(guard && guards.length > 0 ? [...guards, ''] : []),
     `export ${HARNESS_HOME_ENV[account.kind]}=${shellPath(account.home)}`,
   ];
 
+  const storeBackedNames = new Set(storeBacked.map(([name]) => name));
   for (const [name, value] of entries) {
+    if (storeBackedNames.has(name)) continue;
     const reference = envReferenceName(value);
     lines.push(`export ${name}=${reference === undefined ? shellQuote(value) : `"\${${reference}}"`}`);
   }

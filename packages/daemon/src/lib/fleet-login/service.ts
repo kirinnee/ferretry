@@ -79,6 +79,7 @@ import {
 import type { FleetConfig, FleetManifest } from '@ferretry/fleet';
 import type {
   FleetCredentialReading,
+  FleetCredentialSource as ProtocolCredentialSource,
   FleetLoginAccount,
   FleetLoginAccountOutcome,
   FleetLoginIdentity,
@@ -352,6 +353,25 @@ export class HarnessLoginService {
     return sources.get(accountId) ?? { source: 'undeclared' };
   }
 
+  /**
+   * One account's credential source in the shape the wire union can carry.
+   *
+   * `secret-store` is a member the fleet domain has and the protocol does not, and this narrows it to
+   * `environment` for the row a browser receives. That is a TRUE narrowing rather than a substitute:
+   * the daemon resolves the secret and puts the value into the environment the wrapper is launched in,
+   * so both the variable named and the "there is no sign-in to run for it" verdict are exactly right;
+   * what the browser loses is the sentence naming Ferretry's own store as where it came from.
+   *
+   * It is here rather than in the fleet package because the fleet package is where the precise fact
+   * belongs — `credentialSourceOf` answers `secret-store` and every host-side surface reads it. The
+   * wire is the one place that cannot say it yet, and widening the protocol union means a matching arm
+   * in the browser's copy, which is a separate unit's file. So the loss is one sentence, in one
+   * surface, and it is written down here and in `docs/fleet-env-profiles.md` rather than discovered.
+   */
+  #wireSource(source: FleetCredentialSource): ProtocolCredentialSource {
+    return source.source === 'secret-store' ? { source: 'environment', variable: source.variable } : source;
+  }
+
   #identityRow(
     identity: FleetIdentity,
     status: FleetIdentityStatus,
@@ -371,7 +391,7 @@ export class HarnessLoginService {
         mode: member.mode,
         available: member.available,
         credential: readingOf(status, member, login.applies),
-        source,
+        source: this.#wireSource(source),
         login,
       };
     });
@@ -657,6 +677,10 @@ export function describeSource(source: FleetCredentialSource): string {
   }
   if (source.source === 'configured-value') {
     return `this account's credential is ${source.variable} as the fleet configuration sets it, so there is nothing to sign in to`;
+  }
+  if (source.source === 'secret-store') {
+    const which = `${source.secrets.length === 1 ? 'secret' : 'secrets'} ${source.secrets.join(', ')}`;
+    return `this account's credential is ${source.variable}, which a profile takes from this daemon's secret store (${which}), so there is nothing to sign in to`;
   }
   if (source.source === 'undeclared') {
     return 'nothing in this fleet’s configuration says where this account’s credential comes from';

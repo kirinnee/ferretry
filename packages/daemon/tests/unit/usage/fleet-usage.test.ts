@@ -8,6 +8,7 @@ const ACCOUNT_ID = '4c0f3b6e-7a91-4a2f-9a7f-2b1d0f5c8e31';
 const OTHER_ID = '9d2e1a44-3c57-4b18-8f60-7c9a5e2d1b03';
 
 const account = (overrides: Partial<CoreAccount> = {}): CoreAccount => ({
+  secretEnv: {},
   id: ACCOUNT_ID,
   agent: 'claude-writer',
   wrapper: '/state/fleet/bin/claude-writer',

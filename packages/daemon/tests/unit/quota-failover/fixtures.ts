@@ -21,6 +21,7 @@ export const spentRow = (agent: string, overrides: Partial<AccountUsage> = {}): 
   usageRow(agent, { ok: true, authOk: true, atLimit: true, fiveHourPercent: 100, ...overrides });
 
 export const account = (agent: string, overrides: Partial<CoreAccount> = {}): CoreAccount => ({
+  secretEnv: {},
   id: `id-${agent}`,
   agent,
   // The published path is what a start runs; `agent` is its name. They agree here for the same

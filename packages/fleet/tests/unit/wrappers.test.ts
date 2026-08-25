@@ -435,3 +435,96 @@ describe('first-run seeding', () => {
     should(actual).not.containEql(FIRST_RUN_SEED_TOGGLE);
   });
 });
+
+/**
+ * A wrapper for an account a profile authenticates.
+ *
+ * The property under test is an absence: the script must carry no value and no way to produce one,
+ * so what it carries instead is a REQUIREMENT the daemon satisfies at launch. Every "value" below is
+ * a fixture string; nothing here supplies a credential.
+ */
+describe('an account whose profile takes a variable from the secret store', () => {
+  it('should never export the value, because there is none in the script to export', () => {
+    // Act
+    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
+
+    // Assert
+    should(actual).not.containEql('export ANTHROPIC_API_KEY');
+    should(actual).not.containEql('${secret:WORK_KEY}');
+  });
+
+  it('should require the variable, naming the secret and what to run', () => {
+    // Act
+    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
+
+    // Assert
+    should(actual).containEql(
+      `: "\${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry's secret store (secret WORK_KEY). Launch it through the daemon, or run: fy secret set WORK_KEY}"`,
+    );
+  });
+
+  it('should name every secret one variable composes, and offer the first as the one to set', () => {
+    // Act
+    const actual = renderWrapperScript(account({ env: { AUTH_HEADER: '${secret:SCHEME} ${secret:WORK_KEY}' } }));
+
+    // Assert
+    should(actual).containEql('(secrets SCHEME, WORK_KEY)');
+    should(actual).containEql('fy secret set SCHEME');
+  });
+
+  it('should require it before the home is bound, so nothing runs on a missing credential', () => {
+    // Act
+    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }));
+
+    // Assert
+    should(actual.indexOf('${ANTHROPIC_API_KEY:?')).be.lessThan(actual.indexOf('export CLAUDE_CONFIG_DIR'));
+  });
+
+  it('should still export the literal variables beside it', () => {
+    // Act
+    const actual = renderWrapperScript(
+      account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', ANTHROPIC_BASE_URL: 'https://example.invalid' } }),
+    );
+
+    // Assert
+    should(actual).containEql("export ANTHROPIC_BASE_URL='https://example.invalid'");
+  });
+
+  it('should keep an environment reference beside it a reference, with its own guard', () => {
+    // Act
+    const actual = renderWrapperScript(
+      account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', OTHER: `$${TOKEN_NAME}` } }),
+    );
+
+    // Assert
+    should(actual).containEql(`export OTHER="\${${TOKEN_NAME}}"`);
+    should(actual).containEql(`expected it from the environment`);
+    should(actual).containEql(`Ferretry's secret store`);
+  });
+
+  it('should emit no requirement at all when guards are turned off', () => {
+    // Act
+    const actual = renderWrapperScript(account({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } }), {
+      guardEnvReferences: false,
+    });
+
+    // Assert — still no export, because the absence of the value is not a guard setting.
+    should(actual).not.containEql(':?ferretry');
+    should(actual).not.containEql('export ANTHROPIC_API_KEY');
+  });
+
+  it('should leave a wrapper that binds no secret byte-identical to what it always was', () => {
+    // Arrange
+    const plain = account({ env: { ANTHROPIC_BASE_URL: 'https://example.invalid', OTHER: `$${TOKEN_NAME}` } });
+
+    // Act
+    const actual = renderWrapperScript(plain);
+
+    // Assert — the two rendering rules that existed before, unchanged and in the same order.
+    should(actual).containEql(
+      `: "\${${TOKEN_NAME}:?ferretry: ${TOKEN_NAME} is not set — expected it from the environment}"`,
+    );
+    should(actual).containEql("export ANTHROPIC_BASE_URL='https://example.invalid'");
+    should(actual).not.containEql('secret store');
+  });
+});

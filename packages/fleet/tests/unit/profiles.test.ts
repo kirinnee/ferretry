@@ -711,3 +711,62 @@ describe('resolveAccounts skills selection', () => {
     should(actual[0]?.skills).deepEqual([]);
   });
 });
+
+describe('the secret bindings toManifestAccounts publishes', () => {
+  it('should publish only the variables that name a secret, so a literal has one home', () => {
+    // Arrange
+    const config = parse({
+      profiles: { work: { env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', ANTHROPIC_BASE_URL: 'https://x.invalid' } } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          auth: 'api-key',
+          profiles: ['work'],
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-kirin',
+              home: 'claude-kirin',
+              defaultModel: 'model-one',
+              models: ['model-one'],
+            },
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = toManifestAccounts(resolveAccounts(config), '/state/fleet/bin');
+
+    // Assert
+    should(actual[0]?.secretEnv).deepEqual({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' });
+  });
+
+  it('should publish nothing for an account that binds none', () => {
+    // Arrange
+    const config = parse({
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          routes: {
+            default: {
+              id: ID_ONE,
+              wrapper: 'claude-kirin',
+              home: 'claude-kirin',
+              defaultModel: 'model-one',
+              models: ['model-one'],
+            },
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = toManifestAccounts(resolveAccounts(config), '/state/fleet/bin');
+
+    // Assert
+    should(actual[0]?.secretEnv).deepEqual({});
+  });
+});

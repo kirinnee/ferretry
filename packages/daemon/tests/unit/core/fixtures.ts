@@ -106,6 +106,7 @@ const model = (id: string, available = true): CoreAccount['models'][number] =>
   available ? { id, available: true } : { id, available: false, unavailableReason: 'declared down' };
 
 export const account = (overrides: Partial<CoreAccount> & Pick<CoreAccount, 'id'>): CoreAccount => ({
+  secretEnv: {},
   agent: overrides.agent ?? overrides.id,
   wrapper: `/state/fleet/bin/${overrides.agent ?? overrides.id}`,
   home: `/state/fleet/homes/${overrides.id}`,

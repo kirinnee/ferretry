@@ -157,6 +157,7 @@ const MANIFEST: FleetManifest = FleetManifestSchema.parse({
 const ENV_ID = '00000000-0000-4000-8000-000000000005';
 const LITERAL_ID = '00000000-0000-4000-8000-000000000006';
 const BARE_ID = '00000000-0000-4000-8000-000000000007';
+const STORE_ID = '00000000-0000-4000-8000-000000000008';
 
 /**
  * A fleet declaring the three credential sources {@link CONFIG} has no account of.
@@ -183,6 +184,15 @@ const SOURCES_CONFIG = parseConfig({
       env: { ANTHROPIC_API_KEY: 'sk-configured-TESTONLY' },
       routes: { default: route(LITERAL_ID, 'claude-literal', 'interactive') },
     },
+    // A profile takes the credential from this daemon's own store, so there is nothing to sign in to
+    // and the value is in neither the configuration nor the generated wrapper.
+    {
+      name: 'stored',
+      kind: 'claude',
+      auth: 'api-key',
+      env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' },
+      routes: { default: route(STORE_ID, 'claude-stored', 'interactive') },
+    },
     // Declares that it authenticates with a key and says nowhere the key comes from: the fail-closed
     // member, which must not be read as "the harness writes this one".
     {
@@ -200,6 +210,7 @@ const SOURCES_MANIFEST: FleetManifest = FleetManifestSchema.parse({
   accounts: [
     manifestAccount(ENV_ID, 'claude', 'claude-envkey', 'interactive'),
     manifestAccount(LITERAL_ID, 'claude', 'claude-literal', 'interactive'),
+    manifestAccount(STORE_ID, 'claude', 'claude-stored', 'interactive'),
     manifestAccount(BARE_ID, 'claude', 'claude-bare', 'interactive'),
   ],
 });
@@ -634,6 +645,37 @@ describe('an account whose credential is not a login', () => {
     // Assert
     should(actual.message).match(/as the fleet configuration sets it/u);
     should(subject.children).be.empty();
+  });
+
+  it('should refuse an account a profile authenticates, naming the store and the secret', async () => {
+    // Arrange — the "no login wanted" answer: a sign-in here would write a store nothing reads.
+    const subject = sources();
+
+    // Act
+    const actual = await refusalOf(async () => subject.service.start({ accountId: STORE_ID }, HOST));
+
+    // Assert
+    should(actual.code).equal('fleet_login_unavailable');
+    should(actual.message).match(/secret store \(secret WORK_KEY\)/u);
+    should(subject.children).be.empty();
+  });
+
+  /**
+   * The wire union has no `secret-store` member, so the row a browser receives narrows to
+   * `environment` — true of it, because the daemon does put the value into the environment the
+   * wrapper is launched in, and the verdict it carries is identical. What the browser loses is the
+   * sentence naming Ferretry's own store, and that arrives with the PWA half.
+   */
+  it('should narrow a stored credential to the environment on the wire, keeping the variable', async () => {
+    // Act
+    const actual = await sources().service.readiness();
+
+    // Assert
+    should(accountOf(actual, STORE_ID).source).deepEqual({
+      source: 'environment',
+      variable: 'ANTHROPIC_API_KEY',
+    });
+    should(accountOf(actual, STORE_ID).login).have.property('applies', false);
   });
 
   it('should refuse an account nothing declares a credential source for, rather than offering a login', async () => {
@@ -1426,6 +1468,18 @@ describe('describeSource', () => {
 
   it('should admit that nothing declares an undeclared source', () => {
     should(describeSource({ source: 'undeclared' })).match(/nothing in this fleet/u);
+  });
+
+  it('should name the store and the profile for a credential a profile supplies', () => {
+    should(describeSource({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] })).match(
+      /a profile takes from this daemon's secret store \(secret WORK_KEY\)/u,
+    );
+  });
+
+  it('should pluralise when one variable is composed from two secrets', () => {
+    should(describeSource({ source: 'secret-store', variable: 'AUTH', secrets: ['SCHEME', 'WORK_KEY'] })).match(
+      /secrets SCHEME, WORK_KEY/u,
+    );
   });
 
   it('should be total over the union, including the source a refusal never describes', () => {
