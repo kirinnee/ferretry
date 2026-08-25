@@ -392,7 +392,7 @@ describe('which step owns which blocker', () => {
     expect(mayAdvance('harness', nameless, declared)).toBe(true);
     expect(stepProblems('harness', nameless, declared)).toEqual([]);
     expect(mayAdvance('identity', nameless, declared)).toBe(false);
-    expect(stepProblems('identity', nameless, declared)[0]).toContain('name the provider account');
+    expect(stepProblems('identity', nameless, declared)[0]).toContain('pick the account this signs in as');
     // A blocker from a read the daemon refused stops the step it belongs to as firmly as a typo does.
     expect(mayAdvance('instructions', complete(), declared, ['could not be read'])).toBe(false);
     // The recap owns nothing of its own: it shows everything, which is what a recap is.

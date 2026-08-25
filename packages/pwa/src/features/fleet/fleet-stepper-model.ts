@@ -29,6 +29,7 @@
 import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import type { FleetConfigView, FleetManifestAccountView } from './fleet-api.ts';
 import {
+  accountNameProblems,
   accountProblems,
   assetPathProblem,
   BLANK_INSTRUCTIONS_CHOICE,
@@ -644,27 +645,20 @@ const ownedProblems: Readonly<
   review: () => [],
 };
 
-const CONTROL_CHARACTER = /\p{Cc}/u;
-
 /**
  * The account's own identity: the name it is known by, and the lanes its modes derived.
  *
- * The lane sentences are {@link laneProblems}' rather than restated here — including the one that
+ * BOTH halves are the change model's sentences rather than restated here — the name grammar through
+ * {@link accountNameProblems} and the lane set through {@link laneProblems}, including the one that
  * refuses an empty selection, which is this step's because this step holds the control. Ticking
  * nothing is the state the multi-select made reachable, and it has to block somewhere a person can
- * see the boxes.
+ * see the boxes. This file used to carry its own copy of the name chain; a copy is how the recap comes
+ * to refuse a change for a reason no step would say.
  */
-const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
-  const problems: string[] = [];
-  const name = draft.name.trim();
-  if (name === '') problems.push('name the provider account');
-  else if (name !== draft.name) problems.push('the account name must not start or end with whitespace');
-  else if (name.length > 64) problems.push('the account name must be 64 characters or shorter');
-  else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {
-    problems.push('the account name must not contain a path separator, "..", or control characters');
-  }
-  return [...problems, ...laneProblems(draft.lanes, config)];
-};
+const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => [
+  ...accountNameProblems(draft),
+  ...laneProblems(draft, config),
+];
 
 const modelProblems = (draft: FleetAccountDraft): readonly string[] => {
   const models = selectedModels(draft);

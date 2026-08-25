@@ -748,7 +748,7 @@ describe('creating an account', () => {
     // Assert — the account step does not, because it has no name yet, and it says so HERE.
     expect(stepperStep(surface.container)).toBe('identity');
     expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
-    expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('name the provider account');
+    expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('pick the account this signs in as');
 
     // Act
     await type(field(surface.container, '-name'), 'atelier');
