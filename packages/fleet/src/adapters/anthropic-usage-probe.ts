@@ -257,19 +257,24 @@ function jsonFields(
   readonly truncated: boolean;
 } {
   const fields: ProviderResponseJsonField[] = [];
+  let truncated = false;
   const visit = (current: unknown, prefix: string, depth: number): void => {
     const record = asRecord(current);
     if (record === undefined || depth > 1) return;
     for (const key of Object.keys(record).sort()) {
-      if (fields.length > MAX_JSON_FIELDS) return;
+      if (fields.length >= MAX_JSON_FIELDS) {
+        truncated = true;
+        return;
+      }
       const path = scrubDiagnosticPath(prefix.length === 0 ? key : `${prefix}.${key}`, secrets);
       const child = record[key];
       fields.push({ path, type: jsonType(child) });
       if (depth < 1) visit(child, path, depth + 1);
+      if (truncated) return;
     }
   };
   visit(value, '', 0);
-  return { fields: fields.slice(0, MAX_JSON_FIELDS), truncated: fields.length > MAX_JSON_FIELDS };
+  return { fields, truncated };
 }
 
 function codeLike(value: unknown, secrets: readonly string[]): string | undefined {
@@ -285,14 +290,14 @@ function jsonShape(value: unknown, secrets: readonly string[]): ProviderResponse
   const error = asRecord(root?.error);
   const nestedType = codeLike(error?.type, secrets);
   const rootType = codeLike(root?.type, secrets);
-  const errorType = nestedType ?? (rootType === 'error' ? undefined : rootType);
   const errorCode =
     codeLike(error?.code, secrets) ?? codeLike(root?.error_code, secrets) ?? codeLike(root?.code, secrets);
   return {
     type: jsonType(value),
     fields: [...fields],
     ...(truncated ? { fieldsTruncated: true as const } : {}),
-    ...(errorType === undefined ? {} : { errorType }),
+    ...(rootType === undefined ? {} : { envelopeType: rootType }),
+    ...(nestedType === undefined ? {} : { errorType: nestedType }),
     ...(errorCode === undefined ? {} : { errorCode }),
   };
 }
@@ -311,10 +316,15 @@ async function inspectResponse(response: QuotaResponse, secrets: readonly string
     response.body.bytes.byteLength > MAX_RESPONSE_BODY_BYTES
       ? response.body.bytes.slice(0, MAX_RESPONSE_BODY_BYTES)
       : response.body.bytes;
-  const text = new TextDecoder().decode(bytes);
+  let text: string | undefined;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    // Invalid UTF-8 is not JSON. The raw-byte length/hash still survives below.
+  }
   let parsed: unknown;
   let parsedJson = false;
-  if (!bodyTruncated) {
+  if (!bodyTruncated && text !== undefined) {
     try {
       parsed = JSON.parse(text) as unknown;
       parsedJson = true;
@@ -346,15 +356,12 @@ async function inspectResponse(response: QuotaResponse, secrets: readonly string
   return { fingerprint, ...(parsedJson ? { json: parsed } : {}) };
 }
 
-/** A 403 is accepted-but-unmeasurable only when it came back as an Anthropic-shaped JSON error. */
-function acceptedScopeFailure(response: ProviderResponseFingerprint): boolean {
+/** A 403 is accepted only for Anthropic's exact permission-error envelope, never an outline guess. */
+function acceptedScopeFailure(response: ProviderResponseFingerprint, body: unknown): boolean {
   const jsonContent = response.contentType === 'application/json' || response.contentType?.endsWith('+json') === true;
-  return (
-    jsonContent &&
-    response.json?.type === 'object' &&
-    response.json.errorType === 'permission_error' &&
-    response.json.fields.some(field => field.path === 'error' && field.type === 'object')
-  );
+  const root = asRecord(body);
+  const error = asRecord(root?.error);
+  return jsonContent && root?.type === 'error' && error?.type === 'permission_error';
 }
 
 export class AnthropicUsageProbe implements FleetUsageProbe {
@@ -393,20 +400,22 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
       // A request that never completed proves nothing about the credential, and the two ways it can
       // fail are two different sentences a reader acts on differently: "it timed out" versus "the
       // provider could not be reached". Neither is ever a rejection.
-      return failure(requestFailure(error), { credentialSignal: abortedRequest(error) ? 'timeout' : 'inconclusive' });
+      return failure(requestFailure(error, [token]), {
+        credentialSignal: abortedRequest(error) ? 'timeout' : 'inconclusive',
+      });
     }
 
     let inspected: InspectedQuotaResponse;
     try {
       inspected = await inspectResponse(response, [token]);
     } catch (error) {
-      return failure(`the usage endpoint response could not be inspected: ${requestFailure(error)}`, {
+      return failure(`the usage endpoint response could not be inspected: ${requestFailure(error, [token])}`, {
         credentialSignal: 'inconclusive',
       });
     }
 
     if (response.status === FORBIDDEN_STATUS) {
-      if (acceptedScopeFailure(inspected.fingerprint)) {
+      if (acceptedScopeFailure(inspected.fingerprint, inspected.json)) {
         return failure('this token cannot read usage; it lacks the user:profile scope', {
           authOk: true,
           credentialSignal: usageEndpointCredentialSignal(response.status, { scopeUnavailableConfirmed: true }),
@@ -449,9 +458,10 @@ function abortedRequest(error: unknown): boolean {
 }
 
 /** A request failure's own message, never anything derived from the credential. */
-function requestFailure(error: unknown): string {
+function requestFailure(error: unknown, secrets: readonly string[] = []): string {
   if (abortedRequest(error)) return 'the request timed out';
-  return error instanceof Error && error.message.length > 0 ? error.message : 'the request failed';
+  if (!(error instanceof Error) || error.message.length === 0) return 'the request failed';
+  return scrubDiagnosticValue(error.message, secrets) ?? 'the request failed';
 }
 
 /**

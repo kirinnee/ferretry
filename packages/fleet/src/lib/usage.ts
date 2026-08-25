@@ -89,6 +89,7 @@ export const ProviderResponseJsonShapeSchema = z.strictObject({
   type: ProviderResponseJsonTypeSchema,
   fields: z.array(ProviderResponseJsonFieldSchema).max(64),
   fieldsTruncated: z.literal(true).optional(),
+  envelopeType: diagnosticText.optional(),
   errorType: diagnosticText.optional(),
   errorCode: diagnosticText.optional(),
 });

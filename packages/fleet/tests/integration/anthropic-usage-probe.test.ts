@@ -53,6 +53,8 @@ interface Reply {
   readonly ok?: boolean;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  /** Exact synthetic wire bytes, when JSON.stringify is not the fixture under test. */
+  readonly rawBody?: Uint8Array;
   /** Set to return an HTML error page rather than JSON. */
   readonly unreadableJson?: boolean;
   /** Set when the supplied bytes are only the retained prefix of a larger response. */
@@ -79,7 +81,7 @@ function transport(replies: Readonly<Record<string, Reply>>): {
         : reply.body === undefined
           ? ''
           : JSON.stringify(reply.body);
-    const encoded = new TextEncoder().encode(text);
+    const encoded = reply.rawBody ?? new TextEncoder().encode(text);
     const response: QuotaResponse = {
       status,
       ok: reply.ok ?? (status >= 200 && status < 300),
@@ -209,6 +211,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
           { path: 'error.type', type: 'string' },
           { path: 'type', type: 'string' },
         ],
+        envelopeType: 'error',
         errorType: 'authentication_error',
         errorCode: 'invalid_token',
       },
@@ -306,6 +309,21 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     // Assert
     should(actual.ok).be.false();
     should(actual.error).equal('getaddrinfo ENOTFOUND');
+  });
+
+  it('should scrub the bearer token if a transport error reflects it', async () => {
+    // Arrange — production network errors do not normally include headers, but the adapter boundary
+    // must remain secret-safe even when an injected transport violates that expectation.
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: { throws: new Error(`Bearer ${TOKEN} could not be sent`) },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.error).equal('Bearer [redacted] could not be sent');
+    should(actual.error).not.containEql(TOKEN);
   });
 
   it('should name a timeout as a timeout', async () => {
@@ -425,6 +443,65 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
+  });
+
+  it('should require the Anthropic error envelope around a permission-shaped 403', async () => {
+    // Arrange — a proxy can use the same content type and nested error label. Without the root
+    // discriminator it would be indistinguishable from the provider response this rule recognizes.
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+        body: { type: 'proxy_error', error: { type: 'permission_error' } },
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.credentialSignal).equal('inconclusive');
+  });
+
+  it('should confirm a scope 403 from direct discriminators even when its diagnostic outline is capped', async () => {
+    // Arrange — classification reads the bounded parsed envelope directly. Depending on whether the
+    // `error` key happened to fit in the sorted diagnostic outline would make the same response flip.
+    const noise = Object.fromEntries(
+      Array.from({ length: 64 }, (_, index) => [`a${String(index).padStart(2, '0')}`, index]),
+    );
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+        body: { ...noise, type: 'error', error: { type: 'permission_error' } },
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.credentialSignal).equal('scope_unavailable');
+    should(actual.responseFingerprint?.json?.fields).have.length(64);
+    should(actual.responseFingerprint?.json?.fieldsTruncated).be.true();
+  });
+
+  it('should not accept malformed UTF-8 as an Anthropic JSON scope response', async () => {
+    // Arrange
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+        rawBody: new Uint8Array([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x31, 0x7d]),
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.credentialSignal).equal('inconclusive');
+    should(actual.responseFingerprint).not.have.property('json');
   });
 });
 
