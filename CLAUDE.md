@@ -212,9 +212,11 @@ function of a usage snapshot somebody already collected and a LOCAL credential r
 seam to hang a spend on, and `GET /v1/fleet/health` is a store read a browser may hydrate on page
 load. **There is no health timer** — health rides the free read-only `GET /api/oauth/usage` the quota
 pass already makes, so a verdict refreshes as a side effect of a read the daemon was making anyway.
-The single most consequential rule is that a **`403` from that endpoint is HEALTHY**: the token
-merely lacks `user:profile`, permanently, for an inference-scoped token, and reading it as a
-rejection sends somebody to re-login forever on a working account. `needs_credentials` is a separate
+The single most consequential rule is that a confirmed Anthropic JSON **`403` from that endpoint is
+HEALTHY**: the token merely lacks `user:profile`, permanently, for an inference-scoped token, and
+reading it as a rejection sends somebody to re-login forever on a working account. An HTML/WAF `403`
+and a bare control-plane `401` are inconclusive, with a strict secret-safe response fingerprint
+retained so neither becomes an invented credential verdict. `needs_credentials` is a separate
 verdict from `needs_relogin` because an account authenticated by an environment variable **cannot** be
 fixed by signing in. **Codex is honestly `unknown`** and that is the finished answer, not a gap: its
 usage endpoint answers `200` for stale tokens, and the refresh that would prove liveness rotates a

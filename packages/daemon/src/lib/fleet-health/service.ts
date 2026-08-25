@@ -21,18 +21,24 @@
  *
  * ## What is never stored
  *
- * Reason codes, verdicts, timestamps and one opaque credential digest. No tokens, no authorization
- * headers, no provider bodies, no output from anything the fleet launches. `AccountHealthHeadSchema`
- * is the enforcement: there is no field a secret could travel in.
+ * Reason codes, verdicts, timestamps, one opaque credential digest and a secret-safe provider
+ * response fingerprint. The response contributes status, bounded header metadata, body length/hash
+ * and JSON key/type/error-code shape — never a body, token, authorization value or harness output.
+ * `AccountHealthHeadSchema` is the enforcement: there is no free-form field a secret could travel in.
  */
-import type { AccountHealthObservation, FleetConfig, FleetHealthSnapshot, FleetManifest } from '@ferretry/fleet';
+import type {
+  AccountHealthObservation,
+  FleetConfig,
+  FleetHealthSnapshot,
+  FleetManifest,
+  FleetUsageSnapshot,
+} from '@ferretry/fleet';
 import {
   type FleetCredentialClassifier,
   FleetHealthSnapshotSchema,
   observeAccountHealth,
   readLocalCredentials,
 } from '@ferretry/fleet';
-import type { FleetUsageSnapshot } from '@ferretry/fleet';
 import { type AccountHealthHead, mergeAccountHealthHead, neverCheckedHead, projectAccountHealth } from './head.ts';
 
 /**

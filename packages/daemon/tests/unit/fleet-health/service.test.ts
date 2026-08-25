@@ -121,6 +121,7 @@ describe('FleetAccountHealthService.snapshot', () => {
         verdictAt: NOW,
         lastCheckInconclusive: false,
         fingerprint: 'aaa',
+        responseFingerprint: null,
       },
     ]);
 
@@ -286,6 +287,7 @@ describe('FleetAccountHealthService.observe', () => {
         verdictAt: NOW,
         lastCheckInconclusive: false,
         fingerprint: 'aaa',
+        responseFingerprint: null,
       },
     ]);
 

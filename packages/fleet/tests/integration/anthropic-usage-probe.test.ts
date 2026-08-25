@@ -13,6 +13,7 @@ import {
   AnthropicUsageProbe,
   type CredentialMaterialSource,
   fetchQuota,
+  MAX_RESPONSE_BODY_BYTES,
   type QuotaFetch,
   type QuotaRequest,
   type QuotaResponse,
@@ -52,8 +53,10 @@ interface Reply {
   readonly ok?: boolean;
   readonly headers?: Readonly<Record<string, string>>;
   readonly body?: unknown;
-  /** Set to make `json()` reject, as an HTML error page would. */
+  /** Set to return an HTML error page rather than JSON. */
   readonly unreadableJson?: boolean;
+  /** Set when the supplied bytes are only the retained prefix of a larger response. */
+  readonly bodyTruncated?: boolean;
   /** Set to make the request itself throw. */
   readonly throws?: Error;
 }
@@ -70,14 +73,24 @@ function transport(replies: Readonly<Record<string, Reply>>): {
     if (reply === undefined) return Promise.reject(new Error(`unexpected url ${request.url}`));
     if (reply.throws) return Promise.reject(reply.throws);
     const status = reply.status ?? 200;
+    const text =
+      reply.unreadableJson === true
+        ? '<html>not JSON</html>'
+        : reply.body === undefined
+          ? ''
+          : JSON.stringify(reply.body);
+    const encoded = new TextEncoder().encode(text);
     const response: QuotaResponse = {
       status,
       ok: reply.ok ?? (status >= 200 && status < 300),
+      headerNames: Object.keys(reply.headers ?? {})
+        .map(name => name.toLowerCase())
+        .sort(),
       header: name => reply.headers?.[name.toLowerCase()] ?? null,
-      json:
-        reply.unreadableJson === true
-          ? () => Promise.reject(new Error('Unexpected token < in JSON'))
-          : () => Promise.resolve(reply.body),
+      body: {
+        bytes: encoded.slice(0, MAX_RESPONSE_BODY_BYTES),
+        truncated: reply.bodyTruncated === true || encoded.byteLength > MAX_RESPONSE_BODY_BYTES,
+      },
     };
     return Promise.resolve(response);
   };
@@ -125,17 +138,117 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     should(requests[0]?.headers.Authorization).equal(`Bearer ${TOKEN}`);
   });
 
-  it('should condemn the credential on a 401 and mark the account unavailable', async () => {
+  it('should retain a secret-safe fingerprint without condemning a login on a bare 401', async () => {
     // Arrange
-    const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 401 } });
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 401,
+        headers: {
+          authorization: `Bearer ${TOKEN}`,
+          'cf-ray': 'edge-ray-123',
+          'content-type': 'application/json; charset=utf-8',
+          'request-id': 'request-123',
+          'retry-after': '60',
+          'set-cookie': 'session=must-never-be-stored',
+          'www-authenticate': 'Bearer error="invalid_token", error_description="do not persist this message"',
+          'x-request-id': TOKEN,
+          [TOKEN]: 'a secret may not survive as a header name either',
+        },
+        body: {
+          type: 'error',
+          access_token: 'must-never-be-stored',
+          error: {
+            type: 'authentication_error',
+            code: 'invalid_token',
+            message: `Bearer ${TOKEN} was rejected`,
+          },
+        },
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert — a bare control-plane 401 cannot tell token rejection from client rejection, so it is
+    // retained as evidence but never turned into a login instruction.
+    should(actual.ok).be.false();
+    should(actual.authOk).be.undefined();
+    should(actual.unavailable).be.undefined();
+    should(actual.credentialSignal).equal('rejection_unconfirmed');
+
+    const fingerprint = (actual as unknown as { responseFingerprint?: Record<string, unknown> }).responseFingerprint;
+    should(fingerprint).be.an.Object();
+    const { bodyLength, bodySha256, ...shape } = fingerprint ?? {};
+    should(shape).deepEqual({
+      status: 401,
+      contentType: 'application/json',
+      headerNames: [
+        'authorization',
+        'cf-ray',
+        'content-type',
+        'request-id',
+        'retry-after',
+        'set-cookie',
+        'www-authenticate',
+        'x-request-id',
+      ],
+      headers: {
+        cfRay: 'edge-ray-123',
+        requestId: 'request-123',
+        retryAfter: '60',
+        wwwAuthenticate: { scheme: 'bearer', errorCode: 'invalid_token' },
+        xRequestId: '[redacted]',
+      },
+      json: {
+        type: 'object',
+        fields: [
+          { path: 'access_token', type: 'string' },
+          { path: 'error', type: 'object' },
+          { path: 'error.code', type: 'string' },
+          { path: 'error.message', type: 'string' },
+          { path: 'error.type', type: 'string' },
+          { path: 'type', type: 'string' },
+        ],
+        errorType: 'authentication_error',
+        errorCode: 'invalid_token',
+      },
+    });
+    should(bodyLength).be.a.Number().and.be.above(0);
+    should(bodySha256)
+      .be.a.String()
+      .and.match(/^[0-9a-f]{64}$/u);
+    const serialized = JSON.stringify(fingerprint);
+    should(serialized).not.containEql(TOKEN);
+    should(serialized).not.containEql('must-never-be-stored');
+    should(serialized).not.containEql('do not persist this message');
+  });
+
+  it('should cap oversized body evidence and never trust a truncated JSON shape', async () => {
+    // Arrange — an edge challenge can be arbitrarily large. Even a prefix that begins like JSON is
+    // not a complete provider error and must not turn a 403 into a healthy scope verdict.
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+        body: {
+          type: 'error',
+          error: { type: 'permission_error' },
+          padding: 'x'.repeat(MAX_RESPONSE_BODY_BYTES),
+        },
+      },
+    });
 
     // Act
     const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
 
     // Assert
-    should(actual.ok).be.false();
-    should(actual.authOk).be.false();
-    should(actual.unavailable).be.true();
+    should(actual.credentialSignal).equal('inconclusive');
+    should(actual.responseFingerprint).containDeep({
+      status: 403,
+      bodyLength: MAX_RESPONSE_BODY_BYTES,
+      bodyTruncated: true,
+    });
+    should(actual.responseFingerprint).not.have.property('json');
   });
 
   it('should not condemn the credential on a 500, and not mark the account unavailable', async () => {
@@ -231,7 +344,20 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
    * costs nothing, and these tests assert the REQUESTS MADE rather than a flag, so a fallback cannot
    * return without turning them red.
    */
-  const forbidden = () => transport({ [ANTHROPIC_USAGE_URL]: { status: 403 } });
+  const forbidden = () =>
+    transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+        body: {
+          type: 'error',
+          error: {
+            type: 'permission_error',
+            message: 'OAuth token does not meet scope requirement user:profile',
+          },
+        },
+      },
+    });
 
   it('should report the account as unmeasurable rather than buying the number', async () => {
     // Arrange
@@ -256,6 +382,49 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     // Assert — the whole request list, so an added call is a failure rather than an unnoticed cost.
     should(requests.map(request => request.url)).deepEqual([ANTHROPIC_USAGE_URL]);
     should(requests.map(request => request.method)).deepEqual(['GET']);
+  });
+
+  it('should not mistake a Cloudflare HTML challenge for an accepted scope-limited token', async () => {
+    // Arrange — the status is the same 403, but the response came from the edge rather than the
+    // Anthropic JSON API. Status-only classification would publish a false green account.
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'cf-mitigated': 'challenge', 'content-type': 'text/html; charset=UTF-8' },
+        unreadableJson: true,
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.credentialSignal).equal('inconclusive');
+    const fingerprint = (actual as unknown as { responseFingerprint?: Record<string, unknown> }).responseFingerprint;
+    should(fingerprint).containDeep({
+      status: 403,
+      contentType: 'text/html',
+      headers: { cfMitigated: 'challenge' },
+    });
+    should(fingerprint).not.have.property('json');
+  });
+
+  it('should not mistake an Anthropic-shaped authentication 403 for a scope failure', async () => {
+    // Arrange — JSON and an error object establish the origin, but only `permission_error` confirms
+    // this endpoint's accepted-but-unmeasurable scope response.
+    const { fetch } = transport({
+      [ANTHROPIC_USAGE_URL]: {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+        body: { type: 'error', error: { type: 'authentication_error', message: 'not retained' } },
+      },
+    });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.credentialSignal).equal('inconclusive');
   });
 });
 
@@ -411,7 +580,10 @@ describe('fetchQuota', () => {
     should(actual.ok).be.true();
     should(actual.header('anthropic-ratelimit-unified-5h-utilization')).equal('0.42');
     should(actual.header('absent-header')).be.null();
-    should(await actual.json()).deepEqual({ five_hour: { utilization: 42 } });
+    should(actual.headerNames).containDeep(['anthropic-ratelimit-unified-5h-utilization', 'content-type']);
+    should(actual.headerNames).deepEqual([...actual.headerNames].sort());
+    should(actual.body.truncated).be.false();
+    should(JSON.parse(new TextDecoder().decode(actual.body.bytes))).deepEqual({ five_hour: { utilization: 42 } });
   });
 
   it('should report a non-2xx status without throwing', async () => {
@@ -424,6 +596,18 @@ describe('fetchQuota', () => {
     // Assert
     should(actual.status).equal(403);
     should(actual.ok).be.false();
+  });
+
+  it('should cancel and mark a response body at the diagnostic byte limit', async () => {
+    // Arrange
+    const url = serve(() => new Response('x'.repeat(MAX_RESPONSE_BODY_BYTES + 1_024)));
+
+    // Act
+    const actual = await fetchQuota({ url, method: 'GET', headers: {}, timeoutMs: 5_000 });
+
+    // Assert
+    should(actual.body.bytes.byteLength).equal(MAX_RESPONSE_BODY_BYTES);
+    should(actual.body.truncated).be.true();
   });
 
   it('should send the headers it was given and no body at all', async () => {
@@ -466,6 +650,22 @@ describe('fetchQuota', () => {
     // Act / Assert — the abort surfaces as a rejection, which the probe turns into "timed out".
     await fetchQuota({ url, method: 'GET', headers: {}, timeoutMs: 60 }).should.be.rejected();
   });
+
+  it('should keep the deadline armed while reading the response body', async () => {
+    // Arrange — headers arrive immediately, then the body never finishes. Clearing the timer after
+    // `fetch()` resolves would leave this probe hung forever.
+    const url = serve(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start: controller => controller.enqueue(new TextEncoder().encode('{')),
+          }),
+        ),
+    );
+
+    // Act / Assert
+    await fetchQuota({ url, method: 'GET', headers: {}, timeoutMs: 60 }).should.be.rejected();
+  });
 });
 
 /**
@@ -488,7 +688,11 @@ describe('AnthropicUsageProbe reporting what the answer said about the credentia
 
   it('should classify a 403 as ACCEPTED-but-unmeasurable, which is a healthy verdict', async () => {
     // Arrange / Act
-    const actual = await signalFor({ status: 403 });
+    const actual = await signalFor({
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+      body: { type: 'error', error: { type: 'permission_error', message: 'missing user:profile' } },
+    });
 
     // Assert — the single most consequential line in the whole feature. `rejected` here would send
     // somebody to sign in again, forever, on an account that works perfectly. Still ONE free GET.
@@ -496,8 +700,8 @@ describe('AnthropicUsageProbe reporting what the answer said about the credentia
     should(actual.requests.map(request => request.method)).deepEqual(['GET']);
   });
 
-  it('should classify a 401 as rejected', async () => {
-    should((await signalFor({ status: 401 })).signal).equal('rejected');
+  it('should keep a bare 401 inconclusive until token rejection can be distinguished from client rejection', async () => {
+    should((await signalFor({ status: 401 })).signal).equal('rejection_unconfirmed');
   });
 
   it('should classify a successful read as accepted', async () => {

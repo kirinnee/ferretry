@@ -31,10 +31,15 @@
  *
  * ## The rule that matters most
  *
- * A `403` from the read-only usage endpoint is **HEALTHY**. It means the token lacks `user:profile`,
- * which is permanent and expected for an inference-scoped token, and says nothing about whether the
- * account works. Reading it as a rejection sends a person to re-login, forever, on a working account
- * — so it is `healthy/usage_scope_unavailable`, and the usage number is what goes missing.
+ * An Anthropic-shaped JSON `403` from the read-only usage endpoint is **HEALTHY**. It means the token
+ * lacks `user:profile`, which is permanent and expected for an inference-scoped token, and says
+ * nothing about whether the account works. An HTML `403` can instead be an edge challenge and proves
+ * nothing. The adapter retains a secret-safe response fingerprint so those same-status answers do not
+ * collapse into one claim.
+ *
+ * A bare control-plane `401` is inconclusive too: this client cannot yet distinguish repudiation of
+ * the login from refusal of the HTTP client itself. Telling somebody to sign in again from that status
+ * alone is worse than admitting the check could not tell.
  *
  * ## Codex is honestly unknown, and that is the finished answer
  *
@@ -62,7 +67,8 @@ import { credentialSourceOf, decideLoginApplicability } from './credential-sourc
 import type { CredentialState } from './identity.ts';
 import type { FleetManifest, FleetManifestAccount, HarnessKind } from './manifest.ts';
 import { resolveAccounts } from './profiles.ts';
-import type { FleetCredentialSignal, FleetUsage, FleetUsageSnapshot } from './usage.ts';
+import type { FleetCredentialSignal, FleetUsage, FleetUsageSnapshot, ProviderResponseFingerprint } from './usage.ts';
+import { ProviderResponseFingerprintSchema } from './usage.ts';
 
 const epochMilliseconds = z.number().int().nonnegative().refine(Number.isFinite, 'expected a finite number');
 
@@ -106,14 +112,14 @@ export const FleetHealthReasonSchema = z.enum([
   // healthy
   /** The provider answered for this exact token. */
   'provider_accepted',
-  /** `403`: accepted, and usage is not readable with it. Healthy; the QUOTA is what is unknown. */
+  /** Anthropic JSON `403`: accepted, and usage is not readable. Healthy; the QUOTA is what is unknown. */
   'usage_scope_unavailable',
   // needs_relogin
   /** There is no OAuth material in this home at all. */
   'oauth_credential_missing',
   /** The access token has expired and there is no refresh token to renew it with. */
   'oauth_access_expired',
-  /** `401`: the provider repudiated this token. */
+  /** A provider rejection established by evidence stronger than this probe's ambiguous bare `401`. */
   'oauth_token_rejected',
   // needs_credentials
   /** A non-login credential (env var, token file, configured value) is absent. */
@@ -193,6 +199,8 @@ export const FleetAccountHealthSchema = z.strictObject({
    * the failed attempt is how a fleet looks fine while every provider call is failing.
    */
   lastCheckInconclusive: z.boolean(),
+  /** Secret-safe shape of the newest completed provider response, when there was one. */
+  responseFingerprint: ProviderResponseFingerprintSchema.optional(),
   /** What the conclusion WAS before it went stale. Present only when `reason` is `stale`. */
   staleVerdict: FleetHealthVerdictSchema.optional(),
 });
@@ -335,6 +343,9 @@ export function decideAccountHealth(input: AccountHealthInput): AccountHealthCon
       ? conclusion('needs_relogin', 'oauth_token_rejected', 'anthropic_usage', true)
       : conclusion('needs_credentials', 'static_credential_rejected', 'anthropic_usage', true);
   }
+  if (remote === 'rejection_unconfirmed') {
+    return unknown('oauth_rejection_unconfirmed', 'anthropic_usage');
+  }
 
   // Nothing conclusive. Say which unknown this is, most specific first.
   if (local?.state === 'unreadable' || remote === 'absent') {
@@ -358,6 +369,8 @@ export interface AccountHealthObservation extends AccountHealthConclusion {
    * The only consumer is the change guard that stops a stale rejection landing on a fresh login.
    */
   readonly fingerprint?: string;
+  /** Secret-safe shape of the provider response this observation joined, when one completed. */
+  readonly responseFingerprint?: ProviderResponseFingerprint;
 }
 
 /** Whether an interactive login can fix each declared account. Read from the DECLARATION, never the host. */
@@ -395,12 +408,13 @@ export function observeAccountHealth(input: {
     .sort((left, right) => left.id.localeCompare(right.id))
     .map(account => {
       const local = input.local.get(account.id);
+      const usage = rows.get(account.id);
       const decided = decideAccountHealth({
         kind: account.kind,
         loginApplies: applies.get(account.id) ?? true,
         available: account.available,
         local,
-        remote: rows.get(account.id)?.credentialSignal,
+        remote: usage?.credentialSignal,
       });
       return {
         ...decided,
@@ -408,6 +422,7 @@ export function observeAccountHealth(input: {
         kind: account.kind,
         at: input.at,
         ...(local?.fingerprint === undefined ? {} : { fingerprint: local.fingerprint }),
+        ...(usage?.responseFingerprint === undefined ? {} : { responseFingerprint: usage.responseFingerprint }),
       };
     });
 }
@@ -451,6 +466,9 @@ export function healthSnapshotFromObservations(
       lastCheckedAt: observation.at,
       verdictAt: observation.conclusive ? observation.at : null,
       lastCheckInconclusive: !observation.conclusive,
+      ...(observation.responseFingerprint === undefined
+        ? {}
+        : { responseFingerprint: observation.responseFingerprint }),
     })),
   });
 }

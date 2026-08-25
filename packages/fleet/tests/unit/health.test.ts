@@ -63,18 +63,22 @@ const declared = (fixture: { env?: Record<string, string>; auth?: 'oauth' | 'api
     ],
   });
 
-const usage = (rows: readonly { id: string; signal?: FleetCredentialSignal }[]): FleetUsageSnapshot => ({
-  at: NOW,
-  accounts: rows.map(row => ({
-    accountId: row.id,
-    kind: 'claude',
-    usageBased: true,
-    ok: true,
-    unavailable: false,
-    atLimit: false,
-    ...(row.signal === undefined ? {} : { credentialSignal: row.signal }),
-  })),
-});
+const usage = (
+  rows: readonly { id: string; signal?: FleetCredentialSignal; responseFingerprint?: unknown }[],
+): FleetUsageSnapshot =>
+  ({
+    at: NOW,
+    accounts: rows.map(row => ({
+      accountId: row.id,
+      kind: 'claude',
+      usageBased: true,
+      ok: true,
+      unavailable: false,
+      atLimit: false,
+      ...(row.signal === undefined ? {} : { credentialSignal: row.signal }),
+      ...(row.responseFingerprint === undefined ? {} : { responseFingerprint: row.responseFingerprint }),
+    })),
+  }) as unknown as FleetUsageSnapshot;
 
 describe('decideAccountHealth', () => {
   const input = (patch: Partial<Parameters<typeof decideAccountHealth>[0]> = {}) =>
@@ -276,6 +280,20 @@ describe('decideAccountHealth', () => {
     ]);
   });
 
+  it('keeps a control-plane 401 inconclusive when it cannot distinguish the login from this client', () => {
+    // Arrange / Act
+    const actual = input({ remote: 'rejection_unconfirmed' as FleetCredentialSignal });
+
+    // Assert — this result must never tell a person to sign in again. The response fingerprint is
+    // retained separately so a later discriminator can explain which side was actually refused.
+    should(actual).deepEqual({
+      verdict: 'unknown',
+      reason: 'oauth_rejection_unconfirmed',
+      evidence: 'anthropic_usage',
+      conclusive: false,
+    });
+  });
+
   it('calls an expired-but-renewable credential unproven rather than signed out', () => {
     should(input({ local: { state: 'refreshable', expiresAt: NOW - 1 } })).deepEqual({
       verdict: 'unknown',
@@ -427,6 +445,38 @@ describe('observeAccountHealth', () => {
     // Assert
     should(actual[0]).not.have.property('fingerprint');
   });
+
+  it('carries the provider response fingerprint into the health observation', () => {
+    // Arrange
+    const responseFingerprint = {
+      status: 401,
+      contentType: 'application/json',
+      headerNames: ['content-type'],
+      bodyLength: 42,
+      bodySha256: 'b'.repeat(64),
+      json: { type: 'object', fields: [{ path: 'error.type', type: 'string' }] },
+    };
+
+    // Act
+    const actual = observeAccountHealth({
+      manifest: manifest([account(ID_ONE)]),
+      config: declared(),
+      usage: usage([
+        {
+          id: ID_ONE,
+          signal: 'rejection_unconfirmed' as FleetCredentialSignal,
+          responseFingerprint,
+        },
+      ]),
+      local: new Map([[ID_ONE, { state: 'valid' as const, expiresAt: NOW + 60_000 }]]),
+      at: NOW,
+    });
+
+    // Assert
+    should((actual[0] as unknown as { responseFingerprint?: unknown }).responseFingerprint).deepEqual(
+      responseFingerprint,
+    );
+  });
 });
 
 describe('readLocalCredentials', () => {
@@ -461,6 +511,14 @@ describe('healthSnapshotFromObservations', () => {
         reason: 'provider_accepted' as const,
         evidence: 'anthropic_usage' as const,
         conclusive: true,
+        responseFingerprint: {
+          status: 200,
+          contentType: 'application/json',
+          headerNames: ['content-type'],
+          bodyLength: 2,
+          bodySha256: 'c'.repeat(64),
+          json: { type: 'object' as const, fields: [] },
+        },
       },
       {
         accountId: 'b',
@@ -487,6 +545,14 @@ describe('healthSnapshotFromObservations', () => {
       lastCheckedAt: NOW,
       verdictAt: NOW,
       lastCheckInconclusive: false,
+      responseFingerprint: {
+        status: 200,
+        contentType: 'application/json',
+        headerNames: ['content-type'],
+        bodyLength: 2,
+        bodySha256: 'c'.repeat(64),
+        json: { type: 'object', fields: [] },
+      },
     });
     should(actual.accounts[1]?.verdictAt).be.null();
     should(actual.accounts[1]?.lastCheckInconclusive).be.true();

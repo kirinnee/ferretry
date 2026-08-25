@@ -26,13 +26,15 @@ export const FleetCredentialSignalSchema = z.enum([
   /** The provider answered for this token: it is currently accepted. */
   'accepted',
   /**
-   * `403` from the read-only usage endpoint. The token is ACCEPTED and merely lacks `user:profile`,
-   * which is permanent for an inference-scoped token. Reading this as a rejection is the single
-   * worst mistake available here: it sends somebody to re-login, forever, on a working account.
+   * Anthropic-shaped JSON `403` from the read-only usage endpoint. The token is ACCEPTED and merely
+   * lacks `user:profile`, which is permanent for an inference-scoped token. An HTML/WAF `403` is
+   * inconclusive instead; the response fingerprint is what keeps those equal statuses apart.
    */
   'scope_unavailable',
-  /** `401`. This exact token was repudiated by the provider. */
+  /** An explicit credential rejection. A bare control-plane `401` is not enough to produce this. */
   'rejected',
+  /** `401` whose response cannot distinguish credential rejection from refusal of this HTTP client. */
+  'rejection_unconfirmed',
   /** The request did not finish inside its deadline. Inconclusive, never a rejection. */
   'timeout',
   /** Reached, and said nothing usable: a 5xx, a 429, another 4xx, a transport failure. */
@@ -42,6 +44,77 @@ export const FleetCredentialSignalSchema = z.enum([
 ]);
 
 export type FleetCredentialSignal = z.infer<typeof FleetCredentialSignalSchema>;
+
+/** JSON value kinds retained in a response fingerprint. Values themselves never travel. */
+export const ProviderResponseJsonTypeSchema = z.enum(['null', 'boolean', 'number', 'string', 'array', 'object']);
+export type ProviderResponseJsonType = z.infer<typeof ProviderResponseJsonTypeSchema>;
+
+const diagnosticText = z.string().min(1).max(256);
+const responseHeaderName = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[!#$%&'*+\-.^_`|~0-9a-z]+$/u, 'expected a normalized HTTP header name');
+
+/** A header's authentication challenge, reduced to non-secret protocol words. */
+export const ProviderAuthenticationShapeSchema = z.strictObject({
+  scheme: diagnosticText,
+  errorCode: diagnosticText.optional(),
+});
+export type ProviderAuthenticationShape = z.infer<typeof ProviderAuthenticationShapeSchema>;
+
+/** The only response header VALUES permitted to survive. Every other header contributes its name only. */
+export const ProviderResponseHeaderValuesSchema = z.strictObject({
+  anthropicRequestId: diagnosticText.optional(),
+  cfMitigated: diagnosticText.optional(),
+  cfRay: diagnosticText.optional(),
+  requestId: diagnosticText.optional(),
+  retryAfter: diagnosticText.optional(),
+  retryAfterMs: diagnosticText.optional(),
+  server: diagnosticText.optional(),
+  wwwAuthenticate: ProviderAuthenticationShapeSchema.optional(),
+  xRequestId: diagnosticText.optional(),
+});
+export type ProviderResponseHeaderValues = z.infer<typeof ProviderResponseHeaderValuesSchema>;
+
+/** One key path and only the kind of value behind it — never the value. */
+export const ProviderResponseJsonFieldSchema = z.strictObject({
+  path: diagnosticText,
+  type: ProviderResponseJsonTypeSchema,
+});
+export type ProviderResponseJsonField = z.infer<typeof ProviderResponseJsonFieldSchema>;
+
+/** A bounded JSON outline plus the provider's code-like error labels, when present. */
+export const ProviderResponseJsonShapeSchema = z.strictObject({
+  type: ProviderResponseJsonTypeSchema,
+  fields: z.array(ProviderResponseJsonFieldSchema).max(64),
+  fieldsTruncated: z.literal(true).optional(),
+  errorType: diagnosticText.optional(),
+  errorCode: diagnosticText.optional(),
+});
+export type ProviderResponseJsonShape = z.infer<typeof ProviderResponseJsonShapeSchema>;
+
+/**
+ * A secret-safe description of one provider response.
+ *
+ * The body contributes only its byte length, SHA-256 digest, key/type outline and code-like error
+ * labels. A normal response is described in full; `bodyTruncated` says an oversized response was
+ * cancelled and the length/digest cover only the hard-capped prefix. Header NAMES are safe to
+ * enumerate; values survive only through the closed allowlist above. There is deliberately no
+ * free-form string or provider body field for a token to travel in.
+ */
+export const ProviderResponseFingerprintSchema = z.strictObject({
+  status: z.number().int().min(100).max(599),
+  contentType: diagnosticText.optional(),
+  headerNames: z.array(responseHeaderName).max(128),
+  headerNamesTruncated: z.literal(true).optional(),
+  headers: ProviderResponseHeaderValuesSchema.optional(),
+  bodyLength: z.number().int().nonnegative().refine(Number.isFinite, 'expected a finite body length'),
+  bodySha256: z.string().regex(/^[0-9a-f]{64}$/u, 'expected a SHA-256 digest'),
+  bodyTruncated: z.literal(true).optional(),
+  json: ProviderResponseJsonShapeSchema.optional(),
+});
+export type ProviderResponseFingerprint = z.infer<typeof ProviderResponseFingerprintSchema>;
 
 /** A normalized quota window. Percentages always mean consumed capacity. */
 export const FleetUsageWindowSchema = z.strictObject({
@@ -66,6 +139,8 @@ export const FleetUsageProbeResultSchema = z.strictObject({
    * probe that declined to run.
    */
   credentialSignal: FleetCredentialSignalSchema.optional(),
+  /** Secret-safe evidence from the HTTP response that produced `credentialSignal`. */
+  responseFingerprint: ProviderResponseFingerprintSchema.optional(),
   error: z.string().min(1).optional(),
   shortWindow: FleetUsageWindowSchema.optional(),
   longWindow: FleetUsageWindowSchema.optional(),
@@ -99,6 +174,8 @@ export const FleetUsageSchema = z.strictObject({
    * `./health.ts`, which is where the two are joined.
    */
   credentialSignal: FleetCredentialSignalSchema.optional(),
+  /** The representative request's secret-safe response evidence, shared with this credential group. */
+  responseFingerprint: ProviderResponseFingerprintSchema.optional(),
   error: z.string().min(1).optional(),
   shortWindow: FleetUsageWindowSchema.optional(),
   longWindow: FleetUsageWindowSchema.optional(),
@@ -329,6 +406,7 @@ export class FleetUsageCollector {
       ...(reading.unavailableReason === undefined ? {} : { unavailableReason: reading.unavailableReason }),
       ...(reading.authOk === undefined ? {} : { authOk: reading.authOk }),
       ...(reading.credentialSignal === undefined ? {} : { credentialSignal: reading.credentialSignal }),
+      ...(reading.responseFingerprint === undefined ? {} : { responseFingerprint: reading.responseFingerprint }),
       ...(reading.error === undefined ? {} : { error: reading.error }),
       ...(shortWindow === undefined ? {} : { shortWindow }),
       ...(longWindow === undefined ? {} : { longWindow }),
