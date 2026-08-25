@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { FleetAccountStepper } from '../../../../src/features/fleet/fleet-account-stepper.tsx';
+import type { FleetConfigView } from '../../../../src/features/fleet/fleet-api.ts';
 import {
   detectedAccountDraft,
   emptyAccountDraft,
@@ -11,11 +12,14 @@ import {
 import {
   FLEET_STEP_IDS,
   type FleetInstructionsControl,
-  type FleetInstructionsSource,
+  type FleetPickOrAddSource,
+  type FleetSkillsStoreItem,
   type FleetStepId,
+  SKILL_DOCUMENT,
+  SKILLS_PREFIX,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { type Mounted, mount } from '../../../support/dom.ts';
-import { area, button, card, cardChosen, click, discovery, field, pick, type } from './fleet-support.ts';
+import { area, button, card, cardChosen, click, config, discovery, field, pick, type } from './fleet-support.ts';
 
 /**
  * Every mount this file makes, unmounted whether or not its test got as far as saying so.
@@ -62,12 +66,24 @@ const MANY = [
 const stepper = async (options: {
   readonly step: FleetStepId;
   readonly draft?: Partial<FleetAccountDraft>;
-  readonly source?: FleetInstructionsSource;
+  readonly source?: FleetPickOrAddSource;
   readonly assets?: readonly string[];
   readonly loading?: boolean;
   readonly instructions?: Partial<FleetInstructionsControl>;
   /** What this fleet declares. Only a fleet with a slot no mode derives gets the group control. */
   readonly variants?: readonly string[];
+  /**
+   * The declared configuration, which is where the accounts a new member could sign in as come from.
+   *
+   * `null` by default, so a suite that is about some other step gets the first-account shape: no picker
+   * at all, one name box, exactly as a fleet with nothing in it renders.
+   */
+  readonly config?: FleetConfigView | null;
+  /** What the fleet's skills store already holds. Empty by default, which is the first-account shape. */
+  readonly skillsStore?: readonly FleetSkillsStoreItem[];
+  /** Which answer the account step is on. Held by the surface in production, a prop here. */
+  readonly accountSource?: FleetPickOrAddSource;
+  readonly onNavigate?: (to: string) => void;
 }) => {
   let current: FleetAccountDraft = {
     ...emptyAccountDraft('claude'),
@@ -77,6 +93,7 @@ const stepper = async (options: {
     ...options.draft,
   };
   let chosen: string | null = null;
+  let accountSource: FleetPickOrAddSource = options.accountSource ?? 'existing';
   const instructions: FleetInstructionsControl = {
     choices: [{ value: 'new-blank', label: 'New — empty', detail: 'A new, empty document.' }],
     value: 'new-blank',
@@ -102,11 +119,18 @@ const stepper = async (options: {
       instructions={instructions}
       instructionsSource={options.source ?? 'new'}
       onInstructionsSource={() => {}}
+      accountSource={accountSource}
+      onAccountSource={next => {
+        accountSource = next;
+        if (next === 'new') current = { ...current, name: '' };
+      }}
+      accountsHref="/d/9f1c/accounts"
+      {...(options.onNavigate === undefined ? {} : { onNavigate: options.onNavigate })}
       variants={options.variants ?? ['default']}
-      config={null}
+      config={options.config ?? null}
       discovery={null}
       published={[]}
-      skillsStore={[]}
+      skillsStore={options.skillsStore ?? []}
       storeDocuments={options.assets ?? []}
       assetBlockers={[]}
     />
@@ -117,6 +141,7 @@ const stepper = async (options: {
     rerender: async () => await mounted.render(element()),
     latest: () => current,
     chosen: () => chosen,
+    source: () => accountSource,
   };
 };
 
@@ -269,6 +294,124 @@ describe('the identity step', () => {
   it('offers no group control at all when every slot follows from how the account runs', async () => {
     const surface = await stepper({ step: 'identity', variants: ['default', 'auto'] });
     expect(surface.container.querySelector('[data-fleet-other-lanes]')).toBeNull();
+    await surface.unmount();
+  });
+
+  it('says on the mode card which wrapper the picked login already has in that slot', async () => {
+    // RED: this used to be a refusal at the END — walk four screens, then read that the daemon will not
+    // take it. The collision is knowable the moment a login is picked, so the card that would cause it
+    // says so on itself.
+    //
+    // `config()` declares `studio` with a `default` route held by `claude-studio`, and the draft opens
+    // ticked on `auto` in that same `default` slot.
+    const surface = await stepper({
+      step: 'identity',
+      draft: { name: 'studio' },
+      config: config(),
+      accountSource: 'existing',
+    });
+
+    const auto = pick(surface.container, '[data-fleet-check-group="mode"] [data-fleet-check="auto"]');
+    const interactive = pick(surface.container, '[data-fleet-check-group="mode"] [data-fleet-check="interactive"]');
+    // The occupant is NAMED, on both cards — the ticked one reads its own lane's slot, the unticked one
+    // reads the slot its mode would derive. Two different reads of `slotFor`, one sentence each.
+    expect(auto.textContent).toContain('already added');
+    expect(auto.textContent).toContain('This account already has one: claude-studio.');
+    expect(interactive.textContent).toContain('This account already has one: claude-studio.');
+
+    // NOT DISABLED WHILE TICKED. Disabling the ticked card would leave somebody unable to untick their
+    // way out of a blocker they can read — the unticked one is the only one held shut.
+    expect(auto.querySelector('input')?.hasAttribute('disabled')).toBe(false);
+    expect(interactive.querySelector('input')?.hasAttribute('disabled')).toBe(true);
+    await surface.unmount();
+  });
+
+  it('badges no mode when the picked login holds no slot this account would land in', async () => {
+    // The other side of the same read: a fleet whose only login is a different one says nothing, so the
+    // badge cannot become decoration that is always there.
+    const surface = await stepper({
+      step: 'identity',
+      draft: { name: 'atelier' },
+      config: config(),
+      accountSource: 'existing',
+    });
+    expect(pick(surface.container, '[data-fleet-check-group="mode"]').textContent).not.toContain('already added');
+    expect(card(surface.container, 'mode', 'interactive').hasAttribute('disabled')).toBe(false);
+    await surface.unmount();
+  });
+});
+
+describe('the skills step', () => {
+  const stored = (path: string): FleetSkillsStoreItem => ({ path, accounts: [] });
+
+  it('writes a skill here rather than sending somebody to the asset tree to make one first', async () => {
+    // RED: the step used to offer ONLY what the store already held, so the first account in a fresh
+    // fleet met an empty list and a dead end. A skill is named here, seeded with its own SKILL.md, and
+    // written into the store by the same reviewed apply — which is what makes it tickable next time.
+    const surface = await stepper({ step: 'skills' });
+    expect(pick(surface.container, '[data-fleet-check-empty="skills"]').textContent).toContain(
+      'Write the first one below',
+    );
+
+    // The prefix is RENDERED, not typed: what is read is the whole path, what is edited is the part
+    // that is theirs.
+    expect(pick(surface.container, '[data-fleet-skill-prefix]').textContent).toBe(SKILLS_PREFIX);
+    await type(pick(surface.container, '[data-fleet-new-skill]') as HTMLInputElement, 'review');
+    expect(pick(surface.container, '[data-fleet-new-skill-note]').textContent).toContain(
+      `${SKILLS_PREFIX}review/${SKILL_DOCUMENT} will be added to the store.`,
+    );
+
+    // Act
+    await click(pick(surface.container, '[data-fleet-add-skill]'));
+
+    // Assert — the draft carries the directory AND the first document in it, path derived.
+    expect(surface.latest().layer.skillsDirectory).toBe(`${SKILLS_PREFIX}review`);
+    expect(surface.latest().layer.skills).toMatchObject([
+      { path: `${SKILLS_PREFIX}review/${SKILL_DOCUMENT}`, text: '' },
+    ]);
+
+    await surface.rerender();
+    // It is offered as a CARD, ticked, badged as new — one list rather than a list plus a hidden extra,
+    // and unticking it is the way back to an account with no skills at all.
+    const written = pick(surface.container, `[data-fleet-check="${SKILLS_PREFIX}review"]`);
+    expect(written.textContent).toContain('new');
+    expect(cardChosen(surface.container, 'skills', `${SKILLS_PREFIX}review`)).toBe(true);
+    // The box empties, so the control is ready for the next answer rather than holding a stale one.
+    expect((pick(surface.container, '[data-fleet-new-skill]') as HTMLInputElement).value).toBe('');
+
+    // And the contents are edited here, against the path that was derived.
+    const contents = pick(surface.container, `[data-fleet-authored-skill="${SKILLS_PREFIX}review/${SKILL_DOCUMENT}"]`);
+    expect(contents.textContent).toContain('on the next apply');
+    await type(area(surface.container, '-skill-text'), '# review\n');
+    expect(surface.latest().layer.skills[0]?.text).toBe('# review\n');
+    await surface.unmount();
+  });
+
+  it('shows no contents box until there is a document to put contents in', async () => {
+    const surface = await stepper({ step: 'skills', skillsStore: [stored('skills/studio')] });
+    expect(surface.container.querySelector('[data-fleet-authored-skill]')).toBeNull();
+    // A picked skill is a REFERENCE — the store already holds its documents and this change writes none
+    // of them — so ticking one must not open an editor over somebody else's file.
+    await click(card(surface.container, 'skills', 'skills/studio'));
+    await surface.rerender();
+    expect(surface.container.querySelector('[data-fleet-authored-skill]')).toBeNull();
+    await surface.unmount();
+  });
+
+  it('holds Add shut on a name the store already has, and says which control links it instead', async () => {
+    const surface = await stepper({ step: 'skills', skillsStore: [stored('skills/studio')] });
+    await type(pick(surface.container, '[data-fleet-new-skill]') as HTMLInputElement, 'studio');
+
+    expect(pick(surface.container, '[data-fleet-new-skill-note]').textContent).toContain(
+      'is already in the store — tick it above to link it',
+    );
+    expect((pick(surface.container, '[data-fleet-add-skill]') as HTMLButtonElement).hasAttribute('disabled')).toBe(
+      true,
+    );
+
+    // Nothing reached the draft: the refusal is a REDIRECT to the card above, not a half-written skill.
+    expect(surface.latest().layer.skillsDirectory).toBe('');
+    expect(surface.latest().layer.skills).toEqual([]);
     await surface.unmount();
   });
 });

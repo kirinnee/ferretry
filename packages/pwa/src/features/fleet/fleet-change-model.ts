@@ -1502,7 +1502,60 @@ export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblem
 };
 
 /**
- * What is wrong with the SET of lanes this draft would create, or nothing.
+ * The provider accounts this fleet already declares for one harness, and what each already carries.
+ *
+ * THE JOIN KEY IS THE DAEMON'S, not this browser's. `create-account` looks for an agent with the same
+ * `name` AND the same harness and merges the new routes into it — otherwise it appends a new agent
+ * (`packages/daemon/src/lib/fleet/mutations.ts`). So one provider login serving several accounts is not
+ * a feature to build; it is a feature the browser never offered, and the answer is a PICK from this list.
+ *
+ * Read from the declared CONFIGURATION rather than from the published manifest, because the manifest
+ * publishes wrappers and modes and never the login name the merge is keyed on. A fleet whose
+ * configuration could not be read produces an empty list, which is a picker with nothing to offer
+ * rather than a claim that this host has no accounts.
+ */
+export interface FleetExistingAccount {
+  /** The provider login's name, exactly as the daemon would match it. */
+  readonly name: string;
+  /** What this login already carries: the slot each account occupies, and the wrapper it publishes. */
+  readonly taken: readonly { readonly variant: string; readonly wrapper: string }[];
+}
+
+export const existingAccounts = (
+  harness: FleetHarnessKind,
+  config: FleetConfigView | null,
+): readonly FleetExistingAccount[] =>
+  (config?.agents ?? [])
+    .filter(agent => agent.kind === harness)
+    .map(agent => ({
+      name: agent.name,
+      taken: Object.entries(agent.routes).map(([variant, route]) => ({ variant, wrapper: route.wrapper })),
+    }));
+
+/**
+ * What is wrong with the NAME this account is known by, in ONE place because two steps ask.
+ *
+ * The whole-draft check below and the identity step that owns these sentences in the stepper's
+ * partition used to carry a copy of this chain each. A copy is how one of them quietly becomes the
+ * laxer one, and the way it shows up is that the recap refuses a change for a reason no step would say.
+ *
+ * THE EMPTY SENTENCE ASKS FOR A CHOICE, not for typing. The step offers the accounts this fleet already
+ * has before it offers a box, so "name the provider account" would have been a blocker pointing at a
+ * control that is not on screen until somebody asks for it.
+ */
+export const accountNameProblems = (draft: FleetAccountDraft): readonly string[] => {
+  const name = draft.name.trim();
+  if (name === '') return ['pick the account this signs in as, or add a new one'];
+  if (name !== draft.name) return ['the account name must not start or end with whitespace'];
+  if (name.length > 64) return ['the account name must be 64 characters or shorter'];
+  if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {
+    return ['the account name must not contain a path separator, "..", or control characters'];
+  }
+  return [];
+};
+
+/**
+ * What is wrong with the SET of accounts this draft would create, or nothing.
  *
  * Exported and single-sourced because two places ask: the whole-draft check below, and the identity
  * step that owns these sentences in the stepper's partition. Restating them there would be two
@@ -1515,13 +1568,24 @@ export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblem
  * daemon would refuse the pair — so the sentence has to arrive here, before somebody walks six steps
  * to be told.
  *
+ * ## THE COLLISION WITH WHAT THIS FLEET ALREADY HAS, and why it is the same rule
+ *
+ * It takes the whole DRAFT rather than its lanes, because the third refusal needs the name and the
+ * harness too. The daemon refuses `account "X" already has a "auto" lane on this fleet`
+ * (`mutations.ts`), and nothing in this browser used to check it: somebody could pick a login they
+ * already had, tick a way of running it already had, walk all seven steps, and be refused at proposal
+ * time for something knowable at step two. So it is checked HERE, against the same declared routes the
+ * daemon reads, and the sentence names the wrapper that already exists rather than the slot it occupies.
+ *
  * THE SENTENCES SAY "group", NOT "lane". A variant is a named composition slot and `lane` is what
  * this codebase calls one; a person reading a blocker on the identity step has never met either
  * word, and a sentence that refuses a change in vocabulary the screen never taught cannot be acted
  * on. The type names stay — only what a person reads changes.
  */
-export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConfigView | null): readonly string[] => {
+export const laneProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
+  const lanes = draft.lanes;
   if (lanes.length === 0) return ['pick at least one way this account runs; each one creates its own account'];
+  const held = existingAccounts(draft.harness, config).find(account => account.name === draft.name.trim());
   const problems: string[] = [];
   const seen = new Set<string>();
   for (const lane of lanes) {
@@ -1539,21 +1603,19 @@ export const laneProblems = (lanes: readonly FleetLaneDraft[], config: FleetConf
       );
     }
     seen.add(variant);
+    const taken = held?.taken.find(entry => entry.variant === variant);
+    if (taken !== undefined) {
+      problems.push(
+        `the ${lane.mode} account on "${held?.name ?? ''}" already exists as "${taken.wrapper}" — untick it, or pick a different account`,
+      );
+    }
   }
   return problems;
 };
 
 export const accountProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
-  const problems: string[] = [];
   const name = draft.name.trim();
-  if (name === '') problems.push('name the provider account');
-  else if (name !== draft.name) problems.push('the account name must not start or end with whitespace');
-  else if (name.length > 64) problems.push('the account name must be 64 characters or shorter');
-  else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {
-    problems.push('the account name must not contain a path separator, "..", or control characters');
-  }
-
-  problems.push(...laneProblems(draft.lanes, config));
+  const problems: string[] = [...accountNameProblems(draft), ...laneProblems(draft, config)];
 
   const models = draftModels(draft.modelsText);
   const defaultModel = draft.defaultModel.trim();

@@ -13,6 +13,7 @@ import {
 import {
   ALL_STEP_PROBLEMS,
   assetProblemStep,
+  authoredSkill,
   customModelProblem,
   DEFAULT_LANE,
   draftIsComplete,
@@ -24,20 +25,26 @@ import {
   laneForMode,
   mayAdvance,
   modelOptions,
+  newSkillProblem,
   nextStep,
   openingInstructionsSource,
+  PICK_OR_ADD_LABEL,
   otherLanes,
   previousStep,
   selectedModels,
   settingsChoice,
+  SKILL_DOCUMENT,
   skillsSelection,
+  SKILLS_PREFIX,
   skillsStoreItems,
   stepCopy,
   stepIndex,
   stepProblems,
   toggleModel,
   unverifiedModels,
+  withAuthoredSkillText,
   withInstructionsMiddle,
+  withNewSkill,
   selectedModes,
   toggleMode,
   withLaneVariant,
@@ -228,7 +235,7 @@ describe('naming a document in the store', () => {
     expect(instructionsNameProblem('../escape', 'claude', store)).toContain('path separator');
     const collision = instructionsNameProblem('shared', 'claude', store);
     expect(collision).toContain('instructions/CLAUDE-shared.md');
-    expect(collision).toContain('Use an existing one');
+    expect(collision).toContain(PICK_OR_ADD_LABEL.existing);
     expect(instructionsNameProblem('atelier', 'claude', store)).toBeNull();
   });
 
@@ -304,6 +311,90 @@ describe('the skills store', () => {
     // `layerProblems` would then report as a problem the person did not cause.
     const cleared = withSkillsSelection(chosen, []);
     expect(cleared).toMatchObject({ skillsDirectory: '', skills: [] });
+  });
+});
+
+describe('the skill this draft is writing', () => {
+  /** A store item, so a collision fixture pins the shape the step actually reads. */
+  const stored = (path: string) => ({ path, accounts: [] as readonly string[] });
+
+  it('asks for a name before it refuses one', () => {
+    // An empty box is the OPENING state of the control, not a mistake somebody made. It asks rather
+    // than reporting, which is why it is a separate sentence from every refusal below it.
+    expect(newSkillProblem('', [], layerWith())).toBe('name the skill first');
+    expect(newSkillProblem('   ', [], layerWith())).toBe('name the skill first');
+  });
+
+  it('refuses a name whose edges are whitespace, rather than trimming it into a different name', () => {
+    // Quietly trimming would write `skills/review` for somebody who typed `review ` and believed the
+    // space was part of it — and the daemon's own grammar refuses a segment with an edge space anyway.
+    expect(newSkillProblem('review ', [], layerWith())).toBe('a skill name must not start or end with a space');
+    expect(newSkillProblem(' review', [], layerWith())).toBe('a skill name must not start or end with a space');
+  });
+
+  it('refuses a name that is secretly a path', () => {
+    const expected = 'the name must not contain a path separator or ".."';
+    expect(newSkillProblem('a/b', [], layerWith())).toBe(expected);
+    expect(newSkillProblem('a\\b', [], layerWith())).toBe(expected);
+    expect(newSkillProblem('..', [], layerWith())).toBe(expected);
+    // `..` anywhere, not only as a whole segment — the prefix is prepended, so the person never sees
+    // the path this would produce until it is already in the change.
+    expect(newSkillProblem('re..view', [], layerWith())).toBe(expected);
+  });
+
+  it('reports the shared grammar in the shared grammar’s own words, about the path it produced', () => {
+    // A control character passes every check above and is still refused by `fleetAssetRefProblem`, which
+    // is the ONE description of what a browser may compose. Restating it here is how two descriptions
+    // drift; the label says the refusal is about the produced path rather than about what was typed.
+    const problem = newSkillProblem('re\u0007view', [], layerWith());
+    expect(problem).toBe('that name produces a path that contains control characters');
+  });
+
+  it('redirects a name the store already holds to the control that links it', () => {
+    // NOT a refusal of the intent. Somebody typing a name the store has almost always means to link it,
+    // and the tick-cards above are where that happens — so the sentence names the path and the control.
+    expect(newSkillProblem('studio', [stored('skills/studio')], layerWith())).toBe(
+      '"skills/studio" is already in the store — tick it above to link it, or choose another name',
+    );
+    // A different store item is not a collision.
+    expect(newSkillProblem('review', [stored('skills/studio')], layerWith())).toBeNull();
+  });
+
+  it('refuses the name this draft is already writing, so Add cannot silently replace it', () => {
+    expect(newSkillProblem('review', [], layerWith({ skillsDirectory: 'skills/review' }))).toBe(
+      '"skills/review" is already listed',
+    );
+  });
+
+  it('seeds one document inside the new directory, with the path derived rather than asked for', () => {
+    const written = withNewSkill(layerWith(), ' review ', 'id-1');
+    expect(written.skillsDirectory).toBe(`${SKILLS_PREFIX}review`);
+    // The document is INSIDE the directory it declares — `skillsProblems` refuses one that is not, and
+    // a person made to keep two boxes agreeing is maintaining an invariant the scheme already knows.
+    expect(written.skills).toEqual([{ id: 'id-1', path: `${SKILLS_PREFIX}review/${SKILL_DOCUMENT}`, text: '' }]);
+    expect(authoredSkill(written)?.path).toBe(`${SKILLS_PREFIX}review/${SKILL_DOCUMENT}`);
+  });
+
+  it('replaces the authored skill rather than accumulating a second one', () => {
+    // The step offers ONE "add", and the selection it feeds holds one reference. A second row would be a
+    // document the cards never show and the recap would still write.
+    const once = withNewSkill(layerWith(), 'review', 'id-1');
+    const twice = withNewSkill(once, 'triage', 'id-2');
+    expect(twice.skills).toHaveLength(1);
+    expect(twice.skillsDirectory).toBe(`${SKILLS_PREFIX}triage`);
+  });
+
+  it('edits the authored document’s text, and changes nothing when there is no document to edit', () => {
+    const written = withNewSkill(layerWith(), 'review', 'id-1');
+    const typed = withAuthoredSkillText(written, '# review\n');
+    expect(authoredSkill(typed)?.text).toBe('# review\n');
+    // The id survives, because it is the DOM identity of the row being edited.
+    expect(authoredSkill(typed)?.id).toBe('id-1');
+
+    // A layer with nothing authored is returned untouched rather than growing a row from a keystroke.
+    const nothing = layerWith();
+    expect(withAuthoredSkillText(nothing, 'text')).toBe(nothing);
+    expect(authoredSkill(nothing)).toBeUndefined();
   });
 });
 
@@ -392,7 +483,7 @@ describe('which step owns which blocker', () => {
     expect(mayAdvance('harness', nameless, declared)).toBe(true);
     expect(stepProblems('harness', nameless, declared)).toEqual([]);
     expect(mayAdvance('identity', nameless, declared)).toBe(false);
-    expect(stepProblems('identity', nameless, declared)[0]).toContain('name the provider account');
+    expect(stepProblems('identity', nameless, declared)[0]).toContain('pick the account this signs in as');
     // A blocker from a read the daemon refused stops the step it belongs to as firmly as a typo does.
     expect(mayAdvance('instructions', complete(), declared, ['could not be read'])).toBe(false);
     // The recap owns nothing of its own: it shows everything, which is what a recap is.

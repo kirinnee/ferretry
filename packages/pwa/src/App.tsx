@@ -978,9 +978,12 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       pricingSettingsTab(createDaemonClient),
-      fleetSettingsTab(async daemon => await store.clients.client(daemon)),
+      // The navigator is threaded because the account step links out to the accounts page, and a
+      // `RouteLink` cancels the browser's own navigation — without it the one link on that step is a
+      // control that does nothing.
+      fleetSettingsTab(async daemon => await store.clients.client(daemon), navigate),
     ],
-    [createDaemonClient, store.clients],
+    [createDaemonClient, navigate, store.clients],
   );
   return (
     <SettingsPage

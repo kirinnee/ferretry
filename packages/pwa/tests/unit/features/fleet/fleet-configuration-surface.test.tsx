@@ -9,6 +9,7 @@ import {
   fleetSettingsTab,
 } from '../../../../src/features/fleet/fleet-configuration-surface.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { PICK_OR_ADD_LABEL } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { grantGuidance, UNLOCK_LIMIT_NOTE } from '../../../../src/lib/grants.ts';
 import type { LocalNetworkAccess } from '../../../../src/lib/local-network-access.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -35,6 +36,7 @@ import {
   proposal,
   scaffoldProposal,
   stepperStep,
+  nameNewAccount,
   type,
   unlockField,
   unlockView,
@@ -654,7 +656,7 @@ describe('creating an account', () => {
     // A new account writes asset text too, so the stepper waits for the asset listing before it is usable.
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'review');
   };
 
@@ -678,7 +680,7 @@ describe('creating an account', () => {
     // And NOTHING was prefilled from an absence of evidence. The model step offers what the fleet's own
     // published account serves — real, declared models — and nothing is selected.
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'models');
     expect(absent(surface.container, '[data-fleet-prefill="models"]')).toBe(true);
     // With nothing ticked there is no default to offer, so the control is the sentence that says
@@ -706,7 +708,7 @@ describe('creating an account', () => {
 
     // Act — the ONE thing left to type.
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
 
     // Assert — the wrapper the daemon will derive, shown rather than asked for.
     expect(pick(surface.container, '[data-fleet-derived-wrapper]').textContent).toBe('claude-atelier');
@@ -748,10 +750,10 @@ describe('creating an account', () => {
     // Assert — the account step does not, because it has no name yet, and it says so HERE.
     expect(stepperStep(surface.container)).toBe('identity');
     expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(true);
-    expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('name the provider account');
+    expect(pick(surface.container, '[data-fleet-problems]').textContent).toContain('pick the account this signs in as');
 
     // Act
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
 
     // Assert
     expect(button(surface.container, 'Next').hasAttribute('disabled')).toBe(false);
@@ -767,7 +769,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await type(field(surface.container, '-display-name'), 'Atelier Claude');
     await walkTo(surface.container, 'instructions');
     await type(field(surface.container, '-middle'), 'house');
@@ -778,7 +780,7 @@ describe('creating an account', () => {
 
     // Assert — the account step still holds both entries.
     expect(stepperStep(surface.container)).toBe('identity');
-    expect(field(surface.container, '-name').value).toBe('atelier');
+    expect(field(surface.container, '-account-name').value).toBe('atelier');
     expect(field(surface.container, '-display-name').value).toBe('Atelier Claude');
 
     // Act — the progress indicator jumps back to an answered step, and forward again.
@@ -800,7 +802,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
 
     // Assert — the fleet declares an `auto` lane and the draft opens on `auto`, so that is the lane.
     expect(cardChosen(surface.container, 'mode', 'auto')).toBe(true);
@@ -822,7 +824,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
 
     expect(pick(surface.container, '[data-fleet-other-lanes]')).toBeDefined();
     // CARDS, not a `<select>`. These were the last two native dropdowns in the sequence, and being
@@ -848,7 +850,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
 
     // Act — the draft opens on "auto"; ticking "interactive" as well is the second account.
     await click(card(surface.container, 'mode', 'interactive'));
@@ -873,7 +875,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await click(card(surface.container, 'mode', 'interactive'));
     await walkTo(surface.container, 'review');
     await click(button(surface.container, 'Preview this change'));
@@ -896,7 +898,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'models');
 
     // Act
@@ -940,7 +942,7 @@ describe('creating an account', () => {
 
     // Act — and it does not block: the sequence still reaches the recap.
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'review');
     expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
     await surface.unmount();
@@ -956,7 +958,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'instructions');
 
     // Act — "use one already in the store", which lands on the one that is there.
@@ -985,7 +987,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'instructions');
 
     // Act
@@ -1015,7 +1017,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'instructions');
 
     // Act
@@ -1025,7 +1027,7 @@ describe('creating an account', () => {
     const note = pick(surface.container, '[data-fleet-instructions-name-note]');
     expect(note.textContent).toContain('instructions/CLAUDE-shared.md');
     expect(note.textContent).toContain('is already in the store');
-    expect(note.textContent).toContain('Use an existing one');
+    expect(note.textContent).toContain(PICK_OR_ADD_LABEL.existing);
 
     // A name that is not there yet is the ordinary case: a new account writing its own instructions.
     await type(field(surface.container, '-middle'), 'atelier');
@@ -1042,7 +1044,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'instructions');
     expect(pick(surface.container, '[data-fleet-instructions-prefix]').textContent).toBe('CLAUDE-');
 
@@ -1137,7 +1139,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'skills');
 
     // Assert — a declared directory carries its linkers; one that is only in the tree is offered as an
@@ -1151,7 +1153,7 @@ describe('creating an account', () => {
     // The gap is stated where it bites, and it is careful about WHOSE gap it is: #373 made the fleet
     // able to give an account several items, so a sentence blaming the fleet would now be false.
     const limit = pick(surface.container, '[data-fleet-skills-limit]').textContent ?? '';
-    expect(limit).toContain('One store item at a time, on this screen');
+    expect(limit).toContain('One skill at a time, on this screen');
     expect(limit).toContain('not a limit of the fleet');
 
     // Act
@@ -1171,7 +1173,7 @@ describe('creating an account', () => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
     await interact(() => undefined);
     await walkTo(surface.container, 'identity');
-    await type(field(surface.container, '-name'), 'atelier');
+    await nameNewAccount(surface.container, 'atelier');
     await walkTo(surface.container, 'settings');
 
     // Assert — the default answer changes nothing, and there is no JSON box to be frightened by.
@@ -1999,7 +2001,9 @@ describe('applying one exact proposal', () => {
     expect(document.activeElement === panel).toBe(true);
     // And it does not fight the person once they are typing in it.
     await walkTo(surface.container, 'identity');
-    const name = field(surface.container, '-name');
+    // "Add a new one" first: the name box only exists under that answer.
+    await nameNewAccount(surface.container, '');
+    const name = field(surface.container, '-account-name');
     name.focus();
     await type(name, 'atelier');
     expect(document.activeElement === name).toBe(true);

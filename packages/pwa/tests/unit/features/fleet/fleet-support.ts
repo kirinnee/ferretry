@@ -342,6 +342,26 @@ export const cardChosen = (container: HTMLElement, group: string, id: string): b
   );
 };
 
+/**
+ * Name a NEW provider account, which is now TWO acts rather than one.
+ *
+ * The account step asks the question every other step asks — pick one of the logins this fleet already
+ * has, or add a new one — so reaching the name box means choosing "add a new one" first. A fleet with
+ * no login of this harness offers no such choice and renders the box directly, which is why the source
+ * card is looked for rather than assumed.
+ *
+ * The box's id is `-account-name` rather than `-name` on purpose: `field()` matches an id SUFFIX, and
+ * `-display-name` ends with `-name` — so once the name box became conditional, `field(c, '-name')`
+ * silently started typing into the display-name box and the derived wrapper read `claude-`.
+ */
+export const nameNewAccount = async (container: HTMLElement, name: string): Promise<void> => {
+  const adding = container.querySelector<HTMLInputElement>(
+    '[data-fleet-pick-or-add="account"] [data-fleet-choice="new"] input',
+  );
+  if (adding !== null && !adding.checked) await click(adding);
+  await type(field(container, '-account-name'), name);
+};
+
 /** Press Next once, which is the only way forward through the sequence. */
 export const next = async (container: HTMLElement): Promise<void> => {
   await click(button(container, 'Next'));

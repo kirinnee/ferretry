@@ -21,6 +21,7 @@ import {
   editAccountProposal,
   emptyAccountDraft,
   emptyLayerDraft,
+  existingAccounts,
   type FleetAccountDraft,
   type FleetLayerDraft,
   fleetApplyAuthority,
@@ -1086,9 +1087,17 @@ describe('layer problems', () => {
 });
 
 describe('account problems', () => {
+  /**
+   * A name this fleet does NOT already have, which is what "accepts" has to mean.
+   *
+   * It used to be `studio` — the very login `config()` declares with a `default` route — so the
+   * canonical "accepts a servable account" fixture described a change the daemon refuses outright with
+   * `account "studio" already has a "default" lane on this fleet`. The suite could not fail on that,
+   * because nothing in the browser looked. The collision now has its own test below.
+   */
   const draft = (overrides: Partial<FleetAccountDraft>): FleetAccountDraft => ({
     ...emptyAccountDraft('claude'),
-    name: 'studio',
+    name: 'atelier',
     modelsText: 'claude-opus-5',
     defaultModel: 'claude-opus-5',
     ...overrides,
@@ -1098,8 +1107,43 @@ describe('account problems', () => {
     expect(accountProblems(draft({}), declared)).toHaveLength(0);
   });
 
+  it('refuses an account this fleet already has, naming the wrapper that already exists', () => {
+    // THE SEVEN-STEP REFUSAL. `config()` declares `studio` with a `default` route, and the daemon
+    // refuses a second one (`mutations.ts`). Before this, nothing here compared the two — so a person
+    // could pick a login they already had, tick a way of running it already had, walk every step and be
+    // refused at proposal time for something knowable at step two.
+    expect(accountProblems(draft({ name: 'studio' }), declared)).toContain(
+      'the auto account on "studio" already exists as "claude-studio" — untick it, or pick a different account',
+    );
+    // The MERGE is the ordinary case and must stay unblocked: the same login, a slot it does not hold.
+    const spare = config({
+      review: { id: accountId(9), wrapper: 'claude-review-studio' },
+    });
+    expect(
+      accountProblems(draft({ name: 'studio', lanes: [{ mode: 'auto', variant: 'default' }] }), {
+        ...spare,
+        variants: { default: {}, review: {} },
+      }),
+    ).toHaveLength(0);
+    // The join key is the daemon's: same name, OTHER harness, so there is nothing to collide with.
+    expect(accountProblems({ ...draft({ name: 'studio' }), harness: 'codex' }, declared)).toHaveLength(0);
+  });
+
+  it('reads the accounts this fleet already declares, per harness, with the slots each has taken', () => {
+    expect(existingAccounts('claude', declared)).toEqual([
+      { name: 'studio', taken: [{ variant: 'default', wrapper: 'claude-studio' }] },
+    ]);
+    expect(existingAccounts('codex', declared)).toEqual([]);
+    // A configuration nobody could read offers nothing, rather than claiming this host has no accounts.
+    expect(existingAccounts('claude', null)).toEqual([]);
+  });
+
   it('refuses a name that would escape a directory or corrupt a wrapper', () => {
-    expect(accountProblems(draft({ name: '' }), declared)).toContain('name the provider account');
+    // The empty sentence asks for a CHOICE: the step offers what this fleet already has before it
+    // offers a box, so "name the provider account" pointed at a control that is not on screen yet.
+    expect(accountProblems(draft({ name: '' }), declared)).toContain(
+      'pick the account this signs in as, or add a new one',
+    );
     expect(accountProblems(draft({ name: ' studio' }), declared)).toContain(
       'the account name must not start or end with whitespace',
     );
@@ -1246,7 +1290,9 @@ describe('the account form fills itself in from what the host has', () => {
     expect(draft.prefilled.defaultModel).toBe('Detected — read from /home/pilot/.claude/settings.json.');
     // And the draft it produces, once it has a name, is one the existing validation already accepts —
     // reconciled, because that is what derives the document path the imported text is written to.
-    expect(accountProblems(reconcileAccountDraft(draft, { ...draft, name: 'studio' }, discovery()), declared)).toEqual(
+    // `atelier` rather than `studio`: `config()` already declares `studio` with a `default` route, and
+    // an account this fleet already has is now a blocker of its own.
+    expect(accountProblems(reconcileAccountDraft(draft, { ...draft, name: 'atelier' }, discovery()), declared)).toEqual(
       [],
     );
   });
@@ -1258,7 +1304,7 @@ describe('the account form fills itself in from what the host has', () => {
     const draft = opened();
 
     // Assert — one cause, one sentence.
-    expect(accountProblems(draft, declared)).toEqual(['name the provider account']);
+    expect(accountProblems(draft, declared)).toEqual(['pick the account this signs in as, or add a new one']);
     // The rule is about the DERIVED path only. A layer editor, where the path IS typed, still says so.
     expect(layerProblems({ ...draft.layer, instructions: { path: '', text: 'body' } })).toEqual([
       'name the file the instructions are written to',

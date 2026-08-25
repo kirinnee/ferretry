@@ -16,8 +16,9 @@
  */
 
 import { Check } from 'lucide-react';
-import { useId } from 'react';
+import { type ReactNode, useId } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import { type FleetPickOrAddSource, PICK_OR_ADD_LABEL } from './fleet-stepper-model.ts';
 
 export interface FleetChoice<T extends string> {
   readonly id: T;
@@ -104,6 +105,89 @@ export function FleetChoiceGroup<T extends string>({
         );
       })}
     </fieldset>
+  );
+}
+
+/** One answer offered, carrying the facts about it this control cannot know. */
+export interface FleetPickOrAddAnswer {
+  readonly id: FleetPickOrAddSource;
+  /** What choosing this one DOES, in the vocabulary of the thing being picked. */
+  readonly detail: string;
+  readonly disabled?: boolean;
+  readonly badge?: string;
+}
+
+export interface FleetPickOrAddProps {
+  /** The one question, asked as a person would ask it about this particular thing. */
+  readonly legend: string;
+  /** Marks this control in the DOM. The answer group is `<name>-source`. */
+  readonly name: string;
+  readonly answers: readonly FleetPickOrAddAnswer[];
+  readonly value: FleetPickOrAddSource;
+  readonly onChoose: (next: FleetPickOrAddSource) => void;
+  readonly disabled?: boolean;
+  /**
+   * The control that appears under each answer.
+   *
+   * A map rather than a `children` slot, because "the sub-control follows the answer" is the rule being
+   * extracted: with children, every caller re-decides it, and the one that gets it wrong renders a name
+   * box under "use the one you already have".
+   */
+  readonly under: Readonly<Partial<Record<FleetPickOrAddSource, ReactNode>>>;
+}
+
+/**
+ * PICK FROM WHAT EXISTS, OR ADD A NEW ONE — how every REQUIRED single choice in this feature is asked.
+ *
+ * The owner's rule is that a screen should "always ask to select from existing, then have an option to
+ * jump to the entity type to add a new one there, or allow new, and auto add it to the entity type".
+ * The instructions step had already grown into exactly that — three answers, a sub-control under
+ * whichever was picked, and both add-new answers writing into the store so the next member can pick
+ * them — and it was hand-rolled, so every step that needed the same shape would have hand-rolled it
+ * again.
+ *
+ * What it owns is the two things that must not drift: the WORDS on the answers, and the rule that the
+ * sub-control belongs under the answer it belongs to. The details stay with the caller because they are
+ * facts about the thing being picked — how many there are, what editing a shared one costs, why an
+ * import is unavailable — and a shared sentence for those would either be vague or wrong.
+ *
+ * NOT EVERY STEP IS THIS SHAPE, and forcing the ones that are not would be the second pattern rather
+ * than the first. A radio group answers a question with exactly one answer; an OPTIONAL SET — models,
+ * skills — is tick-cards over what exists with an inline add beneath them, which is the same rule with
+ * the same two halves and needs no fourth answer whose only job is to mean "none of these".
+ *
+ * The union and its LABELS are `fleet-stepper-model.ts`', because which answers exist is a fact about
+ * the question rather than about this control — and because a refusal has to be able to cite a label
+ * it is sending somebody to, which a table private to a component cannot be asked for.
+ */
+export function FleetPickOrAdd({
+  legend,
+  name,
+  answers,
+  value,
+  onChoose,
+  disabled = false,
+  under,
+}: FleetPickOrAddProps) {
+  return (
+    <div className="grid min-w-0 gap-3" data-fleet-pick-or-add={name}>
+      <FleetChoiceGroup
+        legend={legend}
+        name={`${name}-source`}
+        columns={1}
+        value={value}
+        disabled={disabled}
+        onChoose={onChoose}
+        options={answers.map(answer => ({
+          id: answer.id,
+          label: PICK_OR_ADD_LABEL[answer.id],
+          detail: answer.detail,
+          ...(answer.disabled === true ? { disabled: true } : {}),
+          ...(answer.badge === undefined ? {} : { badge: answer.badge }),
+        }))}
+      />
+      {under[value]}
+    </div>
   );
 }
 

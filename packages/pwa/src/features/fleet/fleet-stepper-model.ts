@@ -29,15 +29,18 @@
 import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import type { FleetConfigView, FleetManifestAccountView } from './fleet-api.ts';
 import {
+  accountNameProblems,
   accountProblems,
   assetPathProblem,
   BLANK_INSTRUCTIONS_CHOICE,
   discoveredHarness,
   draftModels,
+  existingAccounts,
   type FleetAccountDraft,
   type FleetAccountMode,
   type FleetLaneDraft,
   type FleetLayerDraft,
+  type FleetSkillDraft,
   type FleetUnreadableAsset,
   IMPORTED_INSTRUCTIONS_CHOICE,
   instructionsMiddleOf,
@@ -408,13 +411,18 @@ export interface FleetInstructionsControl {
 }
 
 /**
- * Where an account's instructions come from. THREE answers, and all three end the same way.
+ * WHERE THE ANSWER TO A STEP COMES FROM. Three answers, and all of them end the same way.
  *
- * The account POINTS AT a named document in the fleet's store. That is the whole model, and it is
- * why these are not four unrelated buttons: `existing` points at an item that is already there,
- * `import` puts this host's real `CLAUDE.md` / `AGENTS.md` into the store under a name the person
- * chooses and then points at it, and `new` creates an empty item under a chosen name and points at
- * it. Import and new-document differ only in where the first draft of the text comes from.
+ * One union for every step that asks it, because it is one question: the account POINTS AT something
+ * that exists. `existing` points at an item that is already there; `new` creates one under a chosen
+ * name and points at that; `import` — offered only where this host has something to copy — puts the
+ * host's real file into the store under a chosen name and then points at that. Import and new differ
+ * only in where the first draft of the text comes from, which is why they are two answers to one
+ * question rather than two flows.
+ *
+ * It lives HERE rather than beside the control that renders it, because which answers exist is a fact
+ * about the question. `FleetPickOrAdd` annotates its labels over this union, so an answer added here
+ * is a compile error there rather than a card with no label.
  *
  * A POSIX symlink is deliberately not part of this. The pointer IS the link: `config.shared` is a
  * registry of named documents and an account references one by name, so an edit to that document
@@ -422,7 +430,42 @@ export interface FleetInstructionsControl {
  * rather than on the next apply — which is an optimisation of a mechanism that already works, and
  * not something a person composing an account has to be asked about.
  */
-export type FleetInstructionsSource = 'existing' | 'import' | 'new';
+export type FleetPickOrAddSource = 'existing' | 'import' | 'new';
+
+/**
+ * ONE SET OF WORDS for those answers, so a person learns this control once.
+ *
+ * Here rather than beside the control that renders it, because a REFUSAL has to cite the label it is
+ * sending somebody to: `instructionsNameProblem` used to say `pick "Use an existing one"` while the
+ * card actually read "Use one already in the store", which is a blocker naming a control that is not
+ * on the screen. Annotated over the union so a fourth answer is a compile error rather than a card
+ * with a blank label.
+ *
+ * "Use one this fleet already has" rather than "…already in the store", because the account step picks
+ * a provider login and there is no store of those — and one label that reads correctly for a document,
+ * a skill and a login is the point.
+ */
+export const PICK_OR_ADD_LABEL: Readonly<Record<FleetPickOrAddSource, string>> = {
+  existing: 'Use one this fleet already has',
+  import: 'Import this host’s own',
+  new: 'Add a new one',
+};
+
+/**
+ * Which answer the ACCOUNT step opens on: pick one, wherever there is one to pick.
+ *
+ * ASK FIRST, which is the owner's rule and the opposite of what the free-text box did. A fleet with a
+ * login of this harness opens on the list of them; a fleet with none opens on the box, because "pick or
+ * add" is not a question when there is exactly one answer.
+ *
+ * It is only the OPENING value, for the same reason the instructions one is. Once a person has answered,
+ * the answer is theirs — see {@link FleetAccountStepperProps.accountSource} for what re-deriving it
+ * would do to somebody halfway through typing a name.
+ */
+export const openingAccountSource = (
+  harness: FleetHarnessKind,
+  config: FleetConfigView | null,
+): FleetPickOrAddSource => (existingAccounts(harness, config).length === 0 ? 'new' : 'existing');
 
 /** The store item the draft points at, when it points at one that is already there. */
 const EXISTING_PREFIX = 'asset:';
@@ -436,11 +479,11 @@ const EXISTING_PREFIX = 'asset:';
  * and pointed the account at somebody else's document instead of refusing the collision. An answer a
  * person gave is a fact about them, so it is kept rather than guessed at every render.
  */
-export const openingInstructionsSource = (draft: FleetAccountDraft): FleetInstructionsSource =>
+export const openingInstructionsSource = (draft: FleetAccountDraft): FleetPickOrAddSource =>
   draft.prefilled.instructionsText === undefined ? 'new' : 'import';
 
 /** The opaque value {@link FleetInstructionsControl.onChoose} takes for each source. */
-export const instructionsChoiceFor = (source: FleetInstructionsSource, firstExisting: string | undefined): string => {
+export const instructionsChoiceFor = (source: FleetPickOrAddSource, firstExisting: string | undefined): string => {
   if (source === 'import') return IMPORTED_INSTRUCTIONS_CHOICE;
   if (source === 'new') return BLANK_INSTRUCTIONS_CHOICE;
   // Choosing "an existing one" with nothing chosen yet lands on the first document rather than on a
@@ -495,7 +538,7 @@ export const instructionsNameProblem = (
   const problem = assetPathProblem(path, 'that name produces a path that');
   if (problem !== null) return problem;
   if (existing.includes(path)) {
-    return `"${path}" is already in the store — pick "Use an existing one" to point at it, or choose another name`;
+    return `"${path}" is already in the store — pick "${PICK_OR_ADD_LABEL.existing}" to point at it, or choose another name`;
   }
   return null;
 };
@@ -590,6 +633,75 @@ export const withSkillsSelection = (layer: FleetLayerDraft, selected: readonly s
   skills: selected.length === 0 ? [] : layer.skills,
 });
 
+// ─── adding a skill that is not in the store yet ───────────────────────────────────────────────
+
+/**
+ * The fixed part of a new skill's path, and the document that makes the directory real.
+ *
+ * `skills/` is where the fleet's own scaffold puts them and what the field's placeholder has always
+ * shown, so a new one lands beside whatever is already there rather than inventing a second
+ * convention — the same rule {@link instructionsPathFor} follows for a document. `SKILL.md` is the
+ * open standard's own filename, which is what makes a directory a skill rather than a folder of notes.
+ */
+export const SKILLS_PREFIX = 'skills/';
+export const SKILL_DOCUMENT = 'SKILL.md';
+
+/**
+ * The skill this draft is AUTHORING, as opposed to the ones it picked out of the store.
+ *
+ * The distinction is the whole reason this exists. A picked skill is a reference: the store already
+ * holds the documents and this change writes none of them. An authored one is a directory that does not
+ * exist yet plus the first document in it, so the change carries text — which is why it is the
+ * `skills` rows the draft already had rather than a second field. Exactly one row, because the step
+ * offers one "add" and per-item selection is a declared limit below.
+ */
+export const authoredSkill = (layer: FleetLayerDraft): FleetSkillDraft | undefined => layer.skills[0];
+
+/**
+ * Why this name cannot become a new skill, or `null` when it can.
+ *
+ * The store collision is the one that matters, and it is a REDIRECT rather than a refusal of the
+ * intent: naming a directory the store already has is almost always somebody meaning to link it, and
+ * the control that does that is a tap above. It does not claim to prevent an overwrite — a document
+ * added under an existing directory blocks later, in the daemon's own terms, through `unseenAssets`.
+ */
+export const newSkillProblem = (
+  middle: string,
+  store: readonly FleetSkillsStoreItem[],
+  layer: FleetLayerDraft,
+): string | null => {
+  const trimmed = middle.trim();
+  if (trimmed === '') return 'name the skill first';
+  if (trimmed !== middle) return 'a skill name must not start or end with a space';
+  if (/[/\\]/u.test(trimmed) || trimmed.includes('..')) return 'the name must not contain a path separator or ".."';
+  const path = `${SKILLS_PREFIX}${trimmed}`;
+  const problem = assetPathProblem(path, 'that name produces a path that');
+  if (problem !== null) return problem;
+  if (store.some(item => item.path === path)) {
+    return `"${path}" is already in the store — tick it above to link it, or choose another name`;
+  }
+  return layer.skillsDirectory.trim() === path ? `"${path}" is already listed` : null;
+};
+
+/**
+ * The layer carrying a NEW skill: the directory selected, and one document seeded inside it.
+ *
+ * The `id` is passed in because it is a DOM identity a component mints, and this module holds no
+ * randomness. The document's path is derived rather than asked for — `skillsProblems` refuses a
+ * document outside the directory it belongs to, and a person who has to keep two boxes agreeing is
+ * being asked to maintain an invariant the scheme already knows.
+ */
+export const withNewSkill = (layer: FleetLayerDraft, middle: string, id: string): FleetLayerDraft => {
+  const directory = `${SKILLS_PREFIX}${middle.trim()}`;
+  return { ...layer, skillsDirectory: directory, skills: [{ id, path: `${directory}/${SKILL_DOCUMENT}`, text: '' }] };
+};
+
+/** The layer after editing the authored document's text. Nothing to edit means nothing changes. */
+export const withAuthoredSkillText = (layer: FleetLayerDraft, text: string): FleetLayerDraft => {
+  const authored = authoredSkill(layer);
+  return authored === undefined ? layer : { ...layer, skills: [{ ...authored, text }] };
+};
+
 // ─── settings: a choice, not a mechanism ───────────────────────────────────────────────────────
 
 /**
@@ -644,27 +756,20 @@ const ownedProblems: Readonly<
   review: () => [],
 };
 
-const CONTROL_CHARACTER = /\p{Cc}/u;
-
 /**
  * The account's own identity: the name it is known by, and the lanes its modes derived.
  *
- * The lane sentences are {@link laneProblems}' rather than restated here — including the one that
+ * BOTH halves are the change model's sentences rather than restated here — the name grammar through
+ * {@link accountNameProblems} and the lane set through {@link laneProblems}, including the one that
  * refuses an empty selection, which is this step's because this step holds the control. Ticking
  * nothing is the state the multi-select made reachable, and it has to block somewhere a person can
- * see the boxes.
+ * see the boxes. This file used to carry its own copy of the name chain; a copy is how the recap comes
+ * to refuse a change for a reason no step would say.
  */
-const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => {
-  const problems: string[] = [];
-  const name = draft.name.trim();
-  if (name === '') problems.push('name the provider account');
-  else if (name !== draft.name) problems.push('the account name must not start or end with whitespace');
-  else if (name.length > 64) problems.push('the account name must be 64 characters or shorter');
-  else if (/[/\\]/u.test(name) || name.includes('..') || CONTROL_CHARACTER.test(name)) {
-    problems.push('the account name must not contain a path separator, "..", or control characters');
-  }
-  return [...problems, ...laneProblems(draft.lanes, config)];
-};
+const identityProblems = (draft: FleetAccountDraft, config: FleetConfigView | null): readonly string[] => [
+  ...accountNameProblems(draft),
+  ...laneProblems(draft, config),
+];
 
 const modelProblems = (draft: FleetAccountDraft): readonly string[] => {
   const models = selectedModels(draft);
