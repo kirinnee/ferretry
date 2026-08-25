@@ -425,14 +425,14 @@ describe('AccountsSurface', () => {
 
   it('says what one login covers, and what the fleet decided about it', async () => {
     const { container } = await open(
-      ready([{ ...claudeIdentity(), verdict: 'sync', reason: 'the auto home has no credential.' }]),
+      ready([{ ...claudeIdentity(), verdict: 'sync', reason: 'the auto home has no credential' }]),
     );
 
     const line = must(rowFor(container, CLAUDE_ACCOUNT_ID).querySelector('[data-account-login]'), 'the login line');
     expect(line.getAttribute('data-account-login')).toBe('claude:studio');
     expect(line.textContent).toContain('This login covers 2 accounts, this one included.');
     expect(line.textContent).toContain('has no credential of its own yet');
-    expect(line.textContent).toContain('the auto home has no credential.');
+    expect(line.textContent).toContain('The auto home has no credential.');
     // The configuration schema's own word, which a reader would have to learn first — the same defect
     // as the lane and layer badges that were removed from every screen.
     expect(line.textContent).not.toContain('sync');

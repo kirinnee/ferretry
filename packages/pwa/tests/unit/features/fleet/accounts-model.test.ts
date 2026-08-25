@@ -160,22 +160,98 @@ describe('accountsRoster', () => {
 
   it('keeps the daemon’s own reason beside the verdict rather than replacing either', () => {
     const withBoth = accountsRoster(
-      readiness([{ ...claudeIdentity(), verdict: 'login', reason: 'the studio home has no credential.' }]),
+      readiness([{ ...claudeIdentity(), verdict: 'login', reason: 'the studio home has no credential' }]),
       new Map(),
       undefined,
       NOW,
     );
     const reasonOnly = accountsRoster(
-      readiness([{ ...claudeIdentity(), verdict: 'complete', reason: 'every member is signed in.' }]),
+      readiness([{ ...claudeIdentity(), verdict: 'complete', reason: 'every member is signed in' }]),
       new Map(),
       undefined,
       NOW,
     );
 
     expect(rowFor(withBoth, CLAUDE_ACCOUNT_ID).login.state).toBe(
-      'This login needs somebody to sign in. the studio home has no credential.',
+      'This login needs somebody to sign in. The studio home has no credential.',
     );
-    expect(rowFor(reasonOnly, CLAUDE_ACCOUNT_ID).login.state).toBe('every member is signed in.');
+    expect(rowFor(reasonOnly, CLAUDE_ACCOUNT_ID).login.state).toBe('Every member is signed in.');
+  });
+
+  /**
+   * THE TWO REASONS THAT ACTUALLY REACH A BROWSER, spelled out as the fleet composes them.
+   *
+   * Both are lowercase clauses with no full stop (`packages/fleet/src/lib/identity.ts`), and appended
+   * raw after the verdict's own sentence they read as ". no usable credential was found" — a full stop
+   * followed by a lowercase fragment that never closes. Only a rendered screen shows that, so it is
+   * pinned here against the production strings rather than against a fixture phrased conveniently.
+   */
+  it('closes the daemon’s lowercase clause into a sentence without rewording it', () => {
+    const keyed = accountsRoster(
+      readiness([{ ...claudeIdentity(), verdict: 'no-login', reason: 'this account authenticates with a key' }]),
+      new Map(),
+      undefined,
+      NOW,
+    );
+    const undecided = accountsRoster(
+      readiness([
+        {
+          ...claudeIdentity(),
+          verdict: 'indeterminate',
+          reason: 'no usable credential was found, and 1 of 2 could not be read — refusing to decide',
+        },
+      ]),
+      new Map(),
+      undefined,
+      NOW,
+    );
+
+    expect(rowFor(keyed, CLAUDE_ACCOUNT_ID).login.state).toBe(
+      'Nothing here signs in: this login’s credential comes from somewhere else. This account authenticates with a key.',
+    );
+    // Every word the host chose survives, including the dash clause it ends on.
+    expect(rowFor(undecided, CLAUDE_ACCOUNT_ID).login.state).toBe(
+      'A member’s credential could not be read, so nothing is decided about this login. No usable credential was ' +
+        'found, and 1 of 2 could not be read — refusing to decide.',
+    );
+  });
+
+  /**
+   * ONE FACT, ONE SENTENCE. Found by looking at the screen, not at the type.
+   *
+   * A keyed row used to print the same thing three times: the login verdict, then the daemon's reason,
+   * then the credential-source sentence — and only the last one names the variable and the file
+   * somebody actually has to open.
+   */
+  it('drops the login verdict on a row whose own sentence already says where the credential is from', () => {
+    const keyed = accountsRoster(
+      readiness([
+        { ...claudeIdentity([keyedAccount()]), verdict: 'no-login', reason: 'this account authenticates with a key' },
+      ]),
+      new Map(),
+      undefined,
+      NOW,
+    );
+
+    const row = rowsOf(keyed)[0];
+    expect(row?.login.state).toBeUndefined();
+    // The REACH is never dropped: no other line on the row carries how far one sign-in reaches, and a
+    // shared login mistaken for a per-account approval is the misreading this line exists to stop.
+    expect(row?.login.summary).toBe('This login covers this account only.');
+    expect(row?.signIn.kind).toBe('elsewhere');
+  });
+
+  it('keeps the login verdict for a row that has a sign-in to offer', () => {
+    // The suppression is per ROW and not per verdict: a `no-login` identity whose member does take a
+    // login still owes the reader the fleet's own decision, because nothing else on that row says it.
+    const view = accountsRoster(
+      readiness([{ ...claudeIdentity(), verdict: 'no-login', reason: 'this account authenticates with a key' }]),
+      new Map(),
+      undefined,
+      NOW,
+    );
+
+    expect(rowFor(view, CLAUDE_ACCOUNT_ID).login.state).toContain('Nothing here signs in');
   });
 
   it('carries the mode and the availability the fleet published', () => {

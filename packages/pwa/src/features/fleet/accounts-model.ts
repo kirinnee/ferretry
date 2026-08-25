@@ -212,17 +212,49 @@ const coverageSummary = (memberCount: number): string =>
     ? 'This login covers this account only.'
     : `This login covers ${String(memberCount)} accounts, this one included.`;
 
-const loginCoverage = (identity: FleetLoginIdentity): AccountLoginCoverage => {
+/**
+ * The daemon's reason, made into a sentence. Its WORDS are never touched.
+ *
+ * Every reason the fleet composes is a lowercase clause with no full stop —
+ * `this account authenticates with a key`, `no usable credential was found, and 1 of 2 could not be
+ * read — refusing to decide` (`packages/fleet/src/lib/identity.ts`). Appended raw after the verdict's
+ * own sentence, that renders as a full stop followed by a lowercase fragment that never closes:
+ * "…so nothing is decided about this login. no usable credential was found…". Found by reading the
+ * screen rather than the type, which is the only place it is visible.
+ *
+ * A capital and a full stop are TYPOGRAPHY. Rewording the clause here would be a second set of words
+ * for a fact the host already stated, which is the thing this module exists not to do.
+ */
+const asSentence = (reason: string): string => {
+  const first = reason.slice(0, 1);
+  const opened = first.toLocaleUpperCase() + reason.slice(1);
+  return /[.!?]$/u.test(opened) ? opened : `${opened}.`;
+};
+
+/**
+ * What the fleet decided about this login, for a row that is ALSO saying where its credential is from.
+ *
+ * `offer` is here because of what the screen looked like. A `no-login` row printed three statements of
+ * one fact: "Nothing here signs in: this login's credential comes from somewhere else.", then "This
+ * account authenticates with a key.", then — beside the badge — "This account authenticates with
+ * ANTHROPIC_API_KEY, which the wrapper reads from /etc/ferretry/secrets.sh. There is no sign-in to run
+ * for it." The third is strictly the most useful of the three: it names the variable and the file
+ * somebody has to go and look at. The first two are the same sentence with the details removed.
+ *
+ * So the identity's state yields to the row's own source sentence, and only there. The REACH — how many
+ * accounts this login covers — is never dropped, because no other line on the row carries it.
+ */
+const loginCoverage = (identity: FleetLoginIdentity, offer: AccountSignInOffer): AccountLoginCoverage => {
   const verdict = COVERAGE_STATE[identity.verdict];
+  const reason = identity.reason === undefined ? undefined : asSentence(identity.reason);
   // The daemon's own reason is appended rather than replacing the sentence: the verdict says WHAT was
   // decided and the reason says why, and a surface that printed only one of them loses half of it.
-  const state =
-    verdict === undefined ? identity.reason : identity.reason === undefined ? verdict : `${verdict} ${identity.reason}`;
+  const state = verdict === undefined ? reason : reason === undefined ? verdict : `${verdict} ${reason}`;
   return {
     identity: identity.identity,
     memberCount: identity.accounts.length,
     summary: coverageSummary(identity.accounts.length),
-    state,
+    state: offer.kind === 'elsewhere' ? undefined : state,
   };
 };
 
@@ -235,6 +267,7 @@ const accountRow = (
 ): AccountRowView => {
   const stored = health.get(account.accountId);
   const readout = accountUsageReadout(usage?.get(account.wrapper), now);
+  const signIn = accountSignInOffer(account);
   return {
     accountId: account.accountId,
     kind: account.kind,
@@ -250,8 +283,8 @@ const accountRow = (
     credential: credentialStateCopy(account.credential, now),
     usage: usageSummary(readout),
     usageKind: readout.kind,
-    login: loginCoverage(identity),
-    signIn: accountSignInOffer(account),
+    login: loginCoverage(identity, signIn),
+    signIn,
   };
 };
 

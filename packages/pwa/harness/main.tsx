@@ -372,8 +372,9 @@ const HARNESS_ACCOUNTS_READINESS = {
     {
       identity: 'claude:atelier',
       kind: 'claude',
+      // No `reason`, because the fleet composes none for this verdict — a fixture that invented one
+      // showed a shape the daemon cannot produce (`packages/fleet/src/lib/identity.ts`).
       verdict: 'login',
-      reason: 'no member of this login holds a usable credential.',
       accounts: [
         {
           accountId: '33333333-3333-4333-8333-333333333333',
@@ -392,6 +393,9 @@ const HARNESS_ACCOUNTS_READINESS = {
       identity: 'claude:proxy',
       kind: 'claude',
       verdict: 'no-login',
+      // The fleet’s OWN words, byte for byte: a lowercase clause with no full stop, which is what the
+      // page has to turn into a sentence without rewording.
+      reason: 'this account authenticates with a key',
       accounts: [
         {
           accountId: '44444444-4444-4444-8444-444444444444',
