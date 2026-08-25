@@ -32,6 +32,8 @@ import {
   FleetManifestSummarySchema,
   type FleetPermissions,
   FleetPermissionsSchema,
+  type FleetProfileCatalog,
+  FleetProfileCatalogSchema,
   FleetProposalApplyRequestSchema,
   type FleetProposalPreview,
   type FleetProposalRequest,
@@ -64,6 +66,7 @@ export type {
   FleetChangeConfirmation,
   FleetManifestSummary,
   FleetPermissions,
+  FleetProfileCatalog,
   FleetProposalPreview,
   FleetProposalRequest,
   FleetProposalView,
@@ -150,6 +153,18 @@ export const readFleetHarnesses = async (client: FleetClient): Promise<HarnessDi
  */
 export const readFleetAccountHealth = async (client: FleetClient): Promise<AccountPickerHealthCatalog> =>
   await readAccountPickerHealth(client);
+
+/**
+ * The profiles this fleet declares, in shapes.
+ *
+ * A SEPARATE READ from the configuration beside it, and deliberately not a slice of it. The declared
+ * document carries every environment value a profile sets as text; this answer carries the SHAPE of
+ * each — a literal with no text at all, the variable an `$NAME` reads, or the secrets a `${secret:…}`
+ * binds — which is the only form this browser has any business rendering. `docs/secrets.md` is why:
+ * a value reaches exactly one place, and it is not a screen.
+ */
+export const readFleetProfiles = async (client: FleetClient): Promise<FleetProfileCatalog> =>
+  await client.request(`${FLEET_PATH}/profiles`, FleetProfileCatalogSchema);
 
 export const readFleetConfig = async (client: FleetClient): Promise<FleetConfigView> =>
   await client.request(`${FLEET_PATH}/config`, FleetConfigViewSchema);

@@ -36,6 +36,18 @@ export interface CredentialSourceCopy {
  * somebody to look at a variable that does not exist.
  */
 export function credentialSourceCopy(source: FleetCredentialSource): CredentialSourceCopy {
+  if (source.source === 'secret-store') {
+    // THE "NO LOGIN WANTED" ANSWER, and the one arm that must never be collapsed into `environment`.
+    // Both sentences would be true of it — the daemon does put the value into the environment the
+    // wrapper is launched with — but they send a reader to two different places, and only one of them
+    // is somewhere they can act: `fy secret set NAME` on this host. The names are the whole point of
+    // saying it; the values are in this daemon's store and no route in this product returns one.
+    const secrets = source.secrets.join(', ');
+    return {
+      label: 'From the secret store',
+      detail: `A profile authenticates this account with ${source.variable}, whose value this daemon takes from its own secret store (${source.secrets.length === 1 ? 'secret' : 'secrets'} ${secrets}) and puts into the launch. There is no sign-in to run for it.`,
+    };
+  }
   if (source.source === 'token-file') {
     return {
       label: 'From a file',

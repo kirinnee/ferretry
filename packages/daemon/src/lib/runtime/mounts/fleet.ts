@@ -24,7 +24,9 @@ import {
   type FleetSeedResult,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
+  HARNESS_CREDENTIAL_ENV,
   type HarnessKind,
+  profileCatalog,
   resolveFleetSharing,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
@@ -60,6 +62,8 @@ import {
   FleetManifestSummarySchema,
   type FleetPermissions,
   FleetPermissionsSchema,
+  type FleetProfileCatalog,
+  FleetProfileCatalogSchema,
   type FleetProposalApplyRequest,
   FleetProposalApplyRequestSchema,
   type FleetProposalRequest,
@@ -150,6 +154,17 @@ export interface FleetSubsystem {
   /** The complete last-published manifest, not a wrapper-directory reconstruction. */
   accounts(): Promise<FleetManifest>;
   config(): Promise<FleetConfig>;
+  /**
+   * The profiles this fleet declares, in SHAPES — never in values.
+   *
+   * A separate read from {@link FleetSubsystem.config} rather than a slice of it, and the reason is
+   * the whole contract: the answer says a variable is `literal`, or reads `$NAME`, or binds the
+   * secrets it names, and there is nowhere in it for a credential to travel. It also carries two facts
+   * the configuration alone does not spell — which accounts already compose each profile, and which
+   * harnesses a profile can authenticate with no login at all — and both are derived by the fleet
+   * package from the one composition chain rather than by whoever is rendering them.
+   */
+  profiles(): Promise<FleetProfileCatalog>;
   /**
    * What this host already knows about each harness, so a form does not ask for it.
    *
@@ -1342,6 +1357,18 @@ class MountedFleet implements FleetSubsystem {
     }
   }
 
+  /**
+   * Pass-through, for the same reason `harnesses` is one.
+   *
+   * `profileCatalog` reads `compositionSlots` for membership and `HARNESS_CREDENTIAL_ENV` for the
+   * authentication verdict, so both answers come from the modules that own them. A mount that derived
+   * either would be a second reading of the precedence order, and the way two readings differ is by
+   * telling somebody a profile authenticates an account it does not.
+   */
+  async profiles(): Promise<FleetProfileCatalog> {
+    return { profiles: profileCatalog(await this.config()), credentialVariables: HARNESS_CREDENTIAL_ENV };
+  }
+
   async environment(): Promise<FleetEnvironmentView> {
     const config = await this.config();
     const profiles: Record<string, Record<string, string>> = {};
@@ -1597,6 +1624,22 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.config()),
+    },
+    {
+      /**
+       * The profiles this fleet declares, for the surface that offers one.
+       *
+       * `fleet`/`use` like every other read here. It discloses strictly LESS than `/config` beside it,
+       * which serves the whole declared document: this answer has no field a value can travel in, so a
+       * caller allowed to read the configuration cannot learn less by reading this and cannot learn a
+       * credential by reading either.
+       */
+      method: 'GET',
+      path: '/v1/fleet/profiles',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      noStore: true,
+      handle: async () => await respondWith(FleetProfileCatalogSchema, () => subsystem.profiles()),
     },
     {
       method: 'GET',
