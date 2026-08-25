@@ -412,26 +412,62 @@ export function renderManifest(manifest: FleetManifest): string {
   return [header, ...manifest.accounts.map(renderAccount)].join('\n');
 }
 
+/**
+ * Which account a row is ABOUT.
+ *
+ * A row that printed `accountId` alone printed an opaque UUID, which answered "how many accounts are
+ * at their limit" or "how many need a login" and never "which". Every row was correct and addressed to
+ * nobody.
+ *
+ * Names come from the manifest the controller already loaded, so nothing new is read and no field is
+ * added to the wire: the browser joins by id against the roster it already holds, and only the
+ * terminal needs this. `displayName` rather than `wrapper`, because a manifest wrapper is an ABSOLUTE
+ * PATH — printing it put `/tmp/…/fleet/bin/claude-default` in the row.
+ *
+ * FALLS BACK TO THE ID rather than hiding the row or inventing a name. A stored head can outlive the
+ * account it is about — the manifest moved, the account was removed — and a report about something
+ * the manifest cannot name is still a true report.
+ */
+export type FleetAccountNames = ReadonlyMap<string, string>;
+
+/** The one join from a manifest to the lookup every row-namer takes, so the two surfaces cannot drift. */
+export function fleetAccountNames(manifest: FleetManifest): FleetAccountNames {
+  return new Map(manifest.accounts.map(account => [account.id, account.displayName]));
+}
+
+function accountSubject(accountId: string, names: FleetAccountNames): string {
+  return names.get(accountId) ?? accountId;
+}
+
 /** A quota window as a percentage, or a dash when the provider did not say. */
 function percent(value: number | undefined): string {
   return value === undefined ? '—' : `${Math.round(value)}%`;
 }
 
-/** One usage row. An account at its limit is called out, because that is the actionable case. */
-export function renderUsageRow(usage: FleetUsage): string {
-  if (usage.unavailable) return `  ${usage.accountId}  unavailable — ${usage.unavailableReason ?? 'no reason given'}`;
-  if (!usage.ok) return `  ${usage.accountId}  probe failed — ${usage.error ?? 'no reason given'}`;
-  if (!usage.usageBased) return `  ${usage.accountId}  pay-as-you-go — no quota to report`;
+/**
+ * One usage row. An account at its limit is called out, because that is the actionable case.
+ *
+ * NO REMEDY LINE, deliberately, and that is the difference from a health row rather than an omission.
+ * `fy fleet health` prints `fy fleet login <accountId>` beside an account a login repairs, so the id
+ * has to travel with the name. There is no command that "fixes" a quota number — a window resets on
+ * the provider's clock — so a row here carries the name alone, and printing an instruction nobody can
+ * act on would be the same defect in a different costume.
+ */
+export function renderUsageRow(usage: FleetUsage, names: FleetAccountNames = new Map()): string {
+  const subject = accountSubject(usage.accountId, names);
+  if (usage.unavailable) return `  ${subject}  unavailable — ${usage.unavailableReason ?? 'no reason given'}`;
+  if (!usage.ok) return `  ${subject}  probe failed — ${usage.error ?? 'no reason given'}`;
+  if (!usage.usageBased) return `  ${subject}  pay-as-you-go — no quota to report`;
   const limit = usage.atLimit ? '  AT LIMIT' : '';
-  return `  ${usage.accountId}  short ${percent(usage.shortWindow?.usedPercent)} · long ${percent(usage.longWindow?.usedPercent)}${limit}`;
+  return `  ${subject}  short ${percent(usage.shortWindow?.usedPercent)} · long ${percent(usage.longWindow?.usedPercent)}${limit}`;
 }
 
 /** The whole fleet's quota picture. */
-export function renderUsage(snapshot: FleetUsageSnapshot): string {
+export function renderUsage(snapshot: FleetUsageSnapshot, names: FleetAccountNames = new Map()): string {
   if (snapshot.accounts.length === 0) return 'No accounts to report usage for.';
   const exhausted = snapshot.accounts.filter(account => account.atLimit).length;
   const header = `${plural(snapshot.accounts.length, 'account')}${exhausted === 0 ? '' : `, ${exhausted} at limit`}`;
-  return [header, ...snapshot.accounts.map(renderUsageRow)].join('\n');
+  return [header, ...snapshot.accounts.map(account => renderUsageRow(account, names))].join('\n');
 }
 
 /**
@@ -485,32 +521,13 @@ export function renderRelativeInstant(instant: number, now: number): string {
 }
 
 /**
- * Which account a verdict is ABOUT — and BOTH halves are needed, which is the whole point.
+ * The verdicts a person can actually do something about, and the id the remedy needs.
  *
- * The row used to print `health.accountId` alone: an opaque UUID. That answered "how many accounts
- * need a login" and never "which", so the verdict was correct and addressed to nobody.
- *
- * BUT THE ID IS NOT DECORATION. `fy fleet login <accountId>` matches on exactly that id — see
- * `selectIdentities` — so replacing it with a name would have made the row readable and
- * unactionable, which is the opposite failure. A reader needs the name to know WHICH account and the
- * id to DO something about it, so the row carries the name and the remedy line carries the id.
- *
- * Names come from the manifest the controller already loaded, so nothing new is read and no field is
- * added to the wire: the browser joins by id against the roster it already holds, and only the
- * terminal needs this. `displayName` rather than `wrapper`, because a manifest wrapper is an ABSOLUTE
- * PATH — printing it put `/tmp/…/fleet/bin/claude-default` in the row.
- *
- * FALLS BACK TO THE ID rather than hiding the row or inventing a name. A stored head can outlive the
- * account it is about — the manifest moved, the account was removed — and a verdict about something
- * the manifest cannot name is still a true verdict.
+ * THE ID IS NOT DECORATION HERE, which is why a health row carries BOTH halves while a usage row
+ * carries only the name. `fy fleet login <accountId>` matches on exactly that id — see
+ * `selectIdentities` — so a row that named the account and nothing else would be readable and
+ * unactionable, the opposite of the failure naming it fixed.
  */
-export type FleetAccountNames = ReadonlyMap<string, string>;
-
-function healthSubject(health: FleetAccountHealth, names: FleetAccountNames): string {
-  return names.get(health.accountId) ?? health.accountId;
-}
-
-/** The verdicts a person can actually do something about, and the id the remedy needs. */
 const HEALTH_REMEDY: Readonly<Partial<Record<FleetHealthVerdict, (accountId: string) => string>>> = {
   needs_relogin: accountId => `fy fleet login ${accountId}`,
 };
@@ -521,7 +538,7 @@ function renderHealthRow(health: FleetAccountHealth, now: number, names: FleetAc
   // like an account nobody has ever looked at, which is the opposite of what happened.
   const was = health.staleVerdict === undefined ? '' : ` (was ${HEALTH_VERDICT_LABEL[health.staleVerdict]})`;
   const inconclusive = health.lastCheckInconclusive ? '; last check was inconclusive' : '';
-  const row = `  ${healthSubject(health, names)}  ${HEALTH_VERDICT_LABEL[health.verdict]}${was}  checked ${checked} — ${HEALTH_REASON_LABEL[health.reason]}${inconclusive}`;
+  const row = `  ${accountSubject(health.accountId, names)}  ${HEALTH_VERDICT_LABEL[health.verdict]}${was}  checked ${checked} — ${HEALTH_REASON_LABEL[health.reason]}${inconclusive}`;
   // The exact command, on its own line, for the one verdict a person can act on. "NEEDS LOGIN" with
   // no way to act on it is the state this whole feature exists to stop producing — and the id the
   // command needs is not something a reader could have derived from the name above it.
