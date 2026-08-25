@@ -117,7 +117,6 @@ export function FleetSettingsOrder({ layer, onChange, disabled, harness, name }:
                 key={entry.id}
                 className="min-w-0 rounded-control border border-border bg-surface-2 p-3"
                 data-fleet-settings-entry={settingsEntryLabel(entry)}
-                data-fleet-settings-position={String(index + 1)}
               >
                 <div className="flex min-w-0 flex-wrap items-start gap-2">
                   <span
@@ -144,9 +143,9 @@ export function FleetSettingsOrder({ layer, onChange, disabled, harness, name }:
                     </p>
                     <p className="m-0 mt-0.5 min-w-0 break-words text-meta leading-base text-muted">
                       {ENTRY_DETAIL[entry.source]}
-                      {index === entries.length - 1 || entries.length === 1
-                        ? ''
-                        : ' A later one below wins where they set the same key.'}
+                      {/* Not on the LAST row, because there is nothing below it to lose to. A stack of
+                          one is the same case: its only row is also its last. */}
+                      {index === entries.length - 1 ? '' : ' A later one below wins where they set the same key.'}
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-1">
