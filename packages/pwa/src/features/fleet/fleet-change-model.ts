@@ -351,6 +351,11 @@ export interface FleetLedgerEntry {
  * keeps what the harness wrote, because a re-apply that clobbered `/effort` would silently reset
  * somebody. A prune says how many names it spares and that it only removes files carrying Ferretry's
  * own marker, because "remove unclaimed wrappers" otherwise reads as "delete things in a bin directory".
+ *
+ * THE SETTINGS COUNT MAY NOT SAY "LAYER". `layerCount` is the wire's name for it and stays; the
+ * sentence a person reads was "3 settings layers", which is the one word the owner called "way too
+ * complicated" surviving in a line nobody greps for because the field it comes from is spelled the
+ * same. What they need from it is that several documents were folded together and in what direction.
  */
 const octal = (value: number): string => `mode ${value.toString(8).padStart(4, '0')}`;
 
@@ -367,7 +372,9 @@ const operationDetails = (operation: FleetWriteOperation): readonly string[] => 
       return [
         octal(operation.mode),
         `format ${operation.format}`,
-        `${operation.layerCount} settings layer${operation.layerCount === 1 ? '' : 's'}`,
+        operation.layerCount === 1
+          ? '1 settings document'
+          : `${operation.layerCount} settings documents, applied in order`,
         operation.preserveExisting ? 'folds in the file already there' : 'replaces the file already there',
       ];
     case 'codex-sqlite-ownership':
@@ -562,6 +569,45 @@ export interface FleetSkillDraft extends FleetAssetDraft {
 }
 
 /**
+ * WHERE ONE SETTINGS ENTRY COMES FROM, which is also what applying it writes.
+ *
+ * `store` points at a document this fleet already has and writes nothing: the change carries the
+ * reference, and the document's own text is not read by this browser at all. `new` is a document
+ * being written HERE — the change carries its text, so it lands in the asset tree and the next
+ * account created can point at it, which is the "auto add it to the entity type" half of the rule.
+ * `inline` is an object with no name: it goes into the configuration itself rather than into a file,
+ * which is what makes "a couple of keys, for this one account" not require inventing a filename.
+ */
+export type FleetSettingsSource = 'store' | 'new' | 'inline';
+
+/**
+ * ONE entry in the settings a person composed, and there may be several.
+ *
+ * `settings` on the wire is a STACK deep-merged left to right, and an entry may be a reference or an
+ * object (`packages/protocol/src/lib/fleet-changes.ts`). This draft is that stack, in the order it is
+ * sent, which is what makes the order a person sees the order that applies: a shape that held one
+ * inline object could express only the last entry of it, and a screen cannot show a precedence it
+ * does not hold.
+ *
+ * `id` is a DOM identity rather than fleet data, for the reason {@link FleetEnvEntry.id} is: an entry
+ * being typed into has no name yet, and an `inline` one never gets one.
+ */
+export interface FleetSettingsDraft {
+  readonly id: string;
+  readonly source: FleetSettingsSource;
+  /** The document's path in the asset tree. Empty exactly when `source` is `inline`. */
+  readonly path: string;
+  /**
+   * The text this browser holds for the entry, and it holds one only where it wrote one.
+   *
+   * The JSON for an `inline` entry, and the document's own text for a `new` one. ALWAYS EMPTY for a
+   * `store` entry: nothing here has read that document, and seeding this with the empty string and
+   * then writing it back is exactly how a reference becomes an empty file.
+   */
+  readonly text: string;
+}
+
+/**
  * This one account's overlay. It is applied after every shared slot, so two lanes of one agent can
  * carry different instructions, skills, settings and environment without either leaking onto the
  * other.
@@ -572,17 +618,22 @@ export interface FleetLayerDraft {
   readonly skillsDirectory: string;
   /** Documents written beneath that directory. */
   readonly skills: readonly FleetSkillDraft[];
-  /** Inline settings, as the JSON a person typed. */
-  readonly settingsText: string;
+  /** The settings this account applies, in the order they apply. Empty declares none. */
+  readonly settings: readonly FleetSettingsDraft[];
   readonly env: readonly FleetEnvEntry[];
   /**
    * Everything this layer declares that this editor cannot faithfully edit.
    *
-   * Two kinds of thing land here: fields the surface does not offer at all (`flags`, `hooks`,
-   * `hooksDir`, `mcp`, a `claude:`/`codex:` overlay), and one of the four it does offer whose declared
-   * value is a shape it cannot represent — a `settings:` that is a FILE REFERENCE rather than an inline
-   * object. An edit omits every key in here, and the daemon's patch semantics keep them: absent keeps,
-   * `null` removes. Naming a key here is therefore how the surface promises not to touch it.
+   * Fields the surface does not offer at all land here — `flags`, `hooks`, `hooksDir`, `mcp`, a
+   * `claude:`/`codex:` overlay — as does one of the four it does offer whose declared value is a shape
+   * it cannot represent. An edit omits every key in here, and the daemon's patch semantics keep them:
+   * absent keeps, `null` removes. Naming a key here is therefore how the surface promises not to touch
+   * it.
+   *
+   * A `settings:` FILE REFERENCE used to be the commonest thing in here, and is not any more: the
+   * stack above holds references and objects in one list, so the shape an operator wrote is a shape
+   * this editor can show and put back. What still lands here is a settings value that is neither — a
+   * number, a list with a number in it — because a box that cannot show it must not speak for it.
    */
   readonly preserved: Readonly<Record<string, unknown>>;
 }
@@ -594,7 +645,7 @@ export const emptyLayerDraft = (): FleetLayerDraft => ({
   instructions: { path: '', text: '' },
   skillsDirectory: '',
   skills: [],
-  settingsText: '',
+  settings: [],
   env: [],
   preserved: {},
 });
@@ -607,33 +658,91 @@ const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined
 const asPath = (value: unknown): string => (typeof value === 'string' ? value : '');
 
 /**
+ * ONE STRING, TWO SPELLINGS, and this is the narrower one.
+ *
+ * The fleet's own configuration writes `./templates/claude/settings.json` — that is what `fy fleet
+ * init` scaffolds — and `expandAssetPath` normalises it. The grammar a paired browser is held to
+ * refuses any `.` segment as traversal, and the daemon's asset listings report the bare spelling. So a
+ * path read out of the configuration is canonicalised to the bare one before it is offered, compared
+ * or sent, because the alternative is offering a person a document whose reference the wire then
+ * refuses for containing a traversal segment — a refusal about a document sitting in the middle of the
+ * asset tree.
+ *
+ * The same normalisation belongs on every declared asset path this browser reads. THIS CHANGE OWNS THE
+ * SETTINGS ONE; the skills store still offers a declared path exactly as spelled.
+ */
+export const canonicalAssetPath = (declared: string): string =>
+  declared.startsWith('./') ? declared.slice(2) : declared;
+
+/**
+ * The declared `settings` as the stack it is, or `undefined` when it is a shape no box can hold.
+ *
+ * A bare value is the stack of one — the same rule the wire schema and the fleet's own configuration
+ * both state — so there is one code path for `settings: ./a.json`, for an inline object, and for a
+ * list mixing the two.
+ *
+ * `undefined` for anything else, INCLUDING a reference the browser's own grammar would refuse. An
+ * operator may legitimately write `~/settings.json` or an absolute path in `config.yaml`; this editor
+ * cannot send one, so a stack containing one is a stack it cannot speak for, and preserving the whole
+ * field untouched is the only honest answer. Pulling it in instead would put a blocker on a value the
+ * person never typed and cannot fix from here.
+ */
+const asSettingsStack = (value: unknown): readonly (string | Readonly<Record<string, unknown>>)[] | undefined => {
+  const entries: (string | Readonly<Record<string, unknown>>)[] = [];
+  for (const item of Array.isArray(value) ? (value as readonly unknown[]) : [value]) {
+    if (typeof item === 'string') {
+      const canonical = canonicalAssetPath(item);
+      if (fleetAssetRefProblem(canonical) !== undefined) return undefined;
+      entries.push(canonical);
+      continue;
+    }
+    const record = asRecord(item);
+    if (record === undefined) return undefined;
+    entries.push(record);
+  }
+  return entries;
+};
+
+/**
  * Can this editor show this declared value, and therefore speak for it?
  *
- * A `settings:` file reference, or a `memory:`/`skills:` that is a list rather than one path, is a
- * shape none of the boxes below can hold. Editing beside it must not send an opinion about it.
+ * A `memory:`/`skills:` that is a list rather than one path is a shape none of the boxes below can
+ * hold, and neither is a `settings:` that is not a stack of references and objects. Editing beside one
+ * must not send an opinion about it.
  */
 const editableHere = (key: string, value: unknown): boolean => {
   if (!EDITABLE_LAYER_FIELDS.includes(key)) return false;
-  if (key === 'settings' || key === 'env') return asRecord(value) !== undefined;
+  if (key === 'settings') return asSettingsStack(value) !== undefined;
+  if (key === 'env') return asRecord(value) !== undefined;
   return typeof value === 'string';
 };
 
 /**
  * Seed a draft from the layer this account already declares.
  *
- * A settings value that is a FILE REFERENCE rather than an inline object is deliberately not pulled
- * into the JSON box: editing it here would replace a reference the operator wrote with a literal, and
- * that is a change nobody asked for.
+ * A seeded entry's id is its POSITION rather than its path, and that is one rule for both kinds
+ * instead of two: an `inline` entry has nothing to key on, and a stack is ordered, so where an entry
+ * sits is the only identity every entry has. It is stable because a seed is computed once, from a
+ * document, rather than re-derived per render.
  */
 export const layerDraftFrom = (layer: Readonly<Record<string, unknown>> | undefined): FleetLayerDraft => {
   if (layer === undefined) return emptyLayerDraft();
-  const settings = asRecord(layer.settings);
+  const settings = 'settings' in layer ? asSettingsStack(layer.settings) : [];
   const env = asRecord(layer.env);
   return {
     instructions: { path: asPath(layer.memory), text: '' },
     skillsDirectory: asPath(layer.skills),
     skills: [],
-    settingsText: settings === undefined ? '' : JSON.stringify(settings, null, 2),
+    settings: (settings ?? []).map((entry, index) =>
+      typeof entry === 'string'
+        ? { id: `settings-${String(index)}`, source: 'store' as const, path: entry, text: '' }
+        : {
+            id: `settings-${String(index)}`,
+            source: 'inline' as const,
+            path: '',
+            text: JSON.stringify(entry, null, 2),
+          },
+    ),
     preserved: Object.fromEntries(Object.entries(layer).filter(([key, value]) => !editableHere(key, value))),
     env:
       env === undefined
@@ -783,7 +892,13 @@ export const unseenAssets = (
 ): readonly FleetUnreadableAsset[] => {
   const listed = new Set(knowledge.listed);
   const loaded = new Set(knowledge.loaded);
-  const named = [layer.instructions.path.trim(), ...layer.skills.map(skill => skill.path.trim())];
+  const named = [
+    layer.instructions.path.trim(),
+    ...layer.skills.map(skill => skill.path.trim()),
+    // An AUTHORED settings document only. A `store` entry sends no text, so a document the daemon
+    // already lists is a document this change reads nothing of and writes nothing to.
+    ...layer.settings.filter(entry => entry.source === 'new').map(entry => entry.path.trim()),
+  ];
   return named
     .filter(path => path !== '' && listed.has(path) && !loaded.has(path))
     .map(path => ({
@@ -1417,15 +1532,93 @@ export const assetPathProblem = (path: string, label: string): string | null => 
   return problem === undefined ? null : `${label} ${problem}`;
 };
 
-const settingsProblem = (settingsText: string): string | null => {
-  if (settingsText.trim() === '') return null;
+/**
+ * The object an inline settings entry expresses, or `undefined` when its text is not one.
+ *
+ * Exported because the settings step MERGES these to show which entry supplied which key, and a
+ * second parser for the same text is how a screen comes to explain a precedence the change does not
+ * send. `undefined` rather than a throw: an entry a person is still typing into is not an error state.
+ */
+export const parsedSettingsObject = (text: string): Readonly<Record<string, unknown>> | undefined => {
+  if (text.trim() === '') return undefined;
+  try {
+    return asRecord(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
+};
+
+const settingsProblem = (text: string): string | null => {
+  if (text.trim() === '') return 'the settings typed here are empty; write a JSON object or remove them';
   let parsed: unknown;
   try {
-    parsed = JSON.parse(settingsText);
+    parsed = JSON.parse(text);
   } catch {
     return 'settings must be valid JSON';
   }
   return asRecord(parsed) === undefined ? 'settings must be a JSON object' : null;
+};
+
+/**
+ * Every blocker the settings STACK carries, in the order the entries carry them.
+ *
+ * One entry, one sentence, and each names the entry it is about. A stack whose second document is
+ * misspelled must not be reported as "settings" being wrong, because the person then has to work out
+ * which of four rows to look at.
+ *
+ * Shared with the stepper rather than restated there: the step that owns this control derives its own
+ * blockers by SUBTRACTION from `layerProblems`, so a second copy of these sentences would be a copy
+ * that drifts into refusing a change for a reason no step will say.
+ */
+export const settingsStackProblems = (settings: readonly FleetSettingsDraft[]): readonly string[] => {
+  const problems: string[] = [];
+  const listed = new Set<string>();
+  for (const entry of settings) {
+    if (entry.source === 'inline') {
+      const problem = settingsProblem(entry.text);
+      if (problem !== null) problems.push(problem);
+      continue;
+    }
+    const path = entry.path.trim();
+    if (path === '') {
+      problems.push('every settings document needs a path');
+      continue;
+    }
+    const problem = assetPathProblem(path, `the settings path "${path}"`);
+    if (problem !== null) problems.push(problem);
+    if (listed.has(path)) {
+      problems.push(`"${path}" is applied twice by this account; one document applies once`);
+    }
+    listed.add(path);
+  }
+  return problems;
+};
+
+/**
+ * Paths this one change would write with two different texts.
+ *
+ * Shared by `layerProblems` and by the step that owns the instructions box, which used to hold a copy
+ * of it. `assetEdits` writes every named path in order, so two rows carrying the same path resolved by
+ * last-write-wins: a person reviewing the plan saw both texts and had no way to tell which survived.
+ *
+ * The settings entries in it are the AUTHORED ones only. A `store` entry writes nothing, so naming a
+ * document another row also writes is not a conflict — it is an account applying a document this same
+ * change happens to create, which is ordinary.
+ */
+export const pathsWrittenTwice = (layer: FleetLayerDraft): readonly string[] => {
+  const written = new Set<string>();
+  const twice = new Set<string>();
+  const paths = [
+    layer.instructions.path.trim(),
+    ...layer.skills.map(skill => skill.path.trim()),
+    ...layer.settings.filter(entry => entry.source === 'new').map(entry => entry.path.trim()),
+  ];
+  for (const path of paths) {
+    if (path === '') continue;
+    if (written.has(path)) twice.add(path);
+    written.add(path);
+  }
+  return [...twice].map(path => `"${path}" is written twice by this change; one path carries one text`);
 };
 
 export interface FleetLayerProblemOptions {
@@ -1472,20 +1665,8 @@ export const layerProblems = (layer: FleetLayerDraft, options: FleetLayerProblem
     }
   }
 
-  // One path, one text. `assetEdits` writes every named path in order, so two rows carrying the same path
-  // — or a skill row that names the instructions file — used to resolve by last-write-wins: a person
-  // reviewing the plan saw both texts and had no way to tell which one would survive. Refuse instead.
-  const written = new Set<string>();
-  const twice = new Set<string>();
-  for (const path of [instructionsPath, ...layer.skills.map(skill => skill.path.trim())]) {
-    if (path === '') continue;
-    if (written.has(path)) twice.add(path);
-    written.add(path);
-  }
-  for (const path of twice) problems.push(`"${path}" is written twice by this change; one path carries one text`);
-
-  const settings = settingsProblem(layer.settingsText);
-  if (settings !== null) problems.push(settings);
+  problems.push(...pathsWrittenTwice(layer));
+  problems.push(...settingsStackProblems(layer.settings));
 
   const names = new Set<string>();
   for (const entry of layer.env) {
@@ -1636,6 +1817,28 @@ const layerEnv = (layer: FleetLayerDraft): Record<string, string> =>
   Object.fromEntries(layer.env.map(entry => [entry.name.trim(), entry.value]));
 
 /**
+ * The stack as the wire carries it: a bare value for one entry, a list for several, nothing for none.
+ *
+ * ONE ENTRY IS SENT BARE on purpose. `settings: ./templates/claude/settings.json` and
+ * `settings: [./templates/claude/settings.json]` mean the same thing to the fleet, and the first is
+ * what a scaffolded `config.yaml` already says — so an account whose settings nobody changed comes back
+ * out of an edit spelled the way it went in, instead of every edited account acquiring a one-element
+ * list for no reason a reader of that file could explain.
+ *
+ * `undefined` for an empty stack rather than `[]`: a declared empty list is a claim, and "this account
+ * adds nothing of its own" is the absence of one.
+ */
+const layerSettings = (
+  layer: FleetLayerDraft,
+): string | Readonly<Record<string, unknown>> | readonly (string | Readonly<Record<string, unknown>>)[] | undefined => {
+  const entries = layer.settings.map(entry =>
+    entry.source === 'inline' ? (JSON.parse(entry.text) as Readonly<Record<string, unknown>>) : entry.path.trim(),
+  );
+  if (entries.length === 0) return undefined;
+  return entries.length === 1 ? entries[0] : entries;
+};
+
+/**
  * A NEW account's layer: blank means "not declared", so a blank field is simply absent.
  *
  * There is nothing to preserve on an account that does not exist yet, which is why this is not the
@@ -1647,8 +1850,8 @@ const createLayer = (layer: FleetLayerDraft): Readonly<Record<string, unknown>> 
   if (instructions !== '') value.memory = instructions;
   const skills = layer.skillsDirectory.trim();
   if (skills !== '') value.skills = skills;
-  const settings = layer.settingsText.trim();
-  if (settings !== '') value.settings = JSON.parse(settings) as Record<string, unknown>;
+  const settings = layerSettings(layer);
+  if (settings !== undefined) value.settings = settings;
   const env = layerEnv(layer);
   if (Object.keys(env).length > 0) value.env = env;
   return Object.keys(value).length === 0 ? undefined : value;
@@ -1673,8 +1876,7 @@ const editLayerPatch = (layer: FleetLayerDraft): Readonly<Record<string, unknown
   state('memory', instructions === '' ? null : instructions);
   const skills = layer.skillsDirectory.trim();
   state('skills', skills === '' ? null : skills);
-  const settings = layer.settingsText.trim();
-  state('settings', settings === '' ? null : (JSON.parse(settings) as Record<string, unknown>));
+  state('settings', layerSettings(layer) ?? null);
   const env = layerEnv(layer);
   state('env', Object.keys(env).length === 0 ? null : env);
   return patch;
@@ -1686,12 +1888,19 @@ const editLayerPatch = (layer: FleetLayerDraft): Readonly<Record<string, unknown
  * An instructions path with no text is still sent, because an empty instructions file that exists is
  * a different host state from a declared file that does not — and the second one is what makes an
  * apply reference something that is not there.
+ *
+ * A settings entry is carried only when it is `new` — a document being written here, which is what
+ * puts it in the store for the next account to point at. A `store` entry is a reference this change
+ * writes nothing for, and sending its empty text would overwrite the document with nothing.
  */
 const assetEdits = (layer: FleetLayerDraft): { path: string; content: string }[] => {
   const edits = [];
   const instructions = layer.instructions.path.trim();
   if (instructions !== '') edits.push({ path: instructions, content: layer.instructions.text });
   for (const skill of layer.skills) edits.push({ path: skill.path.trim(), content: skill.text });
+  for (const entry of layer.settings) {
+    if (entry.source === 'new') edits.push({ path: entry.path.trim(), content: entry.text });
+  }
   return edits;
 };
 
@@ -1744,6 +1953,6 @@ export const initializeProposal = (): FleetProposalRequest => ({ mutation: { kin
  */
 export const CHANGE_LIMITS: readonly string[] = [
   'Applying rewrites fleet config.yaml from the parsed document: YAML comments, anchors and key order in that file are not preserved.',
-  'Inline settings are MERGED over what the harness already wrote. A key cannot be deleted from here.',
+  'Settings are MERGED, in order, over what the harness already wrote. A key cannot be deleted from here — a later document can only give it another value.',
   'Only text assets can be edited here. Executable hooks, per-skill selection and home pruning are not offered.',
 ];

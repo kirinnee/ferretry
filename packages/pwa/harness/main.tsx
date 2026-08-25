@@ -627,6 +627,13 @@ const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
       path: 'instructions/CLAUDE-atelier.md',
       text: '# Atelier\n\nBe exact. Prefer the smallest change that is provably correct.\n',
     },
+    // TWO SETTINGS ENTRIES, because one proves nothing about the control that exists to show an ORDER:
+    // a document this fleet shares, then a block typed here that overrides one of its keys. That is the
+    // state where the numbered list, the move controls and the origin list all have something to say.
+    settings: [
+      { id: 'settings-shared', source: 'store', path: 'templates/claude/settings.json', text: '' },
+      { id: 'settings-typed', source: 'inline', path: '', text: '{\n  "model": "claude-opus-5"\n}' },
+    ],
   },
   prefilled: {
     models: 'Detected — read from /home/pilot/.claude/settings.json.',
@@ -678,6 +685,10 @@ const HARNESS_FLEET_INSTRUCTIONS: FleetInstructionsControl = {
  */
 const HARNESS_FLEET_CONFIG: FleetConfigView = {
   variants: { default: {}, auto: {}, review: {} },
+  // THE `./` SPELLING, exactly as `fy fleet init` writes it into config.yaml. The store canonicalises
+  // it, and a fixture that pre-canonicalised it would make a capture of this step evidence about the
+  // fixture rather than about the host every scaffolded fleet actually has.
+  shared: { settings: { claude: './templates/claude/settings.json', codex: './templates/codex/config.toml' } },
   agents: [
     {
       name: 'studio',
@@ -686,7 +697,10 @@ const HARNESS_FLEET_CONFIG: FleetConfigView = {
         default: {
           id: 'b2f0f0c8-7d3e-4a7d-9a1f-2b4a6d9e1c33',
           wrapper: 'claude-studio',
-          layer: { skills: 'skills/studio' },
+          layer: {
+            skills: 'skills/studio',
+            settings: ['./templates/claude/settings.json', 'templates/claude/strict.json'],
+          },
         },
         auto: {
           id: 'c3a1e1d9-8e4f-4b8e-8b20-3c5b7eaf2d44',
@@ -762,7 +776,20 @@ const HARNESS_FLEET_LAYER: FleetLayerDraft = {
   skills: [
     { id: 'skills/studio/review.md', path: 'skills/studio/review.md', text: '# Review\n\nRead the diff twice.\n' },
   ],
-  settingsText: '{\n  "model": "claude-opus-5",\n  "permissions": { "allow": ["Bash(git status)"] }\n}',
+  // A STACK OF THREE, which is the widest this section ever gets and the state the geometry gate has
+  // to be able to measure: a document this fleet shares, a document this change writes, and one block
+  // of settings typed here — the last of them overriding a key the first also sets, so the origin list
+  // has something to disagree about.
+  settings: [
+    { id: 'settings-shared', source: 'store', path: 'templates/claude/settings.json', text: '' },
+    {
+      id: 'settings-studio',
+      source: 'new',
+      path: 'templates/claude/studio.json',
+      text: '{\n  "permissions": { "allow": ["Bash(git status)"] }\n}',
+    },
+    { id: 'settings-typed', source: 'inline', path: '', text: '{\n  "model": "claude-opus-5"\n}' },
+  ],
   env: [{ id: 'FY_LANE', name: 'FY_LANE', value: 'studio' }],
   // Fields this editor does not offer, carried through the change exactly as declared.
   preserved: { flags: ['--dangerously-skip-permissions'], mcp: 'mcp/studio.json' },

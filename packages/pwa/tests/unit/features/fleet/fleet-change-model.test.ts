@@ -604,7 +604,7 @@ describe('drafts', () => {
       instructions: { path: '', text: '' },
       skillsDirectory: '',
       skills: [],
-      settingsText: '',
+      settings: [],
       env: [],
       preserved: {},
     });
@@ -641,7 +641,9 @@ describe('drafts', () => {
     });
     expect(draft.instructions).toEqual({ path: 'instructions/studio.md', text: '' });
     expect(draft.skillsDirectory).toBe('skills/studio');
-    expect(JSON.parse(draft.settingsText)).toEqual({ model: 'opus' });
+    expect(draft.settings).toHaveLength(1);
+    expect(draft.settings[0]?.source).toBe('inline');
+    expect(JSON.parse(draft.settings[0]?.text ?? '')).toEqual({ model: 'opus' });
     expect(draft.env).toEqual([
       { id: 'FY_LANE', name: 'FY_LANE', value: 'studio' },
       { id: 'FY_COUNT', name: 'FY_COUNT', value: '3' },
@@ -682,11 +684,55 @@ describe('drafts', () => {
     expect(edited.assetEdits).toEqual([{ path: 'instructions/studio.md', content: '# new' }]);
   });
 
-  it('never sends an opinion about a settings FILE REFERENCE it could not show', () => {
-    const draft = layerDraftFrom({ settings: 'settings/shared.json', memory: 'instructions/a.md' });
-    expect(draft.settingsText).toBe('');
-    expect(draft.preserved).toEqual({ settings: 'settings/shared.json' });
-    // `settings` is absent from the patch — not null — so the operator's reference survives.
+  it('shows a settings FILE REFERENCE as the entry it is, and sends it back unchanged', () => {
+    const draft = layerDraftFrom({ settings: 'templates/claude/settings.json', memory: 'instructions/a.md' });
+    expect(draft.settings).toEqual([
+      { id: 'settings-0', source: 'store', path: 'templates/claude/settings.json', text: '' },
+    ]);
+    expect(draft.preserved).toEqual({});
+    // A reference is no longer preserved-and-untouchable: it round-trips as itself, bare rather than
+    // as a one-element list, and carries NO asset edit — nothing here read that document.
+    const proposal = editAccountProposal('abc', draft);
+    expect(proposal.mutation).toEqual({
+      kind: 'edit-account',
+      accountId: 'abc',
+      layer: {
+        memory: 'instructions/a.md',
+        skills: null,
+        settings: 'templates/claude/settings.json',
+        env: null,
+      },
+    });
+    expect(proposal.assetEdits).toEqual([{ path: 'instructions/a.md', content: '' }]);
+  });
+
+  it('canonicalises the ./ spelling the configuration uses, because the wire refuses a "." segment', () => {
+    const draft = layerDraftFrom({ settings: ['./templates/claude/settings.json', { model: 'opus' }] });
+    expect(draft.settings.map(entry => ({ source: entry.source, path: entry.path }))).toEqual([
+      { source: 'store', path: 'templates/claude/settings.json' },
+      { source: 'inline', path: '' },
+    ]);
+    // Two entries go out as a LIST, in the order they apply.
+    expect(editAccountProposal('abc', draft).mutation).toEqual({
+      kind: 'edit-account',
+      accountId: 'abc',
+      layer: {
+        memory: null,
+        skills: null,
+        settings: ['templates/claude/settings.json', { model: 'opus' }],
+        env: null,
+      },
+    });
+  });
+
+  it('preserves a settings reference this browser could never send, rather than blocking on it', () => {
+    // An operator may legitimately write a home-relative path in config.yaml. A browser may not send
+    // one, so the whole field stays preserved and the patch omits it — which is what stops the editor
+    // reporting a blocker about a value nobody typed here and nobody can fix from here.
+    const draft = layerDraftFrom({ settings: ['~/settings.json'], memory: 'instructions/a.md' });
+    expect(draft.settings).toHaveLength(0);
+    expect(draft.preserved).toEqual({ settings: ['~/settings.json'] });
+    expect(layerProblems(draft)).toHaveLength(0);
     expect(editAccountProposal('abc', draft).mutation).toEqual({
       kind: 'edit-account',
       accountId: 'abc',

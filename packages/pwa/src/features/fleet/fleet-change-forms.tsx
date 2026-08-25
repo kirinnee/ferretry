@@ -22,6 +22,7 @@ import { type RefObject, useId, useRef } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { FIELD_LABEL } from '../../shell/panel-typography.tsx';
 import type { FleetLayerDraft } from './fleet-change-model.ts';
+import { FleetSettingsOrder } from './fleet-settings-stack.tsx';
 
 const SECTION = 'border-t border-border-soft px-panel py-3 first:border-t-0';
 
@@ -252,20 +253,22 @@ export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFields
           icon={Wrench}
           id={id('-settings')}
           title="Settings"
-          note="Inline JSON, merged over what the harness already wrote. A key cannot be deleted from here."
+          note="Folded together in this order, over what the harness already wrote. A key cannot be deleted from here."
         />
-        <label className={FIELD_LABEL} htmlFor={id('-settings-text')}>
-          Settings JSON
-        </label>
-        <textarea
-          id={id('-settings-text')}
-          className="kt-input min-h-[6rem] font-mono"
-          rows={6}
-          value={layer.settingsText}
-          disabled={disabled}
-          placeholder={'{\n  "model": "opus"\n}'}
-          onChange={event => onChange({ ...layer, settingsText: event.target.value })}
-        />
+        {/* THE SAME CONTROL THE NEW-ACCOUNT STEP USES, minus the two halves this form has no facts for.
+            An account's settings are a stack, and this form used to show one box — so an account whose
+            settings the fleet composed from three documents appeared here as either one editable object
+            or, for a plain reference, nothing at all. What it can now do is show the stack, reorder it,
+            drop an entry and edit the one typed here.
+
+            The picker and the add-a-document control are NOT here, and that is a fact about this form
+            rather than a choice: it is handed a wrapper name, and neither the harness whose format a new
+            document would be written in nor this fleet's store reaches it. Guessing the harness from the
+            wrapper's prefix is the inference this feature refuses to make everywhere else. */}
+        <FleetSettingsOrder layer={layer} onChange={onChange} disabled={disabled} harness={null} name="layer-form" />
+        <p className="m-0 mt-2 text-meta leading-base text-muted" data-fleet-settings-picker-elsewhere="">
+          Adding a document from this fleet’s store is on the New account screen.
+        </p>
       </section>
 
       <section className={SECTION} aria-labelledby={id('-env')}>

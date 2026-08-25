@@ -33,6 +33,7 @@ import {
   accountProblems,
   assetPathProblem,
   BLANK_INSTRUCTIONS_CHOICE,
+  canonicalAssetPath,
   discoveredHarness,
   draftModels,
   existingAccounts,
@@ -40,6 +41,7 @@ import {
   type FleetAccountMode,
   type FleetLaneDraft,
   type FleetLayerDraft,
+  type FleetSettingsDraft,
   type FleetSkillDraft,
   type FleetUnreadableAsset,
   IMPORTED_INSTRUCTIONS_CHOICE,
@@ -47,6 +49,8 @@ import {
   instructionsPathFor,
   laneProblems,
   layerProblems,
+  parsedSettingsObject,
+  pathsWrittenTwice,
 } from './fleet-change-model.ts';
 import type { FleetHarnessKind } from './fleet-model.ts';
 
@@ -702,35 +706,348 @@ export const withAuthoredSkillText = (layer: FleetLayerDraft, text: string): Fle
   return authored === undefined ? layer : { ...layer, skills: [{ ...authored, text }] };
 };
 
-// ─── settings: a choice, not a mechanism ───────────────────────────────────────────────────────
+// ─── settings: several apply, and you can see the order ────────────────────────────────────────
 
 /**
- * The settings question, with the mechanism kept underneath it.
+ * SETTINGS ARE A STACK, and this step is where a person composes one.
  *
- * Settings in a fleet configuration are a STACK, deep-merged left to right, which is a real and
- * useful thing and the wrong thing to put in front of somebody adding their first account. The two
- * answers below are the two a person has: leave it alone, or set something. Choosing `own` writes
- * one inline object at the end of that stack; choosing `fleet` writes nothing, so every layer the
- * fleet already composes applies untouched. Neither answer can reorder the stack or remove a layer,
- * and the surface says so rather than offering a control that looks like it could.
- */
-export type FleetSettingsChoice = 'fleet' | 'own';
-
-/** Which answer the draft currently expresses. An empty box IS "leave the fleet's settings alone". */
-export const settingsChoice = (layer: FleetLayerDraft): FleetSettingsChoice =>
-  layer.settingsText.trim() === '' ? 'fleet' : 'own';
-
-/**
- * The layer after answering it.
+ * What this replaces asked a two-way question — leave the fleet's settings alone, or type one JSON
+ * object — which is the one step in the sequence that did not follow the owner's rule. The rule is
+ * "pick from what this fleet already has, or add one and have it join the collection", and settings
+ * were the field where it mattered most: `settings` has ALWAYS been a stack on the wire, deep-merged
+ * left to right, with an entry allowed to be a document reference or an inline object
+ * (`packages/protocol/src/lib/fleet-changes.ts`). A single JSON box could express the last entry of
+ * that stack and nothing else, so the mechanism the fleet already had was unreachable from a browser.
  *
- * Choosing `own` from empty seeds an empty JSON object rather than an empty box: a person who picked
- * "set something here" is looking at the box to type INTO, and `{}` both parses and shows them the
- * shape. Choosing `fleet` clears whatever was there, which is the only way back.
+ * Three answers, and each of them is a real difference in what applying WRITES:
+ *
+ *  - a document this fleet already has — the change carries a reference and writes no text at all;
+ *  - a document written here — the change carries its text, so it lands in the asset tree and the
+ *    NEXT account created can pick it, which is the "auto add it to the entity type" half;
+ *  - settings typed here with no name — an object in the configuration itself, for the person who
+ *    wants two keys and not a file.
+ *
+ * ORDER IS THE FEATURE, so it is shown rather than implied: the entries are a numbered list a person
+ * reorders, and {@link settingsOrigins} says, per key, which entry supplied the value that survives.
+ * "These apply in order" is the whole sentence — the word for the mechanism is one the owner called
+ * way too complicated, and a composed value whose origin cannot be explained is worse than no
+ * composition at all.
+ *
+ * WHAT THIS STEP DOES NOT CLAIM: the fleet's own composition chain. `compositionSlots` in the fleet
+ * package owns the order the fleet applies its shared documents and profiles in, and a browser that
+ * restated that order would be a second description of it — disagreeing exactly where it matters
+ * most, on an account whose settings are not the ones the screen claims. So this step says what it
+ * owns, which is that this account's own entries apply LAST and in the order shown.
  */
-export const withSettingsChoice = (layer: FleetLayerDraft, choice: FleetSettingsChoice): FleetLayerDraft => {
-  if (choice === 'fleet') return { ...layer, settingsText: '' };
-  return layer.settingsText.trim() === '' ? { ...layer, settingsText: '{}' } : layer;
+
+/** Where a new settings document lands, per harness. The directory this fleet's own scaffold uses. */
+export const SETTINGS_PREFIX: Readonly<Record<FleetHarnessKind, string>> = {
+  claude: 'templates/claude/',
+  codex: 'templates/codex/',
 };
+
+/**
+ * The extension and the format name, per harness, and they are ONE fact rather than two.
+ *
+ * A harness's settings destination decides how every document in its stack is parsed —
+ * `settings.json` is read as JSON and `config.toml` as TOML (`packages/fleet/src/lib/assets.ts`) — so
+ * the extension a new document gets is not decoration: a `.json` document handed to a Codex account is
+ * parsed as TOML and fails the apply. Deriving it is what stops a person having to know that.
+ */
+export const SETTINGS_DOCUMENT: Readonly<
+  Record<FleetHarnessKind, { readonly extension: string; readonly format: string }>
+> = {
+  claude: { extension: '.json', format: 'JSON' },
+  codex: { extension: '.toml', format: 'TOML' },
+};
+
+/** A new settings document's path from the part a person named. An empty middle names nothing. */
+export const settingsPathFor = (harness: FleetHarnessKind, middle: string): string =>
+  middle.trim() === '' ? '' : `${SETTINGS_PREFIX[harness]}${middle.trim()}${SETTINGS_DOCUMENT[harness].extension}`;
+
+/**
+ * One settings document this fleet has, and who already applies it.
+ *
+ * `name` is the name `config.shared.settings` gave it, present only where the registry named it —
+ * that registry is what makes a scaffolded fleet's own templates offerable at all, since it applies
+ * them through the `base` profile rather than through any account's overlay.
+ *
+ * `refusal` is how a declared document that cannot be picked FROM A BROWSER says so on its own card
+ * instead of vanishing from the list. An operator may legitimately write `~/settings.json` in
+ * `config.yaml`; a paired browser may not send one, and a store that quietly dropped it would tell
+ * somebody their fleet has no settings documents while its configuration names two.
+ */
+export interface FleetSettingsStoreItem {
+  readonly path: string;
+  readonly name?: string;
+  /** Wrappers whose account already applies it, in fleet order. Empty means no account names it. */
+  readonly accounts: readonly string[];
+  readonly refusal?: string;
+}
+
+/**
+ * The settings documents this fleet has, from the two places that know.
+ *
+ * The REGISTRY first — `config.shared.settings`, the names this fleet gave its documents — then every
+ * document an account's own overlay references, which is how one written by an earlier pass of this
+ * very step becomes offerable to the next. Nothing is inferred from a filename: a path is a settings
+ * document because the configuration says it is one, never because of what it is called.
+ *
+ * Every path is canonicalised on the way out. The configuration spells them `./templates/...` and the
+ * browser's grammar refuses a `.` segment, so the two spellings are reconciled HERE — once, where the
+ * offer is built — rather than at each of the places that compares, offers or sends one.
+ */
+export const settingsStoreItems = (config: FleetConfigView | null): readonly FleetSettingsStoreItem[] => {
+  const named = new Map<string, string>();
+  for (const [name, declared] of Object.entries(config?.shared?.settings ?? {})) {
+    named.set(canonicalAssetPath(declared), name);
+  }
+  const linkers = new Map<string, string[]>();
+  for (const agent of config?.agents ?? []) {
+    for (const route of Object.values(agent.routes)) {
+      for (const path of declaredSettingsPaths(route.layer?.settings)) {
+        const held = linkers.get(path);
+        if (held === undefined) linkers.set(path, [route.wrapper]);
+        else held.push(route.wrapper);
+      }
+    }
+  }
+  const items = new Map<string, FleetSettingsStoreItem>();
+  for (const path of [...named.keys(), ...linkers.keys()]) {
+    if (items.has(path)) continue;
+    const name = named.get(path);
+    const problem = assetPathProblem(path, 'it');
+    items.set(path, {
+      path,
+      ...(name === undefined ? {} : { name }),
+      accounts: linkers.get(path) ?? [],
+      ...(problem === null ? {} : { refusal: problem }),
+    });
+  }
+  return [...items.values()];
+};
+
+/** Every document path one route's declared `settings` references, canonical, in declared order. */
+const declaredSettingsPaths = (declared: unknown): readonly string[] =>
+  (Array.isArray(declared) ? (declared as readonly unknown[]) : [declared])
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    .map(entry => canonicalAssetPath(entry.trim()));
+
+/** The one entry a person typed rather than named, when they have typed one. */
+export const inlineSettings = (layer: FleetLayerDraft): FleetSettingsDraft | undefined =>
+  layer.settings.find(entry => entry.source === 'inline');
+
+/** Documents this change WRITES, as opposed to the ones it references. */
+export const authoredSettings = (layer: FleetLayerDraft): readonly FleetSettingsDraft[] =>
+  layer.settings.filter(entry => entry.source === 'new');
+
+/** The paths the stack currently applies, whether referenced or authored, in the order they apply. */
+export const settingsPaths = (layer: FleetLayerDraft): readonly string[] =>
+  layer.settings.filter(entry => entry.source !== 'inline').map(entry => entry.path.trim());
+
+/**
+ * Tick a document this fleet has, or untick it.
+ *
+ * Ticking APPENDS, which is what makes selection order the order that applies: an entry inserted
+ * anywhere else would silently change what an earlier pick means. Unticking removes it and leaves
+ * every other entry exactly where it was.
+ */
+export const withStoreSettings = (layer: FleetLayerDraft, path: string, id: string): FleetLayerDraft => {
+  const held = layer.settings.filter(entry => !(entry.source !== 'inline' && entry.path.trim() === path));
+  if (held.length !== layer.settings.length) return { ...layer, settings: held };
+  return { ...layer, settings: [...layer.settings, { id, source: 'store', path, text: '' }] };
+};
+
+/**
+ * The layer carrying a NEW settings document: appended to the stack, with its text seeded.
+ *
+ * The seed is the empty document for the harness's own format rather than an empty file, for the same
+ * reason the old inline box seeded `{}`: somebody who asked to write a document is looking at the box
+ * to type into, and an empty JSON file is not a document the daemon can parse.
+ */
+export const withNewSettings = (
+  layer: FleetLayerDraft,
+  harness: FleetHarnessKind,
+  middle: string,
+  id: string,
+): FleetLayerDraft => ({
+  ...layer,
+  settings: [
+    ...layer.settings,
+    {
+      id,
+      source: 'new',
+      path: settingsPathFor(harness, middle),
+      text: SETTINGS_DOCUMENT[harness].extension === '.json' ? '{}\n' : '',
+    },
+  ],
+});
+
+/**
+ * The layer carrying settings typed here with no name. AT MOST ONE, and that is a rule not a limit.
+ *
+ * Two anonymous entries are indistinguishable in the list a person reorders, and merging one nameless
+ * object onto another is a thing nobody needs: whatever the second would say, they can type into the
+ * first. A document is how you get two, and a document has a name.
+ */
+export const withInlineSettings = (layer: FleetLayerDraft, id: string): FleetLayerDraft =>
+  inlineSettings(layer) === undefined
+    ? { ...layer, settings: [...layer.settings, { id, source: 'inline', path: '', text: '{}' }] }
+    : layer;
+
+/** The layer without one entry. The only way back to an account that adds no settings of its own. */
+export const withoutSettings = (layer: FleetLayerDraft, id: string): FleetLayerDraft => ({
+  ...layer,
+  settings: layer.settings.filter(entry => entry.id !== id),
+});
+
+/** The layer with one entry moved one place earlier or later. At either end, nothing changes. */
+export const withSettingsMoved = (layer: FleetLayerDraft, id: string, delta: -1 | 1): FleetLayerDraft => {
+  const index = layer.settings.findIndex(entry => entry.id === id);
+  const target = index + delta;
+  if (index === -1 || target < 0 || target >= layer.settings.length) return layer;
+  const moved = [...layer.settings];
+  const [entry] = moved.splice(index, 1);
+  if (entry === undefined) return layer;
+  moved.splice(target, 0, entry);
+  return { ...layer, settings: moved };
+};
+
+/** The layer after editing one entry's text. An entry that is not there changes nothing. */
+export const withSettingsText = (layer: FleetLayerDraft, id: string, text: string): FleetLayerDraft => ({
+  ...layer,
+  settings: layer.settings.map(entry => (entry.id === id ? { ...entry, text } : entry)),
+});
+
+/**
+ * Why this name cannot become a new settings document, or `null` when it can.
+ *
+ * The store collision is a REDIRECT rather than a refusal of the intent — naming a document the fleet
+ * already has is almost always somebody meaning to apply it, and the control that does that is a tap
+ * above. The write collision is a genuine refusal: a path this same change already writes with other
+ * text would resolve by last-write-wins, and a person reviewing the plan would see both.
+ */
+export const newSettingsProblem = (
+  middle: string,
+  harness: FleetHarnessKind,
+  store: readonly FleetSettingsStoreItem[],
+  layer: FleetLayerDraft,
+): string | null => {
+  const trimmed = middle.trim();
+  if (trimmed === '') return 'name this document';
+  if (trimmed !== middle) return 'the name must not start or end with a space';
+  if (/[/\\]/u.test(trimmed) || trimmed.includes('..')) return 'the name must not contain a path separator or ".."';
+  const path = settingsPathFor(harness, trimmed);
+  const problem = assetPathProblem(path, 'that name produces a path that');
+  if (problem !== null) return problem;
+  if (store.some(item => item.path === path)) {
+    return `"${path}" is already in the store — tick it above to apply it, or choose another name`;
+  }
+  if (settingsPaths(layer).includes(path)) return `"${path}" is already listed`;
+  if ([layer.instructions.path.trim(), ...layer.skills.map(skill => skill.path.trim())].includes(path)) {
+    return `"${path}" is already written by this change; one path carries one text`;
+  }
+  return null;
+};
+
+/** What one entry is called where a person reads it: the document's path, or that they typed it. */
+export const settingsEntryLabel = (entry: FleetSettingsDraft): string =>
+  entry.source === 'inline' ? 'typed here' : entry.path.trim() === '' ? 'an unnamed document' : entry.path.trim();
+
+const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The text of one entry as the object it expresses, or `undefined` when this screen cannot know it.
+ *
+ * Three of the four cases are knowable and one is not, and the one that is not is the point of the
+ * distinction. An `inline` entry is a JSON object whichever harness reads it, because the daemon
+ * serialises it into the harness's own format. A `new` document is text in the HARNESS's format, so a
+ * Claude one parses here and a Codex one is TOML that this browser has no parser for. A `store` entry
+ * is a document nothing here has read.
+ *
+ * A `null` harness is the fourth case and it lands with the unknowable ones: a screen that was not
+ * told which harness reads a document cannot tell which parser would have read it.
+ */
+const knownSettingsObject = (
+  entry: FleetSettingsDraft,
+  harness: FleetHarnessKind | null,
+): Readonly<Record<string, unknown>> | undefined => {
+  if (entry.source === 'store') return undefined;
+  if (entry.source === 'new' && (harness === null || SETTINGS_DOCUMENT[harness].extension !== '.json')) {
+    return undefined;
+  }
+  return parsedSettingsObject(entry.text);
+};
+
+/** One key the composed settings set, and the entry whose value survived for it. */
+export interface FleetSettingsOrigin {
+  /** The key as a person would write it into the file: `permissions.allow`, not `permissions`. */
+  readonly key: string;
+  /** {@link settingsEntryLabel} for the entry that supplied it. */
+  readonly from: string;
+}
+
+/**
+ * Merge one entry's object into the running origin map, EXACTLY as the daemon's merge would.
+ *
+ * The rule being followed is `deepMergeSettings`: nested plain objects merge key by key, and every
+ * other value — scalar, array, null — replaces what was there wholesale. So an object arriving over a
+ * scalar erases that key and contributes its own leaves, and a scalar arriving over an object erases
+ * the whole subtree. Getting this approximately right would be worse than not showing it: the one
+ * thing a person uses this list for is to find out which document won.
+ */
+const foldOrigins = (
+  origins: Map<string, string>,
+  object: Readonly<Record<string, unknown>>,
+  from: string,
+  prefix: string,
+): void => {
+  for (const [key, value] of Object.entries(object)) {
+    const path = prefix === '' ? key : `${prefix}.${key}`;
+    if (isPlainObject(value)) {
+      origins.delete(path);
+      foldOrigins(origins, value, from, path);
+      continue;
+    }
+    for (const held of [...origins.keys()]) {
+      if (held === path || held.startsWith(`${path}.`)) origins.delete(held);
+    }
+    origins.set(path, from);
+  }
+};
+
+/**
+ * WHICH ENTRY DECIDED EACH KEY, over the entries whose contents this screen knows.
+ *
+ * Alphabetical, because the list is read to look one key up rather than to be walked in order — and
+ * because the insertion order a merge leaves behind is an implementation detail of the merge.
+ */
+export const settingsOrigins = (
+  layer: FleetLayerDraft,
+  harness: FleetHarnessKind | null,
+): readonly FleetSettingsOrigin[] => {
+  const origins = new Map<string, string>();
+  for (const entry of layer.settings) {
+    const object = knownSettingsObject(entry, harness);
+    if (object !== undefined) foldOrigins(origins, object, settingsEntryLabel(entry), '');
+  }
+  return [...origins.entries()]
+    .map(([key, from]) => ({ key, from }))
+    .sort((left, right) => left.key.localeCompare(right.key));
+};
+
+/**
+ * Entries whose contents this screen has NOT read, in the order they apply.
+ *
+ * Said out loud beside the key list, because a key list that silently omitted them would read as the
+ * whole answer. A document this browser has not read may set anything, and where it sits in the order
+ * is the only thing that can honestly be said about it.
+ */
+export const unreadSettings = (layer: FleetLayerDraft, harness: FleetHarnessKind | null): readonly string[] =>
+  layer.settings
+    .filter(entry => knownSettingsObject(entry, harness) === undefined)
+    .map(entry => settingsEntryLabel(entry));
 
 // ─── which step owns which problem ─────────────────────────────────────────────────────────────
 
@@ -794,25 +1111,11 @@ const instructionsProblems = (draft: FleetAccountDraft): readonly string[] => {
     return draft.layer.instructions.text !== '' && !pending ? ['name the file the instructions are written to'] : [];
   }
   const problem = assetPathProblem(path, 'the instructions path');
-  return [...(problem === null ? [] : [problem]), ...writtenTwice(draft.layer)];
-};
-
-/**
- * A path this change would write with two different texts.
- *
- * It lands on the instructions step rather than the skills one because the instructions document is
- * the path a person is most likely to have retyped into a skill row by mistake, and the sentence
- * names both. Claimed by ONE step either way: the partition proof would fail if both took it.
- */
-const writtenTwice = (layer: FleetLayerDraft): readonly string[] => {
-  const written = new Set<string>();
-  const twice = new Set<string>();
-  for (const path of [layer.instructions.path.trim(), ...layer.skills.map(skill => skill.path.trim())]) {
-    if (path === '') continue;
-    if (written.has(path)) twice.add(path);
-    written.add(path);
-  }
-  return [...twice].map(path => `"${path}" is written twice by this change; one path carries one text`);
+  // A path this change would write twice lands on THIS step rather than on skills or settings, because
+  // the instructions document is the one a person is most likely to have retyped into another row by
+  // mistake, and the sentence names both paths either way. Claimed by exactly one step: the partition
+  // proof fails if two take it, which is why it is `pathsWrittenTwice` here and nowhere else.
+  return [...(problem === null ? [] : [problem]), ...pathsWrittenTwice(draft.layer)];
 };
 
 const skillsProblems = (draft: FleetAccountDraft): readonly string[] => {
@@ -879,6 +1182,7 @@ export const draftIsComplete = (draft: FleetAccountDraft, config: FleetConfigVie
 export const assetProblemStep = (entry: FleetUnreadableAsset, layer: FleetLayerDraft): FleetStepId => {
   if (entry.scope === 'tree') return 'review';
   if (entry.path === layer.instructions.path.trim()) return 'instructions';
+  if (settingsPaths(layer).includes(entry.path)) return 'settings';
   return 'skills';
 };
 

@@ -62,6 +62,7 @@ import {
 } from './fleet-change-model.ts';
 import { FleetCheckChoice, type FleetChoice, FleetChoiceGroup, FleetPickOrAdd } from './fleet-choice-group.tsx';
 import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
+import { FleetSettingsOrder } from './fleet-settings-stack.tsx';
 import {
   assetProblemStep,
   authoredSkill,
@@ -70,7 +71,7 @@ import {
   FLEET_STEPS,
   type FleetInstructionsControl,
   type FleetPickOrAddSource,
-  type FleetSettingsChoice,
+  type FleetSettingsStoreItem,
   type FleetSkillsStoreItem,
   type FleetStepId,
   instructionsMiddle,
@@ -78,17 +79,23 @@ import {
   laneForMode,
   MODE_EXPLANATION,
   modelOptions,
+  newSettingsProblem,
   newSkillProblem,
   nextStep,
   otherLanes,
   OWN_DOCUMENT_CONSEQUENCE,
   previousStep,
+  SETTINGS_DOCUMENT,
+  SETTINGS_PREFIX,
   SHARED_DOCUMENT_CONSEQUENCE,
   SKILL_DOCUMENT,
   SKILLS_PREFIX,
   selectedModels,
   selectedModes,
-  settingsChoice,
+  settingsEntryLabel,
+  settingsPathFor,
+  settingsPaths,
+  settingsStoreItems,
   skillsSelection,
   stepCopy,
   stepIndex,
@@ -100,9 +107,10 @@ import {
   withInstructionsMiddle,
   withLaneVariant,
   withModels,
+  withNewSettings,
   withNewSkill,
-  withSettingsChoice,
   withSkillsSelection,
+  withStoreSettings,
 } from './fleet-stepper-model.ts';
 
 /** Above this many options a list stops being a list a person reads and becomes one they search. */
@@ -441,7 +449,15 @@ export function FleetAccountStepper({
         {step === 'skills' ? (
           <SkillsStep layer={draft.layer} onChange={setLayer} disabled={disabled} store={skillsStore} />
         ) : null}
-        {step === 'settings' ? <SettingsStep layer={draft.layer} onChange={setLayer} disabled={disabled} /> : null}
+        {/* THE SETTINGS STORE IS DERIVED HERE rather than handed in like the skills one, and the
+            difference is which document each is read out of. A skills item can be a directory sitting
+            in the asset TREE that no route declares, so building that list needs the asset listing the
+            surface holds. Every settings document this fleet has is named in the CONFIGURATION — by
+            `shared.settings`, or by an account's own overlay — which this component already has, so a
+            second prop would be a second copy of a derivation with one input. */}
+        {step === 'settings' ? (
+          <SettingsStep draft={draft} onChange={setLayer} disabled={disabled} store={settingsStoreItems(config)} />
+        ) : null}
         {step === 'review' ? <ReviewStep draft={draft} variants={variants} /> : null}
       </div>
 
@@ -1280,18 +1296,64 @@ function SkillsStep({
   );
 }
 
+/**
+ * Which settings this account applies — the same question every other step asks, finally asked here.
+ *
+ * THE STEP THAT DID NOT FOLLOW THE RULE. Every other step in this sequence offers what this fleet
+ * already has and lets a person add one that joins the collection. This one asked a two-way question
+ * — leave the fleet's settings alone, or type one JSON object — which could express exactly one entry
+ * of a field that has always been a STACK, deep-merged left to right, whose entries may be document
+ * references. So the fleet could compose settings and a browser could not, and the composition it did
+ * perform was invisible.
+ *
+ * SHAPED LIKE SKILLS, NOT LIKE INSTRUCTIONS, for the reason the skills step gives: this is an
+ * OPTIONAL SET and "none" is an ordinary answer somebody gives by ticking nothing, so a radio group
+ * would need a fourth answer whose only job is to escape a control that should not have been a radio.
+ * What it adds over skills is ORDER, because a set has none and a stack is nothing but order — which
+ * is why the ticked entries are shown as a numbered list underneath rather than only as ticks.
+ *
+ * The FORMAT is stated once, up here, rather than guessed per card. A harness's settings destination
+ * decides how every document in its stack is parsed, and this browser cannot know what a document in
+ * the store contains; what it can do is say plainly which parser will read them.
+ */
 function SettingsStep({
-  layer,
+  draft,
   onChange,
   disabled,
+  store,
 }: {
-  readonly layer: FleetLayerDraft;
+  readonly draft: FleetAccountDraft;
   readonly onChange: (next: FleetLayerDraft) => void;
   readonly disabled: boolean;
+  readonly store: readonly FleetSettingsStoreItem[];
 }) {
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
-  const choice = settingsChoice(layer);
+  const layer = draft.layer;
+  const harness = draft.harness;
+  const [middle, setMiddle] = useState('');
+  const applied = settingsPaths(layer);
+  const nameProblem = newSettingsProblem(middle, harness, store, layer);
+  const cards: readonly FleetChoice<string>[] = store.map(item => ({
+    id: item.path,
+    label: item.path,
+    detail:
+      item.refusal ??
+      [
+        item.name === undefined ? null : `Named “${item.name}” by this fleet.`,
+        item.accounts.length === 0 ? 'No account applies it yet.' : `Applied by ${item.accounts.join(', ')}.`,
+        SHARED_DOCUMENT_CONSEQUENCE,
+      ]
+        .filter(part => part !== null)
+        .join(' '),
+    ...(item.name === undefined ? {} : { badge: item.name }),
+    ...(item.refusal === undefined ? {} : { disabled: true }),
+  }));
+  const addDocument = (): void => {
+    if (nameProblem !== null) return;
+    onChange(withNewSettings(layer, harness, middle, crypto.randomUUID()));
+    setMiddle('');
+  };
   const addVariable = (): void =>
     onChange({ ...layer, env: [...layer.env, { id: crypto.randomUUID(), name: '', value: '' }] });
   return (
@@ -1299,41 +1361,73 @@ function SettingsStep({
       <div className="flex min-w-0 items-start gap-2">
         <Wrench size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
         <p className="m-0 min-w-0 text-meta leading-base text-muted">
-          This fleet already composes settings for its accounts. You can leave that alone, or add a few keys on top of
-          it for this account only.
+          This fleet already composes settings for its accounts, and anything here applies after that. Several can apply
+          at once: they are folded together in the order you put them in, and a later one wins where two set the same
+          key. A {fleetHarnessLabel(harness)} account reads them as {SETTINGS_DOCUMENT[harness].format}.
         </p>
       </div>
-      <FleetChoiceGroup
-        legend="Settings"
+
+      <FleetCheckChoice
+        legend="Settings this fleet already has"
         name="settings"
-        value={choice}
+        options={cards}
+        selected={applied}
         disabled={disabled}
-        onChoose={(next: FleetSettingsChoice) => onChange(withSettingsChoice(layer, next))}
-        options={[
-          {
-            id: 'fleet',
-            label: 'Use the fleet’s settings',
-            detail: 'Whatever this fleet already composes, unchanged.',
-          },
-          { id: 'own', label: 'Add settings for this account', detail: 'Merged on top. A key cannot be removed here.' },
-        ]}
+        empty="This fleet has named no settings documents. Write one below, or leave this account with whatever the fleet already composes."
+        onToggle={path => onChange(withStoreSettings(layer, path, crypto.randomUUID()))}
       />
-      {choice === 'own' ? (
-        <div>
-          <label className={FIELD_LABEL} htmlFor={id('-settings')}>
-            Settings JSON
-          </label>
-          <textarea
-            id={id('-settings')}
-            className="kt-input min-h-[6rem] font-mono"
-            rows={6}
-            value={layer.settingsText}
-            disabled={disabled}
-            placeholder={'{\n  "model": "opus"\n}'}
-            onChange={event => onChange({ ...layer, settingsText: event.target.value })}
-          />
+
+      {/* ADD ONE HERE, and it joins the collection — the same half the skills step gained, for the
+          same reason. The prefix and the extension are rendered rather than typed: the directory is
+          this fleet's own scaffold convention, and the extension follows from the harness, because a
+          `.json` document handed to a Codex account is parsed as TOML and fails the apply. */}
+      <div>
+        <label className={FIELD_LABEL} htmlFor={id('-new-settings')}>
+          Add a new settings document
+        </label>
+        <div className="flex min-w-0 flex-wrap items-start gap-2">
+          <div className="flex min-w-0 flex-1 items-stretch">
+            <span
+              className="inline-flex shrink-0 items-center rounded-l-control border border-r-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
+              data-fleet-settings-prefix=""
+            >
+              {SETTINGS_PREFIX[harness]}
+            </span>
+            <input
+              id={id('-new-settings')}
+              className="kt-input min-w-0 flex-1 rounded-l-none rounded-r-none font-mono"
+              value={middle}
+              disabled={disabled}
+              placeholder="strict"
+              data-fleet-new-settings=""
+              onChange={event => setMiddle(event.target.value)}
+            />
+            <span
+              className="inline-flex shrink-0 items-center rounded-r-control border border-l-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
+              aria-hidden="true"
+            >
+              {SETTINGS_DOCUMENT[harness].extension}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="kt-btn"
+            data-fleet-add-settings=""
+            disabled={disabled || nameProblem !== null}
+            onClick={addDocument}
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add
+          </button>
         </div>
-      ) : null}
+        <p className="m-0 mt-1 break-words text-meta leading-base text-muted" data-fleet-new-settings-note="">
+          {middle.trim() === ''
+            ? 'A new document in this fleet’s store, written by this change. The next account you create can tick it.'
+            : (nameProblem ?? `${settingsPathFor(harness, middle)} will be added to the store.`)}
+        </p>
+      </div>
+
+      <FleetSettingsOrder layer={layer} onChange={onChange} disabled={disabled} harness={harness} name="stepper" />
 
       <details className="group rounded-control border border-border-soft" data-fleet-env-fold="">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-ui font-semibold text-fg">
@@ -1456,9 +1550,16 @@ function ReviewStep({ draft, variants }: { readonly draft: FleetAccountDraft; re
           value={draft.layer.instructions.path.trim() === '' ? '—' : draft.layer.instructions.path.trim()}
         />
         <RecapRow label="Skills" value={skills.length === 0 ? 'none' : skills.join(', ')} />
+        {/* NAMED AND IN ORDER, never counted. "2 settings" is the one thing a person cannot check
+            against the plan they are about to approve, and the order is the whole mechanism — so the
+            row reads as the sequence it sends, with `→` for "and then". */}
         <RecapRow
           label="Settings"
-          value={settingsChoice(draft.layer) === 'fleet' ? 'the fleet’s, unchanged' : 'a few keys of its own'}
+          value={
+            draft.layer.settings.length === 0
+              ? 'the fleet’s, unchanged'
+              : draft.layer.settings.map(entry => settingsEntryLabel(entry)).join(' → ')
+          }
         />
       </dl>
     </div>
