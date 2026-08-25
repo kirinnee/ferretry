@@ -1736,7 +1736,7 @@ describe('drafts become one named mutation', () => {
       harness: 'claude',
       name: 'studio',
       lanes: [{ variant: 'default', mode: 'auto' }],
-      models: ['opus', 'sonnet'],
+      models: [{ id: 'opus' }, { id: 'sonnet' }],
       defaultModel: 'opus',
       displayName: 'Studio Claude',
       layer: {
@@ -1764,7 +1764,7 @@ describe('drafts become one named mutation', () => {
       harness: 'codex',
       name: 'solo',
       lanes: [{ variant: 'default', mode: 'auto' }],
-      models: ['gpt'],
+      models: [{ id: 'gpt' }],
       defaultModel: 'gpt',
     });
     expect(request.assetEdits).toHaveLength(0);
@@ -1843,10 +1843,13 @@ describe('drafts become one named mutation', () => {
 });
 
 describe('declared limits', () => {
-  it('states the YAML, settings-merge and asset limits rather than implying none', () => {
-    expect(CHANGE_LIMITS).toHaveLength(3);
+  it('states the YAML, settings-merge, asset and out-of-service-model limits rather than implying none', () => {
+    expect(CHANGE_LIMITS).toHaveLength(4);
     expect(CHANGE_LIMITS[0]).toContain('YAML comments');
     expect(CHANGE_LIMITS[1]).toContain('MERGED');
     expect(CHANGE_LIMITS[2]).toContain('per-skill selection');
+    // Both halves in one sentence, because each is a surprise on its own: this form cannot declare a
+    // model out of service, and a change sent from it will not delete one somebody declared by hand.
+    expect(CHANGE_LIMITS[3]).toContain('taken out of service');
   });
 });

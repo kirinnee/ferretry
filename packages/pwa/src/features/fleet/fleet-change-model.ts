@@ -2149,7 +2149,11 @@ export const createAccountProposal = (draft: FleetAccountDraft): FleetProposalRe
       harness: draft.harness,
       name: draft.name.trim(),
       lanes: draft.lanes.map(lane => ({ variant: lane.variant.trim(), mode: lane.mode })),
-      models: draftModels(draft.modelsText),
+      // A DECLARATION PER MODEL, not a bare identifier. The wire carries availability and the reason a
+      // model is out of service, and this form offers neither — so each entry says its id and stops
+      // there, which on a create is an available model because the account has no prior answer to
+      // leave alone. Sending strings is what deleted an out-of-service model on the way through.
+      models: draftModels(draft.modelsText).map(id => ({ id })),
       defaultModel: draft.defaultModel.trim(),
       ...(displayName === '' ? {} : { displayName }),
       ...(layer === undefined ? {} : { layer }),
@@ -2187,4 +2191,5 @@ export const CHANGE_LIMITS: readonly string[] = [
   'Applying rewrites fleet config.yaml from the parsed document: YAML comments, anchors and key order in that file are not preserved.',
   'Settings are MERGED, in order, over what the harness already wrote. A key cannot be deleted from here — a later document can only give it another value.',
   'Only text assets can be edited here. Executable hooks, per-skill selection and home pruning are not offered.',
+  'A model taken out of service in config.yaml is kept exactly as it is. This form cannot declare one, and no change sent from here removes one or the reason written on it.',
 ];
