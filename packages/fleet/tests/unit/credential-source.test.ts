@@ -300,3 +300,47 @@ describe('decideLoginApplicability', () => {
     should(actual).deepEqual({ applies: false, because: 'harness-has-no-login' });
   });
 });
+
+/**
+ * The "no login wanted" answer. A profile binds the credential variable to Ferretry's own store, so
+ * there is nothing to sign in to and nothing on this host to go and look at except the store.
+ */
+describe('an account a profile authenticates', () => {
+  it('should read a secret-backed credential as coming from the store, naming the secret', () => {
+    // Act
+    const actual = sourceOf({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } });
+
+    // Assert
+    should(actual).deepEqual({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] });
+  });
+
+  it('should not read it as a configured value, which would say the configuration carries the key', () => {
+    // Act
+    const actual = sourceOf({ env: { ANTHROPIC_API_KEY: 'Bearer ${secret:WORK_KEY}' } });
+
+    // Assert
+    should(actual).have.property('source', 'secret-store');
+  });
+
+  it('should win over the secrets file, which names a place the value is not', () => {
+    // Act
+    const actual = sourceOf({
+      env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' },
+      secretsFile: '/etc/ferretry/secrets.sh',
+    });
+
+    // Assert
+    should(actual).deepEqual({ source: 'secret-store', variable: 'ANTHROPIC_API_KEY', secrets: ['WORK_KEY'] });
+  });
+
+  it('should offer no login for it, because a login would write a store nothing reads', () => {
+    // Arrange
+    const source = sourceOf({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } });
+
+    // Act
+    const actual = decideLoginApplicability('claude', source);
+
+    // Assert
+    should(actual).deepEqual({ applies: false, because: 'credential-is-not-a-login' });
+  });
+});

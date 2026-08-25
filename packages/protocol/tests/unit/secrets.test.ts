@@ -11,6 +11,7 @@ import {
   SecretUseRequestSchema,
   SecretUseResultSchema,
   SecretValueSchema,
+  malformedSecretReference,
   secretMask,
   secretReference,
   secretReferencePattern,
@@ -122,6 +123,33 @@ describe('the one reference grammar', () => {
 
   it('masks by name, because the name is not the secret', () => {
     expect(secretMask('TOKEN')).toBe('[redacted:TOKEN]');
+  });
+});
+
+/**
+ * The near miss is the way this grammar actually breaks: a reference that matches nothing stays a
+ * literal, is exported into a child verbatim, and the child authenticates with the text of it. Every
+ * failure after that names a remote service and nothing anybody could have looked at.
+ */
+describe('a value that only looks like a reference', () => {
+  it('names the malformed opener so a configuration can refuse it with the text of it', () => {
+    expect(malformedSecretReference('${secret:work_key}')).toBe('${secret:work_key}');
+  });
+
+  it('is not excused by a well-formed reference beside it', () => {
+    expect(malformedSecretReference('Bearer ${secret:GOOD} ${secret:bad}')).toBe('${secret:bad}');
+  });
+
+  it('catches an opener that was never closed', () => {
+    expect(malformedSecretReference('${secret:UNCLOSED')).toBe('${secret:UNCLOSED');
+  });
+
+  it('says nothing about a value whose openers are all well formed', () => {
+    expect(malformedSecretReference('Bearer ${secret:A} ${secret:B}')).toBeUndefined();
+  });
+
+  it('says nothing about a value with no opener at all, including one that resembles the tag', () => {
+    expect(malformedSecretReference('${SECRET:TOKEN} $secret:TOKEN {secret:TOKEN}')).toBeUndefined();
   });
 });
 

@@ -523,3 +523,60 @@ describe('AccountRouteSchema layer', () => {
     should(actual.length).be.above(0);
   });
 });
+
+/**
+ * A profile may bind a variable to Ferretry's own secret store, and the near miss is the failure that
+ * matters: a value matching no reference stays a literal and the harness authenticates with the text
+ * of the reference, which produces a credential error naming nothing on this machine.
+ */
+describe('a profile that names a secret', () => {
+  it('should accept a whole-value reference and one composed inside a value', () => {
+    // Arrange
+    const input = config({
+      profiles: { work: { env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}', AUTH: 'Bearer ${secret:WORK_KEY}' } } },
+      agents: [agent({ profiles: ['work'] })],
+    });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  it('should refuse a malformed reference rather than accept it as a literal', () => {
+    // Arrange
+    const input = config({ agents: [agent({ env: { ANTHROPIC_API_KEY: '${secret:work_key}' } })] });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual).matchAny(/is not a secret reference/);
+    should(actual).matchAny(/\$\{secret:WORK_KEY\}/);
+  });
+
+  it('should refuse a malformed reference in a route layer too', () => {
+    // Arrange
+    const input = config({
+      agents: [agent({ routes: { default: route({ layer: { env: { A_KEY: '${secret:}' } } }) } })],
+    });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual).matchAny(/is not a secret reference/);
+  });
+
+  it('should still refuse a reserved variable, however its value is spelled', () => {
+    // Arrange — a profile that could set a home would point an account at somebody else's credential.
+    const input = config({ agents: [agent({ env: { [RESERVED_ENV_NAMES[0]]: '${secret:WORK_KEY}' } })] });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual).matchAny(/is reserved/);
+  });
+});

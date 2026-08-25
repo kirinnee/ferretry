@@ -28,6 +28,7 @@ const DONORS = { claude: '/fixture/user/.claude', codex: '/fixture/user/.codex' 
 
 /** A published account exactly as a preparation would have just added it. */
 const target = (wrapper: string, kind: HarnessKind = 'claude'): FleetSeedTarget => ({
+  secretEnv: {},
   id: `00000000-0000-4000-8000-00000000000${wrapper.length % 10}`,
   kind,
   mode: 'interactive',

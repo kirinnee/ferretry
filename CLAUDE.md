@@ -163,6 +163,33 @@ adding a getter would delete the feature. The threat model, the `${secret:NAME}`
 declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
 against, because the useful property is narrower than people assume.
 
+A **profile can authenticate an account instead of a login** — the "no login wanted" answer — and the
+contract is [docs/fleet-env-profiles.md](docs/fleet-env-profiles.md). **There is no second profile
+system**: a profile already existed, already composed, and `env` was already one of the fields it
+composed; what it could not carry was a CREDENTIAL, because every value went into a generated wrapper
+in plain text. So this is **one spelling added to the value grammar** — `${secret:NAME}`, the same
+reference `config/daemon.json` already uses, against the same store — and composition needed no work
+at all. Anyone reading it as a parallel mechanism will "simplify" it into one. **Composition is
+therefore the composition it always was**, right-overriding-left through the chain
+`compositionSlots` owns, and the report READS that chain rather than restating it, because two
+orderings would disagree exactly where it matters most — on an account whose credential is not the
+one the report claims. It is **visible** as the origin on each secret-listing row, naming the account,
+the variable, the slot that won AND the slots it beat, in words that never say "layer" or "lane"
+(both removed in `#384`). **Use, never read holds unchanged**: a value reaches exactly one place, the
+environment of the child launched for that one account, so no route, command or error returns one and
+`FleetLaunchEnvironment` is the THIRD thing in the daemon holding a `SecretVault`. **The two halves
+read different documents on purpose** — a launch reads the published manifest so a `config.yaml` typo
+cannot refuse every session, and the reference listing reads the configuration because only it knows
+WHICH profile set a variable; do not unify them. `CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
+`CODEX_SQLITE_HOME` are **refused at parse time, naming the variable**, since a profile that set one
+could point an account at another account's credential, and a malformed `${secret:…}` is refused
+rather than exported as the text of itself. A missing secret **refuses the launch naming every one**,
+never an empty credential; a damaged vault refuses too. A profile is **opt-in** and an account that
+binds none never opens the store, which is what keeps an ordinary fleet working on a host whose vault
+is damaged. Read the GAPs before describing the surface: there is no UI for creating a profile yet,
+the browser's sign-in row is told `environment` rather than `secret-store` on purpose, and a wrapper
+run from a plain shell now fails for a profiled account by design.
+
 `packages/daemon` locates the harness commands (`claude`, `codex`) through **one** rule an operator can
 change: an explicit per-harness path, then declared search directories, then the inherited
 environment — the contract is [docs/harness-paths.md](docs/harness-paths.md). It exists because a

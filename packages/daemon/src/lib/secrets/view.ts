@@ -15,6 +15,28 @@ import type { SecretDirectory } from './vault.ts';
 /** A store with no configured references reports none, which is a fact rather than an absence. */
 export const NO_REFERENCES: SecretReferenceSource = { references: async () => [] };
 
+/**
+ * Several places that name secrets, as one source.
+ *
+ * A daemon has more than one now — the operator's `secretEnvironment` recipes, and the fleet accounts
+ * whose profiles authenticate them — and the listing must show all of them. Sources are read in order
+ * and their answers concatenated, NOT deduplicated: one secret named by a recipe and by two accounts
+ * is three facts, and collapsing them would hide that deleting it breaks all three.
+ *
+ * A source that raises takes the read down with it, which is the point. A reference list that quietly
+ * dropped the half it could not read would show a person a complete-looking screen with their account
+ * missing from it, and they would go and delete a secret nothing appears to want.
+ */
+export function combinedReferences(...sources: readonly SecretReferenceSource[]): SecretReferenceSource {
+  return {
+    references: async () => {
+      const collected: { readonly name: string; readonly origin: string }[] = [];
+      for (const source of sources) collected.push(...(await source.references()));
+      return collected;
+    },
+  };
+}
+
 /** Why the store cannot answer, in terms an operator can act on. */
 function diagnose(error: SecretStoreError): string {
   switch (error.failure) {

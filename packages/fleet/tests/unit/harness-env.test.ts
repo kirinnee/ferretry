@@ -87,3 +87,44 @@ describe('referencedEnvNames', () => {
     should(actual).deepEqual([]);
   });
 });
+
+/**
+ * A wrapper whose account is authenticated by a profile emits a requirement and NO export, so the
+ * requirement line is the only place that dependency is written down. A reader that ignored it would
+ * report the account as needing nothing from its environment while the guard it skipped is exactly
+ * what will stop the launch.
+ */
+describe('the variables a profile-authenticated wrapper requires', () => {
+  it('should report a variable a requirement line names but no export mentions', () => {
+    // Arrange
+    const script = [
+      '#!/bin/sh',
+      `: "\${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry's secret store (secret WORK_KEY). Launch it through the daemon, or run: fy secret set WORK_KEY}"`,
+      "export CLAUDE_CONFIG_DIR='/homes/one'",
+      'exec claude "$@"',
+    ].join('\n');
+
+    // Act
+    const actual = referencedEnvNames(script);
+
+    // Assert
+    should(actual).deepEqual(['ANTHROPIC_API_KEY']);
+  });
+
+  it('should report a requirement and an exported reference together, each once', () => {
+    // Arrange
+    const script = [
+      '#!/bin/sh',
+      ': "${FY_TOKEN:?ferretry: FY_TOKEN is not set — expected it from the environment}"',
+      `: "\${ANTHROPIC_API_KEY:?ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry's secret store (secret WORK_KEY).}"`,
+      'export OPENAI_API_KEY="${FY_TOKEN}"',
+      'exec claude "$@"',
+    ].join('\n');
+
+    // Act
+    const actual = referencedEnvNames(script);
+
+    // Assert
+    should(actual).deepEqual(['FY_TOKEN', 'ANTHROPIC_API_KEY']);
+  });
+});

@@ -18,6 +18,7 @@
  * segment or separator in one would let a configuration write outside the directories it owns.
  */
 import { z } from 'zod';
+import { malformedSecretReference } from '@ferretry/protocol';
 import type { AssetField } from './assets.ts';
 import { canonicalAssetReference } from './paths.ts';
 import { AccountIdSchema, AccountModeSchema, type FleetManifestModel, HarnessKindSchema } from './manifest.ts';
@@ -57,12 +58,29 @@ export const EnvNameSchema = z.string().regex(POSIX_ENV_NAME, {
 export const RESERVED_ENV_NAMES = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CODEX_SQLITE_HOME'] as const;
 
 /**
- * An environment value. A value that is exactly `$NAME` or `${NAME}` is an indirect reference,
- * resolved from the process environment when the wrapper runs; anything else is a literal. Keeping
- * references as references is what allows provider credentials to live in the secrets file instead
- * of in a generated script.
+ * An environment value, in one of three spellings.
+ *
+ * - `$NAME` or `${NAME}` — an indirect reference, resolved from the process environment when the
+ *   wrapper runs.
+ * - `${secret:NAME}`, anywhere inside the value — this daemon's secret store supplies it at launch,
+ *   and the value is never written into a generated script. See `./env-profiles.ts`; that is what
+ *   lets a profile authenticate an account instead of a login.
+ * - anything else — a literal.
+ *
+ * A MALFORMED `${secret:…}` IS REFUSED rather than treated as a literal. `${secret:work_key}` matches
+ * no reference, so it would be exported verbatim and the harness would authenticate with the text of
+ * the reference — a credential failure whose cause is invisible in every place a person would look.
  */
-export const EnvValueSchema = z.string();
+export const EnvValueSchema = z.string().check(ctx => {
+  const malformed = malformedSecretReference(ctx.value);
+  if (malformed !== undefined) {
+    ctx.issues.push({
+      code: 'custom',
+      message: `"${malformed}" is not a secret reference — a secret name is uppercase letters, digits and underscores, as in \${secret:WORK_KEY}`,
+      input: ctx.value,
+    });
+  }
+});
 
 /**
  * Keys are checked explicitly rather than through a key schema: a record key schema reports only

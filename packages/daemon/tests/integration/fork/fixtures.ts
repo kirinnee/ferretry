@@ -71,6 +71,7 @@ export async function realTemporaryDirectory(prefix: string): Promise<string> {
 /** One published account, in the exact shape the fleet manifest declares. */
 export function account(overrides: Partial<CoreAccount> = {}): CoreAccount {
   return {
+    secretEnv: {},
     id: 'acct-target',
     agent: 'claude-auto-zelda',
     kind: 'claude',

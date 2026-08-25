@@ -18,6 +18,15 @@
  * derivation that stat-ed the secrets file would answer a different question ("is the secret there
  * right now") and would answer it differently on every boot.
  *
+ * ## The answer to "no login wanted"
+ *
+ * `secret-store` is the member a profile earns. A configured value naming `${secret:NAME}` means the
+ * credential is in this daemon's own store and the daemon puts it into the launch environment — so
+ * there is nothing to sign in to, nothing in the generated wrapper, and nothing in the fleet
+ * configuration but a name. It is asked before every other reading of a value, because every other
+ * reading would name the wrong place: `configured-value` would say the configuration carries the key,
+ * and `environment` would send somebody to a variable they are supposed to set themselves.
+ *
  * ## Why an env reference plus a secrets file is a FILE and not the environment
  *
  * `./wrappers.ts` renders a configured value of exactly `$NAME` as `"${NAME}"` and, when the fleet
@@ -35,6 +44,7 @@
  * declaration says about the shape of it. That is not inference about `auth`: it is reading what the
  * generated wrapper will actually export, which is the thing that decides what the harness does.
  */
+import { secretReferencesIn, type SecretName } from '@ferretry/protocol';
 import type { HarnessKind } from './manifest.ts';
 import type { ResolvedAccount } from './profiles.ts';
 import { envReferenceName } from './wrappers.ts';
@@ -72,6 +82,11 @@ export const HARNESS_CREDENTIAL_ENV: Readonly<Record<HarnessKind, readonly strin
 export type FleetCredentialSource =
   /** The harness's own login writes the credential into the harness's own store. */
   | { readonly source: 'interactive-login' }
+  /**
+   * A profile binds the variable to Ferretry's own secret store, and the daemon supplies the value
+   * at launch. This is the "no login wanted" answer: nothing to sign in to, and nothing on disk.
+   */
+  | { readonly source: 'secret-store'; readonly variable: string; readonly secrets: readonly SecretName[] }
   /** A shell file the generated wrapper sources supplies the variable. */
   | { readonly source: 'token-file'; readonly variable: string; readonly path: string }
   /** The environment that launches the wrapper supplies the variable. */
@@ -107,6 +122,11 @@ export function credentialSourceOf(account: ResolvedAccount, secretsFile?: strin
   // Present because `declaredCredentialVariable` found it; read again rather than threaded through so
   // this function has one source of truth for the value it classifies.
   const value = account.env[variable] ?? '';
+  // Asked FIRST, because a secret reference is a value the wrapper never carries and never resolves
+  // for itself. Reading it as a `configured-value` would report the credential as living in the fleet
+  // configuration — which is exactly the sentence a profile exists to stop being true.
+  const secrets = secretReferencesIn(value);
+  if (secrets.length > 0) return { source: 'secret-store', variable, secrets };
   if (envReferenceName(value) === undefined) return { source: 'configured-value', variable };
   return secretsFile === undefined
     ? { source: 'environment', variable }

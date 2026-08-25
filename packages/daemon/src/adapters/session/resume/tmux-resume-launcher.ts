@@ -1,3 +1,4 @@
+import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import { sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
 import {
   type PaneObservation,
@@ -23,6 +24,13 @@ export interface ResumeLaunchSpec {
    * itself even when the spec carries no environment at all.
    */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * The executable this session runs, so a profile-authenticated account can be recognised.
+   *
+   * Absent means the caller cannot say, and the revive then supplies no profile environment — which
+   * is what every session that binds no secret gets anyway.
+   */
+  readonly agent?: string;
 }
 
 /** Rewrites the durable pane identity after a revive replaces the process incarnation. */
@@ -73,6 +81,8 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     private readonly limits?: AgentLaunchWrapper,
     private readonly registrar?: ResumePaneRegistrar,
     private readonly retry: ResumeRegistrationRetry = DEFAULT_REGISTRATION_RETRY,
+    /** What the account's own profile supplies; see the launch path's identical parameter. */
+    private readonly accountEnvironment?: AccountLaunchEnvironment,
   ) {}
 
   async observe(id: SessionId): Promise<PaneObservation> {
@@ -94,10 +104,14 @@ export class TmuxResumeLauncher implements ResumeLauncher {
    *
    * A pane reads its environment AT LAUNCH, so a revive that dropped it would hand a working agent a
    * replacement that has lost its own name and its board capability — a teammate that stops being
-   * able to attribute a message, or accept an invitation, at the exact moment it is recovered.
+   * able to attribute a message, or accept an invitation, at the exact moment it is recovered. An
+   * account authenticated by a profile has the same problem in a harsher form: the replacement would
+   * come back with no credential at all, so its profile is resolved here exactly as it is on the
+   * first launch.
    */
   async relaunch(id: SessionId): Promise<void> {
     const spec = await this.spec(id);
+    const account = spec.agent === undefined ? {} : ((await this.accountEnvironment?.forWrapper(spec.agent)) ?? {});
     // Resolve from the CURRENT saved resource-limit document, but never bake the transient wrapper
     // into the durable spec. A later relaunch after disabling must recover the same direct command.
     const wrapped = (await this.limits?.command(id, spec.command)) ?? spec.command;
@@ -107,7 +121,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
       session: spec.tmuxSession,
       cwd: spec.cwd,
       command: [program, ...arguments_],
-      env: sessionPaneEnvironment(id, spec.env ?? {}),
+      env: sessionPaneEnvironment(id, launchEnvironment(account, spec.env ?? {})),
     });
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.

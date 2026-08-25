@@ -612,9 +612,20 @@ The engineering is tractable and mostly already written. The trade is one questi
 sign-in; then both harness legs; then the surface that drives them and the control where the dead end was.
 **That last step was wider than it looks:** the `quota auth!` readout is one component deliberately shared
 by the chat header, the fleet table, the session card and the folder sidebar
-(`packages/pwa/src/shell/quota-readout.tsx:1-19`), so the control went **beside** it — a Sign-in tab
-immediately after Fleet — rather than inside a readout four screens render. Both readouts gained one
-sentence naming where to go, which is the only change either of them needed.
+(`packages/pwa/src/shell/quota-readout.tsx:1-19`), so the control went **beside** it rather than inside a
+readout four screens render. Both readouts gained one sentence naming where to go, which is the only
+change either of them needed.
+
+> **SUPERSEDED, and the correction is a promotion rather than a reversal.** That control shipped as a
+> Sign-in tab immediately after Fleet, and it is now **the Accounts page** —
+> `packages/pwa/src/features/fleet/accounts-page.tsx`, at `/d/:daemonId/accounts`. Two things forced the
+> move. A settings sub-tab is selected by component state and therefore **has no address**, so the
+> readout's "where to go" sentence could not link to it; and the tab grouped by provider login and
+> offered one control per group, which started the sign-in of whichever member was listed first — the
+> exact conflation `chooseLoginDriver` (§ below) exists to end. The page is one row per ACCOUNT, the row's
+> own `accountId` goes to `POST /v1/fleet/login`, and each row carries the stored health verdict and the
+> instant behind it. Everything else in this section still holds: one flow per harness, the credential
+> source deciding whether a sign-in is offered at all, and the shared operator prompt.
 
 **No** → the honest alternatives, both coherent:
 
@@ -669,25 +680,25 @@ deleted: a reader comparing this document to `main` needs to see which claims mo
 has inverted is the dangerous kind — "no hits" reads as confirmation either way — so each says what the
 answer is now.
 
-| claim                                                                                                           | how to re-check it                                                                                                                                                     |
-| --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ~~no daemon route logs the fleet in~~ **NOW FALSE**: five do                                                    | `rg -n --fixed-strings "path: '/v1/fleet/login" packages/daemon/src/lib/runtime/mounts/fleet-login.ts`                                                                 |
-| `fy fleet login` inherits a terminal                                                                            | `packages/fleet/src/adapters/process-login.ts:89-97`                                                                                                                   |
-| the login command is two literals                                                                               | `rg -n --fixed-strings "HARNESS_LOGIN" packages/fleet/src/adapters/process-login.ts`                                                                                   |
-| credential material never leaves the adapter                                                                    | `packages/fleet/src/adapters/credential-store.ts:16-18`, `194-206`                                                                                                     |
-| ~~the wire carries no credential classification~~ **NOW FALSE**                                                 | `rg -n --fixed-strings "refreshable" packages/protocol/src packages/pwa/src` — `FleetCredentialReadingSchema` carries it                                               |
-| the roster already puts `home` and `wrapper` on the wire                                                        | `packages/protocol/src/lib/fleet-changes.ts:564-577`                                                                                                                   |
-| ~~a login UI already exists and dials nothing~~ **NOW FALSE**: it is deleted, and the two that replace it dial  | `rg -n --fixed-strings "startHarnessLogin" packages/pwa/src` — a grep for `RemoteLoginSurface` now finds NOTHING, which is the answer inverting rather than confirming |
-| both fleet axes default to enabled                                                                              | `packages/daemon/src/lib/grants/policy.ts:42-49`                                                                                                                       |
-| `use` is never password-gated; `configure` is                                                                   | `packages/daemon/src/lib/grants/policy.ts:211-229`                                                                                                                     |
-| every attention board is session-scoped                                                                         | `rg -n --fixed-strings "path: '/v1/sessions/:sessionId/attention'" packages/daemon/src`                                                                                |
-| nothing raises a daemon-caused attention item                                                                   | `rg -n --fixed-strings "kind: 'daemon'" packages/daemon/src` (state-machine read-back only)                                                                            |
-| ~~the browser meets a dead end today~~ **NOW FALSE**: the readout names where to go, and a Sign-in tab is there | `rg -n --fixed-strings "Settings ▸ Fleet" packages/pwa/src`                                                                                                            |
-| a relay cannot read a data frame                                                                                | `docs/relay-protocol.md:123-124`, `138`                                                                                                                                |
-| the remedy the daemon composes is a host command                                                                | `packages/daemon/src/lib/usage/quota.ts:12-17`                                                                                                                         |
-| a terminal cannot be pointed at a command                                                                       | `packages/protocol/src/lib/terminal.ts:96-109`                                                                                                                         |
-| readiness never runs a harness to answer a question                                                             | `packages/daemon/src/lib/core/harness-readiness.ts:22-24`                                                                                                              |
-| the harness flows were read out of the installed binaries                                                       | `docs/migration/surveys/harness-login-flows.md:10-16`                                                                                                                  |
+| claim                                                                                                               | how to re-check it                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~no daemon route logs the fleet in~~ **NOW FALSE**: five do                                                        | `rg -n --fixed-strings "path: '/v1/fleet/login" packages/daemon/src/lib/runtime/mounts/fleet-login.ts`                                                                 |
+| `fy fleet login` inherits a terminal                                                                                | `packages/fleet/src/adapters/process-login.ts:89-97`                                                                                                                   |
+| the login command is two literals                                                                                   | `rg -n --fixed-strings "HARNESS_LOGIN" packages/fleet/src/adapters/process-login.ts`                                                                                   |
+| credential material never leaves the adapter                                                                        | `packages/fleet/src/adapters/credential-store.ts:16-18`, `194-206`                                                                                                     |
+| ~~the wire carries no credential classification~~ **NOW FALSE**                                                     | `rg -n --fixed-strings "refreshable" packages/protocol/src packages/pwa/src` — `FleetCredentialReadingSchema` carries it                                               |
+| the roster already puts `home` and `wrapper` on the wire                                                            | `packages/protocol/src/lib/fleet-changes.ts:564-577`                                                                                                                   |
+| ~~a login UI already exists and dials nothing~~ **NOW FALSE**: it is deleted, and the two that replace it dial      | `rg -n --fixed-strings "startHarnessLogin" packages/pwa/src` — a grep for `RemoteLoginSurface` now finds NOTHING, which is the answer inverting rather than confirming |
+| both fleet axes default to enabled                                                                                  | `packages/daemon/src/lib/grants/policy.ts:42-49`                                                                                                                       |
+| `use` is never password-gated; `configure` is                                                                       | `packages/daemon/src/lib/grants/policy.ts:211-229`                                                                                                                     |
+| every attention board is session-scoped                                                                             | `rg -n --fixed-strings "path: '/v1/sessions/:sessionId/attention'" packages/daemon/src`                                                                                |
+| nothing raises a daemon-caused attention item                                                                       | `rg -n --fixed-strings "kind: 'daemon'" packages/daemon/src` (state-machine read-back only)                                                                            |
+| ~~the browser meets a dead end today~~ **NOW FALSE**: the readout names where to go, and the Accounts page is there | `rg -n --fixed-strings "Accounts page." packages/pwa/src` — the old grep was `Settings ▸ Fleet`, which now finds NOTHING because the tab became a route                |
+| a relay cannot read a data frame                                                                                    | `docs/relay-protocol.md:123-124`, `138`                                                                                                                                |
+| the remedy the daemon composes is a host command                                                                    | `packages/daemon/src/lib/usage/quota.ts:12-17`                                                                                                                         |
+| a terminal cannot be pointed at a command                                                                           | `packages/protocol/src/lib/terminal.ts:96-109`                                                                                                                         |
+| readiness never runs a harness to answer a question                                                                 | `packages/daemon/src/lib/core/harness-readiness.ts:22-24`                                                                                                              |
+| the harness flows were read out of the installed binaries                                                           | `docs/migration/surveys/harness-login-flows.md:10-16`                                                                                                                  |
 
 Use `--fixed-strings` on every one of those greps. `rg -r` is `--replace`, so `rg -rn "pattern" path`
 prints each hit with the pattern rewritten to `n` and reads as "it is not there" — the mistake

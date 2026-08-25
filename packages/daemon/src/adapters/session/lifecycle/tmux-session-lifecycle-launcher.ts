@@ -1,3 +1,4 @@
+import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import {
   sessionPaneEnvironment,
   type SessionEnvironmentStore,
@@ -41,6 +42,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     private readonly registrar?: SessionPaneRegistrar,
     private readonly snapshots?: LastSnapshotWriter,
     private readonly limits?: AgentLaunchWrapper,
+    /**
+     * What this account's own profile supplies. A launcher built without one launches exactly as it
+     * did before profiles existed, which is also what every account that binds no secret gets.
+     */
+    private readonly accountEnvironment?: AccountLaunchEnvironment,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -60,7 +66,18 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     // The env is never empty now — `sessionPaneEnvironment` always contributes the session's own id —
     // so the branch that omitted it entirely is gone. A pane launched without it is a teammate that
     // cannot name itself in a single request.
-    const env = sessionPaneEnvironment(record.config.id, await this.environment.read(record.config.id));
+    //
+    // The account's own profile is resolved per launch for the same reason, and against the account
+    // this session actually runs — a credential rotated in the store reaches the next pane without an
+    // apply, and a missing one refuses HERE, naming the secret, rather than letting the harness fail
+    // to authenticate against a remote service minutes later.
+    const env = sessionPaneEnvironment(
+      record.config.id,
+      launchEnvironment(
+        (await this.accountEnvironment?.forWrapper(record.config.agent)) ?? {},
+        await this.environment.read(record.config.id),
+      ),
+    );
     await this.tmux.launch({
       session: record.config.tmuxSession,
       cwd: record.config.cwd,

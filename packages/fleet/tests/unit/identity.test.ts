@@ -42,6 +42,7 @@ const parse = (input: Record<string, unknown>): FleetConfig => {
 };
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
+  secretEnv: {},
   id: ID_ONE,
   kind: 'claude',
   mode: 'interactive',

@@ -25,6 +25,7 @@ import {
   ChartNoAxesCombined,
   FolderKanban,
   GraduationCap,
+  KeyRound,
   LayoutGrid,
   RefreshCw,
   Search,
@@ -36,6 +37,7 @@ import { type ReactNode, useId, useState } from 'react';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
+  daemonAccountsPath,
   daemonAnalyticsPath,
   daemonLearningPath,
   daemonProjectsPath,
@@ -82,6 +84,10 @@ export const UPDATE_CHIP = {
   },
 } as const satisfies Record<UpdateReason, { label: string; title: string }>;
 
+export const ACCOUNTS_ENTRY = {
+  label: 'Accounts',
+  title: 'Open every account, its sign-in and when it was last checked',
+} as const;
 export const SETTINGS_ENTRY = { label: 'Settings', title: 'Open appearance and density settings' } as const;
 export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision and verdicts' } as const;
 export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
@@ -97,6 +103,7 @@ export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered works
  */
 export const APP_BAR_DESTINATIONS = [
   { id: 'projects', ...PROJECTS_ENTRY, path: daemonProjectsPath, Icon: FolderKanban },
+  { id: 'accounts', ...ACCOUNTS_ENTRY, path: daemonAccountsPath, Icon: KeyRound },
   { id: 'analytics', ...ANALYTICS_ENTRY, path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'warden', ...WARDEN_ENTRY, path: daemonWardenPath, Icon: ShieldCheck },
   { id: 'learning', ...LEARNING_ENTRY, path: daemonLearningPath, Icon: GraduationCap },
@@ -110,6 +117,7 @@ export type AppBarDestinationId = AppBarDestination['id'];
 export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | null => {
   switch (route.kind) {
     case 'projects':
+    case 'accounts':
     case 'analytics':
     case 'warden':
     case 'learning':

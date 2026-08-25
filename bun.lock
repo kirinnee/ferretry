@@ -20,7 +20,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.164.0",
+      "version": "3.9.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -40,7 +40,7 @@
     },
     "packages/daemon": {
       "name": "@ferretry/daemon",
-      "version": "0.164.0",
+      "version": "3.9.0",
       "bin": {
         "fyd": "bin/fyd.ts",
         "fyd-browser-worker": "bin/browser-worker.ts",
@@ -58,6 +58,7 @@
       "name": "@ferretry/fleet",
       "version": "0.0.0",
       "dependencies": {
+        "@ferretry/protocol": "workspace:*",
         "smol-toml": "1.7.1",
         "zod": "4.4.3",
       },
