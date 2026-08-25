@@ -19,7 +19,19 @@ import {
   SKILLS_PREFIX,
 } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { type Mounted, mount } from '../../../support/dom.ts';
-import { area, button, card, cardChosen, click, config, discovery, field, pick, type } from './fleet-support.ts';
+import {
+  area,
+  button,
+  card,
+  cardChosen,
+  click,
+  config,
+  discovery,
+  field,
+  pick,
+  profileCatalog,
+  type,
+} from './fleet-support.ts';
 
 /**
  * Every mount this file makes, unmounted whether or not its test got as far as saying so.
@@ -45,6 +57,14 @@ const DETECTION: FleetHarnessDetection = {
   detail: 'Detected claude at /usr/local/bin/claude.',
   noneInstalled: false,
 };
+
+/**
+ * One row of a profile being written, with the credential answer already given.
+ *
+ * `id` is a DOM identity rather than fleet data — two empty rows keyed by their contents would be one
+ * row — so it is fixed here and asserted to survive every edit.
+ */
+const WRITTEN_ROW = { id: 'row-one', from: 'secret' as const, variable: 'ANTHROPIC_API_KEY', detail: 'WORK_KEY' };
 
 /** Enough documents that a list stops being one a person reads and becomes one they search. */
 const MANY = [
@@ -649,5 +669,368 @@ describe('the whole sequence', () => {
     const one = await stepper({ step: 'instructions', draft: { lanes: [{ mode: 'auto', variant: 'auto' }] } });
     expect(one.container.querySelector('[data-fleet-shared-instructions]')).toBeNull();
     await one.unmount();
+  });
+});
+
+/**
+ * The credential step, which is where "no login wanted" becomes an answer somebody can give.
+ *
+ * THE HARD LINE: a profile's VALUE is never on this screen. Everything asserted below is a NAME or a
+ * shape, and the note the step itself carries says so out loud. `docs/secrets.md` is the contract.
+ */
+describe('the credential step', () => {
+  /** The step on the profile answer, which is the half none of the cases above reach. */
+  const onProfile = async (
+    options: {
+      readonly draft?: Partial<FleetAccountDraft>;
+      readonly profiles?: FleetProfileCatalog | null;
+      readonly config?: FleetConfigView | null;
+    } = {},
+  ) =>
+    await stepper({
+      step: 'credential',
+      profiles: options.profiles === undefined ? profileCatalog() : options.profiles,
+      ...(options.config === undefined ? {} : { config: options.config }),
+      draft: { credential: 'profile', ...options.draft },
+    });
+
+  it('offers the two answers, and says signing in happens once for the whole login', async () => {
+    // Arrange
+    const screen = await stepper({ step: 'credential', profiles: profileCatalog() });
+
+    // Assert — the login half names where it happens, because it is not on this screen.
+    expect(cardChosen(screen.container, 'credential', 'login')).toBe(true);
+    expect(pick(screen.container, '[data-fleet-credential-login]').textContent).toContain('Accounts screen');
+    await screen.unmount();
+  });
+
+  it('tells somebody what a login already uses before they change it, on either answer', async () => {
+    // Arrange — profiles belong to a provider LOGIN, so what is ticked here reaches every account on
+    // it. `claude-studio` is the wrapper the fixture's `studio` login publishes, and `work` is the
+    // profile that login already composes.
+    const login = await stepper({
+      step: 'credential',
+      profiles: profileCatalog(),
+      config: config(),
+      draft: { name: 'studio' },
+    });
+
+    // Assert — on the login answer it is a reason to leave the answer alone.
+    expect(pick(login.container, '[data-fleet-credential-login]').textContent).toContain('already uses work');
+    await login.unmount();
+
+    // Act — and on the profile answer it is a warning about reach, before any tick.
+    const profiled = await onProfile({ draft: { name: 'studio' }, config: config() });
+
+    // Assert
+    const bound = pick(profiled.container, '[data-fleet-profiles-bound="1"]');
+    expect(bound.textContent).toContain('“studio” already uses work');
+    expect(bound.textContent).toContain('Profiles belong to the login rather than to one account');
+    await profiled.unmount();
+  });
+
+  it('says nothing about reach for a login that does not exist yet', async () => {
+    // Arrange
+    const screen = await onProfile({ draft: { name: 'brand-new' }, config: config() });
+
+    // Assert
+    expect(screen.container.querySelector('[data-fleet-profiles-bound]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('says what each profile sets and what else it reaches, and never what it holds', async () => {
+    // Arrange
+    const screen = await onProfile();
+
+    // Assert — the card names the SECRET, which is what somebody has to see to fix an account reaching
+    // for one nobody set. `base` is not offered: it is composed by every account, so a tick box for it
+    // could not be unticked and would be a control that lies about what it does.
+    const work = pick(screen.container, '[data-fleet-check-group="profiles"] [data-fleet-check="work"]');
+    expect(work.textContent).toContain('Sets ANTHROPIC_API_KEY.');
+    expect(work.textContent).toContain('Also used by claude-studio — editing it reaches them too.');
+    expect(work.textContent).toContain('no login needed');
+    const gateway = pick(screen.container, '[data-fleet-check-group="profiles"] [data-fleet-check="gateway"]');
+    expect(gateway.textContent).toContain('Nothing uses it yet.');
+    // The badge is per HARNESS: `gateway` sets no credential for anybody, so it makes no such promise.
+    expect(gateway.textContent).not.toContain('no login needed');
+    expect(screen.container.querySelector('[data-fleet-check-group="profiles"] [data-fleet-check="base"]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('does not promise "no login needed" for a profile that authenticates the OTHER harness', async () => {
+    // Arrange — `work` sets `ANTHROPIC_API_KEY` flatly, which IS a Claude credential variable, and the
+    // fixture's catalog says it authenticates Claude and nothing else. A Codex account bound to it
+    // still needs its sign-in, and a badge saying otherwise sends somebody to an account that cannot
+    // start. The badge therefore reads the HOST's `authenticates` verdict rather than re-deciding it
+    // here from the variable names, which is the reading that would have got this wrong.
+    const screen = await onProfile({ draft: { harness: 'codex' } });
+
+    // Assert — the variables are still listed, both the flat one and this harness's own overlay.
+    const work = pick(screen.container, '[data-fleet-check-group="profiles"] [data-fleet-check="work"]');
+    expect(work.textContent).not.toContain('no login needed');
+    expect(work.textContent).toContain('Sets ANTHROPIC_API_KEY, HTTPS_PROXY.');
+    await screen.unmount();
+  });
+
+  it('says a profile sets nothing for this harness rather than showing an empty list', async () => {
+    // Arrange
+    const screen = await onProfile({
+      draft: { harness: 'codex' },
+      profiles: profileCatalog({
+        profiles: [
+          {
+            name: 'claude-only',
+            appliesToEveryAccount: false,
+            variables: [
+              { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] }, harness: 'claude' },
+            ],
+            accounts: [],
+            authenticates: ['claude'],
+          },
+        ],
+      }),
+    });
+
+    // Assert
+    expect(
+      pick(screen.container, '[data-fleet-check-group="profiles"] [data-fleet-check="claude-only"]').textContent,
+    ).toContain('Sets nothing for this harness.');
+    await screen.unmount();
+  });
+
+  it('invites the first profile to be written when this fleet declares none', async () => {
+    // Arrange — an empty catalog is an ordinary fleet, not a broken one.
+    const screen = await onProfile({ profiles: profileCatalog({ profiles: [] }) });
+
+    // Assert
+    expect(pick(screen.container, '[data-fleet-check-empty="profiles"]').textContent).toContain(
+      'This fleet declares no profiles yet',
+    );
+    await screen.unmount();
+  });
+
+  it('appends a ticked profile to the order, because the order is the precedence', async () => {
+    // Arrange
+    const screen = await onProfile({ draft: { profiles: ['gateway'] } });
+
+    // Act
+    await click(card(screen.container, 'profiles', 'work'));
+
+    // Assert — appended rather than inserted: a newly ticked profile beats the ones already there,
+    // which is what somebody ticking it is asking for.
+    expect(screen.latest().profiles).toEqual(['gateway', 'work']);
+    await screen.unmount();
+  });
+
+  it('shows which value wins, in the daemon’s own words, before the round trip', async () => {
+    // Arrange — `base` sets the URL and `work` sets it again, so one variable is contested.
+    const screen = await onProfile({
+      draft: { profiles: ['work'] },
+      profiles: profileCatalog({
+        profiles: [
+          {
+            name: 'base',
+            appliesToEveryAccount: true,
+            variables: [{ variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } }],
+            accounts: [],
+            authenticates: [],
+          },
+          {
+            name: 'work',
+            appliesToEveryAccount: false,
+            variables: [
+              { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } },
+              { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
+            ],
+            accounts: [],
+            authenticates: ['claude'],
+          },
+        ],
+      }),
+    });
+
+    // Assert — the shape is described and the origin named; a contested variable says what it beat.
+    expect(pick(screen.container, '[data-fleet-composed-env="2"]')).toBeDefined();
+    const key = pick(screen.container, '[data-fleet-composed-variable="ANTHROPIC_API_KEY"]');
+    expect(key.textContent).toContain('from this daemon’s secret store — secret WORK_KEY');
+    expect(key.textContent).toContain('set by the profile “work”');
+    const url = pick(screen.container, '[data-fleet-composed-variable="ANTHROPIC_BASE_URL"]');
+    expect(url.textContent).toContain('overriding the base profile');
+    await screen.unmount();
+  });
+
+  it('says out loud that nothing on this screen can show a value', async () => {
+    // Arrange — the note is not decoration. It is the sentence that stops somebody hunting for a
+    // control that shows the key, because there is no route in this product that answers one.
+    const screen = await onProfile({ draft: { profiles: ['work'] } });
+
+    // Assert
+    const note = pick(screen.container, '[data-fleet-composed-note]').textContent ?? '';
+    expect(note).toContain('Nothing on this screen can show you a value');
+    expect(note).toContain('reaches only the account’s own session');
+    await screen.unmount();
+  });
+
+  it('shows no order at all when nothing is composed yet', async () => {
+    // Arrange
+    const screen = await onProfile({ profiles: profileCatalog({ profiles: [] }) });
+
+    // Assert
+    expect(screen.container.querySelector('[data-fleet-composed-env]')).toBeNull();
+    await screen.unmount();
+  });
+});
+
+describe('writing a new profile', () => {
+  const writing = async (draft: Partial<FleetAccountDraft> = {}) =>
+    await stepper({
+      step: 'credential',
+      profiles: profileCatalog(),
+      draft: { credential: 'profile', ...draft },
+    });
+
+  it('seeds the first row with the credential variable the HOST named for this harness', async () => {
+    // Arrange — `credentialVariables` travelling, rather than a name this browser knows. A browser that
+    // hard-coded ANTHROPIC_API_KEY would seed a form whose result the host does not call a credential.
+    const screen = await writing();
+
+    // Act
+    await click(pick(screen.container, '[data-fleet-add-profile]'));
+
+    // Assert
+    expect(screen.latest().newProfile?.variables[0]).toMatchObject({ from: 'secret', variable: 'ANTHROPIC_API_KEY' });
+    await screen.unmount();
+  });
+
+  it('offers the three spellings the daemon accepts and nothing else', async () => {
+    // Arrange — a free text box could carry `${secret:work_key}`, a near miss the grammar does not
+    // match: it would stay a literal and authenticate the harness with the reference itself.
+    const screen = await writing({ newProfile: { name: 'mine', variables: [WRITTEN_ROW] } });
+
+    // Assert
+    const group = pick(screen.container, '[data-fleet-choice-group="profile-source-0"]');
+    expect(
+      [...group.querySelectorAll('[data-fleet-choice]')].map(node => node.getAttribute('data-fleet-choice')),
+    ).toEqual(['secret', 'environment', 'value']);
+    expect(group.textContent).toContain('Secret in this daemon’s store');
+    expect(group.textContent).toContain('The value never reaches this browser or the fleet file');
+    // And the plain answer carries its consequence on the control rather than in a document.
+    expect(group.textContent).toContain('Written into the fleet configuration as text');
+    expect(group.textContent).toContain('Never a credential');
+    await screen.unmount();
+  });
+
+  it('names the box after the answer, because one field carries three meanings', async () => {
+    // Arrange
+    const screen = await writing({ newProfile: { name: 'mine', variables: [WRITTEN_ROW] } });
+
+    // Act
+    await click(card(screen.container, 'profile-source-0', 'value'));
+
+    // Assert — the answer changed and the detail somebody already typed is kept, because switching
+    // answers mid-thought should not lose it.
+    expect(screen.latest().newProfile?.variables[0]).toMatchObject({ from: 'value', detail: 'WORK_KEY' });
+    await screen.unmount();
+  });
+
+  it('edits the name and the rows in place, keeping each row’s identity', async () => {
+    // Arrange
+    const screen = await writing({ newProfile: { name: '', variables: [WRITTEN_ROW] } });
+
+    // Act — re-rendered between keystrokes, because each edit is computed from the draft on screen and
+    // three edits against one stale render would only prove the last one.
+    await type(field(screen.container, '-profile-name'), 'mine');
+    await screen.rerender();
+    await type(pick(screen.container, '[data-fleet-profile-variable="0"]') as HTMLInputElement, 'ANTHROPIC_AUTH_TOKEN');
+    await screen.rerender();
+    await type(pick(screen.container, '[data-fleet-profile-detail="0"]') as HTMLInputElement, 'OTHER_KEY');
+
+    // Assert — the id is a DOM identity rather than fleet data, so it survives every edit.
+    expect(screen.latest().newProfile).toEqual({
+      name: 'mine',
+      variables: [{ id: WRITTEN_ROW.id, from: 'secret', variable: 'ANTHROPIC_AUTH_TOKEN', detail: 'OTHER_KEY' }],
+    });
+    await screen.unmount();
+  });
+
+  it('offers no way to remove the only row, because a profile with none is not a state', async () => {
+    // Arrange
+    const one = await writing({ newProfile: { name: 'mine', variables: [WRITTEN_ROW] } });
+
+    // Assert
+    expect(one.container.querySelector('[data-fleet-remove-profile-variable]')).toBeNull();
+    await one.unmount();
+
+    // Act — a second row makes both removable.
+    const two = await writing({
+      newProfile: { name: 'mine', variables: [WRITTEN_ROW, { ...WRITTEN_ROW, id: 'row-two' }] },
+    });
+    await click(pick(two.container, '[data-fleet-remove-profile-variable="1"]'));
+
+    // Assert
+    expect(two.latest().newProfile?.variables.map(row => row.id)).toEqual([WRITTEN_ROW.id]);
+    await two.unmount();
+  });
+
+  it('adds another row as a plain value, because the credential is the row already there', async () => {
+    // Arrange
+    const screen = await writing({ newProfile: { name: 'mine', variables: [WRITTEN_ROW] } });
+
+    // Act
+    await click(pick(screen.container, '[data-fleet-add-profile-variable]'));
+
+    // Assert
+    expect(screen.latest().newProfile?.variables[1]).toMatchObject({ from: 'value', variable: '', detail: '' });
+    await screen.unmount();
+  });
+
+  it('abandons the writing when it is discarded, and leaves the ticks alone', async () => {
+    // Arrange
+    const screen = await writing({ profiles: ['work'], newProfile: { name: 'mine', variables: [WRITTEN_ROW] } });
+
+    // Act
+    await click(pick(screen.container, '[data-fleet-discard-profile]'));
+
+    // Assert
+    expect(screen.latest().newProfile).toBeUndefined();
+    expect(screen.latest().profiles).toEqual(['work']);
+    await screen.unmount();
+  });
+
+  it('shows the problems inside the form, where they are the only place they can be acted on', async () => {
+    // Arrange — somebody scrolled into this form should not have to find them below it. The name is
+    // `base`, which this fleet declares and which the tick list deliberately does NOT offer: the
+    // collision is read against every DECLARED profile rather than against the ones on offer, so a
+    // reader narrowing that list to `profileChoices` would let somebody declare a second `base`.
+    const screen = await writing({ newProfile: { name: 'base', variables: [{ ...WRITTEN_ROW, detail: 'work_key' }] } });
+
+    // Assert — and the secret's shape is refused here rather than at the daemon.
+    const problems = pick(screen.container, '[data-fleet-new-profile] [data-fleet-problems]').textContent ?? '';
+    expect(problems).toContain('already declares a profile named "base"');
+    expect(problems).toContain('"work_key" is not a secret name');
+    await screen.unmount();
+  });
+
+  it('is a card in the same list, so the order somebody reads is the whole order', async () => {
+    // Arrange
+    const screen = await writing({ newProfile: { name: 'mine', variables: [WRITTEN_ROW] } });
+
+    // Assert — labelled by its own name once it has one, and marked as the one this change declares.
+    const authored = pick(screen.container, '[data-fleet-check-group="profiles"] [data-fleet-check="mine"]');
+    expect(authored.textContent).toContain('mine');
+    expect(authored.textContent).toContain('new');
+    expect(authored.textContent).toContain('The next account you add can pick it');
+    await screen.unmount();
+  });
+
+  it('calls an unnamed profile what it is, rather than rendering a blank card', async () => {
+    // Arrange
+    const screen = await writing({ newProfile: { name: '', variables: [WRITTEN_ROW] } });
+
+    // Assert
+    expect(pick(screen.container, '[data-fleet-check-group="profiles"] [data-fleet-check=""]').textContent).toContain(
+      'This new profile',
+    );
+    await screen.unmount();
   });
 });
