@@ -229,7 +229,7 @@ describe('linking an account to a shared document', () => {
     ]);
   });
 
-  it('should plan a copy of the linked document into the account home', async () => {
+  it('should plan a real link of the shared document into the account home', async () => {
     // Arrange
     const subject = await fixture();
     await prepare(subject);
@@ -240,8 +240,8 @@ describe('linking an account to a shared document', () => {
       mutation: { kind: 'link-shared-asset', accountId: CLAUDE_ID, field: 'memory', name: 'terse' },
     });
 
-    // Assert — this is what "the account reads the shared document" means at plan time: apply copies
-    // that source into this account's home as the harness's own instructions file.
+    // Assert — this is what "the account reads the shared document" means at plan time: apply makes
+    // this account's instructions file BE that source, so a later edit to it needs no second apply.
     should(response.status).equal(200);
     const plan = (
       jsonBody(response) as unknown as {
@@ -249,7 +249,7 @@ describe('linking an account to a shared document', () => {
       }
     ).preview.plan;
     should(plan.operations).containEql({
-      kind: 'copy',
+      kind: 'symlink',
       source: join(subject.paths.fleet, 'assets', 'terse.md'),
       path: join(subject.paths.fleet, 'homes', 'claude-work', 'CLAUDE.md'),
     });

@@ -101,6 +101,23 @@ describe('apply plan rendering', () => {
     should(rendered).containEql('/state/fleet/homes/a/skills ← /assets/skills');
   });
 
+  it('should say what a symlink line means, only on a plan that has one', () => {
+    // Arrange
+    const linking = plan({
+      operations: [{ kind: 'symlink', path: '/state/fleet/homes/a/CLAUDE.md', source: '/assets/CLAUDE.md' }],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(linking);
+
+    // Assert — every other line in a plan writes bytes once; this one makes two names into one file, and
+    // its effect keeps going after the apply finishes. Somebody approving it has to be told which.
+    should(rendered).containEql('makes the destination the SAME FILE as the source');
+    should(rendered).containEql('with no apply in between');
+    // And a plan with no link says nothing about links, so the note stays a statement about this plan.
+    should(renderApplyPlan(plan())).not.containEql('SAME FILE');
+  });
+
   it('should name settings files and inline layers without printing their values', () => {
     // Arrange
     const withSettings = plan({
@@ -1455,8 +1472,8 @@ describe('rendering the sharing report', () => {
               state: 'selection',
               origin: { kind: 'account' },
               items: [
-                { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2 },
-                { name: 'mine', path: 'skills/mine', referrers: 1 },
+                { name: 'review', path: 'skills/review', sharedName: 'review', referrers: 2, materialization: 'link' },
+                { name: 'mine', path: 'skills/mine', referrers: 1, materialization: 'copy' },
               ],
             },
           },
@@ -1469,8 +1486,94 @@ describe('rendering the sharing report', () => {
 
     // Assert — which ones, which are the store's, and who else is on each: a count answers none of it.
     should(actual).containEql('skills   2 items · from this account');
-    should(actual).containEql('review  SHARED "review" · with 1 other account · skills/review');
-    should(actual).containEql('mine  own · only this account · skills/mine');
+    should(actual).containEql('review  SHARED "review" · with 1 other account · skills/review · linked');
+    should(actual).containEql('mine  own · only this account · skills/mine · copied at apply');
+  });
+
+  it('should say which mechanism each field has, and what each one means for an edit', () => {
+    // Arrange — a stack of settings layers alongside the linked memory document, so both the per-field
+    // mechanism and the generated-file statement are on the same screen.
+    const report = sharingReport({
+      accounts: [
+        sharingAccount({
+          settings: [
+            {
+              position: 0,
+              kind: 'document',
+              path: './base.json',
+              origin: { kind: 'base-profile', name: 'base' },
+              referrers: 1,
+            },
+            { position: 1, kind: 'inline', origin: { kind: 'account' } },
+          ],
+        }),
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — the mechanism per field, the stack said as one generated file, and a legend written
+    // about the EDIT rather than about the filesystem: "symlink" answers nothing a person came to ask.
+    should(actual).containEql('./CLAUDE.md · from the base profile · linked');
+    should(actual).containEql('settings  2 layers merged in order into one generated file');
+    should(actual).containEql('linked = one file.');
+    should(actual).containEql('copied at apply = the bytes as of the last apply');
+    should(actual).containEql('generated = composed from its layers on every apply');
+  });
+
+  it('should say nothing about a mechanism for a field whose harness has no destination', () => {
+    // Arrange — a Claude account declaring `hooks`, which Claude has no destination for. The report
+    // carries no materialization for it, and `linkable` already excludes it.
+    const report = sharingReport({
+      accounts: [
+        sharingAccount({
+          fields: {
+            ...sharingAccount().fields,
+            hooks: { state: 'local', path: './hooks.json', origin: { kind: 'account' }, referrers: 1 },
+          },
+          linkable: ['memory', 'skills', 'hooks', 'mcp'],
+        }),
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — the field is still described; only the mechanism sentence is withheld, because there is
+    // no write to describe.
+    should(actual).containEql('./hooks.json · from this account');
+    should(actual).not.containEql('./hooks.json · from this account · linked');
+    should(actual).not.containEql('./hooks.json · from this account · copied at apply');
+  });
+
+  it('should render a generated field rather than silently dropping a mechanism the wire admits', () => {
+    // Arrange — no field the daemon reports today is `generated`; `settings` is a stack and is reported
+    // separately. But the wire enum admits all three values for every field, so a renderer that said
+    // nothing for one of them would be an unhandled case waiting for the first field that used it.
+    const report = sharingReport({
+      accounts: [
+        sharingAccount({
+          fields: {
+            ...sharingAccount().fields,
+            mcp: {
+              state: 'local',
+              path: './own.json',
+              origin: { kind: 'account' },
+              referrers: 1,
+              materialization: 'generated',
+            },
+          },
+        }),
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — and the sentence is about the edit: a generated file is the one a person must NOT edit
+    // in the home, which is the whole reason the three mechanisms are named separately.
+    should(actual).containEql('./own.json · from this account · merged into a generated file');
   });
 
   it('should say an empty selection is empty rather than printing nothing', () => {

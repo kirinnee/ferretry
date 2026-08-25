@@ -480,7 +480,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
   ): Promise<void> {
     const pending = new Map(documents.map(document => [path.resolve(document.path), document.content]));
     for (const operation of operations) {
-      if (operation.kind === 'copy') {
+      // A LINK IS CHECKED EXACTLY LIKE A COPY, and it has to be checked HERE rather than left to the
+      // write. `cp` fails on a missing source and `symlink` does not: it creates a dangling link
+      // perfectly happily, so the apply would report success and the harness would find no
+      // instructions. `stat` rather than `lstat`, because the destination has to resolve to something
+      // real — a link to a link to nothing is still nothing.
+      if (operation.kind === 'copy' || operation.kind === 'symlink') {
         if (!pending.has(path.resolve(operation.source))) await stat(operation.source);
         continue;
       }

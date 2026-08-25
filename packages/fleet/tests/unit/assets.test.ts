@@ -5,6 +5,7 @@ import {
   HARNESS_ASSETS,
   harnessAsset,
   isUsableSkillItemName,
+  resolveAssetMaterialization,
   skillItemName,
   unsupportedAssetFields,
 } from '../../src/lib/assets.ts';
@@ -26,12 +27,17 @@ describe('HARNESS_ASSETS', () => {
     should(fields.every(field => ASSET_FIELDS.includes(field))).be.true();
   });
 
-  it.each(['claude', 'codex'] as const)('should copy every %s asset into the Ferretry-owned home', kind => {
+  it.each(['claude', 'codex'] as const)('should link every %s asset except its generated settings', kind => {
     // Act
     const settings = harnessAsset(HARNESS_ASSETS, kind, 'settings');
+    const linked = HARNESS_ASSETS[kind].filter(asset => asset.field !== 'settings');
 
-    // Assert — the harness rewrites this file at runtime, so a symlink into a template would break.
-    should(HARNESS_ASSETS[kind].every(asset => asset.mode === 'copy')).be.true();
+    // Assert — a shared document has to BE the file in the home, or "shared" is only a description of
+    // two files that started out equal. Settings is the one exception in both directions: a merge of
+    // layers cannot be a link to any of them, and the harness rewrites the result at runtime.
+    should(linked.length).be.above(0);
+    should(linked.every(asset => asset.materialization === 'link')).be.true();
+    should(settings?.materialization).equal('generated');
     should(settings?.format).be.oneOf(['json', 'toml']);
   });
 
@@ -72,7 +78,7 @@ describe('harnessAsset', () => {
     const actual = harnessAsset(HARNESS_ASSETS, 'codex', 'memory');
 
     // Assert
-    should(actual).deepEqual({ field: 'memory', dest: 'AGENTS.md', mode: 'copy' });
+    should(actual).deepEqual({ field: 'memory', dest: 'AGENTS.md', materialization: 'link' });
   });
 
   it('should return undefined for a field the harness does not accept', () => {
@@ -85,13 +91,76 @@ describe('harnessAsset', () => {
 
   it('should read the supplied table rather than the built-in one', () => {
     // Arrange
-    const table = { claude: [{ field: 'memory', dest: 'NOTES.md', mode: 'copy' }], codex: [] } as const;
+    const table = { claude: [{ field: 'memory', dest: 'NOTES.md', materialization: 'copy' }], codex: [] } as const;
 
     // Act
     const actual = harnessAsset(table, 'claude', 'memory');
 
     // Assert
     should(actual?.dest).equal('NOTES.md');
+  });
+});
+
+describe('resolveAssetMaterialization', () => {
+  it.each([
+    ['./CLAUDE.md', 'link'],
+    ['CLAUDE.md', 'link'],
+    ['memory/terse.md', 'link'],
+  ])('should link %s, because it lives in the asset tree this fleet owns', (reference, expected) => {
+    // Act
+    const actual = resolveAssetMaterialization(HARNESS_ASSETS, 'claude', 'memory', reference);
+
+    // Assert — the whole point: the home's file IS the shared document, so an edit reaches every
+    // account referencing it with no apply in between.
+    should(actual).equal(expected);
+  });
+
+  it.each(['/etc/instructions.md', '~/dotfiles/CLAUDE.md', '$HOME/CLAUDE.md', '../outside/CLAUDE.md'])(
+    'should downgrade %s to a copy, because a link inside a home may only resolve into the asset tree',
+    reference => {
+      // Act
+      const actual = resolveAssetMaterialization(HARNESS_ASSETS, 'claude', 'memory', reference);
+
+      // Assert — the state home refuses to traverse a link out of itself, and the narrow exemption
+      // admits only a target inside the fleet's own directories. So this one is copied, and says so.
+      should(actual).equal('copy');
+    },
+  );
+
+  it('should call settings generated whatever the reference is', () => {
+    // Act
+    const inTree = resolveAssetMaterialization(
+      HARNESS_ASSETS,
+      'claude',
+      'settings',
+      './templates/claude/settings.json',
+    );
+    const outside = resolveAssetMaterialization(HARNESS_ASSETS, 'claude', 'settings', '~/settings.json');
+
+    // Assert — a stack is merged in memory and written as one file, so there is no source it could be
+    // the same file as. Being in the asset tree changes nothing about that.
+    should(inTree).equal('generated');
+    should(outside).equal('generated');
+  });
+
+  it('should say nothing at all for a field this harness has no destination for', () => {
+    // Act
+    const actual = resolveAssetMaterialization(HARNESS_ASSETS, 'claude', 'hooksDir', './hooks');
+
+    // Assert — undefined rather than a mechanism, because nothing is materialized. Naming one would
+    // describe a write that never happens, and this is exactly the set `linkable` leaves out.
+    should(actual).be.undefined();
+  });
+
+  it('should read the supplied table rather than the built-in one', () => {
+    // Arrange — a table that asks for a copy of a document sitting in the asset tree.
+    const table = { claude: [{ field: 'memory', dest: 'NOTES.md', materialization: 'copy' }], codex: [] } as const;
+
+    // Act
+    const actual = resolveAssetMaterialization(table, 'claude', 'memory', './CLAUDE.md');
+
+    // Assert — the reference only ever downgrades a `link`; it never promotes a declared copy.
+    should(actual).equal('copy');
   });
 });
 

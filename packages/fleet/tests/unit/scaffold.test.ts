@@ -447,10 +447,13 @@ describe('the starter asset content', () => {
     should(fileAt('/state/fleet/assets/CLAUDE.md')?.content).not.containEql('Never wait for input');
   });
 
-  it('should state the copy-on-apply and deliberately empty capability boundaries', () => {
-    // Assert
+  it('should state which mechanism each field gets and the deliberately empty capabilities', () => {
+    // Assert — all three mechanisms, said where somebody about to edit a file will read them: a person
+    // who does not know whether their edit is shared, private or discarded finds out the expensive way.
     const source = fileAt('/state/fleet/assets/README.md')?.content ?? '';
-    should(source).containEql('Account-home assets are copies, not symlinks');
+    should(source).containEql('it **is** the file in');
+    should(source).containEql('`settings` is generated, never linked');
+    should(source).containEql('A source outside this directory is copied');
     should(source).containEql('No hooks, MCP servers or skills are installed by default');
     // The README names the four documents it ships, so it cannot describe a fleet it no longer writes.
     for (const name of ['CLAUDE.md', 'CLAUDE-auto.md', 'AGENTS.md', 'AGENTS-auto.md']) {
