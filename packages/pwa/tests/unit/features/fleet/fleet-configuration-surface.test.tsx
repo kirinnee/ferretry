@@ -9,6 +9,7 @@ import {
   fleetSettingsTab,
 } from '../../../../src/features/fleet/fleet-configuration-surface.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { PICK_OR_ADD_LABEL } from '../../../../src/features/fleet/fleet-stepper-model.ts';
 import { grantGuidance, UNLOCK_LIMIT_NOTE } from '../../../../src/lib/grants.ts';
 import type { LocalNetworkAccess } from '../../../../src/lib/local-network-access.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -1026,7 +1027,7 @@ describe('creating an account', () => {
     const note = pick(surface.container, '[data-fleet-instructions-name-note]');
     expect(note.textContent).toContain('instructions/CLAUDE-shared.md');
     expect(note.textContent).toContain('is already in the store');
-    expect(note.textContent).toContain('Use an existing one');
+    expect(note.textContent).toContain(PICK_OR_ADD_LABEL.existing);
 
     // A name that is not there yet is the ordinary case: a new account writing its own instructions.
     await type(field(surface.container, '-middle'), 'atelier');
@@ -1152,7 +1153,7 @@ describe('creating an account', () => {
     // The gap is stated where it bites, and it is careful about WHOSE gap it is: #373 made the fleet
     // able to give an account several items, so a sentence blaming the fleet would now be false.
     const limit = pick(surface.container, '[data-fleet-skills-limit]').textContent ?? '';
-    expect(limit).toContain('One store item at a time, on this screen');
+    expect(limit).toContain('One skill at a time, on this screen');
     expect(limit).toContain('not a limit of the fleet');
 
     // Act

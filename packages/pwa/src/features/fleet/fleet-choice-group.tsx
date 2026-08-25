@@ -18,7 +18,7 @@
 import { Check } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 import { cn } from '../../lib/class-names.ts';
-import type { FleetPickOrAddSource } from './fleet-stepper-model.ts';
+import { type FleetPickOrAddSource, PICK_OR_ADD_LABEL } from './fleet-stepper-model.ts';
 
 export interface FleetChoice<T extends string> {
   readonly id: T;
@@ -108,38 +108,6 @@ export function FleetChoiceGroup<T extends string>({
   );
 }
 
-/**
- * PICK FROM WHAT EXISTS, OR ADD A NEW ONE — the one shape every question in this feature uses.
- *
- * The owner's rule is that a screen should "always ask to select from existing, then have an option to
- * jump to the entity type to add a new one there, or allow new, and auto add it to the entity type".
- * The instructions step had already grown into exactly that — three answers, a sub-control under
- * whichever was picked, and both add-new answers writing into the store so the next member can pick
- * them — and every other step was that shape with pieces missing.
- *
- * So it is HERE rather than hand-rolled three times, and what it owns is the two things that must not
- * drift: the WORDS on the answers, and the rule that the sub-control belongs under the answer it
- * belongs to. The details stay with the caller because they are facts about the thing being picked —
- * how many there are, what editing a shared one costs, why an import is unavailable — and a shared
- * sentence for those would either be vague or wrong.
- *
- * The union itself is `fleet-stepper-model.ts`', because which answers exist is a fact about the
- * question rather than about this control, and that module is where the pure half of every step's
- * answer already lives.
- *
- * ONE SET OF WORDS, annotated over the whole union so a fourth answer is a compile error here rather
- * than a card with a blank label.
- *
- * "Use one this fleet already has" rather than "…already in the store", because the accounts step picks
- * a provider login and there is no store of those — and one label that reads correctly for a document,
- * a skill and a login is the whole point of a person learning this control once.
- */
-const SOURCE_LABEL: Readonly<Record<FleetPickOrAddSource, string>> = {
-  existing: 'Use one this fleet already has',
-  import: 'Import this host’s own',
-  new: 'Add a new one',
-};
-
 /** One answer offered, carrying the facts about it this control cannot know. */
 export interface FleetPickOrAddAnswer {
   readonly id: FleetPickOrAddSource;
@@ -168,6 +136,30 @@ export interface FleetPickOrAddProps {
   readonly under: Readonly<Partial<Record<FleetPickOrAddSource, ReactNode>>>;
 }
 
+/**
+ * PICK FROM WHAT EXISTS, OR ADD A NEW ONE — how every REQUIRED single choice in this feature is asked.
+ *
+ * The owner's rule is that a screen should "always ask to select from existing, then have an option to
+ * jump to the entity type to add a new one there, or allow new, and auto add it to the entity type".
+ * The instructions step had already grown into exactly that — three answers, a sub-control under
+ * whichever was picked, and both add-new answers writing into the store so the next member can pick
+ * them — and it was hand-rolled, so every step that needed the same shape would have hand-rolled it
+ * again.
+ *
+ * What it owns is the two things that must not drift: the WORDS on the answers, and the rule that the
+ * sub-control belongs under the answer it belongs to. The details stay with the caller because they are
+ * facts about the thing being picked — how many there are, what editing a shared one costs, why an
+ * import is unavailable — and a shared sentence for those would either be vague or wrong.
+ *
+ * NOT EVERY STEP IS THIS SHAPE, and forcing the ones that are not would be the second pattern rather
+ * than the first. A radio group answers a question with exactly one answer; an OPTIONAL SET — models,
+ * skills — is tick-cards over what exists with an inline add beneath them, which is the same rule with
+ * the same two halves and needs no fourth answer whose only job is to mean "none of these".
+ *
+ * The union and its LABELS are `fleet-stepper-model.ts`', because which answers exist is a fact about
+ * the question rather than about this control — and because a refusal has to be able to cite a label
+ * it is sending somebody to, which a table private to a component cannot be asked for.
+ */
 export function FleetPickOrAdd({
   legend,
   name,
@@ -188,7 +180,7 @@ export function FleetPickOrAdd({
         onChoose={onChoose}
         options={answers.map(answer => ({
           id: answer.id,
-          label: SOURCE_LABEL[answer.id],
+          label: PICK_OR_ADD_LABEL[answer.id],
           detail: answer.detail,
           ...(answer.disabled === true ? { disabled: true } : {}),
           ...(answer.badge === undefined ? {} : { badge: answer.badge }),

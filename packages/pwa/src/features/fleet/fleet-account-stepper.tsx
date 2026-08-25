@@ -64,6 +64,7 @@ import { FleetCheckChoice, type FleetChoice, FleetChoiceGroup, FleetPickOrAdd } 
 import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
 import {
   assetProblemStep,
+  authoredSkill,
   customModelProblem,
   FLEET_ACCOUNT_MODES,
   FLEET_STEPS,
@@ -77,10 +78,14 @@ import {
   laneForMode,
   MODE_EXPLANATION,
   modelOptions,
+  newSkillProblem,
   nextStep,
   otherLanes,
+  OWN_DOCUMENT_CONSEQUENCE,
   previousStep,
   SHARED_DOCUMENT_CONSEQUENCE,
+  SKILL_DOCUMENT,
+  SKILLS_PREFIX,
   selectedModels,
   selectedModes,
   settingsChoice,
@@ -91,9 +96,11 @@ import {
   toggleMode,
   toggleModel,
   unverifiedModels,
+  withAuthoredSkillText,
   withInstructionsMiddle,
   withLaneVariant,
   withModels,
+  withNewSkill,
   withSettingsChoice,
   withSkillsSelection,
 } from './fleet-stepper-model.ts';
@@ -1115,6 +1122,21 @@ function InstructionsStep({
   );
 }
 
+/**
+ * Which skills this account gets — the ones this fleet already has, or one written here.
+ *
+ * THE MODELS SHAPE, not the instructions one, and that is a decision rather than an accident. This is
+ * an OPTIONAL SET: an account with no skills is an ordinary account, and "none" is an answer somebody
+ * gives by ticking nothing. Putting it behind a radio group would have needed a fourth answer whose
+ * only job is to escape a control that should not have been a radio — so it is tick-cards over what
+ * exists plus an inline add beneath them, exactly as the models step does, which is the owner's rule
+ * with the same two halves.
+ *
+ * WHAT THIS REPLACES was half the rule: the cards were here, and the empty case said "add one from the
+ * asset tree first" — sending a person out of the sequence to a file browser to do the thing the step
+ * is for. A skill written here is added to the store on the same reviewed apply, so the NEXT account
+ * created can tick it, which is the "auto add it to the entity type" half.
+ */
 function SkillsStep({
   layer,
   onChange,
@@ -1126,34 +1148,123 @@ function SkillsStep({
   readonly disabled: boolean;
   readonly store: readonly FleetSkillsStoreItem[];
 }) {
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
+  const [middle, setMiddle] = useState('');
   const selection = skillsSelection(layer);
-  const cards: readonly FleetChoice<string>[] = store.map(item => ({
-    id: item.path,
-    label: item.path,
-    detail:
-      item.accounts.length === 0
-        ? `In the store, linked by nothing yet. ${SHARED_DOCUMENT_CONSEQUENCE}`
-        : `Linked by ${item.accounts.join(', ')}. ${SHARED_DOCUMENT_CONSEQUENCE}`,
-  }));
+  const authored = authoredSkill(layer);
+  const cards: readonly FleetChoice<string>[] = [
+    ...store.map(item => ({
+      id: item.path,
+      label: item.path,
+      detail:
+        item.accounts.length === 0
+          ? `In the store, linked by nothing yet. ${SHARED_DOCUMENT_CONSEQUENCE}`
+          : `Linked by ${item.accounts.join(', ')}. ${SHARED_DOCUMENT_CONSEQUENCE}`,
+    })),
+    // The skill being WRITTEN is offered as a card too, so the selection is one list rather than a
+    // list plus a hidden extra — the same reason the models step offers a typed identifier as a card.
+    // Unticking it is also the only way back to an account with no skills at all.
+    ...(authored === undefined
+      ? []
+      : [
+          {
+            id: layer.skillsDirectory.trim(),
+            label: layer.skillsDirectory.trim(),
+            detail: `Written below and added to this fleet’s store by this change. ${OWN_DOCUMENT_CONSEQUENCE}`,
+            badge: 'new',
+          },
+        ]),
+  ];
+  const problem = newSkillProblem(middle, store, layer);
+  const add = (): void => {
+    if (problem !== null) return;
+    onChange(withNewSkill(layer, middle, crypto.randomUUID()));
+    setMiddle('');
+  };
   return (
     <div className={cn(SECTION, 'grid gap-3')}>
       <div className="flex min-w-0 items-start gap-2">
         <Sparkles size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
         <p className="m-0 min-w-0 text-meta leading-base text-muted">
-          Skills come from the fleet’s store. Choosing one links this account to it; every document in it is copied into
-          the account’s home on the next apply. Choosing nothing is fine — an account with no skills is an ordinary
+          Skills come from the fleet’s store. Ticking one links this account to it; every document in it is copied into
+          the account’s home on the next apply. Ticking nothing is fine — an account with no skills is an ordinary
           account.
         </p>
       </div>
       <FleetCheckChoice
-        legend="Skills from the store"
+        legend="Skills this fleet already has"
         name="skills"
         options={cards}
         selected={selection.selected}
         disabled={disabled}
-        empty="This fleet’s store has no skills yet. Add one from the asset tree first, or leave this account without skills."
+        empty="This fleet’s store has no skills yet. Write the first one below, or leave this account without skills."
         onToggle={path => onChange(withSkillsSelection(layer, selection.selected.includes(path) ? [] : [path]))}
       />
+
+      {/* ADD ONE HERE, which is the half that was missing. The prefix is rendered rather than typed,
+          so what a person reads is the whole path and what they edit is only the part that is theirs —
+          the same control the instructions step uses for the same reason. */}
+      <div>
+        <label className={FIELD_LABEL} htmlFor={id('-new-skill')}>
+          Add a new skill
+        </label>
+        <div className="flex min-w-0 flex-wrap items-start gap-2">
+          <div className="flex min-w-0 flex-1 items-stretch">
+            <span
+              className="inline-flex shrink-0 items-center rounded-l-control border border-r-0 border-border bg-surface-3 px-2 font-mono text-meta text-muted"
+              data-fleet-skill-prefix=""
+            >
+              {SKILLS_PREFIX}
+            </span>
+            <input
+              id={id('-new-skill')}
+              className="kt-input min-w-0 flex-1 rounded-l-none font-mono"
+              value={middle}
+              disabled={disabled}
+              placeholder="review"
+              data-fleet-new-skill=""
+              onChange={event => setMiddle(event.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            className="kt-btn"
+            data-fleet-add-skill=""
+            disabled={disabled || problem !== null}
+            onClick={add}
+          >
+            <Plus size={14} aria-hidden="true" />
+            Add
+          </button>
+        </div>
+        <p className="m-0 mt-1 break-words text-meta leading-base text-muted" data-fleet-new-skill-note="">
+          {middle.trim() === ''
+            ? `A new directory in the store with a ${SKILL_DOCUMENT} in it, written by this change. The next account you create can tick it.`
+            : (problem ?? `${SKILLS_PREFIX}${middle.trim()}/${SKILL_DOCUMENT} will be added to the store.`)}
+        </p>
+      </div>
+
+      {authored === undefined ? null : (
+        <div data-fleet-authored-skill={authored.path}>
+          <label className={FIELD_LABEL} htmlFor={id('-skill-text')}>
+            Contents
+          </label>
+          <textarea
+            id={id('-skill-text')}
+            className="kt-input min-h-[9rem] font-mono"
+            rows={8}
+            value={authored.text}
+            disabled={disabled}
+            onChange={event => onChange(withAuthoredSkillText(layer, event.target.value))}
+          />
+          <p className="m-0 mt-1 flex min-w-0 flex-wrap items-baseline gap-1 text-meta leading-base text-muted">
+            Written to <PanelPath value={authored.path} className="text-meta text-fg" label="New skill document" /> on
+            the next apply.
+          </p>
+        </div>
+      )}
+
       {/* A DECLARED LIMIT OF THIS SCREEN, and it is careful about whose limit it is.
           `layer.skills` became a LIST in #373, so the fleet CAN now select items one at a time — what
           has not caught up is this browser's draft, which still models the selection as one reference.
@@ -1161,8 +1272,9 @@ function SkillsStep({
           that goes stale into a lie is worse than no sentence. The selection is already a list here,
           so closing it is widening the draft rather than redesigning this step. */}
       <p className="m-0 text-meta leading-base text-muted" data-fleet-skills-limit="">
-        One store item at a time, on this screen. The fleet itself can give an account several — picking more than one
-        here is the next change, not a limit of the fleet.
+        One skill at a time, on this screen — ticking a second replaces the first, and adding a new one replaces a
+        ticked one. The fleet itself can give an account several; picking more than one here is the next change, not a
+        limit of the fleet.
       </p>
     </div>
   );

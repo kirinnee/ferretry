@@ -26,6 +26,7 @@ import {
   modelOptions,
   nextStep,
   openingInstructionsSource,
+  PICK_OR_ADD_LABEL,
   otherLanes,
   previousStep,
   selectedModels,
@@ -228,7 +229,7 @@ describe('naming a document in the store', () => {
     expect(instructionsNameProblem('../escape', 'claude', store)).toContain('path separator');
     const collision = instructionsNameProblem('shared', 'claude', store);
     expect(collision).toContain('instructions/CLAUDE-shared.md');
-    expect(collision).toContain('Use an existing one');
+    expect(collision).toContain(PICK_OR_ADD_LABEL.existing);
     expect(instructionsNameProblem('atelier', 'claude', store)).toBeNull();
   });
 
