@@ -13,11 +13,11 @@ import {
 import type { HarnessDiscoveryReport } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
-import { FleetAccountHealthService } from '../../../../src/lib/fleet-health/index.ts';
 import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { FleetAccountHealthService } from '../../../../src/lib/fleet-health/index.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
@@ -660,5 +660,156 @@ agents:
     should(health.accounts[0]?.verdict).equal('needs_relogin');
     should(health.accounts[0]?.lastCheckedAt).equal(GENERATED_AT_MS);
     should(health.at).equal(GENERATED_AT_MS + 1_000);
+  });
+});
+
+/**
+ * A fleet whose profiles are worth asking about: one that authenticates and one that does not.
+ *
+ * `PLAIN_KEY` is a credential typed into a plain value, which is a real configuration somebody writes
+ * once and regrets. It is here so a test can assert this route never carries it back.
+ */
+const profilesYaml = `
+profiles:
+  base:
+    env:
+      ANTHROPIC_BASE_URL: https://base.invalid
+  work:
+    env:
+      ANTHROPIC_API_KEY: \${secret:WORK_KEY}
+  gateway:
+    env:
+      PLAIN_KEY: sk-fixture-typed-into-the-wrong-box
+agents:
+  - name: work
+    kind: claude
+    profiles: [work]
+    routes:
+      default:
+        id: ${ACCOUNT_ID}
+        wrapper: fy-claude-work
+        home: claude-work
+        defaultModel: opus
+        models: [opus]
+`;
+
+/**
+ * A guard for a caller the operator has narrowed on the `use` axis — no fleet read at all.
+ *
+ * `NARROWED` above refuses `configure` only, so it cannot tell an ungated read from a governed one.
+ */
+const FLEET_READ_REFUSED: CapabilityGuard = {
+  decide: demand =>
+    demand.capability === 'fleet' ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' },
+  governance: () => ({
+    governed: true,
+    passwordSet: true,
+    confirmChange: true,
+    decide: demand =>
+      demand.capability === 'fleet'
+        ? { allowed: false, refusal: 'not-granted' }
+        : { allowed: true, refusal: 'granted' },
+  }),
+  explain: () => 'this device may not read the fleet on this machine',
+};
+
+describe('the profiles a browser may read', () => {
+  it('should answer the catalog the fleet package derives, in names and shapes only', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject, profilesYaml);
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/profiles', headers: human }));
+
+    // Assert — a whole-object comparison of the wire answer, because a value would arrive as a NEW
+    // FIELD and only this shape of assertion fails when one shows up. `base` applies to every account,
+    // `work` authenticates Claude and is composed by the one login, `gateway` authenticates nothing.
+    should(response.status).equal(200);
+    should(JSON.parse(response.body)).deepEqual({
+      profiles: [
+        {
+          name: 'base',
+          appliesToEveryAccount: true,
+          variables: [{ variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } }],
+          accounts: ['fy-claude-work'],
+          authenticates: [],
+        },
+        {
+          name: 'gateway',
+          appliesToEveryAccount: false,
+          variables: [{ variable: 'PLAIN_KEY', shape: { shape: 'literal' } }],
+          accounts: [],
+          authenticates: [],
+        },
+        {
+          name: 'work',
+          appliesToEveryAccount: false,
+          variables: [{ variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } }],
+          accounts: ['fy-claude-work'],
+          authenticates: ['claude'],
+        },
+      ],
+      credentialVariables: {
+        claude: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
+        codex: ['OPENAI_API_KEY'],
+      },
+    });
+  });
+
+  it('should carry no value, not even the literal one this host can read out of its own config', async () => {
+    // Arrange — the host CAN read `PLAIN_KEY`, so nothing but the shape of this projection stops it
+    // travelling. `docs/secrets.md` is the contract and the daemon has no route that answers a value.
+    const subject = await fixture();
+    await writeConfig(subject, profilesYaml);
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/profiles', headers: human }));
+
+    // Assert
+    should(response.body.includes('sk-fixture-typed-into-the-wrong-box')).be.false();
+    should(response.body.includes('https://base.invalid')).be.false();
+  });
+
+  it('should refuse a caller the operator has not allowed to read the fleet', async () => {
+    // Arrange — the same capability as every other fleet read, on the `use` axis. It discloses
+    // strictly less than `/config` beside it, so a caller allowed to read one cannot learn a
+    // credential by reading either — but "less" is not "ungated", which is what this asserts.
+    const subject = await fixture({ guard: FLEET_READ_REFUSED });
+    await writeConfig(subject, profilesYaml);
+
+    // Act
+    const response = await subject.dispatcher.dispatch(
+      request({ path: '/v1/fleet/profiles', headers: { authorization: 'Bearer paired-device' } }),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+  });
+
+  it('should refuse a caller with no credential at all, rather than being open because it is a read', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject, profilesYaml);
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/profiles' }));
+
+    // Assert
+    should(response.status).equal(401);
+  });
+
+  it('should refuse a damaged config rather than answering an empty catalog', async () => {
+    // Arrange — an empty list is what an ordinary fleet with no profiles looks like, so answering one
+    // for a config nobody can parse would tell a browser this fleet declares nothing.
+    const subject = await fixture();
+    await writeConfig(subject, 'agents: definitely-not-a-list\n');
+
+    // Act
+    const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/profiles', headers: human }));
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'fleet_config_invalid');
   });
 });

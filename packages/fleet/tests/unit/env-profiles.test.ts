@@ -9,15 +9,20 @@
  * NO REAL CREDENTIAL APPEARS HERE. Every "value" is a fixture string, and the assertions are about
  * where a value goes rather than what it is.
  */
+
 import { describe, it } from 'bun:test';
+import { type FleetProfileDeclaration, FleetProfileDeclarationSchema } from '@ferretry/protocol';
 import should from 'should';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
+import { HARNESS_CREDENTIAL_ENV } from '../../src/lib/credential-source.ts';
 import {
+  declaredProfileEnv,
   describeCompositionOrigin,
   envComposition,
   envValueShape,
   fleetSecretReferences,
   MissingFleetSecretsError,
+  profileCatalog,
   resolveSecretEnvironment,
   secretEnvBindings,
 } from '../../src/lib/env-profiles.ts';
@@ -468,5 +473,261 @@ describe('the composed account a profile produces', () => {
       ANTHROPIC_BASE_URL: 'https://base.invalid',
       WORK_ONLY: 'yes',
     });
+  });
+});
+
+/**
+ * A fleet whose profiles are reached by BOTH ways into a composition, plus one nothing composes.
+ *
+ * The variant is the part that matters. `compositionSlots` takes a profile list from the agent and
+ * another from the variant, so a catalog that read the `profiles:` arrays directly would report one of
+ * them and quietly omit the other — and "what else changes if I edit this" is the one question the
+ * membership field exists to answer.
+ *
+ * `TYPED_KEY` is a credential somebody typed into a plain value box, which is the mistake the write
+ * surface warns about. It is here so a test can assert the catalog never carries it back.
+ */
+const TYPED_KEY = 'sk-fixture-typed-into-the-wrong-box';
+
+const catalogFleet = (): FleetConfig =>
+  parse({
+    profiles: {
+      base: { env: { ANTHROPIC_BASE_URL: 'https://base.invalid' } },
+      work: { env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } },
+      gateway: {
+        env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' },
+        codex: { env: { OPENAI_API_KEY: '${secret:GATEWAY_KEY}' } },
+      },
+      unused: { env: { HTTPS_PROXY: '$OUTER_PROXY', PLAIN_KEY: TYPED_KEY } },
+    },
+    variants: { default: {}, auto: { profiles: ['gateway'] } },
+    agents: [
+      {
+        name: 'kirin',
+        kind: 'claude',
+        auth: 'api-key',
+        profiles: ['work'],
+        routes: { default: route(ID_ONE, 'claude-kirin') },
+      },
+      { name: 'sol', kind: 'codex', auth: 'api-key', routes: { auto: route(ID_TWO, 'codex-sol-auto') } },
+    ],
+  });
+
+describe('profileCatalog', () => {
+  it('should report every declared profile with the accounts composing it, however they reached it', () => {
+    // Arrange
+    const config = catalogFleet();
+
+    // Act
+    const actual = profileCatalog(config);
+
+    // Assert — a WHOLE-OBJECT comparison, because a value would arrive as a new field and only this
+    // shape of assertion fails when one shows up. `work` is reached through the agent's own list and
+    // `gateway` through the variant's; `base` is composed by every account and `unused` by none.
+    should(actual).deepEqual([
+      {
+        name: 'base',
+        appliesToEveryAccount: true,
+        variables: [{ variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } }],
+        accounts: ['claude-kirin', 'codex-sol-auto'],
+        authenticates: [],
+      },
+      {
+        name: 'gateway',
+        appliesToEveryAccount: false,
+        variables: [
+          { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
+          { variable: 'OPENAI_API_KEY', shape: { shape: 'secret', secrets: ['GATEWAY_KEY'] }, harness: 'codex' },
+        ],
+        accounts: ['codex-sol-auto'],
+        authenticates: ['codex'],
+      },
+      {
+        name: 'unused',
+        appliesToEveryAccount: false,
+        variables: [
+          { variable: 'HTTPS_PROXY', shape: { shape: 'environment-reference', variable: 'OUTER_PROXY' } },
+          { variable: 'PLAIN_KEY', shape: { shape: 'literal' } },
+        ],
+        accounts: [],
+        authenticates: [],
+      },
+      {
+        name: 'work',
+        appliesToEveryAccount: false,
+        variables: [{ variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } }],
+        accounts: ['claude-kirin'],
+        authenticates: ['claude'],
+      },
+    ]);
+  });
+
+  it('should carry no value at all, so the catalog a browser reads cannot echo a credential back', () => {
+    // Arrange — `PLAIN_KEY` holds a credential in the configuration itself, which is the worst case:
+    // the host CAN read it, so nothing but the shape of this projection stops it travelling.
+    const config = catalogFleet();
+
+    // Act
+    const serialised = JSON.stringify(profileCatalog(config));
+
+    // Assert
+    should(serialised.includes(TYPED_KEY)).be.false();
+    should(serialised.includes('https://base.invalid')).be.false();
+    should(serialised.includes('https://gateway.invalid')).be.false();
+  });
+
+  it('should report the flat entry and the overlay entry separately when a profile sets both', () => {
+    // Arrange — within one slot the overlay beats the flat field, so a reader of each harness needs
+    // the entry that will apply to THEM; collapsing the two would have to choose wrong for somebody.
+    const config = parse({
+      profiles: {
+        work: {
+          env: { ANTHROPIC_API_KEY: '${secret:SHARED_KEY}' },
+          claude: { env: { ANTHROPIC_API_KEY: '${secret:CLAUDE_KEY}' } },
+        },
+      },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          auth: 'api-key',
+          profiles: ['work'],
+          routes: { default: route(ID_ONE, 'claude-kirin') },
+        },
+      ],
+    });
+
+    // Act
+    const entry = profileCatalog(config)[0];
+
+    // Assert
+    should(entry?.variables).deepEqual([
+      { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['SHARED_KEY'] } },
+      { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['CLAUDE_KEY'] }, harness: 'claude' },
+    ]);
+  });
+
+  it('should read the host list of credential variables rather than a second copy of it', () => {
+    // Arrange — iterating HARNESS_CREDENTIAL_ENV rather than naming variables means a variable added
+    // to that table is asserted here on the day it is added, which is the drift this field prevents.
+    for (const [harness, variables] of Object.entries(HARNESS_CREDENTIAL_ENV)) {
+      for (const variable of variables) {
+        const config = parse({
+          profiles: { signs: { env: { [variable]: '${secret:SOME_KEY}' } } },
+          agents: [
+            {
+              name: 'kirin',
+              kind: harness,
+              auth: 'api-key',
+              profiles: ['signs'],
+              routes: { default: route(ID_ONE, 'wrapper-one') },
+            },
+          ],
+        });
+
+        // Act
+        const entry = profileCatalog(config)[0];
+
+        // Assert
+        should(entry?.authenticates).deepEqual([harness]);
+      }
+    }
+  });
+
+  it('should authenticate nothing for a profile that sets only a base URL, so "no login" is refusable', () => {
+    // Arrange
+    const config = parse({
+      profiles: { gateway: { env: { ANTHROPIC_BASE_URL: 'https://gateway.invalid' } } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          auth: 'api-key',
+          profiles: ['gateway'],
+          routes: { default: route(ID_ONE, 'claude-kirin') },
+        },
+      ],
+    });
+
+    // Act & Assert
+    should(profileCatalog(config)[0]?.authenticates).deepEqual([]);
+  });
+
+  it('should report nothing for a fleet that declares no profile, which is an ordinary fleet', () => {
+    // Arrange & Act & Assert
+    should(profileCatalog(singleAgent({}))).deepEqual([]);
+  });
+});
+
+describe('declaredProfileEnv', () => {
+  it('should compose the three spellings into an ordinary env map, secrets through one producer', () => {
+    // Arrange
+    const declaration: FleetProfileDeclaration = {
+      name: 'work',
+      variables: [
+        { from: 'secret', variable: 'ANTHROPIC_API_KEY', secret: 'WORK_KEY' },
+        { from: 'environment', variable: 'HTTPS_PROXY', source: 'OUTER_PROXY' },
+        { from: 'value', variable: 'ANTHROPIC_BASE_URL', value: 'https://gateway.invalid' },
+      ],
+    };
+
+    // Act
+    const actual = declaredProfileEnv(declaration);
+
+    // Assert
+    should(actual).deepEqual({
+      ANTHROPIC_API_KEY: '${secret:WORK_KEY}',
+      HTTPS_PROXY: '$OUTER_PROXY',
+      ANTHROPIC_BASE_URL: 'https://gateway.invalid',
+    });
+  });
+
+  it('should write a document this host reads back as the same three shapes, so there is one kind of profile', () => {
+    // Arrange — the claim in the module comment: a declared profile is byte-for-byte the kind of
+    // document somebody could have written by hand. The proof is that the host's OWN reader agrees.
+    const env = declaredProfileEnv({
+      name: 'work',
+      variables: [
+        { from: 'secret', variable: 'ANTHROPIC_API_KEY', secret: 'WORK_KEY' },
+        { from: 'environment', variable: 'HTTPS_PROXY', source: 'OUTER_PROXY' },
+        { from: 'value', variable: 'ANTHROPIC_BASE_URL', value: 'https://gateway.invalid' },
+      ],
+    });
+    const config = parse({
+      profiles: { work: { env } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          auth: 'api-key',
+          profiles: ['work'],
+          routes: { default: route(ID_ONE, 'claude-kirin') },
+        },
+      ],
+    });
+
+    // Act
+    const entry = profileCatalog(config)[0];
+
+    // Assert
+    should(entry?.variables).deepEqual([
+      { variable: 'ANTHROPIC_API_KEY', shape: { shape: 'secret', secrets: ['WORK_KEY'] } },
+      { variable: 'ANTHROPIC_BASE_URL', shape: { shape: 'literal' } },
+      { variable: 'HTTPS_PROXY', shape: { shape: 'environment-reference', variable: 'OUTER_PROXY' } },
+    ]);
+    should(fleetSecretReferences(config).map(reference => reference.name)).deepEqual(['WORK_KEY']);
+  });
+
+  it('should refuse the near miss it exists to prevent, by having nowhere to spell one', () => {
+    // Arrange — `${secret:work_key}` matches no reference, stays a literal, and would authenticate a
+    // child with the eighteen characters of the reference itself. A caller declares a NAME instead, so
+    // the lower-case spelling can only arrive as a secret name the schema rejects.
+    const parsed = FleetProfileDeclarationSchema.safeParse({
+      name: 'work',
+      variables: [{ from: 'secret', variable: 'ANTHROPIC_API_KEY', secret: 'work_key' }],
+    });
+
+    // Act & Assert
+    should(parsed.success).be.false();
   });
 });

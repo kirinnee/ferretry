@@ -707,3 +707,208 @@ describe('applyFleetMutation linking a shared skill', () => {
     should((routeOf(actual, ID_ONE).layer as Record<string, unknown>).memory).equal('./CLAUDE.md');
   });
 });
+
+/**
+ * A fleet with one login that already composes a profile, so a second account can be added to it.
+ *
+ * `existing()` above has no profiles, and the rules under test are all about what happens to a list
+ * that is already there — which is the consequence a create can have on accounts nobody named.
+ */
+const withProfile = (): FleetConfig =>
+  configOf({
+    profiles: { work: { env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } } },
+    agents: [
+      {
+        name: 'kirin',
+        kind: 'claude',
+        profiles: ['work'],
+        routes: {
+          default: {
+            id: ID_ONE,
+            wrapper: 'claude-kirin',
+            home: 'claude-kirin',
+            defaultModel: 'model-one',
+            models: ['model-one'],
+          },
+        },
+      },
+    ],
+  });
+
+const agentOf = (config: FleetConfig, name: string): Record<string, unknown> => {
+  const agent = config.agents.find(candidate => candidate.name === name);
+  if (agent === undefined) throw new Error(`no agent ${name}`);
+  return agent as unknown as Record<string, unknown>;
+};
+
+const createWithProfiles = (overrides: Record<string, unknown>): FleetMutation =>
+  mutationOf({
+    kind: 'create-account',
+    harness: 'claude',
+    name: 'kirin',
+    ...oneLane('auto'),
+    models: ['model-one'],
+    defaultModel: 'model-one',
+    ...overrides,
+  });
+
+describe('applyFleetMutation declaring a profile', () => {
+  it('should fold the declaration into the configuration as an ordinary env map', () => {
+    // Act
+    const actual = applyFleetMutation(
+      configOf(),
+      createWithProfiles({
+        ...oneLane(),
+        declareProfiles: [
+          {
+            name: 'work',
+            variables: [
+              { from: 'secret', variable: 'ANTHROPIC_API_KEY', secret: 'WORK_KEY' },
+              { from: 'environment', variable: 'HTTPS_PROXY', source: 'OUTER_PROXY' },
+              { from: 'value', variable: 'ANTHROPIC_BASE_URL', value: 'https://gateway.invalid' },
+            ],
+          },
+        ],
+      }),
+      mintId,
+    );
+
+    // Assert — the three spellings, composed by the fleet package's single producer of `${secret:…}`.
+    // A whole-object comparison because a fourth key would mean a second kind of profile document.
+    should(actual.profiles.work).deepEqual({
+      env: {
+        ANTHROPIC_API_KEY: '${secret:WORK_KEY}',
+        HTTPS_PROXY: '$OUTER_PROXY',
+        ANTHROPIC_BASE_URL: 'https://gateway.invalid',
+      },
+    });
+  });
+
+  it('should let one change declare a profile and name it, because declaring runs first', () => {
+    // Arrange — the configuration schema cross-checks profile references, so a change that named a
+    // profile it was adding in the same request would be an unknown name if the order were reversed.
+    const mutation = createWithProfiles({
+      ...oneLane(),
+      profiles: ['work'],
+      declareProfiles: [{ name: 'work', variables: [{ from: 'secret', variable: 'ANTHROPIC_API_KEY', secret: 'W' }] }],
+    });
+
+    // Act
+    const actual = applyFleetMutation(configOf(), mutation, mintId);
+
+    // Assert
+    should(agentOf(actual, 'kirin').profiles).deepEqual(['work']);
+    should(actual.profiles.work).deepEqual({ env: { ANTHROPIC_API_KEY: '${secret:W}' } });
+  });
+
+  it('should refuse a name this fleet already declares rather than writing over it', () => {
+    // Arrange — the profile `claude-kirin` composes. Merging would re-credential an account this
+    // change never names, from a request whose one-line summary says it adds an account.
+    const config = withProfile();
+
+    // Act
+    const message = refusalOf(() =>
+      applyFleetMutation(
+        config,
+        createWithProfiles({
+          declareProfiles: [
+            { name: 'work', variables: [{ from: 'secret', variable: 'ANTHROPIC_API_KEY', secret: 'OTHER_KEY' }] },
+          ],
+        }),
+        mintId,
+      ),
+    );
+
+    // Assert — and the remedy is in the sentence, so somebody can act on it without reading a doc.
+    should(message).match(/already declares a profile named "work"/u);
+    should(message).match(/name the existing one/u);
+    should(config.profiles.work).deepEqual({ env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } });
+  });
+
+  it('should refuse one change that declares the same profile twice, because one name is one profile', () => {
+    // Act
+    const message = refusalOf(() =>
+      applyFleetMutation(
+        configOf(),
+        createWithProfiles({
+          ...oneLane(),
+          declareProfiles: [
+            { name: 'work', variables: [{ from: 'value', variable: 'ONE', value: 'a' }] },
+            { name: 'work', variables: [{ from: 'value', variable: 'TWO', value: 'b' }] },
+          ],
+        }),
+        mintId,
+      ),
+    );
+
+    // Assert
+    should(message).match(/declares the profile "work" twice/u);
+  });
+
+  it('should hold a declared profile name to the same rule a path component is held to', () => {
+    // Arrange — a profile name is a key in the configuration and an argument in a sentence, and the
+    // wire schema asks only for non-empty. The refusal comes from the same `SafeNameSchema` an account
+    // name is parsed by, so a traversal spelling cannot reach the document at all.
+    const act = (): unknown =>
+      applyFleetMutation(
+        configOf(),
+        createWithProfiles({
+          ...oneLane(),
+          declareProfiles: [{ name: '../escape', variables: [{ from: 'value', variable: 'ONE', value: 'a' }] }],
+        }),
+        mintId,
+      );
+
+    // Act & Assert
+    should(act).throw();
+  });
+});
+
+describe('applyFleetMutation naming the profiles a created account composes', () => {
+  it('should refuse a profile this fleet declares nothing of, naming it and what to do', () => {
+    // Arrange — the configuration schema would catch it too, but its message names a path in a
+    // document the caller never wrote. This is the difference between fixing a typo and reading
+    // `agents.0.profiles.1`.
+    const message = refusalOf(() =>
+      applyFleetMutation(configOf(), createWithProfiles({ ...oneLane(), profiles: ['gateway'] }), mintId),
+    );
+
+    // Assert
+    should(message).match(/declares no profile named "gateway"/u);
+    should(message).match(/declare it with this change, or name one it has/u);
+  });
+
+  it('should refuse the same profile named twice, because a profile applies once wherever it sits', () => {
+    // Act
+    const message = refusalOf(() =>
+      applyFleetMutation(withProfile(), createWithProfiles({ profiles: ['work', 'work'] }), mintId),
+    );
+
+    // Assert
+    should(message).match(/names the profile "work" twice/u);
+  });
+
+  it('should leave an existing login’s profiles alone when the create names no list at all', () => {
+    // Arrange — ABSENT IS NOT EMPTY. A second account added to `kirin` sends no `profiles`, and the
+    // login keeps the one it composes; a create that sent `[]` here would strip the credential off an
+    // account nobody in this request named.
+    const config = withProfile();
+
+    // Act
+    const actual = applyFleetMutation(config, createWithProfiles({}), mintId);
+
+    // Assert
+    should(agentOf(actual, 'kirin').profiles).deepEqual(['work']);
+  });
+
+  it('should remove them when the create names an empty list, which is a declared "none"', () => {
+    // Arrange — the other half of the same rule: `[]` is somebody answering "sign in" for this login.
+    const config = withProfile();
+
+    // Act
+    const actual = applyFleetMutation(config, createWithProfiles({ profiles: [] }), mintId);
+
+    // Assert
+    should(agentOf(actual, 'kirin').profiles).deepEqual([]);
+  });
+});
