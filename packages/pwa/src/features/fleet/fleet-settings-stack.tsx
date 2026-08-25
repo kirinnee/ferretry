@@ -43,10 +43,16 @@ const ENTRY_DETAIL: Readonly<Record<FleetSettingsDraft['source'], string>> = {
   inline: 'Typed here and kept in the fleet’s own configuration. No file is created for it.',
 };
 
-const ENTRY_BADGE: Readonly<Record<FleetSettingsDraft['source'], string>> = {
+/**
+ * WHAT KIND of entry each row is, where the row's own label does not already say it.
+ *
+ * `inline` has no badge, and that is the point of the table being partial rather than total: an inline
+ * entry has no path, so its label IS its kind — and the version that badged it rendered
+ * `typed here [typed here]`, the same two words twice on one line.
+ */
+const ENTRY_BADGE: Readonly<Partial<Record<FleetSettingsDraft['source'], string>>> = {
   store: 'in the store',
   new: 'new',
-  inline: 'typed here',
 };
 
 export interface FleetSettingsOrderProps {
@@ -127,9 +133,11 @@ export function FleetSettingsOrder({ layer, onChange, disabled, harness, name }:
                       >
                         {settingsEntryLabel(entry)}
                       </span>
-                      <span className="shrink-0 rounded-control bg-surface-3 px-1.5 py-0.5 text-meta text-muted">
-                        {ENTRY_BADGE[entry.source]}
-                      </span>
+                      {ENTRY_BADGE[entry.source] === undefined ? null : (
+                        <span className="shrink-0 rounded-control bg-surface-3 px-1.5 py-0.5 text-meta text-muted">
+                          {ENTRY_BADGE[entry.source]}
+                        </span>
+                      )}
                     </p>
                     <p className="m-0 mt-0.5 min-w-0 break-words text-meta leading-base text-muted">
                       {ENTRY_DETAIL[entry.source]}

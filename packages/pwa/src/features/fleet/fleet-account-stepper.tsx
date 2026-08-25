@@ -93,6 +93,7 @@ import {
   selectedModels,
   selectedModes,
   settingsEntryLabel,
+  settingsFormatNote,
   settingsPathFor,
   settingsPaths,
   settingsStoreItems,
@@ -1340,8 +1341,17 @@ function SettingsStep({
     detail:
       item.refusal ??
       [
-        item.name === undefined ? null : `Named “${item.name}” by this fleet.`,
-        item.accounts.length === 0 ? 'No account applies it yet.' : `Applied by ${item.accounts.join(', ')}.`,
+        // "Registered as", not "named": `settingsFormatNote` below starts with "Named", and two
+        // sentences opening on the same word read as one sentence repeated.
+        item.name === undefined ? null : `Registered as “${item.name}”.`,
+        // "ALSO applied by", and NOTHING AT ALL when the list is empty. The version here said "no
+        // account applies it yet", which is false on every scaffolded host: `fy fleet init` registers
+        // these documents AND applies them through the `base` profile, and this list is built from
+        // per-account overlays only. Claiming an absence needs the fleet's whole composition chain,
+        // which `compositionSlots` owns and no browser may restate — so the offer states presence
+        // where it can see it and says nothing where it cannot.
+        item.accounts.length === 0 ? null : `Also applied by ${item.accounts.join(', ')}.`,
+        settingsFormatNote(item.path, harness),
         SHARED_DOCUMENT_CONSEQUENCE,
       ]
         .filter(part => part !== null)

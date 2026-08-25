@@ -827,6 +827,30 @@ export const settingsStoreItems = (config: FleetConfigView | null): readonly Fle
   return [...items.values()];
 };
 
+/**
+ * TWO FACTS ABOUT ONE DOCUMENT that a person needs put side by side, or `null` when they agree.
+ *
+ * The facts are: what this document is NAMED, and which parser the harness reading it will use. They
+ * are independent — `parseSettings` is handed the harness's own destination format and never looks at
+ * the extension — so a `config.toml` applied to a Claude account is parsed as JSON and fails the
+ * apply. The scaffolded fleet registers exactly one document per harness, and this step offers both,
+ * so that is not a hypothetical trap: it is the default one.
+ *
+ * It is a STATEMENT and not a refusal, and the difference matters. An extension is a claim about
+ * contents that can be wrong in either direction — a `.json` file may hold TOML and nobody here has
+ * read either — so this says the two facts and leaves the conclusion to the person, rather than
+ * refusing a document on the strength of its name.
+ */
+export const settingsFormatNote = (path: string, harness: FleetHarnessKind): string | null => {
+  const { extension, format } = SETTINGS_DOCUMENT[harness];
+  if (path.endsWith(extension)) return null;
+  // A path with no extension at all gets the same sentence with the first half told honestly: there
+  // is no name to quote, and slicing at a dot that is not there would quote its last character.
+  const dot = path.lastIndexOf('.');
+  const named = dot === -1 || dot < path.lastIndexOf('/') ? 'Named with no extension' : `Named ${path.slice(dot)}`;
+  return `${named}, and a ${harness} account reads its settings as ${format}.`;
+};
+
 /** Every document path one route's declared `settings` references, canonical, in declared order. */
 const declaredSettingsPaths = (declared: unknown): readonly string[] =>
   (Array.isArray(declared) ? (declared as readonly unknown[]) : [declared])

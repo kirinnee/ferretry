@@ -7239,7 +7239,15 @@ const HARNESS_FLEET_COCKPIT_ANSWERS: Readonly<Record<string, unknown>> = {
     confirmation: 'none',
   },
   '/accounts': { version: 1, generatedAt: '2026-08-05T08:26:00.000Z', accounts: HARNESS_FLEET_ACCOUNTS },
-  '/config': { variants: { default: {}, auto: {} }, agents: [] },
+  // A REAL SETTINGS REGISTRY, because the sequence's Settings step offers what this fleet has and a
+  // fleet that names nothing captures the empty case forever. These are the two names and the two `./`
+  // paths `fy fleet init` scaffolds, so the capture measures the shipped scheme rather than one this
+  // file made up — including the canonicalisation, since a card spelled `./…` could not be ticked.
+  '/config': {
+    variants: { default: {}, auto: {} },
+    shared: { settings: { claude: './templates/claude/settings.json', codex: './templates/codex/config.toml' } },
+    agents: [],
+  },
   // WHAT THIS HOST HAS. Without it the new-account sequence opens unprefilled, which is the OLD screen:
   // every capture would show empty boxes and prove nothing about the one property the panel gained.
   '/harnesses': HARNESS_FLEET_DISCOVERY,
