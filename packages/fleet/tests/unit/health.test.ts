@@ -285,6 +285,25 @@ describe('decideAccountHealth', () => {
     });
   });
 
+  it('lets an expired-but-refreshable local credential outrank a remote rejection', () => {
+    // Arrange — a sync copies an already-expired access token (refresh token still present) onto a
+    // sibling, and the remote probe sends that same expired token and is correctly told 401. That is a
+    // fact about the STALE token the probe happened to try, not about whether this home can still sign
+    // itself back in via its own refresh token. A positively dead local credential already outranks a
+    // remote answer (see the `missing` case above); a refreshable one is not yet given the same rank.
+    const actual = input({ remote: 'rejected', local: { state: 'refreshable', expiresAt: NOW - 1 } });
+
+    // Assert — DESIRED: unproven, not condemned. Today this instead returns
+    // needs_relogin/oauth_token_rejected, because the remote branch is checked before the local
+    // `refreshable` branch runs, so this case is RED until that ordering changes.
+    should(actual).deepEqual({
+      verdict: 'unknown',
+      reason: 'oauth_refreshable',
+      evidence: 'local_credential',
+      conclusive: false,
+    });
+  });
+
   it('does not call a locally valid credential healthy', () => {
     // Arrange / Act — a current access token can have been revoked a minute ago, so a local reading is
     // structural evidence and never provider acceptance.

@@ -24,6 +24,39 @@
  * and re-signing the donor in does not refresh the fleet. Both are properties a person has to be told
  * about, which is why every outcome below is a sentence a boot says rather than a code it swallows.
  *
+ * ## EVERY COPY HOLDS THE SAME REFRESH TOKEN, AND THAT MAY MATTER LATER
+ *
+ * A seed leaves N+1 homes holding one credential blob: this host's own donor, plus a copy per account
+ * it seeded. The blob travels WHOLE — its refresh token included — because the store copies material
+ * instead of parsing it, and a default fleet declares two lanes per harness, so an ordinary first run
+ * ends with three copies of one refresh token.
+ *
+ * IF a provider rotates a refresh token when it is redeemed, or accepts it only once, THEN the first
+ * copy to renew spends the token every other copy is holding, and the siblings and the donor are left
+ * holding one that is already dead. That is written as a conditional deliberately: **nothing in this
+ * repository proves that Claude's refresh tokens rotate**, no call to a provider is made here to find
+ * out, and the one harness it does claim single-use rotation for is Codex ({@link ./health.ts},
+ * {@link ./token-refresh.ts}). {@link ./token-refresh.ts} reasons about this same hazard for the clones
+ * an identity makes. Treat it as a risk to design against, never as a measurement.
+ *
+ * Two things follow whatever the provider turns out to do, because both are properties of THIS code:
+ *
+ * - **A spent refresh token is indistinguishable from a live one.** Classification is by PRESENCE:
+ *   {@link classifyCredential} asks whether a refresh token is THERE, never whether it can still be
+ *   redeemed. So a home holding a rotated-away token reads `refreshable` and looks fine until
+ *   something tries to use it.
+ * - **The donor is outside every identity, so the sibling repair path cannot reach it.**
+ *   {@link hostHarnessInstall} is not an account and never becomes one, and the sync in
+ *   {@link module:identity} copies a fresher credential onto the SIBLINGS of an identity. A fleet lane
+ *   that renews first may therefore leave the operator's own install holding the dead copy, and
+ *   nothing on either side repairs that one.
+ *
+ * WHICH IS WHY NO PROACTIVE OR UNATTENDED REFRESH BELONGS HERE YET. Renewing on a timer, or on every
+ * boot, multiplies the copies racing for one token by the number of homes. Three questions want
+ * answering by design first: which home OWNS a credential, how copies of one blob are recognised as
+ * copies rather than as N independent credentials, and what protects the donor — a login somebody made
+ * themselves and did not hand the fleet permission to break.
+ *
  * ## WHAT IT REFUSES TO OVERWRITE
  *
  * Only a `missing` credential is seeded. `unreadable` is a state here for the reason it is a state in
