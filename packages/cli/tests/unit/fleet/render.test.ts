@@ -1474,6 +1474,35 @@ describe('rendering the sharing report', () => {
     should(actual).not.containEql('./hooks.json · from this account · copied at apply');
   });
 
+  it('should render a generated field rather than silently dropping a mechanism the wire admits', () => {
+    // Arrange — no field the daemon reports today is `generated`; `settings` is a stack and is reported
+    // separately. But the wire enum admits all three values for every field, so a renderer that said
+    // nothing for one of them would be an unhandled case waiting for the first field that used it.
+    const report = sharingReport({
+      accounts: [
+        sharingAccount({
+          fields: {
+            ...sharingAccount().fields,
+            mcp: {
+              state: 'local',
+              path: './own.json',
+              origin: { kind: 'account' },
+              referrers: 1,
+              materialization: 'generated',
+            },
+          },
+        }),
+      ],
+    });
+
+    // Act
+    const actual = renderFleetSharing(report);
+
+    // Assert — and the sentence is about the edit: a generated file is the one a person must NOT edit
+    // in the home, which is the whole reason the three mechanisms are named separately.
+    should(actual).containEql('./own.json · from this account · merged into a generated file');
+  });
+
   it('should say an empty selection is empty rather than printing nothing', () => {
     // Arrange
     const report = sharingReport({
