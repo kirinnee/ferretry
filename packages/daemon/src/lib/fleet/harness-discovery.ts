@@ -4,8 +4,8 @@
  * THE DETECTION IS NOT NEW. `readHarnessPreflight` has resolved `claude` and `codex` against this
  * host's `PATH` since the first boot milestone, and said so in the startup warning; what it never did
  * was OFFER that answer to anything a person types into. This module surfaces the same lookup, from
- * the same port, and adds the two further facts a form needs and a preflight has no use for: the model
- * the harness itself is configured with, and the instructions document it already reads.
+ * the same port, and adds the two further facts a form needs and a preflight has no use for: the
+ * models the harness's own settings already name, and the instructions document it already reads.
  *
  * FOUR RULES, and each one exists because the opposite choice ships a lie:
  *
@@ -118,6 +118,76 @@ export interface HarnessDiscoveryOptions {
  */
 const MODEL_KEY = 'model';
 
+/**
+ * An environment name that names a model.
+ *
+ * A RULE RATHER THAN A TABLE, and that is the whole point. Claude Code takes several model
+ * identifiers through its settings `env` block — a primary, a small fast one, a per-family default —
+ * and a hardcoded list of those names would be this repository claiming to know a harness's
+ * environment surface. It would also go stale silently: a name the harness added would simply never
+ * be offered, and nothing would say so. A name ending in `MODEL` holds a model identifier in every
+ * spelling either harness uses, so the rule finds them all, and it can never invent one — every
+ * candidate it yields is a value somebody wrote in that file.
+ */
+const MODEL_ENV_NAME = /(^|_)MODEL$/u;
+
+/** Codex declares a model per named profile, which is a second — and equally declared — place to look. */
+const PROFILES_KEY = 'profiles';
+
+/** What the sentence below has to tell a reader when nothing named a model, since the rule is otherwise invisible. */
+const MODEL_SOURCES = `"${MODEL_KEY}", an env name ending in MODEL, or a profile's own "${MODEL_KEY}"`;
+
+const trimmedString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  return text === '' ? undefined : text;
+};
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Every model identifier one settings document names, in preference order and without repeats.
+ *
+ * THE HARNESS'S OWN `model` IS FIRST, because it is the one the harness would use if nobody chose
+ * and {@link HarnessModels.defaultModel} has to be one of these. The rest are the further models the
+ * SAME document already names: an `env` entry whose name ends in `MODEL`, and the model each named
+ * profile declares. Both extra keys are read for both harnesses for the reason {@link MODEL_KEY} is
+ * not a layout fact — a per-harness table of where to look is a second declaration that can go stale
+ * against a harness, where a rule applied uniformly cannot.
+ *
+ * WHY IT MATTERS: before this, a fresh host offered the account form exactly ONE card and every
+ * further model had to be typed in by hand and marked unverified — which is most of why an account
+ * served one model in practice. Somebody who has configured a small fast model or a second profile
+ * has already told this host which models their account can serve.
+ *
+ * NOTHING IS LAUNCHED AND NOTHING IS INVENTED. This is the same single read of the same file, so it
+ * cannot cost a provider request. The wire carries ONE `source` for the whole set, which stays
+ * literally true because every candidate comes out of the one document that path names. WHICH key
+ * named a given model is deliberately not published: saying so per candidate is a wire field and a
+ * surface change rather than a read, and it is stated as a limit rather than half-built.
+ */
+const namedModels = (settings: Readonly<Record<string, unknown>>): readonly string[] => {
+  const found: string[] = [];
+  const add = (value: unknown): void => {
+    const model = trimmedString(value);
+    if (model !== undefined && !found.includes(model)) found.push(model);
+  };
+
+  add(settings[MODEL_KEY]);
+  const environment = settings.env;
+  if (isRecord(environment))
+    for (const [name, value] of Object.entries(environment)) if (MODEL_ENV_NAME.test(name)) add(value);
+  const profiles = settings[PROFILES_KEY];
+  if (isRecord(profiles)) for (const profile of Object.values(profiles)) if (isRecord(profile)) add(profile[MODEL_KEY]);
+  return found;
+};
+
+/** What one settings document turned out to name: at least one model, or the reason it named none. */
+type DeclaredModels =
+  | { readonly kind: 'named'; readonly ids: readonly [string, ...(readonly string[])] }
+  | { readonly kind: 'none'; readonly why: string };
+
 /** What being unable to find this harness's command breaks, said whether or not it is missing. */
 const ABSENCE_IMPACT: Readonly<Record<HarnessKind, string>> = {
   claude:
@@ -127,35 +197,45 @@ const ABSENCE_IMPACT: Readonly<Record<HarnessKind, string>> = {
 };
 
 /**
- * The model the harness declares, or the reason nothing could be read out of its settings.
+ * The models the harness declares, or the reason nothing could be read out of its settings.
  *
  * A settings document that will not parse is reported as a REASON rather than swallowed. The harness
  * itself is failing to read that file too, so a person who is told "no model detected" and nothing
  * else has been sent looking in the wrong place.
  */
-const declaredModel = (read: HarnessDocumentRead, layout: HarnessHomeLayout): string | { readonly why: string } => {
-  if (read.kind === 'absent') return { why: `there is no ${layout.settingsPath} on this host` };
+const declaredModels = (read: HarnessDocumentRead, layout: HarnessHomeLayout): DeclaredModels => {
+  if (read.kind === 'absent') return { kind: 'none', why: `there is no ${layout.settingsPath} on this host` };
   if (read.kind === 'too-large')
-    return { why: `${layout.settingsPath} is ${String(read.bytes)} bytes and was not read` };
-  if (read.kind === 'unreadable') return { why: `${layout.settingsPath} could not be read (${read.reason})` };
+    return { kind: 'none', why: `${layout.settingsPath} is ${String(read.bytes)} bytes and was not read` };
+  if (read.kind === 'unreadable')
+    return { kind: 'none', why: `${layout.settingsPath} could not be read (${read.reason})` };
   let settings: Readonly<Record<string, unknown>>;
   try {
     settings = parseSettings(read.text, layout.settingsFormat);
   } catch (error) {
-    return { why: `${layout.settingsPath} is not valid ${layout.settingsFormat} (${errorText(error)})` };
+    return {
+      kind: 'none',
+      why: `${layout.settingsPath} is not valid ${layout.settingsFormat} (${errorText(error)})`,
+    };
   }
-  const declared = settings[MODEL_KEY];
-  if (typeof declared !== 'string' || declared.trim() === '')
-    return { why: `${layout.settingsPath} declares no "${MODEL_KEY}"` };
-  return declared.trim();
+  const [first, ...rest] = namedModels(settings);
+  if (first === undefined) return { kind: 'none', why: `${layout.settingsPath} names no model in ${MODEL_SOURCES}` };
+  return { kind: 'named', ids: [first, ...rest] };
 };
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const modelsFor = (read: HarnessDocumentRead, layout: HarnessHomeLayout): HarnessModels => {
-  const declared = declaredModel(read, layout);
-  if (typeof declared === 'string')
-    return { origin: 'detected', ids: [declared], defaultModel: declared, source: layout.settingsPath };
+  const declared = declaredModels(read, layout);
+  // A DETECTION OF SEVERAL, not of one. The first is the default because `namedModels` puts the
+  // harness's own `model` first, and the published shape demands the default be one of the ids.
+  if (declared.kind === 'named')
+    return {
+      origin: 'detected',
+      ids: [...declared.ids],
+      defaultModel: declared.ids[0],
+      source: layout.settingsPath,
+    };
   const starter = FLEET_STARTER_MODELS[layout.kind];
   return {
     origin: 'fallback',
@@ -221,6 +301,6 @@ export async function readHarnessDiscovery(options: HarnessDiscoveryOptions): Pr
     harnesses,
     noneInstalled: harnesses.every(harness => harness.command === undefined),
     limitation:
-      'Every answer here is a PATH lookup and a file read. It does not prove a harness is signed in, has credit, or can reach its provider, and a model read out of a settings file is what that file says rather than what the provider will serve.',
+      'Every answer here is a PATH lookup and a file read. It does not prove a harness is signed in, has credit, or can reach its provider, and a model read out of a settings file is what that file says rather than what the provider will serve. Where a settings file names several models, they are reported together against that one path — which key named which model is not said.',
   };
 }

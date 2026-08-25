@@ -174,4 +174,35 @@ describe('the harness home document reader', () => {
     should(report.harnesses[1]?.models.origin).equal('fallback');
     should(report.harnesses[1]?.instructions.found).be.false();
   });
+
+  it('should offer every model a real settings file on disk names, not just the harness own default', async () => {
+    // Arrange — the same assembly over real files, with the configuration a person who uses a small fast
+    // model actually has. The point of the tier: the ids come off a disk read through the real reader and
+    // the real layouts, so nothing here is this test's opinion about what the file contains.
+    const home = await harnessHome();
+    await writeFile(
+      join(home, '.claude', 'settings.json'),
+      JSON.stringify({ model: 'claude-opus-4-5', env: { ANTHROPIC_SMALL_FAST_MODEL: 'claude-haiku-4-5' } }),
+      'utf8',
+    );
+    await writeFile(
+      join(home, '.codex', 'config.toml'),
+      'model = "gpt-5.6-terra"\n\n[profiles.fast]\nmodel = "gpt-5.6-sol"\n',
+      'utf8',
+    );
+
+    // Act
+    const report = await readHarnessDiscovery({
+      layouts: harnessHomeLayouts(home),
+      executables: { resolve: () => undefined },
+      documents: new NodeHarnessHomeDocuments(),
+      maxDocumentBytes: 64 * 1024,
+    });
+
+    // Assert — two cards per harness, each traceable to the one path the report names.
+    should(report.harnesses[0]?.models.ids).deepEqual(['claude-opus-4-5', 'claude-haiku-4-5']);
+    should(report.harnesses[0]?.models.source).equal(join(home, '.claude', 'settings.json'));
+    should(report.harnesses[1]?.models.ids).deepEqual(['gpt-5.6-terra', 'gpt-5.6-sol']);
+    should(report.harnesses[1]?.models.origin).equal('detected');
+  });
 });
