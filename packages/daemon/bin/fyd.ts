@@ -563,6 +563,7 @@ import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import {
   FileFleetConfigSource,
+  harnessKeychainAccount,
   PlatformFleetCredentialStore,
   readFleetWrapperScript,
   SpawnCredentialCommand,
@@ -4521,7 +4522,7 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
     clock: millisecondClock,
     files: stateFiles,
     platform: process.platform,
-    keychainAccount: process.env.USER ?? '',
+    keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
     // Identity is minted here for the same reason everything else is: this is the only place
     // allowed to reach for randomness, and a proposal handle or an account id derived from a clock
     // would be guessable by anyone who knew roughly when it was made.
@@ -4580,7 +4581,10 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       platform: process.platform,
       command: new SpawnCredentialCommand(),
       now: () => millisecondClock.now(),
-      keychainAccount: process.env.USER ?? '',
+      keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
+      // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no
+      // suffix. Spelled from `userHome` because the fleet layout owns the same join.
+      defaultClaudeHome: join(userHome, '.claude'),
     }),
     clock: millisecondClock,
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),

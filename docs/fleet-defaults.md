@@ -149,11 +149,12 @@ So the consequence is said out loud on every boot that seeds:
 
 ### Two platforms, two implementations
 
-| harness | platform | what a seed does                                                                          |
-| ------- | -------- | ----------------------------------------------------------------------------------------- |
-| claude  | macOS    | reads keychain item `Claude Code-credentials-<sha256(home)[0:8]>` and writes the target's |
-| claude  | other    | copies `<home>/.credentials.json`, mode `0600`                                            |
-| codex   | any      | copies `<home>/auth.json`, mode `0600`                                                    |
+| harness | platform | what a seed does                                                                            |
+| ------- | -------- | ------------------------------------------------------------------------------------------- |
+| claude  | macOS    | reads keychain item `Claude Code-credentials[-<sha256(home)[0:8]>]` and writes the target's |
+| claude  | macOS    | falls back to `<home>/.credentials.json` when the keychain holds no item for that home      |
+| claude  | other    | copies `<home>/.credentials.json`, mode `0600`                                              |
+| codex   | any      | copies `<home>/auth.json`, mode `0600`                                                      |
 
 **macOS is not a file copy and a file-copy-only seed would silently do nothing there**, because Claude
 Code keeps no credential file on a Mac — it keeps a keychain item whose NAME is derived from the config
@@ -162,6 +163,20 @@ directory. The seeder has no platform branch of its own; the store owns both, wh
 scripting `security` and asserting that the DONOR's item was read and the TARGET's different item was
 written. The displayed account identity (`.claude.json`'s `oauthAccount`) travels with it, so `/status`
 in a seeded home names the account the credential belongs to.
+
+**THE SUFFIX IS CONDITIONAL, AND THAT DEFECT COST THIS SEED ITS DONOR.** The harness appends
+`-<sha256(home)[0:8]>` only when `CLAUDE_CONFIG_DIR` is set; a default install stores its login under
+the bare name `Claude Code-credentials`. Every account this boot creates is launched by a wrapper that
+exports that variable, so every fleet home is suffixed — but the donor is the operator's own
+`~/.claude`, which is the one home nobody launches that way. Asking for a suffixed item there asked
+for one that was never written, so a Mac that was signed in produced a fleet that was not and this
+boot reported `no-donor` about a login on the same machine. `keychainServices` now offers the bare
+name **only for that default home**: offering it for a fleet home would let an account with no
+credential of its own read the operator's login, report itself signed in, and then donate it to its
+siblings. The harness's darwin store is likewise keychain-**with-plaintext-fallback**, so a home whose
+keychain write once failed is read from its file rather than reported `missing`; a keychain that could
+not be READ still stays `unreadable`, because answering an unknown from a file beside it is exactly
+what `unreadable` exists to prevent.
 
 ### What it will not overwrite
 

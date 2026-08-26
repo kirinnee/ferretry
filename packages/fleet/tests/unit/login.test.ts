@@ -20,6 +20,8 @@ const ID_THREE = '00000000-0000-4000-8000-000000000003';
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;
 const VALID: CredentialReading = { state: 'valid', expiresAt: NOW + HOUR };
+/** An expired access token with a refresh token beside it — what a home holds BEFORE a sign-in. */
+const REFRESHABLE: CredentialReading = { state: 'refreshable', expiresAt: NOW - HOUR };
 
 const member = (overrides: Partial<FleetIdentityMember> = {}): FleetIdentityMember => ({
   accountId: ID_ONE,
@@ -278,6 +280,79 @@ describe('FleetLoginService', () => {
 
     // Assert
     should(actual).deepEqual([{ accountId: ID_ONE, identity: 'claude:kirin', status: 'logged-in' }]);
+  });
+
+  /**
+   * THE REPORTED BUG, end to end, in the shape it was observed in.
+   *
+   * A `reauthenticate` pass on a fleet whose homes held an expired-but-renewable copy. The wrapper
+   * was missing, so the login port fell back to the bare harness CLI — launched with no
+   * configuration directory, which signs the OPERATOR's own default home in and leaves the account's
+   * home exactly as it was. It exited zero, so the pass reported `logged in`, picked the stale copy
+   * as the identity's donor, cloned it onto the sibling as `credential copied from this identity`,
+   * and `fy fleet health` then correctly reported both lanes as needing a refresh — seconds after a
+   * real browser approval.
+   *
+   * An approval mints an access token, so a home it reached is `valid`. `refreshable` is the state
+   * the home was already in, and a token minted seconds ago cannot be expired.
+   */
+  const staleAfterSignIn = [
+    { [ID_ONE]: REFRESHABLE, [ID_TWO]: { state: 'missing' as const } },
+    { [ID_ONE]: REFRESHABLE, [ID_TWO]: { state: 'missing' as const } },
+  ];
+
+  it('should refuse to call it a login when the sign-in left an expired access token behind', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore(staleAfterSignIn);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_ONE],
+      mode: 'reauthenticate',
+    });
+
+    // Assert — the row a person reads must not claim something no read established.
+    should(port.launched).have.length(1);
+    should(statusesOf(actual)[ID_ONE]).equal('failed');
+    should(actual.find(result => result.accountId === ID_ONE)?.message).containEql('already expired');
+    should(actual.find(result => result.accountId === ID_ONE)?.message).containEql(ID_ONE);
+  });
+
+  it('should still call it a login when the sign-in left a freshly minted access token', async () => {
+    // Arrange — the same pass, distinguished only by what the launched home holds afterwards.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: REFRESHABLE, [ID_TWO]: { state: 'missing' } },
+      { [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [twoLanes],
+      accountIds: [ID_ONE],
+      mode: 'reauthenticate',
+    });
+
+    // Assert
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'logged-in', [ID_TWO]: 'synced' });
+  });
+
+  it('should leave a launched lane that received a copy reporting the copy, not a failure', async () => {
+    // Arrange — the driver is a TARGET here, so its `synced` row is honest and must survive.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: VALID },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
+
+    // Assert
+    should(port.launched[0]?.accountId).equal(ID_ONE);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'synced', [ID_TWO]: 'usable' });
   });
 
   it('should never open a browser under sync-only, and say what is still needed', async () => {

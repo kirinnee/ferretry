@@ -82,14 +82,17 @@ Everything else in this document is cost and sequencing.
 
 `packages/fleet/src/adapters/credential-store.ts:1-23` owns this and states the table:
 
-| harness  | platform | location                                         |
-| -------- | -------- | ------------------------------------------------ |
-| `claude` | macOS    | keychain item `Claude Code-credentials-<suffix>` |
-| `claude` | other    | `<home>/.credentials.json`                       |
-| `codex`  | any      | `<home>/auth.json`                               |
+| harness  | platform | location                                                         |
+| -------- | -------- | ---------------------------------------------------------------- |
+| `claude` | macOS    | keychain item `Claude Code-credentials[-<suffix>]`               |
+| `claude` | macOS    | `<home>/.credentials.json`, when the keychain holds no such item |
+| `claude` | other    | `<home>/.credentials.json`                                       |
+| `codex`  | any      | `<home>/auth.json`                                               |
 
-`<suffix>` is the first eight hex digits of `sha256(<home>)` (`:284-287`), which is why the home path
-must be the resolved absolute one. Files are written `0600` (`:60`, `:135-139`).
+`<suffix>` is the first eight hex digits of `sha256(<home>)`, which is why the home path must be the
+resolved absolute one. It is present only when the harness was launched with `CLAUDE_CONFIG_DIR` set,
+so this host's DEFAULT Claude home is stored under the bare name and `keychainServices` offers that
+name for that one home and no other. Files are written `0600`.
 
 **Material never leaves that adapter** (`:16-18`). `read` returns a classification, `clone` copies end
 to end, and the only method that yields bytes — `material` (`:194-206`) — is documented
