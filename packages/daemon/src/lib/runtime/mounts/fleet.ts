@@ -38,6 +38,7 @@ import {
   FileSharedHistoryFileSystem,
   fetchQuota,
   fleetApplyLockFor,
+  harnessKeychainAccount,
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
   StoreCredentialClassifier,
@@ -1510,7 +1511,10 @@ class MountedFleet implements FleetSubsystem {
       platform: this.options.platform,
       command: new SpawnCredentialCommand(),
       now: () => this.options.clock.now(),
-      keychainAccount: this.options.keychainAccount ?? '',
+      keychainAccount: harnessKeychainAccount([this.options.keychainAccount]),
+      // The one home the harness reaches with no `CLAUDE_CONFIG_DIR`, so the one whose keychain item
+      // carries no suffix — and the first-run seed's donor, which is what made the omission visible.
+      defaultClaudeHome: this.layout.defaultHomeDirectories.claude,
     });
     return this.credentials_;
   }

@@ -22,6 +22,7 @@ import {
   FileFleetScaffolder,
   FileSharedHistoryFileSystem,
   fetchQuota,
+  harnessKeychainAccount,
   PlatformFleetCredentialStore,
   ProcessFleetLoginPort,
   ProcessFleetTokenRefreshPort,
@@ -719,7 +720,10 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     platform: process.platform,
     command: new SpawnCredentialCommand(),
     now: () => Date.now(),
-    keychainAccount: world.environment.USER ?? '',
+    keychainAccount: harnessKeychainAccount([world.environment.USER, world.environment.LOGNAME]),
+    // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item therefore
+    // carries no suffix. The fleet layout is the single owner of that fact.
+    defaultClaudeHome: layout.defaultHomeDirectories.claude,
   });
   const identityService = new FleetIdentityService(credentialStore);
   const provisioner = new FileFleetProvisioner(

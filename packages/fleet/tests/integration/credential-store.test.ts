@@ -17,8 +17,12 @@ import {
   claudeConfigPath,
   claudeFilePath,
   codexPath,
+  DEFAULT_KEYCHAIN_SERVICE,
+  FALLBACK_KEYCHAIN_ACCOUNT,
+  harnessKeychainAccount,
   KEYCHAIN_ITEM_NOT_FOUND,
   keychainService,
+  keychainServices,
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
 } from '../../src/adapters/credential-store.ts';
@@ -366,6 +370,63 @@ describe('keychainService', () => {
   });
 });
 
+/**
+ * The names one home's credential could be stored under.
+ *
+ * Read out of the harness's own source rather than guessed: `claude-code` builds the item name as
+ * `Claude Code${OAUTH_FILE_SUFFIX}-credentials${suffix}` where `suffix` is
+ * `-sha256(configDir).slice(0,8)` **only when `CLAUDE_CONFIG_DIR` is set** and `OAUTH_FILE_SUFFIX`
+ * is empty in the production configuration. So a default install stores its login under the bare
+ * name, and asking for a suffixed item there asks for one that was never written.
+ */
+describe('keychainServices', () => {
+  it('should offer one name for a home the harness reaches through CLAUDE_CONFIG_DIR', () => {
+    // Assert — the operator's own login must never answer for a fleet account that has none.
+    should(keychainServices('/homes/claude-default', '/user/.claude')).deepEqual([
+      keychainService('/homes/claude-default'),
+    ]);
+  });
+
+  it('should offer the unsuffixed name for the default home, after the suffixed one', () => {
+    // Assert — an operator who exports CLAUDE_CONFIG_DIR at their own default home makes the
+    // suffixed item the real one, so it still has to win; the bare name is the fallback.
+    should(keychainServices('/user/.claude', '/user/.claude')).deepEqual([
+      keychainService('/user/.claude'),
+      DEFAULT_KEYCHAIN_SERVICE,
+    ]);
+  });
+
+  it('should treat a trailing separator as the same home', () => {
+    should(keychainServices('/user/.claude/', '/user/.claude')).containEql(DEFAULT_KEYCHAIN_SERVICE);
+  });
+
+  it('should offer one name when no default home was declared', () => {
+    // Assert — the fail-closed reading: it can cost a seed its donor, never send a read elsewhere.
+    should(keychainServices('/user/.claude')).deepEqual([keychainService('/user/.claude')]);
+  });
+});
+
+/**
+ * The `acct` attribute an item is stored under.
+ *
+ * `security add-generic-password -U` matches on the PAIR (`acct`, `svce`), so an empty `acct` adds
+ * a second item beside the harness's instead of updating it — after which an `-s`-only read can
+ * return either. The composition roots used to pass `USER ?? ''`.
+ */
+describe('harnessKeychainAccount', () => {
+  it('should take the first candidate that names somebody', () => {
+    should(harnessKeychainAccount([undefined, '  ', 'placeholder-user', 'placeholder-other'])).equal(
+      'placeholder-user',
+    );
+  });
+
+  it('should never be empty, and should agree with the harness when nothing names anybody', () => {
+    // Assert — `claude-code-user` is the harness's own last resort, spelled the same way.
+    should(harnessKeychainAccount([undefined, ''])).equal(FALLBACK_KEYCHAIN_ACCOUNT);
+    should(FALLBACK_KEYCHAIN_ACCOUNT).equal('claude-code-user');
+  });
+});
+
 describe('PlatformFleetCredentialStore on macOS', () => {
   const macStore = (replies: readonly CredentialCommandResult[], command = new ScriptedCommand(replies)) => ({
     store: new PlatformFleetCredentialStore({
@@ -508,6 +569,121 @@ describe('PlatformFleetCredentialStore on macOS', () => {
     // Assert — nothing was written, and no attribute lookup was even attempted.
     should(actual).deepEqual({ ok: false, reason: 'the donor credential could not be read at copy time' });
     should(command.calls).have.length(1);
+  });
+
+  /**
+   * THE REPORTED BUG, at the point it starts.
+   *
+   * The first run's donor is this host's own `~/.claude`, which is the one home the harness reaches
+   * with no `CLAUDE_CONFIG_DIR` set — so its keychain item carries no suffix. Asking only for the
+   * suffixed name asked for an item that does not exist, and a Mac that was signed in produced a
+   * fleet that was not, with the boot reporting `no-donor` about a login on the same machine.
+   */
+  const defaultHomeStore = (replies: readonly CredentialCommandResult[], defaultClaudeHome = '/user/.claude') => {
+    const command = new ScriptedCommand(replies);
+    return {
+      command,
+      store: new PlatformFleetCredentialStore({
+        platform: 'darwin',
+        command,
+        now: () => NOW,
+        keychainAccount: 'placeholder-user',
+        defaultClaudeHome,
+        keychainTimeoutMs: 250,
+      }),
+    };
+  };
+
+  it('should find the default home credential under the unsuffixed item the harness wrote it to', async () => {
+    // Arrange — the suffixed item does not exist, because the harness never wrote one.
+    const { store, command } = defaultHomeStore([
+      { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
+      { code: 0, stdout: `${claudeBlob(NOW + HOUR)}\n` },
+    ]);
+
+    // Act
+    const actual = await store.read('claude', member('/user/.claude'));
+
+    // Assert
+    should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
+    should(command.calls[0]?.[3]).equal(keychainService('/user/.claude'));
+    should(command.calls[1]?.[3]).equal(DEFAULT_KEYCHAIN_SERVICE);
+  });
+
+  it('should never ask for the unsuffixed item on behalf of a configured home', async () => {
+    // Arrange — the bare item is the OPERATOR's login. A fleet account reading it would report
+    // itself signed in on somebody else's credential and then donate it to its siblings.
+    const { store, command } = defaultHomeStore([{ code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' }]);
+
+    // Act
+    const actual = await store.read('claude', member('/homes/claude-default'));
+
+    // Assert
+    should(actual).deepEqual({ state: 'missing' });
+    should(command.calls).have.length(1);
+  });
+
+  it('should stop at an item that exists but could not be read, rather than trying the next name', async () => {
+    // Arrange — a locked keychain on this home's own item must not be answered from another one.
+    const { store, command } = defaultHomeStore([{ code: 51, stdout: '' }]);
+
+    // Act
+    const actual = await store.read('claude', member('/user/.claude'));
+
+    // Assert
+    should(actual.state).equal('unreadable');
+    should(command.calls).have.length(1);
+  });
+
+  it('should write the default home to the unsuffixed item it is already stored under', async () => {
+    // Arrange — read donor, look up the suffixed item (absent), look up the bare item (present).
+    const { store, command } = defaultHomeStore([
+      { code: 0, stdout: claudeBlob(NOW + HOUR) },
+      { code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' },
+      { code: 0, stdout: '"acct"<blob>="existing-account"' },
+      { code: 0, stdout: '' },
+    ]);
+
+    // Act
+    const actual = await store.clone('claude', member('/homes/donor'), member('/user/.claude', 'account-two'));
+
+    // Assert — a write to the suffixed name would add an item the harness never reads.
+    should(actual).deepEqual({ ok: true });
+    should(command.calls[3]?.[6]).equal(DEFAULT_KEYCHAIN_SERVICE);
+    should(command.calls[3]?.[4]).equal('existing-account');
+  });
+
+  /**
+   * The harness's darwin store is `keychain-with-plaintext-fallback`: it reads the keychain and
+   * falls back to `<home>/.credentials.json`, and it WRITES that file when the keychain write fails.
+   * A store that looked only in the keychain reported `missing` — a hard negative — for a home that
+   * is signed in.
+   */
+  it('should fall back to the credential file when the keychain has no item for this home', async () => {
+    // Arrange
+    const home = await temporaryDirectory();
+    await writeFile(claudeFilePath(home), claudeBlob(NOW + HOUR));
+    const { store } = defaultHomeStore([{ code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' }]);
+
+    // Act
+    const actual = await store.read('claude', member(home));
+
+    // Assert
+    should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
+  });
+
+  it('should not answer an unreadable keychain from the credential file beside it', async () => {
+    // Arrange — the file may be the credential the harness already replaced, so "I could not tell"
+    // must stay "I could not tell": an unreadable home is never overwritten, a missing one is.
+    const home = await temporaryDirectory();
+    await writeFile(claudeFilePath(home), claudeBlob(NOW + HOUR));
+    const { store } = defaultHomeStore([{ code: 51, stdout: '' }]);
+
+    // Act
+    const actual = await store.read('claude', member(home));
+
+    // Assert
+    should(actual.state).equal('unreadable');
   });
 
   it('should use the default bound when none is supplied', async () => {

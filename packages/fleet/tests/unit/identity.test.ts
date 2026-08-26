@@ -123,6 +123,75 @@ describe('decodeJwtExpiry', () => {
   });
 });
 
+/**
+ * The credential the harness ACTUALLY writes, pinned against its own source.
+ *
+ * This exists because a fleet that had just been signed in kept reporting every lane
+ * `refreshable`, and the leading explanations were both about this function: that the access token
+ * is not at the path it looks for, or that `expiresAt` is in seconds. Both are false, and the whole
+ * point of this fixture is that it is not a guess. `@anthropic-ai/claude-code` `package/cli.js`
+ * (2.0.30 and 2.1.110, the last builds that ship readable source) writes exactly one shape:
+ *
+ *     store.update({ claudeAiOauth: { accessToken, refreshToken, expiresAt,
+ *                                     scopes, subscriptionType, rateLimitTier } })
+ *
+ * and assigns the expiry in exactly one shape everywhere in the bundle:
+ * `expiresAt: Date.now() + (expires_in || 3600) * 1000` — epoch MILLISECONDS.
+ *
+ * So a credential a browser approval minted seconds ago is `valid` here, and this classifier was
+ * never the thing misreading it. What was wrong was WHICH credential reached it: see
+ * `keychainServices` in `adapters/credential-store.ts` for the item name the harness uses when no
+ * `CLAUDE_CONFIG_DIR` names a home, and `freshlySignedIn` in `lib/login.ts` for why a login pass
+ * must not accept `refreshable` as proof that its own approval landed.
+ *
+ * KEEP THIS FIXTURE IN THE HARNESS'S SHAPE. A fixture written to suit the reader proves that the
+ * reader agrees with itself.
+ */
+const harnessWrittenCredential = (expiresAt: number): string =>
+  JSON.stringify({
+    claudeAiOauth: {
+      accessToken: 'placeholder-access-token',
+      refreshToken: 'placeholder-refresh-token',
+      expiresAt,
+      scopes: ['user:inference', 'user:profile'],
+      subscriptionType: 'max',
+      rateLimitTier: null,
+    },
+  });
+
+describe('classifyClaudeCredential against the shape the harness writes', () => {
+  it('should report a credential minted seconds ago as valid, never as refreshable', () => {
+    // Arrange — an access token from an approval that has just completed.
+    const expiresAt = NOW + 3_600_000;
+
+    // Act
+    const actual = classifyClaudeCredential(found(harnessWrittenCredential(expiresAt)), NOW);
+
+    // Assert — every extra field the harness carries is ignored rather than confusing the read.
+    should(actual).deepEqual({ state: 'valid', expiresAt });
+  });
+
+  it('should read the expiry as milliseconds, which is the unit the harness stores', () => {
+    // Arrange — the same instant, written the way a seconds-based reader would have to read it.
+    const seconds = Math.trunc(NOW / 1000) + 3_600;
+
+    // Act — as milliseconds it is thirty years past, so a seconds-storing harness would read dead.
+    const actual = classifyClaudeCredential(found(harnessWrittenCredential(seconds)), NOW);
+
+    // Assert — it reads dead, which is exactly why the harness does not store seconds.
+    should(actual).deepEqual({ state: 'refreshable', expiresAt: seconds });
+    should(classifyClaudeCredential(found(harnessWrittenCredential(NOW + 3_600_000)), NOW).state).equal('valid');
+  });
+
+  it('should report the same shape with a past expiry as refreshable', () => {
+    // Assert — the ONLY way a harness-written credential reaches `refreshable`: it really is expired.
+    should(classifyClaudeCredential(found(harnessWrittenCredential(NOW - 1)), NOW)).deepEqual({
+      state: 'refreshable',
+      expiresAt: NOW - 1,
+    });
+  });
+});
+
 describe('classifyClaudeCredential', () => {
   it('should report a home with no credential as missing, not unreadable', () => {
     should(classifyClaudeCredential({ outcome: 'absent' }, NOW)).deepEqual({ state: 'missing' });

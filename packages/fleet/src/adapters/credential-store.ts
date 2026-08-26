@@ -6,12 +6,38 @@
  *
  * | harness | platform | location                                           |
  * | ------- | -------- | -------------------------------------------------- |
- * | claude  | macOS    | keychain item `Claude Code-credentials-<suffix>`   |
+ * | claude  | macOS    | keychain item `Claude Code-credentials[-<suffix>]` |
+ * | claude  | macOS    | `<home>/.credentials.json`, when the keychain write failed |
  * | claude  | other    | `<home>/.credentials.json`                         |
  * | codex   | any      | `<home>/auth.json`                                 |
  *
  * where `<suffix>` is the first eight hex digits of `sha256(<home>)` — the name Claude Code derives
  * from its own config directory, which is why the home path must be the resolved absolute one.
+ *
+ * ## THE SUFFIX IS NOT UNCONDITIONAL, AND THAT COST THIS PRODUCT ITS FIRST-RUN SEED
+ *
+ * Claude Code appends `-<suffix>` **only when `CLAUDE_CONFIG_DIR` is set**; a default install
+ * stores its credential under the bare name `Claude Code-credentials`. Every fleet account is
+ * launched by a generated wrapper that exports that variable, so every fleet home is suffixed — but
+ * the ONE home nobody launches that way is the operator's own `~/.claude`, which is precisely the
+ * donor the first-run seed reads. Asking the keychain for a suffixed item there is asking for an
+ * item that does not exist, so a host that was signed in produced a fleet that was not, and the
+ * boot said `no-donor` about a login sitting on the same machine.
+ *
+ * So {@link keychainServices} returns the names the harness could have used for one home, most
+ * specific first, and the bare name is offered ONLY for a home the harness reaches with no
+ * `CLAUDE_CONFIG_DIR` set. It is deliberately not offered for every home: the bare item is the
+ * default install's credential, and reading it for a fleet home would report an account as signed
+ * in on somebody else's login and then let it donate that login to its siblings.
+ *
+ * ## MACOS IS KEYCHAIN-WITH-PLAINTEXT-FALLBACK, NOT KEYCHAIN-ONLY
+ *
+ * The harness composes the two stores on darwin: it reads the keychain and falls back to
+ * `<home>/.credentials.json`, and it WRITES the file when the keychain write fails. A store that
+ * looked only in the keychain therefore reported `missing` for a home that is signed in, which is
+ * the hard negative that condemns a login. The fallback here is on ABSENCE only — a keychain that
+ * could not be read stays `unreadable`, because papering an unknown over with a file that may be
+ * the credential the harness replaced is the mistake `unreadable` exists to prevent.
  *
  * **Credential material never leaves this adapter layer.** `read` returns a classification and `clone` copies
  * end to end, so no service, renderer or log line is ever handed a token. Nothing here writes a
@@ -107,9 +133,16 @@ export interface PlatformCredentialStoreDeps {
   /**
    * The keychain `acct` attribute to use when the item being written does not exist yet and the donor
    * item does not name one. Supplied by the composition root, which is the only place that may read
-   * the environment.
+   * the environment. See {@link harnessKeychainAccount} for why it must never be empty.
    */
   readonly keychainAccount: string;
+  /**
+   * This host's DEFAULT Claude home — the one the harness reaches with no `CLAUDE_CONFIG_DIR` set,
+   * and therefore the one whose keychain item carries no suffix. Absent means every home is treated
+   * as configured, which is the fail-closed reading: it can cost a seed its donor, never send a read
+   * to the wrong login.
+   */
+  readonly defaultClaudeHome?: string;
   readonly keychainTimeoutMs?: number;
 }
 
@@ -202,7 +235,11 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   async material(kind: HarnessKind, home: string): Promise<CredentialMaterial> {
     if (kind === 'codex') return await readFileMaterial(codexPath(home));
     if (this.deps.platform !== 'darwin') return await readFileMaterial(claudeFilePath(home));
-    return await this.#readKeychain(home);
+    const keychain = await this.#readKeychain(home);
+    // The harness's own darwin store is keychain-with-plaintext-fallback, so a home whose keychain
+    // write failed is signed in and its credential is in the file. Absence only: a keychain that
+    // could not be READ stays unreadable rather than being answered from a file beside it.
+    return keychain.outcome === 'absent' ? await readFileMaterial(claudeFilePath(home)) : keychain;
   }
 
   async #material(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialMaterial> {
@@ -217,9 +254,26 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return { ok: true };
   }
 
+  /**
+   * Read the first keychain item this home could have been written under.
+   *
+   * Every name is tried in order and the first item that EXISTS answers, however it answers: an item
+   * that is there but unreadable is this home's credential and stops the walk, because falling
+   * through to the next name would answer a locked keychain with a different login's credential.
+   * Only "no such item" moves on, and running out of names is an absence.
+   */
   async #readKeychain(home: string): Promise<CredentialMaterial> {
+    let material: CredentialMaterial = { outcome: 'absent' };
+    for (const service of this.#services(home)) {
+      material = await this.#readKeychainItem(service);
+      if (material.outcome !== 'absent') return material;
+    }
+    return material;
+  }
+
+  async #readKeychainItem(service: string): Promise<CredentialMaterial> {
     const { code, stdout } = await this.deps.command.run(
-      ['security', 'find-generic-password', '-s', keychainService(home), '-w'],
+      ['security', 'find-generic-password', '-s', service, '-w'],
       this.#timeout(),
     );
     if (code === KEYCHAIN_ITEM_NOT_FOUND) return { outcome: 'absent' };
@@ -230,6 +284,10 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
   }
 
+  #services(home: string): readonly [string, ...string[]] {
+    return keychainServices(home, this.deps.defaultClaudeHome);
+  }
+
   /**
    * Add or update the target's keychain item.
    *
@@ -238,8 +296,7 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
    * commands, which on a single-user host is the same person who can read the keychain.
    */
   async #writeKeychain(home: string, blob: string): Promise<CredentialCloneOutcome> {
-    const service = keychainService(home);
-    const account = await this.#keychainAccount(service);
+    const { service, account } = await this.#writeTarget(home);
     const { code } = await this.deps.command.run(
       ['security', 'add-generic-password', '-U', '-a', account, '-s', service, '-w', blob],
       this.#timeout(),
@@ -247,14 +304,27 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return code === 0 ? { ok: true } : { ok: false, reason: `the keychain write failed (exit ${code})` };
   }
 
-  /** The `acct` attribute an existing item already carries, else the injected default. */
-  async #keychainAccount(service: string): Promise<string> {
-    const { code, stdout } = await this.deps.command.run(
-      ['security', 'find-generic-password', '-s', service],
-      this.#timeout(),
-    );
-    const found = code === 0 ? KEYCHAIN_ACCOUNT_PATTERN.exec(stdout)?.[1] : undefined;
-    return found !== undefined && found.length > 0 ? found : this.deps.keychainAccount;
+  /**
+   * Which item to write, and under whose `acct`.
+   *
+   * `add-generic-password -U` matches on the PAIR (`acct`, `svce`), so both halves have to be the
+   * ones the harness itself uses or the write silently adds a second item beside the harness's
+   * instead of updating it — after which this store's own `-s` read can return either one. An
+   * existing item therefore decides both: its name is the name this home is already stored under,
+   * and its `acct` is the one the harness will look the item up by.
+   */
+  async #writeTarget(home: string): Promise<{ readonly service: string; readonly account: string }> {
+    const services = this.#services(home);
+    for (const service of services) {
+      const { code, stdout } = await this.deps.command.run(
+        ['security', 'find-generic-password', '-s', service],
+        this.#timeout(),
+      );
+      if (code !== 0) continue;
+      const found = KEYCHAIN_ACCOUNT_PATTERN.exec(stdout)?.[1];
+      return { service, account: found !== undefined && found.length > 0 ? found : this.deps.keychainAccount };
+    }
+    return { service: services[0], account: this.deps.keychainAccount };
   }
 
   /**
@@ -281,9 +351,58 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   }
 }
 
-/** The keychain item name Claude Code derives from a config directory. */
+/** The item name Claude Code uses when no `CLAUDE_CONFIG_DIR` names a home for it. */
+export const DEFAULT_KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
+/** The keychain item name Claude Code derives from a CONFIGURED config directory. */
 export function keychainService(home: string): string {
-  return `Claude Code-credentials-${createHash('sha256').update(home).digest('hex').slice(0, 8)}`;
+  return `${DEFAULT_KEYCHAIN_SERVICE}-${createHash('sha256').update(home).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * Every keychain item name this home's credential could be under, most specific first.
+ *
+ * Two, and only for the default home: the harness appends its `sha256(home)` suffix only when
+ * `CLAUDE_CONFIG_DIR` is set, so a default install stores its login under the bare name. The
+ * suffixed name still comes first there, because an operator who exports `CLAUDE_CONFIG_DIR` at
+ * their own default home makes the suffixed item the real one and it must win.
+ *
+ * Any other home gets exactly one name. Offering the bare name everywhere would let a fleet account
+ * with no credential of its own read the OPERATOR's login, report itself signed in, and then donate
+ * that login to its siblings — a single wrong read turning into a fleet-wide one.
+ */
+export function keychainServices(home: string, defaultHome?: string): readonly [string, ...string[]] {
+  const configured = keychainService(home);
+  return defaultHome !== undefined && normalizeHome(home) === normalizeHome(defaultHome)
+    ? [configured, DEFAULT_KEYCHAIN_SERVICE]
+    : [configured];
+}
+
+/** Trailing separators only: the hash is over the harness's own string, so nothing else may move. */
+const normalizeHome = (home: string): string => home.replace(/\/+$/u, '');
+
+/** What Claude Code falls back to when it can name neither `$USER` nor this host's login name. */
+export const FALLBACK_KEYCHAIN_ACCOUNT = 'claude-code-user';
+
+/**
+ * The `acct` attribute to store a keychain item under, from the environment names the harness reads.
+ *
+ * IT MUST NEVER BE EMPTY, and it used to be: the composition roots passed `USER ?? ''`, and
+ * `security add-generic-password -U` matches on the pair (`acct`, `svce`) — so an empty `acct` does
+ * not update the harness's item, it adds a second one beside it under the same service name. A
+ * later `-s`-only read then returns whichever of the two the keychain yields first, which is how a
+ * home that had just been signed in could keep reading as the stale copy this store wrote.
+ *
+ * Pure, and takes candidates rather than reading them: the composition root owns the environment.
+ * `claude-code-user` is the harness's own last resort, spelled the same way here so that a host with
+ * no `USER` at all still agrees with it.
+ */
+export function harnessKeychainAccount(candidates: readonly (string | undefined)[]): string {
+  for (const candidate of candidates) {
+    const named = candidate?.trim() ?? '';
+    if (named.length > 0) return named;
+  }
+  return FALLBACK_KEYCHAIN_ACCOUNT;
 }
 
 /** Where Claude Code keeps its credential when there is no keychain. */
