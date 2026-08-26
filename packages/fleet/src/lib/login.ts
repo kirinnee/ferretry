@@ -386,8 +386,8 @@ export class FleetLoginService {
           : this.#unwritten(settled, driver);
 
     // `logged-in` is a claim about where the credential CAME FROM, so it is credited only when this
-    // home's credential is its own login's work. Two things disqualify it, and both were observed by
-    // running the command rather than by reading it:
+    // home's credential is its own login's work. Three things disqualify it, and all three were
+    // observed by running the command rather than by reading it:
     //
     // - the launched lane received a COPY. Its own login exited zero and wrote nothing, so the
     //   identity's credential had to be cloned in; `synced` says that, and `logged-in` would credit a
@@ -395,12 +395,16 @@ export class FleetLoginService {
     // - the row does not say this home holds a credential at all. The launched lane is now the account
     //   somebody named, so its home can perfectly well be the unreadable one — and an exit code is not
     //   evidence against a read that failed.
+    // - the home still holds an EXPIRED access token. See {@link freshlySignedIn}.
     const donated = new Set(settled.targets.map(target => target.accountId));
-    return rows.map(result =>
-      result.accountId === driver.accountId && CLAIMED.has(result.status) && !donated.has(result.accountId)
+    const fresh = freshlySignedIn(settled, driver.accountId);
+    return rows.map(result => {
+      if (result.accountId !== driver.accountId || !CLAIMED.has(result.status)) return result;
+      if (donated.has(result.accountId)) return result;
+      return fresh
         ? { ...result, status: 'logged-in' as const }
-        : result,
-    );
+        : { ...result, status: 'failed' as const, message: staleAfterSignInMessage(driver) };
+    });
   }
 
   async #attempt(kind: HarnessKind, member: FleetIdentityMember): Promise<FleetLoginOutcome> {
@@ -464,6 +468,42 @@ export class FleetLoginService {
       ? row(status.identity, accountId, 'usable')
       : row(status.identity, accountId, 'indeterminate', refused.reading.reason);
   }
+}
+
+/**
+ * Whether this home's credential can only have come from the approval that just happened.
+ *
+ * **A BROWSER APPROVAL MINTS AN ACCESS TOKEN, SO A HOME IT REACHED IS `valid`.** `refreshable` is
+ * the state that home was already in — an expired access token with a refresh token beside it — and
+ * a token minted seconds ago cannot be expired. So `refreshable` after a sign-in is not weak
+ * evidence of success, it is positive evidence that nothing this sign-in produced landed here.
+ *
+ * This is the reported defect. `refreshable` counted as a credential, so a sign-in that exited zero
+ * and wrote nothing was reported `logged in`, the stale expired copy it left behind was picked as
+ * the identity's donor and cloned onto every sibling as `credential copied from this identity`, and
+ * `fy fleet health` then correctly reported the whole identity as needing a refresh — seconds after
+ * a real approval. One row of a login report claimed something no read had established.
+ *
+ * The reading is not disputed and the classifier is not the thing being corrected: what changed is
+ * that a login pass no longer accepts the state it started in as proof of what it did.
+ *
+ * `refreshable` remains a perfectly good credential everywhere else — as a donor, as a `usable` row,
+ * as something a renewal can rescue. It is only worthless as evidence that THIS approval landed.
+ */
+function freshlySignedIn(status: FleetIdentityStatus, accountId: string): boolean {
+  return status.members.find(member => member.member.accountId === accountId)?.reading.state === 'valid';
+}
+
+/**
+ * What to say when a sign-in reported success and its own home still holds an expired access token.
+ *
+ * Names the account and the wrapper, and states the inference rather than a cause: the commonest
+ * cause is real — a missing wrapper sends {@link FleetLoginPort} to the bare harness CLI, which is
+ * launched with no configuration directory and therefore signs the OPERATOR's own default home in
+ * instead — but a sentence that guessed would send somebody to the wrong place on every other cause.
+ */
+function staleAfterSignInMessage(driver: FleetIdentityMember): string {
+  return `the sign-in for "${driver.accountId}" reported success and this home still holds an access token that is already expired — an approval mints a fresh one, so nothing that sign-in produced reached this home. Run \`${driver.wrapper}\` and log in by hand to see which home that harness actually wrote to`;
 }
 
 function row(identity: FleetIdentity, accountId: string, status: FleetLoginStatus, message?: string): FleetLoginResult {
