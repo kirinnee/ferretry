@@ -33,7 +33,7 @@ import { OPERATOR_UNLOCK_HEADER, type UsageAccountView } from '@ferretry/protoco
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 
-import { AccountsPage } from '../../../../src/features/fleet/accounts-page.tsx';
+import { AccountsPage, accountsSettingsTab } from '../../../../src/features/fleet/accounts-page.tsx';
 import type { FleetClient, FleetPermissions } from '../../../../src/features/fleet/fleet-api.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -1011,5 +1011,55 @@ describe('AccountsPage — renewing a credential', () => {
 
     expect(document.querySelector('[data-operator-unlock-dialog]')).toBeNull();
     expect(calls.some(call => call.method === 'POST' && call.path === '/v1/fleet/renew')).toBe(false);
+  });
+});
+
+/**
+ * THE MOUNTED PANEL — the declaration that makes Accounts a LEVEL rather than a twelfth flat row.
+ *
+ * `accountsSettingsTab` is one object and it would be easy to test by reading its fields back, which
+ * would prove nothing: what matters is that the frame gets a panel that (a) says which panel it hangs
+ * off, (b) actually reads this daemon's accounts through the client the composition root handed it,
+ * and (c) sends "Add an account" to the panel Fleet really answers to. A typo in that last id costs
+ * nothing at compile time and produces a primary button that silently does nothing, because
+ * `openPanel` ignores an id the frame does not mount.
+ */
+describe('the mounted accounts panel', () => {
+  it('declares itself Fleet’s child rather than leaving the relation to mounting order', () => {
+    const tab = accountsSettingsTab(async () => {
+      throw new Error('no client is opened to read a declaration');
+    });
+
+    expect(tab.id).toBe('accounts');
+    // The whole structural claim, in the one place a reshuffle of `daemonSettingsTabs` cannot reach.
+    expect(tab.parentId).toBe('fleet');
+    expect(tab.label).toBe('Accounts');
+  });
+
+  it('reads the daemon it is handed and sends adding an account to the Fleet panel', async () => {
+    const { client, calls } = clientFor({ readiness: readiness([claudeIdentity()]) });
+    const asked: string[] = [];
+    const tab = accountsSettingsTab(async () => client);
+    const mounted = await mount(<tab.Surface connection={daemon} openPanel={id => asked.push(id)} />);
+    cleanup = mounted.unmount;
+    await interact(() => undefined);
+
+    // It really mounted the panel, against the connection the frame supplied — not an empty shell that
+    // happens to render a button.
+    expect(
+      must(mounted.container.querySelector('[data-accounts-surface]'), 'the surface').getAttribute(
+        'data-accounts-daemon-id',
+      ),
+    ).toBe('accounts-daemon');
+    expect(calls.some(call => call.method === 'GET' && call.path === '/v1/fleet/login')).toBe(true);
+    expect(mounted.container.querySelector(`[data-account-row="${CLAUDE_ACCOUNT_ID}"]`)).not.toBeNull();
+
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-accounts-add]'), 'add').click(),
+    );
+
+    // The id Fleet is mounted under, so the pair round-trips: Fleet opens 'accounts', Accounts opens
+    // 'fleet'. Anything else here is a control that does nothing.
+    expect(asked).toEqual(['fleet']);
   });
 });

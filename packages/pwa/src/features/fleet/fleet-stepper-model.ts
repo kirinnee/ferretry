@@ -27,7 +27,7 @@
  *
  * Two nouns meet on this screen and they are NOT the same thing:
  *
- *  - an **account** is a thing this daemon runs — one wrapper, one home, one row on the Accounts page;
+ *  - an **account** is a thing this daemon runs — one wrapper, one home, one row on the Accounts panel;
  *  - a **login** is the provider sign-in an account authenticates with, and one login can carry
  *    several accounts.
  *
@@ -36,7 +36,7 @@
  * not tell which noun they were picking, which is the collapse the whole step order exists to avoid.
  *
  * IT WENT THIS WAY ROUND rather than the other because the rest of the product had already chosen.
- * The Accounts page's own heading is "Every account this daemon can run" and it prints one row per
+ * The Accounts panel's own heading is "Every account this daemon can run" and it prints one row per
  * wrapper; the daemon mints an `accountId` per wrapper and publishes `POST /v1/fleet/login` for the
  * sign-in. Making "account" mean the login would have left that page, that id and that route all
  * misnamed — a rename rippling into the daemon, which is the one thing this pass may not do. So the
@@ -758,7 +758,7 @@ export const withAuthoredSkillText = (layer: FleetLayerDraft, text: string): Fle
  * lives, because "no login" on its own sounds like an account with no credential at all.
  *
  * THE FIRST ONE SAYS WHERE THE SIGN-IN HAPPENS, and that is not decoration. Signing in from the
- * browser has always worked — the Accounts page mounts the Claude and Codex login panels and drives
+ * browser has always worked — the Accounts panel mounts the Claude and Codex login panels and drives
  * the harness's own flow — but from inside this sequence the card said only that the harness writes a
  * credential, naming no screen and offering no way to reach one. A person choosing it read it as a
  * sign-in that had been taken away. The card names the destination and the step links to it.

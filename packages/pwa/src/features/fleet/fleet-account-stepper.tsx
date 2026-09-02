@@ -908,7 +908,7 @@ function IdentityStep({
  * ## AND IT SAYS WHERE THE SIGN-IN IS
  *
  * The step used to offer the two answers and nothing else: neither card named a screen, and neither
- * linked to one. Browser sign-in works and always did — the Accounts page mounts both harness login
+ * linked to one. Browser sign-in works and always did — the Accounts panel mounts both harness login
  * panels — so what was missing was a sentence and a link, not a feature. Both are here now, because a
  * person who picks "Sign in with the harness" and cannot find the thing that does it has been told the
  * web login was taken away.
