@@ -1589,11 +1589,13 @@ try {
               await sequence.waitFor({ state: 'visible' });
               for (const step of ACCOUNT_STEPS) {
                 await sequence.locator(`[data-fleet-step-question="${step}"]`).waitFor({ state: 'visible' });
-                // The account name is the ONE thing the host cannot answer, and every step after it is
+                // The login name is the ONE thing the host cannot answer, and every step after it is
                 // unreachable until it is there. Typed rather than skipped, because a sequence walked
                 // with an empty draft would be measuring the refusal, not the screen.
                 if (step === 'identity') {
-                  await sequence.getByRole('textbox', { name: 'Provider account name' }).fill('atelier');
+                  await sequence
+                    .getByRole('textbox', { name: 'Name the login this account signs in as' })
+                    .fill('atelier');
                   // BOTH modes, because that is the WIDEST this sequence ever gets: the mode question
                   // is a multi-select, so ticking the second one adds a second group control (on a
                   // fleet that declares a slot no mode derives), a second derived wrapper line, a

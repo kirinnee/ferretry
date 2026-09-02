@@ -694,14 +694,53 @@ describe('the credential step', () => {
       draft: { credential: 'profile', ...options.draft },
     });
 
-  it('offers the two answers, and says signing in happens once for the whole login', async () => {
+  it('offers the two answers, and says one sign-in covers the whole login', async () => {
     // Arrange
     const screen = await stepper({ step: 'credential', profiles: profileCatalog() });
 
-    // Assert — the login half names where it happens, because it is not on this screen.
+    // Assert — the login half says what one sign-in reaches, which is the fact this sentence owns.
+    // WHERE it happens is the link's, asserted below: this line used to carry both, and the screen
+    // then named the accounts page three times in four lines.
     expect(cardChosen(screen.container, 'credential', 'login')).toBe(true);
-    expect(pick(screen.container, '[data-fleet-credential-login]').textContent).toContain('Accounts screen');
+    expect(pick(screen.container, '[data-fleet-credential-login]').textContent).toContain(
+      'every account on it is then usable',
+    );
+    // The card itself says the sign-in is done from THIS browser. "The harness writes the credential"
+    // on its own read as a thing that happens somewhere a person could not go.
+    expect(pick(screen.container, '[data-fleet-choice="login"]').textContent).toContain('from this browser');
     await screen.unmount();
+  });
+
+  /**
+   * WHERE THE WEB LOGIN IS, said and linked.
+   *
+   * The complaint this answers was "what happened to the web logins?" — and nothing had: the accounts
+   * page mounts both harness login panels and always did. What this step offered was a CHOICE with no
+   * destination on it, so from inside the sequence a sign-in that exists reads as one that was taken
+   * away. The link is the same one the account step already carries, to the same page, with the same
+   * warning about the draft.
+   */
+  it('links to the screen the harness sign-in actually happens on, and says what opening it costs', async () => {
+    // Arrange — the login answer, which is the one that has a sign-in to point at.
+    const screen = await stepper({ step: 'credential', profiles: profileCatalog() });
+
+    // Assert — a real destination, not a sentence naming one.
+    const link = pick(screen.container, '[data-fleet-credential-accounts-link]');
+    expect(link.getAttribute('href')).toBe('/d/9f1c/accounts');
+    expect(link.textContent).toBe('Accounts');
+    // The draft lives in this panel, so leaving discards it. A link that did not say so would be the
+    // one control on the step that loses somebody's answers without warning.
+    expect(pick(screen.container, '[data-fleet-credential-accounts-link]').parentElement?.textContent).toContain(
+      'leaves this draft behind',
+    );
+    await screen.unmount();
+
+    // Act — the profile answer, where there is no sign-in to send anybody to.
+    const profiled = await onProfile();
+
+    // Assert — and no link either, rather than a dead end pointing at a page that cannot help.
+    expect(profiled.container.querySelector('[data-fleet-credential-accounts-link]')).toBeNull();
+    await profiled.unmount();
   });
 
   it('tells somebody what a login already uses before they change it, on either answer', async () => {
