@@ -165,6 +165,7 @@ const open = async (
       // Long, because the poll is driven explicitly where it is the subject; a short one would have
       // the fake answering in the background of every unrelated assertion.
       pollMs={100_000}
+      onAddAccount={() => undefined}
       {...overrides}
     />,
   );
@@ -571,6 +572,7 @@ describe('AccountsPage', () => {
           throw new Error('this daemon is not paired');
         }}
         now={() => NOW}
+        onAddAccount={() => undefined}
       />,
     );
     cleanup = mounted.unmount;
@@ -765,26 +767,37 @@ describe('AccountsPage', () => {
     expect(calls.some(call => call.method === 'GET' && call.path.endsWith('/flow-one'))).toBe(false);
   });
 
-  it('offers a route to add an account rather than a form of its own', async () => {
-    const navigated: string[] = [];
+  /**
+   * ADDING AN ACCOUNT IS A MOVE TO THE SIBLING PANEL, not a form of this panel's own and no longer a
+   * navigation.
+   *
+   * This asserted an `href` before: Accounts was a route, so "Add an account" was a `RouteLink` to
+   * `…/settings#daemons` and the test pinned the pathname the router built. There is no pathname to
+   * pin now — Accounts is Fleet's child panel in the daemon settings frame, and the frame answers
+   * "show me Fleet" directly — so what is asserted is the CALL, which is the whole contract that
+   * survived: pressing it hands off to the panel where a change is reviewed, and nothing on this
+   * panel writes a fleet.
+   */
+  it('hands off to the Fleet panel to add an account rather than offering a form of its own', async () => {
+    const opened: number[] = [];
     const { client } = clientFor({ readiness: readiness([claudeIdentity()]) });
     const mounted = await mount(
       <AccountsPage
         connection={daemon}
         createClient={async () => client}
         now={() => NOW}
-        onNavigate={to => navigated.push(to)}
+        onAddAccount={() => opened.push(1)}
       />,
     );
     cleanup = mounted.unmount;
 
-    const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-accounts-add]'), 'the add link');
-    // Built by the router rather than written as a literal, and it lands on the review step that
-    // already exists: nothing on this page writes a fleet.
-    expect(link.getAttribute('href')).toBe('/d/accounts-daemon/settings#daemons');
-    await interact(() => link.click());
+    const add = must(mounted.container.querySelector<HTMLButtonElement>('[data-accounts-add]'), 'the add control');
+    // A BUTTON, not a link: there is no address for a panel, and an anchor with a made-up `href`
+    // would be the "control that does nothing" this replaced.
+    expect(add.tagName).toBe('BUTTON');
+    await interact(() => add.click());
 
-    expect(navigated).toEqual(['/d/accounts-daemon/settings#daemons']);
+    expect(opened).toEqual([1]);
   });
 });
 

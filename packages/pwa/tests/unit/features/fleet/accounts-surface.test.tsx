@@ -52,8 +52,6 @@ const daemon = daemonConnection({
   deviceToken: 'test-token',
 });
 
-const ADD_HREF = '/d/accounts-daemon/settings#daemons';
-
 /** A failed test must not leave its mount attached, or the next one queries into two surfaces. */
 let cleanup: (() => Promise<void>) | null = null;
 
@@ -68,7 +66,8 @@ interface Handled {
   readonly renewed: string[];
   readonly submitted: { readonly flowId: string; readonly code: string }[];
   readonly cancelled: string[];
-  readonly navigated: string[];
+  /** How many times the surface asked for the panel where an account is added. */
+  readonly addRequested: number[];
   readonly reRead: number[];
   readonly checked: number[];
 }
@@ -78,8 +77,6 @@ interface Options {
   readonly refusal?: string | null;
   readonly busy?: boolean;
   readonly mayStart?: boolean;
-  /** Omitted deliberately in one test: a surface with no navigator must still render its link. */
-  readonly withNavigate?: boolean;
 }
 
 const open = async (
@@ -91,11 +88,10 @@ const open = async (
     renewed: [],
     submitted: [],
     cancelled: [],
-    navigated: [],
+    addRequested: [],
     reRead: [],
     checked: [],
   };
-  const navigate = { onNavigate: (to: string) => handled.navigated.push(to) };
   const mounted = await mount(
     <AccountsSurface
       daemonId={daemon.daemonId}
@@ -110,8 +106,7 @@ const open = async (
         checked: 0,
         onCheck: () => handled.checked.push(1),
       }}
-      addAccountHref={ADD_HREF}
-      {...(options.withNavigate === false ? {} : navigate)}
+      onAddAccount={() => handled.addRequested.push(1)}
       onReRead={() => handled.reRead.push(1)}
       onStart={row => handled.started.push(row.accountId)}
       onRenew={row => handled.renewed.push(row.accountId)}
@@ -568,27 +563,28 @@ describe('AccountsSurface', () => {
     expect(must(reRead, 'the re-read control').disabled).toBe(true);
   });
 
-  it('sends a person to add an account through the router rather than a page load', async () => {
+  /**
+   * ADDING AN ACCOUNT OPENS THE SIBLING PANEL — no route, so no `href` to assert.
+   *
+   * Two tests stood here: one pinned the pathname the `RouteLink` was built from, and one proved the
+   * link still rendered as a real `<a href>` where no navigator was wired, so "open in a new tab"
+   * kept working. Both were about an ADDRESS, and Accounts no longer has one — it is Fleet's child
+   * panel in the daemon settings frame, and Fleet is the panel one level up. A pathname invented to
+   * keep those assertions alive would be exactly the dead control they were guarding against.
+   *
+   * What survives is the whole contract that still exists: it is a real control, pressing it asks for
+   * the panel where a change is reviewed, and the surface still says that adding one writes nothing
+   * on its own.
+   */
+  it('asks for the Fleet panel to add an account, and says the change is reviewed first', async () => {
     const { container, handled } = await open(ready([claudeIdentity()]));
 
-    const link = must(container.querySelector<HTMLAnchorElement>('[data-accounts-add]'), 'the add link');
-    expect(link.getAttribute('href')).toBe(ADD_HREF);
-    await interact(() => link.click());
+    const add = must(container.querySelector<HTMLButtonElement>('[data-accounts-add]'), 'the add control');
+    expect(add.tagName).toBe('BUTTON');
+    await interact(() => add.click());
 
-    expect(handled.navigated).toEqual([ADD_HREF]);
-    // What adding one actually does is said beside the control, because it is a review step and not a
-    // write: nothing on the other side of this link changes a fleet on its own.
+    expect(handled.addRequested).toEqual([1]);
     expect(container.textContent).toContain('reviewed before anything is written');
-  });
-
-  it('still renders the add link where the host wired no navigator', async () => {
-    const { container } = await open(ready([claudeIdentity()]), { withNavigate: false });
-
-    // A real `<a href>` either way, so "open in a new tab" keeps working and the destination is
-    // inspectable even when this host handles navigation itself.
-    expect(
-      must(container.querySelector<HTMLAnchorElement>('[data-accounts-add]'), 'the add link').getAttribute('href'),
-    ).toBe(ADD_HREF);
   });
 
   it('re-reads on request', async () => {

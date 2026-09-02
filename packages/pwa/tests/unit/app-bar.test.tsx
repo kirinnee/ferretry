@@ -136,7 +136,7 @@ describe('AppBar destinations', () => {
     const mounted = await mount(bar({ active: 'warden' }));
     const links = linksOf(mounted.container, 'Destinations');
 
-    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null, null]);
+    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
     expect(links.map(link => link.getAttribute('aria-label'))).toEqual(
       APP_BAR_DESTINATIONS.map(destination => destination.label),
     );
