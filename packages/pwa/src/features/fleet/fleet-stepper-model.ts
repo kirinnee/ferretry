@@ -23,6 +23,28 @@
  *     module as the same {@link FleetPrefillNotes} the fields already carry, so a prefilled step is
  *     one a person confirms rather than one they fill in.
  *
+ * ## ONE WORD PER CONCEPT
+ *
+ * Two nouns meet on this screen and they are NOT the same thing:
+ *
+ *  - an **account** is a thing this daemon runs — one wrapper, one home, one row on the Accounts page;
+ *  - a **login** is the provider sign-in an account authenticates with, and one login can carry
+ *    several accounts.
+ *
+ * This sequence used to say "account" for both, on the same screen: the panel title and step 2's title
+ * meant the wrapper, while step 2's question and its picker legend meant the sign-in. A person could
+ * not tell which noun they were picking, which is the collapse the whole step order exists to avoid.
+ *
+ * IT WENT THIS WAY ROUND rather than the other because the rest of the product had already chosen.
+ * The Accounts page's own heading is "Every account this daemon can run" and it prints one row per
+ * wrapper; the daemon mints an `accountId` per wrapper and publishes `POST /v1/fleet/login` for the
+ * sign-in. Making "account" mean the login would have left that page, that id and that route all
+ * misnamed — a rename rippling into the daemon, which is the one thing this pass may not do. So the
+ * word that moved is the SIGN-IN's, and it moved to the word the accounts page already used for it.
+ *
+ * "Member" is not used anywhere a person reads. It was a third word for an account, and one concept
+ * that already has a word does not get a second.
+ *
  * Pure throughout: no React, no client, no clock.
  */
 
@@ -92,7 +114,11 @@ export interface FleetStep {
  */
 const STEP_COPY: Readonly<Record<FleetStepId, Omit<FleetStep, 'id'>>> = {
   harness: { title: 'Harness', question: 'Which agent does this account run?' },
-  identity: { title: 'Account', question: 'What is this account called, and how does it run?' },
+  // "Which LOGIN" rather than "what is this account called". The step's own question used the word
+  // "account" for the provider sign-in while the panel above it used the same word for the thing being
+  // created, so one screen asked a person to pick two different nouns under one name. The module
+  // comment's ONE WORD PER CONCEPT section says which word means which, and why it went this way round.
+  identity: { title: 'Account', question: 'Which login does this account use, and how does it run?' },
   // "Sign-in" rather than "Credential" or "Profiles", because the question is the one the owner asked:
   // do you want a login here or not. A title naming the mechanism would be the third step in a row
   // teaching a word before asking a question.
@@ -730,13 +756,22 @@ export const withAuthoredSkillText = (layer: FleetLayerDraft, text: string): Fle
  * Annotated over the union so a third answer is a compile error here rather than a card with no
  * sentence on it. The second one is the owner's "if no login is wanted", and it says where the value
  * lives, because "no login" on its own sounds like an account with no credential at all.
+ *
+ * THE FIRST ONE SAYS WHERE THE SIGN-IN HAPPENS, and that is not decoration. Signing in from the
+ * browser has always worked — the Accounts page mounts the Claude and Codex login panels and drives
+ * the harness's own flow — but from inside this sequence the card said only that the harness writes a
+ * credential, naming no screen and offering no way to reach one. A person choosing it read it as a
+ * sign-in that had been taken away. The card names the destination and the step links to it.
  */
 export const CREDENTIAL_CHOICE_COPY: Readonly<
   Record<FleetCredentialChoice, { readonly label: string; readonly detail: string }>
 > = {
   login: {
     label: 'Sign in with the harness',
-    detail: 'The harness writes this account’s credential into its own store when somebody signs in.',
+    // "FROM THIS BROWSER" is the whole correction, and the screen is named ONCE — by the link under the
+    // step, not here as well. A card, a sentence and a link all saying "the Accounts screen" is three
+    // lines answering one question, which is the shape this sequence exists to have removed.
+    detail: 'You sign in from this browser, and the harness writes the credential into its own store.',
   },
   profile: {
     label: 'No login — use a profile',

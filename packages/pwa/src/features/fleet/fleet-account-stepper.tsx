@@ -457,7 +457,15 @@ export function FleetAccountStepper({
           />
         ) : null}
         {step === 'credential' ? (
-          <CredentialStep draft={draft} onChange={onChange} disabled={disabled} catalog={profiles} config={config} />
+          <CredentialStep
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+            catalog={profiles}
+            config={config}
+            accountsHref={accountsHref}
+            {...(onNavigate === undefined ? {} : { onNavigate })}
+          />
         ) : null}
         {step === 'models' ? (
           <ModelsStep
@@ -646,7 +654,7 @@ function IdentityStep({
   const nameBox = (
     <div>
       <label className={FIELD_LABEL} htmlFor={id('-account-name')}>
-        {existing.length === 0 ? 'Provider account name' : 'Name the new account'}
+        {existing.length === 0 ? 'Name the login this account signs in as' : 'Name the new login'}
       </label>
       <input
         id={id('-account-name')}
@@ -658,11 +666,15 @@ function IdentityStep({
       />
       {/* A name that is ALREADY a login on this fleet is not refused — the daemon merges into it, and
           that is a useful thing to do. It is simply not what "add a new one" says, so the note says
-          which of the two this would actually be rather than letting somebody find out from the recap. */}
+          which of the two this would actually be rather than letting somebody find out from the recap.
+
+          The label above now names the noun, so this carries only what the label does not: where the
+          name ends up. It used to open by restating "the login this account signs in as", which was
+          the same sentence twice on two consecutive lines. */}
       <p className="m-0 mt-1 text-meta leading-base text-muted" data-fleet-account-name-note="">
         {held === undefined
-          ? 'The account you sign in as. It becomes part of the wrapper name.'
-          : `“${held.name}” is already on this fleet — this would add to that sign-in rather than making a new one.`}
+          ? 'Its name becomes part of the wrapper name.'
+          : `“${held.name}” is already a login on this fleet — this would add an account to it rather than making a new login.`}
       </p>
     </div>
   );
@@ -684,7 +696,7 @@ function IdentityStep({
         </p>
       </div>
       <FleetChoiceGroup
-        legend="Which one?"
+        legend="Which login?"
         name="account"
         columns={1}
         value={draft.name.trim()}
@@ -695,7 +707,7 @@ function IdentityStep({
           label: account.name,
           detail:
             account.taken.length === 0
-              ? 'Declared on this fleet with nothing running on it yet.'
+              ? 'Declared on this fleet with no account on it yet.'
               : `Already runs ${account.taken.map(entry => entry.wrapper).join(', ')}.`,
         }))}
       />
@@ -707,13 +719,13 @@ function IdentityStep({
       {existing.length === 0 ? (
         <>
           <p className="m-0 text-meta leading-base text-muted" data-fleet-account-none={draft.harness}>
-            This fleet has no {fleetHarnessLabel(draft.harness)} account yet, so this is the first one.
+            This fleet has no {fleetHarnessLabel(draft.harness)} login yet, so this is the first one.
           </p>
           {nameBox}
         </>
       ) : (
         <FleetPickOrAdd
-          legend="Which account does this sign in as?"
+          legend="Which login does this account sign in as?"
           name="account"
           value={source}
           disabled={disabled}
@@ -741,7 +753,7 @@ function IdentityStep({
         >
           Accounts
         </RouteLink>{' '}
-        is where these are signed in and where what each provider last said is shown. Opening it leaves this draft
+        is where a login is signed in and where what each provider last said is shown. Opening it leaves this draft
         behind.
       </p>
 
@@ -870,6 +882,14 @@ function IdentityStep({
  * same rule every other step follows: pick from what this fleet already has, stack several, or add one
  * that joins the collection for the next account.
  *
+ * ## AND IT SAYS WHERE THE SIGN-IN IS
+ *
+ * The step used to offer the two answers and nothing else: neither card named a screen, and neither
+ * linked to one. Browser sign-in works and always did — the Accounts page mounts both harness login
+ * panels — so what was missing was a sentence and a link, not a feature. Both are here now, because a
+ * person who picks "Sign in with the harness" and cannot find the thing that does it has been told the
+ * web login was taken away.
+ *
  * ## Values never appear here, in either direction
  *
  * The cards say what each profile SETS — a variable name, and whether the value comes from this daemon's
@@ -893,12 +913,16 @@ function CredentialStep({
   disabled,
   catalog,
   config,
+  accountsHref,
+  onNavigate,
 }: {
   readonly draft: FleetAccountDraft;
   readonly onChange: (next: FleetAccountDraft) => void;
   readonly disabled: boolean;
   readonly catalog: FleetProfileCatalog | null;
   readonly config: FleetConfigView | null;
+  readonly accountsHref: string;
+  readonly onNavigate?: (to: string) => void;
 }) {
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
@@ -958,11 +982,32 @@ function CredentialStep({
       />
 
       {draft.credential === 'login' ? (
-        <p className="m-0 text-meta leading-base text-muted" data-fleet-credential-login="">
-          {bound.length === 0
-            ? 'Signing in happens on the Accounts screen, once, for this login — every account on it is then usable.'
-            : `This login already uses ${bound.join(', ')}, and leaving this answer alone keeps it that way.`}
-        </p>
+        <>
+          <p className="m-0 text-meta leading-base text-muted" data-fleet-credential-login="">
+            {bound.length === 0
+              ? 'Signing in happens once, for this login — every account on it is then usable.'
+              : `This login already uses ${bound.join(', ')}, and leaving this answer alone keeps it that way.`}
+          </p>
+          {/* THE SIGN-IN IS A DESTINATION, so this step links to it the same way the account step
+              links to the same page. Browser sign-in was never removed — `accounts-surface.tsx`
+              mounts the Claude and Codex login panels and drives the harness's own flow — but a step
+              that only offered the CHOICE, named no screen and linked nowhere, read from inside as
+              though it had been. The cost is stated for the same reason it is stated one step back:
+              the draft lives in this panel, so leaving discards it, and a link that did not say so
+              would be the one control here that loses somebody's answers without warning. */}
+          <p className="m-0 text-meta leading-base text-muted">
+            <RouteLink
+              to={accountsHref}
+              {...(onNavigate === undefined ? {} : { onNavigate })}
+              className="text-accent underline"
+              data-fleet-credential-accounts-link=""
+            >
+              Accounts
+            </RouteLink>{' '}
+            is the screen it happens on, for this harness and every other. Opening it leaves this draft behind, so
+            finish here first and sign in once the account exists.
+          </p>
+        </>
       ) : (
         <>
           {/* WHAT TICKING THESE REACHES. Profiles belong to a provider LOGIN, so a login serving two
@@ -1933,7 +1978,10 @@ function ReviewStep({ draft, variants }: { readonly draft: FleetAccountDraft; re
     <div className={SECTION}>
       <dl className="m-0" data-fleet-recap="">
         <RecapRow label="Harness" value={fleetHarnessLabel(draft.harness)} />
-        <RecapRow label="Account" value={draft.name.trim() === '' ? '—' : draft.name.trim()} />
+        {/* THE LOGIN, not the account. `draft.name` is the provider sign-in the accounts below share,
+            and the rows underneath are the accounts it would create — labelling both "Account" was the
+            recap's half of the collapse the identity step's question just had removed. */}
+        <RecapRow label="Login" value={draft.name.trim() === '' ? '—' : draft.name.trim()} />
         <RecapRow
           label="Display name"
           value={draft.displayName.trim() === '' ? draft.name.trim() : draft.displayName.trim()}

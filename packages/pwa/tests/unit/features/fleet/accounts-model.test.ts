@@ -216,7 +216,7 @@ describe('accountsRoster', () => {
     );
     // Every word the host chose survives, including the dash clause it ends on.
     expect(rowFor(undecided, CLAUDE_ACCOUNT_ID).login.state).toBe(
-      'A member’s credential could not be read, so nothing is decided about this login. No usable credential was ' +
+      'An account’s credential could not be read, so nothing is decided about this login. No usable credential was ' +
         'found, and 1 of 2 could not be read — refusing to decide.',
     );
   });
@@ -384,16 +384,16 @@ describe('accountRenewOffer', () => {
 });
 
 describe('HARNESS_SHARING', () => {
-  it('says a Claude account can serve several members, and what can stand in for its sign-in', () => {
-    expect(HARNESS_SHARING.claude.headline).toBe('A Claude account can serve several members.');
+  it('says one Claude login can serve several accounts, and what can stand in for its sign-in', () => {
+    expect(HARNESS_SHARING.claude.headline).toBe('One Claude login can serve several accounts.');
     expect(HARNESS_SHARING.claude.detail).toContain('Claude OAuth token can stand in');
     // "inference only" is the harness's own stated limit on such a token, and dropping it would sell a
     // full-scope login.
     expect(HARNESS_SHARING.claude.detail).toContain('inference only');
   });
 
-  it('says a Codex account is signed in per member, and why nothing can stand in', () => {
-    expect(HARNESS_SHARING.codex.headline).toBe('A Codex account is signed in per member.');
+  it('says a Codex login is signed in per account, and why nothing can stand in', () => {
+    expect(HARNESS_SHARING.codex.headline).toBe('A Codex login is signed in per account.');
     expect(HARNESS_SHARING.codex.detail).toContain('API key is different auth');
     // The cost of the other route somebody would reach for. A shared `CODEX_HOME` is not a shared
     // credential — it is a shared agent.
@@ -404,7 +404,7 @@ describe('HARNESS_SHARING', () => {
     // Both harnesses clone a donor credential to the siblings of one identity, so a sentence here
     // saying "one home at a time" would be false. The per-row coverage line is where reach is stated.
     expect(HARNESS_SHARING.codex.detail).not.toContain('one home');
-    expect(HARNESS_SHARING.claude.detail).toContain('One sign-in covers every member on the same login');
+    expect(HARNESS_SHARING.claude.detail).toContain('One sign-in covers every account on the same login');
   });
 
   it('carries the sharing note onto the group a reader is looking at', () => {
