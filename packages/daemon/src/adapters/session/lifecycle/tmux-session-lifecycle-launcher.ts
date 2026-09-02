@@ -1,4 +1,5 @@
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
+import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
 import {
   sessionPaneEnvironment,
   type SessionEnvironmentStore,
@@ -47,6 +48,14 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
      * did before profiles existed, which is also what every account that binds no secret gets.
      */
     private readonly accountEnvironment?: AccountLaunchEnvironment,
+    /**
+     * The account's chance to renew its own credential before this pane runs it.
+     *
+     * ATTENDED, because a person started this session — which is the whole rule renewal is allowed
+     * under. A launcher built without one launches exactly as it did before, and one built WITH one
+     * still launches whatever happens: the port answers nothing a launch could branch on.
+     */
+    private readonly accountRenewal?: AccountLaunchRenewal,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -78,6 +87,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
         await this.environment.read(record.config.id),
       ),
     );
+    // Before the pane, not after: an access token that has aged out is renewed while there is still
+    // somebody here to be told it could not be, rather than surfacing later as an agent that cannot
+    // explain itself. It cannot refuse this launch — see `lib/fleet/launch-renewal.ts` — so there is
+    // nothing here to check and nothing to branch on.
+    await this.accountRenewal?.beforeLaunch(record.config.agent);
     await this.tmux.launch({
       session: record.config.tmuxSession,
       cwd: record.config.cwd,

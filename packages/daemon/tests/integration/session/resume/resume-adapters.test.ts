@@ -18,10 +18,12 @@ import {
   StorageResumeRepository,
   SystemClock,
   TmuxPaneDelivery,
+  type ResumeLaunchSpec,
   TmuxResumeLauncher,
 } from '../../../../src/adapters/index.ts';
 import {
   type AccountLaunchEnvironment,
+  type AccountLaunchRenewal,
   parseSessionId,
   type TmuxCommandPort,
   TmuxController,
@@ -695,5 +697,78 @@ describe('the resume launcher and a profile-authenticated account', () => {
     port.alive = false;
     await should(subject.relaunch(ID)).be.rejectedWith(/no secret named WORK_KEY/u);
     should(port.calls.filter(call => call[0] === 'new-session')).be.empty();
+  });
+});
+
+/**
+ * A revive and the account's chance to renew before the replacement runs it.
+ *
+ * A revive IS a launch: something a person set in motion is being kept alive, so the same attended
+ * rule applies and the same two obligations do — before the pane, and never instead of it.
+ */
+describe('the resume launcher and a credential that can renew itself', () => {
+  const reviving = (spec: Partial<ResumeLaunchSpec>, accountRenewal: AccountLaunchRenewal) => {
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+        ...spec,
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      accountRenewal,
+    );
+    return { port, subject };
+  };
+
+  it('should give the account its turn before the replacement pane exists', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const { port, subject } = reviving(
+      { agent: '/opt/fleet/bin/agent' },
+      {
+        beforeLaunch: async wrapper => {
+          asked.push(`${wrapper} @ ${String(port.calls.filter(call => call[0] === 'new-session').length)}`);
+        },
+      },
+    );
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert — asked once, about this account, while no replacement had been started yet.
+    should(asked).deepEqual(['/opt/fleet/bin/agent @ 0']);
+    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+  });
+
+  it('should ask for nothing when the spec cannot name the executable', async () => {
+    // Arrange — the same rule the profile lookup follows: a spec with no executable names no account,
+    // so there is nothing to renew and no fleet to read looking for one.
+    let asked = 0;
+    const { port, subject } = reviving(
+      {},
+      {
+        beforeLaunch: async () => {
+          asked += 1;
+        },
+      },
+    );
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert
+    should(asked).equal(0);
+    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
   });
 });

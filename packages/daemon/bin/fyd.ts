@@ -447,6 +447,7 @@ import {
   renderInitialAttachmentSection,
   resolveStateHome,
   FleetLaunchEnvironment,
+  FleetLaunchRenewal,
   FleetSecretReferences,
   type ScratchReclamation,
   combinedReferences,
@@ -572,7 +573,7 @@ import {
   SpawnCredentialCommand,
   spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
-import { FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
+import { FleetIdentityService, FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import { daemonVersion } from '../src/lib/version.ts';
@@ -4637,6 +4638,33 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       which: harnessBinary,
     }),
   });
+  /**
+   * This boot's journal, held as a local because two things now write to it.
+   *
+   * Hoisted out of the world literal below rather than duplicated: a second journal would be a second
+   * `+Nms` baseline, so two lines a person reads in one stream would disagree about when this daemon
+   * started. Nothing else about it moved.
+   */
+  const bootNotices = bootJournal(overrides.logLevel);
+  /**
+   * The account's own chance to renew before an agent is started on it.
+   *
+   * ATTENDED RENEWAL, and this is the second of its exactly two doors — a person running a command is
+   * the first. There is deliberately no third: the unattended usage pass must never rotate a credential,
+   * because the harness rewrites its own store by temp-file-and-rename and a writer racing it loses
+   * silently, with nobody present to be told.
+   *
+   * It takes the SAME renewal instance everything else does, which is what makes the dedupe real: two
+   * panes starting at once on one identity are one rotation of a refresh token only one of them could
+   * spend. It reads through the same store and the same fleet mount, so the reading that authorises a
+   * rotation here is the reading the browser's own renewal would have decided on.
+   */
+  const accountLaunchRenewal = new FleetLaunchRenewal({
+    fleet,
+    identities: new FleetIdentityService(harnessCredentials),
+    renewal: harnessRenewal,
+    notices: bootNotices,
+  });
   const harnessLogin = new HarnessLoginService({
     fleet,
     credentials: harnessCredentials,
@@ -4932,6 +4960,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       // The SAME resolver the first launch used, for the same reason the environment above is
       // re-read: a revive must hand the replacement the credential the account has NOW.
       accountLaunchEnvironment,
+      // And the same chance to renew it. A recovered agent holding an expired access token is a
+      // revive that restored the pane and not the session.
+      accountLaunchRenewal,
     );
   };
   /**
@@ -5050,7 +5081,7 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
     // The SAME two collaborators a start resolves an account from, so the preflight cannot report
     // one answer while a launch gives another.
     harnesses: { accounts, executables },
-    notices: bootJournal(overrides.logLevel),
+    notices: bootNotices,
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
         source: file => {
@@ -5093,6 +5124,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       // Resolved per launch against the store, so a rotated credential reaches the next pane with no
       // apply in between, and a missing one refuses the start naming the secret.
       accountLaunchEnvironment,
+      // Attended renewal's second door: a person started this session, so the account's credential is
+      // given its chance to rotate while somebody is still here to be told it could not.
+      accountLaunchRenewal,
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {
