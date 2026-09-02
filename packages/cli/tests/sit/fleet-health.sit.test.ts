@@ -102,4 +102,26 @@ describe(`fleet account health (SIT, ${useInProcess ? 'in-process' : 'compiled b
     should(health.out).not.containEql('FERRETRY_HEALTH_OK');
     should(health.err).not.containEql('FERRETRY_HEALTH_OK');
   });
+
+  it('should not promise a sentinel turn in its own help', async () => {
+    // Arrange — the report's disclosure and this command's one-line description disagreed. The
+    // description still read "explicitly verify each wrapper can complete a sentinel turn", which is
+    // what this command USED to do and what it exists to have stopped doing. `fy fleet --help` is
+    // where somebody decides whether running it will cost them, so it is the one place the stale
+    // sentence did the most damage — and no test read it.
+    //
+    // Asserted through the driver rather than off the source, because the string only reaches a person
+    // via the composed command tree in `bin/fy.ts`, which is in NEITHER coverage ledger.
+
+    // Act
+    const help = await driver.run(['fleet', 'health', '--help'], { FY_TOKEN: '', FY_URL: '', FY_SESSION_ID: '' });
+
+    // Assert
+    should(help.code).equal(0, help.err);
+    should(help.out).not.containEql('sentinel turn');
+    should(help.out).containEql('It spends nothing.');
+    // And it says the row carries a copy-paste command, because the reported incident was somebody
+    // reading a row that needed one action and finding no action on it.
+    should(help.out).containEql('fy fleet login <accountId>');
+  });
 });

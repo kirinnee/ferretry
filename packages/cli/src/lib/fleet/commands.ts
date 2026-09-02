@@ -93,11 +93,23 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       await controller.usage(merged(command));
     },
   );
-  scoped(fleet.command('health').description('explicitly verify each wrapper can complete a sentinel turn')).action(
-    async (_flags: unknown, command: Command) => {
-      await controller.health(merged(command));
-    },
-  );
+  scoped(
+    fleet
+      .command('health')
+      .description('whether each account is signed in, and when that was last established')
+      .addHelpText(
+        'after',
+        '\nIt spends nothing. This used to launch every wrapper and ask a model to answer a sentinel —\n' +
+          'a billable turn per account — and the description said so. It is now a local credential read\n' +
+          'plus one free read-only status endpoint, and the report repeats that promise every time.\n\n' +
+          'An account a command can repair gets that exact command printed under its row, carrying the\n' +
+          'whole account id: `fy fleet login <accountId>` matches on the id, and the row above it shows\n' +
+          'the display name. That includes an account whose access token has aged out with a refresh\n' +
+          'token beside it — it renews with no browser and nobody asked.',
+      ),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.health(merged(command));
+  });
 
   scoped(
     fleet

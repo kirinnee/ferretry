@@ -72,6 +72,30 @@ the check saw for later diagnosis; it does not manufacture certainty the respons
 | `needs_credentials` | A non-login credential needs repair. **A login cannot fix this account.** |
 | `unknown`           | No conclusive result. Never routeable evidence, and never "zero usage".   |
 
+### The remedy is keyed on the REASON, not the verdict
+
+A row's command is chosen from `HEALTH_REMEDY` in `packages/cli/src/lib/fleet/render.ts`, and that
+table is exhaustive over `FleetHealthReason` — a reason added tomorrow is a compile error there rather
+than a row that silently stops offering a command.
+
+It used to be keyed on the **verdict**, and that was a reported defect. `oauth_refreshable` is a
+reason whose verdict is `unknown`, so a verdict-keyed table could not reach it however it was written:
+the row printed _"signed in, but this copy needs refreshing"_ and stopped, while
+`fy fleet login <accountId>` renewed exactly that account the whole time — a login pass renews before
+anything else, and a renewal that succeeds settles it with no browser at all. The row shows the
+account's display **name**, so the id the command needs was not on screen either. Somebody had to be
+told both, by hand.
+
+Three `undefined` entries are load-bearing rather than incidental:
+
+- `oauth_rejection_unconfirmed` — see below; a browser approval that fixes nothing is the worst
+  outcome available here.
+- `static_credential_missing` / `static_credential_rejected` — a login cannot repair an account that
+  authenticates from an environment variable or a token file.
+- `stale` — a conclusion too old to trust publishes `unknown` / `stale` while remembering what it
+  **was**. Printing a command on the strength of an expired claim is the regression rekeying invites,
+  so it is locked by a test rather than left to the table's shape.
+
 ### The remedy has to actually work
 
 `fy fleet health` prints `fy fleet login <accountId>` beside every `needs_relogin` row, and for a
@@ -143,8 +167,9 @@ Its publication and rendering rules are:
 
 - Its verdict is **`unknown`**, its evidence is `anthropic_usage`, and the check is **inconclusive**.
 - **No surface offers a sign-in for it.** The terminal prints no `fy fleet login` line and the browser
-  offers no control, both because `offersSignIn` and the terminal's remedy are keyed on
-  `needs_relogin` and this is not that.
+  offers no control. The browser's `offersSignIn` is keyed on `needs_relogin` and this is not that;
+  the terminal's remedy is keyed on the **reason**, and this reason's entry is `undefined`. Not
+  because the verdict is `unknown` — `oauth_refreshable` is `unknown` too and does print a command.
 - It is rendered in the same visual class as every other `unknown` — muted, never a warning colour.
 
 The reason the split exists: a `401` from that endpoint cannot distinguish a repudiated LOGIN from a
