@@ -9,4 +9,5 @@ export * from './mutation-journal.ts';
 export * from './credential-classifier.ts';
 export * from './process-login.ts';
 export * from './process-token-refresh.ts';
+export * from './seed-provenance-store.ts';
 export * from './system-clock.ts';

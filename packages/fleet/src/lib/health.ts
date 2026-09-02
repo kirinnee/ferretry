@@ -67,6 +67,13 @@ import { credentialSourceOf, decideLoginApplicability } from './credential-sourc
 import type { CredentialState } from './identity.ts';
 import type { FleetManifest, FleetManifestAccount, HarnessKind } from './manifest.ts';
 import { resolveAccounts } from './profiles.ts';
+import {
+  type FleetAccountSeedProvenance,
+  FleetAccountSeedProvenanceSchema,
+  type FleetSeedProvenanceRecord,
+  type FleetSeedProvenanceStore,
+  decideSeedProvenance,
+} from './seed-provenance.ts';
 import type { FleetCredentialSignal, FleetUsage, FleetUsageSnapshot, ProviderResponseFingerprint } from './usage.ts';
 import { ProviderResponseFingerprintSchema } from './usage.ts';
 
@@ -203,6 +210,16 @@ export const FleetAccountHealthSchema = z.strictObject({
   responseFingerprint: ProviderResponseFingerprintSchema.optional(),
   /** What the conclusion WAS before it went stale. Present only when `reason` is `stale`. */
   staleVerdict: FleetHealthVerdictSchema.optional(),
+  /**
+   * Whether this home is still holding the copy a first run took from this host's own harness install.
+   *
+   * IT IS NOT A VERDICT AND NOTHING BRANCHES ON IT. It rides here because the digest the comparison
+   * needs is already computed on every classification — so disclosing it costs no read at all — and
+   * because this is the row every surface already draws per account. See `./seed-provenance.ts`; the
+   * field is ABSENT for an account with no seed record, and absence must never be rendered as "this
+   * account owns its credential".
+   */
+  seedProvenance: FleetAccountSeedProvenanceSchema.optional(),
 });
 export type FleetAccountHealth = z.infer<typeof FleetAccountHealthSchema>;
 
@@ -371,6 +388,8 @@ export interface AccountHealthObservation extends AccountHealthConclusion {
   readonly fingerprint?: string;
   /** Secret-safe shape of the provider response this observation joined, when one completed. */
   readonly responseFingerprint?: ProviderResponseFingerprint;
+  /** This home against its own seed record, when one exists. Absent means no record, never "owned". */
+  readonly seedProvenance?: FleetAccountSeedProvenance;
 }
 
 /** Whether an interactive login can fix each declared account. Read from the DECLARATION, never the host. */
@@ -400,6 +419,14 @@ export function observeAccountHealth(input: {
   readonly config: FleetConfig;
   readonly usage: FleetUsageSnapshot;
   readonly local: ReadonlyMap<string, LocalCredentialReading>;
+  /**
+   * What a first run recorded about each home it seeded, keyed by account id.
+   *
+   * A VALUE, exactly like the usage snapshot beside it: this function reaches no store and no
+   * filesystem. An empty map is the ordinary reading of a fleet nobody seeded — every account then
+   * publishes no provenance at all, which is the honest "nothing is recorded about this".
+   */
+  readonly provenance: ReadonlyMap<string, FleetSeedProvenanceRecord>;
   readonly at: number;
 }): readonly AccountHealthObservation[] {
   const applies = loginApplicability(input.config, input.manifest);
@@ -416,6 +443,9 @@ export function observeAccountHealth(input: {
         local,
         remote: usage?.credentialSignal,
       });
+      // The SAME digest the change guard uses, read once and asked a second question. This is what
+      // makes the disclosure free: no additional read exists to be made.
+      const seedProvenance = decideSeedProvenance(input.provenance.get(account.id), local?.fingerprint);
       return {
         ...decided,
         accountId: account.id,
@@ -423,6 +453,7 @@ export function observeAccountHealth(input: {
         at: input.at,
         ...(local?.fingerprint === undefined ? {} : { fingerprint: local.fingerprint }),
         ...(usage?.responseFingerprint === undefined ? {} : { responseFingerprint: usage.responseFingerprint }),
+        ...(seedProvenance === undefined ? {} : { seedProvenance }),
       };
     });
 }
@@ -450,6 +481,24 @@ export async function readLocalCredentials(
   return new Map(entries);
 }
 
+/**
+ * Read the seed records, tolerating a store that throws.
+ *
+ * A failure is NO RECORDS rather than an error, and the two consequences are opposite in weight: an
+ * unreadable document costs a disclosure this feature would otherwise have made, while a throw would
+ * cost the whole health report — the answer to a question the caller actually asked. Shared by both
+ * collectors so a daemon and a terminal cannot disagree about what an unreadable document means.
+ */
+export async function readSeedProvenance(
+  store: FleetSeedProvenanceStore,
+): Promise<ReadonlyMap<string, FleetSeedProvenanceRecord>> {
+  try {
+    return new Map((await store.read()).map(record => [record.accountId, record]));
+  } catch {
+    return new Map();
+  }
+}
+
 /** Publish observations directly, with no persistence. A one-shot answer for a caller who just asked. */
 export function healthSnapshotFromObservations(
   observations: readonly AccountHealthObservation[],
@@ -469,6 +518,7 @@ export function healthSnapshotFromObservations(
       ...(observation.responseFingerprint === undefined
         ? {}
         : { responseFingerprint: observation.responseFingerprint }),
+      ...(observation.seedProvenance === undefined ? {} : { seedProvenance: observation.seedProvenance }),
     })),
   });
 }
@@ -487,16 +537,25 @@ export class FleetHealthCollector {
     private readonly credentials: FleetCredentialClassifier,
     private readonly clock: FleetHealthClock,
     private readonly config: FleetConfig,
+    /**
+     * What a first run recorded about the homes it seeded. A LOCAL read, on the same host.
+     *
+     * A store that throws is a document nobody could read, which is "nothing is recorded" — the same
+     * reading a host that was never seeded gets. It must never fail the command: a person asking
+     * whether their fleet is signed in is not asking about this.
+     */
+    private readonly provenance: FleetSeedProvenanceStore,
   ) {}
 
   async collect(manifest: FleetManifest): Promise<FleetHealthSnapshot> {
-    const [usage, local] = await Promise.all([
+    const [usage, local, provenance] = await Promise.all([
       this.usage.collect(manifest),
       readLocalCredentials(manifest, this.credentials),
+      readSeedProvenance(this.provenance),
     ]);
     const at = this.#now();
     return healthSnapshotFromObservations(
-      observeAccountHealth({ manifest, config: this.config, usage, local, at }),
+      observeAccountHealth({ manifest, config: this.config, usage, local, provenance, at }),
       at,
     );
   }
@@ -514,6 +573,7 @@ export function buildFleetHealthCollector(
   usage: { collect(manifest: FleetManifest): Promise<FleetUsageSnapshot> },
   credentials: FleetCredentialClassifier,
   clock: FleetHealthClock,
+  provenance: FleetSeedProvenanceStore,
 ): FleetHealthCollector {
-  return new FleetHealthCollector(usage, credentials, clock, config);
+  return new FleetHealthCollector(usage, credentials, clock, config, provenance);
 }

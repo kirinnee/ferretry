@@ -4,6 +4,7 @@ import {
   FleetConfigSchema,
   type FleetCredentialClassifier,
   type FleetManifest,
+  type FleetSeedProvenanceStore,
   type FleetUsageSnapshot,
   type LocalCredentialReading,
 } from '@ferretry/fleet';
@@ -75,11 +76,17 @@ const memoryStore = (seed: readonly AccountHealthHead[] = []) => {
 
 const classifier = (reading: LocalCredentialReading): FleetCredentialClassifier => ({ classify: async () => reading });
 
-const service = (parts: { store: AccountHealthStore; credentials?: FleetCredentialClassifier; now?: () => number }) =>
+const service = (parts: {
+  store: AccountHealthStore;
+  credentials?: FleetCredentialClassifier;
+  now?: () => number;
+  provenance?: FleetSeedProvenanceStore;
+}) =>
   new FleetAccountHealthService({
     store: parts.store,
     credentials: parts.credentials ?? classifier({ state: 'valid', fingerprint: 'aaa', expiresAt: NOW + 1 }),
     clock: { now: parts.now ?? (() => NOW) },
+    provenance: parts.provenance ?? { read: async () => [], write: async () => undefined },
   });
 
 describe('FleetAccountHealthService.snapshot', () => {

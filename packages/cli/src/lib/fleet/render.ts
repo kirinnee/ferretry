@@ -1,7 +1,9 @@
+import { HARNESS_LABEL } from '@ferretry/fleet';
 import type {
   CredentialState,
   DisplacedState,
   FleetAccountHealth,
+  FleetAccountSeedProvenance,
   FleetApplyCommittedState,
   FleetApplyFailure,
   FleetApplyPreview,
@@ -711,6 +713,76 @@ const HEALTH_MINIMUM_REASON_COLUMN = 24;
  */
 const HEALTH_DISCLOSURE = 'Reads credentials and one free status endpoint — no model, no inference quota.';
 
+/**
+ * The harness as a person writes it, tolerating a kind this build does not know.
+ *
+ * The health contract publishes `kind` as an open string so a daemon that grows a third harness stays
+ * conformant. A lookup that assumed the closed set would print `undefined` in the middle of a sentence
+ * about somebody's credential; the raw kind is at least true.
+ */
+function harnessLabel(kind: string): string {
+  return kind === 'claude' || kind === 'codex' ? HARNESS_LABEL[kind] : kind;
+}
+
+const SEED_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/**
+ * The day a seed happened, absolute and in UTC.
+ *
+ * ABSOLUTE RATHER THAN RELATIVE, unlike every other instant in this report. A health verdict is worth
+ * minutes and "4m ago" is what a reader wants; a seed is a thing that happened once and may be months
+ * old, and "94d ago" is not a date anybody can match against what they remember doing.
+ */
+function seedDateLabel(instant: number): string {
+  const date = new Date(instant);
+  return `${String(date.getUTCDate())} ${SEED_MONTHS[date.getUTCMonth()] ?? '?'} ${String(date.getUTCFullYear())}`;
+}
+
+/**
+ * WHAT RENEWING A SEEDED COPY MAY COST THE INSTALL IT WAS TAKEN FROM.
+ *
+ * ## THE CONDITIONAL IS NOT HEDGING AND MUST NOT BE COPY-EDITED AWAY
+ *
+ * Nothing in this repository proves that CLAUDE's refresh tokens rotate. Single-use rotation is
+ * established for Codex only. So the Claude sentence says "if Claude rotates refresh tokens … may",
+ * and flattening it into "renewing this will sign that install out" would be asserting a measurement
+ * nobody has taken, on somebody's own login, in a report they are reading to decide what to do.
+ *
+ * Which sentence applies is NOT decided here: `rotation` arrives on the row from `@ferretry/fleet`,
+ * which owns that claim once for both surfaces. This file owns only the words.
+ */
+function seedRotationClause(provenance: FleetAccountSeedProvenance, label: string): string {
+  return provenance.rotation === 'single_use'
+    ? `${label} refresh tokens are single-use, so renewing it — or running an agent on it — signs that install out.`
+    : `If ${label} rotates refresh tokens, renewing it — or running an agent on it — may sign that install out.`;
+}
+
+/**
+ * One account's provenance, as the sentence a row says about it — or nothing.
+ *
+ * `undefined` in means NO RECORD, and the honest rendering of that is silence. It is emphatically not
+ * "this account owns its credential": a home seeded before this shipped has no record and can never
+ * get one, so the hosts most exposed today are exactly the ones with nothing to print.
+ *
+ * `own_login` is printed too, short, because it is what turns the absence of the other two lines into
+ * information: a reader who has seen this line on one account knows a silent account is one nothing
+ * was recorded about, rather than one that was checked and cleared.
+ */
+function seedProvenanceSentence(health: FleetAccountHealth): string | undefined {
+  const provenance = health.seedProvenance;
+  if (provenance === undefined) return undefined;
+  const label = harnessLabel(health.kind);
+  const when = seedDateLabel(provenance.seededAt);
+  if (provenance.state === 'own_login') {
+    return `own login: seeded from this host's own ${label} install (${provenance.donorHome}) on ${when}, and replaced since.`;
+  }
+  const subject =
+    provenance.state === 'seeded_copy'
+      ? `seeded copy: this credential is still the copy taken from this host's own ${label} install (${provenance.donorHome}) on ${when}.`
+      : `seeded copy, unconfirmed: this home's credential could not be read, so this cannot tell whether it is still the copy taken from this host's own ${label} install (${provenance.donorHome}) on ${when}; it is reported as if it were.`;
+  return `${subject} ${seedRotationClause(provenance, label)}`;
+}
+
 /** When the check ran, in the words the header and a row both use so they cannot disagree. */
 function healthCheckedLabel(health: FleetAccountHealth, now: number): string {
   return health.lastCheckedAt === null
@@ -818,12 +890,24 @@ function healthRowLines(
         ...segments.slice(1).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`),
       ]
     : [head.trimEnd(), ...segments.map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`)];
+  // WHERE THE CREDENTIAL CAME FROM, when a first run recorded it. Below the verdict because it is not
+  // one — it changes no decision and never contradicts the row above it — and above the command
+  // because it is what somebody needs to have read BEFORE running one on a credential their own
+  // install is holding. Muted, like every other secondary clause: this is a disclosure, not a fault.
+  const provenance = seedProvenanceSentence(health);
+  const disclosed =
+    provenance === undefined
+      ? lines
+      : [
+          ...lines,
+          ...softWrap(provenance, wrapped, wrapped).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`),
+        ];
   // The exact command, on its own line, for every state a person can act on. A row with no way to
   // act on it is the state this whole feature exists to stop producing — and the id the command needs
   // is not something a reader could have derived from the name above it. NEVER WRAPPED: this line
   // exists to be selected, and a break inside the id produces something that looks copyable.
   const remedy = HEALTH_REMEDY[health.reason]?.(health.accountId);
-  return remedy === undefined ? lines : [...lines, `${HEALTH_REMEDY_INDENT}${palette.command(remedy)}`];
+  return remedy === undefined ? disclosed : [...disclosed, `${HEALTH_REMEDY_INDENT}${palette.command(remedy)}`];
 }
 
 /** The summary, as fragments that keep their own colour so packing them cannot lose the paint. */

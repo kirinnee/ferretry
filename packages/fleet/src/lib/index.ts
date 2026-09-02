@@ -21,6 +21,7 @@ export * from './profiles.ts';
 export * from './provisioning.ts';
 export * from './quota.ts';
 export * from './scaffold.ts';
+export * from './seed-provenance.ts';
 export * from './settings.ts';
 export * from './sharing.ts';
 export {

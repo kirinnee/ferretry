@@ -144,6 +144,16 @@ export type FleetSeedOutcome =
 export interface FleetSeedResult {
   /** The wrapper NAME a person reads — what a boot line says and what `fleet ls` prints. */
   readonly account: string;
+  /**
+   * The manifest id of the account this happened to, so a caller can join the result back to the home.
+   *
+   * BOTH HALVES TRAVEL because they answer different questions. The name is what a boot line says and
+   * what somebody types; the id is the only key the manifest promises never to move, and
+   * `./seed-provenance.ts` needs exactly it to read back the home a copy just landed in. Deriving one
+   * from the other at the call site would be a second join, and it would be wrong first on the host
+   * where a wrapper name had been reused.
+   */
+  readonly accountId: string;
   readonly kind: HarnessKind;
   readonly outcome: FleetSeedOutcome;
 }
@@ -173,6 +183,7 @@ export class FleetFirstRunSeeder {
     for (const target of targets) {
       results.push({
         account: wrapperNameOf(target.wrapper),
+        accountId: target.id,
         kind: target.kind,
         outcome: await this.#seedOne(target, donors[target.kind], surveyed),
       });

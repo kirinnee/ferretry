@@ -21,6 +21,7 @@ import {
   type FleetScaffolder,
   fleetScaffoldIds,
   FleetScaffoldPartialError,
+  type FleetSeedProvenanceStore,
   type FleetSeedResult,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
@@ -37,9 +38,11 @@ import {
   FileFleetScaffolder,
   FileSharedHistoryFileSystem,
   fetchQuota,
+  FileSeedProvenanceStore,
   fleetApplyLockFor,
   harnessKeychainAccount,
   PlatformFleetCredentialStore,
+  seedProvenancePath,
   SpawnCredentialCommand,
   StoreCredentialClassifier,
 } from '@ferretry/fleet/adapters';
@@ -585,6 +588,7 @@ class MountedFleet implements FleetSubsystem {
    */
   private health_: FleetAccountHealthService | undefined;
   private credentials_: PlatformFleetCredentialStore | undefined;
+  private seedProvenance_: FleetSeedProvenanceStore | undefined;
 
   constructor(private readonly options: DaemonFleetOptions) {
     this.layout = fleetLayout(options.paths, options.userHome);
@@ -1501,8 +1505,22 @@ class MountedFleet implements FleetSubsystem {
           now: () => this.options.clock.now(),
         }),
         clock: this.options.clock,
+        provenance: this.seedProvenanceStore(),
       });
     return this.health_;
+  }
+
+  /**
+   * The seed-provenance records, from the one store that owns their file format.
+   *
+   * Built once and shared between the writer (a first-run seed) and the reader (every health pass), so
+   * a daemon cannot record a digest through one spelling of the document and read it back through
+   * another. It lives beside the manifest rather than in it, because an apply regenerates a manifest
+   * and this has to survive one.
+   */
+  private seedProvenanceStore(): FleetSeedProvenanceStore {
+    this.seedProvenance_ ??= new FileSeedProvenanceStore(seedProvenancePath(this.layout.fleetDirectory));
+    return this.seedProvenance_;
   }
 
   /** One credential store for the quota probe and the health classifier, so both read the same bytes. */

@@ -1216,6 +1216,140 @@ describe('health rendering', () => {
     should(rendered).containEql('✓ h  HEALTHY  the provider accepted this credential');
   });
 
+  /**
+   * THE DISCLOSURE, and the sentence the honesty constraint lives in.
+   *
+   * The Claude case asserts BOTH halves: that the conditional is present and that the flat claim is
+   * absent. Asserting only the first would pass over a sentence that said "if Claude rotates refresh
+   * tokens, renewing it signs that install out" — conditional in form and an assertion in substance.
+   */
+  /**
+   * The report as ONE line, so an assertion about WHAT was said is not also an assertion about
+   * where the terminal happened to break it. Where it breaks has its own test below.
+   */
+  const unwrapped = (rendered: string): string => rendered.replace(/\s+/g, ' ');
+
+  const seedRow = (patch: Record<string, unknown> = {}, row: Record<string, unknown> = {}) =>
+    healthRow({
+      accountId: 'seeded',
+      seedProvenance: {
+        state: 'seeded_copy',
+        donorHome: '/home/me/.claude',
+        seededAt: Date.UTC(2026, 7, 12, 9, 30),
+        rotation: 'unproven',
+        ...patch,
+      },
+      ...row,
+    } as Partial<FleetAccountHealth>);
+
+  it('should say a credential is still the copy taken from this host, and when', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: [seedRow()] }, names, WIDE);
+
+    // Assert — the directory is the only thing a person can go and check, and the date is absolute
+    // because a seed may be months old and "94d ago" is not something anybody can match to a memory.
+    should(unwrapped(rendered)).containEql(
+      "seeded copy: this credential is still the copy taken from this host's own Claude install (/home/me/.claude) on 12 Aug 2026.",
+    );
+  });
+
+  it('should keep the Claude consequence CONDITIONAL, because nothing here proves Claude rotates', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: [seedRow()] }, names, WIDE);
+
+    // Assert — the evidence for Claude is that a REPLACEMENT refresh token is stored, which is not
+    // the same claim as the old one being invalidated. Nobody has measured that.
+    should(unwrapped(rendered)).containEql(
+      'If Claude rotates refresh tokens, renewing it — or running an agent on it — may sign that install out.',
+    );
+    // And the flat claim is NOT made. This half is what a copy-editing pass would delete.
+    should(rendered).not.containEql('signs that install out');
+    should(rendered).not.containEql('will sign that install out');
+  });
+
+  it('should say the Codex consequence flatly, because single-use rotation is established there', () => {
+    // Act
+    const rendered = renderHealth(
+      {
+        at: NOW,
+        accounts: [seedRow({ donorHome: '/home/me/.codex', rotation: 'single_use' }, { kind: 'codex' })],
+      },
+      names,
+      WIDE,
+    );
+
+    // Assert
+    should(unwrapped(rendered)).containEql(
+      'Codex refresh tokens are single-use, so renewing it — or running an agent on it — signs that install out.',
+    );
+    should(rendered).not.containEql('If Codex rotates');
+  });
+
+  it('should hedge the whole sentence when this home credential could not be read', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: [seedRow({ state: 'undetermined' })] }, names, WIDE);
+
+    // Assert — fail-closed, and SAID to be fail-closed. A locked keychain reads as "may belong to the
+    // donor", and pretending that was a measurement would be the same overstatement in a new place.
+    should(rendered).containEql('seeded copy, unconfirmed:');
+    should(unwrapped(rendered)).containEql('so this cannot tell whether it is still the copy');
+    should(rendered).containEql('it is reported as if it were.');
+  });
+
+  it('should say a home that has since rotated is its own, with no consequence attached', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: [seedRow({ state: 'own_login' })] }, names, WIDE);
+
+    // Assert — the risk has passed, so no sentence about signing anybody out is printed at all. This
+    // line is also what turns a SILENT row into information: silence means nothing was recorded.
+    should(unwrapped(rendered)).containEql(
+      "own login: seeded from this host's own Claude install (/home/me/.claude) on 12 Aug 2026, and replaced since.",
+    );
+    should(rendered).not.containEql('sign that install out');
+  });
+
+  it('should say nothing at all about an account with no seed record', () => {
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts: [healthRow()] }, names, WIDE);
+
+    // Assert — absence of a record is NOT evidence of an own login, so the row makes no claim either
+    // way. Rendering it as "own login" would clear exactly the hosts this cannot say anything about.
+    should(rendered).not.containEql('seeded copy');
+    should(rendered).not.containEql('own login');
+  });
+
+  it('should print the disclosure above the command it changes the meaning of', () => {
+    // Arrange — an account a login repairs, whose credential is still the donor's copy.
+    const rendered = renderHealth(
+      { at: NOW, accounts: [seedRow({}, { verdict: 'unknown', reason: 'oauth_refreshable' })] },
+      names,
+      WIDE,
+    ).split('\n');
+
+    // Assert — somebody about to run a renewal has to have read this first, so it cannot sit below.
+    const disclosure = rendered.findIndex(line => line.includes('seeded copy:'));
+    const remedy = rendered.findIndex(line => line.includes('fy fleet login seeded'));
+    should(disclosure).be.greaterThan(-1);
+    should(remedy).be.greaterThan(disclosure);
+  });
+
+  it('should print the raw harness when the daemon named one this build does not know', () => {
+    // Assert — `kind` is an open string on the wire so a third harness stays conformant. A closed
+    // lookup would print `undefined` in the middle of a sentence about somebody's credential.
+    const rendered = renderHealth({ at: NOW, accounts: [seedRow({}, { kind: 'gemini' })] }, names, WIDE);
+    should(unwrapped(rendered)).containEql("this host's own gemini install");
+  });
+
+  it('should wrap the disclosure under the account rather than against the left margin', () => {
+    // Arrange — an 80-column terminal, which is what a pipe and a default window both give.
+    const lines = renderHealth({ at: NOW, accounts: [seedRow()] }, names, plainAt(80)).split('\n');
+
+    // Assert — every line of it is indented, so a wrapped clause never reads as the next account.
+    const disclosure = lines.filter(line => line.trim().startsWith('seeded copy:') || line.includes('rotates refresh'));
+    should(disclosure.length).be.greaterThan(1);
+    for (const line of disclosure) should(line.startsWith('    ')).be.true();
+  });
+
   it('should fall back to the id when the manifest cannot name the account', () => {
     // Arrange — a stored head can outlive the account it is about: the manifest moved, or somebody
     // removed the account. A verdict about something the manifest cannot name is STILL a true verdict,

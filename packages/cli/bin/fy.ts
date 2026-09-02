@@ -20,6 +20,7 @@ import {
   FileFleetConfigSource,
   FileFleetProvisioner,
   FileFleetScaffolder,
+  FileSeedProvenanceStore,
   FileSharedHistoryFileSystem,
   fetchQuota,
   harnessKeychainAccount,
@@ -29,6 +30,7 @@ import {
   readFleetWrapperScript,
   SpawnCredentialCommand,
   StoreCredentialClassifier,
+  seedProvenancePath,
   spawnFleetLoginProcess,
   spawnFleetTokenRefreshProcess,
   whichHarnessBinary,
@@ -828,6 +830,11 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
           ),
           new StoreCredentialClassifier({ credentials: credentialStore, now: () => Date.now() }),
           new SystemUsageClock(),
+          // WRITTEN BY A DAEMON, READ HERE. This terminal never seeds anything, so it only ever
+          // reads the document — and it reads it through the same store the daemon writes with,
+          // because two spellings of one file format is how a terminal and a browser end up
+          // disagreeing about whose credential an account is holding.
+          new FileSeedProvenanceStore(seedProvenancePath(layout.fleetDirectory)),
         ),
     },
     // One credential store for both verbs: `--status` reads through it and a login copies through it,

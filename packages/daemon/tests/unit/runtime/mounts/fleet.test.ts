@@ -558,6 +558,7 @@ agents:
         },
         credentials: { classify: async () => ({ state: 'missing' }) },
         clock: { now: () => GENERATED_AT_MS },
+        provenance: { read: async () => [], write: async () => undefined },
       }),
     });
     await writeConfig(subject);

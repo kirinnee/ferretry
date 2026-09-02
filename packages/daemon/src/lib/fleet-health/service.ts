@@ -36,8 +36,10 @@ import type {
 import {
   type FleetCredentialClassifier,
   FleetHealthSnapshotSchema,
+  type FleetSeedProvenanceStore,
   observeAccountHealth,
   readLocalCredentials,
+  readSeedProvenance,
 } from '@ferretry/fleet';
 import { type AccountHealthHead, mergeAccountHealthHead, neverCheckedHead, projectAccountHealth } from './head.ts';
 
@@ -62,6 +64,15 @@ export interface FleetAccountHealthParts {
   readonly store: AccountHealthStore;
   readonly credentials: FleetCredentialClassifier;
   readonly clock: FleetAccountHealthClock;
+  /**
+   * What this host's first run recorded about the homes it seeded.
+   *
+   * READ HERE RATHER THAN AT THE SNAPSHOT, because the comparison needs the credential digest and the
+   * digest only exists where a classification happens — which is this pass and nowhere else.
+   * {@link FleetAccountHealthService.snapshot} stays a pure store read that spends nothing and reads
+   * no credential, which is what makes `GET /v1/fleet/health` safe to hydrate on page load.
+   */
+  readonly provenance: FleetSeedProvenanceStore;
 }
 
 export class FleetAccountHealthService {
@@ -131,12 +142,16 @@ export class FleetAccountHealthService {
     readonly config: FleetConfig;
     readonly usage: FleetUsageSnapshot;
   }): Promise<void> {
-    const local = await readLocalCredentials(input.manifest, this.parts.credentials);
+    const [local, provenance] = await Promise.all([
+      readLocalCredentials(input.manifest, this.parts.credentials),
+      readSeedProvenance(this.parts.provenance),
+    ]);
     const observations = observeAccountHealth({
       manifest: input.manifest,
       config: input.config,
       usage: input.usage,
       local,
+      provenance,
       at: this.#now(),
     });
     // Read INSIDE the queued work, so a pass that started while another was writing still folds onto

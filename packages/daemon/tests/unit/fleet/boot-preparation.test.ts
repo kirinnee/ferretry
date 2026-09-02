@@ -541,11 +541,13 @@ describe('the whole-manifest disclosure', () => {
 describe('fleetSeedSentences', () => {
   const seeded = (account: string, kind: 'claude' | 'codex', donorHome: string): FleetSeedResult => ({
     account,
+    accountId: `id-${account}`,
     kind,
     outcome: { kind: 'seeded', donorHome },
   });
   const noDonor = (account: string, kind: 'claude' | 'codex', donorHome: string): FleetSeedResult => ({
     account,
+    accountId: `id-${account}`,
     kind,
     outcome: { kind: 'no-donor', donorHome },
   });
@@ -665,7 +667,7 @@ describe('fleetSeedSentences', () => {
     // Assert — seeding is an import, so an account that already had one is left alone; reporting it
     // as unsigned would send somebody to log in to an account that is already logged in.
     const said = fleetSeedSentences(
-      [{ account: 'claude-default', kind: 'claude', outcome: { kind: 'kept' } }],
+      [{ account: 'claude-default', accountId: 'id-claude-default', kind: 'claude', outcome: { kind: 'kept' } }],
       'fy',
     ).join(' ');
     should(said).containEql('Every one of them starts with a credential in place');
@@ -677,15 +679,22 @@ describe('fleetSeedSentences', () => {
       [
         {
           account: 'claude-default',
+          accountId: 'id-claude-default',
           kind: 'claude',
           outcome: { kind: 'donor-unreadable', donorHome: '/home/me/.claude', reason: 'the keychain read failed' },
         },
         {
           account: 'claude-auto-default',
+          accountId: 'id-claude-auto-default',
           kind: 'claude',
           outcome: { kind: 'refused', reason: 'the credential has an access token but no readable expiry' },
         },
-        { account: 'codex-default', kind: 'codex', outcome: { kind: 'failed', reason: 'ENOSPC: no space left' } },
+        {
+          account: 'codex-default',
+          accountId: 'id-codex-default',
+          kind: 'codex',
+          outcome: { kind: 'failed', reason: 'ENOSPC: no space left' },
+        },
       ],
       'fy',
     ).join(' ');
@@ -700,7 +709,14 @@ describe('fleetSeedSentences', () => {
   it('should stay singular for one failed copy', () => {
     // Assert
     const said = fleetSeedSentences(
-      [{ account: 'codex-default', kind: 'codex', outcome: { kind: 'failed', reason: 'ENOSPC' } }],
+      [
+        {
+          account: 'codex-default',
+          accountId: 'id-codex-default',
+          kind: 'codex',
+          outcome: { kind: 'failed', reason: 'ENOSPC' },
+        },
+      ],
       'fy',
     ).join(' ');
     should(said).containEql('One credential copy did not happen and the account is exactly as it was');
