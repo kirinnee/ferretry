@@ -4,6 +4,7 @@ import { FLEET_HEALTH_FRESH_MS } from '@ferretry/fleet';
 import should from 'should';
 import {
   type AccountHealthHead,
+  AccountHealthHeadSchema,
   mergeAccountHealthHead,
   neverCheckedHead,
   projectAccountHealth,
@@ -55,7 +56,112 @@ describe('neverCheckedHead', () => {
       lastCheckInconclusive: false,
       fingerprint: null,
       responseFingerprint: null,
+      seedProvenance: null,
     });
+  });
+});
+
+/**
+ * The seeded-copy disclosure is not a conclusion, so neither of the head's two protection rules
+ * applies to it: it is a statement about the credential that was just digested, and the newest
+ * observation is therefore always the right answer.
+ */
+describe('the seed-provenance disclosure on a head', () => {
+  const provenance = {
+    state: 'seeded_copy' as const,
+    donorHome: '/home/me/.claude',
+    seededAt: NOW - 90_000,
+    rotation: 'unproven' as const,
+  };
+
+  it('records the newest reading', () => {
+    // Act / Assert
+    should(mergeAccountHealthHead(undefined, observation({ seedProvenance: provenance })).seedProvenance).deepEqual(
+      provenance,
+    );
+  });
+
+  it('updates it even when the pass concluded nothing', () => {
+    // Arrange — a standing conclusion the inconclusive arm preserves.
+    const previous = head({ verdict: 'healthy', reason: 'provider_accepted', verdictAt: NOW - 60_000 });
+
+    // Act
+    const merged = mergeAccountHealthHead(
+      previous,
+      observation({ conclusive: false, verdict: 'unknown', reason: 'check_timeout', seedProvenance: provenance }),
+    );
+
+    // Assert — a provider read that failed says nothing about whether the LOCAL credential is still
+    // the seeded copy, and the local digest was read either way.
+    should(merged.verdict).equal('healthy');
+    should(merged.seedProvenance).deepEqual(provenance);
+  });
+
+  it('updates it even when a remote rejection was discarded by the change guard', () => {
+    // Arrange — the credential moved mid-check, so the verdict is thrown away. The provenance is
+    // about the credential that is there NOW, which is exactly what was just digested.
+    const previous = head({ fingerprint: 'old', verdictAt: NOW - 60_000 });
+
+    // Act
+    const merged = mergeAccountHealthHead(
+      previous,
+      observation({
+        verdict: 'needs_relogin',
+        reason: 'oauth_token_rejected',
+        fingerprint: 'new',
+        seedProvenance: { ...provenance, state: 'own_login' },
+      }),
+    );
+
+    // Assert
+    should(merged.reason).equal('credential_changed_during_check');
+    should(merged.seedProvenance?.state).equal('own_login');
+  });
+
+  it('clears it when the newest pass recorded none', () => {
+    // Arrange — the record was removed, or the account is no longer one this daemon has a record for.
+    const previous = head({ seedProvenance: provenance });
+
+    // Act / Assert — a home must stop being disclosed as a copy the moment nothing says it is one.
+    should(mergeAccountHealthHead(previous, observation()).seedProvenance).be.null();
+  });
+
+  it('parses a stored document written before this field existed', () => {
+    // Assert — one field with an obvious absent value, not a migration. Without the default, every
+    // host would publish a whole fleet of never-checked accounts for a usage interval after upgrade.
+    const stored = AccountHealthHeadSchema.parse({
+      accountId: 'acct',
+      kind: 'claude',
+      verdict: 'healthy',
+      reason: 'provider_accepted',
+      evidence: 'anthropic_usage',
+      lastCheckedAt: NOW,
+      verdictAt: NOW,
+      lastCheckInconclusive: false,
+      fingerprint: 'aaa',
+      responseFingerprint: null,
+    });
+    should(stored.seedProvenance).be.null();
+  });
+
+  it('publishes it on a fresh row and on a stale one alike', () => {
+    // Assert — staleness bounds a VERDICT. Where a credential came from does not go stale in the
+    // same way, and a stale row is exactly where somebody is most likely to reach for Renew.
+    should(projectAccountHealth(head({ seedProvenance: provenance, verdictAt: NOW }), NOW).seedProvenance).deepEqual(
+      provenance,
+    );
+    const stale = projectAccountHealth(
+      head({ seedProvenance: provenance, verdict: 'healthy', verdictAt: NOW - FLEET_HEALTH_FRESH_MS - 1 }),
+      NOW,
+    );
+    should(stale.reason).equal('stale');
+    should(stale.seedProvenance).deepEqual(provenance);
+  });
+
+  it('omits the field entirely when nothing was recorded', () => {
+    // Assert — ABSENT on the wire, so a surface cannot mistake it for a reading. Absence of a record
+    // is not evidence that an account owns its credential.
+    should(projectAccountHealth(head(), NOW)).not.have.property('seedProvenance');
   });
 });
 
@@ -76,6 +182,7 @@ describe('mergeAccountHealthHead', () => {
       lastCheckInconclusive: false,
       fingerprint: 'aaa',
       responseFingerprint: null,
+      seedProvenance: null,
     });
   });
 

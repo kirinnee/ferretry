@@ -6416,6 +6416,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
           // What the first-run credential seed did, per account. Passed through rather than summarised
           // here: the sentences belong to `src/lib`, which is the layer that may decide what is said.
           seeded: prepared.seeded,
+          // A seed that happened and could not be RECORDED. The accounts work; what is gone is the
+          // disclosure, and it cannot be recovered afterwards.
+          ...(prepared.provenanceRefusal === undefined ? {} : { provenanceRefusal: prepared.provenanceRefusal }),
           locations: fleetLocations,
           pathEntry: prepared.pathEntry,
           clientName: CLIENT_NAME,

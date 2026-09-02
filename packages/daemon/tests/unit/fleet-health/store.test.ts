@@ -26,6 +26,7 @@ const head = (patch: Partial<AccountHealthHead> = {}): AccountHealthHead =>
     lastCheckInconclusive: false,
     fingerprint: 'aaa',
     responseFingerprint: RESPONSE_FINGERPRINT,
+    seedProvenance: null,
     ...patch,
   }) as AccountHealthHead;
 
@@ -118,6 +119,9 @@ describe('FileSystemAccountHealthStore', () => {
       'lastCheckedAt',
       'reason',
       'responseFingerprint',
+      // A verdict about where a credential CAME FROM, and a state, a directory, an instant and a
+      // rotation claim are all it holds. No digest travels into this document from that field.
+      'seedProvenance',
       'verdict',
       'verdictAt',
     ]);

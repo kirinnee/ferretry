@@ -112,6 +112,36 @@ function AccountHealthLine({ row }: { readonly row: AccountRowView }) {
 }
 
 /**
+ * Where this account's credential came from, on its own line under the verdict.
+ *
+ * ## IT IS BELOW THE VERDICT AND ABOVE THE BUTTONS, AND BOTH HALVES OF THAT MATTER
+ *
+ * Below, because it is not a verdict: it changes no decision, contradicts nothing above it, and a row
+ * that led with it would be leading with a footnote. Above, because "Renew" is on this row and
+ * somebody about to press it has to have read this first — the whole point is that renewing a copy
+ * may spend a token their own install is holding, and they have no other way to know that.
+ *
+ * It is `warn` at most and never `bad`. A seeded copy is not a broken account; painting it red would
+ * teach a reader to look past red on the rows where something really is wrong.
+ *
+ * A row with NO note is an account nothing was recorded about — not one that was checked and cleared.
+ * See `seedProvenanceNote`.
+ */
+function AccountSeedProvenance({ row }: { readonly row: AccountRowView }) {
+  const note = row.health.seedProvenance;
+  if (note === undefined) return null;
+  return (
+    <p
+      className={cn('m-0 mt-1 min-w-0 text-meta leading-base', note.tone === 'warn' ? 'text-warn' : 'text-muted')}
+      data-account-seed-provenance={note.tone}
+    >
+      {note.headline}
+      {note.consequence === undefined ? null : <span className="ml-1">{note.consequence}</span>}
+    </p>
+  );
+}
+
+/**
  * The controls this row offers, or the reason it has none.
  *
  * RENEW LEADS WHEN IT IS THERE, and that is the whole point of offering it. It is the cheap answer —
@@ -222,6 +252,7 @@ function AccountRow({
           </p>
           <code className="mt-0.5 block min-w-0 break-all font-mono text-meta text-muted">{row.wrapper}</code>
           <AccountHealthLine row={row} />
+          <AccountSeedProvenance row={row} />
           <p className="m-0 mt-1 text-meta leading-base text-muted">{row.credential}</p>
           <p className="m-0 mt-1 text-meta leading-base text-muted" data-account-usage={row.usageKind}>
             {row.usage}

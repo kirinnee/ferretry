@@ -600,6 +600,39 @@ const agreements: readonly Agreement[] = [
     ),
   },
   {
+    // The disclosure that says whether an account is still holding this host's own login. The two
+    // sides never import each other — the daemon publishes a code and each surface owns its words —
+    // so a state added on one side and not rendered on the other is exactly the silent gap this gate
+    // exists for, on a row that is about somebody's credential.
+    id: 'seed-provenance-states',
+    owner: literalArray(
+      'packages/fleet/src/lib/seed-provenance.ts',
+      'FleetSeedProvenanceStateSchema = z.enum(',
+      '@ferretry/fleet FleetSeedProvenanceStateSchema',
+    ),
+    replica: literalArray(
+      'packages/pwa/src/lib/account-picker-catalog.ts',
+      'PickerSeedProvenanceStateSchema = z.enum(',
+      'PWA PickerSeedProvenanceStateSchema',
+    ),
+  },
+  {
+    // The MEASUREMENT CLAIM about a harness's refresh tokens: `single_use` is established for Codex,
+    // `unproven` is the honest answer for Claude. If these two ever disagree, one surface is asserting
+    // something the other refuses to, which is the failure the whole feature is written around.
+    id: 'harness-refresh-rotation',
+    owner: literalArray(
+      'packages/fleet/src/lib/seed-provenance.ts',
+      'HarnessRefreshRotationSchema = z.enum(',
+      '@ferretry/fleet HarnessRefreshRotationSchema',
+    ),
+    replica: literalArray(
+      'packages/pwa/src/lib/account-picker-catalog.ts',
+      'PickerRefreshRotationSchema = z.enum(',
+      'PWA PickerRefreshRotationSchema',
+    ),
+  },
+  {
     id: 'push-notification-settings-kinds',
     owner: literalArray(
       'packages/protocol/src/lib/push.ts',

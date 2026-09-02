@@ -550,3 +550,135 @@ describe('the first run credential seed', () => {
     should(await readFile(copy, 'utf8')).equal(refreshed);
   });
 });
+
+/**
+ * Recording that a seed happened, and the end-to-end disclosure it makes possible.
+ *
+ * The comparison itself is proved in `packages/fleet/tests/unit/seed-provenance.test.ts`. What is
+ * proved HERE is the part only a real filesystem and a real seed can answer: that the digest written
+ * at the moment of the copy is the digest of the copy, that the health pass then reads it back and
+ * agrees, and — the one that would silently rot — that a home the harness has since rewritten stops
+ * being disclosed as a copy.
+ */
+describe('recording where a seeded credential came from', () => {
+  const provenanceDocument = async (subject: Fixture): Promise<{ version: number; accounts: unknown[] }> =>
+    JSON.parse(await readFile(join(subject.paths.fleet, 'seed-provenance.json'), 'utf8')) as {
+      version: number;
+      accounts: unknown[];
+    };
+
+  it('should record one row per account it actually seeded, naming the donor directory', async () => {
+    // Arrange
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+
+    // Act
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert — the account id, because that is the only key the manifest promises never to move, and
+    // the donor home, because it is the only thing a person can go and look at.
+    const document = await provenanceDocument(subject);
+    should(document.version).equal(1);
+    const manifest = await subject.subsystem.accounts();
+    should(
+      (document.accounts as { accountId: string; donorHome: string; seededFrom: string }[])
+        .map(row => `${row.seededFrom}:${row.donorHome}`)
+        .sort(),
+    ).deepEqual([
+      `host:claude:${join(subject.userHome, '.claude')}`,
+      `host:claude:${join(subject.userHome, '.claude')}`,
+    ]);
+    should((document.accounts as { accountId: string }[]).map(row => row.accountId).sort()).deepEqual(
+      manifest.accounts.map(account => account.id).sort(),
+    );
+  });
+
+  it('should record no credential material, only a digest', async () => {
+    // Arrange
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+
+    // Act
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert — the document is written beside the manifest and read by two processes, so the one
+    // thing it must never contain is the thing it is derived from.
+    const raw = await readFile(join(subject.paths.fleet, 'seed-provenance.json'), 'utf8');
+    should(raw).not.containEql('fixture-refresh-token');
+    should(raw).not.containEql('fixture-access-token');
+    // Private, for the same reason the credential copies are.
+    should((await stat(join(subject.paths.fleet, 'seed-provenance.json'))).mode & 0o777).equal(0o600);
+  });
+
+  it('should record nothing at all when there was nothing to copy', async () => {
+    // Arrange — no donor on this host, so every account ends `no-donor`.
+    const subject = await fixture();
+
+    // Act
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Assert — no copy, no record. A row here would be a claim about a copy that never happened.
+    should(await Bun.file(join(subject.paths.fleet, 'seed-provenance.json')).exists()).be.false();
+  });
+
+  it('should publish the disclosure through the health pass, and withdraw it once the home rotates', async () => {
+    // Arrange — a seeded host, and a health snapshot taken while the copies are untouched.
+    const subject = await fixture();
+    await hostLogin(subject, 'claude', CLAUDE_CREDENTIAL);
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Act — `checkHealth` is the pass that classifies local credentials; `health` publishes the head.
+    await subject.subsystem.checkHealth();
+    const seededSnapshot = await subject.subsystem.health();
+
+    // Assert — every account is disclosed as still holding this host's own copy, and the harness's
+    // conditional travels with it. This is the end-to-end claim: a digest written at seed time,
+    // compared against the same classifier's reading minutes later, agreeing.
+    should(seededSnapshot.accounts.map(account => account.seedProvenance?.state)).deepEqual([
+      'seeded_copy',
+      'seeded_copy',
+    ]);
+    should(seededSnapshot.accounts[0]?.seedProvenance?.rotation).equal('unproven');
+    should(seededSnapshot.accounts[0]?.seedProvenance?.donorHome).equal(join(subject.userHome, '.claude'));
+
+    // Act — the harness rewrites one home's credential, exactly as a token refresh does.
+    const rotated = join(subject.paths.fleet, 'homes', 'claude-default', '.credentials.json');
+    await writeFile(
+      rotated,
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'a-token-the-harness-minted',
+          refreshToken: 'a-refresh-token-the-harness-minted',
+          expiresAt: GENERATED_AT_MS + 86_400_000,
+        },
+      }),
+      { mode: 0o600 },
+    );
+    await subject.subsystem.checkHealth();
+    const afterRotation = await subject.subsystem.health();
+
+    // Assert — that home is its OWN now and stops being disclosed as a copy, while its sibling, which
+    // nothing has touched, still is. A disclosure that could not be withdrawn would be a warning
+    // about a risk that has passed, on every account, forever.
+    const byId = new Map(afterRotation.accounts.map(account => [account.accountId, account]));
+    const manifest = await subject.subsystem.accounts();
+    const interactive = manifest.accounts.find(account => account.mode === 'interactive');
+    const auto = manifest.accounts.find(account => account.mode === 'auto');
+    should(byId.get(interactive?.id ?? '')?.seedProvenance?.state).equal('own_login');
+    should(byId.get(auto?.id ?? '')?.seedProvenance?.state).equal('seeded_copy');
+  });
+
+  it('should say nothing about an account no seed ever recorded', async () => {
+    // Arrange — a fleet with no donor, so nothing was copied and nothing recorded.
+    const subject = await fixture();
+    await subject.subsystem.prepareDefaults(['claude']);
+
+    // Act
+    await subject.subsystem.checkHealth();
+    const snapshot = await subject.subsystem.health();
+
+    // Assert — the field is ABSENT rather than a reading. Absence of a record is not evidence that
+    // an account owns its credential, and a surface must be able to tell those apart.
+    for (const account of snapshot.accounts) should(account).not.have.property('seedProvenance');
+  });
+});

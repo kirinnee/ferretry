@@ -303,6 +303,15 @@ export function fleetPreparedDisclosure(input: {
    * and found nothing, which is a different and false statement about somebody's host.
    */
   readonly seeded: readonly FleetSeedResult[];
+  /**
+   * Why the seed could not be RECORDED, when it could not be.
+   *
+   * A DIFFERENT FAILURE FROM A COPY THAT DID NOT LAND, with a different consequence, so it gets its
+   * own sentence rather than joining the list above. The copies are there and the accounts work; what
+   * was lost is that no surface will ever be able to say their credential is still this host's own —
+   * and it cannot be recovered later, because the digest at seed time only exists at seed time.
+   */
+  readonly provenanceRefusal?: string;
   readonly locations: FleetPreparationLocations;
   readonly pathEntry: string;
   readonly clientName: string;
@@ -318,6 +327,11 @@ export function fleetPreparedDisclosure(input: {
         ]),
     'A session can use them now — a start launches the absolute wrapper path the manifest publishes, never a name off your PATH.',
     ...fleetSeedSentences(input.seeded, input.clientName),
+    ...(input.provenanceRefusal === undefined
+      ? []
+      : [
+          `The copies landed and were NOT recorded (${input.provenanceRefusal}), so nothing will be able to tell you later that these accounts are still holding this host's own login — that is a digest of the moment the copy was made, and the moment has passed.`,
+        ]),
     `Add \`${input.pathEntry}\` to your shell profile if you also want to type these names in your own terminal.`,
     `To stop this happening on future starts set "${FLEET_PREPARATION_KEY}": false in ${input.locations.configPath}; to remove the accounts, delete them from ${input.locations.fleetDirectory}/config.yaml and run \`${input.clientName} fleet apply\`.`,
   ].join(' ');

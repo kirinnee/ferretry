@@ -101,6 +101,36 @@ export interface PickerAccountHealth {
   readonly lastCheckInconclusive: boolean;
   /** What the verdict WAS before it aged out. Present only when `reason` is `stale`. */
   readonly staleVerdict?: PickerHealthVerdict;
+  /**
+   * Whether this account is still holding the copy a first run took from this host's own install.
+   *
+   * ABSENT MEANS NOTHING WAS RECORDED, and that is not a reading. A home seeded before the daemon
+   * learned to record this has no record and can never get one, so a surface that rendered the
+   * absence as "this account owns its credential" would be clearing exactly the hosts that cannot
+   * be checked. Say nothing instead.
+   */
+  readonly seedProvenance?: PickerSeedProvenance;
+}
+
+/**
+ * WHAT MAY BE CLAIMED ABOUT A HARNESS'S REFRESH TOKENS — a measurement, not a wording preference.
+ *
+ * `single_use` means the daemon holds evidence that redeeming the refresh token invalidates it, so
+ * every other copy of that blob is left holding a dead one. `unproven` means nobody has measured it.
+ * The daemon decides this once, for both the terminal and this browser, precisely so that the two
+ * cannot drift into describing the same account differently — see `@ferretry/fleet`'s
+ * `harnessRefreshRotation`. It is NOT re-derived here from `kind`.
+ */
+export type PickerRefreshRotation = 'single_use' | 'unproven';
+
+export type PickerSeedProvenanceState = 'seeded_copy' | 'own_login' | 'undetermined';
+
+export interface PickerSeedProvenance {
+  readonly state: PickerSeedProvenanceState;
+  /** The absolute directory the login was copied from, so somebody can go and check it. */
+  readonly donorHome: string;
+  readonly seededAt: number;
+  readonly rotation: PickerRefreshRotation;
 }
 
 export interface AccountPickerHealthCatalog {
@@ -113,6 +143,9 @@ export type PickerCatalogClient = Pick<IFyApiClient, 'request'>;
 
 const finiteEpoch = z.number().finite().int().nonnegative();
 const PickerHealthVerdictSchema = z.enum(['healthy', 'needs_relogin', 'needs_credentials', 'unknown']);
+/** Registered in `scripts/validate/closed-set-agreement.ts` against the fleet package's own enum. */
+const PickerSeedProvenanceStateSchema = z.enum(['seeded_copy', 'own_login', 'undetermined']);
+const PickerRefreshRotationSchema = z.enum(['single_use', 'unproven']);
 const PickerAccountHealthSchema = z.strictObject({
   accountId: z.string().min(1),
   kind: z.string().min(1),
@@ -142,6 +175,14 @@ const PickerAccountHealthSchema = z.strictObject({
   verdictAt: finiteEpoch.nullable(),
   lastCheckInconclusive: z.boolean(),
   staleVerdict: PickerHealthVerdictSchema.optional(),
+  seedProvenance: z
+    .strictObject({
+      state: PickerSeedProvenanceStateSchema,
+      donorHome: z.string().min(1),
+      seededAt: finiteEpoch,
+      rotation: PickerRefreshRotationSchema,
+    })
+    .optional(),
 });
 const PickerHealthSnapshotSchema = z.strictObject({
   at: finiteEpoch,

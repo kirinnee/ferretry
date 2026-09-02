@@ -129,6 +129,7 @@ describe('FleetAccountHealthService.snapshot', () => {
         lastCheckInconclusive: false,
         fingerprint: 'aaa',
         responseFingerprint: null,
+        seedProvenance: null,
       },
     ]);
 
@@ -295,6 +296,7 @@ describe('FleetAccountHealthService.observe', () => {
         lastCheckInconclusive: false,
         fingerprint: 'aaa',
         responseFingerprint: null,
+        seedProvenance: null,
       },
     ]);
 

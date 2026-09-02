@@ -46,7 +46,14 @@
  * fresh check happened.
  */
 
-import type { PickerAccountHealth, PickerHealthReason, PickerHealthVerdict } from './account-picker-catalog.ts';
+import type {
+  PickerAccountHealth,
+  PickerHealthReason,
+  PickerHealthVerdict,
+  PickerRefreshRotation,
+  PickerSeedProvenance,
+  PickerSeedProvenanceState,
+} from './account-picker-catalog.ts';
 
 /** The tone a row paints itself with. Deliberately four, matching the four verdicts. */
 export type AccountHealthTone = 'ok' | 'bad' | 'warn' | 'muted';
@@ -83,6 +90,102 @@ export interface AccountHealthView {
    * account as a broken one. Only the reasons that RESTATE their own headline are implied.
    */
   readonly detailIsImplied: boolean;
+  /**
+   * Where this account's credential came from, when a first run recorded it. Absent means silence.
+   *
+   * NOT part of the verdict and never coloured like one. It changes no decision and contradicts
+   * nothing above it — see {@link seedProvenanceNote}.
+   */
+  readonly seedProvenance?: SeedProvenanceNote;
+}
+
+/** One account's provenance, as the two clauses a row prints and the tone it prints them in. */
+export interface SeedProvenanceNote {
+  /** What is known: still the copy, its own now, or could not be told. */
+  readonly headline: string;
+  /**
+   * What renewing it may cost the install it came from, when there is still something to cost.
+   *
+   * Absent for a home that has since rotated, because the risk has passed and a warning about a
+   * consequence that can no longer happen is noise on the one row that should be quiet.
+   */
+  readonly consequence?: string;
+  /** `warn` where the donor may still be at risk, `muted` where it is not. Never `bad`: this is not a fault. */
+  readonly tone: Extract<AccountHealthTone, 'warn' | 'muted'>;
+}
+
+/** Whole days, absolute and in UTC, because a seed may be months old and "94d ago" is not a date. */
+function seedDateLabel(instant: number): string {
+  const date = new Date(instant);
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][
+    date.getUTCMonth()
+  ];
+  return `${String(date.getUTCDate())} ${month ?? '?'} ${String(date.getUTCFullYear())}`;
+}
+
+/**
+ * WHAT RENEWING A SEEDED COPY MAY COST THE INSTALL IT WAS TAKEN FROM.
+ *
+ * ## THE CONDITIONAL IS NOT HEDGING AND MUST NOT BE COPY-EDITED AWAY
+ *
+ * Nothing in this product proves that Claude's refresh tokens rotate. Single-use rotation is
+ * established for Codex only. So the `unproven` sentence says "if … may", and flattening it into
+ * "renewing this will sign that install out" would be asserting a measurement nobody has taken —
+ * about somebody's own login, on the screen they are reading to decide whether to press Renew.
+ *
+ * Which sentence applies is NOT decided here. `rotation` arrives on the row from the daemon, which
+ * owns that claim once for this browser and for the terminal, so the two cannot drift apart.
+ */
+const ROTATION_CONSEQUENCE: Readonly<Record<PickerRefreshRotation, (harness: string) => string>> = {
+  single_use: harness =>
+    `${harness} refresh tokens are single-use, so renewing this — or running an agent on it — signs that install out.`,
+  unproven: harness =>
+    `If ${harness} rotates refresh tokens, renewing this — or running an agent on it — may sign that install out.`,
+};
+
+/**
+ * The headline per state, exhaustive so a state added tomorrow is a compile error rather than a row
+ * that silently stops saying anything.
+ */
+const PROVENANCE_HEADLINE: Readonly<Record<PickerSeedProvenanceState, (harness: string, where: string) => string>> = {
+  seeded_copy: (harness, where) => `Still the copy taken from this host’s own ${harness} install ${where}.`,
+  own_login: (harness, where) =>
+    `Its own login. It was seeded from this host’s own ${harness} install ${where} and has been replaced since.`,
+  undetermined: (harness, where) =>
+    `This account’s credential could not be read, so this cannot tell whether it is still the copy taken from this host’s own ${harness} install ${where}. It is shown as if it were.`,
+};
+
+/** Whether the donor may still be spent by acting on this account. `own_login` cannot be. */
+const PROVENANCE_AT_RISK: Readonly<Record<PickerSeedProvenanceState, boolean>> = {
+  seeded_copy: true,
+  undetermined: true,
+  own_login: false,
+};
+
+/**
+ * One account's provenance in words, or nothing at all.
+ *
+ * `undefined` in means NO RECORD, and silence is the only honest rendering of that: a home seeded
+ * before the daemon learned to record this can never get a record, so those are exactly the accounts
+ * nothing can be said about. Rendering the absence as "its own login" would clear them falsely.
+ *
+ * `harness` is the account's own kind as a person writes it. The caller supplies it because the
+ * health row publishes `kind` as an open string — a daemon that grows a third harness stays
+ * conformant, and a closed lookup here would put `undefined` in the middle of a sentence about
+ * somebody's credential.
+ */
+export function seedProvenanceNote(
+  provenance: PickerSeedProvenance | undefined,
+  harness: string,
+): SeedProvenanceNote | undefined {
+  if (provenance === undefined) return undefined;
+  const where = `(${provenance.donorHome}) on ${seedDateLabel(provenance.seededAt)}`;
+  const atRisk = PROVENANCE_AT_RISK[provenance.state];
+  return {
+    headline: PROVENANCE_HEADLINE[provenance.state](harness, where),
+    ...(atRisk ? { consequence: ROTATION_CONSEQUENCE[provenance.rotation](harness) } : {}),
+    tone: atRisk ? 'warn' : 'muted',
+  };
 }
 
 const VERDICT_LABEL: Readonly<Record<PickerHealthVerdict, string>> = {
@@ -193,7 +296,19 @@ export function accountHealthOffersSignIn(health: PickerAccountHealth): boolean 
  * the newest attempt to re-prove it failed. Hiding that is how a fleet reads
  * healthy while every provider call is failing.
  */
+/**
+ * The harness as a person writes it, tolerating one this build has never heard of.
+ *
+ * `kind` is an open string on the wire so a daemon that grows a third harness stays conformant. The
+ * raw kind is at least true; `undefined` in the middle of a sentence about somebody's credential is
+ * not.
+ */
+function harnessLabel(kind: string): string {
+  return kind === 'claude' ? 'Claude' : kind === 'codex' ? 'Codex' : kind;
+}
+
 export function accountHealthView(health: PickerAccountHealth, now: number): AccountHealthView {
+  const provenance = seedProvenanceNote(health.seedProvenance, harnessLabel(health.kind));
   const detail =
     // A stale row's own reason says only "too old"; the reader also wants to know WHAT went stale,
     // because a bare Unknown there looks exactly like an account nobody ever checked.
@@ -216,6 +331,7 @@ export function accountHealthView(health: PickerAccountHealth, now: number): Acc
     quiet: health.verdict === 'unknown' && health.reason === 'never_checked',
     // A row that went stale says WHAT went stale, so its detail is never the reason's own sentence.
     detailIsImplied: health.staleVerdict === undefined && REASON_IS_IMPLIED[health.reason],
+    ...(provenance === undefined ? {} : { seedProvenance: provenance }),
   };
 }
 

@@ -284,3 +284,107 @@ describe('UNREAD_ACCOUNT_HEALTH', () => {
     expect(Object.isFrozen(UNREAD_ACCOUNT_HEALTH)).toBeTrue();
   });
 });
+
+/**
+ * THE SEEDED-COPY DISCLOSURE, and the sentence the honesty constraint lives in.
+ *
+ * The Claude case asserts BOTH halves — that the conditional is present and that the flat claim is
+ * absent — because asserting only the first passes over "if Claude rotates refresh tokens, renewing
+ * this signs that install out": conditional in form and an assertion in substance.
+ */
+describe('the seed-provenance note', () => {
+  const seeded = (
+    provenance: Partial<NonNullable<PickerAccountHealth['seedProvenance']>> = {},
+    row: Partial<PickerAccountHealth> = {},
+  ) =>
+    accountHealthView(
+      health({
+        seedProvenance: {
+          state: 'seeded_copy',
+          donorHome: '/home/me/.claude',
+          seededAt: Date.UTC(2026, 7, 12, 9, 30),
+          rotation: 'unproven',
+          ...provenance,
+        },
+        ...row,
+      }),
+      NOW,
+    ).seedProvenance;
+
+  it('says nothing at all about an account with no record', () => {
+    // Assert — absence of a record is NOT evidence of an own login. A home seeded before the daemon
+    // learned to record this can never get a record, so those are exactly the accounts that must not
+    // be cleared by silence being read as a verdict.
+    expect(accountHealthView(health(), NOW).seedProvenance).toBeUndefined();
+  });
+
+  it('names the install and the day the copy was taken', () => {
+    // Assert — the directory is the only thing a person can go and check, and the date is absolute
+    // because a seed may be months old and "94d ago" is not something anybody can match to a memory.
+    expect(seeded()?.headline).toBe(
+      'Still the copy taken from this host’s own Claude install (/home/me/.claude) on 12 Aug 2026.',
+    );
+  });
+
+  it('keeps the Claude consequence CONDITIONAL, because nothing proves Claude rotates', () => {
+    // Assert — single-use rotation is established for Codex only. For Claude the evidence is that a
+    // REPLACEMENT refresh token is stored, which is not the same claim as the old one being killed.
+    const note = seeded();
+    expect(note?.consequence).toBe(
+      'If Claude rotates refresh tokens, renewing this — or running an agent on it — may sign that install out.',
+    );
+    // And the flat claim is NOT made. This half is what a copy-editing pass would delete.
+    expect(note?.consequence).not.toContain('signs that install out');
+    expect(note?.consequence).not.toContain('will sign');
+  });
+
+  it('says the Codex consequence flatly, because single-use rotation is established there', () => {
+    // Assert
+    const note = seeded({ donorHome: '/home/me/.codex', rotation: 'single_use' }, { kind: 'codex' });
+    expect(note?.consequence).toBe(
+      'Codex refresh tokens are single-use, so renewing this — or running an agent on it — signs that install out.',
+    );
+    expect(note?.consequence).not.toContain('If Codex rotates');
+  });
+
+  it('reads the rotation claim off the row rather than deriving it from the harness', () => {
+    // Assert — the daemon owns that claim once, for this browser and for the terminal. A browser that
+    // decided it from `kind` would be a second opinion, and the two would eventually disagree about
+    // what may be asserted of somebody's login.
+    expect(seeded({ rotation: 'single_use' })?.consequence).toContain('Claude refresh tokens are single-use');
+  });
+
+  it('hedges the whole sentence when the credential could not be read', () => {
+    // Assert — fail-closed, and SAID to be fail-closed.
+    const note = seeded({ state: 'undetermined' });
+    expect(note?.headline).toContain('could not be read, so this cannot tell whether it is still the copy');
+    expect(note?.headline).toContain('It is shown as if it were.');
+    expect(note?.tone).toBe('warn');
+  });
+
+  it('drops the consequence for a home that has since rotated, and goes quiet', () => {
+    // Assert — the risk has passed. A warning about a consequence that can no longer happen is noise
+    // on the one row that should be quiet, and it is `muted` rather than `warn` for the same reason.
+    const note = seeded({ state: 'own_login' });
+    expect(note?.headline).toContain('Its own login.');
+    expect(note?.headline).toContain('has been replaced since');
+    expect(note?.consequence).toBeUndefined();
+    expect(note?.tone).toBe('muted');
+  });
+
+  it('is never painted as a fault', () => {
+    // Assert — a seeded copy is not a broken account, and painting it like one teaches a reader to
+    // look past the colour on the rows where something really is wrong.
+    for (const state of ['seeded_copy', 'own_login', 'undetermined'] as const) {
+      const tone = seeded({ state })?.tone;
+      expect(tone).toBeDefined();
+      expect(['warn', 'muted']).toContain(tone ?? 'bad');
+    }
+  });
+
+  it('prints the raw harness when the daemon named one this build does not know', () => {
+    // Assert — `kind` is an open string on the wire so a third harness stays conformant. A closed
+    // lookup would put `undefined` in the middle of a sentence about somebody's credential.
+    expect(seeded({}, { kind: 'gemini' })?.headline).toContain('this host’s own gemini install');
+  });
+});

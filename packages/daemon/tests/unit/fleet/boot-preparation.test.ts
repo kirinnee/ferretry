@@ -224,6 +224,40 @@ describe('fleetPreparedDisclosure', () => {
     clientName: 'fy',
   });
 
+  it('should say when the copies landed and could not be RECORDED, and what that costs', () => {
+    // Arrange — the seed itself worked; writing down that it happened did not.
+    const refused = fleetPreparedDisclosure({
+      wrappers: ['claude-default'],
+      published: ['claude-default'],
+      seeded: [
+        {
+          account: 'claude-default',
+          accountId: 'id-claude-default',
+          kind: 'claude',
+          outcome: { kind: 'seeded', donorHome: '/home/me/.claude' },
+        },
+      ],
+      provenanceRefusal: 'EACCES: permission denied',
+      locations: LOCATIONS,
+      pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
+      clientName: 'fy',
+    });
+
+    // Assert — a DIFFERENT failure from a copy that did not land, with a different consequence: the
+    // accounts work, and what is gone is the disclosure. It cannot be recovered later, because the
+    // digest only exists at the moment of the copy — so the sentence says that rather than implying
+    // a retry would fix it.
+    should(refused).containEql('The copies landed and were NOT recorded (EACCES: permission denied)');
+    should(refused).containEql('the moment has passed');
+    // And the copies are still reported as copies. This is not a seed failure.
+    should(refused).containEql("now holds a COPY of this host's own Claude login");
+  });
+
+  it('should say nothing about recording when the record was written', () => {
+    // Assert — the ordinary case adds no sentence at all.
+    should(said).not.containEql('NOT recorded');
+  });
+
   it('should name every wrapper it created rather than counting them', () => {
     // Assert — a count is not something a person can act on; the names are what they type.
     should(said).containEql('created 2 default accounts: claude-default, claude-auto-default');

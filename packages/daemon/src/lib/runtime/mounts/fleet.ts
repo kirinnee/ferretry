@@ -21,6 +21,7 @@ import {
   type FleetScaffolder,
   fleetScaffoldIds,
   FleetScaffoldPartialError,
+  FleetSeedProvenanceRecorder,
   type FleetSeedProvenanceStore,
   type FleetSeedResult,
   type FleetUsageProbe,
@@ -261,6 +262,15 @@ export type FleetDefaultsPreparation =
        * need a login, which is the half a person has to act on.
        */
       readonly seeded: readonly FleetSeedResult[];
+      /**
+       * Why the seed could not be RECORDED, when it could not be.
+       *
+       * Separate from `seeded` because it is a different failure with a different consequence: the
+       * copies landed and the accounts work, and what was lost is the disclosure that their
+       * credential is still this host's own. Absent means it was recorded, or that there was nothing
+       * to record.
+       */
+      readonly provenanceRefusal?: string;
       readonly created: readonly string[];
       readonly kept: readonly string[];
       readonly pathEntry: string;
@@ -1220,6 +1230,7 @@ class MountedFleet implements FleetSubsystem {
     }
     try {
       await this.provisioner.apply(plan);
+      const seeded = await this.seedFirstRunCredentials(added);
       return {
         kind: 'prepared',
         wrappers: additions,
@@ -1228,7 +1239,8 @@ class MountedFleet implements FleetSubsystem {
         // credential. Only the accounts this preparation ADDED are seeded — an account somebody else
         // declared is theirs, and writing a credential into it would be this daemon deciding which
         // provider login one of their accounts uses.
-        seeded: await this.seedFirstRunCredentials(added),
+        seeded: seeded.results,
+        ...(seeded.provenanceRefusal === undefined ? {} : { provenanceRefusal: seeded.provenanceRefusal }),
         // Read BACK from the manifest the apply just published rather than from the plan that
         // produced it: the names a boot puts in front of a person have to be ones a start could
         // resolve, and the manifest is the file a start reads.
@@ -1261,8 +1273,59 @@ class MountedFleet implements FleetSubsystem {
    * than the fleet it had just published. The accounts exist and are runnable either way; a credential
    * is the one thing `fy fleet login` can still supply afterwards.
    */
-  private async seedFirstRunCredentials(added: readonly FleetManifestAccount[]): Promise<readonly FleetSeedResult[]> {
-    return await new FleetFirstRunSeeder(this.credentialStore()).seed(added, this.layout.defaultHomeDirectories);
+  private async seedFirstRunCredentials(
+    added: readonly FleetManifestAccount[],
+  ): Promise<{ readonly results: readonly FleetSeedResult[]; readonly provenanceRefusal?: string }> {
+    const results = await new FleetFirstRunSeeder(this.credentialStore()).seed(
+      added,
+      this.layout.defaultHomeDirectories,
+    );
+    const provenanceRefusal = await this.recordSeedProvenance(added, results);
+    return { results, ...(provenanceRefusal === undefined ? {} : { provenanceRefusal }) };
+  }
+
+  /**
+   * Write down that these homes are holding a copy of this host's own login, and when.
+   *
+   * ## IT IS RECORDED HERE OR IT CANNOT BE RECORDED AT ALL
+   *
+   * The digest is of what the home holds IMMEDIATELY AFTER the copy, and this is the only moment that
+   * exists. A later pass reads whatever the harness has since written and cannot tell a copy from an
+   * own login, which is the exact question the record answers — so a fleet seeded before this shipped
+   * can never get one, and that is a declared gap rather than something a migration could close.
+   *
+   * ## IT NEVER FAILS A BOOT, BY THE SAME DOCTRINE AS THE SEED ITSELF
+   *
+   * A seed that could not finish costs a boot one sentence rather than the fleet it had just
+   * published. A DISCLOSURE that could not be written is strictly less than that: the accounts exist,
+   * are runnable and are signed in, and the only loss is that the surfaces will say nothing about
+   * where their credential came from. Refusing the preparation over it would be trading a working
+   * fleet for a sentence.
+   *
+   * The failure is not silent. It comes back as a sentence the boot says beside everything else this
+   * preparation did, so a person who later wonders why an account says nothing about its origin has a
+   * line to find.
+   */
+  private async recordSeedProvenance(
+    added: readonly FleetManifestAccount[],
+    results: readonly FleetSeedResult[],
+  ): Promise<string | undefined> {
+    try {
+      await new FleetSeedProvenanceRecorder({
+        store: this.seedProvenanceStore(),
+        // The SAME classifier the health pass uses, so the digest recorded here and the digest
+        // compared against it later are produced by one function over one store. Two spellings would
+        // disagree first on macOS, where a credential read is a keychain read rather than a file one.
+        digests: new StoreCredentialClassifier({
+          credentials: this.credentialStore(),
+          now: () => this.options.clock.now(),
+        }),
+        now: () => this.options.clock.now(),
+      }).record({ accounts: added, results });
+      return undefined;
+    } catch (error) {
+      return errorMessage(error);
+    }
   }
 
   private deriveCandidate(config: FleetConfig, mutation: FleetMutation): FleetConfig {

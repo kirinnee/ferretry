@@ -39,6 +39,7 @@ import {
   FLEET_HEALTH_FRESH_MS,
   type FleetAccountHealth,
   FleetAccountHealthSchema,
+  FleetAccountSeedProvenanceSchema,
   FleetHealthEvidenceSchema,
   FleetHealthReasonSchema,
   FleetHealthVerdictSchema,
@@ -68,6 +69,21 @@ export const AccountHealthHeadSchema = z.strictObject({
   fingerprint: z.string().min(1).nullable(),
   /** The newest completed provider response's secret-safe shape, or null when no request completed. */
   responseFingerprint: ProviderResponseFingerprintSchema.nullable(),
+  /**
+   * Whether this home was still holding its seeded copy at the newest observation.
+   *
+   * IT IS NOT A CONCLUSION AND THE TWO RULES ABOVE DO NOT APPLY TO IT. Both exist to stop a verdict
+   * about a credential being attributed to the wrong credential; this is a statement about the
+   * credential that was actually just digested, so the newest observation is always the right answer
+   * and an inconclusive provider read has nothing to say about it. It is overwritten every pass,
+   * `null` included — a home that has since rotated must stop being disclosed as a copy.
+   *
+   * DEFAULTED so a document written before this field existed still parses. The module note above is
+   * right that a shape this build cannot read is discarded rather than migrated, and this is not a
+   * migration — it is one field with an obvious absent value. Without it, every host would publish a
+   * whole fleet of never-checked accounts for one usage interval after an upgrade, to learn nothing.
+   */
+  seedProvenance: FleetAccountSeedProvenanceSchema.nullable().default(null),
 });
 export type AccountHealthHead = z.infer<typeof AccountHealthHeadSchema>;
 
@@ -98,6 +114,7 @@ export function neverCheckedHead(accountId: string, kind: string): AccountHealth
     lastCheckInconclusive: false,
     fingerprint: null,
     responseFingerprint: null,
+    seedProvenance: null,
   };
 }
 
@@ -118,7 +135,16 @@ export function mergeAccountHealthHead(
   const previous = head ?? neverCheckedHead(observation.accountId, observation.kind);
   const fingerprint = observation.fingerprint ?? null;
   const responseFingerprint = observation.responseFingerprint ?? null;
-  const checked = { ...previous, kind: observation.kind, lastCheckedAt: observation.at, responseFingerprint };
+  // The newest reading, on every arm. See the schema note: this is a statement about the credential
+  // that was just digested, so an inconclusive pass and a guarded rejection both still update it.
+  const seedProvenance = observation.seedProvenance ?? null;
+  const checked = {
+    ...previous,
+    kind: observation.kind,
+    lastCheckedAt: observation.at,
+    responseFingerprint,
+    seedProvenance,
+  };
 
   if (!observation.conclusive) {
     // Nothing conclusive was learned — but WHETHER there is a conclusion to protect decides what the
@@ -190,6 +216,7 @@ export function projectAccountHealth(head: AccountHealthHead, now: number): Flee
       verdictAt: head.verdictAt,
       lastCheckInconclusive: head.lastCheckInconclusive,
       ...(head.responseFingerprint === null ? {} : { responseFingerprint: head.responseFingerprint }),
+      ...(head.seedProvenance === null ? {} : { seedProvenance: head.seedProvenance }),
       // What it WAS, so a reader is told "this was healthy and is now too old to trust" rather than
       // being handed a bare unknown that looks like the account was never checked.
       staleVerdict: head.verdict,
@@ -205,5 +232,6 @@ export function projectAccountHealth(head: AccountHealthHead, now: number): Flee
     verdictAt: head.verdictAt,
     lastCheckInconclusive: head.lastCheckInconclusive,
     ...(head.responseFingerprint === null ? {} : { responseFingerprint: head.responseFingerprint }),
+    ...(head.seedProvenance === null ? {} : { seedProvenance: head.seedProvenance }),
   });
 }
