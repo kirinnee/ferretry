@@ -65,6 +65,7 @@ afterEach(async () => {
 
 interface Handled {
   readonly started: string[];
+  readonly renewed: string[];
   readonly submitted: { readonly flowId: string; readonly code: string }[];
   readonly cancelled: string[];
   readonly navigated: string[];
@@ -85,7 +86,15 @@ const open = async (
   state: AccountsReadState,
   options: Options = {},
 ): Promise<{ container: HTMLElement; handled: Handled }> => {
-  const handled: Handled = { started: [], submitted: [], cancelled: [], navigated: [], reRead: [], checked: [] };
+  const handled: Handled = {
+    started: [],
+    renewed: [],
+    submitted: [],
+    cancelled: [],
+    navigated: [],
+    reRead: [],
+    checked: [],
+  };
   const navigate = { onNavigate: (to: string) => handled.navigated.push(to) };
   const mounted = await mount(
     <AccountsSurface
@@ -105,6 +114,7 @@ const open = async (
       {...(options.withNavigate === false ? {} : navigate)}
       onReRead={() => handled.reRead.push(1)}
       onStart={row => handled.started.push(row.accountId)}
+      onRenew={row => handled.renewed.push(row.accountId)}
       onSubmitCode={(flow, code) => handled.submitted.push({ flowId: flow.flowId, code })}
       onCancel={flow => handled.cancelled.push(flow.flowId)}
     />,
@@ -295,6 +305,36 @@ describe('AccountsSurface', () => {
     );
 
     expect(handled.started).toEqual([CLAUDE_SIBLING_ID]);
+  });
+
+  it('offers a renewal only on the row whose token can renew itself, and hands back that row', async () => {
+    // The cheap answer, offered exactly where a person would otherwise reach for the expensive one. A
+    // valid credential has nothing to gain and a rotating refresh token to lose, so its row must not
+    // carry the button at all — a control the host would refuse is still a control that misleads.
+    const { container, handled } = await open(
+      ready([
+        claudeIdentity([
+          loginAccount({ credential: { state: 'refreshable' } }),
+          loginAccount({ accountId: CLAUDE_SIBLING_ID, wrapper: 'claude-auto', credential: { state: 'valid' } }),
+        ]),
+      ]),
+    );
+
+    expect(
+      [...container.querySelectorAll('[data-account-renew]')].map(node => node.getAttribute('data-account-renew')),
+    ).toEqual([CLAUDE_ACCOUNT_ID]);
+    // And the sign-in is still there beside it: a renewal that fails still leaves somebody needing one.
+    expect(rowFor(container, CLAUDE_ACCOUNT_ID).querySelector('[data-account-sign-in]')).not.toBeNull();
+
+    await interact(() =>
+      must(
+        rowFor(container, CLAUDE_ACCOUNT_ID).querySelector<HTMLButtonElement>('[data-account-renew]'),
+        'the renew control',
+      ).click(),
+    );
+
+    expect(handled.renewed).toEqual([CLAUDE_ACCOUNT_ID]);
+    expect(handled.started).toEqual([]);
   });
 
   it('labels the control by whether there is already a credential to replace', async () => {

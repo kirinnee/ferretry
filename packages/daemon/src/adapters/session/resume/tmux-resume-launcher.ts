@@ -1,4 +1,5 @@
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
+import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
 import { sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
 import {
   type PaneObservation,
@@ -83,6 +84,15 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     private readonly retry: ResumeRegistrationRetry = DEFAULT_REGISTRATION_RETRY,
     /** What the account's own profile supplies; see the launch path's identical parameter. */
     private readonly accountEnvironment?: AccountLaunchEnvironment,
+    /**
+     * The account's chance to renew before the replacement pane runs it.
+     *
+     * A revive is a launch, and it happens for the same reason a first launch does — something a
+     * person set in motion is being kept alive. A replacement that came back holding an expired
+     * access token is a recovered agent that fails its first turn, which is the same defect the
+     * environment above is resolved here to avoid.
+     */
+    private readonly accountRenewal?: AccountLaunchRenewal,
   ) {}
 
   async observe(id: SessionId): Promise<PaneObservation> {
@@ -117,6 +127,9 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     const wrapped = (await this.limits?.command(id, spec.command)) ?? spec.command;
     const [program, ...arguments_] = wrapped;
     if (program === undefined) throw new Error(`session ${id} has an empty command and cannot be relaunched`);
+    // An executable this daemon does not publish is not a fleet account, and a spec with none names
+    // nothing to renew — so the lookup is skipped rather than asked about `undefined`.
+    if (spec.agent !== undefined) await this.accountRenewal?.beforeLaunch(spec.agent);
     await this.tmux.launch({
       session: spec.tmuxSession,
       cwd: spec.cwd,

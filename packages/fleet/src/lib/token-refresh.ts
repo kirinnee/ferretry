@@ -36,6 +36,21 @@
  *   to have renewed it already. Firing on a stale reading would burn the token that was just minted.
  * - An identity that holds a valid credential anywhere is never refreshed. It has nothing to gain and
  *   a rotation to lose.
+ * - **Two callers asking at once are one renewal.** See the note on {@link FleetTokenRefreshService}.
+ *
+ * ## What single-flight is, and what it is NOT
+ *
+ * The dedupe below is **in-process only**, and the limit is a fact about the architecture rather than
+ * an unfinished corner. Ferretry never makes the token call — the harness CLI does, in its own child,
+ * against its own store — so there is nothing here to observe a `Retry-After`, nothing to hold a
+ * cross-process cooldown against, and no lock the harness would respect if there were. `fy fleet
+ * login` in a terminal and a renewal inside the daemon still have nothing between them, exactly as
+ * two logins do (`packages/daemon/src/lib/fleet-login/service.ts`).
+ *
+ * What makes that acceptable is the fresh read above rather than the dedupe: a second process that
+ * arrives after the first has renewed reads `valid` and refuses to fire. The dedupe removes the
+ * remaining window — two callers **inside one process** that both read `refreshable` before either
+ * fired — which is the window a route and a launch actually race in.
  *
  * ## Success is read from the credential, never from the call
  *
@@ -51,6 +66,7 @@
  * {@link FleetCredentialStore}, exactly as {@link FleetIdentityService} does, and the material stays
  * behind that boundary in an adapter.
  */
+import type { FleetRenewalStatus } from '@ferretry/protocol';
 import type {
   CredentialState,
   FleetCredentialStore,
@@ -64,27 +80,12 @@ import type { HarnessKind } from './manifest.ts';
 /**
  * What happened to one identity's credential.
  *
- * Every outcome is named, and the four that did nothing are four different reasons for having done
- * nothing. `not-expired` is a refusal this product wants to be loud about — a still-valid credential
- * is the case where firing would be destructive — while `indeterminate` means the home was never read
- * successfully, so nothing at all is known. Collapsing them is how a report ends up implying a fleet
- * renewed itself when part of it was never looked at.
+ * ONE CLOSED SET, OWNED BY THE WIRE CONTRACT. `FleetRenewalStatusSchema` in `@ferretry/protocol` holds
+ * the members and the sentence explaining each; this is that union and not a restatement of it. Two
+ * spellings would drift in exactly the direction that hurts: a projection narrower than this domain
+ * turns a real outcome into a 500, and one wider promises a status nothing can produce.
  */
-export type FleetTokenRefreshStatus =
-  /** The harness renewed it: the credential's own re-read expiry is now in the future. */
-  | 'renewed'
-  /** Some home in this identity already holds a valid access token, so nothing was fired. */
-  | 'not-expired'
-  /** Nothing here can renew itself — there is no refresh token to spend. */
-  | 'not-renewable'
-  /** This identity authenticates with a key, so there is no provider token to renew. */
-  | 'not-required'
-  /** A home could not be classified, so nothing was read from it or fired at it. */
-  | 'indeterminate'
-  /** The harness CLI this renewal needs is not installed on this host. */
-  | 'unavailable'
-  /** The path ran and the credential is still not valid. */
-  | 'failed';
+export type FleetTokenRefreshStatus = FleetRenewalStatus;
 
 /** What one identity's renewal did, and to which home. */
 export interface FleetTokenRefreshResult {
@@ -287,8 +288,30 @@ const AFTER: Readonly<Record<CredentialState, { readonly status: FleetTokenRefre
  * unreadable home and a port that throws is a failure with the port's own sentence, because a
  * renewal that cannot happen must never be able to take down the login it was trying to make
  * unnecessary.
+ *
+ * ## One renewal per identity at a time, and both callers get its answer
+ *
+ * A refresh token that rotates is spent by whoever uses it first, so two concurrent renewals of one
+ * identity are not merely wasteful — the second fires at a home whose token the first has already
+ * consumed, and reports a working identity as broken. The fresh read inside {@link renew} closes most
+ * of that window; it cannot close the part where both callers read `refreshable` before either spawns,
+ * because nothing between the read and the spawn is atomic.
+ *
+ * So a renewal already in flight for an identity is **joined, not queued and not refused**. The
+ * second caller awaits the first and receives its result, which is honest on both fields it turns on:
+ * the credential really was renewed, and `ran` really is true — that caller's survey is stale either
+ * way, which is the only thing `ran` exists to say.
+ *
+ * Keyed on `identity.key`, because a credential belongs to an identity rather than to an account, and
+ * the whole point of the key is that every lane sharing one credential shares one entry.
+ *
+ * INSTANCE STATE, so it dedupes exactly as far as the instance is shared and no further. A composition
+ * root that builds two services gets two windows — see the module note on what in-process means here.
  */
 export class FleetTokenRefreshService implements FleetTokenRenewal {
+  /** One entry per identity being renewed right now. Removed when that renewal settles, never before. */
+  readonly #inFlight = new Map<string, Promise<FleetTokenRefreshResult>>();
+
   constructor(private readonly deps: FleetTokenRefreshDeps) {}
 
   /**
@@ -298,8 +321,23 @@ export class FleetTokenRefreshService implements FleetTokenRenewal {
    * just surveyed the identity and a keychain read is not free. The readings only *choose*; the fresh
    * read below is what authorises the spawn, so a stale survey can cost a wasted decision but never a
    * spent refresh token.
+   *
+   * The lookup and the registration happen with no `await` between them, which is what makes this a
+   * gate rather than a suggestion: an interleaving caller cannot arrive after the miss and before the
+   * entry exists.
    */
   async renew(
+    identity: FleetIdentity,
+    members: readonly FleetIdentityMemberStatus[],
+  ): Promise<FleetTokenRefreshResult> {
+    const joined = this.#inFlight.get(identity.key);
+    if (joined !== undefined) return await joined;
+    const attempt = this.#renewOnce(identity, members).finally(() => this.#inFlight.delete(identity.key));
+    this.#inFlight.set(identity.key, attempt);
+    return await attempt;
+  }
+
+  async #renewOnce(
     identity: FleetIdentity,
     members: readonly FleetIdentityMemberStatus[],
   ): Promise<FleetTokenRefreshResult> {

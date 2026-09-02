@@ -71,6 +71,7 @@ import {
   type FleetLoginTarget,
   type HarnessLoginDeclarations,
   referencedEnvNames,
+  type FleetTokenRenewal,
   type ResolvedAccount,
   resolveAccounts,
   sanitizeHarnessEnv,
@@ -83,6 +84,8 @@ import type {
   FleetLoginAccountOutcome,
   FleetLoginIdentity,
   FleetLoginReadiness,
+  FleetRenewal,
+  FleetRenewalRequest,
   HarnessLoginFlow,
   HarnessLoginStartRequest,
   HarnessLoginSubmission,
@@ -164,6 +167,18 @@ export interface DaemonHarnessLoginOptions {
    * there is no second budget and no second gate.
    */
   readonly confirmChange: (password: string) => Promise<ChangeConfirmation>;
+  /**
+   * Renewing a credential that can already renew itself, for the surface that has no browser.
+   *
+   * OPTIONAL, and absent means `POST /v1/fleet/renew` refuses in words rather than 500-ing. A renewal
+   * starts a harness process, exactly as a sign-in does, so an embedder gets it by deciding to rather
+   * than by upgrading — the same rule `FleetLoginServiceDeps.renewal` states for the terminal.
+   *
+   * ONE INSTANCE, SHARED WITH EVERY OTHER CALLER IN THIS DAEMON. That is not a composition detail: the
+   * service dedupes concurrent renewals of one identity inside itself, so a second instance would be a
+   * second window in which two spawns can both fire at a refresh token only one of them can spend.
+   */
+  readonly renewal?: FleetTokenRenewal;
   /** What a person types to run this binary, so a refusal names a command they actually have. */
   readonly clientName: string;
   /** How long a flow may live. Bounded in minutes, like the browser login window's one-to-sixty. */
@@ -197,6 +212,49 @@ interface FlowRecord {
 }
 
 const settled = (stage: FlowStage): boolean => stage.stage.stage === 'complete' || stage.stage.stage === 'failed';
+
+/**
+ * The words one authorized act owes a person it refuses.
+ *
+ * A sign-in and a renewal share every rule and none of the sentences. "That is not this machine's
+ * operator password, so \"claude:kirin\" was not signed in" is wrong for a renewal in the way that
+ * matters most: it tells somebody a sign-in failed when none was attempted, and sends them to spend a
+ * browser approval on a credential that could still have rotated itself.
+ *
+ * So the RULES are shared and the WORDS are per act, held here rather than composed at each throw —
+ * three phrases beside each other are checkable against each other, and three scattered template
+ * literals are how one of them ends up saying "sign-in" inside a renewal.
+ */
+interface ConfirmedAct {
+  /** When nothing can say where this caller stands. */
+  readonly undecidable: string;
+  /** The act, named: `signing "x" in`. Reads before "from off this host needs …". */
+  readonly asking: (identityKey: string) => string;
+  /** What a confirmation is spent against. Reads after "entered against". */
+  readonly against: string;
+  /** What did not happen: `was not signed in`. Reads after the identity key. */
+  readonly undone: string;
+  /** Why this account cannot be acted on at all, before the daemon's own source clause. */
+  readonly inapplicable: string;
+}
+
+const SIGN_IN: ConfirmedAct = {
+  undecidable: 'this daemon cannot say whether this caller may sign this fleet in',
+  asking: identityKey => `signing "${identityKey}" in`,
+  against: 'this exact sign-in',
+  undone: 'was not signed in',
+  inapplicable: 'there is no sign-in to run for this account',
+};
+
+const RENEWAL: ConfirmedAct = {
+  undecidable: 'this daemon cannot say whether this caller may renew this fleet’s credentials',
+  asking: identityKey => `renewing "${identityKey}"`,
+  against: 'this exact renewal',
+  undone: 'was not renewed',
+  // The same rule as a sign-in and for the same reason: a credential that does not come from a login
+  // has no provider token to rotate, and the harness would never look at its own store for one.
+  inapplicable: 'there is no credential here to renew',
+};
 
 const published = (stage: FlowStage): boolean =>
   stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : stage.stage.stage === 'awaiting-approval';
@@ -260,14 +318,75 @@ export class HarnessLoginService {
 
   /** Start one identity's login, confirmed against the operator password when this caller owes one. */
   async start(request: HarnessLoginStartRequest, governance: CallerGovernance | undefined): Promise<HarnessLoginFlow> {
+    const { identity } = await this.#authorize(request, governance, SIGN_IN);
+    return this.#launch(identity, request.accountId);
+  }
+
+  /**
+   * Renew one identity's credential, with no browser and nobody sent anywhere.
+   *
+   * THE OTHER HALF OF THIS SURFACE, and the half that was missing. A browser could start a sign-in and
+   * could never renew — so an account whose access token had merely aged out, with a perfectly good
+   * refresh token beside it, had exactly one remote remedy: a full sign-in, costing a person a browser
+   * approval to replace a credential that could have rotated itself.
+   *
+   * IT IS NOT A FLOW. Nothing is published, nothing is polled, nothing is brought back, and there is no
+   * window to expire — the harness is driven down an authenticated path that invokes no model, and it
+   * rewrites its own store. One request, one answer.
+   *
+   * The gate is not here. `FleetTokenRefreshService` re-reads the chosen home's own credential before it
+   * spawns anything and refuses everything that is not positively expired-with-a-way-back, and it is the
+   * only door to the port. This resolves who is asking and about what; it never decides that a rotation
+   * is safe, because a single-use refresh token is not something two modules get to have opinions about.
+   *
+   * The same authorization as a start, deliberately: a caller who can drive this from off the machine can
+   * leave an identity needing a person, since a rotation the provider REFUSES makes the harness clear its
+   * own tokens. Reusing the sign-in's gate is also why there is no second refusal vocabulary here.
+   */
+  async renew(request: FleetRenewalRequest, governance: CallerGovernance | undefined): Promise<FleetRenewal> {
+    const renewal = this.options.renewal;
+    // Refused in words rather than by a missing method. A daemon composed without a renewal is a daemon
+    // that decided not to start harness processes for this, and a 500 would read as a broken host.
+    if (renewal === undefined) {
+      throw new HarnessLoginRefusal(
+        'fleet_login_unavailable',
+        'this daemon is not configured to renew credentials; run `fy fleet login` on the host',
+      );
+    }
+
+    const { identity } = await this.#authorize(request, governance, RENEWAL);
+    // Surveyed HERE rather than reused from the readiness read, because the readings only CHOOSE: the
+    // renewal re-reads the home it picked before it fires, so a stale survey costs a wasted decision and
+    // never a spent refresh token.
+    const status = await this.#identities.surveyOne(identity);
+    const result = await renewal.renew(identity, status.members);
+    return {
+      identity: result.identity,
+      status: result.status,
+      ...(result.accountId === undefined ? {} : { accountId: result.accountId }),
+      ...(result.reason === undefined ? {} : { reason: result.reason }),
+      ran: result.ran,
+    };
+  }
+
+  /**
+   * Who is asking, about which identity, and may they.
+   *
+   * ONE GATE FOR BOTH ACTS, because they are the same act from the host's point of view: a caller off
+   * this machine causing a credential to be rewritten in a home on it. Two copies of this sequence would
+   * eventually disagree about the order — and the order is the design, since a refusal that could have
+   * been answered from the manifest must never cost somebody a password attempt out of the shared budget.
+   */
+  async #authorize(
+    request: { readonly accountId: string; readonly operatorPassword?: string },
+    governance: CallerGovernance | undefined,
+    act: ConfirmedAct,
+  ): Promise<{ readonly identity: FleetIdentity }> {
     // Absent governance is refused rather than waved through. It cannot arise through the served route,
     // which declares a capability and therefore always has one built, and the safe reading of "nobody
-    // can tell me where this caller stands" is not "launch a login on the host".
+    // can tell me where this caller stands" is not "launch a harness on the host".
     if (governance === undefined) {
-      throw new HarnessLoginRefusal(
-        'fleet_login_unauthorized',
-        'this daemon cannot say whether this caller may sign this fleet in',
-      );
+      throw new HarnessLoginRefusal('fleet_login_unauthorized', act.undecidable);
     }
 
     const { identities, sources } = await this.#context();
@@ -281,11 +400,10 @@ export class HarnessLoginService {
       );
     }
 
-    this.#assertLoginApplies(identity, request.accountId, sources);
+    this.#assertLoginApplies(identity, request.accountId, sources, act);
     this.#assertSingleFlight(identity);
-    if (governance.confirmChange) await this.#confirm(identity.key, request.operatorPassword);
-
-    return this.#launch(identity, request.accountId);
+    if (governance.confirmChange) await this.#confirm(identity.key, request.operatorPassword, act);
+    return { identity };
   }
 
   /** This flow as it stands, expiring it first if its window has closed. */
@@ -402,6 +520,7 @@ export class HarnessLoginService {
     identity: FleetIdentity,
     accountId: string,
     sources: ReadonlyMap<string, FleetCredentialSource>,
+    act: ConfirmedAct,
   ): void {
     const source = this.#sourceOf(sources, accountId);
     const login = decideLoginApplicability(identity.kind, source, this.options.declarations);
@@ -410,7 +529,7 @@ export class HarnessLoginService {
       login.because === 'harness-has-no-login'
         ? (login.harnessReason ?? `the ${identity.kind} harness has no interactive login`)
         : describeSource(source);
-    throw new HarnessLoginRefusal('fleet_login_unavailable', `there is no sign-in to run for this account: ${because}`);
+    throw new HarnessLoginRefusal('fleet_login_unavailable', `${act.inapplicable}: ${because}`);
   }
 
   /**
@@ -430,21 +549,21 @@ export class HarnessLoginService {
     }
   }
 
-  /** Prove the operator password against THIS start, or refuse in words naming the next step. */
-  async #confirm(identityKey: string, password: string | undefined): Promise<void> {
+  /** Prove the operator password against THIS act, or refuse in words naming the next step. */
+  async #confirm(identityKey: string, password: string | undefined, act: ConfirmedAct): Promise<void> {
     const refuse = (message: string): never => {
       throw new HarnessLoginRefusal('fleet_login_unauthorized', message);
     };
     if (password === undefined) {
       return refuse(
-        `signing "${identityKey}" in from off this host needs this machine's operator password, entered against this exact sign-in`,
+        `${act.asking(identityKey)} from off this host needs this machine's operator password, entered against ${act.against}`,
       );
     }
     const outcome = await this.options.confirmChange(password);
     if (outcome.kind === 'confirmed') return;
     if (outcome.reason === 'rate-limited') {
       return refuse(
-        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; "${identityKey}" was not signed in. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
+        `too many wrong operator passwords have been tried on this machine, so it is not checking any more of them for now; "${identityKey}" ${act.undone}. Wait for the lockout to pass, or clear it on the host with \`${this.options.clientName} daemon password set\`.`,
       );
     }
     if (outcome.reason === 'no-password') {
@@ -455,7 +574,7 @@ export class HarnessLoginService {
         `this machine has no operator password, so the confirmation for "${identityKey}" could not be checked`,
       );
     }
-    return refuse(`that is not this machine's operator password, so "${identityKey}" was not signed in`);
+    return refuse(`that is not this machine's operator password, so "${identityKey}" ${act.undone}`);
   }
 
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────

@@ -166,6 +166,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     submit: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    renew: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     cancel: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -445,11 +448,17 @@ describe('the mounted daemon surface', () => {
     // The class stays in `CredentialMinimum` because the ladder is the daemon's contract rather than
     // a census of today's table — but a table that used it exactly once, for a mechanism the
     // capability model already answered, is worth reading as evidence rather than as trivia.
-    // 129 fleet-and-session routes, plus the five that drive a harness sign-in, plus the one free
-    // account-health re-check, plus the profile catalog the account stepper reads. Written as a sum so that two changes landing together cannot silently
-    // agree on one total — two independent `+ 1` edits produce the same number and git merges them
-    // without a conflict, which is exactly how a route can go missing with this test green.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: 129 + 5 + 1 + 1 });
+    // Written as a LABELLED sum, one term per line, and that is the anti-merge device rather than
+    // style: a bare `129 + 5 + 1 + 1` invited two changes to each append `+ 1` and produce the same
+    // total, which git merges without a conflict — exactly how a route goes missing with this test
+    // green. Two additions here both have to rewrite the line that carries the terminating `;`.
+    const operatorRoutes =
+      129 + // the fleet-and-session table
+      5 + // the family that drives a harness sign-in
+      1 + // the one free account-health re-check
+      1 + // the profile catalog the account stepper reads
+      1; // POST /v1/fleet/renew
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['PUT /v1/grants/password', 'GET /v1/sessions/:sessionId/attach']);
@@ -531,6 +540,10 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/login/:flowId',
       'POST /v1/fleet/login/:flowId',
       'DELETE /v1/fleet/login/:flowId',
+      // A renewal, and NOT under `/v1/fleet/login/`: every path there is `:flowId`, so a literal
+      // segment beside it would be read as the id of a flow that does not exist. One route, because a
+      // renewal publishes nothing, is never polled and has no return trip.
+      'POST /v1/fleet/renew',
       // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or
       // destroys a slice, because the units are transient and belong to the launches that made them.

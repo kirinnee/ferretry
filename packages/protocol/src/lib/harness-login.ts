@@ -205,6 +205,90 @@ export const FleetLoginReadinessSchema = z.strictObject({
 export type FleetLoginReadiness = z.infer<typeof FleetLoginReadinessSchema>;
 
 /**
+ * What a renewal did to one identity's credential — the sibling of a login, and never a login.
+ *
+ * A renewal asks the harness to rotate a credential it can already rotate. Nobody is sent anywhere, no
+ * browser opens, and the daemon still never holds a token: it drives the harness down an authenticated
+ * path that invokes no model, and the harness rewrites its own store. So there is no flow, no window,
+ * no verification URL and no return trip — which is why this is one request and one answer rather than
+ * the five-route family a login needs.
+ *
+ * **THIS ENUM IS THE OWNER.** `packages/fleet/src/lib/token-refresh.ts` infers its own
+ * `FleetTokenRefreshStatus` from it rather than restating it, because a wire projection narrower than
+ * its domain turns a later domain outcome into a 500, and one wider promises a status nothing can
+ * produce. Two spellings of one closed set is how those drift.
+ *
+ * The four that did nothing are four different reasons for having done nothing, and collapsing them is
+ * how a report ends up implying a fleet renewed itself when part of it was never looked at:
+ *
+ * - `renewed` — the harness rotated it, and no browser was opened. The only success.
+ * - `not-expired` — some home in this identity still holds a valid access token. A REFUSAL this product
+ *   wants to be loud about: a rotating refresh token is spent by being used, so firing at a credential
+ *   that needed nothing is the destructive case.
+ * - `not-renewable` — there is no refresh token here to spend. This identity needs a person.
+ * - `not-required` — it authenticates with a key, so there is no provider token to renew.
+ * - `indeterminate` — a home could not be read, so nothing at all is known and nothing was fired.
+ * - `unavailable` — the harness CLI this renewal needs is not installed on this host.
+ * - `failed` — the path ran and the credential is still not valid.
+ */
+export const FleetRenewalStatusSchema = z.enum([
+  'renewed',
+  'not-expired',
+  'not-renewable',
+  'not-required',
+  'indeterminate',
+  'unavailable',
+  'failed',
+]);
+export type FleetRenewalStatus = z.infer<typeof FleetRenewalStatusSchema>;
+
+/**
+ * Ask one account's credential to renew itself.
+ *
+ * Names an ACCOUNT, exactly as a login start does, because a person clicks a row. The daemon resolves
+ * which identity that account belongs to and which home to fire at; there is no shape of request that
+ * could name a command, a path, a wrapper or a home.
+ */
+export const FleetRenewalRequestSchema = z.strictObject({
+  accountId: AccountIdSchema,
+  /**
+   * The per-change confirmation, for a governed caller that owes one.
+   *
+   * The SAME gate a login start sits behind, and not a second one. A renewal is not a sign-in, but it
+   * does mutate shared credential state on the host, and a rotation the provider refuses makes the
+   * harness clear its own tokens — so a caller who can drive it from off this machine can leave an
+   * identity needing a person. That is a change to how the host behaves, which is what
+   * `fleet`/`configure` plus this confirmation already governs.
+   */
+  operatorPassword: OperatorPasswordSchema.optional(),
+});
+export type FleetRenewalRequest = z.infer<typeof FleetRenewalRequestSchema>;
+
+/**
+ * What one renewal did, and to which home.
+ *
+ * `ran` is NOT a success — a renewal that ran and achieved nothing has `ran` true and a status of
+ * `failed`. It says the harness was given its turn, so the credential on disk may have moved in either
+ * direction and any reading a caller is holding is now history. A surface that treated it as success
+ * would report a spent refresh token as a working login.
+ *
+ * `accountId` is optional because a refusal can arrive before any home was chosen: an identity that
+ * authenticates with a key has no home to name, and inventing one would point a reader at an account
+ * this renewal never looked at.
+ */
+export const FleetRenewalSchema = z.strictObject({
+  /** `<kind>:<identity>`, because a credential belongs to an identity rather than to an account. */
+  identity: NonEmptyStringSchema,
+  status: FleetRenewalStatusSchema,
+  /** The home that was renewed, or chosen and then refused. Absent when none was chosen. */
+  accountId: AccountIdSchema.optional(),
+  /** Why, in the terms of the credential — never of the credential's contents. */
+  reason: NonEmptyStringSchema.optional(),
+  ran: z.boolean(),
+});
+export type FleetRenewal = z.infer<typeof FleetRenewalSchema>;
+
+/**
  * What happened to one account when a flow finished.
  *
  * The fleet's own outcomes, carried rather than collapsed: `usable`, `login-needed` and

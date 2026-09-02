@@ -66,6 +66,8 @@ export interface AccountsSurfaceProps {
   readonly onNavigate?: (to: string) => void;
   readonly onReRead: () => void;
   readonly onStart: (row: AccountRowView) => void;
+  /** Ask this account's credential to renew itself: no browser, nobody sent anywhere, one call. */
+  readonly onRenew: (row: AccountRowView) => void;
   readonly onSubmitCode: (flow: HarnessLoginFlow, code: string) => void;
   readonly onCancel: (flow: HarnessLoginFlow) => void;
   className?: string;
@@ -109,33 +111,56 @@ function AccountHealthLine({ row }: { readonly row: AccountRowView }) {
   );
 }
 
-/** The sign-in control, or the reason this row has none. Never a greyed control with no explanation. */
+/**
+ * The controls this row offers, or the reason it has none.
+ *
+ * RENEW LEADS WHEN IT IS THERE, and that is the whole point of offering it. It is the cheap answer —
+ * no browser, nobody sent anywhere, one call — and it exists exactly where a person would otherwise
+ * reach for the expensive one. A row that put "Sign in again" first and a renewal second would still
+ * be teaching somebody to spend an approval on a credential that could rotate itself.
+ */
 function AccountSignIn({
   row,
   busy,
   mayStart,
   onStart,
+  onRenew,
 }: {
   readonly row: AccountRowView;
   readonly busy: boolean;
   readonly mayStart: boolean;
   readonly onStart: () => void;
+  readonly onRenew: () => void;
 }) {
   if (row.signIn.kind === 'offered') {
     return (
-      <Button
-        type="button"
-        variant="outline"
-        // Pointer-derived floor: the LABEL is what a finger lands on, so the height is set here
-        // rather than trusted to the button's resting padding at this text size.
-        className="min-h-[44px] shrink-0"
-        disabled={busy || !mayStart}
-        onClick={onStart}
-        data-account-sign-in={row.accountId}
-      >
-        <KeyRound size={15} aria-hidden="true" />
-        {row.signIn.label}
-      </Button>
+      <div className="flex shrink-0 flex-wrap items-start gap-2">
+        {row.renew.kind === 'none' ? null : (
+          <Button
+            type="button"
+            className="min-h-[44px] shrink-0"
+            disabled={busy || !mayStart}
+            onClick={onRenew}
+            data-account-renew={row.accountId}
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+            {row.renew.label}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          // Pointer-derived floor: the LABEL is what a finger lands on, so the height is set here
+          // rather than trusted to the button's resting padding at this text size.
+          className="min-h-[44px] shrink-0"
+          disabled={busy || !mayStart}
+          onClick={onStart}
+          data-account-sign-in={row.accountId}
+        >
+          <KeyRound size={15} aria-hidden="true" />
+          {row.signIn.label}
+        </Button>
+      </div>
     );
   }
   if (row.signIn.kind === 'unavailable') {
@@ -161,6 +186,7 @@ function AccountRow({
   busy,
   mayStart,
   onStart,
+  onRenew,
   onSubmitCode,
   onCancel,
 }: {
@@ -169,6 +195,7 @@ function AccountRow({
   readonly busy: boolean;
   readonly mayStart: boolean;
   readonly onStart: () => void;
+  readonly onRenew: () => void;
   readonly onSubmitCode: (flow: HarnessLoginFlow, code: string) => void;
   readonly onCancel: (flow: HarnessLoginFlow) => void;
 }) {
@@ -204,7 +231,7 @@ function AccountRow({
             {row.login.state === undefined ? '' : ` ${row.login.state}`}
           </p>
         </div>
-        <AccountSignIn row={row} busy={busy} mayStart={mayStart} onStart={onStart} />
+        <AccountSignIn row={row} busy={busy} mayStart={mayStart} onStart={onStart} onRenew={onRenew} />
       </div>
 
       {/* The live sign-in sits under the row it belongs to, so the account on screen and the account
@@ -245,6 +272,7 @@ function HarnessGroup({
   busy,
   mayStart,
   onStart,
+  onRenew,
   onSubmitCode,
   onCancel,
 }: {
@@ -253,6 +281,7 @@ function HarnessGroup({
   readonly busy: boolean;
   readonly mayStart: boolean;
   readonly onStart: (row: AccountRowView) => void;
+  readonly onRenew: (row: AccountRowView) => void;
   readonly onSubmitCode: (flow: HarnessLoginFlow, code: string) => void;
   readonly onCancel: (flow: HarnessLoginFlow) => void;
 }) {
@@ -285,6 +314,7 @@ function HarnessGroup({
             busy={busy}
             mayStart={mayStart}
             onStart={() => onStart(row)}
+            onRenew={() => onRenew(row)}
             onSubmitCode={onSubmitCode}
             onCancel={onCancel}
           />
@@ -306,6 +336,7 @@ export function AccountsSurface({
   onNavigate,
   onReRead,
   onStart,
+  onRenew,
   onSubmitCode,
   onCancel,
   className,
@@ -390,6 +421,7 @@ export function AccountsSurface({
             busy={busy}
             mayStart={mayStart}
             onStart={onStart}
+            onRenew={onRenew}
             onSubmitCode={onSubmitCode}
             onCancel={onCancel}
           />

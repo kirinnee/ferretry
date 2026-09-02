@@ -105,6 +105,8 @@ export interface AccountRowView {
   readonly usageKind: AccountUsageReadout['kind'];
   readonly login: AccountLoginCoverage;
   readonly signIn: AccountSignInOffer;
+  /** Offered only for an access token that aged out with a refresh token beside it. */
+  readonly renew: AccountRenewOffer;
 }
 
 /** Every account of one harness, and the one thing about that harness a person is surprised by. */
@@ -191,6 +193,35 @@ export const accountSignInOffer = (account: FleetLoginAccount): AccountSignInOff
   }
   return { kind: 'offered', label: signInLabel(account) };
 };
+
+/**
+ * Whether this row can offer a renewal, and there is deliberately no "why not".
+ *
+ * A RENEWAL IS NOT A REMEDY FOR ANYTHING ELSE. It applies to exactly one credential state — an access
+ * token that has aged out with a refresh token still beside it — and every other state is either fine
+ * or needs a person. So the absent case says nothing at all rather than explaining itself: the row
+ * already carries its credential sentence and its sign-in offer, and a third line saying "there is
+ * nothing to renew" on every healthy account is noise on the rows that need the least reading.
+ *
+ * That is the opposite of {@link AccountSignInOffer}'s rule, and the difference is which control a
+ * person came looking for. A missing sign-in button is a dead end somebody is actively hunting for;
+ * a missing renew button on a signed-in account is the ordinary case.
+ */
+export type AccountRenewOffer = { readonly kind: 'offered'; readonly label: string } | { readonly kind: 'none' };
+
+/**
+ * What this row offers, and it is never a control that cannot succeed.
+ *
+ * `refreshable` and nothing else. `valid` has nothing to gain and a rotating refresh token to lose;
+ * `missing` has no refresh token to spend; `unreadable` is a home nobody could classify, and offering
+ * to rotate a credential nobody could read is how a good one gets replaced by nothing. The host
+ * refuses all three anyway — `planTokenRefresh` is the gate and this is not a second one — but a
+ * button that the host would refuse is still a button that should not be there.
+ */
+export const accountRenewOffer = (account: FleetLoginAccount): AccountRenewOffer =>
+  account.login.applies && account.available && account.credential.state === 'refreshable'
+    ? { kind: 'offered', label: 'Renew now' }
+    : { kind: 'none' };
 
 /**
  * The fleet's verdict for one login, as a sentence.
@@ -285,6 +316,7 @@ const accountRow = (
     usageKind: readout.kind,
     login: loginCoverage(identity, signIn),
     signIn,
+    renew: accountRenewOffer(account),
   };
 };
 

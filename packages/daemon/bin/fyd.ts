@@ -353,6 +353,7 @@ import {
   HandoverReconcileLoop,
   SessionHandoverService,
   type HarnessDiscoveryPolicy,
+  locateHarnessCommand,
   type HarnessPreflight,
   HarnessQuirkService,
   harnessQuirks,
@@ -446,6 +447,7 @@ import {
   renderInitialAttachmentSection,
   resolveStateHome,
   FleetLaunchEnvironment,
+  FleetLaunchRenewal,
   FleetSecretReferences,
   type ScratchReclamation,
   combinedReferences,
@@ -562,12 +564,16 @@ import {
 import { readHarnessDiscovery } from '../src/lib/fleet/harness-discovery.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import {
+  type FleetBinaryLookup,
   FileFleetConfigSource,
   harnessKeychainAccount,
   PlatformFleetCredentialStore,
+  ProcessFleetTokenRefreshPort,
   readFleetWrapperScript,
   SpawnCredentialCommand,
+  spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
+import { FleetIdentityService, FleetTokenRefreshService, HARNESS_BINARIES, type HarnessKind } from '@ferretry/fleet';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import { daemonVersion } from '../src/lib/version.ts';
@@ -4575,17 +4581,93 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
    * THE CONFIRMATION IS THE SAME CLOSURE THE FLEET TAKES, routed to the one grant service this daemon
    * has, so the attempt a wrong password spends is one of the same five an unlock spends.
    */
+  /**
+   * The one credential store both halves of the sign-in surface read through.
+   *
+   * A sign-in CLASSIFIES and CLONES; a renewal classifies and then classifies again, which is what
+   * decides whether it fired and whether it worked. Two stores would be two readings of one home, and
+   * the second reading is the whole of the renewal's verdict — so they share this one.
+   */
+  const harnessCredentials = new PlatformFleetCredentialStore({
+    platform: process.platform,
+    command: new SpawnCredentialCommand(),
+    now: () => millisecondClock.now(),
+    keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
+    // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no
+    // suffix. Spelled from `userHome` because the fleet layout owns the same join.
+    defaultClaudeHome: join(userHome, '.claude'),
+  });
+  /**
+   * Where this operator said the harnesses are, once this boot has read the configuration.
+   *
+   * A LET for the reason `attachmentDaemonId` above is one: the declaration is CONFIGURATION, and the
+   * configuration is not loaded when these adapters are built. Every reader is a closure that asks at
+   * the moment of the lookup, so nothing captures the absence — and a renewal that somehow ran before
+   * a boot resolved this answers `unavailable` in words rather than resolving against a second rule.
+   *
+   * IT MUST BE `locateHarnessCommand` AND NOT `Bun.which`. A daemon started by systemd or launchd
+   * inherits a minimal environment, which is the entire reason `docs/harness-paths.md` exists: a
+   * renewal that searched `PATH` alone would report "the claude CLI is not on this host" on precisely
+   * the hosts that feature was written for, while the operator's own `harness` block named the file.
+   */
+  let harnessPolicy: HarnessDiscoveryPolicy | undefined;
+  const harnessBinary: FleetBinaryLookup = binary => {
+    const kind = (['claude', 'codex'] as const satisfies readonly HarnessKind[]).find(
+      candidate => HARNESS_BINARIES[candidate] === binary,
+    );
+    if (kind === undefined || harnessPolicy === undefined) return undefined;
+    const located = locateHarnessCommand(kind, harnessPolicy, executables);
+    return located.outcome === 'located' ? located.path : undefined;
+  };
+  /**
+   * Renewing a credential that can already renew itself — ONE service for this whole process.
+   *
+   * The instance is the dedupe. `FleetTokenRefreshService` joins concurrent renewals of one identity
+   * inside itself, and a rotating refresh token is spent by whoever uses it first, so a second
+   * instance would be a second window in which two spawns both fire at a token only one can spend.
+   * Everything in this daemon that renews takes this object.
+   *
+   * It reads through the SAME store the sign-in does, so the reading that authorises a rotation is the
+   * reading a clone would have decided on.
+   */
+  const harnessRenewal = new FleetTokenRefreshService({
+    store: harnessCredentials,
+    port: new ProcessFleetTokenRefreshPort({
+      spawn: spawnFleetTokenRefreshProcess,
+      environment: process.env,
+      which: harnessBinary,
+    }),
+  });
+  /**
+   * This boot's journal, held as a local because two things now write to it.
+   *
+   * Hoisted out of the world literal below rather than duplicated: a second journal would be a second
+   * `+Nms` baseline, so two lines a person reads in one stream would disagree about when this daemon
+   * started. Nothing else about it moved.
+   */
+  const bootNotices = bootJournal(overrides.logLevel);
+  /**
+   * The account's own chance to renew before an agent is started on it.
+   *
+   * ATTENDED RENEWAL, and this is the second of its exactly two doors — a person running a command is
+   * the first. There is deliberately no third: the unattended usage pass must never rotate a credential,
+   * because the harness rewrites its own store by temp-file-and-rename and a writer racing it loses
+   * silently, with nobody present to be told.
+   *
+   * It takes the SAME renewal instance everything else does, which is what makes the dedupe real: two
+   * panes starting at once on one identity are one rotation of a refresh token only one of them could
+   * spend. It reads through the same store and the same fleet mount, so the reading that authorises a
+   * rotation here is the reading the browser's own renewal would have decided on.
+   */
+  const accountLaunchRenewal = new FleetLaunchRenewal({
+    fleet,
+    identities: new FleetIdentityService(harnessCredentials),
+    renewal: harnessRenewal,
+    notices: bootNotices,
+  });
   const harnessLogin = new HarnessLoginService({
     fleet,
-    credentials: new PlatformFleetCredentialStore({
-      platform: process.platform,
-      command: new SpawnCredentialCommand(),
-      now: () => millisecondClock.now(),
-      keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
-      // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no
-      // suffix. Spelled from `userHome` because the fleet layout owns the same join.
-      defaultClaudeHome: join(userHome, '.claude'),
-    }),
+    credentials: harnessCredentials,
     clock: millisecondClock,
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
     spawn: spawnHarnessLoginChild,
@@ -4593,6 +4675,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
     readWrapper: readFleetWrapperScript,
     timer: harnessLoginTimer,
     confirmChange: async password => await grants.confirmChange(password),
+    // Wired here rather than inside the service, exactly as the terminal's login wires it: this is the
+    // surface where starting a harness is unremarkable, because a person pressed something.
+    renewal: harnessRenewal,
     clientName: CLIENT_NAME,
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
@@ -4875,6 +4960,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       // The SAME resolver the first launch used, for the same reason the environment above is
       // re-read: a revive must hand the replacement the credential the account has NOW.
       accountLaunchEnvironment,
+      // And the same chance to renew it. A recovered agent holding an expired access token is a
+      // revive that restored the pane and not the session.
+      accountLaunchRenewal,
     );
   };
   /**
@@ -4993,7 +5081,7 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
     // The SAME two collaborators a start resolves an account from, so the preflight cannot report
     // one answer while a launch gives another.
     harnesses: { accounts, executables },
-    notices: bootJournal(overrides.logLevel),
+    notices: bootNotices,
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
         source: file => {
@@ -5036,6 +5124,9 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       // Resolved per launch against the store, so a rotated credential reaches the next pane with no
       // apply in between, and a missing one refuses the start naming the secret.
       accountLaunchEnvironment,
+      // Attended renewal's second door: a person started this session, so the account's credential is
+      // given its chance to rotate while somebody is still here to be told it could not.
+      accountLaunchRenewal,
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {
@@ -5235,6 +5326,11 @@ export function buildWorld(overrides: RunOverrides = {}, seams: WorldSeams = {})
       socketTickets,
       harnessDiscovery,
     ) => {
+      // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
+      // read from the configuration this boot loaded, and the adapters are built before that happens.
+      // Assigned rather than copied, so a renewal resolves `claude` through the SAME rule the boot
+      // milestone and the doctor report already published — never a second detector.
+      harnessPolicy = harnessDiscovery;
       // ONE durable ledger and ONE per-session queue for BOTH answer execution and monitor
       // reprojection. Observation never waits behind a live drive: that drive owns the freshest
       // state, and a later read/tick will project it after the key becomes idle. After a restart

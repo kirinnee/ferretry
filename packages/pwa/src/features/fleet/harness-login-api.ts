@@ -20,6 +20,10 @@
 import {
   type FleetLoginReadiness,
   FleetLoginReadinessSchema,
+  type FleetRenewal,
+  type FleetRenewalRequest,
+  FleetRenewalRequestSchema,
+  FleetRenewalSchema,
   type HarnessLoginFlow,
   HarnessLoginFlowSchema,
   type HarnessLoginStartRequest,
@@ -97,6 +101,35 @@ export const submitHarnessLoginCode = async (
     method: 'POST',
     headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
     body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ code })),
+  });
+
+export const FLEET_RENEW_PATH = '/v1/fleet/renew';
+
+/**
+ * Asks one account's credential to renew itself.
+ *
+ * THE OTHER HALF OF THIS SURFACE, and the half that was missing. This browser could start a sign-in and
+ * could never renew — so an account whose access token had merely aged out, with a good refresh token
+ * beside it, had exactly one remote remedy here: a full sign-in, spending a person's browser approval
+ * to replace a credential that could have rotated itself.
+ *
+ * IT IS NOT A FLOW. There is nothing to poll, nothing to bring back and no window to expire: the host
+ * drives the harness down an authenticated path that invokes no model, and the harness rewrites its own
+ * store. One call, one answer — which is why there is no `flowId` anywhere in this signature.
+ *
+ * The unlock and the password are the two different uses of one secret that `startHarnessLogin`
+ * describes, spent the same way and for the same reason: from off that machine this rewrites a
+ * credential in a home on it.
+ */
+export const renewFleetCredential = async (
+  client: FleetClient,
+  request: FleetRenewalRequest,
+  unlock?: string,
+): Promise<FleetRenewal> =>
+  await client.request(FLEET_RENEW_PATH, FleetRenewalSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...unlockHeaders(unlock) },
+    body: JSON.stringify(FleetRenewalRequestSchema.parse(request)),
   });
 
 /** Ends one sign-in and the harness child behind it. */

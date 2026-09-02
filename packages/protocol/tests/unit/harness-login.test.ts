@@ -7,6 +7,7 @@ import type {
   FleetLoginAccount,
   FleetLoginIdentity,
   FleetLoginReadiness,
+  FleetRenewal,
   HarnessLoginSubmission,
 } from '../../src/lib/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
@@ -94,6 +95,14 @@ const claudeFailed = {
 
 const accepted = { outcome: 'accepted', flow: claudeComplete } satisfies HarnessLoginSubmission;
 
+const renewal = {
+  identity: 'claude:kirin',
+  status: 'renewed',
+  accountId: ACCOUNT_ID,
+  reason: 'the harness renewed it, and no browser was opened',
+  ran: true,
+} satisfies FleetRenewal;
+
 const schemaCases: SchemaCase[] = [
   { name: 'verification url', schema: harnessLogin.HarnessLoginVerificationUrlSchema, value: CODEX_URL },
   { name: 'user code', schema: harnessLogin.HarnessLoginUserCodeSchema, value: '0IER-FFQW6' },
@@ -126,6 +135,13 @@ const schemaCases: SchemaCase[] = [
   },
   { name: 'submit request', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { code: 'pasted-code' } },
   { name: 'submission', schema: harnessLogin.HarnessLoginSubmissionSchema, value: accepted },
+  { name: 'renewal status', schema: harnessLogin.FleetRenewalStatusSchema, value: 'renewed' },
+  {
+    name: 'renewal request',
+    schema: harnessLogin.FleetRenewalRequestSchema,
+    value: { accountId: ACCOUNT_ID, operatorPassword: 'the operator password' },
+  },
+  { name: 'renewal', schema: harnessLogin.FleetRenewalSchema, value: renewal },
 ];
 
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
@@ -312,6 +328,58 @@ describe('harness-login schemas', () => {
     for (const status of statuses) {
       should(harnessLogin.FleetLoginAccountOutcomeSchema.parse({ accountId: ACCOUNT_ID, status }).status).equal(status);
     }
+  });
+
+  it('should keep every renewal outcome distinguishable, because four of them mean nothing was fired', () => {
+    // `not-expired`, `not-renewable`, `not-required` and `indeterminate` are four different reasons for
+    // having done nothing, and they send a reader four different places: wait, sign in, look at the
+    // configuration, and fix an unreadable home. Collapsing them is how a report implies a fleet renewed
+    // itself when part of it was never looked at.
+    const statuses = [
+      'renewed',
+      'not-expired',
+      'not-renewable',
+      'not-required',
+      'indeterminate',
+      'unavailable',
+      'failed',
+    ] as const;
+
+    for (const status of statuses) {
+      should(harnessLogin.FleetRenewalSchema.parse({ identity: 'claude:kirin', status, ran: false }).status).equal(
+        status,
+      );
+    }
+  });
+
+  it('should let a renewal refuse before it chose a home, and carry no field a token could occupy', () => {
+    // An identity that authenticates with a key has no home to name. Inventing one would point a reader
+    // at an account this renewal never looked at.
+    const refused = harnessLogin.FleetRenewalSchema.parse({
+      identity: 'claude:api',
+      status: 'not-required',
+      reason: 'this account authenticates with a key, so it has no provider token to renew',
+      ran: false,
+    });
+
+    should(refused).not.have.property('accountId');
+    assertRejects([
+      rejects('a renewed credential', harnessLogin.FleetRenewalSchema, {
+        identity: 'claude:kirin',
+        status: 'renewed',
+        ran: true,
+        accessToken: 'sk-live',
+      }),
+      rejects('a home to fire at', harnessLogin.FleetRenewalRequestSchema, {
+        accountId: ACCOUNT_ID,
+        home: '/fleet/homes/claude-kirin',
+      }),
+      rejects('a status the domain cannot produce', harnessLogin.FleetRenewalSchema, {
+        identity: 'claude:kirin',
+        status: 'logged-in',
+        ran: true,
+      }),
+    ]);
   });
 
   it('should keep the four submission outcomes apart, including unconfirmed', () => {

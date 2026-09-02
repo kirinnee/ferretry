@@ -46,6 +46,7 @@ import { fsyncTaskDirectory } from '../../../../src/adapters/session/lifecycle/f
 import { fsyncReservedDirectory } from '../../../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import {
   type AccountLaunchEnvironment,
+  type AccountLaunchRenewal,
   createSessionPaths,
   createSessionRecord,
   defaultSessionLifecycleSettings,
@@ -1251,5 +1252,80 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     const launch = port.calls.filter(call => call[0] === 'new-session')[0];
     should(launch).containDeep(['-e', 'FY_SESSION_ID=plain-session']);
     should(launch?.filter(word => word === '-e')).have.length(1);
+  });
+});
+
+/**
+ * The launch path and the account's chance to renew before the pane runs it.
+ *
+ * ATTENDED RENEWAL'S SECOND DOOR: a person started this session, which is the only condition under
+ * which this product rotates a credential. What the launcher owes the port is narrow and both halves
+ * matter — the renewal must happen BEFORE the pane, and it must never be able to stop the pane.
+ */
+describe('TmuxSessionLifecycleLauncher and a credential that can renew itself', () => {
+  const renewing = (port: TmuxCommandPort, accountRenewal: AccountLaunchRenewal) => {
+    const controller = new TmuxController(port);
+    return new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      accountRenewal,
+    );
+  };
+
+  it('should give the account its turn before the pane exists, not after', async () => {
+    // Ordering is the feature. A renewal that ran after the launch would be racing the harness this
+    // launch just started, which is the one thing the whole attended rule exists to avoid.
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const order: string[] = [];
+    const observed: TmuxCommandPort = {
+      execute: async arguments_ => {
+        if (arguments_[0] === 'new-session') order.push('launch');
+        return await port.execute(arguments_);
+      },
+    };
+    const subject = renewing(observed, {
+      beforeLaunch: async wrapper => {
+        order.push(`renew ${wrapper}`);
+      },
+    });
+
+    // Act
+    await subject.launch(record('renewed-session'));
+
+    // Assert
+    should(order).deepEqual([`renew ${AGENT}`, 'launch']);
+  });
+
+  it('should start the session anyway when the renewal takes its time and answers nothing', async () => {
+    // The port answers nothing a launch could branch on, and this pins that there is no branch: a
+    // renewal that could not happen is not a reason not to start a session.
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const subject = renewing(port, { beforeLaunch: async () => await Promise.resolve() });
+
+    // Act
+    await subject.launch(record('undecided-session'));
+
+    // Assert
+    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
+  });
+
+  it('should launch exactly as it always did when no renewal is wired at all', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+
+    // Act
+    await subject.launch(record('unrenewed-session'));
+
+    // Assert
+    should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
   });
 });

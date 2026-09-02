@@ -123,10 +123,52 @@ class RecordingRefreshPort implements FleetTokenRefreshPort {
   }
 }
 
-/** A port that fails the way a broken spawn does: by throwing. */
+/**
+ * A port that fails the way a broken spawn does: by throwing.
+ *
+ * It counts anyway. Two failures carry the same sentence, so a test that a failed renewal did not
+ * leave its identity permanently joined cannot be written against the RESULT — both callers would
+ * hold that identical failure either way. The count is the only thing that distinguishes them.
+ */
 class ThrowingRefreshPort implements FleetTokenRefreshPort {
+  attempts = 0;
+
   refresh(): Promise<FleetTokenRefreshAttempt> {
+    this.attempts += 1;
     return Promise.reject(new Error('spawn claude ENOENT'));
+  }
+}
+
+/**
+ * A port that stays inside the refresh until it is told to leave.
+ *
+ * A real renewal spawns a child and waits on it, so the interesting window — two callers both past
+ * their own credential read, neither finished — only exists while something is in flight. Holding the
+ * port open is how a test occupies it deterministically, with no timer and no sleep.
+ */
+class BlockingRefreshPort implements FleetTokenRefreshPort {
+  readonly targets: FleetTokenRefreshTarget[] = [];
+  #entered: (() => void) | undefined;
+  readonly entered = new Promise<void>(resolve => {
+    this.#entered = resolve;
+  });
+  #release: (() => void) | undefined;
+  readonly #gate = new Promise<void>(resolve => {
+    this.#release = resolve;
+  });
+
+  constructor(private readonly store?: ScriptedCredentialStore) {}
+
+  release(): void {
+    this.#release?.();
+  }
+
+  async refresh(target: FleetTokenRefreshTarget): Promise<FleetTokenRefreshAttempt> {
+    this.targets.push(target);
+    this.#entered?.();
+    await this.#gate;
+    this.store?.nextPass();
+    return { outcome: 'ran' };
   }
 }
 
@@ -375,5 +417,85 @@ describe('FleetTokenRefreshService', () => {
     // sentence this produced is free of the material the store was holding all along.
     should(Object.keys(port.targets[0] ?? {}).sort()).deepEqual(['accountId', 'home', 'kind']);
     should(JSON.stringify({ actual, targets: port.targets })).not.containEql(store.material);
+  });
+
+  it('should fire once for two callers racing one identity, and answer both from that one renewal', async () => {
+    // Arrange — the window the fresh read cannot close: both callers read `refreshable` before either
+    // spawned. A rotating refresh token is spent by whoever uses it first, so a second spawn would fire
+    // at a home whose token the first already consumed and report a working identity as broken.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: REFRESHABLE }, { [ID_ONE]: VALID }]);
+    const port = new BlockingRefreshPort(store);
+    const service = build(store, port);
+
+    // Act — the second caller arrives while the first is inside the port.
+    const first = service.renew(identity(), [status(REFRESHABLE)]);
+    await port.entered;
+    const second = service.renew(identity(), [status(REFRESHABLE)]);
+    port.release();
+    const [one, two] = await Promise.all([first, second]);
+
+    // Assert — one spawn, and both callers hold the same answer. `ran` is true for the joiner too:
+    // its survey is stale either way, which is the only thing `ran` exists to say.
+    should(port.targets).have.length(1);
+    should(one).match({ status: 'renewed', ran: true });
+    should(two).deepEqual(one);
+  });
+
+  it('should not join two different identities, because they do not share a credential', async () => {
+    // Arrange — the dedupe is keyed on the identity, not on the service. Two provider accounts renewing
+    // at once is the ordinary case for a fleet, and serialising them would make a fleet renewal take as
+    // long as the sum of its harness spawns for no safety at all.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: REFRESHABLE, [ID_TWO]: REFRESHABLE },
+      { [ID_ONE]: VALID, [ID_TWO]: VALID },
+    ]);
+    const port = new BlockingRefreshPort(store);
+    const service = build(store, port);
+    const other = identity({ key: 'claude:jazelle', identity: 'jazelle', members: [member({ accountId: ID_TWO })] });
+
+    // Act
+    const first = service.renew(identity(), [status(REFRESHABLE)]);
+    await port.entered;
+    const second = service.renew(other, [status(REFRESHABLE, { accountId: ID_TWO })]);
+    port.release();
+    await Promise.all([first, second]);
+
+    // Assert — two spawns, one per identity.
+    should(port.targets.map(target => target.accountId)).deepEqual([ID_ONE, ID_TWO]);
+  });
+
+  it('should release the identity when its renewal settles, so a later caller renews rather than joining', async () => {
+    // Arrange — a stale entry would be worse than no dedupe at all: every later renewal of that
+    // identity would resolve instantly with an old verdict and never fire.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: REFRESHABLE }, { [ID_ONE]: VALID }]);
+    const port = new RecordingRefreshPort({ outcome: 'ran' }, store);
+    const service = build(store, port);
+
+    // Act — sequential, so the first is fully settled before the second is asked for.
+    const first = await service.renew(identity(), [status(REFRESHABLE)]);
+    const second = await service.renew(identity(), [status(REFRESHABLE)]);
+
+    // Assert — the second was decided on its own terms: the credential is valid now, so the plan
+    // refused it. That refusal is only reachable if the first call's entry is gone.
+    should(first).match({ status: 'renewed' });
+    should(second).match({ status: 'not-expired', ran: false });
+  });
+
+  it('should release the identity even when its renewal failed, so a failure is not a permanent join', async () => {
+    // Arrange — `finally`, not `then`. An entry left behind by a failed renewal would answer every
+    // later caller with that same failure, for the lifetime of the process.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: REFRESHABLE }]);
+    const port = new ThrowingRefreshPort();
+    const service = build(store, port);
+
+    // Act
+    const first = await service.renew(identity(), [status(REFRESHABLE)]);
+    const second = await service.renew(identity(), [status(REFRESHABLE)]);
+
+    // Assert — the COUNT is the assertion. Both results carry the same sentence whether the second
+    // call fired or merely inherited the first one's answer, so only the port can tell them apart.
+    should(port.attempts).equal(2);
+    should(first).match({ status: 'failed', reason: 'spawn claude ENOENT' });
+    should(second).match({ status: 'failed', reason: 'spawn claude ENOENT' });
   });
 });

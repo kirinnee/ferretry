@@ -9,6 +9,8 @@ import {
   readDaemonUsageFeed,
   readFleetLoginReadiness,
   readHarnessLoginFlow,
+  renewFleetCredential,
+  FLEET_RENEW_PATH,
   startHarnessLogin,
   submitHarnessLoginCode,
   USAGE_FEED_PATH,
@@ -23,6 +25,15 @@ interface Call {
 
 /** An unlock token that satisfies the shared grammar, so a fixture cannot be laxer than the daemon. */
 const TOKEN = `fy_unlock_${'A'.repeat(22)}`;
+
+/** What a renewal answers with. `ran` is not a success, which is why the assertions read `status`. */
+const RENEWAL = {
+  identity: 'claude:studio',
+  status: 'renewed',
+  accountId: CLAUDE_ACCOUNT_ID,
+  reason: 'the harness renewed it, and no browser was opened',
+  ran: true,
+} as const;
 
 const clientFor = (answer: unknown): { client: FleetClient; calls: Call[] } => {
   const calls: Call[] = [];
@@ -79,6 +90,7 @@ describe('the harness login wire client', () => {
       [flow, async client => await readHarnessLoginFlow(client, flow.flowId, TOKEN)],
       [flow, async client => await cancelHarnessLogin(client, flow.flowId, TOKEN)],
       [{ outcome: 'accepted', flow }, async client => await submitHarnessLoginCode(client, flow.flowId, 'x', TOKEN)],
+      [RENEWAL, async client => await renewFleetCredential(client, { accountId: CLAUDE_ACCOUNT_ID }, TOKEN)],
     ];
     for (const [answer, call] of cases) {
       const { client, calls } = clientFor(answer);
@@ -86,6 +98,46 @@ describe('the harness login wire client', () => {
       const headers = (calls[0]?.init?.headers ?? {}) as Record<string, string>;
       expect(headers[OPERATOR_UNLOCK_HEADER]).toBe(TOKEN);
     }
+  });
+
+  it('renews on its OWN path with POST, naming an account and nothing else', async () => {
+    // NOT under `/v1/fleet/login/`: every path there is a flow id, so a literal segment beside them
+    // would be dialled as the id of a flow that does not exist.
+    const { client, calls } = clientFor(RENEWAL);
+
+    const outcome = await renewFleetCredential(client, { accountId: CLAUDE_ACCOUNT_ID });
+
+    expect(calls[0]?.path).toBe(FLEET_RENEW_PATH);
+    expect(calls[0]?.path).not.toContain(FLEET_LOGIN_PATH);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(bodyOf(calls[0]?.init)).toEqual({ accountId: CLAUDE_ACCOUNT_ID });
+    expect(outcome.status).toBe('renewed');
+  });
+
+  it('sends a renewal’s operator password in the BODY, never in the path', async () => {
+    const { client, calls } = clientFor(RENEWAL);
+
+    await renewFleetCredential(client, { accountId: CLAUDE_ACCOUNT_ID, operatorPassword: 'the password' });
+
+    expect(bodyOf(calls[0]?.init).operatorPassword).toBe('the password');
+    expect(calls[0]?.path).not.toContain('the password');
+  });
+
+  it('parses a renewal that refused rather than throwing on one', async () => {
+    // EVERY ENDING IS A VALUE. A renewal that correctly declined to spend a rotating refresh token is
+    // a `200` with a reason, and a client that treated it as an error would show a failure for exactly
+    // the case the host's gate exists to produce.
+    const { client } = clientFor({
+      identity: 'claude:studio',
+      status: 'not-expired',
+      reason: 'a home in this identity already holds a valid access token',
+      ran: false,
+    });
+
+    const outcome = await renewFleetCredential(client, { accountId: CLAUDE_ACCOUNT_ID });
+
+    expect(outcome).toMatchObject({ status: 'not-expired', ran: false });
+    expect(outcome).not.toHaveProperty('accountId');
   });
 
   it('sends no unlock header at all when there is no unlock to send', async () => {

@@ -5586,6 +5586,7 @@ function Shell() {
               addAccountHref="/d/harness/settings#daemons"
               onReRead={() => {}}
               onStart={() => {}}
+              onRenew={() => {}}
               onSubmitCode={() => {}}
               onCancel={() => {}}
             />

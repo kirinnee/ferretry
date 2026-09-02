@@ -50,6 +50,7 @@ import {
   readDaemonUsageFeed,
   readFleetLoginReadiness,
   readHarnessLoginFlow,
+  renewFleetCredential,
   startHarnessLogin,
   submitHarnessLoginCode,
   usageByWrapper,
@@ -112,6 +113,9 @@ export function AccountsPage({
   const [busy, setBusy] = useState(false);
   const [held, setHeld] = useState<HeldUnlock | null>(null);
   const [pending, setPending] = useState<AccountRowView | null>(null);
+  /** The row a renewal is waiting on a password for. Separate from `pending`, because the dialog says
+   *  which act the password is being spent on and the two acts are not interchangeable. */
+  const [pendingRenewal, setPendingRenewal] = useState<AccountRowView | null>(null);
   const [unlockFailure, setUnlockFailure] = useState<OperatorUnlockFailure | null>(null);
   const [healthStatus, setHealthStatus] = useState<AccountPickerLoadStatus>('idle');
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -165,6 +169,7 @@ export function AccountsPage({
     setFlows({});
     setHeld(null);
     setHealthStatus('idle');
+    setPendingRenewal(null);
     void createClient(connection).then(
       async bound => {
         if (!live) return;
@@ -300,6 +305,79 @@ export function AccountsPage({
     [unlock],
   );
 
+  /**
+   * Ask one account's credential to renew itself.
+   *
+   * IT SPENDS THE SAME PASSWORD THE SAME WAY, through the same two uses `run` describes: this rewrites
+   * a credential in a home on that machine, so a governed caller owes the same confirmation. What it
+   * does NOT do is open a browser, publish a URL or start a flow — so nothing here touches `flows`,
+   * and there is nothing to poll.
+   *
+   * IT RE-READS AFTERWARDS, ALWAYS, including when the renewal refused. The row's credential sentence
+   * and its own offer are both derived from a reading this call may have moved in either direction —
+   * a rotation the provider refuses leaves the home with NOTHING — so leaving the old roster on screen
+   * would show a renewable account that is now signed out.
+   */
+  const renew = useCallback(
+    async (row: AccountRowView, password: string | undefined): Promise<void> => {
+      const bound = clientRef.current;
+      if (bound === null) return;
+      setBusy(true);
+      setRefusal(null);
+      setUnlockFailure(null);
+      let token = usableUnlock(held, connection.daemonId, now());
+      let minting = authority.kind === 'locked' && token === undefined && password !== undefined;
+      try {
+        if (minting) {
+          const minted = await unlockGrants(bound, String(password));
+          setHeld({ daemonId: connection.daemonId, token: minted.token, expiresAtMs: Date.parse(minted.expiresAt) });
+          token = minted.token;
+          minting = false;
+        }
+        const outcome = await renewFleetCredential(
+          bound,
+          {
+            accountId: row.accountId,
+            ...(password === undefined || !fleetApplyNeedsPassword(authority) ? {} : { operatorPassword: password }),
+          },
+          token,
+        );
+        setPendingRenewal(null);
+        // Re-read FIRST and say why SECOND, in that order. `load` clears the refusal on a good read —
+        // correctly, since it is the roster's own error slot — so a sentence set before it would be
+        // wiped by the very read that is supposed to accompany it.
+        await load(bound, token);
+        // EVERY ENDING IS A VALUE, so a refusal arrives as a `200` with a reason rather than as a throw.
+        // A renewal that correctly declined to spend a rotating refresh token is not an error, and the
+        // host's own sentence is the one worth showing — it names which of the four nothings happened.
+        if (outcome.status !== 'renewed' && outcome.reason !== undefined) setRefusal(outcome.reason);
+      } catch (error) {
+        const refused = fleetRefusal(error);
+        if (password !== undefined && (minting || refused.code === 'fleet_login_unauthorized')) {
+          setUnlockFailure(operatorUnlockFailure(error));
+        } else {
+          setRefusal(refused.detail);
+          setPendingRenewal(null);
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [authority, connection.daemonId, held, load, now],
+  );
+
+  const beginRenewal = useCallback(
+    (row: AccountRowView): void => {
+      if (fleetApplyNeedsPassword(authority) && usableUnlock(held, connection.daemonId, now()) === undefined) {
+        setPendingRenewal(row);
+        setUnlockFailure(null);
+        return;
+      }
+      void renew(row, undefined);
+    },
+    [authority, connection.daemonId, held, now, renew],
+  );
+
   const reRead = useCallback((): void => {
     const bound = clientRef.current;
     if (bound === null) return;
@@ -352,6 +430,7 @@ export function AccountsPage({
         {...(onNavigate === undefined ? {} : { onNavigate })}
         onReRead={reRead}
         onStart={begin}
+        onRenew={beginRenewal}
         onSubmitCode={submit}
         onCancel={cancel}
       />
@@ -371,6 +450,30 @@ export function AccountsPage({
         }}
         onClose={() => {
           setPending(null);
+          setUnlockFailure(null);
+        }}
+      />
+      {/* Its OWN prompt, saying what a renewal is rather than borrowing the sign-in's sentence. The two
+          acts spend the same password against the same budget and mean different things to a person:
+          one re-points every agent on this account at whichever provider account they approve, and the
+          other rotates the credential already there. Somebody deciding whether to type a password is
+          entitled to be told which. */}
+      <OperatorUnlockDialog
+        open={pendingRenewal !== null}
+        holding={authority.kind === 'locked'}
+        busy={busy}
+        failure={unlockFailure}
+        submitLabel="Renew now"
+        purpose={
+          pendingRenewal === null
+            ? ''
+            : `Renewing “${pendingRenewal.label}” rewrites this account’s credential on that machine — no browser, and nobody is signed in as anybody else — so it asks for the operator password once, against this one renewal.`
+        }
+        onSubmit={password => {
+          if (pendingRenewal !== null) void renew(pendingRenewal, password);
+        }}
+        onClose={() => {
+          setPendingRenewal(null);
           setUnlockFailure(null);
         }}
       />

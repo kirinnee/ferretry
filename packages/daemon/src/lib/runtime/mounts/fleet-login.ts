@@ -1,5 +1,18 @@
 /**
- * The routes a browser drives a harness login through.
+ * The routes a browser drives a harness login — and a credential renewal — through.
+ *
+ * ## Why a renewal is here, and why it is ONE route rather than five
+ *
+ * A renewal is the sibling of a sign-in and never a sign-in. It asks the harness to rotate a credential
+ * it can already rotate: nobody is sent anywhere, no browser opens, no code comes back, and there is no
+ * window to expire. So it needs no flow id, no status poll, no submit and no cancel — one request, one
+ * answer. Modelling it as a flow would have added four routes that could only ever say "finished".
+ *
+ * It sits under the same `fleet`/`configure` and the same per-change confirmation as a start, and that
+ * is not caution: a rotation the provider REFUSES makes the harness clear its own tokens, so a caller
+ * who can drive this from off the machine can leave an identity needing a person. The authorization is
+ * literally the same code path — see `#authorize` — so the two cannot drift apart on the ORDER of the
+ * checks, which is where a refusal that should have cost nothing starts costing a password attempt.
  *
  * ## `fleet.configure`, and NOT a second gate
  *
@@ -42,6 +55,8 @@
  */
 import {
   FleetLoginReadinessSchema,
+  FleetRenewalRequestSchema,
+  FleetRenewalSchema,
   HarnessLoginFlowSchema,
   HarnessLoginStartRequestSchema,
   HarnessLoginSubmissionSchema,
@@ -55,8 +70,11 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { HarnessLoginRefusal, type HarnessLoginService } from '../../fleet-login/service.ts';
 
-/** The subsystem these routes serve. Narrowed to the four calls plus the read. */
-export type HarnessLoginSubsystem = Pick<HarnessLoginService, 'readiness' | 'start' | 'status' | 'submit' | 'cancel'>;
+/** The subsystem these routes serve. Narrowed to the five calls plus the read. */
+export type HarnessLoginSubsystem = Pick<
+  HarnessLoginService,
+  'readiness' | 'start' | 'status' | 'submit' | 'cancel' | 'renew'
+>;
 
 /**
  * Every login refusal, in the transport's own taxonomy.
@@ -156,6 +174,33 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await respondWith(HarnessLoginFlowSchema, () => subsystem.cancel(flowId(context))),
+    },
+    {
+      /**
+       * Renew one account's credential, with no browser and nobody sent anywhere.
+       *
+       * NOT UNDER `/v1/fleet/login/`, and that is the router's arithmetic rather than taste: every path
+       * there is `:flowId`, so a literal segment beside it would be read as the id of a flow that does
+       * not exist. It is its own address for its own act.
+       *
+       * The body names an ACCOUNT and, when this caller owes one, the operator password. Same shape and
+       * same gate as a start, because from the host's point of view it is the same act: somebody off
+       * this machine causing a credential to be rewritten in a home on it.
+       *
+       * Every ending is a value. `not-expired`, `not-renewable`, `not-required` and `indeterminate` are
+       * `200`s that say nothing was fired and why — a renewal that correctly refused to spend a rotating
+       * refresh token is not an error, and answering `409` for it would teach a surface to show a
+       * failure for the case the whole gate exists to produce.
+       */
+      method: 'POST',
+      path: '/v1/fleet/renew',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'configure' },
+      noStore: true,
+      handle: async context =>
+        await respondWith(FleetRenewalSchema, async () =>
+          subsystem.renew(await parseBody(context.request, FleetRenewalRequestSchema), context.governance),
+        ),
     },
   ];
 }

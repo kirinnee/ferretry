@@ -48,6 +48,7 @@ import {
   codexIdentity,
   healthRow,
   keyedAccount,
+  loginAccount,
   NOW,
   readiness,
   usageRow,
@@ -93,6 +94,8 @@ interface Answers {
   readonly flow?: unknown;
   readonly submit?: unknown;
   readonly cancel?: unknown;
+  /** What `POST /v1/fleet/renew` answers. Keyed by PATH, because a renewal is not a flow's submit. */
+  readonly renew?: unknown;
   readonly unlock?: unknown;
   /** `"<VERB> <path>"` → the value to throw, so a refusal path can be driven exactly. */
   readonly reject?: ReadonlyMap<string, unknown>;
@@ -125,13 +128,15 @@ const clientFor = (answers: Answers): { client: FleetClient; calls: Recorded[] }
                   ? (answers.check ?? snapshot())
                   : path === '/v1/usage'
                     ? (answers.usage ?? { stale: false, accounts: [] })
-                    : path === '/v1/grants/unlock'
-                      ? answers.unlock
-                      : method === 'POST'
-                        ? answers.submit
-                        : method === 'DELETE'
-                          ? answers.cancel
-                          : answers.flow;
+                    : path === '/v1/fleet/renew'
+                      ? answers.renew
+                      : path === '/v1/grants/unlock'
+                        ? answers.unlock
+                        : method === 'POST'
+                          ? answers.submit
+                          : method === 'DELETE'
+                            ? answers.cancel
+                            : answers.flow;
       return schema.parse(answer);
     },
   };
@@ -175,6 +180,15 @@ const signIn = async (container: HTMLElement, accountId: string): Promise<void> 
     must(
       rowFor(container, accountId).querySelector<HTMLButtonElement>('[data-account-sign-in]'),
       `the control on ${accountId}`,
+    ).click(),
+  );
+};
+
+const renewNow = async (container: HTMLElement, accountId: string): Promise<void> => {
+  await interact(() =>
+    must(
+      rowFor(container, accountId).querySelector<HTMLButtonElement>('[data-account-renew]'),
+      `the renew control on ${accountId}`,
     ).click(),
   );
 };
@@ -771,5 +785,218 @@ describe('AccountsPage', () => {
     await interact(() => link.click());
 
     expect(navigated).toEqual(['/d/accounts-daemon/settings#daemons']);
+  });
+});
+
+/**
+ * THE CHEAP HALF OF THIS SURFACE, wired.
+ *
+ * A renewal is not a small sign-in. It opens no browser, publishes no URL, mints no flow and has
+ * nothing to poll, so every property below is about the two things that ARE shared — the password and
+ * the roster — and about the one thing that is not: a refusal here arrives as a `200` with a reason,
+ * because a renewal that correctly declined to spend a rotating refresh token is the outcome the
+ * host's gate exists to produce rather than a failure.
+ *
+ * `refreshable` on the row is not decoration: `accountRenewOffer` puts the control on that state and
+ * no other, so a fixture in any other state would test that the button is absent.
+ */
+describe('AccountsPage — renewing a credential', () => {
+  const REFRESHABLE = readiness([claudeIdentity([loginAccount({ credential: { state: 'refreshable' } })])]);
+
+  const RENEWED = {
+    identity: 'claude:studio',
+    status: 'renewed',
+    accountId: CLAUDE_ACCOUNT_ID,
+    reason: 'the harness renewed it, and no browser was opened',
+    ran: true,
+  } as const;
+
+  const confirming = permissions({ confirmation: 'operator-password' });
+  const lockedAndConfirming = permissions({
+    mayApply: false,
+    applyRefusal: 'locked',
+    confirmation: 'operator-password',
+  });
+
+  it('renews the row’s own account and starts no sign-in', async () => {
+    const { container, calls } = await open({ readiness: REFRESHABLE, renew: RENEWED });
+
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    const renewal = calls.find(call => call.method === 'POST' && call.path === '/v1/fleet/renew');
+    expect(JSON.parse(String(renewal?.body))).toEqual({ accountId: CLAUDE_ACCOUNT_ID });
+    // Nothing was signed in and nobody was sent anywhere: that is the whole saving.
+    expect(calls.some(call => call.method === 'POST' && call.path === '/v1/fleet/login')).toBe(false);
+    expect(container.querySelector('[data-accounts-refusal]')).toBeNull();
+  });
+
+  it('re-reads the roster afterwards, because the reading it acted on may have moved', async () => {
+    // A rotation the provider REFUSES leaves the home with nothing, so the row's credential sentence
+    // and its own offer are both derived from a reading this call may have changed in either
+    // direction. Leaving the old roster up would show a renewable account that is now signed out.
+    const { container, calls } = await open({ readiness: REFRESHABLE, renew: RENEWED });
+
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    const renewedAt = calls.findIndex(call => call.method === 'POST' && call.path === '/v1/fleet/renew');
+    const reads = calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call }) => call.method === 'GET' && call.path === '/v1/fleet/login')
+      .map(({ index }) => index);
+    expect(renewedAt).toBeGreaterThanOrEqual(0);
+    expect(reads.some(index => index > renewedAt)).toBe(true);
+  });
+
+  it('shows the host’s own sentence when the renewal correctly fired nothing', async () => {
+    // EVERY ENDING IS A VALUE. `not-expired` is a `200`, not an error, and the sentence is the host's
+    // because only it knows which of the four nothings happened. It also pins the ORDER: the re-read
+    // clears the roster's error slot, so a sentence set before it would be wiped by the read that is
+    // supposed to accompany it.
+    const { container } = await open({
+      readiness: REFRESHABLE,
+      renew: {
+        identity: 'claude:studio',
+        status: 'not-expired',
+        accountId: CLAUDE_ACCOUNT_ID,
+        reason: 'a home in this identity already holds a valid access token',
+        ran: false,
+      },
+    });
+
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    expect(must(container.querySelector('[data-accounts-refusal]'), 'the refusal').textContent).toContain(
+      'already holds a valid access token',
+    );
+  });
+
+  it('says nothing extra when a refusal arrived with no reason to show', async () => {
+    const { container } = await open({
+      readiness: REFRESHABLE,
+      renew: { identity: 'claude:studio', status: 'not-renewable', ran: false },
+    });
+
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    expect(container.querySelector('[data-accounts-refusal]')).toBeNull();
+  });
+
+  it('asks for the operator password in the RENEWAL’s own words, and renews nothing until it is answered', async () => {
+    // The two acts spend the same password against the same budget and mean different things: one
+    // re-points every agent on this account at whichever provider account is approved, the other
+    // rotates the credential already there. Somebody deciding whether to type a password is entitled
+    // to be told which — so this prompt must not borrow the sign-in's sentence.
+    const { container, calls } = await open({ readiness: REFRESHABLE, permissions: confirming, renew: RENEWED });
+
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    const purpose = must(document.querySelector('[data-operator-unlock-purpose]'), 'the purpose');
+    expect(purpose.textContent).toContain('Renewing');
+    expect(purpose.textContent).toContain('Studio Claude');
+    expect(purpose.textContent).toContain('against this one renewal');
+    expect(purpose.textContent).not.toContain('sign-in');
+    expect(must(document.querySelector('[data-operator-unlock-submit]'), 'the submit').textContent).toContain(
+      'Renew now',
+    );
+    expect(calls.some(call => call.method === 'POST' && call.path === '/v1/fleet/renew')).toBe(false);
+  });
+
+  it('spends one typed password on both the mint and the renewal it was typed for', async () => {
+    const { container, calls } = await open({
+      readiness: REFRESHABLE,
+      permissions: lockedAndConfirming,
+      unlock: { token: UNLOCK, expiresAt: new Date(NOW + 300_000).toISOString(), ttlSeconds: 300 },
+      renew: RENEWED,
+    });
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    await typePassword('the password');
+
+    expect(calls.some(call => call.path === '/v1/grants/unlock')).toBe(true);
+    const renewal = calls.find(call => call.method === 'POST' && call.path === '/v1/fleet/renew');
+    expect(JSON.parse(String(renewal?.body)).operatorPassword).toBe('the password');
+    expect(renewal?.headers[OPERATOR_UNLOCK_HEADER]).toBe(UNLOCK);
+    // The prompt closes on success, and the roster is read again with the unlock it just minted.
+    expect(document.querySelector('[data-operator-unlock-dialog]')).toBeNull();
+  });
+
+  it('keeps a wrong password in the renewal dialog, where it can be retyped', async () => {
+    const refusal = Object.assign(new Error('that is not this machine’s operator password'), {
+      code: 'grant_unlock_failed',
+      attemptsRemaining: 4,
+    });
+    const { container, calls } = await open({
+      readiness: REFRESHABLE,
+      permissions: lockedAndConfirming,
+      reject: new Map([['POST /v1/grants/unlock', refusal]]),
+    });
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    await typePassword('wrong');
+
+    expect(document.querySelector('[data-operator-unlock-dialog]')).not.toBeNull();
+    expect(document.querySelector('[data-grant-unlock-failure]')).not.toBeNull();
+    // The mint failed, so nothing was ever fired at a credential.
+    expect(calls.some(call => call.method === 'POST' && call.path === '/v1/fleet/renew')).toBe(false);
+  });
+
+  it('keeps a password the DAEMON rejected in the renewal dialog too', async () => {
+    // A REAL `FyHttpError`: `fleetRefusal` carries a `code` only off one, so a hand-shaped object with
+    // a `code` property would reach the page as an ordinary error and take the OTHER branch — passing
+    // this test for the wrong reason.
+    const refusal = new FyHttpError('that password was not accepted for this renewal', 403, 'fleet_login_unauthorized');
+    const { container } = await open({
+      readiness: REFRESHABLE,
+      permissions: confirming,
+      reject: new Map([['POST /v1/fleet/renew', refusal]]),
+    });
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    await typePassword('the password');
+
+    expect(document.querySelector('[data-operator-unlock-dialog]')).not.toBeNull();
+    expect(document.querySelector('[data-grant-unlock-failure]')).not.toBeNull();
+    expect(container.querySelector('[data-accounts-refusal]')).toBeNull();
+  });
+
+  it('closes the renewal prompt over a refusal a password cannot fix, and says so on the page', async () => {
+    const { container } = await open({
+      readiness: REFRESHABLE,
+      permissions: confirming,
+      reject: new Map([['POST /v1/fleet/renew', new Error('this daemon is not configured to renew credentials')]]),
+    });
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    await typePassword('the password');
+
+    expect(document.querySelector('[data-operator-unlock-dialog]')).toBeNull();
+    expect(must(container.querySelector('[data-accounts-refusal]'), 'the refusal').textContent).toContain(
+      'not configured to renew credentials',
+    );
+  });
+
+  it('reports a renewal the daemon refused outright, with no prompt in the way', async () => {
+    const { container } = await open({
+      readiness: REFRESHABLE,
+      reject: new Map([['POST /v1/fleet/renew', new Error('a sign-in is already running for this login')]]),
+    });
+
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    expect(must(container.querySelector('[data-accounts-refusal]'), 'the refusal').textContent).toContain(
+      'already running',
+    );
+  });
+
+  it('closes the renewal prompt without renewing anything when it is dismissed', async () => {
+    const { container, calls } = await open({ readiness: REFRESHABLE, permissions: confirming, renew: RENEWED });
+    await renewNow(container, CLAUDE_ACCOUNT_ID);
+
+    await interact(() =>
+      must(document.querySelector<HTMLElement>('[aria-label="Cancel the operator password"]'), 'the scrim').click(),
+    );
+
+    expect(document.querySelector('[data-operator-unlock-dialog]')).toBeNull();
+    expect(calls.some(call => call.method === 'POST' && call.path === '/v1/fleet/renew')).toBe(false);
   });
 });
