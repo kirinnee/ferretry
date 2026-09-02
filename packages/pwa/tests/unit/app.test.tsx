@@ -1856,7 +1856,9 @@ describe('AppShell', () => {
     for (const [path, expected] of [
       ['/d/alpha/new', 'Sessions, New'],
       ['/d/alpha/settings', 'Sessions, Settings'],
-      ['/d/alpha/accounts', 'Sessions, Accounts'],
+      // No `/d/alpha/accounts` row: Accounts is Fleet's child panel inside Settings now, so it has no
+      // address and no crumb of its own. The scope comes from the path taken to it, which is the
+      // defect this replaced — the crumb it used to have named the page and never the machine.
       ['/d/alpha/warden', 'Sessions, Warden'],
       ['/d/alpha/analytics', 'Sessions, Analytics'],
       ['/d/alpha/learning', 'Sessions, Learning'],

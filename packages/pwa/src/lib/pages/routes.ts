@@ -65,19 +65,6 @@ export interface DaemonSettingsRoute {
   readonly daemonId: DaemonId;
 }
 
-/**
- * The accounts a daemon can run, as a place rather than a settings sub-tab.
- *
- * It has a pathname because an account is a first-class thing everything else references: a quota
- * readout saying "not signed in" needs somewhere to send a reader, and a tab selected by component
- * state is not somewhere. It is daemon-scoped like every other page here — accounts belong to a
- * machine, and a bare `/accounts` could only ever mean whichever daemon happened to be selected.
- */
-export interface DaemonAccountsRoute {
-  readonly kind: 'accounts';
-  readonly daemonId: DaemonId;
-}
-
 export interface DaemonWardenRoute {
   readonly kind: 'warden';
   readonly daemonId: DaemonId;
@@ -105,7 +92,6 @@ export type DaemonPageRoute =
   | DaemonProjectDetailRoute
   | DaemonSessionRoute
   | DaemonSettingsRoute
-  | DaemonAccountsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
   | DaemonLearningRoute
@@ -184,9 +170,6 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
 
-/** Builds the canonical accounts pathname for one daemon. */
-export const daemonAccountsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/accounts`;
-
 /** Builds the canonical Warden pathname for one daemon. */
 export const daemonWardenPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/warden`;
 
@@ -212,7 +195,6 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'new') return { kind: 'new-session', daemonId: id };
     if (destination === 'projects') return { kind: 'projects', daemonId: id };
     if (destination === 'settings') return { kind: 'settings', daemonId: id };
-    if (destination === 'accounts') return { kind: 'accounts', daemonId: id };
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
@@ -258,8 +240,6 @@ export const routePath = (route: Route): string => {
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'settings':
       return daemonSettingsPath(route.daemonId);
-    case 'accounts':
-      return daemonAccountsPath(route.daemonId);
     case 'warden':
       return daemonWardenPath(route.daemonId);
     case 'analytics':

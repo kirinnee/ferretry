@@ -108,7 +108,13 @@ const stepper = async (options: {
    * and the state most of these cases want, because the sign-in step is not what they are about.
    */
   readonly profiles?: FleetProfileCatalog | null;
-  readonly onNavigate?: (to: string) => void;
+  /**
+   * Mount with NO way to show the Accounts panel — the gallery's shape, outside any settings frame.
+   *
+   * Wired by default, because that is what production does: the frame answers it. This one case
+   * proves the sentence survives where the move cannot happen, with no control offering it.
+   */
+  readonly withoutAccountsPanel?: boolean;
 }) => {
   let current: FleetAccountDraft = {
     ...emptyAccountDraft('claude'),
@@ -118,6 +124,8 @@ const stepper = async (options: {
     ...options.draft,
   };
   let chosen: string | null = null;
+  /** Every request this mount made to show the Accounts panel. */
+  const accountsOpened: number[] = [];
   let accountSource: FleetPickOrAddSource = options.accountSource ?? 'existing';
   const instructions: FleetInstructionsControl = {
     choices: [{ value: 'new-blank', label: 'New — empty', detail: 'A new, empty document.' }],
@@ -149,8 +157,7 @@ const stepper = async (options: {
         accountSource = next;
         if (next === 'new') current = { ...current, name: '' };
       }}
-      accountsHref="/d/9f1c/accounts"
-      {...(options.onNavigate === undefined ? {} : { onNavigate: options.onNavigate })}
+      {...(options.withoutAccountsPanel === true ? {} : { onOpenAccounts: () => accountsOpened.push(1) })}
       variants={options.variants ?? ['default']}
       config={options.config ?? null}
       discovery={null}
@@ -168,6 +175,7 @@ const stepper = async (options: {
     latest: () => current,
     chosen: () => chosen,
     source: () => accountSource,
+    accountsOpened: () => [...accountsOpened],
   };
 };
 
@@ -712,22 +720,27 @@ describe('the credential step', () => {
   });
 
   /**
-   * WHERE THE WEB LOGIN IS, said and linked.
+   * WHERE THE WEB LOGIN IS, said and offered.
    *
    * The complaint this answers was "what happened to the web logins?" — and nothing had: the accounts
-   * page mounts both harness login panels and always did. What this step offered was a CHOICE with no
-   * destination on it, so from inside the sequence a sign-in that exists reads as one that was taken
-   * away. The link is the same one the account step already carries, to the same page, with the same
-   * warning about the draft.
+   * screen mounts both harness login panels and always did. What this step offered was a CHOICE with
+   * nowhere to go, so from inside the sequence a sign-in that exists reads as one that was taken away.
+   *
+   * IT ASSERTED AN `href` BEFORE. Accounts was a route then. It is Fleet's child panel now — the panel
+   * one level up from this sequence — and a panel has no address, so what is offered is a control the
+   * frame answers. The property is the same one it always was: this step names the screen AND gets
+   * somebody to it, rather than naming it and leaving them looking.
    */
-  it('links to the screen the harness sign-in actually happens on, and says what opening it costs', async () => {
+  it('offers the screen the harness sign-in actually happens on, and says what opening it costs', async () => {
     // Arrange — the login answer, which is the one that has a sign-in to point at.
     const screen = await stepper({ step: 'credential', profiles: profileCatalog() });
 
-    // Assert — a real destination, not a sentence naming one.
+    // Assert — a real control, not a sentence naming one.
     const link = pick(screen.container, '[data-fleet-credential-accounts-link]');
-    expect(link.getAttribute('href')).toBe('/d/9f1c/accounts');
+    expect(link.tagName).toBe('BUTTON');
     expect(link.textContent).toBe('Accounts');
+    await click(link);
+    expect(screen.accountsOpened()).toEqual([1]);
     // The draft lives in this panel, so leaving discards it. A link that did not say so would be the
     // one control on the step that loses somebody's answers without warning.
     expect(pick(screen.container, '[data-fleet-credential-accounts-link]').parentElement?.textContent).toContain(
@@ -738,9 +751,29 @@ describe('the credential step', () => {
     // Act — the profile answer, where there is no sign-in to send anybody to.
     const profiled = await onProfile();
 
-    // Assert — and no link either, rather than a dead end pointing at a page that cannot help.
+    // Assert — and nothing offering it either, rather than a dead end pointing at a screen that
+    // cannot help.
     expect(profiled.container.querySelector('[data-fleet-credential-accounts-link]')).toBeNull();
     await profiled.unmount();
+  });
+
+  /**
+   * MOUNTED WHERE THERE IS NO PANEL TO OPEN, the sentence stays and the control does not appear.
+   *
+   * The visual gallery renders this sequence from a fixture, outside any settings frame, so there is
+   * no sibling panel to show. The old shape put a `RouteLink` there anyway and it navigated nowhere —
+   * a control that does nothing, which is the exact defect this whole change is about. The words are
+   * still true and still worth reading, so they stay; only the offer goes.
+   */
+  it('keeps the sentence and offers no control where no panel can be opened', async () => {
+    const screen = await stepper({ step: 'credential', profiles: profileCatalog(), withoutAccountsPanel: true });
+
+    const mention = pick(screen.container, '[data-fleet-credential-accounts-link]');
+    expect(mention.tagName).toBe('SPAN');
+    expect(mention.textContent).toBe('Accounts');
+    expect(mention.parentElement?.textContent).toContain('is the screen it happens on');
+
+    await screen.unmount();
   });
 
   it('tells somebody what a login already uses before they change it, on either answer', async () => {

@@ -27,7 +27,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
-import { AccountsPage } from './features/fleet/accounts-page.tsx';
+import { accountsSettingsTab } from './features/fleet/accounts-page.tsx';
 import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -264,8 +264,6 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
-    case 'accounts':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Accounts' }];
     case 'warden':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Warden' }];
     case 'analytics':
@@ -978,12 +976,16 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       pricingSettingsTab(createDaemonClient),
-      // The navigator is threaded because the account step links out to the accounts page, and a
-      // `RouteLink` cancels the browser's own navigation — without it the one link on that step is a
-      // control that does nothing.
-      fleetSettingsTab(async daemon => await store.clients.client(daemon), navigate),
+      // FLEET AND ITS CHILD, in that order and adjacent, because they are the two halves of one
+      // subject: Fleet writes the wrappers, Accounts is where a login is signed in. The RELATION is
+      // declared by `accountsSettingsTab` itself (`parentId: 'fleet'`) rather than by this order, so
+      // reordering this array cannot make the rail draw a level that is not there — see
+      // `orderedDaemonPanels`. No navigator is threaded any more: the two steps that used to link out
+      // to an accounts ROUTE now ask the frame to show the sibling panel.
+      fleetSettingsTab(createDaemonClient),
+      accountsSettingsTab(createDaemonClient),
     ],
-    [createDaemonClient, navigate, store.clients],
+    [createDaemonClient, store.clients],
   );
   return (
     <SettingsPage
@@ -1166,28 +1168,6 @@ function WardenRoute({ connection }: DaemonPageProps) {
   return <WardenPage connection={connection} slots={WARDEN_SLOTS} />;
 }
 
-/**
- * The accounts of one daemon, as a destination.
- *
- * The client factory is the app's own pool, so a fleet read travels the same carrier — direct first,
- * the hosted relay as the automatic fallback — as every other daemon call on this page.
- */
-function AccountsRoute({ connection }: DaemonPageProps) {
-  const store = useAppStore();
-  const { navigate } = useRouter();
-  return (
-    <div className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-4">
-      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 py-2">
-        <AccountsPage
-          connection={connection}
-          createClient={async daemon => await store.clients.client(daemon)}
-          onNavigate={navigate}
-        />
-      </div>
-    </div>
-  );
-}
-
 function AnalyticsRoute({ connection }: DaemonPageProps) {
   return <GlobalAnalyticsPage connection={connection} />;
 }
@@ -1224,7 +1204,6 @@ const PAGE_SLOTS: PageHostSlots = {
   ProjectDetail: ProjectDetailRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
-  Accounts: AccountsRoute,
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,

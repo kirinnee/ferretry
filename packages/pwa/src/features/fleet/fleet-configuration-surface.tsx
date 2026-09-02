@@ -35,7 +35,6 @@ import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
 import { type LocalNetworkAccess, readLocalNetworkAccess } from '../../lib/local-network-access.ts';
-import { daemonAccountsPath } from '../../lib/pages/routes.ts';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import { unlockGrants } from '../settings/grants-api.ts';
 import { FleetAccountStepper } from './fleet-account-stepper.tsx';
@@ -413,14 +412,15 @@ export interface FleetConfigurationSurfaceProps {
    */
   readonly readLocalNetwork?: () => Promise<LocalNetworkAccess>;
   /**
-   * How this panel hands a route change to the router, or `undefined` when nobody wired one.
+   * Show the Accounts panel — this panel's own child in the daemon settings frame.
    *
-   * The account step links out to the accounts page, and `RouteLink` cancels the browser's own
-   * navigation — so without this the link would be inert. Optional rather than required because this
-   * surface is mounted from a settings-tab seam that carries only a connection: a caller that supplies
-   * no navigator gets a link that goes nowhere rather than a panel that will not compile.
+   * The account and credential steps of the new-account sequence both offer it. It used to be a route
+   * and a threaded navigator; it is a sibling surface in the same frame now, so the frame answers this
+   * directly. Optional because this surface is also mounted outside that frame — the visual gallery
+   * mounts it from a fixture — and a caller with no sibling panel to show gets a control that says so
+   * by not being offered rather than one that silently does nothing.
    */
-  readonly onNavigate?: (to: string) => void;
+  readonly onOpenAccounts?: () => void;
 }
 
 export function FleetConfigurationSurface({
@@ -429,7 +429,7 @@ export function FleetConfigurationSurface({
   now = Date.now,
   pageScheme = window.location.protocol,
   readLocalNetwork = readLocalNetworkAccess,
-  onNavigate,
+  onOpenAccounts,
 }: FleetConfigurationSurfaceProps) {
   // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
   // four. Module-global ids there left three sections labelled by another daemon's heading and put four
@@ -1183,8 +1183,7 @@ export function FleetConfigurationSurface({
                   },
                 })
               }
-              accountsHref={daemonAccountsPath(connection.daemonId)}
-              {...(onNavigate === undefined ? {} : { onNavigate })}
+              {...(onOpenAccounts === undefined ? {} : { onOpenAccounts })}
               // Every edit goes through ONE reconciliation: the field they touched stops claiming to be
               // detected, a harness change refills what the old harness was speaking for, and the
               // derived document name keeps up with the account until they name their own.
@@ -1306,16 +1305,22 @@ export function FleetConfigurationSurface({
  * Exported as a definition rather than mounted here, because the tab list lives in `App.tsx` and this
  * unit does not own that file. One line there mounts exactly this.
  */
-export const fleetSettingsTab = (createClient: FleetClientFactory, navigate?: (to: string) => void) =>
+export const fleetSettingsTab = (createClient: FleetClientFactory) =>
   ({
     id: 'fleet',
     label: 'Fleet',
-    description: 'Accounts on this daemon host, and the exact change any edit would make.',
-    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+    description: 'The accounts this daemon host runs, and the exact change any edit would make.',
+    Surface: ({
+      connection,
+      openPanel,
+    }: {
+      readonly connection: DaemonConnection;
+      readonly openPanel: (id: string) => void;
+    }) => (
       <FleetConfigurationSurface
         connection={connection}
         createClient={createClient}
-        {...(navigate === undefined ? {} : { onNavigate: navigate })}
+        onOpenAccounts={() => openPanel('accounts')}
       />
     ),
   }) as const;

@@ -11,6 +11,19 @@ const items: readonly ChoiceRailItem<PanelId>[] = [
   { id: 'doctor', label: 'Doctor', detail: 'Dependency and environment checks.' },
 ];
 
+/**
+ * The same three rows with `secrets` declared a level under `warden`, plus a row naming a parent that
+ * is not on this rail.
+ *
+ * `doctor` is the fail-closed case and it matters: a rail may be given a subset, and an indent under a
+ * row the reader cannot see is a claim about a relation that is not on screen.
+ */
+const nested: readonly ChoiceRailItem<PanelId>[] = [
+  { id: 'warden', label: 'Warden', detail: 'Supervision and policy for this daemon.' },
+  { id: 'secrets', label: 'Secrets', parentId: 'warden' },
+  { id: 'doctor', label: 'Doctor', detail: 'Dependency and environment checks.', parentId: 'absent' as PanelId },
+];
+
 interface Calls {
   readonly selected: PanelId[];
 }
@@ -85,6 +98,33 @@ describe('ChoiceRail navigation presentation', () => {
     expect(secrets.querySelector('[data-row-icon="secrets"]')).not.toBeNull();
     expect(secrets.textContent).toBe('Secrets');
     expect(secrets.querySelectorAll('span span')).toHaveLength(1);
+
+    await view.unmount();
+  });
+
+  /**
+   * A LEVEL EXISTS AT BOTH WIDTHS OR IT DOES NOT EXIST.
+   *
+   * The desktop rail and the phone sheet are this one component, so a child indented in one and flush
+   * in the other would be a hierarchy that depends on how wide the reader's screen is. Asserted on the
+   * NAVIGATION presentation — the sheet — because that is the half a rail-shaped fix would forget.
+   */
+  it('indents a row under the parent it names, and only when that parent is on the rail', async () => {
+    const view = await mount(
+      <ChoiceRail items={nested} activeId="warden" marker="data-panel" onSelect={() => undefined} />,
+    );
+
+    const child = row(view.container, 'secrets');
+    const orphan = row(view.container, 'doctor');
+    const parent = row(view.container, 'warden');
+
+    expect(child.className).toContain('ml-md');
+    // The corner rule, so the indent reads as "hangs off the row above" rather than as a stray margin.
+    expect(child.querySelector('[class*="border-l"]')).not.toBeNull();
+    // A parent that is not on this rail draws nothing at all.
+    expect(orphan.className).not.toContain('ml-md');
+    expect(orphan.querySelector('[class*="border-l"]')).toBeNull();
+    expect(parent.className).not.toContain('ml-md');
 
     await view.unmount();
   });
@@ -202,6 +242,21 @@ describe('ChoiceRail tabs presentation', () => {
     await view.render(tabs({ selected: [] }, 'doctor'));
     expect(document.activeElement).toBe(row(view.container, 'doctor'));
 
+    await view.unmount();
+  });
+
+  it('keeps a child in the keyboard order it is drawn in, as an ordinary tab', async () => {
+    // A nested row is a LEVEL on screen and nothing else: same role, same walk, same selection. A
+    // child that arrow keys skipped, or that claimed a different role, would be a second navigation
+    // pattern hiding inside the one rail.
+    const calls: Calls = { selected: [] };
+    const view = await mount(tabs(calls, 'warden', nested));
+
+    expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(3);
+    await interact(() => pressKey(row(view.container, 'warden'), 'ArrowDown'));
+    await interact(() => pressKey(row(view.container, 'secrets'), 'ArrowDown'));
+
+    expect(calls.selected).toEqual(['secrets', 'doctor']);
     await view.unmount();
   });
 

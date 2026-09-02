@@ -1,5 +1,5 @@
 /**
- * The Accounts page's projection, and the sentences it owns.
+ * The Accounts panel's projection, and the sentences it owns.
  *
  * Pure, so every sentence a person reads is pinned here rather than asserted through a rendered tree.
  * Three things this suite exists to stop:

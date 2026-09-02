@@ -33,7 +33,7 @@ import { OPERATOR_UNLOCK_HEADER, type UsageAccountView } from '@ferretry/protoco
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 
-import { AccountsPage } from '../../../../src/features/fleet/accounts-page.tsx';
+import { AccountsPage, accountsSettingsTab } from '../../../../src/features/fleet/accounts-page.tsx';
 import type { FleetClient, FleetPermissions } from '../../../../src/features/fleet/fleet-api.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -165,6 +165,7 @@ const open = async (
       // Long, because the poll is driven explicitly where it is the subject; a short one would have
       // the fake answering in the background of every unrelated assertion.
       pollMs={100_000}
+      onAddAccount={() => undefined}
       {...overrides}
     />,
   );
@@ -571,6 +572,7 @@ describe('AccountsPage', () => {
           throw new Error('this daemon is not paired');
         }}
         now={() => NOW}
+        onAddAccount={() => undefined}
       />,
     );
     cleanup = mounted.unmount;
@@ -765,26 +767,37 @@ describe('AccountsPage', () => {
     expect(calls.some(call => call.method === 'GET' && call.path.endsWith('/flow-one'))).toBe(false);
   });
 
-  it('offers a route to add an account rather than a form of its own', async () => {
-    const navigated: string[] = [];
+  /**
+   * ADDING AN ACCOUNT IS A MOVE TO THE SIBLING PANEL, not a form of this panel's own and no longer a
+   * navigation.
+   *
+   * This asserted an `href` before: Accounts was a route, so "Add an account" was a `RouteLink` to
+   * `…/settings#daemons` and the test pinned the pathname the router built. There is no pathname to
+   * pin now — Accounts is Fleet's child panel in the daemon settings frame, and the frame answers
+   * "show me Fleet" directly — so what is asserted is the CALL, which is the whole contract that
+   * survived: pressing it hands off to the panel where a change is reviewed, and nothing on this
+   * panel writes a fleet.
+   */
+  it('hands off to the Fleet panel to add an account rather than offering a form of its own', async () => {
+    const opened: number[] = [];
     const { client } = clientFor({ readiness: readiness([claudeIdentity()]) });
     const mounted = await mount(
       <AccountsPage
         connection={daemon}
         createClient={async () => client}
         now={() => NOW}
-        onNavigate={to => navigated.push(to)}
+        onAddAccount={() => opened.push(1)}
       />,
     );
     cleanup = mounted.unmount;
 
-    const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-accounts-add]'), 'the add link');
-    // Built by the router rather than written as a literal, and it lands on the review step that
-    // already exists: nothing on this page writes a fleet.
-    expect(link.getAttribute('href')).toBe('/d/accounts-daemon/settings#daemons');
-    await interact(() => link.click());
+    const add = must(mounted.container.querySelector<HTMLButtonElement>('[data-accounts-add]'), 'the add control');
+    // A BUTTON, not a link: there is no address for a panel, and an anchor with a made-up `href`
+    // would be the "control that does nothing" this replaced.
+    expect(add.tagName).toBe('BUTTON');
+    await interact(() => add.click());
 
-    expect(navigated).toEqual(['/d/accounts-daemon/settings#daemons']);
+    expect(opened).toEqual([1]);
   });
 });
 
@@ -998,5 +1011,55 @@ describe('AccountsPage — renewing a credential', () => {
 
     expect(document.querySelector('[data-operator-unlock-dialog]')).toBeNull();
     expect(calls.some(call => call.method === 'POST' && call.path === '/v1/fleet/renew')).toBe(false);
+  });
+});
+
+/**
+ * THE MOUNTED PANEL — the declaration that makes Accounts a LEVEL rather than a twelfth flat row.
+ *
+ * `accountsSettingsTab` is one object and it would be easy to test by reading its fields back, which
+ * would prove nothing: what matters is that the frame gets a panel that (a) says which panel it hangs
+ * off, (b) actually reads this daemon's accounts through the client the composition root handed it,
+ * and (c) sends "Add an account" to the panel Fleet really answers to. A typo in that last id costs
+ * nothing at compile time and produces a primary button that silently does nothing, because
+ * `openPanel` ignores an id the frame does not mount.
+ */
+describe('the mounted accounts panel', () => {
+  it('declares itself Fleet’s child rather than leaving the relation to mounting order', () => {
+    const tab = accountsSettingsTab(async () => {
+      throw new Error('no client is opened to read a declaration');
+    });
+
+    expect(tab.id).toBe('accounts');
+    // The whole structural claim, in the one place a reshuffle of `daemonSettingsTabs` cannot reach.
+    expect(tab.parentId).toBe('fleet');
+    expect(tab.label).toBe('Accounts');
+  });
+
+  it('reads the daemon it is handed and sends adding an account to the Fleet panel', async () => {
+    const { client, calls } = clientFor({ readiness: readiness([claudeIdentity()]) });
+    const asked: string[] = [];
+    const tab = accountsSettingsTab(async () => client);
+    const mounted = await mount(<tab.Surface connection={daemon} openPanel={id => asked.push(id)} />);
+    cleanup = mounted.unmount;
+    await interact(() => undefined);
+
+    // It really mounted the panel, against the connection the frame supplied — not an empty shell that
+    // happens to render a button.
+    expect(
+      must(mounted.container.querySelector('[data-accounts-surface]'), 'the surface').getAttribute(
+        'data-accounts-daemon-id',
+      ),
+    ).toBe('accounts-daemon');
+    expect(calls.some(call => call.method === 'GET' && call.path === '/v1/fleet/login')).toBe(true);
+    expect(mounted.container.querySelector(`[data-account-row="${CLAUDE_ACCOUNT_ID}"]`)).not.toBeNull();
+
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-accounts-add]'), 'add').click(),
+    );
+
+    // The id Fleet is mounted under, so the pair round-trips: Fleet opens 'accounts', Accounts opens
+    // 'fleet'. Anything else here is a control that does nothing.
+    expect(asked).toEqual(['fleet']);
   });
 });

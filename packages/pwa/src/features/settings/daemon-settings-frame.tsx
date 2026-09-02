@@ -14,6 +14,7 @@ import {
   Gauge,
   KeyRound,
   Lock,
+  LogIn,
   Radar,
   Route,
   ShieldCheck,
@@ -43,14 +44,53 @@ import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
+  /**
+   * Move to a SIBLING panel of this same frame, by id. Ignored for an id this frame does not mount.
+   *
+   * A panel that sends a reader to another panel used to have to send them to a ROUTE, which is how
+   * Accounts came to be a top-level destination while its data was daemon-scoped. There is no address
+   * for a panel — the selection is this frame's own state, deliberately, so switching daemons cannot
+   * leave one host's panel name over another host's settings — so the frame hands each surface the one
+   * move it could otherwise only fake with a link that goes somewhere else.
+   */
+  readonly openPanel: (id: string) => void;
 }
 
 export interface DaemonSettingsTabDefinition {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /**
+   * The panel this one BELONGS TO, when it is a level down rather than an eleventh sibling.
+   *
+   * Declared by the definition rather than by where the composition root happens to list it: the tab
+   * factory knows the relation, `App.tsx` knows the mounting order, and only one of those two facts
+   * survives somebody reordering an array. {@link orderedDaemonPanels} then puts the child directly
+   * under its parent, so the rail's order cannot disagree with the relation it draws.
+   */
+  readonly parentId?: string;
   readonly Surface: ComponentType<DaemonSettingsTabProps>;
 }
+
+/**
+ * The panels in rail order: every parent where it was listed, each of its children directly under it.
+ *
+ * ONE LEVEL, AND NO PANEL CAN EVER FALL OUT OF THE LIST. A row only counts as a child when the id it
+ * names belongs to a DIFFERENT panel that is itself top-level, which is what makes this total: a
+ * parent that is not mounted, a panel naming itself, and two panels naming each other all come back
+ * as ordinary top-level rows rather than disappearing. A settings panel that silently vanished
+ * because of how it declared a relation would be unreachable with nothing on screen to say so, and
+ * the frame is the last place that should be able to happen.
+ */
+export const orderedDaemonPanels = (
+  tabs: readonly DaemonSettingsTabDefinition[],
+): readonly DaemonSettingsTabDefinition[] => {
+  const child = (tab: DaemonSettingsTabDefinition): boolean =>
+    tabs.some(parent => parent.id === tab.parentId && parent.id !== tab.id && parent.parentId === undefined);
+  return tabs.flatMap(tab =>
+    child(tab) ? [] : [tab, ...tabs.filter(candidate => candidate.parentId === tab.id && child(candidate))],
+  );
+};
 
 /** The panel each desktop tab controls; unchanged, because the harness, the app suite and the docs all name it. */
 const DAEMON_PANEL_ID = 'daemon-settings-tab-';
@@ -94,6 +134,9 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   'model-pricing': <CircleDollarSign size={16} aria-hidden="true" />,
   // Accounts on the host, so the glyph is the accounts rather than the machine.
   fleet: <Users size={16} aria-hidden="true" />,
+  // The child of Fleet, and the glyph says which half it is: Fleet writes the wrappers, this one is
+  // where a login is signed in. A key would have been the obvious pick and is already Secrets'.
+  accounts: <LogIn size={16} aria-hidden="true" />,
   // The measured PATH the traffic is on, which is exactly what a route is.
   carrier: <Route size={16} aria-hidden="true" />,
   'host-checks': <Radar size={16} aria-hidden="true" />,
@@ -116,7 +159,10 @@ const unavailableWardenStatus: WardenStatusReader = async () => {
 function WardenStatusSurface({
   connection,
   readStatus = unavailableWardenStatus,
-}: DaemonSettingsTabProps & { readonly readStatus?: WardenStatusReader }) {
+}: {
+  readonly connection: DaemonConnection;
+  readonly readStatus?: WardenStatusReader;
+}) {
   const status = useWardenStatus(connection, readStatus);
 
   if (status !== null) return <WardenStrip status={status} />;
@@ -149,7 +195,11 @@ function WardenSettingsTab({
   connection,
   readStatus,
   createWardenClient,
-}: DaemonSettingsTabProps & {
+}: {
+  /* These two are the frame's OWN panels rather than `additionalTabs` entries, so they take a
+     connection and not the whole `DaemonSettingsTabProps`: neither sends a reader to another panel,
+     and typing them by the seam would oblige the arrows below to forward a capability they ignore. */
+  readonly connection: DaemonConnection;
   readonly readStatus?: WardenStatusReader;
   readonly createWardenClient?: WardenClientFactory;
 }) {
@@ -211,111 +261,112 @@ export function DaemonSettingsFrame({
   onRemoveDaemon,
 }: DaemonSettingsFrameProps) {
   const tabs = useMemo<readonly DaemonSettingsTabDefinition[]>(
-    () => [
-      {
-        id: 'warden',
-        label: 'Warden',
-        description: 'Supervision, account failover, and policy for this daemon.',
-        Surface: ({ connection: activeConnection }) => (
-          <WardenSettingsTab
-            connection={activeConnection}
-            readStatus={readWardenStatus}
-            createWardenClient={createWardenClient}
-          />
-        ),
-      },
-      {
-        id: 'secrets',
-        label: 'Secrets',
-        description: 'Credentials agents can use without ever holding one.',
-        Surface: ({ connection: activeConnection }) => (
-          <SecretsSurface
-            connection={activeConnection}
-            {...(createSecretClient ? { createClient: createSecretClient } : {})}
-          />
-        ),
-      },
-      {
-        /**
-         * Adding a device, immediately after the two panels that own this machine's own configuration.
-         *
-         * It is here rather than in a global Settings section because a pairing code belongs to ONE
-         * machine: the code, the device list and every revoke are read from this tab's connection, so a
-         * reader can never revoke a device on the daemon they just switched away from.
-         */
-        id: 'devices',
-        label: 'Add a device',
-        description: 'Pair another phone or browser with this machine, and revoke one.',
-        Surface: ({ connection: activeConnection }) => (
-          <AddDeviceSurface
-            connection={activeConnection}
-            {...(createPairingClient ? { createClient: createPairingClient } : {})}
-          />
-        ),
-      },
-      {
-        /**
-         * The operator's limits, second, because it is the panel that explains why another panel's
-         * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
-         * so it must not be buried after the tabs that send them.
-         */
-        id: 'grants',
-        label: 'What devices may do',
-        description: 'Per-capability limits for callers that are not on this machine.',
-        Surface: ({ connection: activeConnection }) => (
-          <GrantsSurface
-            connection={activeConnection}
-            {...(createGrantClient ? { createClient: createGrantClient } : {})}
-          />
-        ),
-      },
-      {
-        // Environment carries VALUES between daemons; Secrets deliberately does not — a secret is
-        // copied explicitly and per-secret or not at all, never as a side effect of copying
-        // configuration. See `docs/secrets.md`; that copy path is still a declared GAP.
-        id: 'environment',
-        label: 'Environment',
-        description: 'Copy safe fleet profile environment between daemons.',
-        Surface: ({ connection: activeConnection }) => (
-          <FleetEnvironmentSettings connection={activeConnection} connections={connections} />
-        ),
-      },
-      // A product-owned Doctor surface belongs with the daemon configuration,
-      // before the connection carrier and browser-local pairing diagnostics.
-      ...additionalTabs,
-      {
-        id: 'carrier',
-        label: 'Carrier',
-        description: 'The measured path this daemon is using right now.',
-        Surface: () => <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />,
-      },
-      {
-        id: 'host-checks',
-        label: 'Host checks',
-        description: 'Reachability and this browser’s pairing for this daemon.',
-        Surface: () => {
-          if (connectionRecord && probeDaemon && onRenameDaemon && onRemoveDaemon)
-            return (
-              <DaemonHostChecks
-                connection={connectionRecord}
-                probeDaemon={probeDaemon}
-                carrier={carrier}
-                onRenameDaemon={onRenameDaemon}
-                onRemoveDaemon={onRemoveDaemon}
-              />
-            );
-          return (
-            <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
-              <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
-              <p className="mb-0 mt-1 text-cell leading-base text-muted">
-                This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
-                offer pairing changes.
-              </p>
-            </section>
-          );
+    () =>
+      orderedDaemonPanels([
+        {
+          id: 'warden',
+          label: 'Warden',
+          description: 'Supervision, account failover, and policy for this daemon.',
+          Surface: ({ connection: activeConnection }) => (
+            <WardenSettingsTab
+              connection={activeConnection}
+              readStatus={readWardenStatus}
+              createWardenClient={createWardenClient}
+            />
+          ),
         },
-      },
-    ],
+        {
+          id: 'secrets',
+          label: 'Secrets',
+          description: 'Credentials agents can use without ever holding one.',
+          Surface: ({ connection: activeConnection }) => (
+            <SecretsSurface
+              connection={activeConnection}
+              {...(createSecretClient ? { createClient: createSecretClient } : {})}
+            />
+          ),
+        },
+        {
+          /**
+           * Adding a device, immediately after the two panels that own this machine's own configuration.
+           *
+           * It is here rather than in a global Settings section because a pairing code belongs to ONE
+           * machine: the code, the device list and every revoke are read from this tab's connection, so a
+           * reader can never revoke a device on the daemon they just switched away from.
+           */
+          id: 'devices',
+          label: 'Add a device',
+          description: 'Pair another phone or browser with this machine, and revoke one.',
+          Surface: ({ connection: activeConnection }) => (
+            <AddDeviceSurface
+              connection={activeConnection}
+              {...(createPairingClient ? { createClient: createPairingClient } : {})}
+            />
+          ),
+        },
+        {
+          /**
+           * The operator's limits, second, because it is the panel that explains why another panel's
+           * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
+           * so it must not be buried after the tabs that send them.
+           */
+          id: 'grants',
+          label: 'What devices may do',
+          description: 'Per-capability limits for callers that are not on this machine.',
+          Surface: ({ connection: activeConnection }) => (
+            <GrantsSurface
+              connection={activeConnection}
+              {...(createGrantClient ? { createClient: createGrantClient } : {})}
+            />
+          ),
+        },
+        {
+          // Environment carries VALUES between daemons; Secrets deliberately does not — a secret is
+          // copied explicitly and per-secret or not at all, never as a side effect of copying
+          // configuration. See `docs/secrets.md`; that copy path is still a declared GAP.
+          id: 'environment',
+          label: 'Environment',
+          description: 'Copy safe fleet profile environment between daemons.',
+          Surface: ({ connection: activeConnection }) => (
+            <FleetEnvironmentSettings connection={activeConnection} connections={connections} />
+          ),
+        },
+        // A product-owned Doctor surface belongs with the daemon configuration,
+        // before the connection carrier and browser-local pairing diagnostics.
+        ...additionalTabs,
+        {
+          id: 'carrier',
+          label: 'Carrier',
+          description: 'The measured path this daemon is using right now.',
+          Surface: () => <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />,
+        },
+        {
+          id: 'host-checks',
+          label: 'Host checks',
+          description: 'Reachability and this browser’s pairing for this daemon.',
+          Surface: () => {
+            if (connectionRecord && probeDaemon && onRenameDaemon && onRemoveDaemon)
+              return (
+                <DaemonHostChecks
+                  connection={connectionRecord}
+                  probeDaemon={probeDaemon}
+                  carrier={carrier}
+                  onRenameDaemon={onRenameDaemon}
+                  onRemoveDaemon={onRemoveDaemon}
+                />
+              );
+            return (
+              <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
+                <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
+                <p className="mb-0 mt-1 text-cell leading-base text-muted">
+                  This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
+                  offer pairing changes.
+                </p>
+              </section>
+            );
+          },
+        },
+      ]),
     [
       additionalTabs,
       carrier,
@@ -358,8 +409,13 @@ export function DaemonSettingsFrame({
     label: tab.label,
     detail: tab.description,
     icon: PANEL_ICONS[tab.id] ?? FALLBACK_PANEL_ICON,
+    ...(tab.parentId === undefined ? {} : { parentId: tab.parentId }),
   }));
   const activeIcon = PANEL_ICONS[active.id] ?? FALLBACK_PANEL_ICON;
+  /** Only ever a panel this frame really mounts; an unknown id leaves the reader where they are. */
+  const openPanel = (id: string): void => {
+    if (tabs.some(tab => tab.id === id)) setActiveTab(id);
+  };
 
   return (
     <section
@@ -481,7 +537,7 @@ export function DaemonSettingsFrame({
               it got caught. The rail's second line is redundant on desktop rather than missing: the panel
               is beside the row, already explaining itself. On a phone it is not redundant, because the
               sheet is chosen with the panel hidden behind it, so the sheet keeps it. */}
-          <Surface connection={connection} />
+          <Surface connection={connection} openPanel={openPanel} />
         </div>
       </div>
     </section>

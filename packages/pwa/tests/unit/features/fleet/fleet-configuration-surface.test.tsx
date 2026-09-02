@@ -2395,9 +2395,34 @@ describe('the mounted settings tab', () => {
     const tab = fleetSettingsTab(async () => daemon.client);
     expect(tab.id).toBe('fleet');
     expect(tab.label).toBe('Fleet');
-    const mounted = await mount(<tab.Surface connection={laptop} />);
+    const mounted = await mount(<tab.Surface connection={laptop} openPanel={() => undefined} />);
     await interact(() => undefined);
     expect(pick(mounted.container, '[data-fleet-configuration]')).toBeDefined();
+    await mounted.unmount();
+  });
+
+  /**
+   * THE PANEL THIS ONE SENDS PEOPLE TO IS NAMED HERE, and it is the id the accounts factory declares
+   * itself the child of.
+   *
+   * The two new-account steps offer the Accounts panel. Nothing else in this file can catch the
+   * factory asking for the WRONG id — `openPanel` ignores an id the frame does not mount, so a typo
+   * would produce a control that silently does nothing, which is precisely the failure the route
+   * retirement was meant to remove rather than relocate.
+   */
+  it('asks the frame for the accounts panel by the id that panel declares', async () => {
+    const daemon = fakeDaemon({});
+    const asked: string[] = [];
+    const tab = fleetSettingsTab(async () => daemon.client);
+    const mounted = await mount(<tab.Surface connection={laptop} openPanel={id => asked.push(id)} />);
+    await interact(() => undefined);
+
+    await click(pick(mounted.container, '[data-fleet-start-create]'));
+    await interact(() => undefined);
+    await walkTo(mounted.container, 'identity');
+    await click(pick(mounted.container, '[data-fleet-accounts-link]'));
+
+    expect(asked).toEqual(['accounts']);
     await mounted.unmount();
   });
 });

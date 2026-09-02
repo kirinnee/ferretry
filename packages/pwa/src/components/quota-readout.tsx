@@ -33,7 +33,7 @@ export function QuotaReadout({ quota, showUnknown = false, className = '' }: Quo
     return (
       <span
         className={`${classes} fy-quota-warning`}
-        title="This wrapper is not logged in — account usage is unavailable. Sign it in on the Accounts page."
+        title="This wrapper is not logged in — account usage is unavailable. Sign it in on this daemon’s Accounts panel, under Settings › Daemons › Fleet."
       >
         quota auth!
       </span>

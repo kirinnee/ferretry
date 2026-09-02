@@ -128,10 +128,17 @@ describe('route parsing', () => {
       parseRoute('/d/daemon-b/session/%20'),
       parseRoute('/d/daemon-b/session/one/extra'),
       parseRoute('/d/daemon-b/tasks/extra'),
+      // THE RETIRED ACCOUNTS ADDRESS, asserted rather than merely deleted. Accounts is Fleet's child
+      // panel inside one daemon's settings now, and a panel has no pathname — so an old bookmark is
+      // an unknown daemon path like any other and lands on that daemon's sessions. It is emphatically
+      // NOT redirected: there is no second way in, and `legacy-tasks-redirect` is the one
+      // compatibility shim this router has.
+      parseRoute('/d/daemon-b/accounts'),
     ];
 
     // Assert
     should(actual).deepEqual([
+      { kind: 'sessions', daemonId: daemonB },
       { kind: 'sessions', daemonId: daemonB },
       { kind: 'sessions', daemonId: daemonB },
       { kind: 'sessions', daemonId: daemonB },
@@ -239,7 +246,6 @@ describe('route identity', () => {
       daemonBSession,
       daemonASession,
       parseRoute('/d/daemon-b/settings'),
-      parseRoute('/d/daemon-b/accounts'),
       parseRoute('/d/daemon-b/warden'),
       parseRoute('/d/daemon-b/analytics'),
       parseRoute('/d/daemon-b/learning'),
@@ -262,7 +268,6 @@ describe('route identity', () => {
       ['/d/daemon-b/session/same', 'session:["daemon-b","same"]'],
       ['/d/daemon%2Fa/session/same', 'session:["daemon/a","same"]'],
       ['/d/daemon-b/settings', 'settings:"daemon-b"'],
-      ['/d/daemon-b/accounts', 'accounts:"daemon-b"'],
       ['/d/daemon-b/warden', 'warden:"daemon-b"'],
       ['/d/daemon-b/analytics', 'analytics:"daemon-b"'],
       ['/d/daemon-b/learning', 'learning:"daemon-b"'],

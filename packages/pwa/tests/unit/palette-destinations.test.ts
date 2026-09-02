@@ -44,7 +44,6 @@ describe('destinationPaletteEntries', () => {
     expect(entries.map(entry => entry.id)).toEqual([
       'destination-sessions',
       'destination-projects',
-      'destination-accounts',
       'destination-analytics',
       'destination-warden',
       'destination-learning',
@@ -82,18 +81,22 @@ describe('destinationPaletteEntries', () => {
   });
 
   /**
-   * TWO DESTINATIONS GENUINELY ANSWER TO "accounts", and the order is the whole answer.
+   * ONE DESTINATION ANSWERS TO "accounts" NOW, and it is Warden — which is the honest answer.
    *
-   * Warden has always claimed the keyword, because its verdicts are about accounts. The Accounts page
-   * IS the accounts, so it must come first — and this module ranks nothing: it filters in navigation
-   * order, so "first" is decided entirely by where the entry sits in `APP_BAR_DESTINATIONS`. Reordering
-   * that array would silently send somebody typing the name of a page to a different page, which is why
-   * this is pinned here rather than left to the bar's own ordering test.
+   * This test used to pin the OPPOSITE: two destinations claimed the word and the Accounts page had to
+   * come first, because it WAS the accounts. Accounts is no longer a destination at all — it is Fleet's
+   * child panel inside one daemon's settings, and a panel has no pathname for `destinationExists` to
+   * resolve — so the entry and its keywords were deleted rather than left pointing at a dead route.
+   *
+   * The assertion is kept rather than dropped because what it guards is unchanged: Warden keeps its own
+   * claim on the word (its verdicts are about accounts), and this module still ranks nothing, so a row
+   * appearing here can only ever come from `APP_BAR_DESTINATIONS`. If a future change re-adds an
+   * accounts row to the bar, this fails and says so.
    */
-  it('answers “accounts” with the Accounts page first, ahead of Warden’s claim on the word', () => {
+  it('answers “accounts” with Warden alone, now that Accounts is a settings panel and not a destination', () => {
     const entries = destinationPaletteEntries('accounts', APP_BAR_DESTINATIONS, alpha);
 
-    expect(entries.map(entry => entry.id)).toEqual(['destination-accounts', 'destination-warden']);
+    expect(entries.map(entry => entry.id)).toEqual(['destination-warden']);
   });
 
   it('returns nothing when the query matches no destination', () => {
