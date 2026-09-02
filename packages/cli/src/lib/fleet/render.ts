@@ -536,8 +536,9 @@ const HEALTH_VERDICT_LABEL: Readonly<Record<FleetHealthVerdict, string>> = {
  * file: a row has roughly forty columns for a clause on an eighty-column terminal, and the agreed
  * sentence is a hundred. The browser keeps it whole in `account-health-view.ts`, where nothing is
  * competing for the width. All three meanings survive the trim — refused, cause unattributed, and NO
- * instruction to sign in — and the last of those is also carried structurally, because the verdict is
- * `unknown`, the row is muted and `HEALTH_REMEDY` offers nothing for it.
+ * instruction to sign in — and the last of those is also carried structurally, because the row is
+ * muted and `HEALTH_REMEDY` holds `undefined` against this exact reason. Not because its verdict is
+ * `unknown`: `oauth_refreshable` is `unknown` too and does print a command.
  */
 const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
   provider_accepted: 'the provider accepted this credential',
@@ -567,9 +568,11 @@ const HEALTH_REASON_LABEL: Readonly<Record<FleetHealthReason, string>> = {
  * need nothing and the report had to be read end to end before anything could be triaged. This is
  * also the order the summary counts in, so the header and the rows tell the same story top to bottom.
  *
- * The two actionable verdicts lead, `needs_relogin` first because it is the one with a command beside
- * it. `unknown` sits BELOW both and above `healthy`: it is not a fault, and putting it among the
- * faults is what made the old header undercount.
+ * The two actionable verdicts lead, `needs_relogin` first because it is the one of the two with a
+ * command beside it. `unknown` sits BELOW both and above `healthy`: it is not a fault, and putting it
+ * among the faults is what made the old header undercount. Some `unknown` rows do carry a command —
+ * a credential that can renew itself is not a fault either, and one command clears it — so a reader
+ * who has acted on the faults above still finds work here.
  */
 const HEALTH_VERDICT_ORDER: readonly FleetHealthVerdict[] = [
   'needs_relogin',
@@ -636,15 +639,59 @@ export function renderRelativeInstant(instant: number, now: number): string {
 }
 
 /**
- * The verdicts a person can actually do something about, and the id the remedy needs.
+ * The states a person can actually do something about, and the id the remedy needs.
  *
  * THE ID IS NOT DECORATION HERE, which is why a health row carries BOTH halves while a usage row
  * carries only the name. `fy fleet login <accountId>` matches on exactly that id — see
  * `selectIdentities` — so a row that named the account and nothing else would be readable and
  * unactionable, the opposite of the failure naming it fixed.
+ *
+ * KEYED ON THE REASON, AND IT USED TO BE KEYED ON THE VERDICT. That is the defect this table was
+ * reported for. `oauth_refreshable` is a REASON whose verdict is `unknown`, so a verdict-keyed table
+ * could not reach it however it was written: the row said "signed in, but this copy needs refreshing"
+ * with nothing beside it, while `fy fleet login <accountId>` renewed exactly that account the whole
+ * time — it renews before anything else and a renewal that succeeds settles the pass with no browser
+ * at all. The row also prints the account's NAME, so the id the command needs was not on screen
+ * either; somebody had to be told both.
+ *
+ * Exhaustive over every reason rather than partial, so a reason added tomorrow is a compile error
+ * here instead of a row that silently stops offering the command it should have. `undefined` is the
+ * honest entry and most reasons take it: there is no command that repairs a timeout, a provider
+ * outage, or a Codex account that cannot be proved either way.
+ *
+ * Two `undefined`s are load-bearing rather than incidental:
+ *
+ * - `oauth_rejection_unconfirmed` — a bare `401` cannot say whether the provider refused the LOGIN or
+ *   this client. Printing a sign-in for it spends a browser approval and fixes nothing, which is the
+ *   worst outcome available here. See `docs/fleet-health.md`.
+ * - `static_credential_missing` / `static_credential_rejected` — a login cannot fix an account that
+ *   authenticates from an environment variable or a token file. The harness reads that value and
+ *   never consults its own credential store.
+ *
+ * `stale` also takes `undefined`, which preserves exactly what the verdict-keyed table did: a
+ * conclusion too old to trust publishes `unknown`, and a remedy for a verdict nothing currently
+ * stands behind would be a command printed on the strength of an expired claim.
  */
-const HEALTH_REMEDY: Readonly<Partial<Record<FleetHealthVerdict, (accountId: string) => string>>> = {
-  needs_relogin: accountId => `fy fleet login ${accountId}`,
+const HEALTH_REMEDY: Readonly<Record<FleetHealthReason, ((accountId: string) => string) | undefined>> = {
+  provider_accepted: undefined,
+  usage_scope_unavailable: undefined,
+  oauth_credential_missing: accountId => `fy fleet login ${accountId}`,
+  oauth_access_expired: accountId => `fy fleet login ${accountId}`,
+  oauth_token_rejected: accountId => `fy fleet login ${accountId}`,
+  static_credential_missing: undefined,
+  static_credential_rejected: undefined,
+  never_checked: undefined,
+  credential_unreadable: undefined,
+  // Renews without a browser and without asking anybody. This is the entry the table was missing.
+  oauth_refreshable: accountId => `fy fleet login ${accountId}`,
+  oauth_rejection_unconfirmed: undefined,
+  codex_liveness_unproven: undefined,
+  check_timeout: undefined,
+  provider_unavailable: undefined,
+  provider_not_asked: undefined,
+  credential_changed_during_check: undefined,
+  account_unavailable: undefined,
+  stale: undefined,
 };
 
 /** Where a row starts, where its own overflow goes, and where its command sits. Three depths, three meanings. */
@@ -771,11 +818,11 @@ function healthRowLines(
         ...segments.slice(1).map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`),
       ]
     : [head.trimEnd(), ...segments.map(part => `${HEALTH_WRAP_INDENT}${palette.muted(part)}`)];
-  // The exact command, on its own line, for the one verdict a person can act on. "NEEDS LOGIN" with
-  // no way to act on it is the state this whole feature exists to stop producing — and the id the
-  // command needs is not something a reader could have derived from the name above it. NEVER WRAPPED:
-  // this line exists to be selected, and a break inside the id produces something that looks copyable.
-  const remedy = HEALTH_REMEDY[health.verdict]?.(health.accountId);
+  // The exact command, on its own line, for every state a person can act on. A row with no way to
+  // act on it is the state this whole feature exists to stop producing — and the id the command needs
+  // is not something a reader could have derived from the name above it. NEVER WRAPPED: this line
+  // exists to be selected, and a break inside the id produces something that looks copyable.
+  const remedy = HEALTH_REMEDY[health.reason]?.(health.accountId);
   return remedy === undefined ? lines : [...lines, `${HEALTH_REMEDY_INDENT}${palette.command(remedy)}`];
 }
 
