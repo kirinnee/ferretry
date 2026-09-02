@@ -141,6 +141,7 @@ import {
   FleetLiveRoster,
 } from '../src/features/fleet/fleet-change-review.tsx';
 import { accountsRoster } from '../src/features/fleet/accounts-model.ts';
+import { accountsSettingsTab } from '../src/features/fleet/accounts-page.tsx';
 import { type AccountsReadState, AccountsSurface } from '../src/features/fleet/accounts-surface.tsx';
 import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import {
@@ -1472,6 +1473,39 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
     if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
     return fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS);
   }),
+  /**
+   * ACCOUNTS, AS THE FRAME REALLY MOUNTS IT — the whole point of this fixture.
+   *
+   * The parent/child relation is the deliverable of this panel, and it is only visible in a rail that
+   * has BOTH rows. A settings walk carrying Fleet and not Accounts would capture the flat list the
+   * change replaced and report it as the new one.
+   *
+   * Its own surface is rendered from the accounts fixture rather than through the cockpit stub: the
+   * roster wants a health snapshot, a usage feed and a readiness read, and this frame exists to be
+   * looked at rather than to prove three transports.
+   */
+  {
+    ...accountsSettingsTab(async () => {
+      throw new Error('the accounts panel reads its fixture in the harness');
+    }),
+    Surface: () => (
+      <AccountsSurface
+        daemonId={daemon.daemonId}
+        state={HARNESS_ACCOUNTS_STATE}
+        flows={{}}
+        refusal={null}
+        busy={false}
+        mayStart={true}
+        healthCheck={{ status: 'ready', error: null, checked: 4, onCheck: () => {} }}
+        onAddAccount={() => {}}
+        onReRead={() => {}}
+        onStart={() => {}}
+        onRenew={() => {}}
+        onSubmitCode={() => {}}
+        onCancel={() => {}}
+      />
+    ),
+  },
 ];
 
 /**

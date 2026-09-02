@@ -132,7 +132,7 @@ const WALKS_SETTINGS = !(SEARCH_ONLY || ATTENTION_ONLY || FILES_ONLY || TASK_BOA
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 51;
+const SETTINGS_SIDEWAYS_CHECKS = 53;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1479,8 +1479,8 @@ try {
           // at both widths, rather than the sheet's, which are rendered only
           // once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 10)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 10`);
+          if (daemonPanels !== 11)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 11`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -1495,14 +1495,29 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 10)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 10`);
-            // Ten rows, each naming a panel, is the longest list any sheet in Settings presents — so if
-            // one of these sheets is going to be the one that widens a phone, it is this one.
+            if (openPanelChoices !== 11)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 11`);
+            // Eleven rows, one of them a LEVEL DOWN, is the longest list any sheet in Settings presents
+            // — and the indented row is the widest of them, because it starts further in. If one of
+            // these sheets is going to be the one that widens a phone, it is this one.
             await assertNoSidewaysScroll(page, `the open daemon-panel sheet at ${viewport.name}`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
             await page.screenshot({ path: panelPickerOpenTarget });
             process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
+
+            // THE LEVEL, ON A PHONE. A phone has no rail, so the sheet IS where the hierarchy has to
+            // be legible — and the pair is eleven rows down, past the fold of a 390x844 shot. The
+            // capture above is the sheet's resting state and cannot show them; this one scrolls to
+            // the two rows the whole change is about. No extra sideways check: it is the same sheet,
+            // already measured, at a different scroll offset.
+            await panelPicker
+              .locator('[data-daemon-panel-choice]')
+              .filter({ has: page.getByText('Accounts', { exact: true }) })
+              .scrollIntoViewIfNeeded();
+            const nestedPanelTarget = join(outDir, 'settings-daemon-panel-picker-nested-mobile.png');
+            await page.screenshot({ path: nestedPanelTarget });
+            process.stdout.write(`📸 Settings daemon panel picker (Fleet › Accounts) -> ${nestedPanelTarget}\n`);
+
             await page.keyboard.press('Escape');
             await panelPicker.waitFor({ state: 'hidden' });
           }
@@ -1536,6 +1551,10 @@ try {
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
             ['Fleet', 'fleet', '[data-fleet-configuration]'],
+            // FLEET'S CHILD, captured directly after its parent so the two frames read as the pair
+            // they are. This is the one panel whose rail row is a level down, so its capture is also
+            // the evidence for the indent — the rail is in the shot beside the panel it opens.
+            ['Accounts', 'accounts', '[data-accounts-surface="ready"]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {
