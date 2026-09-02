@@ -5583,7 +5583,7 @@ function Shell() {
               busy={false}
               mayStart={true}
               healthCheck={{ status: 'ready', error: null, checked: 4, onCheck: () => {} }}
-              addAccountHref="/d/harness/settings#daemons"
+              onAddAccount={() => undefined}
               onReRead={() => {}}
               onStart={() => {}}
               onRenew={() => {}}
@@ -5640,7 +5640,6 @@ function Shell() {
                     onInstructionsSource={() => {}}
                     accountSource="existing"
                     onAccountSource={() => {}}
-                    accountsHref="/d/9f1c/accounts"
                     variants={['default', 'auto', 'review']}
                     config={HARNESS_FLEET_CONFIG}
                     discovery={HARNESS_FLEET_DISCOVERY}
@@ -7477,7 +7476,6 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
                 onInstructionsSource={() => {}}
                 accountSource="existing"
                 onAccountSource={() => {}}
-                accountsHref="/d/9f1c/accounts"
                 variants={['default', 'auto', 'review']}
                 config={HARNESS_FLEET_CONFIG}
                 discovery={HARNESS_FLEET_DISCOVERY}

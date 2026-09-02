@@ -43,7 +43,6 @@ import {
 import { useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { FIELD_LABEL, PanelPath } from '../../shell/panel-typography.tsx';
-import { RouteLink } from '../../shell/route-link.tsx';
 import { HARNESS_SHARING } from './accounts-model.ts';
 import type { FleetConfigView, FleetManifestAccountView } from './fleet-api.ts';
 import { FleetProblems } from './fleet-change-forms.tsx';
@@ -336,9 +335,19 @@ export interface FleetAccountStepperProps {
    */
   readonly accountSource: FleetPickOrAddSource;
   readonly onAccountSource: (next: FleetPickOrAddSource) => void;
-  /** Where the accounts page is, as a pathname the router built. Never a literal. */
-  readonly accountsHref: string;
-  readonly onNavigate?: (to: string) => void;
+  /**
+   * Show the Accounts panel — the panel that hangs off the one this sequence lives in.
+   *
+   * A CALL RATHER THAN A PATHNAME. Accounts was a route, so these two steps linked to it and a
+   * `RouteLink` needed a navigator threaded all the way down from the composition root to cancel the
+   * browser's own navigation. It is now Fleet's child panel in the same frame, on the same daemon, and
+   * a panel has no address — so the control is one the frame answers directly, and the thread of
+   * optional navigators it replaces is gone rather than left pointing at a path nothing resolves.
+   *
+   * Absent where there is no sibling panel to show — the visual gallery mounts this sequence from a
+   * fixture. See {@link AccountsMention}: the sentence survives, the control does not appear.
+   */
+  readonly onOpenAccounts?: (() => void) | undefined;
   /** Lanes this fleet declares. An account can only be added to one that exists. */
   readonly variants: readonly string[];
   readonly config: FleetConfigView | null;
@@ -377,8 +386,7 @@ export function FleetAccountStepper({
   onInstructionsSource,
   accountSource,
   onAccountSource,
-  accountsHref,
-  onNavigate,
+  onOpenAccounts,
   variants,
   config,
   discovery,
@@ -452,8 +460,7 @@ export function FleetAccountStepper({
             config={config}
             source={accountSource}
             onSource={onAccountSource}
-            accountsHref={accountsHref}
-            {...(onNavigate === undefined ? {} : { onNavigate })}
+            {...(onOpenAccounts === undefined ? {} : { onOpenAccounts })}
           />
         ) : null}
         {step === 'credential' ? (
@@ -463,8 +470,7 @@ export function FleetAccountStepper({
             disabled={disabled}
             catalog={profiles}
             config={config}
-            accountsHref={accountsHref}
-            {...(onNavigate === undefined ? {} : { onNavigate })}
+            {...(onOpenAccounts === undefined ? {} : { onOpenAccounts })}
           />
         ) : null}
         {step === 'models' ? (
@@ -612,6 +618,33 @@ function HarnessStep({
  * provider last answered; it cannot mint a provider login, and its own "Add account" control links
  * back to this panel. So adding one is inline, and the link is for managing what is already there.
  */
+/**
+ * The word "Accounts" where two steps mention it — a control where there is a panel to show, and
+ * plain text where there is not.
+ *
+ * THE SENTENCE IS NOT THE CONTROL. Both steps say something true about the Accounts panel whether or
+ * not this mount can open it, and a mount that cannot — the visual gallery renders the sequence from
+ * a fixture, outside any settings frame — used to get a link that navigated nowhere. Rendering the
+ * word without a control there is the honest version: nothing on screen invites a click that does
+ * nothing, and the explanation a person needs is unchanged.
+ *
+ * One component for both steps, because the two differ only in which sentence follows the word and
+ * which marker a test finds it by.
+ */
+function AccountsMention({ onOpen, marker }: { readonly onOpen?: (() => void) | undefined; readonly marker: string }) {
+  if (onOpen === undefined)
+    return (
+      <span className="font-medium text-fg" {...{ [marker]: '' }}>
+        Accounts
+      </span>
+    );
+  return (
+    <button type="button" onClick={onOpen} className="text-accent underline" {...{ [marker]: '' }}>
+      Accounts
+    </button>
+  );
+}
+
 function IdentityStep({
   draft,
   onChange,
@@ -620,8 +653,7 @@ function IdentityStep({
   config,
   source,
   onSource,
-  accountsHref,
-  onNavigate,
+  onOpenAccounts,
 }: {
   readonly draft: FleetAccountDraft;
   readonly onChange: (next: FleetAccountDraft) => void;
@@ -630,8 +662,7 @@ function IdentityStep({
   readonly config: FleetConfigView | null;
   readonly source: FleetPickOrAddSource;
   readonly onSource: (next: FleetPickOrAddSource) => void;
-  readonly accountsHref: string;
-  readonly onNavigate?: (to: string) => void;
+  readonly onOpenAccounts?: (() => void) | undefined;
 }) {
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
@@ -741,20 +772,12 @@ function IdentityStep({
         />
       )}
 
-      {/* THE JUMP, and what it costs. A draft lives in this panel, so leaving for the accounts page
-          discards it — a link that did not say so would be the one control on the screen that loses
+      {/* THE JUMP, and what it costs. A draft lives in this panel, so opening the Accounts panel
+          discards it — a control that did not say so would be the one on the screen that loses
           somebody's answers without warning. */}
       <p className="m-0 text-meta leading-base text-muted">
-        <RouteLink
-          to={accountsHref}
-          {...(onNavigate === undefined ? {} : { onNavigate })}
-          className="text-accent underline"
-          data-fleet-accounts-link=""
-        >
-          Accounts
-        </RouteLink>{' '}
-        is where a login is signed in and where what each provider last said is shown. Opening it leaves this draft
-        behind.
+        <AccountsMention marker="data-fleet-accounts-link" {...(onOpenAccounts ? { onOpen: onOpenAccounts } : {})} /> is
+        where a login is signed in and where what each provider last said is shown. Opening it leaves this draft behind.
       </p>
 
       <div>
@@ -913,16 +936,14 @@ function CredentialStep({
   disabled,
   catalog,
   config,
-  accountsHref,
-  onNavigate,
+  onOpenAccounts,
 }: {
   readonly draft: FleetAccountDraft;
   readonly onChange: (next: FleetAccountDraft) => void;
   readonly disabled: boolean;
   readonly catalog: FleetProfileCatalog | null;
   readonly config: FleetConfigView | null;
-  readonly accountsHref: string;
-  readonly onNavigate?: (to: string) => void;
+  readonly onOpenAccounts?: (() => void) | undefined;
 }) {
   const uid = useId();
   const id = (name: string): string => `${uid}${name}`;
@@ -988,22 +1009,18 @@ function CredentialStep({
               ? 'Signing in happens once, for this login — every account on it is then usable.'
               : `This login already uses ${bound.join(', ')}, and leaving this answer alone keeps it that way.`}
           </p>
-          {/* THE SIGN-IN IS A DESTINATION, so this step links to it the same way the account step
-              links to the same page. Browser sign-in was never removed — `accounts-surface.tsx`
-              mounts the Claude and Codex login panels and drives the harness's own flow — but a step
-              that only offered the CHOICE, named no screen and linked nowhere, read from inside as
-              though it had been. The cost is stated for the same reason it is stated one step back:
-              the draft lives in this panel, so leaving discards it, and a link that did not say so
-              would be the one control here that loses somebody's answers without warning. */}
+          {/* THE SIGN-IN IS A SCREEN, so this step opens it the same way the account step opens the
+              same panel. Browser sign-in was never removed — `accounts-surface.tsx` mounts the Claude
+              and Codex login panels and drives the harness's own flow — but a step that only offered
+              the CHOICE, named no screen and led nowhere, read from inside as though it had been. The
+              cost is stated for the same reason it is stated one step back: the draft lives in this
+              panel, so leaving discards it, and a control that did not say so would be the one here
+              that loses somebody's answers without warning. */}
           <p className="m-0 text-meta leading-base text-muted">
-            <RouteLink
-              to={accountsHref}
-              {...(onNavigate === undefined ? {} : { onNavigate })}
-              className="text-accent underline"
-              data-fleet-credential-accounts-link=""
-            >
-              Accounts
-            </RouteLink>{' '}
+            <AccountsMention
+              marker="data-fleet-credential-accounts-link"
+              {...(onOpenAccounts ? { onOpen: onOpenAccounts } : {})}
+            />{' '}
             is the screen it happens on, for this harness and every other. Opening it leaves this draft behind, so
             finish here first and sign in once the account exists.
           </p>

@@ -1,5 +1,25 @@
 /**
- * THE ACCOUNTS PAGE, wired. A first-class destination rather than a settings sub-tab.
+ * THE ACCOUNTS PANEL, wired. A daemon settings panel, and the child of Fleet.
+ *
+ * ## WHY IT IS NOT A DESTINATION ANY MORE
+ *
+ * It shipped as a top-level route — `/d/:daemonId/accounts`, breadcrumb `Sessions › Accounts` — while
+ * everything it reads is scoped to ONE machine, which is what the sentence below this one has always
+ * said: a fleet belongs to a machine, so nothing here is cached at module scope. The navigation did
+ * not agree with the data. With more than one daemon paired, nothing on the screen said which machine
+ * the accounts belonged to, and the breadcrumb — which named no daemon — was the only thing that could
+ * have, if somebody had read it.
+ *
+ * So the scope now comes from the PATH somebody took to get here: Settings › Daemons › this machine ›
+ * Fleet › Accounts. The frame's header names the machine above every panel, which is a fact you cannot
+ * fail to notice rather than a label you have to.
+ *
+ * IT IS A CHILD OF FLEET RATHER THAN AN ELEVENTH SIBLING, because Fleet and Accounts are the two
+ * halves of one subject and are not the same thing: Fleet writes the wrappers, Accounts is where a
+ * login is signed in. The rail draws that relation — see `orderedDaemonPanels` and `ChoiceRail`'s
+ * `parentId` — so the two read as one subject at two levels instead of as two unrelated rows.
+ *
+ * The route it replaces is DELETED, not deprecated. There is no second way in.
  *
  * ## WHAT IT REPLACES
  *
@@ -37,7 +57,6 @@ import { checkAccountPickerHealth } from '../../lib/account-picker-catalog.ts';
 import type { AccountPickerLoadStatus } from '../../lib/account-picker-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type HeldUnlock, type OperatorUnlockFailure, operatorUnlockFailure, usableUnlock } from '../../lib/grants.ts';
-import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { unlockGrants } from '../settings/grants-api.ts';
 import { OperatorUnlockDialog } from '../settings/operator-unlock-dialog.tsx';
 import { type AccountRowView, accountsRoster } from './accounts-model.ts';
@@ -67,7 +86,13 @@ export interface AccountsPageProps {
   /** Injected so a test asserts against a fixture rather than against whenever the suite ran. */
   readonly usage?: ReadonlyMap<string, UsageAccountView>;
   readonly pollMs?: number;
-  readonly onNavigate?: (to: string) => void;
+  /**
+   * Show the Fleet panel, which is where an account is added.
+   *
+   * Required rather than optional: this is the one outward move the panel offers, and a default no-op
+   * would render a primary button that does nothing on any caller that forgot to wire it.
+   */
+  readonly onAddAccount: () => void;
   className?: string;
 }
 
@@ -102,7 +127,7 @@ export function AccountsPage({
   now = Date.now,
   usage,
   pollMs = POLL_MS,
-  onNavigate,
+  onAddAccount,
   className,
 }: AccountsPageProps) {
   const [client, setClient] = useState<FleetClient | null>(null);
@@ -426,8 +451,7 @@ export function AccountsPage({
         busy={busy}
         mayStart={authority.kind !== 'refused' && authority.kind !== 'unreadable'}
         healthCheck={{ status: healthStatus, error: healthError, checked, onCheck: check }}
-        addAccountHref={`${daemonSettingsPath(connection.daemonId)}#daemons`}
-        {...(onNavigate === undefined ? {} : { onNavigate })}
+        onAddAccount={onAddAccount}
         onReRead={reRead}
         onStart={begin}
         onRenew={beginRenewal}
@@ -480,3 +504,28 @@ export function AccountsPage({
     </div>
   );
 }
+
+/**
+ * The mounted settings panel, ready for the composition root's `daemonSettingsTabs` seam.
+ *
+ * `parentId` is declared HERE and not in `App.tsx`, for the same reason the id and the label are: the
+ * relation between this panel and Fleet is a fact about what these two panels are, and a composition
+ * root that also owned it could put the child somewhere the relation does not hold.
+ *
+ * `openPanel` is what makes "Add an account" work now that there is no address to link to. It moves
+ * to Fleet — the panel this one hangs off — inside the same frame, on the same daemon.
+ */
+export const accountsSettingsTab = (createClient: FleetClientFactory) =>
+  ({
+    id: 'accounts',
+    parentId: 'fleet',
+    label: 'Accounts',
+    description: 'Each account’s login, what its provider last said, and when that was checked.',
+    Surface: ({
+      connection,
+      openPanel,
+    }: {
+      readonly connection: DaemonConnection;
+      readonly openPanel: (id: string) => void;
+    }) => <AccountsPage connection={connection} createClient={createClient} onAddAccount={() => openPanel('fleet')} />,
+  }) as const;

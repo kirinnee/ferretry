@@ -87,7 +87,6 @@ describe('mobileDestinationMenuOpen', () => {
 describe('appBarDestinationForRoute', () => {
   it('marks the app-level destinations and nothing else', () => {
     expect(appBarDestinationForRoute({ kind: 'projects', daemonId: DAEMON })).toBe('projects');
-    expect(appBarDestinationForRoute({ kind: 'accounts', daemonId: DAEMON })).toBe('accounts');
     expect(appBarDestinationForRoute({ kind: 'warden', daemonId: DAEMON })).toBe('warden');
     expect(appBarDestinationForRoute({ kind: 'analytics', daemonId: DAEMON })).toBe('analytics');
     expect(appBarDestinationForRoute({ kind: 'learning', daemonId: DAEMON })).toBe('learning');
@@ -105,12 +104,17 @@ describe('AppBar destinations', () => {
 
     expect(hrefs).toEqual([
       '/d/workshop/projects',
-      '/d/workshop/accounts',
       '/d/workshop/analytics',
       '/d/workshop/warden',
       '/d/workshop/learning',
       '/d/workshop/settings',
     ]);
+
+    // ACCOUNTS IS DELIBERATELY ABSENT, asserted rather than left to a diff. It was a top-level
+    // destination while everything it shows belongs to one daemon; it is Fleet's child panel inside
+    // that daemon's own settings now, and Fleet has never been a destination here either. The row is
+    // gone rather than pointed at a path the router no longer resolves.
+    expect(hrefs.some(href => href?.endsWith('/accounts') === true)).toBe(false);
 
     // Switching daemons must move every destination with it — this is the
     // multi-daemon rule the single-daemon original could not express.
@@ -118,7 +122,6 @@ describe('AppBar destinations', () => {
 
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop/projects',
-      '/d/laptop/accounts',
       '/d/laptop/analytics',
       '/d/laptop/warden',
       '/d/laptop/learning',

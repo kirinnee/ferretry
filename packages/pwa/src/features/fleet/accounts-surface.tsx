@@ -1,10 +1,17 @@
 /**
- * THE ACCOUNTS PAGE, as pixels. Props only — it reads nothing and dials nothing.
+ * THE ACCOUNTS PANEL, as pixels. Props only — it reads nothing and dials nothing.
  *
  * Split from `accounts-page.tsx` so the whole screen can be rendered from a fixture: at a fixed
  * instant, in every health state, at 390px, in the visual harness. Every UI defect in this project so
  * far was found by looking at one of those captures, and a surface that could only be reached through
  * three live reads cannot be looked at.
+ *
+ * ## IT IS A PANEL, AND THE TYPE SCALE SAYS SO
+ *
+ * This was a top-level route, so it opened with a `text-display` page title and `text-title` group
+ * headings. It is now the child panel of Fleet inside the daemon settings frame — one rung below the
+ * machine's own name — and the headings step down with it. Nothing else about the surface changed:
+ * the same states, the same rows, the same one button per account.
  *
  * ## ONE ROW, ONE ACCOUNT, ONE BUTTON
  *
@@ -37,7 +44,6 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { ModeBadge } from '../../shell/mode-badge.tsx';
 import { Button } from '../../shell/primitives.tsx';
-import { RouteLink } from '../../shell/route-link.tsx';
 import type { AccountRowView, AccountsHarnessGroup, AccountsRosterView } from './accounts-model.ts';
 import { ClaudeLoginPanel } from './claude-login-panel.tsx';
 import { CodexLoginPanel } from './codex-login-panel.tsx';
@@ -61,9 +67,15 @@ export interface AccountsSurfaceProps {
   readonly mayStart: boolean;
   /** The shared "prove it again, now" control's state. */
   readonly healthCheck: AccountHealthCheckProps;
-  /** Where a person goes to add one. A pathname built by the router, never a literal. */
-  readonly addAccountHref: string;
-  readonly onNavigate?: (to: string) => void;
+  /**
+   * Open the panel where one is added — Fleet, the panel this one hangs off.
+   *
+   * A CONTROL RATHER THAN A LINK, because there is no longer an address to link to. This surface used
+   * to be a route and sent people to `…/settings#daemons`; it is now the child panel of Fleet in the
+   * same frame, and the honest control for "show me the sibling panel" is a button. A `RouteLink` here
+   * would have to invent a pathname that no router resolves.
+   */
+  readonly onAddAccount: () => void;
   readonly onReRead: () => void;
   readonly onStart: (row: AccountRowView) => void;
   /** Ask this account's credential to renew itself: no browser, nobody sent anywhere, one call. */
@@ -292,15 +304,18 @@ function HarnessGroup({
       aria-labelledby={`accounts-${group.kind}`}
     >
       <header className="border-b border-border bg-surface-2 px-panel py-3">
-        <h2 id={`accounts-${group.kind}`} className="m-0 text-title font-semibold text-fg">
+        {/* One rung under this panel's own heading, which is `text-row`: a harness group is a section
+            INSIDE Accounts, and while this was a route it was a `text-title` section under a
+            `text-display` page title. The ladder moved down with the panel. */}
+        <h4 id={`accounts-${group.kind}`} className="m-0 text-ui font-semibold text-fg">
           {group.label}
-          <span className="ml-2 text-ui font-normal text-muted">
+          <span className="ml-2 text-meta font-normal text-muted">
             {group.rows.length === 1 ? '1 account' : `${String(group.rows.length)} accounts`}
           </span>
-        </h2>
+        </h4>
         {/* Said HERE rather than in a document: this is the screen where somebody is about to assume
             the wrong one of the two. */}
-        <p className="m-0 mt-1 text-ui leading-base text-fg" data-accounts-sharing={group.kind}>
+        <p className="m-0 mt-1 text-cell leading-base text-fg" data-accounts-sharing={group.kind}>
           {group.sharing.headline}
         </p>
         <p className="m-0 mt-0.5 text-meta leading-base text-muted">{group.sharing.detail}</p>
@@ -332,8 +347,7 @@ export function AccountsSurface({
   busy,
   mayStart,
   healthCheck,
-  addAccountHref,
-  onNavigate,
+  onAddAccount,
   onReRead,
   onStart,
   onRenew,
@@ -350,32 +364,36 @@ export function AccountsSurface({
     >
       <header className="kt-panel overflow-hidden">
         <div className="border-b border-border bg-surface-2 px-panel py-3">
-          <h1 id="accounts-heading" className="m-0 font-display text-display font-bold tracking-display text-fg">
+          {/* A PANEL HEADING, not a page title. This surface is the child panel of Fleet inside the
+              daemon settings frame, one rung below the machine's own name — the ladder
+              `settings-page.tsx` sets out. It was `text-display` while it was a route of its own, and
+              leaving it there would have made the panel shout over the frame it now sits in. */}
+          <h3 id="accounts-heading" className="m-0 text-row font-semibold text-fg">
             Accounts
-          </h1>
-          <p className="m-0 mt-1 text-ui leading-base text-muted">
+          </h3>
+          <p className="m-0 mt-1 text-cell leading-base text-muted">
             Every account this daemon can run, what its provider last said about it, and when that was checked.
           </p>
         </div>
         <div className="space-y-3 p-panel">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <RouteLink
-              to={addAccountHref}
-              {...(onNavigate === undefined ? {} : { onNavigate })}
-              className="kt-btn min-h-[44px]"
-              data-variant="primary"
+            <Button
+              type="button"
+              variant="primary"
+              className="min-h-[44px]"
+              onClick={onAddAccount}
               data-accounts-add=""
             >
               <Plus size={15} aria-hidden="true" />
               Add an account
-            </RouteLink>
+            </Button>
             <Button type="button" variant="outline" className="min-h-[44px]" onClick={onReRead} disabled={busy}>
               <RefreshCw size={15} aria-hidden="true" />
               Re-read
             </Button>
           </div>
           <p className="m-0 text-meta leading-base text-muted">
-            Adding one opens this daemon’s fleet settings, where the change is reviewed before anything is written.
+            Adding one opens Fleet, the panel above this one, where the change is reviewed before anything is written.
           </p>
           <AccountHealthCheck {...healthCheck} />
         </div>

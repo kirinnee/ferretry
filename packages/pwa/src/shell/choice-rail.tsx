@@ -21,6 +21,14 @@
  *                 screen may claim this, and it must be the rail whose panel is
  *                 beside it.
  *
+ * ONE RAIL CAN ALSO HOLD TWO LEVELS. `parentId` marks a row as belonging to the
+ * one above it rather than sitting beside it, and it is drawn indented under a
+ * corner rule. This is not a second navigation pattern: a child is an ordinary
+ * row with the same role, the same keyboard order and the same selection, and
+ * because both presentations are built from the same items the level exists in
+ * the desktop tablist AND in the phone sheet rather than only where it was
+ * styled.
+ *
  * The rail is deliberately presentational: it owns no selection state, reads no
  * store, and holds nothing between renders except the row elements it must be
  * able to focus. A caller that keys its own frame by daemon id therefore cannot
@@ -45,6 +53,21 @@ export interface ChoiceRailItem<T extends string = string> {
    * icons it IS given line up. See {@link ICON_SLOT_CLASS}.
    */
   readonly icon?: ReactNode;
+  /**
+   * The row this one BELONGS TO, when it is a level down rather than a sibling.
+   *
+   * THE RAIL IS WHERE NESTING HAS TO LIVE, because it is the one component both presentations are
+   * built from: a level expressed in the desktop tablist and not in the phone sheet would be a
+   * hierarchy that exists at one width and not the other. A child is drawn indented under its parent
+   * with a corner rule, and it stays an ordinary row in every other respect — same roles, same
+   * keyboard order, same selection.
+   *
+   * NAMING A PARENT THAT IS NOT IN `items` DRAWS NOTHING. A rail may be given a subset (a filtered
+   * list, a caller that mounts some panels and not others), and an indent under a row that is not
+   * there is a claim about a relation the reader cannot see. Ordering is the caller's: this component
+   * does not move a child under its parent, it only draws the one that is already there.
+   */
+  readonly parentId?: T;
 }
 
 interface ChoiceRailBaseProps<T extends string> {
@@ -121,6 +144,17 @@ const RAIL_CLASS = 'flex flex-col gap-xs';
  */
 const ICON_SLOT_CLASS = 'flex w-4 shrink-0 items-center justify-center';
 
+/**
+ * A CHILD ROW IS INDENTED AND HOOKED, and nothing else about it changes.
+ *
+ * The indent alone reads as a stray margin on a rail whose rows are otherwise flush; the corner rule
+ * is what says "this hangs off the row above" rather than "this row is oddly placed". It is drawn as
+ * a bordered box rather than a glyph on purpose — the icon slot beside it is the row's own landmark,
+ * and a second piece of art there would compete with it.
+ */
+const NESTED_ROW_CLASS = 'ml-md';
+const NESTED_HOOK_CLASS = 'mr-xs h-3 w-2 shrink-0 rounded-bl-control border-b border-l border-border-strong';
+
 export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
   const { items, activeId, onSelect, marker, truncate = false, rows = 'two-line' } = props;
   const refs = useRef(new Map<T, HTMLButtonElement>());
@@ -142,8 +176,13 @@ export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
 
   const markerFor = (id: T): Record<string, string> => ({ [marker]: id });
 
+  /** A child only when the row it names is really on this rail — see {@link ChoiceRailItem.parentId}. */
+  const nested = (item: ChoiceRailItem<T>): boolean =>
+    item.parentId !== undefined && items.some(other => other.id === item.parentId);
+
   const row = (item: ChoiceRailItem<T>, selected: boolean): ReactNode => (
     <>
+      {nested(item) ? <span aria-hidden="true" className={NESTED_HOOK_CLASS} /> : null}
       {hasIcons ? (
         <span className={ICON_SLOT_CLASS} aria-hidden="true">
           {item.icon}
@@ -173,7 +212,11 @@ export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
                 {...markerFor(item.id)}
                 aria-current={selected ? 'page' : undefined}
                 onClick={() => onSelect(item.id)}
-                className={cn(ROW_CLASS, selected ? SELECTED_ROW_CLASS : IDLE_ROW_CLASS)}
+                className={cn(
+                  ROW_CLASS,
+                  nested(item) && NESTED_ROW_CLASS,
+                  selected ? SELECTED_ROW_CLASS : IDLE_ROW_CLASS,
+                )}
               >
                 {row(item, selected)}
               </button>
@@ -216,7 +259,7 @@ export function ChoiceRail<T extends string>(props: ChoiceRailProps<T>) {
               event.preventDefault();
               onSelect(next);
             }}
-            className={cn(ROW_CLASS, selected ? SELECTED_ROW_CLASS : IDLE_ROW_CLASS)}
+            className={cn(ROW_CLASS, nested(item) && NESTED_ROW_CLASS, selected ? SELECTED_ROW_CLASS : IDLE_ROW_CLASS)}
           >
             {row(item, selected)}
           </button>
