@@ -1053,12 +1053,17 @@ describe('health rendering', () => {
     should(rendered.split('\n')).containEql(`      fy fleet login ${accountId}`);
   });
 
-  it('should offer no command for a verdict a command cannot fix', () => {
+  it('should offer no command for a state a command cannot fix', () => {
     // Arrange — a static credential cannot be repaired by signing in, and Codex cannot be proved at
     // all. Printing `fy fleet login` beside either would be an instruction that does not help.
+    //
+    // The `stale` row is here because the remedy is keyed on the REASON now: a conclusion too old to
+    // trust publishes `unknown`/`stale` while remembering it WAS `needs_relogin`, and printing a
+    // command on the strength of an expired claim is exactly the regression that rekeying invites.
     const cases = [
       healthRow({ verdict: 'needs_credentials', reason: 'static_credential_rejected' }),
       healthRow({ verdict: 'unknown', reason: 'codex_liveness_unproven', kind: 'codex' }),
+      healthRow({ verdict: 'unknown', reason: 'stale', staleVerdict: 'needs_relogin' }),
       healthRow(),
     ];
 
@@ -1163,7 +1168,26 @@ describe('health rendering', () => {
 
     // Assert
     should(rendered).containEql('UNKNOWN  signed in, but this copy needs refreshing');
-    should(rendered).not.containEql('fy fleet login');
+  });
+
+  it('should print the renewal command beside a refreshable account, with its id', () => {
+    // Arrange — THE REPORTED INCIDENT. This row used to assert `not.containEql('fy fleet login')`,
+    // because the remedy table was keyed on the VERDICT and `oauth_refreshable`'s verdict is
+    // `unknown`. So the row said "signed in, but this copy needs refreshing" and stopped, while
+    // `fy fleet login <accountId>` renewed exactly that account the whole time — it renews before
+    // anything else, and a renewal that succeeds settles the pass with no browser at all. The row
+    // prints the NAME, so the id the command needs was not on screen either.
+    const accountId = '34ffb79f-786c-4179-a8aa-f2180a76252a';
+    const accounts = [healthRow({ accountId, verdict: 'unknown', reason: 'oauth_refreshable' })];
+
+    // Act
+    const painted = renderHealth({ at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
+
+    // Assert — the whole id, in the copy-paste class, on a row that stays muted: a credential that
+    // can renew itself is not a fault, and painting it as one is what the muting exists to prevent.
+    should(painted).containEql(`<command>fy fleet login ${accountId}</command>`);
+    should(painted).containEql('<muted>?</muted> Claude (default)  <muted>UNKNOWN</muted>');
+    should(painted).not.containEql('<danger>');
   });
 
   it('should still say a check was inconclusive when the reason does not already say so', () => {
