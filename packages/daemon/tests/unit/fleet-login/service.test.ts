@@ -1960,6 +1960,112 @@ describe('the harness login routes', () => {
     should(jsonBody(actual)).have.property('code', 'fleet_login_unknown');
   });
 
+  it('should renew through its own address, for the paired browser this exists for', async () => {
+    // NOT under `/v1/fleet/login/`: every path there is `:flowId`, so a literal segment beside it would
+    // be read as the id of a flow nobody minted. And the caller is a DEVICE, because a browser is
+    // always a paired one — an admin-token minimum would 403 the only surface that can press this.
+    // Arrange
+    const subject = fixture({
+      renewal: new RecordingRenewal({ status: 'renewed', accountId: INTERACTIVE_ID, ran: true }),
+    });
+
+    // Act
+    const actual = await pairedDispatcher(subject).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/renew',
+        headers: { ...browser, 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+      }),
+    );
+
+    // Assert — and no child: this route drives no sign-in.
+    should(actual.status).equal(200);
+    should(jsonBody(actual)).match({ identity: 'claude:kirin', status: 'renewed', ran: true });
+    should(subject.children).be.empty();
+  });
+
+  it('should answer 200 for a renewal that correctly fired nothing', async () => {
+    // THE CASE A REVIEWER WANTS TO MAKE AN ERROR. `not-expired` is the gate working: a rotating refresh
+    // token was not spent because the identity already holds a valid access token. A `409` here would
+    // teach every surface to show a failure for the outcome the gate exists to produce.
+    // Arrange
+    const subject = fixture({
+      renewal: new RecordingRenewal({
+        status: 'not-expired',
+        accountId: INTERACTIVE_ID,
+        reason: 'a home in this identity already holds a valid access token',
+        ran: false,
+      }),
+    });
+
+    // Act
+    const actual = await dispatcherFor(subject).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/renew',
+        headers: { ...human, 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+      }),
+    );
+
+    // Assert
+    should(actual.status).equal(200);
+    should(jsonBody(actual)).match({ status: 'not-expired', ran: false });
+  });
+
+  it('should carry the service’s own refusal code rather than a 500, when nothing was composed to renew', async () => {
+    // Arrange — the default fixture is composed with NO renewal, which is the shape the option's
+    // optionality exists to produce.
+    const subject = fixture();
+
+    // Act
+    const actual = await dispatcherFor(subject).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/renew',
+        headers: { ...human, 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+      }),
+    );
+
+    // Assert
+    should(actual.status).equal(409);
+    should(jsonBody(actual)).have.property('code', 'fleet_login_unavailable');
+  });
+
+  it('should refuse a warden token on the renew path too, and a body that names anything but an account', async () => {
+    // The renewal's half of `minimum: 'operator'`, plus the parse: a request that could name a home, a
+    // wrapper or a command is a request that could point a rotation somewhere nobody authorized.
+    // Arrange
+    const renewal = new RecordingRenewal({ status: 'renewed', accountId: INTERACTIVE_ID, ran: true });
+    const subject = fixture({ renewal });
+    const dispatcher = pairedDispatcher(subject);
+
+    // Act
+    const warden = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/renew',
+        headers: { ...wardenCaller, 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: INTERACTIVE_ID }),
+      }),
+    );
+    const overreaching = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/renew',
+        headers: { ...browser, 'content-type': 'application/json' },
+        body: JSON.stringify({ accountId: INTERACTIVE_ID, home: '/home/somebody/.claude' }),
+      }),
+    );
+
+    // Assert
+    should(warden.status).equal(403);
+    should(overreaching.status).equal(400);
+    should(renewal.asked).be.empty();
+  });
+
   it('should refuse a start body that names anything but an account', async () => {
     // Arrange
     const subject = fixture();
