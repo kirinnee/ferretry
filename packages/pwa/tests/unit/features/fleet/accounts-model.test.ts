@@ -16,7 +16,12 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { accountSignInOffer, accountsRoster, HARNESS_SHARING } from '../../../../src/features/fleet/accounts-model.ts';
+import {
+  accountRenewOffer,
+  accountSignInOffer,
+  accountsRoster,
+  HARNESS_SHARING,
+} from '../../../../src/features/fleet/accounts-model.ts';
 import { credentialStateCopy, usageSummary } from '../../../../src/features/fleet/harness-login-model.ts';
 import { accountHealthView, UNREAD_ACCOUNT_HEALTH } from '../../../../src/lib/account-health-view.ts';
 import {
@@ -322,6 +327,59 @@ describe('accountSignInOffer', () => {
     // Order matters: the credential is the fact a person acts on, and "this account cannot run" would
     // send somebody to fix availability for an account that also has no sign-in to run.
     expect(accountSignInOffer({ ...keyedAccount(), available: false }).kind).toBe('elsewhere');
+  });
+});
+
+describe('accountRenewOffer', () => {
+  it('offers a renewal for the one credential state a renewal can fix', () => {
+    // An access token that aged out with a refresh token beside it. One call, no browser, nobody sent
+    // anywhere — and the state where a person would otherwise reach for a full sign-in.
+    expect(accountRenewOffer(loginAccount({ credential: { state: 'refreshable' } }))).toEqual({
+      kind: 'offered',
+      label: 'Renew now',
+    });
+  });
+
+  it('offers nothing for a credential a rotation would only endanger', () => {
+    // `valid` has nothing to gain and a rotating refresh token to lose; `missing` has none to spend;
+    // `unreadable` is a home nobody could classify, and rotating one of those is how a good credential
+    // gets replaced by nothing. The host refuses all three too — this is not the gate, it is the button.
+    const states = [
+      { state: 'valid' },
+      { state: 'missing' },
+      { state: 'unreadable', reason: 'the keychain read timed out' },
+      { state: 'not-read' },
+    ] as const;
+
+    for (const credential of states) {
+      expect(accountRenewOffer(loginAccount({ credential })).kind).toBe('none');
+    }
+  });
+
+  it('offers nothing on an account no login could have written, however its home reads', () => {
+    // A credential from a key has no provider token to rotate, so `refreshable` here would be a reading
+    // of somebody else's leftovers.
+    expect(accountRenewOffer({ ...keyedAccount(), credential: { state: 'refreshable' } }).kind).toBe('none');
+  });
+
+  it('offers nothing on an account the fleet publishes as unable to run', () => {
+    // A renewal would work and would still leave a wrapper no session can launch.
+    expect(accountRenewOffer(loginAccount({ credential: { state: 'refreshable' }, available: false })).kind).toBe(
+      'none',
+    );
+  });
+
+  it('puts the offer on the row the roster renders, not only on the helper', () => {
+    // The surface reads `row.renew`; a helper nothing joined onto a row would be a control that exists
+    // in one test and on no screen.
+    const roster = accountsRoster(
+      readiness([claudeIdentity([loginAccount({ credential: { state: 'refreshable' } })])]),
+      new Map(),
+      undefined,
+      NOW,
+    );
+
+    expect(roster.groups[0]?.rows[0]?.renew).toEqual({ kind: 'offered', label: 'Renew now' });
   });
 });
 

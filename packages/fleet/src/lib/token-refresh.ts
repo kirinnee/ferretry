@@ -66,6 +66,7 @@
  * {@link FleetCredentialStore}, exactly as {@link FleetIdentityService} does, and the material stays
  * behind that boundary in an adapter.
  */
+import type { FleetRenewalStatus } from '@ferretry/protocol';
 import type {
   CredentialState,
   FleetCredentialStore,
@@ -79,27 +80,12 @@ import type { HarnessKind } from './manifest.ts';
 /**
  * What happened to one identity's credential.
  *
- * Every outcome is named, and the four that did nothing are four different reasons for having done
- * nothing. `not-expired` is a refusal this product wants to be loud about — a still-valid credential
- * is the case where firing would be destructive — while `indeterminate` means the home was never read
- * successfully, so nothing at all is known. Collapsing them is how a report ends up implying a fleet
- * renewed itself when part of it was never looked at.
+ * ONE CLOSED SET, OWNED BY THE WIRE CONTRACT. `FleetRenewalStatusSchema` in `@ferretry/protocol` holds
+ * the members and the sentence explaining each; this is that union and not a restatement of it. Two
+ * spellings would drift in exactly the direction that hurts: a projection narrower than this domain
+ * turns a real outcome into a 500, and one wider promises a status nothing can produce.
  */
-export type FleetTokenRefreshStatus =
-  /** The harness renewed it: the credential's own re-read expiry is now in the future. */
-  | 'renewed'
-  /** Some home in this identity already holds a valid access token, so nothing was fired. */
-  | 'not-expired'
-  /** Nothing here can renew itself — there is no refresh token to spend. */
-  | 'not-renewable'
-  /** This identity authenticates with a key, so there is no provider token to renew. */
-  | 'not-required'
-  /** A home could not be classified, so nothing was read from it or fired at it. */
-  | 'indeterminate'
-  /** The harness CLI this renewal needs is not installed on this host. */
-  | 'unavailable'
-  /** The path ran and the credential is still not valid. */
-  | 'failed';
+export type FleetTokenRefreshStatus = FleetRenewalStatus;
 
 /** What one identity's renewal did, and to which home. */
 export interface FleetTokenRefreshResult {

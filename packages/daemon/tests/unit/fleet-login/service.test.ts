@@ -17,10 +17,14 @@ import {
   FleetConfigSchema,
   type FleetCredentialStore,
   type FleetIdentityMember,
+  type FleetIdentity,
+  type FleetIdentityMemberStatus,
   type FleetManifest,
   FleetManifestSchema,
   type HarnessKind,
   type HarnessLoginDeclarations,
+  type FleetTokenRefreshResult,
+  type FleetTokenRenewal,
 } from '@ferretry/fleet';
 import type { FleetLoginReadiness, HarnessLoginSubmission } from '@ferretry/protocol';
 import should from 'should';
@@ -304,6 +308,36 @@ interface FixtureOptions {
   readonly windowMinutes?: number;
   readonly now?: () => number;
   readonly store?: RecordingStore;
+  /**
+   * The renewal this daemon was composed with, or nothing.
+   *
+   * ABSENT BY DEFAULT, matching the option: a daemon that was not given one refuses in words rather
+   * than 500-ing, and the default has to be the shape that proves it.
+   */
+  readonly renewal?: RecordingRenewal;
+}
+
+/**
+ * A renewal that records what it was asked to rotate and never touches a credential.
+ *
+ * It stands where `FleetTokenRefreshService` does, which is the module that owns the GATE — whether a
+ * rotation is safe is decided there, from a fresh read of the chosen home, and is proved in
+ * `packages/fleet/tests/unit/token-refresh.test.ts`. What is proved HERE is everything around it: who
+ * may ask, about what, in which order, and what a caller is told. A fake that re-implemented the gate
+ * would be a second opinion about the one decision this service is not allowed to have one about.
+ */
+class RecordingRenewal implements FleetTokenRenewal {
+  readonly asked: { identity: string; members: number }[] = [];
+
+  constructor(private readonly result: Omit<FleetTokenRefreshResult, 'identity'>) {}
+
+  async renew(
+    identity: FleetIdentity,
+    members: readonly FleetIdentityMemberStatus[],
+  ): Promise<FleetTokenRefreshResult> {
+    this.asked.push({ identity: identity.key, members: members.length });
+    return { identity: identity.key, ...this.result };
+  }
 }
 
 function fixture(options: FixtureOptions = {}): Fixture {
@@ -344,6 +378,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     },
     confirmChange: options.confirmChange ?? (async () => ({ kind: 'confirmed' })),
     clientName: 'fy',
+    ...(options.renewal === undefined ? {} : { renewal: options.renewal }),
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
     ...(options.declarations === undefined ? {} : { declarations: options.declarations }),
   });
@@ -820,6 +855,190 @@ describe('the per-change confirmation', () => {
 
     // Assert
     should(subject.children).be.empty();
+  });
+});
+
+// ─── renewing, which is the sibling of a sign-in and never one ────────────────────────────────────
+
+describe('renewing a credential', () => {
+  const RENEWED = {
+    status: 'renewed' as const,
+    accountId: INTERACTIVE_ID,
+    reason: 'the harness renewed it',
+    ran: true,
+  };
+
+  it('should renew the identity the named account belongs to, and spawn no sign-in child', async () => {
+    // Arrange — the whole point: a credential that can rotate itself costs nobody a browser approval.
+    const renewal = new RecordingRenewal(RENEWED);
+    const subject = fixture({ renewal });
+
+    // Act
+    const actual = await subject.service.renew({ accountId: AUTO_ID }, HOST);
+
+    // Assert — the account NAMED is a lane; the credential belongs to the identity, so that is what
+    // was renewed. And nothing was launched here: this service spawns children for sign-ins only.
+    should(renewal.asked).deepEqual([{ identity: 'claude:kirin', members: 2 }]);
+    should(actual).deepEqual({
+      identity: 'claude:kirin',
+      status: 'renewed',
+      accountId: INTERACTIVE_ID,
+      reason: 'the harness renewed it',
+      ran: true,
+    });
+    should(subject.children).be.empty();
+  });
+
+  it('should carry a refusal that chose no home without inventing one', async () => {
+    // Arrange — an identity that authenticates with a key has no home to name, and naming one would
+    // point a reader at an account this renewal never looked at.
+    const renewal = new RecordingRenewal({
+      status: 'not-required',
+      reason: 'this account authenticates with a key, so it has no provider token to renew',
+      ran: false,
+    });
+
+    // Act
+    const actual = await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, HOST);
+
+    // Assert
+    should(actual).not.have.property('accountId');
+    should(actual).match({ status: 'not-required', ran: false });
+  });
+
+  it('should refuse when this daemon was composed with no renewal, rather than failing', async () => {
+    // Arrange — a daemon that decided not to start harness processes for this. A 500 would read as a
+    // broken host; the refusal names the command that always works.
+    const subject = fixture();
+
+    // Act
+    const refusal = await refusalOf(async () => await subject.service.renew({ accountId: INTERACTIVE_ID }, HOST));
+
+    // Assert
+    should(refusal.code).equal('fleet_login_unavailable');
+    should(refusal.message).match(/not configured to renew credentials/u);
+    should(refusal.message).match(/fy fleet login/u);
+  });
+
+  it('should refuse an account this host does not publish', async () => {
+    // Arrange
+    const renewal = new RecordingRenewal(RENEWED);
+
+    // Act
+    const refusal = await refusalOf(
+      async () => await fixture({ renewal }).service.renew({ accountId: '00000000-0000-4000-8000-00000000ffff' }, HOST),
+    );
+
+    // Assert — refused before the renewal was reached at all.
+    should(refusal.code).equal('fleet_login_unavailable');
+    should(renewal.asked).be.empty();
+  });
+
+  it('should refuse an account whose credential is not a login, in words about renewing', async () => {
+    // Arrange — the sign-in's sentence is WRONG here. "There is no sign-in to run for this account"
+    // tells somebody a sign-in failed when none was attempted, and sends them to spend a browser
+    // approval on a credential no login could ever have written.
+    const renewal = new RecordingRenewal(RENEWED);
+
+    // Act
+    const refusal = await refusalOf(
+      async () => await fixture({ renewal }).service.renew({ accountId: KEYED_ID }, HOST),
+    );
+
+    // Assert
+    should(refusal.message).startWith('there is no credential here to renew:');
+    should(refusal.message).not.containEql('sign-in');
+    should(renewal.asked).be.empty();
+  });
+
+  it('should refuse a renewal while a sign-in holds that identity', async () => {
+    // Arrange — two writers for one home. The sign-in is mid-flight and about to write the credential
+    // this renewal would rotate, and the fleet has no cross-process lock over credential writes.
+    const renewal = new RecordingRenewal(RENEWED);
+    const subject = fixture({ renewal });
+    await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+
+    // Act
+    const refusal = await refusalOf(async () => await subject.service.renew({ accountId: AUTO_ID }, HOST));
+
+    // Assert
+    should(refusal.code).equal('fleet_login_in_progress');
+    should(renewal.asked).be.empty();
+  });
+
+  it('should refuse when nobody can say where this caller stands', async () => {
+    // Arrange — the safe reading of "I cannot tell" is not "start a harness on the host".
+    const renewal = new RecordingRenewal(RENEWED);
+
+    // Act
+    const refusal = await refusalOf(
+      async () => await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, undefined),
+    );
+
+    // Assert
+    should(refusal.code).equal('fleet_login_unauthorized');
+    should(refusal.message).match(/renew this fleet’s credentials/u);
+    should(renewal.asked).be.empty();
+  });
+
+  it('should ask a governed caller for the operator password, against this one renewal', async () => {
+    // Arrange — a rotation the provider REFUSES makes the harness clear its own tokens, so a caller off
+    // this machine can leave an identity needing a person. Same gate as a start, same budget.
+    const renewal = new RecordingRenewal(RENEWED);
+
+    // Act
+    const refusal = await refusalOf(
+      async () => await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, BROWSER),
+    );
+
+    // Assert — the SENTENCE is the renewal's own. A confirmation prompt that said "sign-in" would be
+    // asking somebody to approve an act nothing was going to perform.
+    should(refusal.code).equal('fleet_login_unauthorized');
+    should(refusal.message).match(/entered against this exact renewal/u);
+    should(refusal.message).match(/^renewing "claude:kirin"/u);
+    should(renewal.asked).be.empty();
+  });
+
+  it('should say a wrong password left the credential unrenewed, never unsigned-in', async () => {
+    // Arrange
+    const renewal = new RecordingRenewal(RENEWED);
+    const subject = fixture({ renewal, confirmChange: async () => ({ kind: 'refused', reason: 'wrong-password' }) });
+
+    // Act
+    const refusal = await refusalOf(
+      async () => await subject.service.renew({ accountId: INTERACTIVE_ID, operatorPassword: 'wrong' }, BROWSER),
+    );
+
+    // Assert
+    should(refusal.message).endWith('so "claude:kirin" was not renewed');
+    should(renewal.asked).be.empty();
+  });
+
+  it('should renew once a governed caller proves the password', async () => {
+    // Arrange
+    const renewal = new RecordingRenewal(RENEWED);
+    const subject = fixture({ renewal });
+
+    // Act
+    const actual = await subject.service.renew(
+      { accountId: INTERACTIVE_ID, operatorPassword: 'the operator password' },
+      BROWSER,
+    );
+
+    // Assert
+    should(actual.status).equal('renewed');
+    should(renewal.asked).have.length(1);
+  });
+
+  it('should never ask a caller the operator’s grants do not govern', async () => {
+    // Arrange — somebody at the machine already has the machine.
+    const renewal = new RecordingRenewal(RENEWED);
+
+    // Act
+    const actual = await fixture({ renewal }).service.renew({ accountId: INTERACTIVE_ID }, HOST);
+
+    // Assert
+    should(actual.status).equal('renewed');
   });
 });
 
