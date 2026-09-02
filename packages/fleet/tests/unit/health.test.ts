@@ -12,6 +12,7 @@ import {
   readLocalCredentials,
 } from '../../src/lib/health.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
+import type { FleetSeedProvenanceRecord, FleetSeedProvenanceStore } from '../../src/lib/seed-provenance.ts';
 import type { FleetCredentialSignal, FleetUsageSnapshot } from '../../src/lib/usage.ts';
 
 const NOW = 1_786_000_000_000;
@@ -29,6 +30,22 @@ const account = (id: string, patch: Record<string, unknown> = {}) => ({
   available: true,
   unavailableReason: null,
   ...patch,
+});
+
+/** A host nobody has ever seeded: the store answers with no records and is never written. */
+const emptyProvenanceStore = (): FleetSeedProvenanceStore => ({
+  read: async () => [],
+  write: async () => {
+    throw new Error('a health collection must never write the seed-provenance document');
+  },
+});
+
+/** A store that holds records, so a collector can be proved to read them rather than to invent them. */
+const provenanceStore = (records: readonly FleetSeedProvenanceRecord[]): FleetSeedProvenanceStore => ({
+  read: async () => records,
+  write: async () => {
+    throw new Error('a health collection must never write the seed-provenance document');
+  },
 });
 
 const manifest = (accounts: readonly Record<string, unknown>[]): FleetManifest =>
@@ -373,6 +390,7 @@ describe('observeAccountHealth', () => {
         { id: ID_TWO, signal: 'rejected' },
       ]),
       local: new Map<string, LocalCredentialReading>(),
+      provenance: new Map(),
       at: NOW,
     });
 
@@ -392,6 +410,7 @@ describe('observeAccountHealth', () => {
       config: declared({ env: { ANTHROPIC_API_KEY: 'literal-value' } }),
       usage: usage([{ id: ID_ONE, signal: 'rejected' }]),
       local: new Map(),
+      provenance: new Map(),
       at: NOW,
     });
 
@@ -409,6 +428,7 @@ describe('observeAccountHealth', () => {
       config: declared(),
       usage: usage([{ id: 'stranger', signal: 'rejected' }]),
       local: new Map(),
+      provenance: new Map(),
       at: NOW,
     });
 
@@ -425,6 +445,7 @@ describe('observeAccountHealth', () => {
       local: new Map<string, LocalCredentialReading>([
         [ID_ONE, { state: 'valid', fingerprint: 'abc', expiresAt: NOW + 1 }],
       ]),
+      provenance: new Map(),
       at: NOW,
     });
 
@@ -439,11 +460,116 @@ describe('observeAccountHealth', () => {
       config: declared(),
       usage: usage([{ id: ID_ONE }]),
       local: new Map<string, LocalCredentialReading>([[ID_ONE, { state: 'unreadable' }]]),
+      provenance: new Map(),
       at: NOW,
     });
 
     // Assert
     should(actual[0]).not.have.property('fingerprint');
+  });
+
+  it('publishes no provenance for an account nothing recorded a seed for', () => {
+    // Arrange / Act
+    const actual = observeAccountHealth({
+      manifest: manifest([account(ID_ONE)]),
+      config: declared(),
+      usage: usage([{ id: ID_ONE, signal: 'accepted' }]),
+      local: new Map<string, LocalCredentialReading>([[ID_ONE, { state: 'valid', fingerprint: 'abc' }]]),
+      provenance: new Map(),
+      at: NOW,
+    });
+
+    // Assert — ABSENT, not a reading. A surface must never render the absence as "this account owns
+    // its credential": a home seeded before this shipped has no record and can never get one.
+    should(actual[0]).not.have.property('seedProvenance');
+  });
+
+  it('compares the SAME digest the change guard uses against the recorded seed', () => {
+    // Arrange — the home still holds the bytes the seed wrote into it.
+    const seedRecord: FleetSeedProvenanceRecord = {
+      accountId: ID_ONE,
+      kind: 'claude',
+      seededFrom: 'host:claude',
+      donorHome: '/home/me/.claude',
+      seedFingerprint: 'abc',
+      seededAt: NOW - 1_000,
+    };
+
+    // Act
+    const actual = observeAccountHealth({
+      manifest: manifest([account(ID_ONE)]),
+      config: declared(),
+      usage: usage([{ id: ID_ONE, signal: 'accepted' }]),
+      local: new Map<string, LocalCredentialReading>([[ID_ONE, { state: 'valid', fingerprint: 'abc' }]]),
+      provenance: new Map([[ID_ONE, seedRecord]]),
+      at: NOW,
+    });
+
+    // Assert — the disclosure costs no read at all: the digest was already computed for the change
+    // guard, and this asks it a second question.
+    should(actual[0]?.seedProvenance).deepEqual({
+      state: 'seeded_copy',
+      donorHome: '/home/me/.claude',
+      seededAt: NOW - 1_000,
+      rotation: 'unproven',
+    });
+    should(actual[0]?.fingerprint).equal('abc');
+  });
+
+  it('reports a home whose harness has rewritten its credential as its own', () => {
+    // Arrange
+    const seedRecord: FleetSeedProvenanceRecord = {
+      accountId: ID_ONE,
+      kind: 'codex',
+      seededFrom: 'host:codex',
+      donorHome: '/home/me/.codex',
+      seedFingerprint: 'seed-digest',
+      seededAt: NOW - 1_000,
+    };
+
+    // Act
+    const actual = observeAccountHealth({
+      manifest: manifest([account(ID_ONE, { kind: 'codex' })]),
+      config: declared(),
+      usage: usage([{ id: ID_ONE }]),
+      local: new Map<string, LocalCredentialReading>([[ID_ONE, { state: 'valid', fingerprint: 'rotated' }]]),
+      provenance: new Map([[ID_ONE, seedRecord]]),
+      at: NOW,
+    });
+
+    // Assert — and the rotation claim comes from the RECORD's harness, so a Codex row is never
+    // rendered with Claude's conditional.
+    should(actual[0]?.seedProvenance?.state).equal('own_login');
+    should(actual[0]?.seedProvenance?.rotation).equal('single_use');
+  });
+
+  it('publishes the provenance a snapshot renders', () => {
+    // Arrange
+    const seedRecord: FleetSeedProvenanceRecord = {
+      accountId: ID_ONE,
+      kind: 'claude',
+      seededFrom: 'host:claude',
+      donorHome: '/home/me/.claude',
+      seedFingerprint: 'abc',
+      seededAt: NOW - 1_000,
+    };
+
+    // Act
+    const snapshot = healthSnapshotFromObservations(
+      observeAccountHealth({
+        manifest: manifest([account(ID_ONE)]),
+        config: declared(),
+        usage: usage([{ id: ID_ONE, signal: 'accepted' }]),
+        local: new Map<string, LocalCredentialReading>([[ID_ONE, { state: 'valid', fingerprint: 'abc' }]]),
+        provenance: new Map([[ID_ONE, seedRecord]]),
+        at: NOW,
+      }),
+      NOW,
+    );
+
+    // Assert — the observation's own digest stays behind; only the verdict travels.
+    should(snapshot.accounts[0]?.seedProvenance?.state).equal('seeded_copy');
+    should(JSON.stringify(snapshot)).not.containEql('abc');
   });
 
   it('carries the provider response fingerprint into the health observation', () => {
@@ -469,6 +595,7 @@ describe('observeAccountHealth', () => {
         },
       ]),
       local: new Map([[ID_ONE, { state: 'valid' as const, expiresAt: NOW + 60_000 }]]),
+      provenance: new Map(),
       at: NOW,
     });
 
@@ -577,6 +704,7 @@ describe('buildFleetHealthCollector', () => {
       },
       classifier({ state: 'valid', fingerprint: 'f', expiresAt: NOW + 1 }),
       { now: () => NOW },
+      emptyProvenanceStore(),
     );
 
     // Act
@@ -589,6 +717,59 @@ describe('buildFleetHealthCollector', () => {
     should(actual.accounts[0]?.verdict).equal('healthy');
     should(actual.accounts[0]?.reason).equal('usage_scope_unavailable');
     should(actual.accounts[0]?.lastCheckedAt).equal(NOW);
+    // Nothing recorded, so nothing is said. Not "this account owns its credential".
+    should(actual.accounts[0]).not.have.property('seedProvenance');
+  });
+
+  it('reads the seed records off the store rather than inventing them', async () => {
+    // Arrange — a host whose first run seeded this account, and whose home still holds that copy.
+    const collector = buildFleetHealthCollector(
+      declared(),
+      { collect: async () => usage([{ id: ID_ONE, signal: 'accepted' }]) },
+      classifier({ state: 'valid', fingerprint: 'seed-digest', expiresAt: NOW + 1 }),
+      { now: () => NOW },
+      provenanceStore([
+        {
+          accountId: ID_ONE,
+          kind: 'claude',
+          seededFrom: 'host:claude',
+          donorHome: '/home/me/.claude',
+          seedFingerprint: 'seed-digest',
+          seededAt: NOW - 90_000,
+        },
+      ]),
+    );
+
+    // Act
+    const actual = await collector.collect(manifest([account(ID_ONE)]));
+
+    // Assert
+    should(actual.accounts[0]?.seedProvenance?.state).equal('seeded_copy');
+    should(actual.accounts[0]?.seedProvenance?.donorHome).equal('/home/me/.claude');
+  });
+
+  it('answers the question it was asked when the seed document cannot be read', async () => {
+    // Arrange — a store that throws, which is a damaged or unreadable disclosure document.
+    const collector = buildFleetHealthCollector(
+      declared(),
+      { collect: async () => usage([{ id: ID_ONE, signal: 'accepted' }]) },
+      classifier({ state: 'valid', fingerprint: 'f', expiresAt: NOW + 1 }),
+      { now: () => NOW },
+      {
+        read: async () => {
+          throw new Error('the seed provenance document is not readable');
+        },
+        write: async () => undefined,
+      },
+    );
+
+    // Act
+    const actual = await collector.collect(manifest([account(ID_ONE)]));
+
+    // Assert — the health report still answers. A person asking whether their fleet is signed in is
+    // not asking about the disclosure file, and refusing them over it is the worse failure.
+    should(actual.accounts[0]?.verdict).equal('healthy');
+    should(actual.accounts[0]).not.have.property('seedProvenance');
   });
 
   it('refuses to publish a snapshot dated by a broken clock', async () => {
@@ -598,6 +779,7 @@ describe('buildFleetHealthCollector', () => {
       { collect: async () => usage([{ id: ID_ONE, signal: 'accepted' }]) },
       classifier({ state: 'valid' }),
       { now: () => Number.NaN },
+      emptyProvenanceStore(),
     );
 
     // Act / Assert — a snapshot stamped with a nonsense instant is worse than no snapshot: every

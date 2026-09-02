@@ -102,7 +102,14 @@ describe('FleetFirstRunSeeder', () => {
       { kind: 'claude', donor: DONORS.claude, target: '/fixture/fleet/homes/claude-default' },
     ]);
     should(results).deepEqual([
-      { account: 'claude-default', kind: 'claude', outcome: { kind: 'seeded', donorHome: DONORS.claude } },
+      {
+        account: 'claude-default',
+        // BOTH HALVES. The name is what a boot line says; the id is what the seed-provenance record
+        // joins on, and a result carrying only the name could not be turned back into a home.
+        accountId: target('claude-default').id,
+        kind: 'claude',
+        outcome: { kind: 'seeded', donorHome: DONORS.claude },
+      },
     ]);
   });
 
@@ -345,10 +352,25 @@ describe('FleetFirstRunSeeder', () => {
 
 describe('reading a seed', () => {
   const results: readonly FleetSeedResult[] = [
-    { account: 'claude-default', kind: 'claude', outcome: { kind: 'seeded', donorHome: DONORS.claude } },
-    { account: 'claude-auto-default', kind: 'claude', outcome: { kind: 'seeded', donorHome: DONORS.claude } },
-    { account: 'codex-default', kind: 'codex', outcome: { kind: 'no-donor', donorHome: DONORS.codex } },
-    { account: 'codex-auto-default', kind: 'codex', outcome: { kind: 'kept' } },
+    {
+      account: 'claude-default',
+      accountId: 'id-claude-default',
+      kind: 'claude',
+      outcome: { kind: 'seeded', donorHome: DONORS.claude },
+    },
+    {
+      account: 'claude-auto-default',
+      accountId: 'id-claude-auto-default',
+      kind: 'claude',
+      outcome: { kind: 'seeded', donorHome: DONORS.claude },
+    },
+    {
+      account: 'codex-default',
+      accountId: 'id-codex-default',
+      kind: 'codex',
+      outcome: { kind: 'no-donor', donorHome: DONORS.codex },
+    },
+    { account: 'codex-auto-default', accountId: 'id-codex-auto-default', kind: 'codex', outcome: { kind: 'kept' } },
   ];
 
   it('should group what it imported by harness, naming the home once', async () => {
@@ -388,11 +410,12 @@ describe('reading a seed', () => {
     const failures = seedFailures([
       {
         account: 'a',
+        accountId: 'id-a',
         kind: 'claude',
         outcome: { kind: 'donor-unreadable', donorHome: DONORS.claude, reason: 'exit 51' },
       },
-      { account: 'b', kind: 'claude', outcome: { kind: 'refused', reason: 'not readable JSON' } },
-      { account: 'c', kind: 'codex', outcome: { kind: 'failed', reason: 'ENOSPC' } },
+      { account: 'b', accountId: 'id-b', kind: 'claude', outcome: { kind: 'refused', reason: 'not readable JSON' } },
+      { account: 'c', accountId: 'id-c', kind: 'codex', outcome: { kind: 'failed', reason: 'ENOSPC' } },
     ]);
 
     // Assert
