@@ -126,16 +126,22 @@ export interface AccountsRosterView {
 /**
  * WHAT CAN STAND IN FOR A SIGN-IN, per harness. Said on the page, not hidden in a document.
  *
+ * TWO WORDS, TWO CONCEPTS, and this is one of the places they used to collapse. A **login** is the
+ * provider sign-in; an **account** is a thing this daemon runs, and several of them can sit on one
+ * login. These sentences used to say "account" for the login and "member" for the account, which is
+ * the exact swap the rest of this page does not make — the heading above says "Every account this
+ * daemon can run", so a note calling that a member taught a third word for it.
+ *
  * Both sentences are about SUBSTITUTION, which is the thing the two harnesses genuinely differ on:
  *
- * - A Claude account's credential can be handed to a wrapper when it launches.
+ * - A Claude login's credential can be handed to a wrapper when it launches.
  *   `CLAUDE_CODE_OAUTH_TOKEN` is a recognised credential source
  *   (`packages/fleet/src/lib/credential-source.ts:60`), injection writes no credential file, so there
- *   is nothing per member to go stale — and the harness itself says such a token is inference-only.
- * - A Codex account's cannot. The only environment credential Codex recognises is `OPENAI_API_KEY`
+ *   is nothing per account to go stale — and the harness itself says such a token is inference-only.
+ * - A Codex login's cannot. The only environment credential Codex recognises is `OPENAI_API_KEY`
  *   (`:61`), which is API-key auth and NOT the ChatGPT subscription login, and sharing a `CODEX_HOME`
  *   would share that home's instructions, skills, hooks and logs along with its credential — at which
- *   point the members stop being distinct agents.
+ *   point the accounts stop being distinct agents.
  *
  * Neither sentence claims a sign-in reaches only one home. The fleet clones a donor credential to the
  * siblings of an identity for BOTH harnesses (`packages/fleet/src/lib/identity.ts`), which is what
@@ -152,12 +158,12 @@ export interface HarnessSharingNote {
 
 export const HARNESS_SHARING: Readonly<Record<FleetHarnessKind, HarnessSharingNote>> = {
   claude: {
-    headline: 'A Claude account can serve several members.',
+    headline: 'One Claude login can serve several accounts.',
     detail:
-      'One sign-in covers every member on the same login, and a Claude OAuth token can stand in for one when a wrapper launches — inference only, with no credential file to go stale.',
+      'One sign-in covers every account on the same login, and a Claude OAuth token can stand in for one when a wrapper launches — inference only, with no credential file to go stale.',
   },
   codex: {
-    headline: 'A Codex account is signed in per member.',
+    headline: 'A Codex login is signed in per account.',
     detail:
       'Nothing can stand in for a Codex subscription sign-in: an API key is different auth, and sharing a Codex home would share its instructions, skills and logs too.',
   },
@@ -226,15 +232,15 @@ export const accountRenewOffer = (account: FleetLoginAccount): AccountRenewOffer
 /**
  * The fleet's verdict for one login, as a sentence.
  *
- * `complete` earns silence: every member holds a usable credential, and a row that said so would spend
- * a line telling somebody nothing happened. Annotated over the whole union rather than defaulted, so a
- * sixth verdict is a compile error here instead of a state that renders as blank.
+ * `complete` earns silence: every account holds a usable credential, and a row that said so would
+ * spend a line telling somebody nothing happened. Annotated over the whole union rather than
+ * defaulted, so a sixth verdict is a compile error here instead of a state that renders as blank.
  */
 const COVERAGE_STATE: Readonly<Record<FleetLoginIdentity['verdict'], string | undefined>> = {
   complete: undefined,
-  sync: 'A member of this login has no credential of its own yet. The next sign-in copies one over.',
+  sync: 'An account on this login has no credential of its own yet. The next sign-in copies one over.',
   login: 'This login needs somebody to sign in.',
-  indeterminate: 'A member’s credential could not be read, so nothing is decided about this login.',
+  indeterminate: 'An account’s credential could not be read, so nothing is decided about this login.',
   'no-login': 'Nothing here signs in: this login’s credential comes from somewhere else.',
 };
 

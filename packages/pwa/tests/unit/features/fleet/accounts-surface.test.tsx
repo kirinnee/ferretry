@@ -203,13 +203,13 @@ describe('AccountsSurface', () => {
    * The spike settled that a Claude login can be substituted at launch and a Codex one cannot. This is
    * the screen where somebody is about to assume the wrong one of the two, so both sentences are here.
    */
-  it('says on the page which harness can share an account and which cannot', async () => {
+  it('says on the page which harness can share a login and which cannot', async () => {
     const { container } = await open(ready([claudeIdentity(), codexIdentity()]));
 
     const claude = must(container.querySelector('[data-accounts-sharing="claude"]'), 'the Claude note');
     const codex = must(container.querySelector('[data-accounts-sharing="codex"]'), 'the Codex note');
-    expect(claude.textContent).toBe('A Claude account can serve several members.');
-    expect(codex.textContent).toBe('A Codex account is signed in per member.');
+    expect(claude.textContent).toBe('One Claude login can serve several accounts.');
+    expect(codex.textContent).toBe('A Codex login is signed in per account.');
     const claudeGroup = must(container.querySelector('[data-accounts-harness="claude"]'), 'the Claude group');
     const codexGroup = must(container.querySelector('[data-accounts-harness="codex"]'), 'the Codex group');
     expect(claudeGroup.textContent).toContain('inference only');
