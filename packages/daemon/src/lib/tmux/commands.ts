@@ -27,7 +27,7 @@ export function panePidArguments(session: string): readonly string[] {
 }
 
 export function paneIdentityArguments(session: string): readonly string[] {
-  return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_id}\t#{pane_pid}'];
+  return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_id} #{pane_pid}'];
 }
 
 export function killPaneArguments(paneId: string): readonly string[] {

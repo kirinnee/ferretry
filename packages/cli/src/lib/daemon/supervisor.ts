@@ -89,6 +89,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
         stateHome: this.layout.stateHome,
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
+        locale: this.layout.locale,
         description: description(this.layout.daemonName),
       }),
     );
@@ -184,6 +185,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
         stateHome: this.layout.stateHome,
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
+        locale: this.layout.locale,
         description: description(this.layout.daemonName),
       }),
     );
@@ -257,7 +259,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
     await claimThenCreateLogDirectory(this.claims, this.files, this.layout);
     return await this.processes.spawnDetached({
       argv: [executable],
-      environment: { FY_HOME: this.layout.stateHome, PATH: this.layout.searchPath },
+      environment: { FY_HOME: this.layout.stateHome, PATH: this.layout.searchPath, ...this.layout.locale },
       logFile: this.layout.logFile,
     });
   }

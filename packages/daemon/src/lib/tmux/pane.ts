@@ -105,3 +105,24 @@ export function promptIsReady(pane: string, cursorY?: number, cursorX?: number):
   }
   return lines.slice(-30).some(line => PROMPT.test(line));
 }
+
+/** A pane's tmux id and the pid of the process it runs. */
+export interface PaneIdentity {
+  readonly paneId: string;
+  readonly pid: number;
+}
+
+/**
+ * Parse `#{pane_id} #{pane_pid}`, whatever the locale tmux printed it under.
+ *
+ * Neither field can hold a space, a tab or an underscore, so any one of the three separates them.
+ * That matters because the separator is the one character tmux may rewrite: a tmux client with no
+ * UTF-8 locale prints a tab as `_`, and a parser that split on the tab alone read `%0_2475105` as a
+ * pane with no pid — which failed every session a daemon without a locale ever launched.
+ */
+export function parsePaneIdentity(output: string): PaneIdentity | undefined {
+  const match = /^(%(?:0|[1-9][0-9]*))[\t _]([1-9][0-9]*)$/u.exec(output.trim());
+  if (match === null) return undefined;
+  const pid = Number(match[2]);
+  return Number.isSafeInteger(pid) && pid > 1 ? { paneId: match[1] as string, pid } : undefined;
+}

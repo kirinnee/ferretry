@@ -97,8 +97,30 @@ export interface ServiceDefinitionSpec {
   readonly logFile: string;
   /** The `PATH` it inherits; a service manager provides almost none. */
   readonly searchPath: string;
+  /**
+   * The UTF-8 locale it runs under. A service manager provides none, and without one the terminal
+   * multiplexer every session runs in rewrites tabs and unicode as `_`.
+   */
+  readonly locale: Readonly<Record<string, string>>;
   /** Human description for the unit header. */
   readonly description: string;
+}
+
+/** The variables sorted by name, so one input renders one file. */
+function sortedEntries(variables: Readonly<Record<string, string>>): readonly (readonly [string, string])[] {
+  return Object.entries(variables).sort(([left], [right]) => (left < right ? -1 : 1));
+}
+
+function systemdEnvironment(variables: Readonly<Record<string, string>>): string {
+  return sortedEntries(variables)
+    .map(([name, value]) => `Environment=${systemdQuote(`${name}=${value}`)}\n`)
+    .join('');
+}
+
+function plistEnvironment(variables: Readonly<Record<string, string>>): string {
+  return sortedEntries(variables)
+    .map(([name, value]) => `<key>${xmlText(name, 'a locale name')}</key><string>${xmlText(value, name)}</string>`)
+    .join('');
 }
 
 /** Renders the systemd user unit. */
@@ -123,7 +145,7 @@ RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)} ${String(EXIT_ADDRESS_C
 KillMode=process
 Environment=${systemdQuote(`FY_HOME=${spec.stateHome}`)}
 Environment=${systemdQuote(`PATH=${spec.searchPath}`)}
-StandardOutput=append:${logSpecifier}
+${systemdEnvironment(spec.locale)}StandardOutput=append:${logSpecifier}
 StandardError=append:${logSpecifier}
 
 [Install]
@@ -158,7 +180,7 @@ export function renderLaunchAgentPlist(spec: LaunchAgentSpec): string {
 <key>AbandonProcessGroup</key><true/>
 <key>StandardOutPath</key><string>${log}</string>
 <key>StandardErrorPath</key><string>${log}</string>
-<key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string></dict>
+<key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string>${plistEnvironment(spec.locale)}</dict>
 </dict></plist>
 `;
 }

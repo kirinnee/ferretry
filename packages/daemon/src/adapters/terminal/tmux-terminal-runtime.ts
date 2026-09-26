@@ -225,10 +225,10 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
   async capture(record: TerminalRecord): Promise<Uint8Array> {
     const [capture, cursor] = await Promise.all([
       this.tmux.execute(['capture-pane', '-p', '-e', '-S', '-2000', '-t', terminalPaneTarget(record)]),
-      this.tmux.execute(['display-message', '-p', '-t', terminalPaneTarget(record), '#{cursor_x}\t#{cursor_y}']),
+      this.tmux.execute(['display-message', '-p', '-t', terminalPaneTarget(record), '#{cursor_x}|#{cursor_y}']),
     ]);
     if (capture.code !== 0 || cursor.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
-    const [x = '0', y = '0'] = cursor.stdout.trim().split(SEPARATOR);
+    const [x = '0', y = '0'] = cursor.stdout.trim().split('|');
     return new TextEncoder().encode(terminalSnapshotFrame(capture.stdout, number(x, 0), number(y, 0)));
   }
 
