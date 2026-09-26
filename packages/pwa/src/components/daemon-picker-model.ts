@@ -82,6 +82,31 @@ export interface AccountPickerOption {
   readonly searchText: string;
 }
 
+/**
+ * How a person reads one account: the name its fleet gave it — the one
+ * `fy fleet ls` prints — and, beneath it, the wrapper id a session is started
+ * with.
+ *
+ * The id is plumbing. It stays reachable because it IS the submitted value and
+ * two accounts can share a display name, but it never leads. When the fleet gave
+ * no separate name the manifest publishes the id as the name, and printing it
+ * twice adds nothing, so `id` is then `null`. Both halves are wire fields read
+ * verbatim: nothing here derives a name from an id's spelling.
+ *
+ * Every surface that names an offered account — the closed box, each row, the
+ * migrate sheet's "current" and "requested" lines — reads this one projection,
+ * so no two of them can disagree about which half leads.
+ */
+export interface AccountLabel {
+  readonly name: string;
+  readonly id: string | null;
+}
+
+export const accountLabel = (account: Pick<AccountPickerOption, 'displayName' | 'wrapper'>): AccountLabel => ({
+  name: account.displayName,
+  id: account.displayName === account.wrapper ? null : account.wrapper,
+});
+
 const accountSearchText = (account: PickerAccount): string =>
   [
     account.displayName,

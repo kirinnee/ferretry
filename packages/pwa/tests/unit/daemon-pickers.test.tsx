@@ -3,13 +3,16 @@ import { useState } from 'react';
 
 import {
   AccountHealthCheck,
+  AccountName,
   AccountPickerField,
   accountEmptyCopy,
   accountFieldOptions,
   accountFieldSource,
+  DaemonAccountName,
   DaemonAccountPicker,
   checkedAmongOffered,
   DaemonProjectPicker,
+  namedAccount,
   ProjectPickerField,
   projectFieldOptions,
   projectFieldSource,
@@ -1503,5 +1506,148 @@ describe('DaemonProjectPicker', () => {
     // Nothing here can register a folder: this field has no write port at all,
     // and the only thing it ever calls is its own `onValueChange`.
     expect(chosen).toEqual(['/work/other', '/work/typed-by-hand']);
+  });
+});
+
+// ─── one label, everywhere an account is named ───────────────────────────────
+
+/** An account whose fleet gave it no name of its own: the manifest publishes the id as the name. */
+const unnamed = account({
+  id: '44444444-4444-4444-8444-444444444444',
+  wrapper: 'claude-auto-bare',
+  home: '/homes/claude-auto-bare',
+  displayName: 'claude-auto-bare',
+});
+
+const face = (): Element | null => find('[data-account-face]');
+
+const faceParts = (): readonly string[] => [...(face()?.children ?? [])].map(part => part.textContent ?? '');
+
+const closedField = async (accounts: readonly PickerAccount[], value: string): Promise<void> => {
+  const options = accountFieldOptions(accountPickerOptions(accounts, usage, null), NOW);
+  await show(
+    <AccountPickerField
+      id="fy-test-agent"
+      label="Account"
+      onValueChange={() => undefined}
+      source={accountFieldSource(slice(), options)}
+      value={value}
+    />,
+  );
+};
+
+describe('namedAccount', () => {
+  const options = accountFieldOptions(accountPickerOptions([account(), codex], usage, null), NOW);
+
+  it('names the offered account the box holds, compared verbatim', () => {
+    const source = accountFieldSource(slice(), options);
+    expect(namedAccount(source, 'codex-auto-atelier')?.displayName).toBe('Atelier Codex');
+    expect(namedAccount(source, ' codex-auto-atelier')).toBeNull();
+    expect(namedAccount(source, 'claude-auto-elsewhere')).toBeNull();
+  });
+
+  it('names nothing while there are no rows to name it from', () => {
+    expect(namedAccount({ kind: 'loading' }, 'claude-auto-studio')).toBeNull();
+    expect(namedAccount({ kind: 'failed', reason: 'down' }, 'claude-auto-studio')).toBeNull();
+  });
+});
+
+describe('the closed account box', () => {
+  it('shows the display name first and the id small beside it, keeping the id as the value', async () => {
+    await closedField([account(), codex], 'claude-auto-studio');
+
+    expect(faceParts()).toEqual(['Studio Claude', 'claude-auto-studio']);
+    expect(input().value).toBe('claude-auto-studio');
+    expect(input().className).toContain('!text-transparent');
+    expect(input().getAttribute('aria-describedby')).toBe('fy-test-agent-face');
+  });
+
+  it('keeps a caller’s own description beside the name', async () => {
+    const options = accountFieldOptions(accountPickerOptions([account()], usage, null), NOW);
+    await show(
+      <AccountPickerField
+        describedBy="fy-test-help"
+        id="fy-test-agent"
+        label="Account"
+        onValueChange={() => undefined}
+        source={accountFieldSource(slice(), options)}
+        value="claude-auto-studio"
+      />,
+    );
+    expect(input().getAttribute('aria-describedby')).toBe('fy-test-help fy-test-agent-face');
+  });
+
+  it('omits the id where it would only repeat the name', async () => {
+    await closedField([unnamed], 'claude-auto-bare');
+
+    expect(faceParts()).toEqual(['claude-auto-bare']);
+  });
+
+  it('steps aside for the id while the box is being edited, and returns on blur', async () => {
+    await closedField([account()], 'claude-auto-studio');
+
+    await openList();
+    expect(face()?.className).toContain('opacity-0');
+    expect(input().className).not.toContain('!text-transparent');
+    // Still mounted, so the name stays the input's description while editing.
+    expect(input().getAttribute('aria-describedby')).toBe('fy-test-agent-face');
+
+    await interact(() => input().blur());
+    expect(face()?.className).not.toContain('opacity-0');
+  });
+
+  it('claims no name for a typed wrapper no row offers', async () => {
+    await closedField([account()], 'claude-auto-elsewhere');
+
+    expect(face()).toBeNull();
+    expect(input().className).not.toContain('!text-transparent');
+    expect(input().hasAttribute('aria-describedby')).toBeFalse();
+  });
+
+  it('drops the redundant id from a row too, keeping harness and mode', async () => {
+    await accountField([unnamed]);
+
+    const line = must(find('[data-picker-identity="wrapper"]'), 'the identity line');
+    expect(line.textContent).toBe('Claude · auto');
+  });
+});
+
+describe('AccountName', () => {
+  it('names an offered account by its display name, id after it', async () => {
+    const [option] = must(accountPickerOptions([account()], [], null), 'options');
+    await show(<AccountName account={must(option, 'the option')} wrapper="claude-auto-studio" />);
+
+    const name = must(find('[data-account-name]'), 'the name');
+    expect([...name.children].map(part => part.textContent)).toEqual(['Studio Claude', 'claude-auto-studio']);
+  });
+
+  it('prints a wrapper the roster does not offer as the id it is', async () => {
+    await show(<AccountName account={null} className="text-muted" wrapper="claude-auto-elsewhere" />);
+
+    const name = must(find('[data-account-name]'), 'the name');
+    expect(name.textContent).toBe('claude-auto-elsewhere');
+    expect(name.className).toContain('mono');
+    expect(name.className).toContain('text-muted');
+  });
+
+  it('reads the roster store for a surface that holds no row', async () => {
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => ({ accounts: [account(), unnamed] }),
+      health: async () => ({ health: new Map(), error: null }),
+      checkHealth: async () => {
+        throw new Error('naming an account must never collect health');
+      },
+    });
+    await show(
+      <p>
+        <DaemonAccountName connection={laptop} store={store} wrapper="claude-auto-studio" />
+        <DaemonAccountName className="font-semibold" connection={laptop} store={store} wrapper="claude-auto-bare" />
+      </p>,
+    );
+    await interact(() => undefined);
+
+    const names = [...root().querySelectorAll('[data-account-name]')];
+    expect(names.map(name => name.textContent)).toEqual(['Studio Claude claude-auto-studio', 'claude-auto-bare']);
+    expect(must(names[1], 'the second name').className).toContain('font-semibold');
   });
 });

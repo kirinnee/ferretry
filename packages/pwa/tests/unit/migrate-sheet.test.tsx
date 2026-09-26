@@ -724,6 +724,44 @@ describe('MigrateSheet account picker', () => {
     expect(container().querySelector(`#${id}`)).toBe(combobox());
   });
 
+  it('names the current and requested accounts by the fleet’s name, as the box beside them does', async () => {
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+    );
+    await interact(() => undefined);
+
+    const names = (): readonly string[] =>
+      [...container().querySelectorAll('[data-account-name]')].map(name => name.textContent ?? '');
+    // The help line and the box: one label, name first, id after.
+    expect(names()).toEqual(['Loge Codex codex-auto-loge']);
+    expect(container().querySelector('[data-account-face]')?.textContent).toBe('Loge Codexcodex-auto-loge');
+
+    // The review's from → to line reads the same label.
+    await openRoster();
+    await typeWrapper('codex-auto-atomi');
+    await submitForm();
+    expect(names().slice(-2)).toEqual(['Loge Codex codex-auto-loge', 'Atomi Codex codex-auto-atomi']);
+  });
+
+  it('gives a wrapper the roster never published no name in the review', async () => {
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+    );
+    await openRoster();
+    await typeWrapper('codex-auto-elsewhere');
+    await submitForm();
+
+    const names = [...container().querySelectorAll('[data-account-name]')].map(name => name.textContent);
+    expect(names.at(-1)).toBe('codex-auto-elsewhere');
+  });
+
+  it('prints the current account as its id when the sheet holds no roster', async () => {
+    await showSheet(<MigrateSheet {...props()} />);
+
+    const help = [...container().querySelectorAll('[data-account-name]')].map(name => name.textContent);
+    expect(help[0]).toBe('codex-auto-loge');
+  });
+
   it('offers only this daemon’s same-CLI accounts, and never a row from the other one', async () => {
     await showSheet(
       <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,

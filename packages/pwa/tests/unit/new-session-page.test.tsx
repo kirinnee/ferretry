@@ -761,22 +761,36 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(recorder.probes).toBe(0);
   });
 
-  it('names the chosen account by its display name under the box that holds its id', async () => {
+  it('leads the closed Account box with the display name, the id small beside it', async () => {
     const { props } = wire({ accounts: [terminal, studio, atelier] });
     await show(props);
+    const face = (): Element | null => root().querySelector('[data-account-face]');
+    const faceParts = (): readonly string[] => [...(face()?.children ?? [])].map(part => part.textContent ?? '');
 
-    // Pre-filled: the box holds the id the daemon is sent, the line names the account.
+    // Pre-filled and closed: the value is still the id the daemon is sent, but
+    // the name is what shows, first and in the box's own type, with the id after it.
     expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    const choice = (): string | null => root().querySelector('[data-account-choice]')?.textContent ?? null;
-    expect(choice()).toBe('Studio Claude· Claude account');
+    expect(faceParts()).toEqual(['Studio Claude', 'claude-auto-studio']);
+    expect(face()?.className).not.toContain('opacity-0');
+    expect(box('fy-new-session-agent').className).toContain('!text-transparent');
+    // A screen reader standing in the box hears the name too.
+    expect(box('fy-new-session-agent').getAttribute('aria-describedby')).toContain(must(face(), 'the face').id);
 
+    // Editing: the face steps aside for the id, which is the thing being typed.
     await openList('fy-new-session-agent');
+    expect(face()?.className).toContain('opacity-0');
+    expect(box('fy-new-session-agent').className).not.toContain('!text-transparent');
     await typeInto(box('fy-new-session-agent'), 'codex-auto-atelier');
-    expect(choice()).toBe('Atelier Codex· Codex account');
+    await closeLists();
+    expect(faceParts()).toEqual(['Atelier Codex', 'codex-auto-atelier']);
 
-    // A typed name no offered account has: nothing is claimed about it.
+    // A typed name no offered account has: nothing is claimed about it, and the
+    // box shows the typed text as it is.
+    await openList('fy-new-session-agent');
     await typeInto(box('fy-new-session-agent'), 'claude-auto-elsewhere');
-    expect(choice()).toBeNull();
+    await closeLists();
+    expect(face()).toBeNull();
+    expect(box('fy-new-session-agent').className).not.toContain('!text-transparent');
   });
 
   it('hints the model box from the chosen account’s own default, never another harness’s', async () => {

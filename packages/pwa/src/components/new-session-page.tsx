@@ -475,9 +475,9 @@ interface AccountRosterFieldProps extends ConnectedFieldProps {
  * the most likely first choice a refusal. The first usable account is filled in
  * so a first-time reader starts on something that works.
  *
- * The box's text is the wrapper id, because that is what the daemon is sent, so
- * `describeChoice` puts the account's display name — "Claude (default, auto)",
- * as `fy fleet ls` prints it — right under it.
+ * The box's value is the wrapper id, because that is what the daemon is sent, but
+ * the picker shows the account's display name — "Claude (default, auto)", as
+ * `fy fleet ls` prints it — in the box whenever it is not being edited.
  *
  * NO "CHECK NOW" HERE. Every row already carries the host's stored health verdict
  * and when it was established, so the re-check button added nothing a person
@@ -493,7 +493,6 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
       connection={field.connection}
       id={fieldId('agent')}
       label="Account"
-      describeChoice={true}
       noAccounts={field.noAccounts}
       onAccountChosen={field.onAccountChosen}
       onValueChange={field.onValueChange}
