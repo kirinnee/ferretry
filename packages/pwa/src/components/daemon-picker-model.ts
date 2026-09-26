@@ -107,6 +107,21 @@ export const accountLabel = (account: Pick<AccountPickerOption, 'displayName' | 
   id: account.displayName === account.wrapper ? null : account.wrapper,
 });
 
+/**
+ * How a person reads the account a SESSION runs on, from the wrapper id its
+ * config records (`config.agent`) — the same `accountLabel` the pickers use, so
+ * the sessions list, the header and the pickers cannot name one account two ways.
+ *
+ * A wrapper the roster does not hold — the account was removed, or renamed since
+ * the session started — is shown as its id, because that id is then the only
+ * true thing left to say. Whether to render anything while the roster is still
+ * unread is the caller's decision, not a guess made here.
+ */
+export const sessionAccountLabel = (accounts: readonly PickerAccount[], agent: string): AccountLabel => {
+  const account = accounts.find(candidate => candidate.wrapper === agent);
+  return account === undefined ? { name: agent, id: null } : accountLabel(account);
+};
+
 const accountSearchText = (account: PickerAccount): string =>
   [
     account.displayName,
