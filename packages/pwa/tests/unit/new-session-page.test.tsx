@@ -52,15 +52,51 @@ describe('NewSessionPage', () => {
     const { view } = page();
 
     expect(view.root.findByProps({ id: 'new-session-heading' }).children.join('')).toBe('New session');
-    expect(input(view, 'fy-new-session-agent').props.placeholder).toBe('claude-auto-loge');
-    expect(input(view, 'fy-new-session-cwd').props.placeholder).toBe('/absolute/path/to/project');
-    expect(input(view, 'fy-new-session-prompt').props.placeholder).toBe('Describe the task…');
+    expect(input(view, 'fy-new-session-agent').props.placeholder).toBe('e.g. claude-auto-default');
+    expect(input(view, 'fy-new-session-cwd').props.placeholder).toBe('Full path, e.g. /home/you/my-project');
+    expect(input(view, 'fy-new-session-prompt').props.placeholder).toBe('Describe what you want the agent to do…');
     expect(button(view, 'Create session').props.disabled).toBeTrue();
 
     change(view, 'fy-new-session-agent', 'claude-auto-loge');
     change(view, 'fy-new-session-prompt', 'Port the page');
 
     expect(button(view, 'Create session').props.disabled).toBeFalse();
+  });
+
+  it('speaks the product, not the tool it replaced, and says what each mode means', () => {
+    const { view } = page();
+    const text = JSON.stringify(view.toJSON());
+
+    // The old internal tool's name, and its word for an agent, were on screen.
+    expect(text).not.toMatch(/kteam|teammate|TUI/u);
+    expect(input(view, 'fy-new-session-label').props.placeholder).toBe('e.g. website-redesign');
+    expect(text).toContain('what you want the agent to do');
+    expect(view.root.findByProps({ 'data-new-session-mode-meaning': '' }).findAllByType('dt')).toHaveLength(2);
+    expect(text).toContain('the agent works through your request on its own');
+    expect(text).toContain('opens a live terminal you type into, like a chat');
+  });
+
+  it('names no model in the override box when no account has been chosen', () => {
+    const { view } = page();
+    // It used to be a fixed `e.g. gpt-5.6-sol`, a Codex model, over any account.
+    expect(input(view, 'fy-new-session-model').props.placeholder).toBe('');
+  });
+
+  it('says why Create is unavailable, and wears the outline look until it is not', () => {
+    const { view } = page();
+    const reason = (): string => view.root.findByProps({ id: 'fy-new-session-create-blocker' }).children.join('');
+
+    expect(reason()).toBe('Choose an account first.');
+    expect(button(view, 'Create session').props['data-variant']).toBeUndefined();
+    expect(button(view, 'Create session').props['aria-describedby']).toBe('fy-new-session-create-blocker');
+
+    change(view, 'fy-new-session-agent', 'claude-auto-default');
+    expect(reason()).toBe('Say what you want the agent to do first.');
+
+    change(view, 'fy-new-session-prompt', 'Tidy the README');
+    expect(view.root.findAllByProps({ id: 'fy-new-session-create-blocker' })).toHaveLength(0);
+    expect(button(view, 'Create session').props['data-variant']).toBe('primary');
+    expect(button(view, 'Create session').props['aria-describedby']).toBeUndefined();
   });
 
   it('allows an interactive session without an opening message and changes the prompt copy with the mode', () => {
@@ -704,7 +740,7 @@ describe('NewSessionPage with the daemon pickers', () => {
    * guard against a spend regression — `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`
    * ("what an unattended fleet pass may spend") is, because it boots a real `fyd`.
    */
-  it('hydrates the stored snapshot on mount and collects only from the control', async () => {
+  it('hydrates the stored snapshot on mount, offers no re-check here, and collects nothing', async () => {
     // Arrange / Act
     const { props, recorder } = wire();
     await show(props);
@@ -713,19 +749,69 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(recorder.snapshots).toBe(1);
     expect(recorder.probes).toBe(0);
 
-    const check = namedButton('Check now');
-    // The copy states what it does NOT do, because somebody who used the old button has every reason
-    // to assume this one still bills them.
-    expect(root().textContent).toContain('uses no inference quota');
-    expect(root().textContent).not.toContain('starts each published account');
-    await press(check);
-
-    expect(recorder.probes).toBe(1);
+    // The re-check control is not on the form that starts a session: every row
+    // already carries its stored verdict, which is all choosing an account needs.
+    expect(
+      [...root().querySelectorAll('button')].some(button => button.textContent?.includes('Check now')),
+    ).toBeFalse();
+    expect(root().querySelector('[data-picker-health]')).toBeNull();
     await openList('fy-new-session-agent');
     await clearAccount();
-    expect(rowText(0)).toContain('healthy');
-    // The account the collection did not cover stays uncovered rather than inheriting a verdict.
-    expect(rowText(1)).toContain('never checked');
+    expect(rowText(0)).toContain('never checked');
+    expect(recorder.probes).toBe(0);
+  });
+
+  it('names the chosen account by its display name under the box that holds its id', async () => {
+    const { props } = wire({ accounts: [terminal, studio, atelier] });
+    await show(props);
+
+    // Pre-filled: the box holds the id the daemon is sent, the line names the account.
+    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
+    const choice = (): string | null => root().querySelector('[data-account-choice]')?.textContent ?? null;
+    expect(choice()).toBe('Studio Claude· Claude account');
+
+    await openList('fy-new-session-agent');
+    await typeInto(box('fy-new-session-agent'), 'codex-auto-atelier');
+    expect(choice()).toBe('Atelier Codex· Codex account');
+
+    // A typed name no offered account has: nothing is claimed about it.
+    await typeInto(box('fy-new-session-agent'), 'claude-auto-elsewhere');
+    expect(choice()).toBeNull();
+  });
+
+  it('hints the model box from the chosen account’s own default, never another harness’s', async () => {
+    const { props } = wire({ accounts: [terminal, studio, atelier] });
+    await show(props);
+
+    expect(box('fy-new-session-model').placeholder).toBe('default: claude-opus-5');
+    expect(box('fy-new-session-model').value).toBe('');
+
+    await openList('fy-new-session-agent');
+    await clearAccount();
+    await pressRow(1);
+    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
+    expect(box('fy-new-session-model').placeholder).toBe('default: gpt-5.6-terra');
+
+    // Typed away from the choice: the hint goes with it.
+    await typeInto(box('fy-new-session-agent'), 'claude-auto-elsewhere');
+    expect(box('fy-new-session-model').placeholder).toBe('');
+  });
+
+  it('shows no default model hint for an account that declares none', async () => {
+    const { props } = wire({ accounts: [{ ...studio, defaultModel: null }] });
+    await show(props);
+
+    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
+    expect(box('fy-new-session-model').placeholder).toBe('');
+  });
+
+  it('offers the known folders in the Project box with typing a path as the fallback', async () => {
+    const { props } = wire();
+    await show(props);
+
+    expect(box('fy-new-session-cwd').placeholder).toBe('Choose a folder, or type its full path');
+    await openList('fy-new-session-cwd');
+    expect(rows()).toHaveLength(2);
   });
 
   it('never offers the previous daemon’s accounts or folders after the connection changes', async () => {
@@ -886,6 +972,11 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(noAccountsText()).toBe(NO_ACCOUNTS_SENTENCE);
     expect(noAccountsText()).not.toMatch(/lane|wrapper|interactive/iu);
     expect(namedButton('Create session').disabled).toBeTrue();
+    // Disabled WITH a reason, and no longer drawn as a filled primary button.
+    const blocker = must(root().querySelector('#fy-new-session-create-blocker'), 'the reason').textContent;
+    expect(blocker).toBe('No account can run a session yet — add one first.');
+    expect(namedButton('Create session').getAttribute('aria-describedby')).toBe('fy-new-session-create-blocker');
+    expect(namedButton('Create session').hasAttribute('data-variant')).toBeFalse();
 
     await press(namedButton('Open Settings'));
     expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings']);

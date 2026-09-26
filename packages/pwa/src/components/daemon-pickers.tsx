@@ -46,6 +46,7 @@ import {
   type AccountPickerOption,
   type AccountUsageRow,
   accountPickerOptions,
+  findAccountOption,
   firstUsableAccountOption,
   type ProjectPickerCatalog,
   type ProjectPickerOption,
@@ -485,6 +486,30 @@ export interface AccountPickerFieldProps extends DaemonPickerFieldProps {
    * cautious answer — the generic sentence, which claims less.
    */
   readonly publishesAnyAccount?: boolean;
+  /**
+   * The offered account the box currently names, drawn under it by its display
+   * name. Absent means this surface does not describe the choice at all; `null`
+   * means it does, and the box names no offered account (typed, or empty).
+   */
+  readonly choice?: AccountPickerOption | null;
+}
+
+/**
+ * The chosen account, by the name its fleet gave it.
+ *
+ * The box's text is the wrapper id — `claude-auto-default` — because that is the
+ * value a session is started with, and the control's typed value is its output.
+ * But that id is plumbing; the fleet already publishes a name a person reads,
+ * the one `fy fleet ls` prints. So the name leads and the harness follows, and
+ * the id stays where it already is, in the box, as the secondary fact.
+ */
+function AccountChoiceLine({ account }: { readonly account: AccountPickerOption }): ReactNode {
+  return (
+    <p className="m-0 flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-meta leading-base" data-account-choice="">
+      <span className="font-medium text-fg">{account.displayName}</span>
+      <span className="text-muted">· {fleetHarnessLabel(account.kind)} account</span>
+    </p>
+  );
 }
 
 /**
@@ -527,6 +552,7 @@ export function AccountPickerField({
   advisory,
   harness,
   publishesAnyAccount,
+  choice,
   ...field
 }: AccountPickerFieldProps): ReactNode {
   const empty = accountEmptyCopy(harness, publishesAnyAccount);
@@ -545,6 +571,7 @@ export function AccountPickerField({
         source={source}
         value={field.value}
       />
+      {choice === undefined || choice === null ? null : <AccountChoiceLine account={choice} />}
       {advisory === undefined ? null : (
         <p className="m-0 text-meta leading-base text-muted" data-picker-advisory="" role="status">
           {advisory} Accounts with no reading show “quota —” rather than a percentage.
@@ -723,6 +750,11 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
    */
   readonly offerHealthCheck?: boolean;
   /**
+   * Name the offered account the box holds, under it, by its display name. For a
+   * surface whose box would otherwise show only a wrapper id once filled in.
+   */
+  readonly describeChoice?: boolean;
+  /**
    * The instant relative labels are measured against. Defaults to the wall clock.
    *
    * Injected so a test can assert "checked 4m ago" against a fixture instead of
@@ -771,6 +803,7 @@ export function DaemonAccountPicker({
   offerHealthCheck = false,
   sessionCapableOnly = false,
   preselect = false,
+  describeChoice = false,
   noAccounts,
   now = Date.now(),
   ...field
@@ -807,6 +840,7 @@ export function DaemonAccountPicker({
       {...(harness === undefined ? {} : { harness })}
       {...(published === null ? {} : { publishesAnyAccount: published.length > 0 })}
       {...(onAccountChosen === undefined ? {} : { onAccountChosen })}
+      {...(describeChoice ? { choice: findAccountOption(scoped, value.trim()) } : {})}
       {...(usageError === undefined || usageError === null ? {} : { advisory: usageError })}
       {...(offerHealthCheck
         ? {
