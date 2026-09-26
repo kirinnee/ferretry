@@ -111,7 +111,9 @@ export function credentialStateCopy(reading: FleetCredentialReading, nowMs: numb
     // zero its own credential — access token, refresh token and expiry — measured at 2.1.220 against a
     // throwaway home (#375). So this state can become `missing` with nobody having touched the account,
     // and a sentence promising renewal would have made that transition look like a defect.
-    return 'Signed in · renews itself on next use, if the provider still accepts it';
+    // `Ready`, and the rest of the clause, are the words the health headline and the terminal use for
+    // this same state, so the two lines on one row cannot describe one credential two ways.
+    return 'Ready · renews itself the first time it’s used, if the provider still accepts it';
   }
   if (reading.state === 'missing') return 'Not signed in';
   if (reading.state === 'unreadable') return `Could not be read — ${reading.reason}`;

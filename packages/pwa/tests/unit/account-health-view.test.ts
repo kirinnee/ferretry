@@ -243,12 +243,37 @@ describe('accountHealthView', () => {
     const renewable = accountHealthView(health({ verdict: 'unknown', reason: 'oauth_refreshable' }), NOW);
     const dead = accountHealthView(health({ verdict: 'needs_relogin', reason: 'oauth_access_expired' }), NOW);
 
-    // Assert — one needs nothing from a person and the other needs a browser. It LEADS with being
-    // signed in, because that is the true and reassuring half: the previous wording, "Expired but
-    // renewable. This is not signed out.", opened with a problem and then took it back.
-    expect(renewable.detail).toBe('Signed in, but this copy needs refreshing.');
+    // Assert — one needs nothing from a person and the other needs a browser.
+    expect(renewable.detail).toBe('Renews itself the first time it’s used.');
     expect(renewable.offersSignIn).toBeFalse();
     expect(dead.offersSignIn).toBeTrue();
+  });
+
+  it('calls a renewable credential Ready in the calm tone, never Healthy and never a warning', () => {
+    // Arrange — THE FIRST-RUN SCREEN. Seeding copies the host's own login, whose access token is nearly
+    // always already expired, so every new account arrives in exactly this state. As `Unknown` in the
+    // warning tone, a new user's whole fleet read as broken over a login that was fine.
+    const view = accountHealthView(
+      health({ verdict: 'unknown', reason: 'oauth_refreshable', lastCheckInconclusive: true }),
+      NOW,
+    );
+
+    // Assert — its own headline; the calm tone; and no "the check was inconclusive" beside it, because
+    // an aged-out access token is exactly what the free check cannot use.
+    expect(view.label).toBe('Ready');
+    expect(view.tone).toBe('ok');
+    expect(view.secondary).toBeUndefined();
+    // And never "Confirmed": nothing has confirmed it, which is the one thing its headline admits.
+    expect(view.checked).toBe('Checked 4m ago');
+  });
+
+  it('keeps every other unknown in the warning tone with its own headline', () => {
+    // Arrange / Act — `Ready` is one reason, not the whole verdict.
+    const view = accountHealthView(health({ verdict: 'unknown', reason: 'check_timeout' }), NOW);
+
+    // Assert
+    expect(view.label).toBe('Unknown');
+    expect(view.tone).toBe('warn');
   });
 
   it('offers no sign-in for a rejection it could not attribute, and says so in the detail', () => {
