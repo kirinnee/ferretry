@@ -1050,7 +1050,7 @@ describe('health rendering', () => {
     const rendered = renderHealth({ at: NOW, accounts }, new Map(), plainAt(40));
 
     // Assert
-    should(rendered.split('\n')).containEql(`      fy fleet login ${accountId}`);
+    should(rendered.split('\n')).containEql(`      sign in again: fy fleet login ${accountId}`);
   });
 
   it('should offer no command for a state a command cannot fix', () => {
@@ -1156,10 +1156,9 @@ describe('health rendering', () => {
     should(painted).not.containEql('inconclusive');
   });
 
-  it('should call a renewable token signed in, because that is what it is', () => {
-    // Arrange / Act — the old wording, "expired, but renewable — not signed out", led with a problem
-    // and then took it back. The login is fine; the access token merely aged out with a refresh token
-    // sitting beside it.
+  it('should call a renewable token READY and say it renews itself, rather than asking for anything', () => {
+    // Arrange / Act — "signed in, but this copy needs refreshing" was true and read as a chore. The
+    // harness renews an aged-out access token itself the first time the account is used.
     const rendered = renderHealth(
       { at: NOW, accounts: [healthRow({ verdict: 'unknown', reason: 'oauth_refreshable' })] },
       names,
@@ -1167,27 +1166,169 @@ describe('health rendering', () => {
     );
 
     // Assert
-    should(rendered).containEql('UNKNOWN  signed in, but this copy needs refreshing');
+    should(rendered).containEql("○ claude-default  READY  renews itself the first time it's used");
+    should(rendered).not.containEql('needs refreshing');
+    should(rendered).not.containEql('UNKNOWN');
   });
 
-  it('should print the renewal command beside a refreshable account, with its id', () => {
-    // Arrange — THE REPORTED INCIDENT. This row used to assert `not.containEql('fy fleet login')`,
-    // because the remedy table was keyed on the VERDICT and `oauth_refreshable`'s verdict is
-    // `unknown`. So the row said "signed in, but this copy needs refreshing" and stopped, while
-    // `fy fleet login <accountId>` renewed exactly that account the whole time — it renews before
-    // anything else, and a renewal that succeeds settles the pass with no browser at all. The row
-    // prints the NAME, so the id the command needs was not on screen either.
+  it('should print NO command beside a refreshable account, because there is nothing to do', () => {
+    // Arrange — THIS USED TO PRINT `fy fleet login <id>`, and on a first run that is every account:
+    // seeding copies the host's own login, whose access token is nearly always already expired. The
+    // owner's fresh install showed four rows of `fy fleet login <uuid>` and read as "log in 4 times".
     const accountId = '34ffb79f-786c-4179-a8aa-f2180a76252a';
-    const accounts = [healthRow({ accountId, verdict: 'unknown', reason: 'oauth_refreshable' })];
+    const accounts = [
+      healthRow({ accountId, verdict: 'unknown', reason: 'oauth_refreshable', lastCheckInconclusive: true }),
+    ];
 
     // Act
     const painted = renderHealth({ at: NOW, accounts }, new Map([[accountId, 'Claude (default)']]), labelled());
 
-    // Assert — the whole id, in the copy-paste class, on a row that stays muted: a credential that
-    // can renew itself is not a fault, and painting it as one is what the muting exists to prevent.
-    should(painted).containEql(`<command>fy fleet login ${accountId}</command>`);
-    should(painted).containEql('<muted>?</muted> Claude (default)  <muted>UNKNOWN</muted>');
+    // Assert — no command and no id; the good ink rather than the warning or the danger one; and no
+    // "last check inconclusive", because an expired access token is exactly what the free check cannot
+    // use, so that clause beside it read as a second fault.
+    should(painted).not.containEql('fy fleet login');
+    should(painted).not.containEql(accountId);
+    should(painted).not.containEql('inconclusive');
     should(painted).not.containEql('<danger>');
+    should(painted).containEql('<good>○</good> Claude (default)  <good>READY</good>');
+  });
+
+  it('should count READY on its own, never as healthy and never as unknown', () => {
+    // Arrange — the verdict on the wire stays `unknown`: nothing has PROVED the provider still accepts
+    // this credential, so the header must not promote it to healthy either.
+    const accounts = [
+      healthRow({ accountId: 'h' }),
+      healthRow({ accountId: 'y', verdict: 'unknown', reason: 'oauth_refreshable' }),
+      healthRow({ accountId: 'u', verdict: 'unknown', reason: 'codex_liveness_unproven', kind: 'codex' }),
+    ];
+
+    // Act
+    const lines = renderHealth({ at: NOW, accounts }, new Map(), WIDE).split('\n');
+
+    // Assert — and it sorts between the two, because it needs nothing and is still unproved.
+    should(lines[0]).equal('3 accounts · 1 unknown · 1 ready · 1 healthy · checked 4m ago');
+    const order = lines.flatMap(line => ['UNKNOWN', 'READY', 'HEALTHY'].filter(word => line.includes(word)));
+    should(order).eql(['UNKNOWN', 'READY', 'HEALTHY']);
+  });
+
+  it("should show the owner's fresh install as two ready logins, not four accounts to sign in", () => {
+    // Arrange — THE REPORTED SCREEN, from a real Mac after `fy daemon reset` and `fy daemon start`:
+    // four seeded accounts, each "? UNKNOWN signed in, but this copy needs refreshing · last check
+    // inconclusive" with its own `fy fleet login <uuid>` under it. The default fleet puts two
+    // accounts on each harness's one login, which is exactly the grouping `fy fleet login` acts on.
+    const refreshable = { verdict: 'unknown', reason: 'oauth_refreshable', lastCheckInconclusive: true } as const;
+    const accounts = [
+      healthRow({ ...refreshable, accountId: 'cx', kind: 'codex', lastCheckedAt: NOW }),
+      healthRow({ ...refreshable, accountId: 'cxa', kind: 'codex', lastCheckedAt: NOW }),
+      healthRow({ ...refreshable, accountId: 'cl', lastCheckedAt: NOW }),
+      healthRow({ ...refreshable, accountId: 'cla', lastCheckedAt: NOW }),
+    ];
+    const defaultNames = new Map([
+      ['cx', 'Codex (default)'],
+      ['cxa', 'Codex (default, auto)'],
+      ['cl', 'Claude (default)'],
+      ['cla', 'Claude (default, auto)'],
+    ]);
+    const logins = new Map([
+      ['cx', 'codex:default'],
+      ['cxa', 'codex:default'],
+      ['cl', 'claude:default'],
+      ['cla', 'claude:default'],
+    ]);
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, defaultNames, plainAt(80), logins);
+
+    // Assert — the whole report, because what it must NOT say matters as much as what it says.
+    should(rendered).equal(
+      [
+        '4 accounts on 2 logins · 4 ready · checked just now',
+        '',
+        "  ○ Codex (default)   READY  renews itself the first time it's used",
+        '    this login also covers Codex (default, auto)',
+        "  ○ Claude (default)  READY  renews itself the first time it's used",
+        '    this login also covers Claude (default, auto)',
+        '',
+        '  Reads credentials and one free status endpoint — no model, no inference quota.',
+      ].join('\n'),
+    );
+  });
+
+  it('should keep accounts on one login apart when they do not say the same thing', () => {
+    // Arrange — one home was signed in again and its sibling was not. Merging them would report the
+    // good one's state for both, which is only true of one.
+    const accounts = [
+      healthRow({ accountId: 'cl' }),
+      healthRow({ accountId: 'cla', verdict: 'unknown', reason: 'oauth_refreshable' }),
+    ];
+    const logins = new Map([
+      ['cl', 'claude:default'],
+      ['cla', 'claude:default'],
+    ]);
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, new Map(), WIDE, logins);
+
+    // Assert
+    should(rendered).containEql('○ cla  READY');
+    should(rendered).containEql('✓ cl   HEALTHY');
+    should(rendered).not.containEql('also covers');
+    should(rendered.split('\n')[0]).equal('2 accounts on 1 login · 1 ready · 1 healthy · checked 4m ago');
+  });
+
+  it('should never merge accounts whose login is not known', () => {
+    // Arrange — without the grouping every account is its own row, exactly as before it existed.
+    const accounts = [healthRow({ accountId: 'a' }), healthRow({ accountId: 'b' })];
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, new Map(), WIDE);
+
+    // Assert
+    should(rendered.split('\n')[0]).equal('2 accounts · 2 healthy · checked 4m ago');
+    should(rendered).containEql('✓ a  HEALTHY');
+    should(rendered).containEql('✓ b  HEALTHY');
+  });
+
+  it('should print ONE command for a login that needs signing in, and name every account it covers', () => {
+    // Arrange — naming any account signs its whole login in (`selectIdentities`), so a second command
+    // for the sibling would be a second browser approval for the same login.
+    const expired = { verdict: 'needs_relogin', reason: 'oauth_credential_missing' } as const;
+    const accounts = [
+      healthRow({ ...expired, accountId: 'one' }),
+      healthRow({ ...expired, accountId: 'two' }),
+      healthRow({ ...expired, accountId: 'three' }),
+    ];
+    const logins = new Map([
+      ['one', 'claude:work'],
+      ['two', 'claude:work'],
+      ['three', 'claude:work'],
+    ]);
+    const workNames = new Map([
+      ['one', 'Claude (work)'],
+      ['two', 'Claude (work, auto)'],
+      ['three', 'Claude (work, bulk)'],
+    ]);
+
+    // Act
+    const rendered = renderHealth({ at: NOW, accounts }, workNames, WIDE, logins);
+
+    // Assert — and the command says what it does before the opaque id it needs.
+    should(rendered).containEql('this login also covers Claude (work, auto) and Claude (work, bulk)');
+    should(rendered.split('\n').filter(line => line.includes('fy fleet login'))).eql([
+      '      sign in: fy fleet login one',
+    ]);
+  });
+
+  it('should say what the command does, in the muted ink, and keep only the command copy-paste painted', () => {
+    // Act
+    const painted = renderHealth(
+      { at: NOW, accounts: [healthRow({ accountId: 'r', verdict: 'needs_relogin', reason: 'oauth_token_rejected' })] },
+      new Map(),
+      labelled(),
+    );
+
+    // Assert
+    should(painted).containEql('<muted>sign in again:</muted> <command>fy fleet login r</command>');
   });
 
   it('should still say a check was inconclusive when the reason does not already say so', () => {
@@ -1221,7 +1362,7 @@ describe('health rendering', () => {
    *
    * The Claude case asserts BOTH halves: that the conditional is present and that the flat claim is
    * absent. Asserting only the first would pass over a sentence that said "if Claude rotates refresh
-   * tokens, renewing it signs that install out" — conditional in form and an assertion in substance.
+   * tokens, whichever renews first signs the other out" — conditional in form and an assertion in substance.
    */
   /**
    * The report as ONE line, so an assertion about WHAT was said is not also an assertion about
@@ -1260,11 +1401,11 @@ describe('health rendering', () => {
     // Assert — the evidence for Claude is that a REPLACEMENT refresh token is stored, which is not
     // the same claim as the old one being invalidated. Nobody has measured that.
     should(unwrapped(rendered)).containEql(
-      'If Claude rotates refresh tokens, renewing it — or running an agent on it — may sign that install out.',
+      'If Claude rotates refresh tokens, whichever renews first — this copy, by running an agent, or that install — may sign the other out.',
     );
     // And the flat claim is NOT made. This half is what a copy-editing pass would delete.
-    should(rendered).not.containEql('signs that install out');
-    should(rendered).not.containEql('will sign that install out');
+    should(rendered).not.containEql('signs the other out');
+    should(rendered).not.containEql('will sign the other out');
   });
 
   it('should say the Codex consequence flatly, because single-use rotation is established there', () => {
@@ -1280,7 +1421,7 @@ describe('health rendering', () => {
 
     // Assert
     should(unwrapped(rendered)).containEql(
-      'Codex refresh tokens are single-use, so renewing it — or running an agent on it — signs that install out.',
+      'Codex refresh tokens are single-use: whichever renews first — this copy, by running an agent, or that install — signs the other out.',
     );
     should(rendered).not.containEql('If Codex rotates');
   });
@@ -1305,7 +1446,7 @@ describe('health rendering', () => {
     should(unwrapped(rendered)).containEql(
       "own login: seeded from this host's own Claude install (/home/me/.claude) on 12 Aug 2026, and replaced since.",
     );
-    should(rendered).not.containEql('sign that install out');
+    should(rendered).not.containEql('the other out');
   });
 
   it('should say nothing at all about an account with no seed record', () => {
@@ -1321,12 +1462,12 @@ describe('health rendering', () => {
   it('should print the disclosure above the command it changes the meaning of', () => {
     // Arrange — an account a login repairs, whose credential is still the donor's copy.
     const rendered = renderHealth(
-      { at: NOW, accounts: [seedRow({}, { verdict: 'unknown', reason: 'oauth_refreshable' })] },
+      { at: NOW, accounts: [seedRow({}, { verdict: 'needs_relogin', reason: 'oauth_access_expired' })] },
       names,
       WIDE,
     ).split('\n');
 
-    // Assert — somebody about to run a renewal has to have read this first, so it cannot sit below.
+    // Assert — somebody about to run a sign-in has to have read this first, so it cannot sit below.
     const disclosure = rendered.findIndex(line => line.includes('seeded copy:'));
     const remedy = rendered.findIndex(line => line.includes('fy fleet login seeded'));
     should(disclosure).be.greaterThan(-1);
@@ -1578,8 +1719,8 @@ describe('renderIdentityStatus', () => {
     // Assert — one identity, two homes: the shape that makes the approval count obvious.
     should(actual).startWith('1 identity\n');
     should(actual).containEql(`${KEY}  every home has a usable credential`);
-    should(actual).containEql('a  valid');
-    should(actual).containEql('b  expired, renewable');
+    should(actual).containEql('Account a  valid');
+    should(actual).containEql("Account b  ready, renews itself the first time it's used");
   });
 
   it('should pluralise more than one identity', () => {
@@ -1594,7 +1735,7 @@ describe('renderIdentityStatus', () => {
     });
 
     // Act / Assert
-    should(renderIdentityStatus([status])).containEql('1 home would be copied from a');
+    should(renderIdentityStatus([status])).containEql('1 home would be copied from Account a');
   });
 
   it('should promise one approval covers the whole identity when nothing is usable', () => {
@@ -1609,7 +1750,7 @@ describe('renderIdentityStatus', () => {
 
     // Assert
     should(actual).containEql('needs one browser approval, which would then cover every home here');
-    should(actual).containEql('a  none');
+    should(actual).containEql('Account a  none');
   });
 
   it('should mark an identity it could not read as unknown, not as signed out', () => {
@@ -1624,7 +1765,7 @@ describe('renderIdentityStatus', () => {
 
     // Assert
     should(actual).containEql('UNKNOWN — no usable credential was found');
-    should(actual).containEql('a  UNREADABLE');
+    should(actual).containEql('Account a  UNREADABLE');
   });
 
   it('should say an api-key identity has no provider login at all', () => {

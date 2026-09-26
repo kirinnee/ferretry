@@ -102,10 +102,12 @@ export function registerFleetCommands(program: Command, controller: FleetControl
         '\nIt spends nothing. This used to launch every wrapper and ask a model to answer a sentinel —\n' +
           'a billable turn per account — and the description said so. It is now a local credential read\n' +
           'plus one free read-only status endpoint, and the report repeats that promise every time.\n\n' +
-          'An account a command can repair gets that exact command printed under its row, carrying the\n' +
-          'whole account id: `fy fleet login <accountId>` matches on the id, and the row above it shows\n' +
-          'the display name. That includes an account whose access token has aged out with a refresh\n' +
-          'token beside it — it renews with no browser and nobody asked.',
+          'An account that needs signing in gets that exact command under its row, after what it does:\n' +
+          '`fy fleet login <accountId>` matches on the whole id, and the row above it shows the name.\n' +
+          'Accounts that share one login and say the same thing are shown once, with one command.\n\n' +
+          'READY means the access token has aged out beside a good refresh token — what a first run\n' +
+          'copies from this host — and it renews itself the first time the account is used, so there\n' +
+          'is nothing to run. It is not HEALTHY: nothing has confirmed it with the provider yet.',
       ),
   ).action(async (_flags: unknown, command: Command) => {
     await controller.health(merged(command));

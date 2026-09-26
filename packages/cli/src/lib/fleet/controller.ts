@@ -1,4 +1,11 @@
-import { FleetApplyFailureError, type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
+import {
+  type FleetConfig,
+  FleetApplyFailureError,
+  type FleetIdentity,
+  type FleetManifest,
+  MixedIdentityAuthError,
+  selectIdentities,
+} from '@ferretry/fleet';
 import type {
   IFleetApplier,
   IFleetClock,
@@ -16,6 +23,8 @@ import type {
 } from './ports.ts';
 import type { FleetPresentation } from './presentation.ts';
 import {
+  type FleetAccountLogins,
+  fleetAccountLogins,
   fleetAccountNames,
   renderApplyPlan,
   renderApplyResult,
@@ -224,17 +233,34 @@ export class FleetController {
    * needs their names. A verdict addressed to an opaque account id answers "how many need a login"
    * and never "which". The id still travels, on the remedy line, because `fy fleet login` matches on
    * exactly it -- a name alone would be readable and unactionable.
+   *
+   * The configuration the collector needs also says WHICH LOGIN each account signs in with — the same
+   * identities `fy fleet login` acts on, derived without reading any credential — so accounts sharing
+   * one login and saying the same thing print as one row. A configuration that cannot say (two
+   * accounts claim one login and disagree about how it authenticates) costs the grouping and never
+   * the report: `fy fleet login` refuses that configuration by name, and this is not where to learn it.
    */
   async health(options: FleetCommandOptions): Promise<void> {
     if (this.deps.health === undefined) throw new Error('fleet health probing is not configured for this CLI');
-    const collector = this.deps.health.forConfig(await this.deps.config.load());
+    const config = await this.deps.config.load();
+    const collector = this.deps.health.forConfig(config);
     const manifest = await this.#manifest();
     const snapshot = await collector.collect(manifest);
+    const logins = this.#logins(config, manifest);
     // The one report whose colour MEANS something per line, so it is the one that must reach stdout
     // unrepainted. Everything else here says "that worked" in one colour, which `success` supplies.
     this.#reportRendered(snapshot, options, () =>
-      renderHealth(snapshot, fleetAccountNames(manifest), this.deps.presentation),
+      renderHealth(snapshot, fleetAccountNames(manifest), this.deps.presentation, logins),
     );
+  }
+
+  #logins(config: FleetConfig, manifest: FleetManifest): FleetAccountLogins {
+    try {
+      return fleetAccountLogins(this.deps.identities.identities(config, manifest));
+    } catch (error) {
+      if (error instanceof MixedIdentityAuthError) return new Map();
+      throw error;
+    }
   }
 
   /**

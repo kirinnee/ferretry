@@ -1,10 +1,18 @@
 import { describe, it } from 'bun:test';
-import type { FleetApplyFailureError } from '@ferretry/fleet';
+import {
+  type FleetAccountHealth,
+  type FleetApplyFailureError,
+  type FleetIdentity,
+  fleetIdentityMemberOf,
+  MixedIdentityAuthError,
+} from '@ferretry/fleet';
 import should from 'should';
 import { FleetController, type FleetControllerDeps } from '../../../src/lib/fleet/controller';
+import type { IFleetIdentitySource } from '../../../src/lib/fleet/ports';
 import { PLAIN_FLEET_PRESENTATION } from '../../../src/lib/fleet/presentation';
 import {
   ACCOUNT_ID,
+  account,
   applyResult,
   CapturingOutput,
   FailingApplier,
@@ -13,6 +21,7 @@ import {
   HISTORY_FAILED,
   IDENTITY_KEY,
   LOCK_RESIDUE,
+  manifest,
   RecordingApplier,
   RecordingHealthCollector,
   RecordingIdentitySource,
@@ -309,6 +318,91 @@ describe('reporting health', () => {
 
     // Act + Assert
     await should(subject.health({})).be.rejectedWith(/health probing is not configured/u);
+  });
+
+  /** Two accounts on one login, both holding an aged-out token beside a good refresh token. */
+  const SIBLING_ID = '00000000-0000-4000-8000-00000000c1a1';
+  const twoOnOneLogin = (): {
+    manifests: StubManifestSource;
+    health: RecordingHealthCollector;
+    members: FleetIdentity['members'];
+  } => {
+    const accounts = [
+      account({ displayName: 'Claude (default)' }),
+      account({ id: SIBLING_ID, displayName: 'Claude (default, auto)' }),
+    ];
+    const row = (accountId: string): FleetAccountHealth => ({
+      accountId,
+      kind: 'claude',
+      verdict: 'unknown',
+      reason: 'oauth_refreshable',
+      evidence: 'local_credential',
+      lastCheckedAt: 1_785_000_000_000,
+      verdictAt: 1_785_000_000_000,
+      lastCheckInconclusive: true,
+    });
+    return {
+      manifests: new StubManifestSource(manifest(accounts)),
+      health: new RecordingHealthCollector({ at: 1_785_000_000_000, accounts: [row(ACCOUNT_ID), row(SIBLING_ID)] }),
+      members: accounts.map(fleetIdentityMemberOf),
+    };
+  };
+
+  it('should show accounts that share one login as one row, from the same identities `fy fleet login` uses', async () => {
+    // Arrange
+    const { manifests, health, members } = twoOnOneLogin();
+    const identities: IFleetIdentitySource = {
+      identities: () => [
+        { key: 'claude:default', kind: 'claude', identity: 'default', auth: 'oauth', declared: true, members },
+      ],
+      survey: () => Promise.resolve([]),
+    };
+    const { subject, out } = controller({ health, manifests, identities });
+
+    // Act
+    await subject.health({});
+
+    // Assert
+    should(out.text).containEql('2 accounts on 1 login · 2 ready');
+    should(out.text).containEql('this login also covers Claude (default, auto)');
+    should(out.text).not.containEql('fy fleet login');
+  });
+
+  it('should still report every account when the configuration cannot say which login is whose', async () => {
+    // Arrange — two accounts claiming one login with different auth is refused by `fy fleet login`,
+    // by name. Here it costs only the grouping: a health report that failed over it would hide every
+    // verdict to report a configuration mistake somewhere else.
+    const { manifests, health } = twoOnOneLogin();
+    const identities: IFleetIdentitySource = {
+      identities: () => {
+        throw new MixedIdentityAuthError('claude:default', ['oauth', 'api-key']);
+      },
+      survey: () => Promise.resolve([]),
+    };
+    const { subject, out } = controller({ health, manifests, identities });
+
+    // Act
+    await subject.health({});
+
+    // Assert
+    should(out.text).containEql('2 accounts · 2 ready');
+    should(out.text).containEql('○ Claude (default)');
+    should(out.text).containEql('○ Claude (default, auto)');
+  });
+
+  it('should not swallow a failure that is not about the configuration', async () => {
+    // Arrange
+    const { manifests, health } = twoOnOneLogin();
+    const identities: IFleetIdentitySource = {
+      identities: () => {
+        throw new Error('disk on fire');
+      },
+      survey: () => Promise.resolve([]),
+    };
+    const { subject } = controller({ health, manifests, identities });
+
+    // Act + Assert
+    await should(subject.health({})).be.rejectedWith(/disk on fire/u);
   });
 });
 
