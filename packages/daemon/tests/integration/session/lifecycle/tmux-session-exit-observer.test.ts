@@ -135,23 +135,13 @@ async function fixture(exitCode: number): Promise<ExitFixture> {
   };
 }
 
-function observer(
-  subject: ExitFixture,
-  commands: TmuxCommandPort = subject.commands,
-  sleep?: (milliseconds: number) => Promise<void>,
-): TmuxSessionExitObserver {
-  return new TmuxSessionExitObserver(
-    DAEMON,
-    subject.storage,
-    subject.store,
-    commands,
-    subject.gate,
-    { now: () => NOW },
-    sleep,
-  );
+function observer(subject: ExitFixture, commands: TmuxCommandPort = subject.commands): TmuxSessionExitObserver {
+  return new TmuxSessionExitObserver(DAEMON, subject.storage, subject.store, commands, subject.gate, {
+    now: () => NOW,
+  });
 }
 
-/** The real server for everything but the pane-metadata read, which gets the given answer. */
+/** The real server for everything but the pane-exit read, which gets the given answer. */
 function metadataAnswers(subject: ExitFixture, answer: () => { code: number; stdout: string }): TmuxCommandPort {
   return {
     execute: async (arguments_, stdin) =>
@@ -196,9 +186,12 @@ function selfCheck(subject: ExitFixture): SessionHealthService {
   );
 }
 
-/** Waits on tmux itself, never on a fixed sleep: the prompt is up, or the pane is dead. */
+/**
+ * Waits on the condition itself, never on a fixed sleep. The deadline is generous because a loaded
+ * CI host is exactly where these moments stretch; a healthy run returns in milliseconds.
+ */
 async function until(check: () => Promise<boolean>, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
     if (await check()) return;
     await Bun.sleep(25);
   }
@@ -212,12 +205,43 @@ async function exitHarness(subject: ExitFixture): Promise<void> {
   await until(async () => (await subject.controller.state(subject.tmuxSession)).dead, 'the pane to die');
 }
 
+/** Whether a pid no longer names any process, zombie included — so tmux has reaped it. */
+function reaped(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Ticks the self-check until it settles something, the way the daemon's timer would.
+ *
+ * Deliberately NOT one tick after the pane died: tmux marks a pane dead when its terminal closes and
+ * records how it ended only after it reaps the child, and on a loaded host a tick can land between.
+ * The observer leaves such a pane running for the next tick, so the test ticks too — and first waits
+ * for the harness to be reaped, so the exit it asserts on is one tmux has certainly recorded.
+ */
+async function tickUntilSettled(subject: ExitFixture, service: SessionHealthService) {
+  const registration = await subject.store.registration(DAEMON, subject.id);
+  if (registration === undefined) throw new Error('the pane registration is missing');
+  await until(async () => reaped(registration.pid), 'tmux to reap the harness');
+  let outcome = await service.selfCheck();
+  await until(async () => {
+    if (outcome.exited.length > 0) return true;
+    outcome = await service.selfCheck();
+    return outcome.exited.length > 0;
+  }, 'a self-check to settle the exited session');
+  return outcome;
+}
+
 async function state(subject: ExitFixture): Promise<Record<string, unknown>> {
   return (await subject.storage.readState(subject.id)) as Record<string, unknown>;
 }
 
 describe('tmux session exit observer', () => {
-  it('should move a running session whose harness exited to failed on one self-check tick', async () => {
+  it('should move a running session whose harness exited to failed with its exit status', async () => {
     // Arrange
     const subject = await fixture(3);
     const service = selfCheck(subject);
@@ -225,7 +249,7 @@ describe('tmux session exit observer', () => {
     await exitHarness(subject);
 
     // Act
-    const actual = await service.selfCheck();
+    const actual = await tickUntilSettled(subject, service);
 
     // Assert
     should(actual.exited).deepEqual([subject.id]);
@@ -259,7 +283,7 @@ describe('tmux session exit observer', () => {
     await exitHarness(subject);
 
     // Act
-    const actual = await selfCheck(subject).selfCheck();
+    const actual = await tickUntilSettled(subject, selfCheck(subject));
 
     // Assert
     should(actual.exited).deepEqual([subject.id]);
@@ -369,29 +393,87 @@ describe('tmux session exit observer', () => {
     should(results).deepEqual([[], [], [], [], []]);
   }, 20_000);
 
-  it('should wait briefly for an exit status tmux has not recorded yet, then settle without one', async () => {
-    // Arrange — tmux marks the pane dead before it reaps the child; here it never reaps at all.
+  it('should leave a dead pane with no exit status running until a later tick sees one', async () => {
+    // Arrange — tmux has marked the pane dead but not yet reaped its child.
     const subject = await fixture(0);
     await exitHarness(subject);
-    const sleeps: number[] = [];
     let reads = 0;
     const late = metadataAnswers(subject, () => {
       reads += 1;
-      return { code: 0, stdout: reads < 3 ? '1||0|0|24|80' : '1|7|0|0|24|80' };
+      return { code: 0, stdout: reads < 2 ? '1||' : '1|7|' };
     });
-    const never = metadataAnswers(subject, () => ({ code: 0, stdout: '1||0|0|24|80' }));
-    const refused = metadataAnswers(subject, () => ({ code: 1, stdout: '' }));
-    const sleep = async (milliseconds: number): Promise<void> => void sleeps.push(milliseconds);
+    const tracker = observer(subject, late);
 
     // Act
-    const arrived = await observer(subject, late, sleep).observe();
-    const missing = await observer(subject, never, sleep).observe();
-    const unreadable = await observer(subject, refused, sleep).observe();
+    const first = await tracker.observe();
+    const second = await tracker.observe();
 
     // Assert
-    should(arrived.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 7 }]);
-    should(missing.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: undefined }]);
+    should(first).deepEqual([]);
+    should(second.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: 7, signal: undefined }]);
+  }, 20_000);
+
+  it('should settle as not recorded only after the status stayed missing for three ticks', async () => {
+    // Arrange
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    const never = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: '1||' })),
+    );
+
+    // Act
+    const ticks = [await never.observe(), await never.observe(), await never.observe()];
+
+    // Assert
+    should(ticks.map(tick => tick.map(item => item.exit))).deepEqual([
+      [],
+      [],
+      [{ kind: 'exited', exitStatus: undefined, signal: undefined }],
+    ]);
+  }, 20_000);
+
+  it('should start the missing-status count again for a pane that came back or was replaced', async () => {
+    // Arrange
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    let answer = '1||';
+    const flaky = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: answer })),
+    );
+    await flaky.observe();
+    await flaky.observe();
+    answer = '0||';
+    await flaky.observe();
+    answer = '1||';
+
+    // Act
+    const afterReset = [await flaky.observe(), await flaky.observe()];
+
+    // Assert — two misses, a live read that forgets them, then two more misses: still not settled.
+    should(afterReset).deepEqual([[], []]);
+  }, 20_000);
+
+  it('should settle a pane a signal ended at once, naming the signal', async () => {
+    // Arrange
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    const signalled = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: '1||9' })),
+    );
+    const refused = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 1, stdout: '' })),
+    );
+
+    // Act
+    const killed = await signalled.observe();
+    const unreadable = await refused.observe();
+
+    // Assert
+    should(killed.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: undefined, signal: 9 }]);
     should(unreadable).deepEqual([]);
-    should(sleeps.length).equal(2 + 9);
   }, 20_000);
 });

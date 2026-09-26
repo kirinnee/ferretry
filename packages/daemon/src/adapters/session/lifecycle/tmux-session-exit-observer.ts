@@ -12,9 +12,8 @@ import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
   hasSessionArguments,
   paneIdentityArguments,
-  paneMetadataArguments,
   parsePaneIdentity,
-  parsePaneMetadata,
+  sessionTarget,
   type TmuxCommandPort,
 } from '../../../lib/tmux/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
@@ -33,19 +32,37 @@ export interface SessionLaunchesInFlight {
 const ABSENT_SESSION = /can't find session|no server running|error connecting to/iu;
 
 /**
- * How long a dead pane is given to report its exit status.
+ * How many consecutive self-check ticks a dead pane may go without an exit status before the
+ * session is settled as an exit nobody recorded.
  *
- * tmux marks a pane dead when its terminal closes, and records the status only once it reaps the
- * child, a moment later. A tick landing between the two would otherwise settle the session as an
- * exit nobody recorded, permanently, when the number was milliseconds away. A tmux that never
- * reports one still settles, after the budget.
+ * tmux marks a pane dead when its terminal closes and records the status only once it reaps the
+ * child, which on a loaded host can be a long moment later. A tick landing between the two must not
+ * settle the session, because "not recorded" is permanent and the number may be one tick away. So a
+ * dead pane without a status is left `running` and looked at again, and the bound is counted in
+ * TICKS rather than waited out inside one: a tick never sleeps, and the honest cost of the slow case
+ * is a session that reads running for an extra interval or two.
  */
-const EXIT_STATUS_ATTEMPTS = 10;
-const EXIT_STATUS_POLL_MS = 50;
+const EXIT_STATUS_MISSING_TICK_LIMIT = 3;
 
 function status(state: JsonValue | undefined): string | undefined {
   const value = jsonObject(state)?.status;
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * The three facts that say how a pane ended. `pane_dead_signal` is why this is not the shared
+ * metadata format: a program a signal killed has NO `pane_dead_status`, only a signal number.
+ */
+const PANE_EXIT_FORMAT = '#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}';
+
+function paneNumber(field: string | undefined): number | undefined {
+  if (field === undefined || !/^[0-9]+$/u.test(field)) return undefined;
+  return Number(field);
+}
+
+/** A dead pane's identity for the missing-status count: a relaunched pane starts from zero. */
+function paneKey(pane: RegisteredTerminalPane): string {
+  return `${pane.sessionId}\n${pane.tmuxSession}\n${pane.paneId}\n${pane.pid}\n${pane.processStartTicks}`;
 }
 
 function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): boolean {
@@ -69,8 +86,12 @@ function samePane(left: RegisteredTerminalPane, right: RegisteredTerminalPane): 
  * The process-start incarnation is deliberately NOT consulted: it is how a LIVE pid is told apart
  * from a reused one, and a dead pane has no live process to ask; tmux's own `pane_dead` is the proof.
  *
- * NOTHING IS KILLED AND NOTHING IS LAUNCHED. The observation is two read-only tmux queries per
+ * NOTHING IS KILLED AND NOTHING IS LAUNCHED. The observation is three read-only tmux queries per
  * running session and the settle is one state write plus one journal event.
+ *
+ * THE ONE PIECE OF STATE is how many consecutive ticks each dead pane has gone without an exit
+ * status. It is memory only and keyed by the whole pane identity, so a restarted daemon simply
+ * observes again from zero, and it is pruned to the panes seen on each tick.
  */
 export class TmuxSessionExitObserver implements SessionExitPort {
   constructor(
@@ -80,22 +101,29 @@ export class TmuxSessionExitObserver implements SessionExitPort {
     private readonly tmux: TmuxCommandPort,
     private readonly launches: SessionLaunchesInFlight,
     private readonly clock: ClockPort,
-    private readonly sleep: (milliseconds: number) => Promise<void> = milliseconds => Bun.sleep(milliseconds),
   ) {}
+
+  /** Pane identity → consecutive ticks it has been dead with no exit status. */
+  private readonly missingStatus = new Map<string, number>();
 
   async observe(): Promise<readonly SessionExitObservation[]> {
     if (this.daemonId.length === 0) return [];
     // The tolerant scan: one hand-edited registration must not hide every other exited session.
     const { registrations } = await this.panes.scan(this.daemonId);
     const observed: SessionExitObservation[] = [];
+    const stillMissing = new Set<string>();
     for (const registration of registrations) {
       const id = parseSessionId(registration.sessionId);
       if (this.launches.launching(id)) continue;
       const current = status(await this.storage.readState(id));
       if (current === undefined || !claimsRunningAgent(current)) continue;
       const exit = await this.exitOf(registration).catch(() => undefined);
-      if (exit !== undefined) observed.push({ id, status: current, registration, exit });
+      if (exit === undefined) continue;
+      const unrecorded = exit.kind === 'exited' && exit.exitStatus === undefined && exit.signal === undefined;
+      if (unrecorded && !this.missedEnough(registration, stillMissing)) continue;
+      observed.push({ id, status: current, registration, exit });
     }
+    for (const key of this.missingStatus.keys()) if (!stillMissing.has(key)) this.missingStatus.delete(key);
     return observed;
   }
 
@@ -135,6 +163,16 @@ export class TmuxSessionExitObserver implements SessionExitPort {
     return true;
   }
 
+  /** Counts one more statusless tick for a dead pane; true once the bound says to settle anyway. */
+  private missedEnough(registration: RegisteredTerminalPane, stillMissing: Set<string>): boolean {
+    const key = paneKey(registration);
+    const misses = (this.missingStatus.get(key) ?? 0) + 1;
+    if (misses >= EXIT_STATUS_MISSING_TICK_LIMIT) return true;
+    this.missingStatus.set(key, misses);
+    stillMissing.add(key);
+    return false;
+  }
+
   /** How the registered pane ended, or `undefined` when it is live or nothing could be proven. */
   private async exitOf(registration: RegisteredTerminalPane): Promise<SessionPaneExit | undefined> {
     const present = await this.tmux.execute(hasSessionArguments(registration.tmuxSession));
@@ -144,14 +182,17 @@ export class TmuxSessionExitObserver implements SessionExitPort {
     const identity = parsePaneIdentity(identityResult.stdout);
     if (identity === undefined || identity.paneId !== registration.paneId || identity.pid !== registration.pid)
       return undefined;
-    for (let attempt = 1; ; attempt += 1) {
-      const metadataResult = await this.tmux.execute(paneMetadataArguments(registration.tmuxSession));
-      if (metadataResult.code !== 0) return undefined;
-      const metadata = parsePaneMetadata(metadataResult.stdout);
-      if (!metadata.dead) return undefined;
-      if (metadata.exitCode !== undefined || attempt >= EXIT_STATUS_ATTEMPTS)
-        return { kind: 'exited', exitStatus: metadata.exitCode };
-      await this.sleep(EXIT_STATUS_POLL_MS);
-    }
+    const exitResult = await this.tmux.execute([
+      'display-message',
+      '-p',
+      '-t',
+      sessionTarget(registration.tmuxSession),
+      PANE_EXIT_FORMAT,
+    ]);
+    if (exitResult.code !== 0) return undefined;
+    const [dead, exitStatus, signal] = exitResult.stdout.trimEnd().split('|');
+    return dead === '1'
+      ? { kind: 'exited', exitStatus: paneNumber(exitStatus), signal: paneNumber(signal) }
+      : undefined;
   }
 }

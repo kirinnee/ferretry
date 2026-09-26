@@ -294,8 +294,10 @@ describe('a session on a daemon `fy daemon start` launched', () => {
     await Bun.spawn([TMUX, '-S', socket, 'send-keys', '-t', terminal, 'Enter']).exited;
     const exitedAt = Date.now();
     let actual = await read();
-    // Three intervals of slack for a loaded CI host; the old behaviour never left `running` at all.
-    while (actual.state.status === 'running' && Date.now() - exitedAt < 3_000) {
+    // Generous for a loaded CI host: a dead pane whose exit status tmux has not recorded yet is left
+    // running for the next tick, so the settle may take a few intervals. The old behaviour never left
+    // `running` at all, so any deadline separates the two.
+    while (actual.state.status === 'running' && Date.now() - exitedAt < 20_000) {
       await Bun.sleep(100);
       actual = await read();
     }

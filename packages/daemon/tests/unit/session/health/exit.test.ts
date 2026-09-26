@@ -50,6 +50,14 @@ describe('exited session transition', () => {
     });
   });
 
+  it('should fail a signalled exit as a crash naming the signal, without inventing an exit code', () => {
+    // Act
+    const actual = exitedSessionTransition(observation({ kind: 'exited', signal: 9 }));
+
+    // Assert
+    should(actual).deepEqual({ status: 'failed', health: 'crashed', reason: 'the agent was ended by signal 9' });
+  });
+
   it('should fail an exit tmux kept no status for without calling it a crash', () => {
     // Act
     const actual = exitedSessionTransition(observation({ kind: 'exited' }));

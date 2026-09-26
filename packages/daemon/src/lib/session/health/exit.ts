@@ -16,8 +16,11 @@ import type { RegisteredTerminalPane } from '../reap.ts';
 
 /** How the registered pane was proven not to be running. */
 export type SessionPaneExit =
-  /** tmux kept the pane after its program ended. `exitStatus` is `pane_dead_status`, when kept. */
-  | { readonly kind: 'exited'; readonly exitStatus?: number | undefined }
+  /**
+   * tmux kept the pane after its program ended. `exitStatus` is `pane_dead_status`, set when the
+   * program exited; `signal` is `pane_dead_signal`, set INSTEAD when a signal ended it.
+   */
+  | { readonly kind: 'exited'; readonly exitStatus?: number | undefined; readonly signal?: number | undefined }
   /** tmux no longer has the pane's session at all, so how the program ended was never recorded. */
   | { readonly kind: 'gone' };
 
@@ -66,9 +69,10 @@ export function claimsRunningAgent(status: string | undefined): boolean {
 function exitReason(exit: SessionPaneExit): string {
   if (exit.kind === 'gone')
     return 'the agent is no longer running: its terminal is gone, so how it exited was not recorded';
-  return exit.exitStatus === undefined
+  if (exit.exitStatus !== undefined) return `the agent exited on its own (exit status ${exit.exitStatus})`;
+  return exit.signal === undefined
     ? 'the agent exited on its own; how it exited was not recorded'
-    : `the agent exited on its own (exit status ${exit.exitStatus})`;
+    : `the agent was ended by signal ${exit.signal}`;
 }
 
 /**
@@ -81,7 +85,8 @@ function exitReason(exit: SessionPaneExit): string {
  *
  * EXIT STATUS 0 IS FINISHED, IN EITHER MODE. Nothing in the session contract says a harness must
  * never leave on its own, so a clean exit is read as the agent being done rather than as a crash.
- * A non-zero status failed and says so with the number. An exit nobody recorded — tmux kept no
+ * A non-zero status failed and says so with the number, and so does a signal — as the signal, never
+ * as an invented exit code. An exit nobody recorded — tmux kept no
  * status, or the terminal is gone entirely — fails too, because the session is over and success
  * cannot be claimed without evidence, but its health is `unknown` rather than `crashed`: nothing
  * observed a crash either.
@@ -90,7 +95,10 @@ export function exitedSessionTransition(observation: SessionExitObservation): Ex
   if (!claimsRunningAgent(observation.status)) return undefined;
   const exitCode = observation.exit.kind === 'exited' ? observation.exit.exitStatus : undefined;
   const reason = exitReason(observation.exit);
-  if (exitCode === undefined) return { status: 'failed', health: 'unknown', reason };
+  if (exitCode === undefined) {
+    const signalled = observation.exit.kind === 'exited' && observation.exit.signal !== undefined;
+    return { status: 'failed', health: signalled ? 'crashed' : 'unknown', reason };
+  }
   return exitCode === 0
     ? { status: 'completed', health: 'idle', reason, exitCode }
     : { status: 'failed', health: 'crashed', reason, exitCode };
