@@ -39,10 +39,8 @@
 
 import type { DeviceKind } from './device-kind.ts';
 import {
-  type ConnectionMethodId,
   firstOnboardingStep,
   furthestOnboardingStep,
-  isConnectionMethodId,
   isDaemonRouteId,
   isOnboardingDoerId,
   isOnboardingRouteId,
@@ -219,10 +217,10 @@ const parseQuestion = (fields: Record<string, unknown>, device: DeviceKind): Onb
 
 /** A stored journey, refused unless every answer on it is one this device could hold. */
 const parseWalk = (fields: Record<string, unknown>, device: DeviceKind): OnboardingProgress => {
-  const { route, current, furthest, target, doer, connection } = fields;
+  const { route, current, furthest, target, doer } = fields;
   if (!isOnboardingRouteId(route)) return fresh();
   if (!isOnboardingStepId(current) || !isOnboardingStepId(furthest)) return fresh();
-  const journey = parseJourney(route, device, target, doer, connection);
+  const journey = parseJourney(route, device, target, doer);
   if (journey === undefined) return fresh();
   const path: OnboardingPath = { ...journey, device };
   /* A step from another journey's list is not this reader's place; it is a mismatch. */
@@ -237,24 +235,20 @@ const parseJourney = (
   device: DeviceKind,
   target: unknown,
   doer: unknown,
-  connection: unknown,
 ): OnboardingJourney | undefined => {
   if (!isDaemonRouteId(route)) {
     /* The pairing entry answers neither question, so a document holding one is not this. */
-    return target === undefined && doer === undefined && connection === undefined ? { route } : undefined;
+    return target === undefined && doer === undefined ? { route } : undefined;
   }
   if (!isSetupTargetId(target) || !isTargetPossible(target, device)) return undefined;
   if (!isOnboardingDoerId(doer)) return undefined;
-  /* Only a daemon standing up on THIS machine is ever asked which carrier to use. */
-  if (connection !== undefined && (!isConnectionMethodId(connection) || target !== 'this' || doer !== 'self')) {
-    return undefined;
-  }
-  return {
-    route,
-    target,
-    doer,
-    ...(connection === undefined ? {} : { connection: connection as ConnectionMethodId }),
-  };
+  /*
+   * A document from before the carrier chooser was removed may still carry its
+   * `connection` answer. It is ignored rather than refused: a reader parked on
+   * `local` keeps their place, and one parked on a self-hosting step fails the
+   * step guard above and starts again, because those steps no longer exist.
+   */
+  return { route, target, doer };
 };
 
 /**
@@ -385,13 +379,7 @@ export class OnboardingProgressStore {
   path(at: OnboardingWalking): OnboardingPath {
     return at.route === 'add-client'
       ? { route: 'add-client', device: this.#device }
-      : {
-          route: at.route,
-          target: at.target,
-          doer: at.doer,
-          ...(at.connection === undefined ? {} : { connection: at.connection }),
-          device: this.#device,
-        };
+      : { route: at.route, target: at.target, doer: at.doer, device: this.#device };
   }
 
   snapshot = (): OnboardingProgress => {
@@ -437,31 +425,12 @@ export class OnboardingProgressStore {
    * answering the question.
    *
    * A reader looking at commands they did not want should not have to find their
-   * way back to a question and re-answer it. The carrier choice does not survive:
-   * an agent is not asked it, so keeping it would leave a stored answer that the
-   * new journey never collects and `parseJourney` would refuse on the next load.
+   * way back to a question and re-answer it.
    */
   switchDoer(doer: OnboardingDoerId): OnboardingProgress {
     const at = this.snapshot();
     if (at.stage !== 'walk' || at.route === 'add-client') return at;
     return this.#commit(walk({ route: at.route, target: at.target, doer }, this.#device));
-  }
-
-  /** Answers the carrier chooser and immediately starts that answer's real work. */
-  chooseConnection(connection: ConnectionMethodId): OnboardingProgress {
-    const at = this.snapshot();
-    if (at.stage !== 'walk' || at.current !== 'connect' || at.route === 'add-client') return at;
-    const current = connection === 'own-relay' ? 'relay-fingerprint' : 'local';
-    return this.#commit({
-      v: ONBOARDING_PROGRESS_VERSION,
-      stage: 'walk',
-      route: at.route,
-      target: at.target,
-      doer: at.doer,
-      connection,
-      current,
-      furthest: current,
-    });
   }
 
   /**

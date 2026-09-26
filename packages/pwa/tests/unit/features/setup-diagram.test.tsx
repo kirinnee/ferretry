@@ -26,7 +26,6 @@ const EVERY_STEP: readonly OnboardingStepId[] = [
   'install',
   'agents',
   'daemon',
-  'connect',
   'local',
   'elsewhere',
   'handoff',

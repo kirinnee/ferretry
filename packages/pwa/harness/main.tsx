@@ -2317,7 +2317,6 @@ type HarnessOnboardingScreen =
   | 'install'
   | 'agents'
   | 'daemon'
-  | 'connect'
   | 'local'
   | 'elsewhere'
   | 'elsewhere-mobile'
@@ -2345,7 +2344,6 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   /* Ferretry runs Claude Code and Codex and is neither: the step that makes the daemon worth starting. */
   agents: harnessOnboarding(hereByHand(), 'agents'),
   daemon: harnessOnboarding(hereByHand(), 'daemon'),
-  connect: harnessOnboarding(hereByHand(), 'connect'),
   /* The same-machine collapse: a daemon on this box, and nothing to scan. */
   local: harnessOnboarding(hereByHand(), 'local'),
   /* The recursion, on a computer: the reader walks to the machine that will host it. */
@@ -4661,23 +4659,6 @@ function Shell() {
         <section aria-label="Setup daemon step" id="harness-onboarding-daemon">
           <OnboardingPage
             progress={HARNESS_ONBOARDING.daemon}
-            write={HARNESS_CLIPBOARD}
-            href={HARNESS_SETUP_HREF}
-            channel="brew"
-            fallback={HARNESS_FALLBACK.available}
-            fleetReady={false}
-            onOpenFleet={() => {}}
-            renderPairing={() => null}
-          />
-        </section>
-      ),
-    },
-    {
-      label: 'Setup — choose a connection',
-      render: () => (
-        <section aria-label="Setup connect step" id="harness-onboarding-connect">
-          <OnboardingPage
-            progress={HARNESS_ONBOARDING.connect}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="brew"

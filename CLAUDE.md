@@ -83,8 +83,9 @@ no advertisement was reachable from nothing but its own host, which is why
 to discover fails closed to direct-only with the consequence and the remedy said out loud.
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
-allowlist remains independent of the hosted deployment. The PWA's interim three-way carrier chooser
-and self-hosting route are still there and removing them is still an explicit GAP. **First contact
+allowlist remains independent of the hosted deployment. First-run onboarding asks no carrier
+question: the three-way chooser and the self-hosting steps are gone, and the daemon step only says
+how other devices reach it. **First contact
 is no longer direct-only.** A relay session commits to one of three modes with its first sealed
 record (protocol §14): a request session, one live event or terminal stream, or a one-attempt
 `pair` — sent only after the daemon is proved against the QR-pinned fingerprint, never as an

@@ -139,10 +139,6 @@ const next = async (container: HTMLElement): Promise<void> => {
   await click(buttonWith(container, '[data-onboarding-next]'));
 };
 
-const chooseConnection = async (container: HTMLElement, connection: string): Promise<void> => {
-  await click(buttonWith(container, `[data-onboarding-connection="${connection}"]`));
-};
-
 /** A store already walking a journey, for the screens that are reached by pairing. */
 const walking = (options: {
   readonly device?: DeviceKind;
@@ -506,7 +502,7 @@ describe('this computer, by hand', () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
 
-    expect(view.container.textContent).toContain('step 1 of 7');
+    expect(view.container.textContent).toContain('step 1 of 6');
     const diagram = must(view.container.querySelector('[role="img"]'), 'the arrangement diagram');
     expect(diagram.getAttribute('data-onboarding-diagram')).toBe('install');
     expect(diagram.getAttribute('aria-label')).toContain('not yet linked');
@@ -514,7 +510,7 @@ describe('this computer, by hand', () => {
 
     // A real ordered list, not a row of divs pretending to be one.
     const track = must(view.container.querySelector('[aria-label="Setup steps"]'), 'the step track');
-    expect(track.querySelectorAll('li')).toHaveLength(7);
+    expect(track.querySelectorAll('li')).toHaveLength(6);
     expect(must(track.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Install');
     // Only the steps already reached are jumpable, and none have been yet.
     expect(track.querySelectorAll('[data-onboarding-jump]')).toHaveLength(0);
@@ -528,10 +524,11 @@ describe('this computer, by hand', () => {
     expect(screenOf(view.container)).toBe('agents');
     await next(view.container);
     expect(screenOf(view.container)).toBe('daemon');
+    // The carrier is SAID on the daemon step, never asked: direct first, the
+    // hosted relay as the automatic fallback, and no control to answer.
+    expect(view.container.querySelector('[data-onboarding-connection-note]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-connection]')).toBeNull();
     await next(view.container);
-    expect(screenOf(view.container)).toBe('connect');
-    expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
-    await chooseConnection(view.container, 'default-relay');
 
     // THE COLLAPSE. The daemon is on this machine, so there is no QR and no code
     // — just a command that opens this browser already paired.
@@ -598,7 +595,6 @@ describe('this computer, by hand', () => {
     await next(view.container);
     await next(view.container);
     await next(view.container);
-    await chooseConnection(view.container, 'direct');
     expect(screenOf(view.container)).toBe('local');
 
     await click(buttonWith(view.container, '[data-onboarding-jump="install"]'));
@@ -615,7 +611,6 @@ describe('this computer, by hand', () => {
     await next(view.container);
     await next(view.container);
     await next(view.container);
-    await chooseConnection(view.container, 'default-relay');
 
     await click(buttonWith(view.container, '[data-test-pair]'));
 
@@ -636,7 +631,6 @@ describe('this computer, by hand', () => {
     await next(view.container);
     await next(view.container);
     await next(view.container);
-    await chooseConnection(view.container, 'direct');
     expect(screenOf(view.container)).toBe('local');
 
     await click(buttonWith(view.container, '[data-test-pair]'));
@@ -644,36 +638,25 @@ describe('this computer, by hand', () => {
     await view.unmount();
   });
 
-  it('restates what the chosen fallback would see, where the connection becomes real', async () => {
-    // The carrier choice was made several screens — possibly several days —
-    // before anything was connected, and it is a decision about somebody else's
-    // infrastructure. Naming a carrier here and stopping would quietly retire it.
-    const progress = walking({ step: 'connect' });
-    progress.chooseConnection('default-relay');
-    progress.goTo('done');
-    const relayed = await pageWith({ progress, fleetReady: true });
+  it('restates what the hosted fallback would see, where the connection becomes real', async () => {
+    // The daemon step that first said so may be several screens — possibly several
+    // days — behind the reader, and the fallback is somebody else's infrastructure.
+    // Naming a carrier here and stopping would quietly retire that disclosure.
+    const progress = walking({ step: 'done' });
+    const paired = await pageWith({ progress, fleetReady: true });
 
     // It used to read `Connection in use: Direct`, on the reasoning that pairing is
     // always direct. §14 gave redemption a relayed session mode, so this screen has
     // no measured answer to report and states the ORDER instead.
-    expect(relayed.view.container.textContent).toContain('Connection in use: Not measured yet');
-    expect(relayed.view.container.textContent).toContain('tried directly first, then the relay');
+    expect(paired.view.container.textContent).toContain('Connection in use: Not measured yet');
+    expect(paired.view.container.textContent).toContain('tried directly first, then the hosted relay');
     const disclosure = must(
-      relayed.view.container.querySelector('[data-onboarding-fallback-disclosure]'),
+      paired.view.container.querySelector('[data-onboarding-fallback-disclosure]'),
       'the fallback disclosure',
     );
     expect(disclosure.textContent).toContain('could not read a byte of it');
     expect(disclosure.textContent).toContain('metered and capped');
-    await relayed.view.unmount();
-
-    // A direct connection has no third party in it, and an empty list under a
-    // "what they can see" heading reads as a redaction rather than an absence.
-    const direct = walking({ step: 'connect' });
-    direct.chooseConnection('direct');
-    direct.goTo('done');
-    const plain = await pageWith({ progress: direct, fleetReady: true });
-    expect(plain.view.container.querySelector('[data-onboarding-fallback-disclosure]')).toBeNull();
-    await plain.view.unmount();
+    await paired.view.unmount();
   });
 
   it('offers the fleet when there is one, and refuses to pretend when there is not', async () => {
@@ -930,68 +913,54 @@ describe('the daemon step', () => {
   });
 });
 
-describe('the reach-it step', () => {
-  const toConnect = async (container: HTMLElement): Promise<void> => {
+describe('how other devices reach the daemon', () => {
+  const toDaemon = async (container: HTMLElement): Promise<void> => {
     await enter(container, 'first-time');
-    /* install → agents → daemon → connect */
-    await next(container);
+    /* install → agents → daemon */
     await next(container);
     await next(container);
   };
 
-  it('is a second chooser led by the recommended default relay', async () => {
-    const { view } = await pageWith();
-    await toConnect(view.container);
+  it('is stated on the daemon step, never asked, and Next leads straight to pairing', async () => {
+    const { view } = await pageWith({ fallback: { kind: 'available', relayUrl: 'https://relay.example.test' } });
+    await toDaemon(view.container);
 
-    expect(screenOf(view.container)).toBe('connect');
-    expect(
-      [...view.container.querySelectorAll('[data-onboarding-connection]')].map(node =>
-        node.getAttribute('data-onboarding-connection'),
-      ),
-    ).toEqual(['default-relay', 'own-relay', 'direct']);
-    expect(view.container.textContent).toContain('Recommended');
-    expect(view.container.textContent).toContain('Direct is used whenever it is reachable');
-    await view.unmount();
-  });
+    expect(screenOf(view.container)).toBe('daemon');
+    const note = must(view.container.querySelector('[data-onboarding-connection-note]'), 'the connection note');
+    expect(note.getAttribute('data-onboarding-fallback')).toBe('available');
+    expect(note.textContent).toContain('directly first');
+    // No carrier chooser, no self-hosting route: nothing in first run offers either.
+    expect(view.container.querySelector('[data-onboarding-connection]')).toBeNull();
+    expect(view.container.textContent).not.toContain('Set up my own relay');
+    expect(view.container.textContent).not.toContain('RELAY_DAEMON_IDS');
+    expect(view.container.textContent).not.toContain('task relay:deploy');
 
-  it('expands the self-hosted route into separately tracked operations', async () => {
-    const { view } = await pageWith();
-    await toConnect(view.container);
-    await chooseConnection(view.container, 'own-relay');
-
-    expect(screenOf(view.container)).toBe('relay-fingerprint');
-    expect(view.container.textContent).toContain('step 5 of 11');
-    expect(view.container.querySelectorAll('[aria-label="Setup steps"] li')).toHaveLength(11);
-    expect(view.container.textContent).toContain('fy pair --no-wait');
     await next(view.container);
-    expect(screenOf(view.container)).toBe('relay-source');
-    await next(view.container);
-    expect(screenOf(view.container)).toBe('relay-allow');
-    expect(view.container.textContent).toContain('RELAY_DAEMON_IDS');
-    await next(view.container);
-    expect(screenOf(view.container)).toBe('relay-deploy');
-    expect(view.container.textContent).toContain('task relay:deploy');
-    await view.unmount();
-  });
-
-  it('takes the direct and default choices straight to the local pairing step', async () => {
-    const { view } = await pageWith();
-    await toConnect(view.container);
-    await chooseConnection(view.container, 'direct');
     expect(screenOf(view.container)).toBe('local');
     await click(buttonWith(view.container, '[data-onboarding-back]'));
-    expect(screenOf(view.container)).toBe('connect');
-    await chooseConnection(view.container, 'default-relay');
-    expect(screenOf(view.container)).toBe('local');
+    expect(screenOf(view.container)).toBe('daemon');
     await view.unmount();
   });
 
-  it('is never on a phone journey at all, because no phone stands a daemon up', async () => {
-    const { view } = await pageWith({ device: 'mobile' });
-    await enter(view.container, 'first-time');
-    expect(view.container.querySelector('[data-onboarding-connection]')).toBeNull();
-    expect(view.container.querySelectorAll('[aria-label="Setup steps"] li')).toHaveLength(3);
-    await view.unmount();
+  it('keeps the same destinations: every journey still ends where it paired', async () => {
+    // Removing the question removed one screen and moved no one: the same-machine
+    // journey still pairs on `local`, and nothing new stands between it and `done`.
+    const track = async (device: DeviceKind): Promise<string[]> => {
+      const { view } = await pageWith({ device });
+      await enter(view.container, 'first-time');
+      const steps = [...view.container.querySelectorAll('[aria-label="Setup steps"] li')].map(
+        node => node.textContent ?? '',
+      );
+      await view.unmount();
+      return steps;
+    };
+    const desktop = await track('desktop');
+    expect(desktop).toHaveLength(6);
+    for (const [index, label] of ['Install', 'Agents', 'Daemon', 'Open', 'Phone', 'Done'].entries()) {
+      expect(desktop[index]).toContain(label);
+    }
+    expect(desktop.join(' ')).not.toContain('Connect');
+    expect(await track('mobile')).toHaveLength(3);
   });
 });
 

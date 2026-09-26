@@ -8,9 +8,9 @@ for the person who would rather that fallback ran in their own Cloudflare accoun
 not want a third party on the path at all, because they want the metadata to stay with them, or
 because they simply prefer to own the infrastructure they depend on.
 
-The current interim onboarding still links here; that chooser is a declared GAP and will be removed
-when the automatic transport lands. This remains the expert runbook, not an ordinary setup step. If
-you are setting Ferretry up for the first time, close this and use the app.
+Onboarding does not offer this: it tries the daemon directly and falls back to the hosted relay on
+its own. This is the expert runbook, not an ordinary setup step. If you are setting Ferretry up for
+the first time, close this and use the app.
 
 - **What a relay is, and what its operator can observe** — [relay-protocol.md](relay-protocol.md)
   §§9–11. Architecture lives there; procedure lives here.

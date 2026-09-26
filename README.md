@@ -58,8 +58,6 @@ actually using.
 
 Still missing, as [docs/relay-protocol.md](docs/relay-protocol.md) §13 lists in full:
 
-- The PWA still shows an interim three-way connection chooser and a self-hosting setup route during
-  onboarding. The finished product removes both.
 - There is no `fy` command for the daemon's relay list yet; you edit `config/daemon.json` by hand.
 - Some browser screens (for example files, skills, pins and remote transcript correction) still
   connect directly only, so they show an error over the relay.

@@ -31,10 +31,6 @@ import {
   ElsewhereStage,
   InstallStage,
   PairStage,
-  RelayAllowStage,
-  RelayDeployStage,
-  RelayFingerprintStage,
-  RelaySourceStage,
   ScanStage,
 } from '../../../src/features/onboarding/onboarding-stages.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
@@ -189,27 +185,6 @@ describe('the agents stage', () => {
     expect(disclosure.textContent).toContain('their own documentation is the authority');
     expect(disclosure.textContent).toContain('believe them over this page');
     await view.unmount();
-  });
-});
-
-describe('the self-hosted relay steps', () => {
-  it('keeps each deploy operation on its own stage', async () => {
-    const fingerprint = await mount(<RelayFingerprintStage write={async () => {}} />);
-    expect(fingerprint.container.textContent).toContain('fy pair --no-wait');
-    await fingerprint.unmount();
-
-    const source = await mount(<RelaySourceStage write={async () => {}} />);
-    expect(source.container.textContent).toContain('git clone https://github.com/kirinnee/ferretry');
-    await source.unmount();
-
-    const allow = await mount(<RelayAllowStage />);
-    expect(allow.container.textContent).toContain('RELAY_DAEMON_IDS');
-    expect(asideOf(allow.container).open).toBe(false);
-    await allow.unmount();
-
-    const deploy = await mount(<RelayDeployStage write={async () => {}} />);
-    expect(deploy.container.textContent).toContain('task relay:deploy');
-    await deploy.unmount();
   });
 });
 
