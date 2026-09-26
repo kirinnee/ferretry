@@ -20,7 +20,7 @@ import { SecretListSchema } from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const ACCOUNT = '00000000-0000-4000-8000-0000000000f1';
 const WRAPPER = 'claude-auto-profiled';
@@ -40,7 +40,7 @@ afterEach(async () => {
  */
 function world(): DaemonWorld {
   return {
-    ...buildWorld({}, {}),
+    ...buildWorld({}, { userHome: ABSENT_USER_HOME }),
     relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
   };
 }

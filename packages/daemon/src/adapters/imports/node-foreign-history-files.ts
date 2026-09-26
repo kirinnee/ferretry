@@ -1,6 +1,5 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { resolveUserHome } from '@ferretry/fleet/adapters';
 import type { ForeignHistoryEntry, ForeignHistoryFiles, ForeignHistoryRoots } from '../../lib/imports/index.ts';
 
 /** Node implementation of the importer's deliberately read-only filesystem port. */
@@ -22,7 +21,7 @@ export class NodeForeignHistoryFiles implements ForeignHistoryFiles {
 }
 
 /** The two real harness layouts. Tests inject fixture roots and never name a user's home. */
-export function foreignHistoryRoots(home = resolveUserHome()): ForeignHistoryRoots {
+export function foreignHistoryRoots(home: string): ForeignHistoryRoots {
   return {
     claudeProjects: join(home, '.claude', 'projects'),
     codexSessions: join(home, '.codex', 'sessions'),

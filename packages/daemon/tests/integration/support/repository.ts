@@ -85,3 +85,14 @@ export async function tempRemote(repository: string, remoteName: string, branch:
   await setupGit(repository, 'push', '--quiet', remoteName, branch);
   return remote;
 }
+
+/**
+ * The user home a daemon built in this process is told it has: absolute, unique to this run, and
+ * never created.
+ *
+ * `buildWorld` requires one because the alternative is the developer's own home, where a first run
+ * looks for a Claude or Codex login to COPY. Pointing it at a directory that does not exist means
+ * every harness home derived from it reads as empty, so nothing is found and nothing is copied. A test
+ * that needs harness files under a home creates its own directory and passes that instead.
+ */
+export const ABSENT_USER_HOME = path.join(tmpdir(), `fy-absent-user-home-${crypto.randomUUID()}`);
