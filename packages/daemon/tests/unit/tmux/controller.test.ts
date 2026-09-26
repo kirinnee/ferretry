@@ -351,7 +351,15 @@ describe('tmux bracketed paste', () => {
     // pane's process, and treating it as one would aim a kill at the process tree of the whole box.
     // Arrange
     const answers: Array<[string, unknown]> = [
+      ['%12 4821', { paneId: '%12', pid: 4821 }],
+      // A tab is what builds before this one asked for, and `_` is that tab after a tmux client
+      // with no UTF-8 locale sanitised it — `%0_2475105` is the exact answer that failed every
+      // session a daemon started by `fy daemon start` ever launched.
       ['%12\t4821', { paneId: '%12', pid: 4821 }],
+      ['%0_2475105', { paneId: '%0', pid: 2475105 }],
+      ['%12  4821', undefined],
+      ['%12-4821', undefined],
+      ['%12_4821_7', undefined],
       ['%12\t', undefined],
       ['\t4821', undefined],
       ['0.0\t4821', undefined],
@@ -370,6 +378,14 @@ describe('tmux bracketed paste', () => {
       should(await new TmuxController(tmux).paneIdentity('work-1')).deepEqual(expected);
       should(tmux.received[0]).deepEqual(paneIdentityArguments('work-1'));
     }
+    // Asked with a space, the one separator no locale makes tmux rewrite.
+    should(paneIdentityArguments('work-1')).deepEqual([
+      'display-message',
+      '-p',
+      '-t',
+      'work-1',
+      '#{pane_id} #{pane_pid}',
+    ]);
     // tmux itself failing is also no identity, not a throw: the sweep treats absent evidence as a
     // reason to do nothing.
     should(

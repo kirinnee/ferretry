@@ -15,6 +15,7 @@ const spec = {
   stateHome: '/tmp/fy-home/.ferretry',
   logFile: '/tmp/fy-home/.ferretry/logs/fyd.log',
   searchPath: '/usr/bin:/bin',
+  locale: { LANG: 'C.UTF-8' },
   description: 'fyd — per-host agent daemon',
 };
 
@@ -104,6 +105,16 @@ describe('systemd unit rendering', () => {
     should(actual).match(/^Environment="PATH=\/usr\/bin:\/bin"$/mu);
   });
 
+  it('should give the daemon its locale, one sorted line per variable', () => {
+    // Act — a service manager hands a daemon no locale, and without a UTF-8 one the multiplexer every
+    // session runs in rewrites tabs and unicode as `_`, which failed every session launch.
+    const actual = renderSystemdUnit({ ...spec, locale: { LC_CTYPE: 'sv_SE.UTF-8', LANG: 'en_GB.UTF-8' } });
+
+    // Assert
+    should(actual).containEql('Environment="LANG=en_GB.UTF-8"\nEnvironment="LC_CTYPE=sv_SE.UTF-8"\n');
+    should(renderSystemdUnit(spec)).match(/^Environment="LANG=C\.UTF-8"$/mu);
+  });
+
   it('should refuse to restart on either address-is-taken exit code', () => {
     // Act
     const actual = renderSystemdUnit(spec);
@@ -187,6 +198,20 @@ describe('launch agent rendering', () => {
     // Assert
     should(actual).containEql('<key>FY_HOME</key><string>/tmp/fy-home/.ferretry</string>');
     should(actual).containEql('<key>PATH</key><string>/usr/bin:/bin</string>');
+  });
+
+  it('should pass the locale as environment variables, sorted by name', () => {
+    // Act
+    const actual = renderLaunchAgentPlist({
+      ...spec,
+      label: 'com.ferretry.fyd',
+      locale: { LC_ALL: 'en_US.UTF-8', LANG: 'de_DE.UTF-8' },
+    });
+
+    // Assert
+    should(actual).containEql(
+      '<key>LANG</key><string>de_DE.UTF-8</string><key>LC_ALL</key><string>en_US.UTF-8</string></dict>',
+    );
   });
 
   it('should escape a path that would otherwise break the XML', () => {

@@ -460,6 +460,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     daemonName,
     product: PRODUCT_NAME,
     searchPath: environment.PATH ?? '',
+    locale: { LC_ALL: environment.LC_ALL, LC_CTYPE: environment.LC_CTYPE, LANG: environment.LANG },
   });
   const processes = new BunDaemonProcess();
   const clock = new SystemMillisecondClock();

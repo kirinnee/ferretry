@@ -176,7 +176,7 @@ describe('TmuxTerminalRuntime', () => {
 
   it('should create, update, write, redraw, and close a terminal through the injected tmux port', async () => {
     // Arrange
-    const fake = new FakeTmux([ok(), ok(), ok(), ok(), ok('hello\n'), ok('2\t3\n'), ok()]);
+    const fake = new FakeTmux([ok(), ok(), ok(), ok(), ok('hello\n'), ok('2|3\n'), ok()]);
     const subject = new TmuxTerminalRuntime(fake, () => 1_000);
 
     // Act
