@@ -1,3 +1,4 @@
+export * from './exit.ts';
 export * from './incoherence.ts';
 export * from './report.ts';
 export * from './self-check.ts';

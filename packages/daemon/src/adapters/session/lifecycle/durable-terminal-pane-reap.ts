@@ -139,6 +139,18 @@ export class DurableTerminalPaneStore {
     return { registrations, damaged };
   }
 
+  /**
+   * One session's registration, re-read on its own.
+   *
+   * For a caller that already holds a registration from a scan and must prove, at the moment it
+   * writes, that nothing replaced it since — a resume re-registers before it reports `running`.
+   * A damaged document throws, as it does for the reap: it proves nothing either way.
+   */
+  async registration(daemonId: string, sessionId: SessionId): Promise<RegisteredTerminalPane | undefined> {
+    const text = await this.files.readText(createSessionPaths(this.paths, sessionId).terminalPane);
+    return text === undefined ? undefined : durableRegistration(text, daemonId, sessionId);
+  }
+
   /** The reap's view: a ledger with any damage in it is not a ledger a sweep may act on. */
   async registrations(daemonId: string): Promise<readonly RegisteredTerminalPane[]> {
     const scanned = await this.scan(daemonId);
