@@ -11,6 +11,7 @@ import {
   normalizedModelSelection,
   projectPickerOptions,
   sameHarnessAccountOptions,
+  sessionAccountLabel,
   sessionCapableAccountOptions,
 } from '../../src/components/daemon-picker-model.ts';
 import type { PickerAccountHealth } from '../../src/lib/account-picker-catalog.ts';
@@ -343,5 +344,18 @@ describe('accountLabel', () => {
       name: 'claude-auto-bare',
       id: null,
     });
+  });
+});
+
+describe('sessionAccountLabel', () => {
+  it('names a session’s account from the roster by its wrapper', () => {
+    expect(sessionAccountLabel([claudeAccount()], 'claude-auto-atelier')).toEqual({
+      name: 'Claude Atelier',
+      id: 'claude-auto-atelier',
+    });
+  });
+
+  it('falls back to the id for a wrapper the roster no longer holds', () => {
+    expect(sessionAccountLabel([claudeAccount()], 'claude-removed')).toEqual({ name: 'claude-removed', id: null });
   });
 });

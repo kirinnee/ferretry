@@ -1,6 +1,7 @@
 /** Group/table scaffolds for the sessions dashboard; leaf markup lives in the row module. */
 
 import { FolderGit2 } from 'lucide-react';
+import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -36,6 +37,8 @@ export interface FullDensityGroupsProps extends NavigationProps {
   readonly mode: DashboardView;
   readonly scoped: boolean;
   readonly usage: SessionQuotaResolver | null;
+  /** The daemon's account roster; `null` (unread) names no account. */
+  readonly accounts?: readonly PickerAccount[] | null;
   readonly now: number;
 }
 
@@ -46,6 +49,7 @@ export function FullDensityGroups({
   mode,
   scoped,
   usage,
+  accounts = null,
   now,
   onFocus,
   onNavigate,
@@ -66,6 +70,7 @@ export function FullDensityGroups({
                   now={now}
                   onNavigate={onNavigate}
                   usage={usage}
+                  accounts={accounts}
                   view={view}
                 />
               ))}
@@ -91,6 +96,7 @@ export function FullDensityGroups({
                       now={now}
                       onNavigate={onNavigate}
                       usage={usage}
+                      accounts={accounts}
                       view={view}
                     />
                   ))}

@@ -7,6 +7,8 @@ import type { ComponentType } from 'react';
 import { SessionsPage, type SessionsPageProps } from '../../src/components/sessions-page.tsx';
 import { projectScopePath, projectScopeState, type ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
 import type { WardenStatusReader } from '../../src/hooks/use-warden-status.ts';
+import type { AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
+import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
@@ -373,6 +375,45 @@ describe('SessionsPage', () => {
     expect(reads).toEqual([alpha.daemonId]);
     await interact(() => props.controls.setDeviceControls({ density: 'minimal' }));
     await settle();
+    await page.unmount();
+  });
+
+  it('names each session’s account by its fleet name at full density, reading the roster only there', async () => {
+    const reads: string[] = [];
+    const noHealth: AccountPickerHealthCatalog = { health: new Map(), error: null };
+    const accountPicker = new DaemonAccountPickerStore({
+      catalog: async daemon => {
+        reads.push(daemon.daemonId);
+        return {
+          accounts: [
+            {
+              id: 'claude-id',
+              kind: 'claude',
+              mode: 'auto',
+              wrapper: 'claude',
+              home: '/accounts/claude',
+              displayName: 'Studio Claude',
+              defaultModel: null,
+              models: [],
+              available: true,
+              unavailableReason: null,
+            },
+          ],
+        };
+      },
+      health: async () => noHealth,
+      checkHealth: async () => noHealth,
+    });
+    const props = pageProps({ accountPicker });
+    props.controls.setDeviceControls({ density: 'compact' });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    expect(reads).toEqual([]);
+    expect(page.container.textContent).not.toContain('Studio Claude');
+    await interact(() => props.controls.setDeviceControls({ density: 'full' }));
+    await settle();
+    expect(reads).toEqual([alpha.daemonId]);
+    expect(page.container.querySelector('[data-account="claude"]')?.textContent).toBe('Studio Claude');
     await page.unmount();
   });
 

@@ -518,6 +518,7 @@ function SessionsRoute({ connection }: DaemonPageProps) {
       controls={store.controls}
       projects={store.projects}
       usage={store.usage}
+      accountPicker={store.accountPicker}
       wardenStatus={readWardenStatus}
       onOpenWardenReport={() => navigate(daemonWardenPath(connection.daemonId))}
       onNavigate={navigate}

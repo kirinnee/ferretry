@@ -20,7 +20,7 @@ import {
 } from '../../components/runtime-controls.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
-import { SessionHeader } from '../../components/session-header.tsx';
+import { RosterSessionHeader, SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
@@ -706,6 +706,13 @@ export function SessionChatPage({
       {actionError === null ? '' : `Session action failed: ${actionError}`}
     </p>
   );
+  const headerProps = {
+    daemonId: connection.daemonId,
+    session,
+    onBack,
+    onOpenFleet: onBack,
+    onOpenDetails: () => setDetailsOpen(true),
+  };
 
   return (
     <SidePaneWorkspace
@@ -737,13 +744,11 @@ export function SessionChatPage({
           data-daemon={connection.daemonId}
           data-session={session.config.id}
         >
-          <SessionHeader
-            daemonId={connection.daemonId}
-            session={session}
-            onBack={onBack}
-            onOpenFleet={onBack}
-            onOpenDetails={() => setDetailsOpen(true)}
-          />
+          {accountPicker === undefined ? (
+            <SessionHeader {...headerProps} />
+          ) : (
+            <RosterSessionHeader {...headerProps} accountPicker={accountPicker} connection={connection} />
+          )}
           {/* One compact row. On a phone it carries the pane openers ONLY: the
             lifecycle buttons wrapped to four bands here — 149px of an 844px
             screen, measured — and they are reachable in Session Details
