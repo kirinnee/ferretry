@@ -47,16 +47,30 @@ task preview -- --help
 
 ## Connecting to a daemon
 
-The required behaviour is to try a **direct** connection first, fall back to Ferretry's **hosted
-relay** when the daemon has no inbound route, ask no carrier question, and always name the live
-carrier on screen. That is not yet the shipped behaviour: the PWA still contains an interim
-three-way carrier chooser and self-hosting setup route, and **the client transport is not wired** —
-neither `fyd` nor the PWA can route through a relay today. [docs/relay-protocol.md](docs/relay-protocol.md)
-§13 names both remaining pieces. That document is also the wire contract and the disclosure of what
-a relay operator can and cannot observe.
+A browser tries a **direct** connection to the daemon first and falls back to Ferretry's **hosted
+relay** when the daemon has no inbound route. Both ends are built: `fyd` finds the hosted relay on
+its own at boot and dials it, and the PWA carries requests, the live event feed and terminals over
+it. **Pairing works over the relay too**, so a phone that can never reach your machine's address can
+still scan `fy pair`'s QR code, pair, and then reconnect as an ordinary signed-in device. The relay
+never sees the pairing code, your device token or anything you send; it does see connection
+metadata such as timing and sizes. Settings › Daemons names the connection a live session is
+actually using.
 
-Running a relay of your own remains supported as an **expert opt-in path**; the interim setup option
-is a known GAP that the conforming product removes:
+Still missing, as [docs/relay-protocol.md](docs/relay-protocol.md) §13 lists in full:
+
+- The PWA still shows an interim three-way connection chooser and a self-hosting setup route during
+  onboarding. The finished product removes both.
+- There is no `fy` command for the daemon's relay list yet; you edit `config/daemon.json` by hand.
+- Some browser screens (for example files, skills, pins and remote transcript correction) still
+  connect directly only, so they show an error over the relay.
+- When the relay refuses a new session because this daemon already has too many, no screen says so,
+  and the live event feed fails silently.
+
+§13 is also the wire contract and the full disclosure of what a relay operator can and cannot see.
+
+Running a relay of your own remains supported as an **expert opt-in path**, with one declared limit: a
+device that has never paired cannot find a relay you run yourself, so it can only pair from a
+network that reaches the daemon directly.
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md) is the runbook.
 
 ## Releasing
