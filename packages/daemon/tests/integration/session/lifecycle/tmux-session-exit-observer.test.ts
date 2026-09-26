@@ -205,6 +205,34 @@ async function exitHarness(subject: ExitFixture): Promise<void> {
   await until(async () => (await subject.controller.state(subject.tmuxSession)).dead, 'the pane to die');
 }
 
+/** What the host says about a harness tmux has not reaped, so a CI failure explains itself. */
+async function diagnose(subject: ExitFixture, pid: number): Promise<string> {
+  const read = async (path: string): Promise<string> =>
+    await Bun.file(path)
+      .text()
+      .catch(() => '(unreadable)');
+  const socket = join(subject.home, 'tmux.sock');
+  const ask = async (format: string): Promise<string> =>
+    (
+      await new Response(
+        Bun.spawn([subject.tmuxExecutable, '-S', socket, 'display-message', '-p', '-t', subject.tmuxSession, format])
+          .stdout,
+      ).text()
+    ).trim();
+  const server = await ask('#{pid}');
+  const signals = (text: string): string =>
+    text
+      .split('\n')
+      .filter(line => /^(State|PPid|Sig(Blk|Ign|Cgt))/.test(line))
+      .join(' ');
+  return [
+    `pane: ${await ask('#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_pid}')}`,
+    `harness ${pid}: ${signals(await read(`/proc/${pid}/status`))}`,
+    `tmux server ${server}: ${signals(await read(`/proc/${server}/status`))}`,
+    `test runner: ${signals(await read('/proc/self/status'))}`,
+  ].join('\n');
+}
+
 /** Whether a pid no longer names any process, zombie included — so tmux has reaped it. */
 function reaped(pid: number): boolean {
   try {
@@ -226,7 +254,11 @@ function reaped(pid: number): boolean {
 async function tickUntilSettled(subject: ExitFixture, service: SessionHealthService) {
   const registration = await subject.store.registration(DAEMON, subject.id);
   if (registration === undefined) throw new Error('the pane registration is missing');
-  await until(async () => reaped(registration.pid), 'tmux to reap the harness');
+  await until(async () => reaped(registration.pid), 'tmux to reap the harness').catch(async error => {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n${await diagnose(subject, registration.pid)}`,
+    );
+  });
   let outcome = await service.selfCheck();
   await until(async () => {
     if (outcome.exited.length > 0) return true;
@@ -328,7 +360,11 @@ describe('tmux session exit observer', () => {
     // Arrange
     const subject = await fixture(1);
     await exitHarness(subject);
-    const [observed] = await observer(subject).observe();
+    // The pane-exit answer is fixed so this test is about the settle guards, not tmux reaping speed.
+    const [observed] = await observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: '1|1|' })),
+    ).observe();
     if (observed === undefined) throw new Error('the dead pane was not observed');
     const transition = { status: 'failed', health: 'crashed', reason: 'exited', exitCode: 1 } as const;
     const path = createSessionPaths(subject.storage.paths, subject.id).terminalPane;
