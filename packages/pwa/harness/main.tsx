@@ -2992,11 +2992,34 @@ const DASHBOARD_SESSIONS: readonly SessionView[] = [
   dashboardSession('ms9lina-f6', 'lina', 'Verify daemon isolation', '/work/home-manager', {
     contextPercent: 96,
   }),
-  dashboardSession('ms9mira-g7', 'mira', 'Trace protocol compatibility', '/work/protocol', {
-    status: 'completed',
-    activity: undefined,
-    contextPercent: 18,
-  }),
+  dashboardSession(
+    'ms9mira-g7',
+    'mira',
+    'Trace protocol compatibility',
+    '/work/protocol',
+    { status: 'completed', activity: undefined, contextPercent: 18 },
+    { agent: 'codex-retired' },
+  ),
+];
+
+/**
+ * The roster the dashboard, header and list name each session's account from. Every harness session
+ * runs on the `codex` wrapper, which this fleet calls "Studio Codex"; the last dashboard row runs on
+ * a wrapper the roster no longer holds, so the id fallback is on screen too.
+ */
+const HARNESS_SESSION_ACCOUNTS: readonly PickerAccount[] = [
+  {
+    id: '44444444-4444-4444-8444-444444444444',
+    kind: 'codex',
+    mode: 'auto',
+    wrapper: 'codex',
+    home: '/home/pilot/.ferretry/fleet/homes/codex',
+    displayName: 'Studio Codex',
+    defaultModel: 'gpt-5.6-sol',
+    models: [{ id: 'gpt-5.6-sol', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
 ];
 
 const DASHBOARD_GROUPS: readonly SessionGroup[] = [
@@ -4374,6 +4397,7 @@ function Shell() {
             scopeRecovered={false}
             sessions={DASHBOARD_SESSIONS}
             usage={DASHBOARD_USAGE}
+            accounts={HARNESS_SESSION_ACCOUNTS}
             wardenStatus={null}
             wardenVerdicts={[]}
           />
@@ -4404,6 +4428,7 @@ function Shell() {
             scopeRecovered={false}
             sessions={DASHBOARD_SESSIONS}
             usage={DASHBOARD_USAGE}
+            accounts={HARNESS_SESSION_ACCOUNTS}
             wardenStatus={null}
             wardenVerdicts={[]}
           />
@@ -5066,9 +5091,15 @@ function Shell() {
           className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
           id="harness-session-screen"
         >
-          <SessionList daemonId={daemon.daemonId} onOpenSession={() => {}} sessions={[harnessSession]} />
+          <SessionList
+            accounts={HARNESS_SESSION_ACCOUNTS}
+            daemonId={daemon.daemonId}
+            onOpenSession={() => {}}
+            sessions={[harnessSession]}
+          />
           <div className="flex min-h-[320px] flex-col rounded-panel border border-border bg-surface">
             <SessionHeader
+              accounts={HARNESS_SESSION_ACCOUNTS}
               daemonId={daemon.daemonId}
               onBack={() => {}}
               onOpenDetails={() => {}}

@@ -19,6 +19,7 @@ import {
   WardenVerdicts,
   type WardenVerdictView,
 } from '../features/warden/warden-verdicts.tsx';
+import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import { useDashboardNarrow } from '../hooks/use-dashboard-view.ts';
 import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { cn } from '../lib/class-names.ts';
@@ -61,6 +62,12 @@ export interface SessionDashboardProps {
    * or join usage merely to supply this prop.
    */
   readonly usage: SessionQuotaResolver | null;
+  /**
+   * Full density only, like `usage`: the account roster the full rows name each
+   * session's account from. Absent or `null` is an unread roster, and the rows
+   * then name no account rather than print a wrapper id.
+   */
+  readonly accounts?: readonly PickerAccount[] | null;
   readonly wardenStatus: WardenStatusView | null;
   readonly wardenVerdicts: readonly WardenVerdictView[];
   readonly now: number;
@@ -84,6 +91,7 @@ export function SessionDashboard({
   dashboardView,
   density,
   usage,
+  accounts = null,
   wardenStatus,
   wardenVerdicts,
   now,
@@ -225,6 +233,7 @@ export function SessionDashboard({
               onNavigate={onNavigate}
               scoped={scope !== null}
               usage={usage}
+              accounts={accounts}
             />
           ) : (
             <LeanDensityGroups

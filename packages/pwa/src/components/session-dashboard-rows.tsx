@@ -11,6 +11,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { Activity, Bot, FolderGit2, Sparkles } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { TaskName } from '../features/tasks/task-name.tsx';
+import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { Density } from '../lib/controls.ts';
@@ -25,6 +26,7 @@ import { QuotaReadout } from '../shell/quota-readout.tsx';
 import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
+import { sessionAccountLabel } from './daemon-picker-model.ts';
 import { activityLine, dashboardTone, sessionAge, statusWord } from './session-dashboard-model.ts';
 
 interface SessionNavigationProps {
@@ -35,8 +37,39 @@ interface SessionNavigationProps {
 interface FullSessionProps extends SessionNavigationProps {
   readonly view: SessionView;
   readonly usage: SessionQuotaResolver | null;
+  /**
+   * The daemon's account roster, so the row can name the account by the name its
+   * fleet gave it. `null` (the default) is an unread roster, and the row then
+   * names no account at all rather than printing a wrapper id as if it were one.
+   */
+  readonly accounts?: readonly PickerAccount[] | null;
   /** Injected clock for deterministic age and quota-reset copy. */
   readonly now: number;
+}
+
+/**
+ * The account a session runs on, then a separator — or nothing while the roster
+ * is unread. The wrapper id rides in `title` for the person who needs it.
+ */
+function AccountPrefix({
+  accounts,
+  agent,
+}: {
+  readonly accounts: readonly PickerAccount[] | null;
+  readonly agent: string;
+}) {
+  if (accounts === null) return null;
+  const label = sessionAccountLabel(accounts, agent);
+  return (
+    <>
+      <span className="min-w-0 truncate" data-account={agent} title={label.id ?? label.name}>
+        {label.name}
+      </span>
+      <span aria-hidden="true" className="text-border">
+        ·
+      </span>
+    </>
+  );
 }
 
 interface LeanSessionProps extends SessionNavigationProps {
@@ -121,7 +154,14 @@ export function ContextMeter({ value }: { readonly value: number }) {
 const sessionHref = (daemonId: DaemonId, view: SessionView): string => daemonSessionPath(daemonId, view.config.id);
 
 /** Full-density fixed-table leaf. The parent supplies the six-column table only. */
-export const SessionRow = memo(function SessionRow({ view, usage, daemonId, onNavigate, now }: FullSessionProps) {
+export const SessionRow = memo(function SessionRow({
+  view,
+  usage,
+  accounts = null,
+  daemonId,
+  onNavigate,
+  now,
+}: FullSessionProps) {
   const cfg = view.config;
   const state = view.state;
   const quota = usage?.quotaFor(daemonId, view) ?? null;
@@ -166,6 +206,7 @@ export const SessionRow = memo(function SessionRow({ view, usage, daemonId, onNa
             ) : (
               <Sparkles size={11} className="shrink-0 text-faint" />
             )}
+            <AccountPrefix accounts={accounts} agent={cfg.agent} />
             <span className="truncate">{cfg.model || cfg.modelHint || 'default'}</span>
           </span>
         </div>
@@ -231,7 +272,14 @@ export const LeanSessionRow = memo(function LeanSessionRow({ view, density, daem
 });
 
 /** Phone-first full-density card. It is a RouteLink so normal browser link affordances remain available. */
-export const SessionCard = memo(function SessionCard({ view, usage, daemonId, onNavigate, now }: FullSessionProps) {
+export const SessionCard = memo(function SessionCard({
+  view,
+  usage,
+  accounts = null,
+  daemonId,
+  onNavigate,
+  now,
+}: FullSessionProps) {
   const cfg = view.config;
   const state = view.state;
   const quota = usage?.quotaFor(daemonId, view) ?? null;
@@ -256,8 +304,9 @@ export const SessionCard = memo(function SessionCard({ view, usage, daemonId, on
       <div className="kt-chrome mono mt-0.5 flex flex-wrap items-center gap-x-sm gap-y-0.5">
         <span className="truncate">{cfg.id}</span>
         <span className="text-border">·</span>
-        <span className="inline-flex items-center gap-1 text-fg-soft">
+        <span className="inline-flex min-w-0 items-center gap-1 text-fg-soft">
           {cfg.harness === 'claude' ? <Bot size={11} /> : <Sparkles size={11} />}
+          <AccountPrefix accounts={accounts} agent={cfg.agent} />
           {cfg.model || cfg.modelHint || 'default'}
         </span>
         {cfg.label && (

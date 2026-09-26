@@ -1,5 +1,11 @@
 import type { SessionView } from '@ferretry/protocol';
+import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
+import type { PickerAccount } from '../lib/account-picker-catalog.ts';
+import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
+import { displayCallsign } from '../lib/callsign.ts';
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
+import { sessionAccountLabel } from './daemon-picker-model.ts';
 import { ModeBadge } from './mode-badge.tsx';
 import { StatusMark } from './status-mark.tsx';
 
@@ -7,6 +13,12 @@ export interface SessionHeaderProps {
   /** The paired daemon owns navigation; session ids are not fleet-global. */
   readonly daemonId: string;
   readonly session: SessionView;
+  /**
+   * The daemon's account roster. Read, the eyebrow names the session's account
+   * the way the pickers do; absent or `null` (unread), it falls back to the
+   * wrapper id only when there is no callsign to show instead.
+   */
+  readonly accounts?: readonly PickerAccount[] | null;
   readonly onOpenFleet?: (daemonId: string) => void;
   readonly onBack?: (daemonId: string) => void;
   readonly onOpenDetails?: (daemonId: string, sessionId: string) => void;
@@ -18,7 +30,27 @@ export interface SessionHeaderProps {
  * phone; status and mode remain available in the details panel rather than
  * consuming transcript width.
  */
-export function SessionHeader({ daemonId, session, onOpenFleet, onBack, onOpenDetails }: SessionHeaderProps) {
+/**
+ * The eyebrow: whose session this is. The callsign is a person-readable name —
+ * picked from a pool of given names, or chosen by whoever renamed the session —
+ * so it leads; the account follows it once the roster can name it.
+ */
+const identityLine = (session: SessionView, accounts: readonly PickerAccount[] | null): string => {
+  const { config } = session;
+  const callsign = displayCallsign(config.teammate);
+  if (accounts === null) return callsign || config.agent;
+  const account = sessionAccountLabel(accounts, config.agent).name;
+  return callsign === '' ? account : `${callsign} · ${account}`;
+};
+
+export function SessionHeader({
+  daemonId,
+  session,
+  accounts = null,
+  onOpenFleet,
+  onBack,
+  onOpenDetails,
+}: SessionHeaderProps) {
   const { config, state } = session;
   const title = config.label ?? config.name ?? config.id;
   const status = sessionStatusLabel(state.status);
@@ -38,7 +70,9 @@ export function SessionHeader({ daemonId, session, onOpenFleet, onBack, onOpenDe
         ) : null}
       </div>
       <div className="fy-session-header-identity">
-        <p className="fy-eyebrow">{config.teammate ?? config.agent}</p>
+        <p className="fy-eyebrow" title={config.agent}>
+          {identityLine(session, accounts)}
+        </p>
         <h1 title={title}>{title}</h1>
         <span className="fy-session-header-id" title={config.id}>
           {config.id}
@@ -64,4 +98,18 @@ export function SessionHeader({ daemonId, session, onOpenFleet, onBack, onOpenDe
       ) : null}
     </header>
   );
+}
+
+export interface RosterSessionHeaderProps extends Omit<SessionHeaderProps, 'accounts'> {
+  readonly accountPicker: DaemonAccountPickerStore;
+  readonly connection: DaemonConnection;
+}
+
+/**
+ * The header with the roster read for it, through the same hook and store the
+ * migrate sheet uses — so opening a session does not add a read of its own.
+ */
+export function RosterSessionHeader({ accountPicker, connection, ...props }: RosterSessionHeaderProps) {
+  const slice = useAccountPickerSlice(accountPicker, connection);
+  return <SessionHeader {...props} accounts={slice.catalog?.accounts ?? null} />;
 }

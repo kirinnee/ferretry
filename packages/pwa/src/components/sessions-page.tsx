@@ -9,6 +9,7 @@
 import { useEffect } from 'react';
 
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
+import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { useDensity } from '../hooks/use-density.ts';
 import { useFleetView } from '../hooks/use-fleet-view.ts';
 import { type LiveClockOptions, useLiveClock } from '../hooks/use-live-clock.ts';
@@ -22,6 +23,7 @@ import {
 import { useProjects } from '../hooks/use-projects.ts';
 import { useUsage } from '../hooks/use-usage.ts';
 import { useWardenStatus, type WardenStatusReader } from '../hooks/use-warden-status.ts';
+import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import type { DaemonControlsStore } from '../lib/controls.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { projectKeyFor } from '../lib/fleet-grouping.ts';
@@ -36,6 +38,12 @@ export interface SessionsPageProps {
   readonly controls: DaemonControlsStore;
   readonly projects: DaemonProjectsStore;
   readonly usage: DaemonUsageStore;
+  /**
+   * The same daemon-scoped roster the new-session page and migrate sheet read,
+   * so a full-density row can name a session's account the way the pickers do.
+   * Absent, the rows name no account.
+   */
+  readonly accountPicker?: DaemonAccountPickerStore;
   readonly wardenStatus: WardenStatusReader;
   readonly onOpenWardenReport: (request: WardenReportRequest) => void;
   readonly onNavigate?: (path: string) => void;
@@ -50,13 +58,31 @@ interface DashboardContentProps extends Omit<SessionsPageProps, 'scopeNavigation
   readonly narrow?: boolean;
 }
 
-/** Owns the full-density usage subscription; lean views never mount this hook. */
-function FullDensityDashboard({
-  usageStore,
-  ...props
-}: Omit<SessionDashboardProps, 'usage'> & { usageStore: DaemonUsageStore }) {
+type FullDensityProps = Omit<SessionDashboardProps, 'usage' | 'accounts'> & {
+  usageStore: DaemonUsageStore;
+  accountPicker?: DaemonAccountPickerStore;
+};
+
+/**
+ * Owns the full-density usage and roster subscriptions; lean views never mount
+ * either hook, because they render neither quota nor an account name.
+ */
+function FullDensityDashboard({ usageStore, accountPicker, ...props }: FullDensityProps) {
   useUsage(usageStore, props.connection);
-  return <SessionDashboard {...props} usage={usageStore} />;
+  return accountPicker === undefined ? (
+    <SessionDashboard {...props} usage={usageStore} />
+  ) : (
+    <RosterDashboard {...props} accountPicker={accountPicker} usage={usageStore} />
+  );
+}
+
+/** A separate component only so the roster hook is never called conditionally. */
+function RosterDashboard({
+  accountPicker,
+  ...props
+}: Omit<SessionDashboardProps, 'accounts'> & { accountPicker: DaemonAccountPickerStore }) {
+  const slice = useAccountPickerSlice(accountPicker, props.connection);
+  return <SessionDashboard {...props} accounts={slice.catalog?.accounts ?? null} />;
 }
 
 function DashboardContent({
@@ -65,6 +91,7 @@ function DashboardContent({
   controls,
   projects,
   usage,
+  accountPicker,
   wardenStatus,
   onOpenWardenReport,
   onNavigate,
@@ -107,7 +134,11 @@ function DashboardContent({
   } as const;
 
   return density === 'full' ? (
-    <FullDensityDashboard {...dashboard} usageStore={usage} />
+    <FullDensityDashboard
+      {...dashboard}
+      {...(accountPicker === undefined ? {} : { accountPicker })}
+      usageStore={usage}
+    />
   ) : (
     <SessionDashboard {...dashboard} usage={null} />
   );
