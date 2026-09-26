@@ -6,9 +6,11 @@ import {
   accountPickerOptions,
   accountQuotaSummary,
   findAccountOption,
+  firstUsableAccountOption,
   normalizedModelSelection,
   projectPickerOptions,
   sameHarnessAccountOptions,
+  sessionCapableAccountOptions,
 } from '../../src/components/daemon-picker-model.ts';
 import type { PickerAccountHealth } from '../../src/lib/account-picker-catalog.ts';
 import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
@@ -137,6 +139,33 @@ describe('accountPickerOptions', () => {
 
     expect(sameHarnessAccountOptions(options, 'codex')?.map(option => option.wrapper)).toEqual(['codex-auto-forge']);
     expect(sameHarnessAccountOptions(null, 'codex')).toBeNull();
+  });
+
+  it('offers a new session only the accounts the manifest marks auto, never the terminal one', () => {
+    // The default fleet's own shape: the terminal account is published FIRST.
+    const terminal = claudeAccount({
+      id: '33333333-3333-4333-8333-333333333333',
+      mode: 'interactive',
+      wrapper: 'claude-default',
+      displayName: 'Claude (default)',
+    });
+    const options = accountPickerOptions([terminal, claudeAccount(), codexAccount()], [], null);
+
+    expect(sessionCapableAccountOptions(options)?.map(option => option.wrapper)).toEqual([
+      'claude-auto-atelier',
+      'codex-auto-forge',
+    ]);
+    expect(sessionCapableAccountOptions(accountPickerOptions([terminal], [], null))).toEqual([]);
+    expect(sessionCapableAccountOptions(null)).toBeNull();
+  });
+
+  it('pre-fills the first usable account in the daemon order and nothing when none is usable', () => {
+    const down = claudeAccount({ available: false, unavailableReason: 'wrapper missing' });
+    const options = accountPickerOptions([down, codexAccount()], [], null);
+
+    expect(firstUsableAccountOption(options)?.wrapper).toBe('codex-auto-forge');
+    expect(firstUsableAccountOption(accountPickerOptions([down], [], null))).toBeNull();
+    expect(firstUsableAccountOption(null)).toBeNull();
   });
 
   it('finds the option for a chosen wrapper and answers null when unread or absent', () => {

@@ -140,6 +140,28 @@ export const sameHarnessAccountOptions = (
 ): readonly AccountPickerOption[] | null =>
   options === null ? null : options.filter(option => option.kind === harness);
 
+/**
+ * Narrow to the accounts the daemon can run a session on: the manifest's `auto`
+ * accounts. An `interactive` account is for a person at a terminal, and the
+ * daemon refuses to start a session on it in either session mode, so offering
+ * it only sets up a refusal. Read from the manifest's own `mode` field — never
+ * from the wrapper's spelling, which is the operator's to choose. An unreadable
+ * roster stays unreadable.
+ */
+export const sessionCapableAccountOptions = (
+  options: readonly AccountPickerOption[] | null,
+): readonly AccountPickerOption[] | null =>
+  options === null ? null : options.filter(option => option.mode === 'auto');
+
+/**
+ * The account a new-session form fills in before anybody chooses: the first one
+ * offered that the manifest says is available, in the daemon's own order. `null`
+ * when nothing offered is usable — the form then leaves the box empty rather than
+ * pre-filling a row that would be refused.
+ */
+export const firstUsableAccountOption = (options: readonly AccountPickerOption[] | null): AccountPickerOption | null =>
+  options?.find(option => option.available) ?? null;
+
 /** The option for a chosen wrapper, or `null` when it is absent or the roster is unread. */
 export const findAccountOption = (
   options: readonly AccountPickerOption[] | null,

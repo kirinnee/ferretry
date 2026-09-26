@@ -41,14 +41,16 @@
  */
 
 import { Activity, Check, FolderClock, FolderGit2, ShieldQuestion } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import {
   type AccountPickerOption,
   type AccountUsageRow,
   accountPickerOptions,
+  firstUsableAccountOption,
   type ProjectPickerCatalog,
   type ProjectPickerOption,
   sameHarnessAccountOptions,
+  sessionCapableAccountOptions,
 } from './daemon-picker-model.ts';
 import {
   absoluteInstantLabel,
@@ -688,6 +690,25 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
   readonly usageError?: string | null;
   /** Set for a migration, where cross-CLI is never offered. */
   readonly harness?: PickerAccount['kind'];
+  /**
+   * Offer only the accounts the daemon can run a session on — the manifest's
+   * `auto` accounts — for a surface that STARTS one. See
+   * `sessionCapableAccountOptions` for why the terminal account is left out.
+   */
+  readonly sessionCapableOnly?: boolean;
+  /**
+   * Fill the box with the first usable account offered, once, while the reader
+   * has typed nothing. A reader who clears it gets an empty box, not a refill:
+   * the pre-fill is a head start, never a value that keeps coming back.
+   */
+  readonly preselect?: boolean;
+  /**
+   * Drawn INSTEAD of the field when the roster was read and nothing is offered,
+   * so a host with no account that can run a session says so in one sentence
+   * with a way forward rather than showing an empty list. An unread or failed
+   * roster still gets the field, because typing is the fallback there.
+   */
+  readonly noAccounts?: ReactNode;
   readonly onAccountChosen?: (account: AccountPickerOption) => void;
   /**
    * Whether this surface offers the re-check control. Off by default so a screen
@@ -748,6 +769,9 @@ export function DaemonAccountPicker({
   harness,
   onAccountChosen,
   offerHealthCheck = false,
+  sessionCapableOnly = false,
+  preselect = false,
+  noAccounts,
   now = Date.now(),
   ...field
 }: DaemonAccountPickerProps): ReactNode {
@@ -759,10 +783,27 @@ export function DaemonAccountPicker({
   // text box belongs. Unread stays unread.
   const published = slice.catalog?.accounts ?? null;
   const projected = accountPickerOptions(published, usage, slice.health);
-  const scoped = harness === undefined ? projected : sameHarnessAccountOptions(projected, harness);
+  const capable = sessionCapableOnly ? sessionCapableAccountOptions(projected) : projected;
+  const scoped = harness === undefined ? capable : sameHarnessAccountOptions(capable, harness);
+  const suggested = preselect ? firstUsableAccountOption(scoped) : null;
+  // Set by the first keystroke or the one pre-fill, whichever comes first, so the
+  // pre-fill can never overwrite a reader's own answer — including an empty one.
+  const answered = useRef(false);
+  const { value, onValueChange } = field;
+  useEffect(() => {
+    if (answered.current || suggested === null || value !== '') return;
+    answered.current = true;
+    onValueChange(suggested.wrapper);
+    onAccountChosen?.(suggested);
+  }, [suggested, value, onValueChange, onAccountChosen]);
+  if (noAccounts !== undefined && scoped?.length === 0) return noAccounts;
   return (
     <AccountPickerField
       {...field}
+      onValueChange={next => {
+        answered.current = true;
+        onValueChange(next);
+      }}
       {...(harness === undefined ? {} : { harness })}
       {...(published === null ? {} : { publishesAnyAccount: published.length > 0 })}
       {...(onAccountChosen === undefined ? {} : { onAccountChosen })}
