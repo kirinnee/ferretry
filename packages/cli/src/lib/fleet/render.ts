@@ -3,7 +3,6 @@ import type {
   CredentialState,
   DisplacedState,
   FleetAccountHealth,
-  FleetAccountSeedProvenance,
   FleetApplyCommittedState,
   FleetApplyFailure,
   FleetApplyPreview,
@@ -782,6 +781,9 @@ function seedDateLabel(instant: number): string {
  * renewable: classification is by presence. Saying only "renewing this may sign that install out"
  * left the reverse unsaid on exactly the row that promises renewal.
  *
+ * This is the CLAUDE sentence only. A single-use (Codex) copy says its consequence in one plain line of
+ * its own instead — see {@link seedSignOutLine}.
+ *
  * ## THE CONDITIONAL IS NOT HEDGING AND MUST NOT BE COPY-EDITED AWAY
  *
  * Nothing in this repository proves that CLAUDE's refresh tokens rotate. Single-use rotation is
@@ -792,10 +794,29 @@ function seedDateLabel(instant: number): string {
  * Which sentence applies is NOT decided here: `rotation` arrives on the row from `@ferretry/fleet`,
  * which owns that claim once for both surfaces. This file owns only the words.
  */
-function seedRotationClause(provenance: FleetAccountSeedProvenance, label: string): string {
-  return provenance.rotation === 'single_use'
-    ? `${label} refresh tokens are single-use: whichever renews first — this copy, by running an agent, or that install — signs the other out.`
-    : `If ${label} rotates refresh tokens, whichever renews first — this copy, by running an agent, or that install — may sign the other out.`;
+function seedRotationClause(label: string): string {
+  return `If ${label} rotates refresh tokens, whichever renews first — this copy, by running an agent, or that install — may sign the other out.`;
+}
+
+/**
+ * THE ONE PLAIN LINE A SINGLE-USE COPY GETS, where rotation is PROVEN.
+ *
+ * For Codex the consequence is not a possibility to weigh, it is what the first use does: the copy
+ * renews, the provider spends the refresh token the person's own `codex` is still holding, and their
+ * own CLI on this machine is signed out. A row that said `READY` and nothing else about that was a
+ * surprise waiting to happen, so it gets one short line, on its own, above the longer provenance
+ * sentence — plain enough to be read by somebody who reads nothing else on the row.
+ *
+ * NOTHING LIKE IT IS SAID FOR CLAUDE, whose rotation is unproven; its conditional stays in the
+ * provenance sentence. `rotation` decides, never the harness name. See
+ * `docs/design/credential-seeding.md`.
+ */
+function seedSignOutLine(health: FleetAccountHealth): string | undefined {
+  const provenance = health.seedProvenance;
+  if (provenance === undefined || provenance.state === 'own_login' || provenance.rotation !== 'single_use') {
+    return undefined;
+  }
+  return `first use signs your own ${harnessLabel(health.kind)} out on this machine — sign it back in once`;
 }
 
 /**
@@ -821,7 +842,8 @@ function seedProvenanceSentence(health: FleetAccountHealth): string | undefined 
     provenance.state === 'seeded_copy'
       ? `seeded copy: this credential is still the copy taken from this host's own ${label} install (${provenance.donorHome}) on ${when}.`
       : `seeded copy, unconfirmed: this home's credential could not be read, so this cannot tell whether it is still the copy taken from this host's own ${label} install (${provenance.donorHome}) on ${when}; it is reported as if it were.`;
-  return `${subject} ${seedRotationClause(provenance, label)}`;
+  // A single-use copy says its consequence on its own line (`seedSignOutLine`), not buried here.
+  return provenance.rotation === 'single_use' ? subject : `${subject} ${seedRotationClause(label)}`;
 }
 
 /** When the check ran, in the words the header and a row both use so they cannot disagree. */
@@ -1014,7 +1036,9 @@ function healthRowLines(
   // because it is what somebody needs to have read BEFORE running one on a credential their own
   // install is holding. Muted, like every other secondary clause: this is a disclosure, not a fault.
   const provenance = seedProvenanceSentence(health);
-  const disclosed = provenance === undefined ? covered : [...covered, ...continuation(provenance)];
+  const signOut = seedSignOutLine(health);
+  const warned = signOut === undefined ? covered : [...covered, ...continuation(signOut)];
+  const disclosed = provenance === undefined ? warned : [...warned, ...continuation(provenance)];
   // The exact command, on its own line, for every state a person can act on, led by what it does. ONE
   // command per row even when the row covers several accounts: naming any one of them signs the whole
   // login in. NEVER WRAPPED: this line exists to be selected, and a break inside the id produces

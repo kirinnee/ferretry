@@ -1408,22 +1408,53 @@ describe('health rendering', () => {
     should(rendered).not.containEql('will sign the other out');
   });
 
-  it('should say the Codex consequence flatly, because single-use rotation is established there', () => {
+  it('should say the Codex consequence in ONE plain line of its own, because single-use rotation is established there', () => {
+    // Arrange — the fresh-install case: a READY Codex row still holding the host's copied login.
+    // `READY` with nothing about what the first use does to the person's own `codex` was a surprise
+    // waiting to happen.
+    const accounts = [
+      seedRow(
+        { donorHome: '/home/me/.codex', rotation: 'single_use' },
+        { kind: 'codex', verdict: 'unknown', reason: 'oauth_refreshable' },
+      ),
+    ];
+
+    // Act
+    const lines = renderHealth({ at: NOW, accounts }, names, WIDE).split('\n');
+
+    // Assert — its own line, directly under the row, above the longer provenance sentence.
+    const head = lines.findIndex(line => line.includes('READY'));
+    should(lines[head + 1]).equal('    first use signs your own Codex out on this machine — sign it back in once');
+    should(lines[head + 2]).startWith('    seeded copy:');
+    should(lines.join('\n')).not.containEql('If Codex rotates');
+    should(lines.join('\n')).not.containEql('the other out');
+  });
+
+  it('should say nothing like it for Claude, whose rotation nobody has proved', () => {
+    // Act
+    const rendered = renderHealth(
+      { at: NOW, accounts: [seedRow({}, { verdict: 'unknown', reason: 'oauth_refreshable' })] },
+      names,
+      WIDE,
+    );
+
+    // Assert
+    should(rendered).not.containEql('signs your own');
+  });
+
+  it('should not warn about signing anybody out once the copy is its own login', () => {
     // Act
     const rendered = renderHealth(
       {
         at: NOW,
-        accounts: [seedRow({ donorHome: '/home/me/.codex', rotation: 'single_use' }, { kind: 'codex' })],
+        accounts: [seedRow({ state: 'own_login', rotation: 'single_use' }, { kind: 'codex' })],
       },
       names,
       WIDE,
     );
 
     // Assert
-    should(unwrapped(rendered)).containEql(
-      'Codex refresh tokens are single-use: whichever renews first — this copy, by running an agent, or that install — signs the other out.',
-    );
-    should(rendered).not.containEql('If Codex rotates');
+    should(rendered).not.containEql('signs your own');
   });
 
   it('should hedge the whole sentence when this home credential could not be read', () => {

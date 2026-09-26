@@ -100,6 +100,11 @@ is exactly what the free check cannot use, so that check is inconclusive by cons
 because nothing has proved the provider still accepts the credential. `READY` is counted on its own in
 the header, never as healthy. `fy fleet login --status` says the same words for a `refreshable` home.
 
+A Codex account still holding the host's copied login also gets one plain line under its row:
+"first use signs your own Codex out on this machine — sign it back in once". Codex refresh tokens are
+proven single-use, so that is what the first use does. Nothing like it is said for Claude, whose
+rotation is unproven.
+
 Not printing the command is also the safer default: renewing early is what spends a copied refresh
 token, and for a seeded copy that can sign the host's own install out — see
 [design/credential-seeding.md](design/credential-seeding.md).

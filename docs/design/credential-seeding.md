@@ -49,8 +49,10 @@ What already exists to limit it:
 - **No proactive refresh.** Nothing renews on a timer or at boot (owner rule). Renewal happens only
   when something is used, or when a person presses `Renew now` / runs `fy fleet login <id>`.
 - **Disclosure.** `seed-provenance.ts` records a digest of each seeded copy, and `fy fleet health`
-  prints under a still-seeded account that whichever of the copy and the host install renews first
-  signs (Codex) or may sign (Claude) the other out.
+  says so under a still-seeded account. A Codex copy gets one plain line of its own — "first use signs
+  your own Codex out on this machine — sign it back in once" — because there the consequence is
+  proven. A Claude copy gets the conditional: whichever of the copy and the host install renews first
+  may sign the other out.
 - **No prompt to renew.** Since this change, a refreshable account is `READY` with no command beside
   it, so the report no longer nudges anybody into the renewal that triggers the hazard.
 
