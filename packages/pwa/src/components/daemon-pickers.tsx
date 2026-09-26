@@ -41,10 +41,11 @@
  */
 
 import { Activity, Check, FolderClock, FolderGit2, ShieldQuestion } from 'lucide-react';
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   type AccountPickerOption,
   type AccountUsageRow,
+  accountLabel,
   accountPickerOptions,
   findAccountOption,
   firstUsableAccountOption,
@@ -368,19 +369,20 @@ const IDENTITY_LINE_CLASS = 'mono text-meta text-muted';
  */
 export function AccountPickerRow(option: AccountFieldOption, state: { readonly selected: boolean }): ReactNode {
   const { account } = option;
+  const label = accountLabel(account);
   return (
     <span className={ROW_CLASS} data-picker-row="account">
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1">
           {state.selected ? <Check aria-label="current choice" className="shrink-0 text-accent" size={12} /> : null}
-          <span className="truncate font-medium text-current">{account.displayName}</span>
+          <span className="truncate font-medium text-current">{label.name}</span>
         </span>
         {/* The wrapper is what gets submitted, so it wraps rather than truncating
             on a phone. `break-words` and not `break-all`: this line has spaces
             around its separators, so it breaks between fields instead of through
             the middle of an identifier. */}
         <span className={cn(IDENTITY_LINE_CLASS, 'break-words sm:truncate')} data-picker-identity="wrapper">
-          {account.wrapper} · {fleetHarnessLabel(account.kind)} · {account.mode}
+          {[label.id, fleetHarnessLabel(account.kind), account.mode].filter(part => part !== null).join(' · ')}
         </span>
         {option.disabledReason === undefined ? null : (
           <span className="text-meta text-warn">{option.disabledReason}</span>
@@ -486,29 +488,125 @@ export interface AccountPickerFieldProps extends DaemonPickerFieldProps {
    * cautious answer — the generic sentence, which claims less.
    */
   readonly publishesAnyAccount?: boolean;
-  /**
-   * The offered account the box currently names, drawn under it by its display
-   * name. Absent means this surface does not describe the choice at all; `null`
-   * means it does, and the box names no offered account (typed, or empty).
-   */
-  readonly choice?: AccountPickerOption | null;
 }
 
 /**
- * The chosen account, by the name its fleet gave it.
+ * The offered account the box's text names, or `null`.
+ *
+ * Compared verbatim, exactly as the row tick is: the value was committed
+ * verbatim, and a looser match would put a name on a string the daemon reads as
+ * a different account. A typed wrapper no row offers — and every state that has
+ * no rows yet — names nothing, so the box shows the typed text as it is.
+ */
+export const namedAccount = (source: PickerSource<AccountFieldOption>, value: string): AccountPickerOption | null =>
+  source.kind === 'ready' ? (source.options.find(option => option.value === value)?.account ?? null) : null;
+
+/**
+ * THE CLOSED BOX, BY THE NAME ITS FLEET GAVE IT.
  *
  * The box's text is the wrapper id — `claude-auto-default` — because that is the
- * value a session is started with, and the control's typed value is its output.
- * But that id is plumbing; the fleet already publishes a name a person reads,
- * the one `fy fleet ls` prints. So the name leads and the harness follows, and
- * the id stays where it already is, in the box, as the secondary fact.
+ * value a session is started with, and this control's typed value is its output.
+ * But the id is plumbing, and a phone reader shown it in large type above the
+ * real name in small type is being shown the machine's view of their fleet. So
+ * while the box is not being edited, the name leads IN the box and the id sits
+ * small beside it (or not at all, when it would only repeat the name). Focus the
+ * box and the face steps aside for the id, which is the thing being edited.
+ *
+ * It stays mounted while hidden, as the input's description, so a screen reader
+ * that focuses the box hears the name as well as the id it is about to edit.
  */
-function AccountChoiceLine({ account }: { readonly account: AccountPickerOption }): ReactNode {
+function AccountFace({
+  account,
+  hidden,
+  id,
+}: {
+  readonly account: AccountPickerOption;
+  readonly hidden: boolean;
+  readonly id: string;
+}): ReactNode {
+  const label = accountLabel(account);
   return (
-    <p className="m-0 flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-meta leading-base" data-account-choice="">
-      <span className="font-medium text-fg">{account.displayName}</span>
-      <span className="text-muted">· {fleetHarnessLabel(account.kind)} account</span>
-    </p>
+    <span
+      className={cn(
+        'pointer-events-none absolute inset-y-0 left-0 right-9 flex min-w-0 items-center gap-1.5 overflow-hidden pl-[calc(var(--pad-control-x)+var(--stroke-control))] leading-base',
+        hidden && 'opacity-0',
+      )}
+      data-account-face=""
+      id={id}
+    >
+      <span className="min-w-0 max-w-full shrink-0 truncate text-[length:var(--text-input)] font-medium text-fg">
+        {label.name}
+      </span>
+      {label.id === null ? null : <span className={cn(IDENTITY_LINE_CLASS, 'min-w-0 truncate')}>{label.id}</span>}
+    </span>
+  );
+}
+
+/**
+ * One account named in running text — "Current account: …", a from → to line.
+ *
+ * The same `accountLabel` the box and the rows read, so a sheet can never lead
+ * with the id where the picker beside it leads with the name. A wrapper the
+ * roster does not offer (or a roster not read yet) is printed as it is, in the
+ * monospace an id wears everywhere else: there is no name to claim for it.
+ */
+export function AccountName({
+  account,
+  wrapper,
+  className,
+}: {
+  readonly account: AccountPickerOption | null;
+  readonly wrapper: string;
+  readonly className?: string;
+}): ReactNode {
+  if (account === null) {
+    return (
+      <span className={cn('mono break-words', className)} data-account-name="">
+        {wrapper}
+      </span>
+    );
+  }
+  const label = accountLabel(account);
+  return (
+    <span className={cn('min-w-0 break-words', className)} data-account-name="">
+      <span className="font-medium">{label.name}</span>
+      {label.id === null ? null : (
+        <>
+          {' '}
+          <span className="mono text-meta text-muted">{label.id}</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
+ * `AccountName` for a surface that holds the roster store rather than a row.
+ *
+ * It subscribes through the same hook the picker does, so on a sheet that also
+ * mounts the picker this is the same cached slice and no second read: the store
+ * hydrates the free stored snapshot once per daemon, and nothing here can reach
+ * the collecting health call.
+ */
+export function DaemonAccountName({
+  store,
+  connection,
+  wrapper,
+  className,
+}: {
+  readonly store: DaemonAccountPickerStore;
+  readonly connection: DaemonConnection;
+  readonly wrapper: string;
+  readonly className?: string;
+}): ReactNode {
+  const slice = useAccountPickerSlice(store, connection);
+  const options = accountPickerOptions(slice.catalog?.accounts ?? null, [], null);
+  return (
+    <AccountName
+      account={findAccountOption(options, wrapper)}
+      wrapper={wrapper}
+      {...(className === undefined ? {} : { className })}
+    />
   );
 }
 
@@ -552,26 +650,51 @@ export function AccountPickerField({
   advisory,
   harness,
   publishesAnyAccount,
-  choice,
   ...field
 }: AccountPickerFieldProps): ReactNode {
   const empty = accountEmptyCopy(harness, publishesAnyAccount);
+  const faceId = `${field.id}-face`;
+  const [editing, setEditing] = useState(false);
+  const faceHost = useRef<HTMLDivElement>(null);
+  // Focus is read from the wrapper rather than the input, because the input
+  // belongs to the control. Native `focusin`/`focusout` rather than JSX focus
+  // props: this wrapper is not itself interactive, and says so to a linter too.
+  // Rows are activated on pointer-up without taking focus, so choosing one never
+  // blurs the box and flashes the face.
+  useEffect(() => {
+    const host = faceHost.current;
+    const enter = (): void => setEditing(true);
+    const leave = (): void => setEditing(false);
+    host?.addEventListener('focusin', enter);
+    host?.addEventListener('focusout', leave);
+    return () => {
+      host?.removeEventListener('focusin', enter);
+      host?.removeEventListener('focusout', leave);
+    };
+  }, []);
+  const named = namedAccount(source, field.value);
+  const showFace = named !== null && !editing;
   return (
     <div className="grid gap-xs">
-      <PickerCombobox
-        describedBy={field.describedBy}
-        id={field.id}
-        label={field.label}
-        emptyNotice={empty.notice}
-        emptyStatus={empty.status}
-        onSelect={option => onAccountChosen?.(option.account)}
-        onValueChange={field.onValueChange}
-        placeholder={field.placeholder}
-        renderOption={AccountPickerRow}
-        source={source}
-        value={field.value}
-      />
-      {choice === undefined || choice === null ? null : <AccountChoiceLine account={choice} />}
+      <div className="relative min-w-0" ref={faceHost}>
+        <PickerCombobox
+          describedBy={[field.describedBy, named === null ? undefined : faceId].filter(Boolean).join(' ') || undefined}
+          id={field.id}
+          // Transparent, not removed: the id stays the input's real value, so a
+          // screen reader, a copy and the form all still read what is submitted.
+          inputClassName={showFace ? '!text-transparent' : undefined}
+          label={field.label}
+          emptyNotice={empty.notice}
+          emptyStatus={empty.status}
+          onSelect={option => onAccountChosen?.(option.account)}
+          onValueChange={field.onValueChange}
+          placeholder={field.placeholder}
+          renderOption={AccountPickerRow}
+          source={source}
+          value={field.value}
+        />
+        {named === null ? null : <AccountFace account={named} hidden={!showFace} id={faceId} />}
+      </div>
       {advisory === undefined ? null : (
         <p className="m-0 text-meta leading-base text-muted" data-picker-advisory="" role="status">
           {advisory} Accounts with no reading show “quota —” rather than a percentage.
@@ -750,11 +873,6 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
    */
   readonly offerHealthCheck?: boolean;
   /**
-   * Name the offered account the box holds, under it, by its display name. For a
-   * surface whose box would otherwise show only a wrapper id once filled in.
-   */
-  readonly describeChoice?: boolean;
-  /**
    * The instant relative labels are measured against. Defaults to the wall clock.
    *
    * Injected so a test can assert "checked 4m ago" against a fixture instead of
@@ -803,7 +921,6 @@ export function DaemonAccountPicker({
   offerHealthCheck = false,
   sessionCapableOnly = false,
   preselect = false,
-  describeChoice = false,
   noAccounts,
   now = Date.now(),
   ...field
@@ -840,7 +957,6 @@ export function DaemonAccountPicker({
       {...(harness === undefined ? {} : { harness })}
       {...(published === null ? {} : { publishesAnyAccount: published.length > 0 })}
       {...(onAccountChosen === undefined ? {} : { onAccountChosen })}
-      {...(describeChoice ? { choice: findAccountOption(scoped, value.trim()) } : {})}
       {...(usageError === undefined || usageError === null ? {} : { advisory: usageError })}
       {...(offerHealthCheck
         ? {

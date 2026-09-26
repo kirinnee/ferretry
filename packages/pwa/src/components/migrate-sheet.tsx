@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import {
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -30,7 +31,7 @@ import { pickerIdBase } from '../shell/picker-model.ts';
 import { Button } from '../shell/primitives.tsx';
 import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
-import { DaemonAccountPicker } from './daemon-pickers.tsx';
+import { AccountName, DaemonAccountName, DaemonAccountPicker } from './daemon-pickers.tsx';
 import {
   type MigrationFailure,
   type MigrationTarget,
@@ -368,11 +369,24 @@ export function MigrateSheet({
 
   // One sentence, two fields. It is the target of `aria-describedby` either
   // way, so a reader hears the same account it names whichever control they are
-  // standing in.
+  // standing in. Both this line and the from → to line below name an account
+  // through the picker's own label, so the sheet leads with the fleet's name
+  // wherever the box beside it does.
+  const accountName = (wrapper: string, className?: string): ReactNode =>
+    accountPicker === undefined ? (
+      <AccountName account={null} wrapper={wrapper} {...(className === undefined ? {} : { className })} />
+    ) : (
+      <DaemonAccountName
+        connection={connection}
+        store={accountPicker}
+        wrapper={wrapper}
+        {...(className === undefined ? {} : { className })}
+      />
+    );
   const agentHelp = (
     <span id={agentHelpId} className="text-meta leading-base text-muted">
-      Current account: <span className="mono">{config.agent}</span>. Cross-CLI migration is not offered: Claude and
-      Codex cannot resume each other’s conversation format.
+      Current account: {accountName(config.agent)}. Cross-CLI migration is not offered: Claude and Codex cannot resume
+      each other’s conversation format.
     </span>
   );
 
@@ -667,9 +681,9 @@ export function MigrateSheet({
                 Requested runtime
               </h2>
               <div className="mt-2 flex min-w-0 flex-wrap items-center gap-sm rounded-control border border-border bg-surface-2 p-3 text-ui">
-                <span className="mono break-all text-muted">{config.agent}</span>
+                {accountName(config.agent, 'text-muted')}
                 <ArrowRight aria-hidden="true" className="shrink-0 text-accent" size={15} />
-                <span className="mono break-all font-semibold text-fg">{target?.agent ?? agent.trim()}</span>
+                {accountName(target?.agent ?? agent.trim(), 'font-semibold text-fg')}
                 <span className="mono break-all text-muted">{target?.model ?? 'account default'}</span>
               </div>
             </section>
