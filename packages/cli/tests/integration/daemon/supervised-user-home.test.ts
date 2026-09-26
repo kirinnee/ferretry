@@ -84,7 +84,7 @@ async function executable(path: string, lines: readonly string[]): Promise<void>
 async function arrange(
   root: string,
   port: number,
-): Promise<{ bin: string; userHome: string; stateHome: string; fyd: string }> {
+): Promise<{ bin: string; userHome: string; stateHome: string; fyd: string; probe: string }> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
   const bin = join(root, 'bin');
   const userHome = join(root, 'home');
@@ -122,7 +122,7 @@ async function arrange(
     }),
     { mode: 0o600 },
   );
-  return { bin, userHome, stateHome, fyd };
+  return { bin, userHome, stateHome, fyd, probe };
 }
 
 /** The daemon log once the login search has been reported, or whatever it holds when time runs out. */
@@ -142,7 +142,7 @@ describe('the user home of a daemon `fy daemon start` launched', () => {
     const root = await mkdtemp(join(tmpdir(), 'fy-home-'));
     roots.add(root);
     const port = await freeLoopbackPort();
-    const { bin, userHome, stateHome, fyd } = await arrange(root, port);
+    const { bin, userHome, stateHome, fyd, probe } = await arrange(root, port);
     const searchPath = `${bin}:/usr/bin:/bin`;
     // Fail closed rather than let the daemon find a real harness through PATH.
     should(Bun.which('claude', { PATH: searchPath })).equal(null);
@@ -174,6 +174,11 @@ describe('the user home of a daemon `fy daemon start` launched', () => {
     // Assert — a failed containment prints the whole log, which is the evidence either way.
     should(log).containEql(`no usable Claude login was found in ${join(userHome, '.claude')}`);
     should(log).containEql(`no usable Codex login was found in ${join(userHome, '.codex')}`);
-    should(log.includes(homedir())).equal(false, `the daemon named this account's own home:\n${log}`);
+    // Every path the defect produced, spelled against this account's own home. Not the home itself: a
+    // temporary directory may live under it — a CI runner's does — and every path above would match.
+    const owner = homedir();
+    for (const leaked of [join(owner, '.claude'), join(owner, '.codex'), join(owner, probe)]) {
+      should(log.includes(leaked)).equal(false, `the daemon named ${leaked}:\n${log}`);
+    }
   }, 60_000);
 });
