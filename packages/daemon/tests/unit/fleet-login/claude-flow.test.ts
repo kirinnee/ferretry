@@ -13,6 +13,8 @@ import {
   CLAUDE_LOGIN_START,
   CLAUDE_VERIFICATION_HOSTS,
   type ClaudeLoginStage,
+  claudeCodeSent,
+  claudeEnding,
   claudeProjection,
   decideClaudeSubmit,
   observeClaudeLine,
@@ -254,5 +256,150 @@ describe('claudeProjection', () => {
     const stages: ClaudeLoginStage[] = [CLAUDE_LOGIN_START, awaiting, complete, failed];
 
     for (const stage of stages) should(claudeProjection(BASE, stage)).not.have.property('userCode');
+  });
+});
+
+/**
+ * Claude's refusal of a code, as the installed CLI writes it.
+ *
+ * Quoted from `auth login`'s own stdin handler in claude-code 2.1.281 — the same words
+ * `docs/design/harness-login.md` §6 captured by driving 2.1.220 with a wrong code. It goes to stderr,
+ * which the spawn adapter reads on the same footing as stdout.
+ */
+const INVALID_CODE_LINE = 'Invalid code. Please make sure the full code was copied.';
+
+describe('a code Claude refuses', () => {
+  it('should say the last code was rejected when Claude answers a paste with its refusal', () => {
+    // Act
+    const actual = observeClaudeLine(claudeCodeSent(awaiting), INVALID_CODE_LINE);
+
+    // Assert
+    should(actual).deepEqual({ stage: 'awaiting-code', verificationUrl: CLAUDE_URL, lastCode: 'rejected' });
+  });
+
+  it('should recognise the refusal wrapped in colour, as a terminal program may write it', () => {
+    // Act
+    const actual = observeClaudeLine(awaiting, `${ESC}[31m${INVALID_CODE_LINE}${ESC}[39m`);
+
+    // Assert
+    should(actual).have.property('lastCode', 'rejected');
+  });
+
+  it('should not read the refusal words anywhere but at the start of a line', () => {
+    // A provider page could put any words in a URL; only Claude's own line may move the flow.
+    const actual = observeClaudeLine(awaiting, `visit https://claude.com/?q=${INVALID_CODE_LINE}`);
+
+    // Assert
+    should(actual).equal(awaiting);
+  });
+
+  it('should ignore the refusal before a link exists and after the flow settled', () => {
+    // Act
+    const actual = [CLAUDE_LOGIN_START, complete, failed].map(stage => observeClaudeLine(stage, INVALID_CODE_LINE));
+
+    // Assert
+    should(actual).deepEqual([CLAUDE_LOGIN_START, complete, failed]);
+  });
+
+  it('should clear the previous refusal the moment another code is sent', () => {
+    // Arrange
+    const rejected = observeClaudeLine(awaiting, INVALID_CODE_LINE);
+
+    // Act
+    const actual = claudeCodeSent(rejected);
+
+    // Assert
+    should(actual).deepEqual({ stage: 'awaiting-code', verificationUrl: CLAUDE_URL, codeSent: true });
+  });
+
+  it('should leave a stage that is not waiting for a code alone when one is sent', () => {
+    // Act
+    const actual = [CLAUDE_LOGIN_START, complete, failed].map(claudeCodeSent);
+
+    // Assert
+    should(actual).deepEqual([CLAUDE_LOGIN_START, complete, failed]);
+  });
+
+  it('should publish the refusal as the one recognised value and never the child text', () => {
+    // Act
+    const actual = claudeProjection(BASE, observeClaudeLine(awaiting, INVALID_CODE_LINE));
+
+    // Assert
+    should(actual).deepEqual({
+      harness: 'claude',
+      ...BASE,
+      state: 'awaiting-code',
+      verificationUrl: CLAUDE_URL,
+      lastCode: 'rejected',
+    });
+    should(JSON.stringify(actual)).not.containEql('Invalid code');
+  });
+
+  it('should never publish that a code is in flight', () => {
+    // Act
+    const actual = claudeProjection(BASE, claudeCodeSent(awaiting));
+
+    // Assert
+    should(actual).not.have.property('codeSent');
+  });
+});
+
+describe('claudeEnding', () => {
+  it('should end as a rejected code when Claude exits after a code was sent', () => {
+    // Act
+    const actual = claudeEnding(claudeCodeSent(awaiting), { exit: 1 });
+
+    // Assert
+    should(actual).deepEqual({
+      stage: 'failed',
+      reason: 'Claude could not sign in with that code',
+      remedy: 'Start a new sign-in for a fresh link, then paste the whole code Claude shows you.',
+      lastCode: 'rejected',
+    });
+  });
+
+  it('should not blame a code when none was sent, or when Claude exited cleanly', () => {
+    // Act
+    const actual = [
+      claudeEnding(awaiting, { exit: 1 }),
+      claudeEnding(observeClaudeLine(claudeCodeSent(awaiting), INVALID_CODE_LINE), { exit: 1 }),
+      claudeEnding(claudeCodeSent(awaiting), { exit: 0 }),
+    ];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined, undefined]);
+  });
+
+  it('should say the link expired when the window closes on a person holding one', () => {
+    // Act
+    const actual = claudeEnding(awaiting, 'window');
+
+    // Assert
+    should(actual).deepEqual({
+      stage: 'failed',
+      reason: 'the sign-in link expired before Claude accepted a code',
+      remedy: 'Start a new sign-in to get a fresh link.',
+      lastCode: 'expired',
+    });
+  });
+
+  it('should leave every other stage to the ordinary ending', () => {
+    // Act
+    const actual = [CLAUDE_LOGIN_START, complete, failed].flatMap(stage => [
+      claudeEnding(stage, 'window'),
+      claudeEnding(stage, { exit: 1 }),
+    ]);
+
+    // Assert
+    should(actual.every(ending => ending === undefined)).be.true();
+  });
+
+  it('should carry the code ending onto the wire', () => {
+    // Act
+    const ending = claudeEnding(claudeCodeSent(awaiting), { exit: 1 });
+    const actual = ending === undefined ? undefined : claudeProjection(BASE, ending);
+
+    // Assert
+    should(actual).have.property('lastCode', 'rejected');
   });
 });

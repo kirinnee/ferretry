@@ -199,14 +199,18 @@ export function CodexLoginPanel({
             role="alert"
             className="space-y-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
           >
+            {/* An expired code needs a new code, not the host command every other failure names — and it is
+                said as "expired", never "rejected": nobody here sent a code Codex could refuse. */}
             <p className="m-0 flex items-start gap-2">
               <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
-              {flow.reason}
+              {flow.lastCode === 'expired' ? 'That one-time code expired before it was approved.' : flow.reason}
             </p>
-            <p className="m-0 text-meta leading-base">{flow.remedy}</p>
+            <p className="m-0 text-meta leading-base">
+              {flow.lastCode === 'expired' ? 'Get a new code, then enter it on the provider’s page.' : flow.remedy}
+            </p>
             <Button type="button" variant="outline" onClick={onStart} disabled={busy}>
               <Link2 size={16} aria-hidden="true" />
-              Start a new sign-in
+              {flow.lastCode === 'expired' ? 'Get a new code' : 'Start a new sign-in'}
             </Button>
           </div>
         ) : null}

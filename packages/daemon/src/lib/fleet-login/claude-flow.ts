@@ -43,7 +43,7 @@
  * and the service performs it, which is what makes "the submitted value is write-only" a property of
  * the shape rather than a rule somebody has to remember.
  */
-import type { ClaudeLoginFlow, FleetLoginAccountOutcome } from '@ferretry/protocol';
+import type { ClaudeLoginFlow, FleetLoginAccountOutcome, HarnessLoginLastCode } from '@ferretry/protocol';
 import { HarnessLoginVerificationUrlSchema } from '@ferretry/protocol';
 import { stripTerminalEscapes, verificationUrlIn } from './output.ts';
 import type { HarnessLoginFlowBase, HarnessLoginSubmitDecision } from './ports.ts';
@@ -69,12 +69,40 @@ export const CLAUDE_VERIFICATION_HOSTS: readonly string[] = ['claude.com', 'clau
  */
 export type ClaudeLoginStage =
   | { readonly stage: 'starting' }
-  | { readonly stage: 'awaiting-code'; readonly verificationUrl: string }
+  | {
+      readonly stage: 'awaiting-code';
+      readonly verificationUrl: string;
+      /** Claude refused the last code and is waiting for another. Published, so a person can see it. */
+      readonly lastCode?: 'rejected';
+      /**
+       * A code went to the child and Claude has not refused it on sight. Never published: it is only what
+       * lets an exit after a submission be read as the provider refusing that code.
+       */
+      readonly codeSent?: true;
+    }
   | { readonly stage: 'complete'; readonly accounts: readonly FleetLoginAccountOutcome[] }
-  | { readonly stage: 'failed'; readonly reason: string; readonly remedy: string };
+  | ClaudeLoginFailure;
+
+/** How a Claude login ended badly. `lastCode` is set only when the code itself is why. */
+export interface ClaudeLoginFailure {
+  readonly stage: 'failed';
+  readonly reason: string;
+  readonly remedy: string;
+  readonly lastCode?: HarnessLoginLastCode;
+}
 
 /** Where every Claude login starts. */
 export const CLAUDE_LOGIN_START: ClaudeLoginStage = { stage: 'starting' };
+
+/**
+ * The line Claude writes to stderr when a pasted value is not a code, and then keeps reading.
+ *
+ * Quoted from the installed CLI's own `auth login` handler (claude-code 2.1.281, and the same words
+ * `docs/design/harness-login.md` §6 captured at 2.1.220): a paste that does not split into `code#state`
+ * gets exactly this and the prompt stays open. Matched as a line PREFIX, never a search, so no other
+ * output — and nothing a provider page could put in a URL — can contribute a match.
+ */
+const CLAUDE_INVALID_CODE_LINE = 'Invalid code. Please make sure the full code was copied';
 
 /**
  * The stage one raw output line moves this flow to.
@@ -83,15 +111,60 @@ export const CLAUDE_LOGIN_START: ClaudeLoginStage = { stage: 'starting' };
  * daemon would not be allowed to publish is a value it must not hold as though it could. A line that
  * yields nothing leaves the stage exactly as it was and is dropped — never stored, never journaled.
  *
- * Only `starting` is advanced. Output after the URL is published is Claude's own prompt text and
- * progress chatter, and a second recognised URL would move a flow a person is already acting on.
+ * `starting` is advanced by a URL; `awaiting-code` only by Claude's refusal of a code, which becomes the
+ * recognised value `rejected` and carries none of the child's text. Any other output after the URL is
+ * Claude's own prompt text and progress chatter, and a second recognised URL would move a flow a person
+ * is already acting on.
  */
 export function observeClaudeLine(stage: ClaudeLoginStage, rawLine: string): ClaudeLoginStage {
+  if (stage.stage === 'awaiting-code') {
+    if (!stripTerminalEscapes(rawLine).trimStart().startsWith(CLAUDE_INVALID_CODE_LINE)) return stage;
+    // The value never reached the provider, so nothing is in flight any more: the prompt is open again.
+    return { stage: 'awaiting-code', verificationUrl: stage.verificationUrl, lastCode: 'rejected' };
+  }
   if (stage.stage !== 'starting') return stage;
   const found = verificationUrlIn(stripTerminalEscapes(rawLine), CLAUDE_VERIFICATION_HOSTS);
   if (found === undefined) return stage;
   const checked = HarnessLoginVerificationUrlSchema.safeParse(found);
   return checked.success ? { stage: 'awaiting-code', verificationUrl: checked.data } : stage;
+}
+
+/**
+ * The stage once a code has been written to the child.
+ *
+ * Clearing `lastCode` here is what stops the previous refusal being read as a verdict on the NEW code
+ * while Claude is still deciding. Called before the write, so a refusal that races back cannot be
+ * overwritten by it.
+ */
+export function claudeCodeSent(stage: ClaudeLoginStage): ClaudeLoginStage {
+  return stage.stage === 'awaiting-code'
+    ? { stage: 'awaiting-code', verificationUrl: stage.verificationUrl, codeSent: true }
+    : stage;
+}
+
+/** How this login ends when a code is why, or nothing when the ordinary ending applies. */
+export function claudeEnding(
+  stage: ClaudeLoginStage,
+  cause: 'window' | { readonly exit: number },
+): ClaudeLoginFailure | undefined {
+  if (stage.stage !== 'awaiting-code') return undefined;
+  if (cause === 'window') {
+    return {
+      stage: 'failed',
+      reason: 'the sign-in link expired before Claude accepted a code',
+      remedy: 'Start a new sign-in to get a fresh link.',
+      lastCode: 'expired',
+    };
+  }
+  // Claude exits only after a well-formed code went to the provider and the exchange failed — its own
+  // `Login failed:` path. "Could not sign in with that code" is true whatever the provider's reason was.
+  if (cause.exit === 0 || stage.codeSent !== true) return undefined;
+  return {
+    stage: 'failed',
+    reason: 'Claude could not sign in with that code',
+    remedy: 'Start a new sign-in for a fresh link, then paste the whole code Claude shows you.',
+    lastCode: 'rejected',
+  };
 }
 
 /**
@@ -118,13 +191,26 @@ export function decideClaudeSubmit(stage: ClaudeLoginStage): HarnessLoginSubmitD
 /** The wire projection for this stage, in Claude's own state names. */
 export function claudeProjection(base: HarnessLoginFlowBase, stage: ClaudeLoginStage): ClaudeLoginFlow {
   if (stage.stage === 'awaiting-code') {
-    return { harness: 'claude', ...base, state: 'awaiting-code', verificationUrl: stage.verificationUrl };
+    return {
+      harness: 'claude',
+      ...base,
+      state: 'awaiting-code',
+      verificationUrl: stage.verificationUrl,
+      ...(stage.lastCode === undefined ? {} : { lastCode: stage.lastCode }),
+    };
   }
   if (stage.stage === 'complete') {
     return { harness: 'claude', ...base, state: 'complete', accounts: stage.accounts };
   }
   if (stage.stage === 'failed') {
-    return { harness: 'claude', ...base, state: 'failed', reason: stage.reason, remedy: stage.remedy };
+    return {
+      harness: 'claude',
+      ...base,
+      state: 'failed',
+      reason: stage.reason,
+      remedy: stage.remedy,
+      ...(stage.lastCode === undefined ? {} : { lastCode: stage.lastCode }),
+    };
   }
   return { harness: 'claude', ...base, state: 'starting' };
 }

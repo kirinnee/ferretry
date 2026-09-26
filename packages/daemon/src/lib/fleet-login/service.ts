@@ -94,7 +94,10 @@ import type { CallerGovernance, ChangeConfirmation } from '../api/capability.ts'
 import {
   CLAUDE_LOGIN_ARGV,
   CLAUDE_LOGIN_START,
+  type ClaudeLoginFailure,
   type ClaudeLoginStage,
+  claudeCodeSent,
+  claudeEnding,
   claudeProjection,
   decideClaudeSubmit,
   observeClaudeLine,
@@ -102,7 +105,9 @@ import {
 import {
   CODEX_LOGIN_ARGV,
   CODEX_LOGIN_START,
+  type CodexLoginFailure,
   type CodexLoginStage,
+  codexEnding,
   codexProjection,
   decideCodexSubmit,
   observeCodexLine,
@@ -423,6 +428,9 @@ export class HarnessLoginService {
     const stage = record.stage;
     const decision = stage.harness === 'claude' ? decideClaudeSubmit(stage.stage) : decideCodexSubmit(stage.stage);
     if (decision.decision !== 'write') return { outcome: decision.decision, reason: decision.reason };
+    // Marked BEFORE the write, so a refusal Claude sends back straight away lands on top of this rather
+    // than under it — and so the previous refusal is not read as a verdict on this code.
+    if (stage.harness === 'claude') record.stage = { harness: 'claude', stage: claudeCodeSent(stage.stage) };
 
     const write = record.child?.write ?? (async () => false);
     const accepted = await write(`${value}\n`);
@@ -599,7 +607,7 @@ export class HarnessLoginService {
     };
     this.#flows.set(record.flowId, record);
     record.disarm = this.options.timer.after(window, () => {
-      this.#end(record, 'this sign-in ran out of time before it finished');
+      this.#expire(record);
     });
 
     // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
@@ -684,6 +692,11 @@ export class HarnessLoginService {
       this.#end(record, message);
       return { status: 'failed', message };
     }
+    const ending = this.#ending(record.stage, { exit: code });
+    if (ending !== undefined) {
+      this.#endWith(record, ending);
+      return { status: 'failed', message: ending.reason };
+    }
     return code === 0 ? { status: 'logged-in' } : { status: 'failed', message: `the sign-in exited with code ${code}` };
   }
 
@@ -709,15 +722,40 @@ export class HarnessLoginService {
 
   /** End this flow and its child, keeping whatever outcome it already reached. */
   #end(record: FlowRecord, reason: string): void {
+    const remedy = `sign this account in on the host with \`${this.options.clientName} fleet login\``;
+    this.#endWith(record, { stage: 'failed', reason, remedy });
+  }
+
+  /**
+   * End this flow with a failure that has already been decided — the ordinary one {@link #end} builds,
+   * or a code ending from the harness's own flow, whose remedy is a fresh code rather than the host CLI.
+   */
+  #endWith(record: FlowRecord, failed: ClaudeLoginFailure | CodexLoginFailure): void {
     if (settled(record.stage)) return;
     record.disarm?.();
     record.disarm = undefined;
     record.child?.kill();
     record.child = undefined;
-    const remedy = `sign this account in on the host with \`${this.options.clientName} fleet login\``;
-    const failed = { stage: 'failed', reason, remedy } as const;
     record.stage =
       record.stage.harness === 'claude' ? { harness: 'claude', stage: failed } : { harness: 'codex', stage: failed };
+  }
+
+  /**
+   * The window closed. A flow a person was acting on — a link or a code on their screen — ends by saying
+   * THAT expired, because the host command the ordinary ending names is not what they need next.
+   */
+  #expire(record: FlowRecord): void {
+    const ending = this.#ending(record.stage, 'window');
+    if (ending === undefined) this.#end(record, 'this sign-in ran out of time before it finished');
+    else this.#endWith(record, ending);
+  }
+
+  /** The harness's own reading of how this flow ends because of its code, if it does. */
+  #ending(
+    stage: FlowStage,
+    cause: 'window' | { readonly exit: number },
+  ): ClaudeLoginFailure | CodexLoginFailure | undefined {
+    return stage.harness === 'claude' ? claudeEnding(stage.stage, cause) : codexEnding(stage.stage, cause);
   }
 
   /** This flow, or a refusal. A window that has closed ends the flow before it is read. */
@@ -730,7 +768,7 @@ export class HarnessLoginService {
       );
     }
     if (this.options.clock.now() >= record.expiresAt) {
-      this.#end(record, 'this sign-in ran out of time before it finished');
+      this.#expire(record);
     }
     return record;
   }

@@ -317,6 +317,26 @@ export const FleetLoginAccountOutcomeSchema = z.strictObject({
 });
 export type FleetLoginAccountOutcome = z.infer<typeof FleetLoginAccountOutcomeSchema>;
 
+/**
+ * What became of the code a sign-in handed out or took in, recognised as a STATE rather than forwarded
+ * as text.
+ *
+ * - `rejected` — Claude refused the code a person brought back. Either it answered
+ *   `Invalid code. Please make sure the full code was copied.` and kept waiting (a paste missing its
+ *   `#state` half), or it exited after a code was sent (the provider would not exchange it). Both
+ *   strings are in the installed CLI's own source (claude-code 2.1.281, `auth login`).
+ * - `expired` — Codex's one-time code stopped being waited for before anybody approved it: the daemon's
+ *   window closed, or Codex printed `device auth timed out after 15 minutes` (codex-cli 0.156.1). This is
+ *   deliberately NOT `rejected`: a device grant takes no code back, so nothing here was refused. A
+ *   Claude link whose window closed is `expired` for the same reason.
+ *
+ * No child output travels with either value — `docs/design/harness-login.md` §3.3 rule 2 forbids that,
+ * and a recognised state needs none. They exist because without them a refused code and a code that
+ * was never sent look identical: the form clears and nothing says which happened (§6).
+ */
+export const HarnessLoginLastCodeSchema = z.enum(['rejected', 'expired']);
+export type HarnessLoginLastCode = z.infer<typeof HarnessLoginLastCodeSchema>;
+
 /** Every flow state carries these, in every state, so a reader never has to ask which flow it holds. */
 const flowShape = {
   flowId: NonEmptyStringSchema,
@@ -339,6 +359,11 @@ const failureShape = {
    * not name it would strand the person who most needs it.
    */
   remedy: NonEmptyStringSchema,
+  /**
+   * Set when the flow ended BECAUSE of the code — refused, or no longer waited for — so a surface can say
+   * so and offer a fresh one instead of a host command. Absent for every other failure.
+   */
+  lastCode: HarnessLoginLastCodeSchema.optional(),
 };
 
 /**
@@ -355,6 +380,11 @@ export const ClaudeLoginFlowSchema = z.discriminatedUnion('state', [
     ...flowShape,
     state: z.literal('awaiting-code'),
     verificationUrl: HarnessLoginVerificationUrlSchema,
+    /**
+     * Claude refused the last code and is waiting for another. Only `rejected` can happen here — a flow
+     * still awaiting a code has not expired. Cleared by the next submission.
+     */
+    lastCode: HarnessLoginLastCodeSchema.extract(['rejected']).optional(),
   }),
   z.strictObject({
     harness: z.literal('claude'),

@@ -2084,3 +2084,145 @@ describe('the harness login routes', () => {
     should(actual.status).equal(400);
   });
 });
+
+// ─── a code the harness refuses, or that nobody approved ─────────────────────────────────────────
+
+/** Claude's own refusal, quoted from `auth login` in claude-code 2.1.281 (and §6's 2.1.220 capture). */
+const CLAUDE_INVALID_CODE_LINE = 'Invalid code. Please make sure the full code was copied.';
+
+/** codex-cli 0.156.1's own words when it stops polling a device grant. */
+const CODEX_TIMED_OUT_LINE = 'Error logging in with device code: device auth timed out after 15 minutes';
+
+describe('a code the harness does not take', () => {
+  it('should say the last code was rejected, instead of showing the same form as if nothing happened', async () => {
+    // Arrange — the defect `docs/design/harness-login.md` §6 records: the write lands, Claude refuses the
+    // code on its own output and keeps reading, and the flow used to look exactly as it did before.
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    const submitted = await subject.service.submit(started.flowId, PASTED_CODE);
+
+    // Act
+    child.emit(CLAUDE_INVALID_CODE_LINE);
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(submitted).have.property('outcome', 'accepted');
+    should(actual).have.property('state', 'awaiting-code');
+    should(actual).have.property('lastCode', 'rejected');
+    should(child.killed).be.false();
+  });
+
+  it('should clear the refusal when the next code is sent, and take that code', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, 'first-TESTONLY');
+    child.emit(CLAUDE_INVALID_CODE_LINE);
+
+    // Act
+    const actual = await subject.service.submit(started.flowId, PASTED_CODE);
+
+    // Assert
+    should(actual).have.property('outcome', 'accepted');
+    should(actual).have.property('flow').not.have.property('lastCode');
+    should(child.written).deepEqual(['first-TESTONLY\n', `${PASTED_CODE}\n`]);
+  });
+
+  it('should publish no child text and no code with the refusal', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, PASTED_CODE);
+    child.emit(CLAUDE_INVALID_CODE_LINE);
+
+    // Act
+    const actual = await everyAnswer(subject.service, started.flowId);
+
+    // Assert
+    should(actual).not.containEql('Invalid code');
+    should(actual).not.containEql(PASTED_CODE);
+  });
+
+  it('should end as a rejected code, offering a fresh one, when Claude exits after taking a code', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    await subject.service.submit(started.flowId, PASTED_CODE);
+
+    // Act
+    child.exit(1);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert — not `fy fleet login`: a fresh code is what this person needs, and they are holding a browser.
+    should(actual).match({
+      state: 'failed',
+      reason: 'Claude could not sign in with that code',
+      lastCode: 'rejected',
+    });
+    should(actual).have.property('remedy').not.containEql('fleet login');
+  });
+
+  it('should say the link expired when the window closes while a person holds it', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: INTERACTIVE_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+
+    // Act
+    subject.timers[0]?.run();
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(child.killed).be.true();
+    should(actual).match({ state: 'failed', lastCode: 'expired' });
+  });
+
+  it('should say a Codex code expired — never that it was rejected — when Codex stops waiting', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+
+    // Act
+    child.emit(CODEX_TIMED_OUT_LINE);
+    child.exit(1);
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).match({
+      harness: 'codex',
+      state: 'failed',
+      reason: 'the one-time code expired before it was approved',
+      lastCode: 'expired',
+    });
+  });
+
+  it('should say a Codex code expired when the window closes on it, however the status is read', async () => {
+    // Arrange — the lazy path, because a suspended host wakes up with no timer having fired.
+    let now = NOW;
+    const subject = fixture({ now: () => now });
+    const started = await subject.service.start({ accountId: CODEX_ID }, HOST);
+    const child = await subject.child();
+    child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+
+    // Act
+    now = NOW + 600_001;
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).match({ state: 'failed', lastCode: 'expired' });
+  });
+});

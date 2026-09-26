@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
+import type { CodexLoginFlow } from '@ferretry/protocol';
 import { CodexLoginPanel } from '../../../../src/features/fleet/codex-login-panel.tsx';
 import { render, run } from '../../../support/react.ts';
 import { CODEX_CODE, CODEX_URL, codexFlow } from './harness-login-support.ts';
@@ -179,5 +180,30 @@ describe('CodexLoginPanel', () => {
 
   it('says several siblings in the plural', () => {
     expect(texts(mount({ memberCount: 4 }))).toContain('3 sibling wrappers too');
+  });
+});
+
+describe('CodexLoginPanel when the one-time code expired', () => {
+  it('says the code expired — never that it was rejected — and offers a new one', () => {
+    let starts = 0;
+    const view = mount({
+      flow: { ...(codexFlow('failed') as Extract<CodexLoginFlow, { state: 'failed' }>), lastCode: 'expired' },
+      onStart: () => (starts += 1),
+    });
+
+    expect(texts(view)).toContain('That one-time code expired before it was approved.');
+    expect(texts(view)).toContain('Get a new code');
+    expect(texts(view)).not.toContain('reject');
+    expect(texts(view)).not.toContain('fy fleet login');
+    run(() => view.root.findAllByType('button').at(-1)?.props.onClick());
+    expect(starts).toBe(1);
+  });
+
+  it('keeps the daemon’s own words for every other failure', () => {
+    const view = mount({ flow: codexFlow('failed') });
+
+    expect(texts(view)).toContain('the sign-in ran out of time');
+    expect(texts(view)).toContain('Start a new sign-in');
+    expect(texts(view)).not.toContain('Get a new code');
   });
 });

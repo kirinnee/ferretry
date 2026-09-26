@@ -259,7 +259,8 @@ answer must be a citation rather than a reassurance.
    in §3.1 reach the wire; a line the daemon cannot classify is dropped. Today `fy fleet login`
    inherits stdio and reads nothing (`process-login.ts:89-97`), so this flow makes the daemon a reader
    of harness output for the first time — that is the actual property change, and bounding it to two
-   parsed fields is what keeps it small.
+   parsed fields is what keeps it small. One recognised STATE has since joined them — `lastCode`, which
+   says a code was refused or expired and carries none of the child's text (§6).
 3. **The submitted value is write-only.** Never echoed into a status, an error message, a log line,
    the grant audit journal or a transcript. The panel on `main` already holds up its half — it clears
    the field before the request settles and says so to the reader
@@ -523,7 +524,8 @@ UI in front of a phone.
 ### Found by verifying the shipped build, and deliberately not fixed here
 
 Three defects. The first two are listed apart because a fix for the first makes the second moot while a
-fix for the second would leave the first exactly where it is; the third is independent of both. All three
+fix for the second would leave the first exactly where it is; the third is independent of both, and has
+since been fixed. All three
 were measured on one host at **claude-code 2.1.220** and **codex-cli 0.145.0** — a measurement of somebody
 else's CLI is only true at a version.
 
@@ -569,22 +571,32 @@ else's CLI is only true at a version.
   `packages/daemon/tests/unit/fleet-login/service.test.ts` ("should end as itself when it recognised
   nothing it could publish"), whose comment names this defect so a green test is not read as approval.
 
-- **GAP: a REJECTED code is indistinguishable from no attempt at all.** Driving the shipped spawn adapter
-  against the real `claude auth login --claudeai` with a wrong code, the harness answers
+- **FIXED: a REJECTED code used to be indistinguishable from no attempt at all.** Driving the shipped
+  spawn adapter against the real `claude auth login --claudeai` with a wrong code, the harness answers
   `Invalid code. Please make sure the full code was copied.` on its own output and keeps running. The
-  write did land, so the daemon answers `accepted` — which is true about the write and is not the question
-  the person is asking — and the flow stays `awaiting-code`, so the panel clears the field and shows the
-  same paste form again **with nothing saying the previous attempt was refused**. Somebody who mistypes one
-  character of a code sees a form reset and cannot tell "rejected, try again" from "nothing happened" from
-  "still working"; the retry does work, which is the only reason this is a usability defect rather than a
-  dead end.
+  write did land, so the daemon answers `accepted` — true about the write, and not the question the person
+  is asking — and the flow stayed `awaiting-code`, so the panel cleared the field and showed the same
+  paste form again **with nothing saying the previous attempt was refused**.
 
-  It follows from §3.3 rule 2 — only two recognised values may leave the reader — and that rule is right:
-  forwarding arbitrary child output to a remote client is how a token escapes. But **"the harness refused
-  the code" is a recognisable STATE, not arbitrary output.** A third recognised value carrying no child
-  text at all would say it, so the rule that produced this gap does not stand in the way of closing it.
-  Not fixed here for the same reason as the two above: it reaches the flow, the wire contract and the
-  panel, and it is not what the change this was found in is about.
+  The flow now publishes a third recognised value, `lastCode`, and it carries no child text at all — which
+  is why §3.3 rule 2 never stood in the way: "the harness refused the code" is a recognisable STATE, not
+  arbitrary output. Read from the installed CLI's own `auth login` handler (claude-code 2.1.281), Claude
+  refuses a code in two ways, and both are recognised:
+  - a paste that does not split into `code#state` gets the line above on stderr and the prompt stays
+    open → the flow stays `awaiting-code` with `lastCode: 'rejected'`, and the panel says
+    _Claude didn't accept that code_ above the still-open field. The next submission clears it.
+  - a well-formed code the provider will not exchange makes Claude print `Login failed: …` and exit →
+    the flow ends `failed` with `lastCode: 'rejected'`, and the panel offers **Try again** rather than
+    `fy fleet login`, because somebody holding a browser needs a fresh link, not a terminal.
+
+  **Codex gets a different value on purpose.** A device grant takes no code back, so nothing there can
+  be _rejected_. What a Codex sign-in can do is stop waiting — the daemon's window closes, or codex-cli
+  prints `device auth timed out after 15 minutes` (0.156.1) — and that ends `failed` with
+  `lastCode: 'expired'` and a **Get a new code** action. Its other device failure,
+  `device auth failed with status …`, is deliberately not recognised: a status code is not evidence of
+  why. A Claude link whose window closes is `expired` for the same reason. The recognisers are
+  `observeClaudeLine` / `claudeEnding` and `observeCodexLine` / `codexEnding`; the wire value is
+  `HarnessLoginLastCodeSchema`.
 
 ### Named because it has an owner now
 
